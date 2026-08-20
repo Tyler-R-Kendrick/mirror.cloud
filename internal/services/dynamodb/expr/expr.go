@@ -123,30 +123,47 @@ func eval(n node, item, values map[string]any) (any, error) {
 		}
 		return n.val, nil
 	}
+	kid := func(i int) node {
+		if i >= 0 && i < len(n.kids) {
+			return n.kids[i]
+		}
+		return node{isVal: true}
+	}
 	switch n.op {
 	case "AND":
-		a, err := eval(n.kids[0], item, values)
+		if len(n.kids) < 2 {
+			return false, fmt.Errorf("AND needs two operands")
+		}
+		a, err := eval(kid(0), item, values)
 		if err != nil {
 			return nil, err
 		}
-		b, err := eval(n.kids[1], item, values)
+		b, err := eval(kid(1), item, values)
 		if err != nil {
 			return nil, err
 		}
-		return a.(bool) && b.(bool), nil
+		ab, _ := a.(bool)
+		bb, _ := b.(bool)
+		return ab && bb, nil
 	case "OR":
-		a, _ := eval(n.kids[0], item, values)
-		b, _ := eval(n.kids[1], item, values)
+		if len(n.kids) < 2 {
+			return false, fmt.Errorf("OR needs two operands")
+		}
+		a, _ := eval(kid(0), item, values)
+		b, _ := eval(kid(1), item, values)
 		ab, _ := a.(bool)
 		bb, _ := b.(bool)
 		return ab || bb, nil
 	case "NOT":
-		a, _ := eval(n.kids[0], item, values)
+		if len(n.kids) < 1 {
+			return false, fmt.Errorf("NOT needs one operand")
+		}
+		a, _ := eval(kid(0), item, values)
 		ab, _ := a.(bool)
 		return !ab, nil
 	case "=", "<>", "<", ">", "<=", ">=":
-		a, _ := eval(n.kids[0], item, values)
-		b, _ := eval(n.kids[1], item, values)
+		a, _ := eval(kid(0), item, values)
+		b, _ := eval(kid(1), item, values)
 		cmp := compare(a, b)
 		switch n.op {
 		case "=":
@@ -163,37 +180,37 @@ func eval(n node, item, values map[string]any) (any, error) {
 			return cmp >= 0, nil
 		}
 	case "BETWEEN":
-		v, _ := eval(n.kids[0], item, values)
-		lo, _ := eval(n.kids[1], item, values)
-		hi, _ := eval(n.kids[2], item, values)
+		v, _ := eval(kid(0), item, values)
+		lo, _ := eval(kid(1), item, values)
+		hi, _ := eval(kid(2), item, values)
 		return compare(v, lo) >= 0 && compare(v, hi) <= 0, nil
 	case "attribute_exists":
-		name, _ := eval(n.kids[0], item, values)
+		name, _ := eval(kid(0), item, values)
 		_, ok := item[fmt.Sprint(name)]
 		return ok, nil
 	case "attribute_not_exists":
-		name, _ := eval(n.kids[0], item, values)
+		name, _ := eval(kid(0), item, values)
 		_, ok := item[fmt.Sprint(name)]
 		return !ok, nil
 	case "begins_with":
-		a, _ := eval(n.kids[0], item, values)
-		b, _ := eval(n.kids[1], item, values)
+		a, _ := eval(kid(0), item, values)
+		b, _ := eval(kid(1), item, values)
 		return strings.HasPrefix(fmt.Sprint(a), fmt.Sprint(b)), nil
 	case "contains":
-		a, _ := eval(n.kids[0], item, values)
-		b, _ := eval(n.kids[1], item, values)
+		a, _ := eval(kid(0), item, values)
+		b, _ := eval(kid(1), item, values)
 		return strings.Contains(fmt.Sprint(a), fmt.Sprint(b)), nil
 	case "size":
-		a, _ := eval(n.kids[0], item, values)
+		a, _ := eval(kid(0), item, values)
 		return float64(len(fmt.Sprint(a))), nil
 	case "if_not_exists":
-		a, _ := eval(n.kids[0], item, values)
+		a, _ := eval(kid(0), item, values)
 		if a == nil || a == "" {
-			return eval(n.kids[1], item, values)
+			return eval(kid(1), item, values)
 		}
 		return a, nil
 	case "list_append":
-		return eval(n.kids[1], item, values)
+		return eval(kid(1), item, values)
 	}
 	return nil, fmt.Errorf("unsupported expr op %s", n.op)
 }

@@ -47,8 +47,9 @@ Three properties define success:
 5. **Fail loud, never silently fall back.** A client that asked for the error case and silently received the success case will write a passing test asserting the wrong behavior. Unsupported operation → distinguishable error. Unsupported parameter → explicit error, never ignored. Mock-tier response → labeled on the wire.
 6. **Determinism is a hard requirement.** Same seed + same request sequence ⇒ byte-identical responses, modulo fields documented as nondeterministic. No `time.Now()`, no `math/rand`, no `uuid.New()` anywhere outside the `Clock` and `Rand` implementations. Enforce this with a lint check in CI.
 7. **Cold start under 2 seconds** on ordinary developer hardware with persistence cold, asserted by an automated test.
-8. **Licenses:** only permissive dependencies (MIT / Apache-2.0 / BSD / ISC). No copyleft in the module graph. Add a CI check.
-9. **Idiomatic Go.** `gofmt`, `go vet`, `staticcheck` clean. Package-level doc comments on every package; doc comments on every exported identifier. No secrets or hardcoded credentials beyond documented dummy values.
+8. **Licenses:** only permissive dependencies (MIT / Apache-2.0 / BSD / ISC). No copyleft in the module graph. Add a CI check. This is an adoption decision, not a philosophical one — a copyleft license in this category measurably suppresses uptake regardless of whether the obligation actually binds a test-dependency user.
+9. **Never imply vendor affiliation.** Do not use any cloud vendor's trademarks in binary names, package names, image names, or the project name, and never suggest endorsement. Describing compatibility ("works with the AWS SDK", an image named `mirror-s3`) is fine; naming a product after someone else's mark is not.
+10. **Idiomatic Go.** `gofmt`, `go vet`, `staticcheck` clean. Package-level doc comments on every package; doc comments on every exported identifier. No secrets or hardcoded credentials beyond documented dummy values.
 
 ---
 
@@ -855,7 +856,11 @@ Fourteen swarms. Every swarm codes against the frozen interfaces in §3 **from t
 
 **Produces.** `internal/proxy` implementing all five modes from §3.8; cassette format (plain-text, diffable, one interaction per record, deterministic ordering); secret scrubbing at write time (Authorization headers, `X-Amz-Security-Token`, anything matching configured secret patterns, and any value that appeared in the process environment); `mirror drift` comparison of emulated vs recorded responses with a structured divergence report.
 
-**Success.** Round-trip against a **local test server standing in for the real cloud** — record, then replay with the test server switched off, byte-identical; scrubbing verified by a test asserting no known-secret value survives into the cassette; drift report correctly identifies injected divergences. **No test may require real cloud access.**
+**Also produces — proxy as the accuracy oracle, not just a feature.** A maintainer-side workflow, `mirror record --fixtures`, that captures real-cloud behavior for an emulate-tier service once, scrubs it, and writes **differential conformance fixtures** into `test/fixtures/<service>/`. These fixtures are committed and consumed by S12 to grade behavior packs against recorded real behavior on every commit.
+
+This matters more than it looks. Shape conformance against a spec proves the *envelope* is right and says nothing about whether `ListObjectsV2` paginates correctly or a message reappears after its visibility timeout. Recorded fixtures are the only cheap source of behavioral ground truth, and they invert the maintenance problem: a behavior pack no longer requires someone who *knows* the service's semantics, only a recording that adjudicates them. Design the fixture format to be plain-text and diffable so a re-record produces a reviewable change.
+
+**Success.** Round-trip against a **local test server standing in for the real cloud** — record, then replay with the test server switched off, byte-identical; scrubbing verified by a test asserting no known-secret value survives into the cassette; drift report correctly identifies injected divergences; the fixture-capture workflow produces fixtures S12 can consume. **No test may require real cloud access** — fixtures are captured by a maintainer and committed, never fetched during a test run. Cassette and fixture output directories are gitignored by default except for the committed fixture set, and `mirror doctor` warns when an ad-hoc cassette directory is tracked by git.
 
 ---
 
@@ -874,7 +879,8 @@ Fourteen swarms. Every swarm codes against the frozen interfaces in §3 **from t
 
 **Produces.** Everything needed to prove §6, automated end to end:
 
-- `internal/conformance`: for every operation in every ingested service, generate a valid input from the shape, encode it, route it, decode it, and assert the decoded input matches; assert required-member violations produce the correct error shape and status; assert every declared error shape renders correctly per protocol.
+- `internal/conformance`: for every operation in every ingested service, generate a valid input from the shape, encode it, route it, decode it, and assert the decoded input matches; assert required-member violations produce the correct error shape and status; assert every declared error shape renders correctly per protocol. **This proves shape, not behavior — do not mistake it for an accuracy claim.**
+- `internal/differential`: replays S10's committed real-cloud fixtures (`test/fixtures/<service>/`) against each emulate-tier pack and reports behavioral divergence. This is the project's actual accuracy oracle and the only one that can substantiate a fidelity claim; keep it green and report its coverage in `docs/SUPPORT.md`.
 - `test/sdk/go`: `aws-sdk-go-v2` round-trips for every emulate-tier service. **`aws-sdk-go-v2` may be used only in tests, never in the emulator itself.**
 - `test/sdk/python`: `boto3` round-trips, and `google-cloud-storage` round-trips for GCS.
 - `test/cli`: AWS CLI v2 smoke scripts, skipped with a clear message when the CLI is absent.
@@ -925,6 +931,7 @@ Automated, no manual steps, from a clean checkout:
 23. Binary size and cold start are within budget with the full generated spec set enabled (§4.14).
 24. Mock-tier synthesized output is unchanged by a spec re-pin that does not change the shape (§4.10.6).
 25. Self-referencing URLs in responses reflect the address the client used or `--advertise-url` (§4.12.5).
+26. Every emulate-tier service is graded green by `internal/differential` against its committed real-cloud fixtures, and `docs/SUPPORT.md` reports that fixture coverage per service. Shape conformance (item 4) does not satisfy this item.
 
 ---
 

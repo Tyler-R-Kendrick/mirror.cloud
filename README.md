@@ -14,6 +14,17 @@ mirror.cloud generates cloud API emulators from the cloud providers' own publish
 
 Run one product or many — `mirror up s3` is one process, one port, sub-second.
 
+## Where this fits
+
+The local-AWS-emulator field is crowded and well served. What is not served, by anything currently in the field:
+
+- **more than one cloud** — every incumbent is AWS-only;
+- **running a single product standalone**, instead of a whole cloud on one port;
+- **a proxy tier** that records real-cloud behavior, replays it, and reports drift — which is also how this project grades its own accuracy, rather than claiming fidelity from spec conformance alone;
+- **spec-update diffs as a day-2 workflow**, so provider API drift becomes a reviewable pull request.
+
+AWS is where the pipeline gets validated, because it has the best-published specs and the most mature SDKs to test against. It is not where the differentiation lives.
+
 ## Status
 
 Pre-implementation. The design is settled and written down; the code is not yet built.

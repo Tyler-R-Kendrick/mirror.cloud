@@ -155,3 +155,82 @@ A real lexer, parser, and evaluator for five expression grammars, with correct p
 **Make the README's quick start literally executable and test it in CI.** A quick start that has drifted is worse than none: it converts an interested developer into an annoyed one at the exact moment they were most willing.
 
 **Ship the generated support matrix from day one, with the honest tier column visible.** Publishing "these eight are emulated, these thirty are mocked, everything else is one `spec add` away" builds more trust than any coverage claim, and it is the artifact that makes A1's honest positioning legible without a single word of marketing.
+
+---
+
+## Part 4 — Second pass: attacking the thesis, not the execution
+
+Part 1 attacked the positioning and Part 2 attacked the plan. Neither attacked the premise hard enough. This pass did, and it found that the project's primary differentiation claim was false.
+
+### A6. The thesis is already shipped, by someone else, at ten times the scale
+
+**The attack.** "Generate the emulator from the provider's own specs" was presented as the insight that separates this project from the field. Search for it and you find `faiscadev/fakecloud`: Rust, AGPL-3.0, generating from AWS's Smithy models, claiming **105 services and 7,391 operations** with 100% Smithy conformance across 248,319 generated test variants, plus real engines behind the stateful services — Lambda runtimes, Postgres and MySQL behind RDS, Redis behind ElastiCache. Six thousand three hundred commits.
+
+**Verdict: lands, completely. The differentiation claim was wrong and it was load-bearing.**
+
+This is not a small correction. "We generate, they hand-write" was the sentence the whole direction hung on, and against the most relevant competitor it is simply untrue. Worse, the plan's proposed eight emulate-tier AWS services and ~30 mock-tier services are a rounding error next to 105 real ones, and its deliberate Lambda cut is a capability that competitor already ships across 23 runtimes.
+
+**→ folded in:** `DIRECTION.md` §2 rewritten with the correction stated plainly, a competitor matrix, and the repositioning below.
+
+### A7. The vacuum closed while the analysis was being written
+
+**The attack.** The market case rested on a verified vacuum: LocalStack CE gated in March 2026, community stranded. By August, at least four credible entrants had filled it — Floci, fakecloud, MiniStack, kumo. A vacuum that lasted five months is not a vacuum; it is a land rush that already happened.
+
+**Verdict: lands.** Any market analysis with a March timestamp is stale for an August decision. This is a general lesson worth carrying: in a fast-moving category, *re-verify the vacuum immediately before committing*, not once at the start of the research.
+
+### A8. The scoreboard proves capability is not the axis of competition
+
+Here is the most instructive fact available, and it is worth more than any argument in this document:
+
+> **fakecloud is by a wide margin the most technically complete AWS emulator in the field, and it has roughly 2.5% of Floci's traction.**
+
+105 services and provable Smithy conformance lost — badly — to 20-odd services with MIT licensing and a frictionless drop-in story. The variables that differ are **license** (AGPL versus MIT), **shape** (all 105 services on one port versus a simple drop-in), and **marketing surface**.
+
+**The consequence is uncomfortable and should be stated without hedging: building a better AWS emulator is not a strategy.** Every hour spent closing the gap to fakecloud on AWS coverage is an hour spent competing on the axis that demonstrably does not decide this market.
+
+### A9. What actually survives — and it is narrower and better than what was claimed
+
+Strip out everything a competitor already does, and four properties remain. Every one of them is uncontested across all four entrants:
+
+| Property | LocalStack | Floci | fakecloud | mirror.cloud |
+|---|---|---|---|---|
+| Non-AWS clouds | no | no | no | **yes** |
+| Run one product standalone | no | no | no (105 on one port) | **yes** |
+| Proxy / record / replay against the real cloud | no | no | no | **yes** |
+| Permissive license | gated | MIT | AGPL-3.0 | **Apache-2.0** |
+| Spec-update diffs as a day-2 workflow | no | no | no | **yes** |
+
+**The repositioning: AWS is the validation target, not the market.** Use AWS to prove the generation pipeline — it has the best-documented specs and the most mature SDKs to test against — and spend the differentiation where the field is genuinely empty. That is Azure and GCP, where nothing resembling a coherent multi-cloud local story exists; per-product composition, which nobody offers; and the proxy tier, which nobody offers.
+
+This is a smaller claim than "the thing that generates emulators," and unlike that claim it is true.
+
+### A10. The proxy tier is the test oracle, and treating it as a feature wastes it
+
+**The idea this pass produced, and the best one in this document.** The unanswerable question for every emulator is *how do you know it's accurate?* fakecloud answers "100% Smithy conformance" — which proves shape conformance and says nothing about behavior. Nobody proves behavior.
+
+But the plan already contains the mechanism and files it under features: record → replay. Point it at real AWS **once, maintainer-side**, capture the behavior of an emulate-tier service, scrub, and commit the cassettes as **differential conformance fixtures**. Now every emulate pack is graded against recorded real-cloud behavior on every commit.
+
+Three things fall out of this, and they compound:
+
+1. **A defensible accuracy claim** — "graded against recorded real-cloud behavior," which is strictly stronger than shape conformance and which no competitor makes.
+2. **The maintenance problem inverts.** You no longer need to *know* S3's semantics to implement them. You need to record them once and let the fixtures adjudicate. Recording is cheap; knowing is expensive.
+3. **Drift detection comes free** — re-record periodically, diff the cassettes, and you have a running answer to "has the real cloud changed?"
+
+**→ open, and it should be promoted from a feature to an architectural pillar** in the master prompt. Swarm S10 currently owns proxy as a user-facing mode; it should also own the maintainer-side fixture-capture workflow, and S12 should consume those fixtures as a conformance oracle.
+
+### A11. The only way a small team out-runs 6,300 commits
+
+**The attack.** Even with the narrowed scope, this plan commits to maintaining emulate-tier behavior packs forever, against a competitor with 6,300 commits and against three clouds instead of one. The arithmetic does not work for a small team.
+
+**The idea.** The canonical model is specified as declarative, diffable, and reviewable. Combine that with A10's recorded fixtures and you get the loop that makes the arithmetic work: **an agent proposes a behavior pack; the recorded cassettes grade it; a human reviews the diff.** Generation handles protocol, recording handles ground truth, review handles trust. This is the one configuration in which a small team can cover three clouds — and it is only available to a project whose model was built declarative and diffable from the start, which is why that constraint is worth keeping even though it costs something.
+
+Determinism doctrine still holds absolutely: this is AI at generation time, gated by a human, snapshot-locked into reviewed code. Never in the serving path.
+
+### A12. Minor but real
+
+- **Legal.** Reimplementing an API surface is well-trodden — moto, LocalStack, Floci, and fakecloud all exist — and US law post-*Google v. Oracle* is favorable. Two disciplines regardless: never imply affiliation or endorsement by any cloud vendor, and keep vendor trademarks out of binary, package, and image names. `mirror-s3` as an image name is fine as a description of compatibility; "AWS S3 Emulator" as a product name is not.
+- **Success metrics, or iteration is undirected.** Pick them now and let them be falsifiable. Reasonable candidates at six months: one non-AWS cloud usable end to end by someone who is not the author; a Testcontainers module in the registry; ten `mirror spec add` invocations by strangers; and a proxy-graded accuracy report published for at least one service. Star count is explicitly *not* a metric — A8 shows why it measures distribution rather than merit, and optimizing for it would pull the project straight back onto the axis it should be avoiding.
+
+### What this pass changes, in one paragraph
+
+Keep the architecture — it is sound, and the corrections in Parts 1–2 make it sounder. Discard the marketing claim built on top of it. Stop describing this as a better AWS emulator, because the evidence says that contest is both crowded and decided on axes this project should not want to compete on. Describe it as **the multi-cloud, per-product, proxy-graded one** — four properties nobody else has, on top of a pipeline that has now been independently proven to work by a competitor. That last point is worth ending on: fakecloud's existence is not only the strongest attack on this plan, it is also the strongest available evidence that the plan's core technical bet is correct.

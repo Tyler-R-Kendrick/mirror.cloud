@@ -1,0 +1,219 @@
+{
+  "schemaVersion": "1",
+  "comment": "Lockfile for vendored provider specs. Fields per file: source, ref, path, sha256, ingested. make specs-sync is the only writer.",
+  "pin": {
+    "aws": {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b"
+    },
+    "gcp.storage": {
+      "source": "https://storage.googleapis.com/$discovery/rest?version=v1",
+      "ref": "2026-08-20T19:03:54Z"
+    }
+  },
+  "files": [
+    {
+      "source": "https://storage.googleapis.com/$discovery/rest?version=v1",
+      "ref": "2026-08-20T19:03:54Z",
+      "path": "gcp/storage.json",
+      "sha256": "ddc2d2a46e45816367425e7f3bf3727b9887466c86f5e0480be04b3f7e8f0478",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/acm/service/2015-12-08/acm-2015-12-08.json",
+      "sha256": "4f2e27af9601556e61e14d7250cf57fcc303acd82b36e066a793381582966e81",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/api-gateway/service/2015-07-09/api-gateway-2015-07-09.json",
+      "sha256": "563730cf25f4939755520bd06bc2761e751ae905de2cec1252db6f7546b0f713",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/application-auto-scaling/service/2016-02-06/application-auto-scaling-2016-02-06.json",
+      "sha256": "6f6c87db5ae37323a7674ddb8aff419bbb05f1d3f0750e0fd08e88da8d60293e",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/auto-scaling/service/2011-01-01/auto-scaling-2011-01-01.json",
+      "sha256": "ca441ea1d031cca833e93dc66ccf0f96f9b90644dc22bbb6a68379cbfb7c0d85",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/cloudformation/service/2010-05-15/cloudformation-2010-05-15.json",
+      "sha256": "9992e8206bda7e3c3bb34886f99ca4e07acc12fa24542b788bf03759ad9e6a9c",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/cloudwatch-logs/service/2014-03-28/cloudwatch-logs-2014-03-28.json",
+      "sha256": "dd076041d72a4a056d565abca0750a26c90aedbce88edc2410925c832b27cca5",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/cloudwatch/service/2010-08-01/cloudwatch-2010-08-01.json",
+      "sha256": "183c7c5cc7d9b94fda241431167bdce445548c756a9bbd3cde868ab6ad6d1dc4",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/dynamodb/service/2012-08-10/dynamodb-2012-08-10.json",
+      "sha256": "551882dda390dbce7e3d2001e85017a58b76fdcfaf1bc152b6ecf063efc70705",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/ecr/service/2015-09-21/ecr-2015-09-21.json",
+      "sha256": "8fc7a50db3d1b84f5741a681e5a3716fc748eb231ce9a0828c180979bcaa50a5",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/ecs/service/2014-11-13/ecs-2014-11-13.json",
+      "sha256": "c957dcc62774c4a66a1ffce14d65a20b3ddff1c9a752ba29f55f92b36ddabfcc",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/eks/service/2017-11-01/eks-2017-11-01.json",
+      "sha256": "08b0efd8ddf12d8f95cc308e7823b6d7612f32d909b3402f25c5600795bb1403",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/elastic-load-balancing-v2/service/2015-12-01/elastic-load-balancing-v2-2015-12-01.json",
+      "sha256": "dd913f96538cb6e7e07b55a83d04f86f541c92c4dae9e7af78f3136f480a25cf",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/elasticache/service/2015-02-02/elasticache-2015-02-02.json",
+      "sha256": "531f322d4461115b8cebe68b55a2dae3bbbcff5908b5ed711f19fd6bfb073940",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/eventbridge/service/2015-10-07/eventbridge-2015-10-07.json",
+      "sha256": "47054e3cf1572673a5dc9931c0a6cddc1fc29b9338d9b124bc4ad8a0ec3bb2e7",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/iam/service/2010-05-08/iam-2010-05-08.json",
+      "sha256": "c1f74d3eda269e4fa2f00b57d57ed19c0e0a6d7fc7c70d4e351e319d178430f9",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/kinesis/service/2013-12-02/kinesis-2013-12-02.json",
+      "sha256": "831281086fabbe91be73607eb53d9134efcacadbb70a445405b0b7938ba54a1f",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/kms/service/2014-11-01/kms-2014-11-01.json",
+      "sha256": "874c9682f2f5e5c63c1f448972f8a87808150c5b2b5f1cbcc806cca6d4b5cf50",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/lambda/service/2015-03-31/lambda-2015-03-31.json",
+      "sha256": "44d8324fd73a8b7e4acc330a3b65b7c2e72c505b0e7718de5a12251806159ba9",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/rds/service/2014-10-31/rds-2014-10-31.json",
+      "sha256": "5f9bcd03a328763c66927e441e7668d924f16d3b415cb43b24f41687bb044d41",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/redshift/service/2012-12-01/redshift-2012-12-01.json",
+      "sha256": "aeabcfbb9f6fd6617f73fbcf69b0fdeb06c72174d6b10778b742ae4135557ab8",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/resource-groups-tagging-api/service/2017-01-26/resource-groups-tagging-api-2017-01-26.json",
+      "sha256": "8999afd0964222f459f45a8d755b61aa8b8c0a34cfa19b2930c98ecbb7842a32",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/route-53/service/2013-04-01/route-53-2013-04-01.json",
+      "sha256": "ecd97d60ded217f7e7e7b5eb7835027b7b426204bfae30c1340f4f55062afcf6",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/s3/service/2006-03-01/s3-2006-03-01.json",
+      "sha256": "6975caa92319bf6c1fc2fdea7b3f64f9b9aca6d9b32edeccf086796338842e5a",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/secrets-manager/service/2017-10-17/secrets-manager-2017-10-17.json",
+      "sha256": "2738bd8ded2b25834c71089cf71232738972d78befa80fa168ea476978ac8604",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/sns/service/2010-03-31/sns-2010-03-31.json",
+      "sha256": "fe3f26f8262090946cd2f0afff1e9c5bd397c8351dc6ae531792e27eedb2f4b8",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/sqs/service/2012-11-05/sqs-2012-11-05.json",
+      "sha256": "f34a7d2560fb9776206fb35958b8d0fc5f17d33f377bb7512d55a34a8c0c78f0",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/ssm/service/2014-11-06/ssm-2014-11-06.json",
+      "sha256": "23a5af746171632c4e9eabd6e5c7ea32cfc3c772307fb81e8cc920b17992a61c",
+      "ingested": "2026-08-20T19:03:54Z"
+    },
+    {
+      "source": "https://github.com/aws/api-models-aws",
+      "ref": "d245339a094ef10e0f40c5529630890cbfbaa73b",
+      "path": "models/sts/service/2011-06-15/sts-2011-06-15.json",
+      "sha256": "f9af33a09eeb206ab4f63a276f4342c87a23306725be381e2b7ba21ff3e8d40a",
+      "ingested": "2026-08-20T19:03:54Z"
+    }
+  ]
+}

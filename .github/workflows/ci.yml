@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: test
+        run: >
+          go test
+          ./internal/store
+          ./internal/blobs
+          ./internal/clock
+          ./internal/rand
+          ./internal/bus
+          ./internal/journal
+          ./internal/spitest
+          ./internal/services/s3
+          ./internal/services/sts
+          ./internal/services/sqs
+          ./internal/edge
+          ./internal/mock
+          ./internal/model
+          ./internal/check
+      - name: vet
+        run: >
+          go vet
+          ./internal/store
+          ./internal/blobs
+          ./internal/clock
+          ./internal/rand
+          ./internal/bus
+          ./internal/journal
+          ./internal/spitest
+          ./internal/services/s3
+          ./internal/services/sts
+          ./internal/services/sqs
+          ./internal/edge
+          ./internal/mock
+          ./internal/model
+          ./internal/check

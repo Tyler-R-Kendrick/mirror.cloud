@@ -1,0 +1,34 @@
+# specs/mirror.set — services generated into internal/generated.
+# format: <service-id> <tier>
+# comments start with #. `mirror spec add <id>` appends a line.
+# emulate-tier (behavior packs in internal/services)
+aws.s3 emulate
+aws.dynamodb emulate
+aws.sqs emulate
+aws.sns emulate
+aws.sts emulate
+aws.iam emulate
+aws.ssm emulate
+aws.secretsmanager emulate
+gcp.storage emulate
+# mock-tier (generated protocol + synthesizer only)
+aws.cloudwatch mock
+aws.logs mock
+aws.kms mock
+aws.kinesis mock
+aws.events mock
+aws.ecr mock
+aws.ecs mock
+aws.eks mock
+aws.elasticache mock
+aws.rds mock
+aws.redshift mock
+aws.cloudformation mock
+aws.apigateway mock
+aws.lambda mock
+aws.route53 mock
+aws.acm mock
+aws.elbv2 mock
+aws.autoscaling mock
+aws.applicationautoscaling mock
+aws.resourcegroupstaggingapi mock

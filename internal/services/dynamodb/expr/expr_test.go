@@ -18,6 +18,30 @@ func TestEvalBool(t *testing.T) {
 	}
 }
 
+func TestANDNotOR(t *testing.T) {
+	item := map[string]any{"n": map[string]any{"N": "5"}}
+	ok, err := EvalBool("attribute_exists(n) AND attribute_exists(missing)", item, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("AND must fail when the second operand is false")
+	}
+}
+
+func TestEquals(t *testing.T) {
+	item := map[string]any{"n": map[string]any{"N": "5"}}
+	vals := map[string]any{":n": map[string]any{"N": "5"}, ":m": map[string]any{"N": "7"}}
+	ok, err := EvalBool("n = :n", item, nil, vals)
+	if err != nil || !ok {
+		t.Fatalf("equal %v %v", ok, err)
+	}
+	ok, err = EvalBool("n = :m", item, nil, vals)
+	if err != nil || ok {
+		t.Fatalf("not equal %v %v", ok, err)
+	}
+}
+
 func TestApplyUpdateSET(t *testing.T) {
 	item := map[string]any{"a": map[string]any{"N": "1"}}
 	vals := map[string]any{":x": map[string]any{"N": "2"}}

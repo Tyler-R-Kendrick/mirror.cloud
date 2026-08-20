@@ -16,3 +16,7 @@ jobs:
         run: test -z "$(gofmt -l . | grep -v node_modules || true)"
       - name: test
         run: go test ./...
+      - name: fuzz seeds
+        run: go test ./internal/edge ./internal/identity ./internal/services/dynamodb/expr ./internal/services/gcs -count=1
+      - name: mutation
+        run: go test ./internal/mutation -count=1 -timeout 120s

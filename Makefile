@@ -15,6 +15,13 @@ build:
 test:
 	$(GO) test ./...
 
+test-fuzz:
+	$(GO) test ./internal/edge -fuzz=FuzzDeframeAWSChunked -fuzztime=10s
+	$(GO) test ./internal/services/dynamodb/expr -fuzz=FuzzEvalBool -fuzztime=10s
+
+test-mutation:
+	$(GO) test ./internal/mutation -count=1 -timeout 120s
+
 vet:
 	$(GO) vet ./...
 	@out=$$(gofmt -l $$(find . -name '*.go' -not -path './node_modules/*') || true); if [ -n "$$out" ]; then echo "$$out"; exit 1; fi

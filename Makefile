@@ -1,16 +1,29 @@
-.PHONY: specs-sync generate test vet fmt
+BIN := bin
+GO  := go
+export CGO_ENABLED := 0
 
-specs-sync:
-	./scripts/specs-sync.sh
+.PHONY: all build test vet fmt generate specs-sync
 
-generate:
-	go run ./cmd/mirrorgen
+all: build
+
+build:
+	mkdir -p $(BIN)
+	$(GO) build -o $(BIN)/mirror ./cmd/mirror
+	$(GO) build -o $(BIN)/awslocal ./cmd/awslocal
+	$(GO) build -o $(BIN)/gcslocal ./cmd/gcslocal
 
 test:
-	go test ./...
+	$(GO) test ./...
 
 vet:
-	go vet ./...
+	$(GO) vet ./...
+	@out=$$(gofmt -l $$(find . -name '*.go' -not -path './node_modules/*') || true); if [ -n "$$out" ]; then echo "$$out"; exit 1; fi
 
 fmt:
-	gofmt -w .
+	gofmt -w $$(find . -name '*.go' -not -path './node_modules/*')
+
+generate:
+	$(GO) run ./cmd/mirrorgen --catalog
+
+specs-sync:
+	bash scripts/specs-sync.sh

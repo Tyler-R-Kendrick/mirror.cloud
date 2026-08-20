@@ -40,6 +40,9 @@ func TestCreateSendReceiveDelete(t *testing.T) {
 	if sent.Output["MessageId"] == nil {
 		t.Fatal("missing MessageId")
 	}
+	if sent.Output["MD5OfMessageBody"] != "5d41402abc4b2a76b9719d911017c592" {
+		t.Fatalf("md5 %v", sent.Output["MD5OfMessageBody"])
+	}
 
 	got, err := p.Invoke(ctx, &spi.Request{
 		ServiceID: "aws.sqs",

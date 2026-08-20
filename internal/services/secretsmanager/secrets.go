@@ -48,6 +48,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		var m map[string]any
 		_ = json.Unmarshal(b, &m)
+		if deleted, _ := m["Deleted"].(bool); deleted {
+			return nil, &spi.Fault{Code: "InvalidRequestException", Message: "secret scheduled for deletion", HTTPStatus: 400, Fault: "client"}
+		}
 		return &spi.Response{Output: m}, nil
 	case "ListSecrets":
 		kvs, _, _ := p.col(req).List(ctx, "", "", 0)
@@ -58,10 +61,38 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			ss = append(ss, m)
 		}
 		return &spi.Response{Output: map[string]any{"SecretList": ss}}, nil
+	case "DeleteSecret":
+		b, ok, _ := p.col(req).Get(ctx, name)
+		if !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
+		}
+		var m map[string]any
+		_ = json.Unmarshal(b, &m)
+		if v, ok := req.Input["ForceDeleteWithoutRecovery"].(bool); ok && v {
+			_ = p.col(req).Delete(ctx, name)
+			return &spi.Response{Output: map[string]any{"Name": name}}, nil
+		}
+		m["Deleted"] = true
+		nb, _ := json.Marshal(m)
+		_ = p.col(req).Put(ctx, name, nb)
+		return &spi.Response{Output: map[string]any{"Name": name, "DeletionDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05Z")}}, nil
+	case "RestoreSecret":
+		b, ok, _ := p.col(req).Get(ctx, name)
+		if !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
+		}
+		var m map[string]any
+		_ = json.Unmarshal(b, &m)
+		delete(m, "Deleted")
+		nb, _ := json.Marshal(m)
+		_ = p.col(req).Put(ctx, name, nb)
+		return &spi.Response{Output: map[string]any{"Name": name}}, nil
+	case "ListSecretVersionIds", "TagResource", "UntagResource":
+		return &spi.Response{Output: map[string]any{"Versions": []any{}}}, nil
 	case "GetRandomPassword":
 		return &spi.Response{Output: map[string]any{"RandomPassword": p.deps.Rand.Hex(32)}}, nil
 	default:
-		return &spi.Response{Output: map[string]any{}}, nil
+		return nil, spi.NotImplemented("aws.secretsmanager", req.Operation, "emulate")
 	}
 }
 

@@ -3,9 +3,10 @@ package sqs
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -71,9 +72,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		body := str(req.Input["MessageBody"])
 		id := p.deps.Rand.Hex(16)
 		rh := p.deps.Rand.Hex(64)
-		msg, _ := json.Marshal(map[string]any{"id": id, "body": body, "handle": rh})
+		sum := md5.Sum([]byte(body))
+		md5hex := hex.EncodeToString(sum[:])
+		msg, _ := json.Marshal(map[string]any{"id": id, "body": body, "handle": rh, "md5": md5hex})
 		_ = p.col(req, "msgs:"+name).Put(ctx, rh, msg)
-		return &spi.Response{Output: map[string]any{"MessageId": id, "MD5OfMessageBody": p.deps.Rand.Hex(32)}}, nil
+		return &spi.Response{Output: map[string]any{"MessageId": id, "MD5OfMessageBody": md5hex}}, nil
 	case "ReceiveMessage":
 		name := queueName(req)
 		kvs, _, _ := p.col(req, "msgs:"+name).List(ctx, "", "", 1)
@@ -121,5 +124,3 @@ func queueName(req *spi.Request) string {
 }
 
 func str(v any) string { s, _ := v.(string); return s }
-
-var _ = strconv.Itoa

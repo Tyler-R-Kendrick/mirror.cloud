@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
@@ -49,20 +50,71 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			topics = append(topics, map[string]any{"TopicArn": m["arn"]})
 		}
 		return &spi.Response{Output: map[string]any{"Topics": topics}}, nil
+	case "DeleteTopic":
+		arn := str(req.Input["TopicArn"])
+		name := topicName(arn)
+		_ = p.col(req, "topics").Delete(ctx, name)
+		return &spi.Response{Output: map[string]any{}}, nil
+	case "GetTopicAttributes":
+		arn := str(req.Input["TopicArn"])
+		b, ok, _ := p.col(req, "topics").Get(ctx, topicName(arn))
+		if !ok {
+			return nil, &spi.Fault{Code: "NotFound", HTTPStatus: 404, Fault: "client"}
+		}
+		var m map[string]any
+		_ = json.Unmarshal(b, &m)
+		return &spi.Response{Output: map[string]any{"Attributes": map[string]any{"TopicArn": m["arn"], "DisplayName": m["name"]}}}, nil
+	case "SetTopicAttributes":
+		return &spi.Response{Output: map[string]any{}}, nil
 	case "Publish":
 		arn := str(req.Input["TopicArn"])
 		body := str(req.Input["Message"])
 		_ = p.deps.Bus.Publish(ctx, "sns:"+arn, []byte(body))
 		return &spi.Response{Output: map[string]any{"MessageId": p.deps.Rand.Hex(16)}}, nil
+	case "PublishBatch":
+		return p.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Publish", Input: req.Input, HTTP: req.HTTP})
 	case "Subscribe":
 		if str(req.Input["Protocol"]) == "lambda" {
 			return nil, spi.NotImplemented("aws.sns", "Subscribe/lambda", "emulate")
 		}
-		arn := "arn:aws:sns:" + req.Identity.Region + ":" + req.Identity.Account + ":sub/" + p.deps.Rand.Hex(8)
-		return &spi.Response{Output: map[string]any{"SubscriptionArn": arn}}, nil
-	default:
+		sub := "arn:aws:sns:" + req.Identity.Region + ":" + req.Identity.Account + ":sub/" + p.deps.Rand.Hex(8)
+		rec := map[string]any{
+			"SubscriptionArn": sub,
+			"TopicArn":        str(req.Input["TopicArn"]),
+			"Protocol":        str(req.Input["Protocol"]),
+			"Endpoint":        str(req.Input["Endpoint"]),
+		}
+		b, _ := json.Marshal(rec)
+		_ = p.col(req, "subs").Put(ctx, sub, b)
+		return &spi.Response{Output: map[string]any{"SubscriptionArn": sub}}, nil
+	case "Unsubscribe":
+		_ = p.col(req, "subs").Delete(ctx, str(req.Input["SubscriptionArn"]))
 		return &spi.Response{Output: map[string]any{}}, nil
+	case "ListSubscriptions", "ListSubscriptionsByTopic":
+		want := str(req.Input["TopicArn"])
+		kvs, _, _ := p.col(req, "subs").List(ctx, "", "", 0)
+		var subs []any
+		for _, kv := range kvs {
+			var m map[string]any
+			_ = json.Unmarshal(kv.Value, &m)
+			if want != "" && str(m["TopicArn"]) != want {
+				continue
+			}
+			subs = append(subs, m)
+		}
+		return &spi.Response{Output: map[string]any{"Subscriptions": subs}}, nil
+	case "ConfirmSubscription", "TagResource", "UntagResource":
+		return &spi.Response{Output: map[string]any{"SubscriptionArn": str(req.Input["Token"])}}, nil
+	default:
+		return nil, spi.NotImplemented("aws.sns", req.Operation, "emulate")
 	}
+}
+
+func topicName(arn string) string {
+	if i := strings.LastIndex(arn, ":"); i >= 0 {
+		return arn[i+1:]
+	}
+	return arn
 }
 
 func str(v any) string { s, _ := v.(string); return s }

@@ -56,8 +56,25 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			m["Value"] = string(raw)
 		}
 		return &spi.Response{Output: map[string]any{"Parameter": m}}, nil
-	case "GetParameters", "GetParametersByPath", "DescribeParameters":
-		kvs, _, _ := p.col(req).List(ctx, str(req.Input["Path"]), "", 0)
+	case "GetParameters":
+		var names []any
+		if v, ok := req.Input["Names"].([]any); ok {
+			names = v
+		}
+		var ps []any
+		for _, n := range names {
+			b, ok, _ := p.col(req).Get(ctx, str(n))
+			if !ok {
+				continue
+			}
+			var m map[string]any
+			_ = json.Unmarshal(b, &m)
+			ps = append(ps, m)
+		}
+		return &spi.Response{Output: map[string]any{"Parameters": ps}}, nil
+	case "GetParametersByPath", "DescribeParameters":
+		prefix := str(req.Input["Path"])
+		kvs, _, _ := p.col(req).List(ctx, prefix, "", 0)
 		var ps []any
 		for _, kv := range kvs {
 			var m map[string]any
@@ -65,11 +82,21 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			ps = append(ps, m)
 		}
 		return &spi.Response{Output: map[string]any{"Parameters": ps}}, nil
-	case "DeleteParameter", "DeleteParameters":
+	case "DeleteParameter":
 		_ = p.col(req).Delete(ctx, name)
 		return &spi.Response{Output: map[string]any{}}, nil
-	default:
+	case "DeleteParameters":
+		if v, ok := req.Input["Names"].([]any); ok {
+			for _, n := range v {
+				_ = p.col(req).Delete(ctx, str(n))
+			}
+		}
 		return &spi.Response{Output: map[string]any{}}, nil
+	case "LabelParameterVersion", "GetParameterHistory",
+		"AddTagsToResource", "RemoveTagsFromResource", "ListTagsForResource":
+		return &spi.Response{Output: map[string]any{}}, nil
+	default:
+		return nil, spi.NotImplemented("aws.ssm", req.Operation, "emulate")
 	}
 }
 

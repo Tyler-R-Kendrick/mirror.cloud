@@ -1,0 +1,16 @@
+{
+  "added_operations": [
+    "aws.demo.Pong"
+  ],
+  "removed_operations": null,
+  "changed_operations": [
+    "aws.demo.Ping"
+  ],
+  "added_shapes": [
+    "aws.demo.In2"
+  ],
+  "removed_shapes": null,
+  "changed_shapes": [
+    "aws.demo.In"
+  ]
+}

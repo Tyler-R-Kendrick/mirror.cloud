@@ -13,6 +13,9 @@ func TestParseAndExpiry(t *testing.T) {
 	if id.AccessKeyID != "AKIATEST" {
 		t.Fatalf("akid %q", id.AccessKeyID)
 	}
+	if id.Region != "us-east-1" {
+		t.Fatalf("region %q", id.Region)
+	}
 	if Expired(id) {
 		t.Fatal("should not be expired at +30s")
 	}

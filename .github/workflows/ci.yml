@@ -14,9 +14,24 @@ jobs:
         run: go vet ./...
       - name: gofmt
         run: test -z "$(gofmt -l . | grep -v node_modules || true)"
-      - name: test
-        run: go test ./...
+      - name: unit and coverage floor
+        run: make test-coverage
+      - name: protocol contracts
+        run: go test ./internal/conformance ./internal/proto/... -count=1
+      - name: aws sdk round-trip
+        working-directory: test/sdk/go
+        run: go test ./... -count=1
+      - name: snapshots
+        run: make test-snapshot
+      - name: chaos
+        run: make test-chaos
+      - name: bdd and functional
+        run: make test-bdd
       - name: fuzz seeds
-        run: go test ./internal/edge ./internal/identity ./internal/services/dynamodb/expr ./internal/services/gcs -count=1
+        run: make test-fuzz-seeds
+      - name: bounded native fuzzing
+        run: make test-fuzz
       - name: mutation
-        run: go test ./internal/mutation -count=1 -timeout 120s
+        run: make test-mutation
+      - name: race detector
+        run: make test-race

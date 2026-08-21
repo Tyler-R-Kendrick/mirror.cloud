@@ -36,10 +36,13 @@ func deframeAWSChunked(r io.Reader) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("aws-chunked: bad size %q: %w", sizePart, err)
 		}
+		if n < 0 {
+			return nil, fmt.Errorf("aws-chunked: bad size %q", sizePart)
+		}
 		if n == 0 {
 			break
 		}
-		if int64(len(rest)) < n+2 {
+		if len(rest) < 2 || n > int64(len(rest)-2) {
 			return nil, fmt.Errorf("aws-chunked: truncated chunk")
 		}
 		out.Write(rest[:n])

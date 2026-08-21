@@ -119,7 +119,7 @@ func TestSchedulerDeliversRestoredSchedule(t *testing.T) {
 	}
 	eventually(t, func() bool {
 		got := queueBodies(t, restored, id, "jobs")
-		return len(got) == 1 && got[0] == `"work"`
+		return len(got) == 1 && got[0] == "work"
 	})
 	eventually(t, func() bool {
 		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetSchedule", Input: map[string]any{"Name": "once"}})
@@ -138,6 +138,11 @@ func TestSchedulerStateUpdateAndGroups(t *testing.T) {
 	_, _ = queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "jobs"}})
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateScheduleGroup", Input: map[string]any{"Name": "batch"}}); err != nil {
 		t.Fatal(err)
+	}
+	bad := scheduleInput("bad", "rate(1 minute)", time.Time{}, "jobs", "not-json")
+	bad["Target"].(map[string]any)["Arn"] = "arn:aws:lambda:us-east-1:123456789012:function:job"
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSchedule", Input: bad}); err == nil {
+		t.Fatal("accepted non-JSON Lambda input")
 	}
 	input := scheduleInput("disabled", "at(1970-01-01T00:01:00)", time.Time{}, "jobs", "first")
 	input["GroupName"], input["State"] = "batch", "DISABLED"
@@ -164,7 +169,7 @@ func TestSchedulerStateUpdateAndGroups(t *testing.T) {
 	_ = deps.Clock.(*clock.Controllable).Advance(time.Minute)
 	eventually(t, func() bool {
 		got := queueBodies(t, deps, id, "jobs")
-		return len(got) == 1 && got[0] == `"updated"`
+		return len(got) == 1 && got[0] == "updated"
 	})
 }
 
@@ -174,7 +179,7 @@ func scheduleInput(name, expression string, start time.Time, queue, payload stri
 		"FlexibleTimeWindow": map[string]any{"Mode": "OFF"},
 		"Target": map[string]any{
 			"Arn":     "arn:aws:sqs:us-east-1:123456789012:" + queue,
-			"RoleArn": "arn:aws:iam::123456789012:role/scheduler", "Input": `"` + payload + `"`,
+			"RoleArn": "arn:aws:iam::123456789012:role/scheduler", "Input": payload,
 		},
 	}
 	if !start.IsZero() {

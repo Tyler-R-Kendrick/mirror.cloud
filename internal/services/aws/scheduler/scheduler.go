@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -229,7 +230,8 @@ func (p *Pack) scheduleRecord(input map[string]any, name, group, arn string) (ma
 	if !ok || first(target, "Arn", "arn") == "" || first(target, "RoleArn", "roleArn") == "" {
 		return nil, validation("Target Arn and RoleArn are required.")
 	}
-	if payload := first(target, "Input", "input"); payload != "" && !json.Valid([]byte(payload)) {
+	targetARN := first(target, "Arn", "arn")
+	if payload := first(target, "Input", "input"); payload != "" && requiresJSON(targetARN) && !json.Valid([]byte(payload)) {
 		return nil, validation("Target Input must be valid JSON.")
 	}
 	window, ok := input["FlexibleTimeWindow"].(map[string]any)
@@ -450,6 +452,10 @@ func first(input map[string]any, keys ...string) string {
 }
 
 func stringValue(value any) string { valueString, _ := value.(string); return valueString }
+
+func requiresJSON(arn string) bool {
+	return strings.Contains(arn, ":lambda:") || strings.Contains(arn, ":states:") || strings.Contains(arn, ":events:") || strings.Contains(arn, ":scheduler:::aws-sdk:")
+}
 
 func number(value any) float64 {
 	switch value := value.(type) {

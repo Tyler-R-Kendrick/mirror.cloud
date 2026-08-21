@@ -94,6 +94,9 @@ func (p *Pack) emitStream(ctx context.Context, req *spi.Request, table, event st
 	}
 	b, _ := json.Marshal(rec)
 	_ = p.col(req, "ddbstream:"+table).Put(ctx, fmt.Sprintf("%015d", seq), b)
+	if p.deps.Bus != nil {
+		_ = p.deps.Bus.Publish(ctx, "dynamodb-stream", b)
+	}
 }
 
 func (p *Pack) nextStreamSeq(ctx context.Context, req *spi.Request, table string) int {

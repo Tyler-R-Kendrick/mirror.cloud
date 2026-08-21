@@ -4,8 +4,6 @@ package sns
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +14,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -283,14 +282,13 @@ func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body 
 	if i := strings.LastIndexAny(endpoint, "/:"); i >= 0 {
 		name = endpoint[i+1:]
 	}
-	sum := md5.Sum([]byte(body))
-	rh := p.deps.Rand.Hex(64)
-	msg := map[string]any{
-		"id": p.deps.Rand.Hex(16), "body": body, "handle": rh,
-		"md5": hex.EncodeToString(sum[:]), "visibleAt": p.deps.Clock.Now().UnixNano(), "receiveCount": 0, "seq": 1,
+	in := map[string]any{"QueueName": name, "MessageBody": body}
+	for _, key := range []string{"MessageGroupId", "MessageDeduplicationId"} {
+		if value := str(req.Input[key]); value != "" {
+			in[key] = value
+		}
 	}
-	raw, _ := json.Marshal(msg)
-	_ = p.col(req, "msgs:"+name).Put(ctx, rh, raw)
+	_, _ = sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "SendMessage", Input: in})
 }
 
 func (p *Pack) httpPost(endpoint string, payload map[string]any) {

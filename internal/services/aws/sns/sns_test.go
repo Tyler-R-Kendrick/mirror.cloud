@@ -59,14 +59,21 @@ func TestPublishFilterAndSQSDelivery(t *testing.T) {
 	inv("Subscribe", map[string]any{"TopicArn": arn, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:q", "FilterPolicy": `{"event":["order"]}`, "RawMessageDelivery": "true"})
 	inv("Publish", map[string]any{"TopicArn": arn, "Message": "nope", "MessageAttributes": map[string]any{"event": map[string]any{"Type": "String", "Value": "other"}}})
 	inv("Publish", map[string]any{"TopicArn": arn, "Message": "yes", "MessageAttributes": map[string]any{"event": map[string]any{"Type": "String", "Value": "order"}}})
+	inv("Publish", map[string]any{"TopicArn": arn, "Message": "again", "MessageAttributes": map[string]any{"event": map[string]any{"Type": "String", "Value": "order"}}})
 	kvs, _, _ := deps.Store.Scope("1", "us-east-1").Collection("msgs:q").List(ctx, "", "", 0)
-	if len(kvs) != 1 {
+	if len(kvs) != 2 {
 		t.Fatalf("sqs delivery %d", len(kvs))
 	}
-	var msg map[string]any
-	_ = json.Unmarshal(kvs[0].Value, &msg)
-	if str(msg["body"]) != "yes" {
-		t.Fatalf("raw body %v", msg)
+	bodies := map[string]bool{}
+	sequences := map[float64]bool{}
+	for _, kv := range kvs {
+		var msg map[string]any
+		_ = json.Unmarshal(kv.Value, &msg)
+		bodies[str(msg["body"])] = true
+		sequences[msg["seq"].(float64)] = true
+	}
+	if !bodies["yes"] || !bodies["again"] || len(sequences) != 2 {
+		t.Fatalf("raw bodies %v sequences %v", bodies, sequences)
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{"TopicArn": arn, "Protocol": "lambda", "Endpoint": "fn"}}); err == nil {
 		t.Fatal("lambda should 501")

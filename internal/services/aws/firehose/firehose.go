@@ -203,7 +203,7 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 		return
 	}
 	now := p.deps.Clock.Now().UTC()
-	key := evaluatedS3Prefix(prefix, now) + stream + "-1-" + now.Format("2006-01-02-15-04-05-") + recID
+	key := p.evaluatedS3Prefix(prefix, now) + stream + "-1-" + now.Format("2006-01-02-15-04-05-") + recID
 	info, err := p.deps.Blobs.Put(ctx, req.Identity.Account+"/"+req.Identity.Region+"/"+bucket+"/"+key, bytes.NewReader(data))
 	if err != nil {
 		return
@@ -216,15 +216,19 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 
 var firehoseTimestampPrefix = regexp.MustCompile(`!\{timestamp:([^}]*)\}`)
 
-func evaluatedS3Prefix(prefix string, now time.Time) string {
+func (p *Pack) evaluatedS3Prefix(prefix string, now time.Time) string {
 	if !firehoseTimestampPrefix.MatchString(prefix) {
-		return prefix + now.Format("2006/01/02/15/")
+		prefix += now.Format("2006/01/02/15/")
 	}
-	return firehoseTimestampPrefix.ReplaceAllStringFunc(prefix, func(expression string) string {
+	prefix = firehoseTimestampPrefix.ReplaceAllStringFunc(prefix, func(expression string) string {
 		pattern := expression[len("!{timestamp:") : len(expression)-1]
 		layout := strings.NewReplacer("yyyy", "2006", "MM", "01", "dd", "02", "HH", "15", "mm", "04", "ss", "05").Replace(pattern)
 		return now.Format(layout)
 	})
+	for strings.Contains(prefix, "!{firehose:random-string}") {
+		prefix = strings.Replace(prefix, "!{firehose:random-string}", p.deps.Rand.Hex(11), 1)
+	}
+	return prefix
 }
 
 func first(in map[string]any, keys ...string) string {

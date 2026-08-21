@@ -195,6 +195,12 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	if _, _, err := deps.Blobs.Get(context.Background(), key); err != nil {
 		t.Fatal(err)
 	}
+	randomPrefix := p.evaluatedS3Prefix("random=!{firehose:random-string}/again=!{firehose:random-string}/!{timestamp:yyyy}/", deps.Clock.Now())
+	parts := strings.Split(randomPrefix, "/")
+	first, second := strings.TrimPrefix(parts[0], "random="), strings.TrimPrefix(parts[1], "again=")
+	if len(first) != 11 || len(second) != 11 || first == second || !strings.HasSuffix(randomPrefix, "/1970/") {
+		t.Fatalf("random prefix %q", randomPrefix)
+	}
 }
 
 func TestFirehoseControlPlaneAndBatch(t *testing.T) {

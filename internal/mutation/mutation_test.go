@@ -445,6 +445,46 @@ func TestMutantsAreKilled(t *testing.T) {
 			pkg:  "./internal/services/aws/pipes",
 			run:  "TestPipesKinesisDeliveryAndCheckpoint",
 		},
+		{
+			name: "dynamodb-drop-stream-wake-signal",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "ddb_stream.go"),
+			old:  `_ = p.deps.Bus.Publish(ctx, "dynamodb-stream", b)`,
+			new:  `_ = p.deps.Bus.Publish(ctx, "mutated", b)`,
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestDynamoDBStreamPublishesRecords",
+		},
+		{
+			name: "pipes-ignore-dynamodb-stream-source",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `case strings.Contains(source, ":dynamodb:") && strings.Contains(source, "/stream/"):`,
+			new:  `case false && strings.Contains(source, "/stream/"):`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesDynamoDBStreamDeliveryAndCheckpoint",
+		},
+		{
+			name: "pipes-dynamodb-checkpoint-event-id",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `return stringValue(record["dynamodb"].(map[string]any)["SequenceNumber"])`,
+			new:  `return stringValue(record["eventID"])`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesDynamoDBPartialBatchCheckpoint",
+		},
+		{
+			name: "pipes-dynamodb-wrong-event-version",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `event["eventVersion"] = "1.0"`,
+			new:  `event["eventVersion"] = "1.1"`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesDynamoDBStreamDeliveryAndCheckpoint",
+		},
+		{
+			name: "pipes-allow-source-update",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `exists && stringValue(source) != stringValue(rec["Source"])`,
+			new:  `false && stringValue(source) != stringValue(rec["Source"])`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesDynamoDBStreamDeliveryAndCheckpoint",
+		},
 	}
 
 	for _, m := range mutants {

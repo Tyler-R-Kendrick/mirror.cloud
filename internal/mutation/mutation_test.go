@@ -573,6 +573,38 @@ func TestMutantsAreKilled(t *testing.T) {
 			pkg:  "./internal/services/aws/pipes",
 			run:  "TestPipesStepFunctionsEnrichment",
 		},
+		{
+			name: "apigateway-drop-synthetic-request-body",
+			file: filepath.Join("internal", "services", "aws", "apigateway", "apigateway.go"),
+			old:  `if req.Body != nil {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/apigateway",
+			run:  "TestProxyEventSyntheticMetadata",
+		},
+		{
+			name: "pipes-skip-api-gateway-enrichment",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `case strings.Contains(arn, ":execute-api:"):`,
+			new:  `case false:`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesAPIGatewayEnrichment",
+		},
+		{
+			name: "pipes-disable-dynamic-http-parameters",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `if strings.HasPrefix(parameter, "$") {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesAPIGatewayEnrichment",
+		},
+		{
+			name: "pipes-accept-failed-api-gateway-enrichment",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `if status < 200 || status >= 300 {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesAPIGatewayEnrichment",
+		},
 	}
 
 	for _, m := range mutants {

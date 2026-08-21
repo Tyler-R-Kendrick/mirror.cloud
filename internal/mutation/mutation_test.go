@@ -221,6 +221,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			pkg:  "./internal/registry",
 			run:  "TestCloseEnabledPacks",
 		},
+		{
+			name: "store-reverse-scope-order",
+			file: filepath.Join("internal", "store", "store.go"),
+			old:  "sort.Strings(keys)",
+			new:  "sort.Sort(sort.Reverse(sort.StringSlice(keys)))",
+			pkg:  "./internal/store",
+			run:  "TestScopesAreEnumeratedDeterministically",
+		},
 	}
 
 	for _, m := range mutants {

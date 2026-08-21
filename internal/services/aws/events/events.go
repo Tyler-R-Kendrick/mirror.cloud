@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -357,8 +359,111 @@ func DeliverTarget(ctx context.Context, deps spi.Deps, identity spi.Identity, ar
 			return &spi.Fault{Code: "TargetInvocationFailed", Message: str(response.Output["cause"]), HTTPStatus: 500, Fault: "server"}
 		}
 		return nil
+	case strings.Contains(arn, ":api-destination/"):
+		parameters, _ := target["HttpParameters"].(map[string]any)
+		_, err := InvokeAPIDestination(ctx, deps, identity, arn, parameters, payload)
+		if fault, ok := err.(*spi.Fault); ok && !apiDestinationRetryable(fault.HTTPStatus) {
+			return nil
+		}
+		return err
 	}
 	return &spi.Fault{Code: "ValidationException", Message: "Unsupported target ARN.", HTTPStatus: 400, Fault: "client"}
+}
+
+// InvokeAPIDestination invokes a stored EventBridge API destination and returns its response body.
+func InvokeAPIDestination(ctx context.Context, deps spi.Deps, identity spi.Identity, arn string, parameters map[string]any, payload []byte) ([]byte, error) {
+	destination, ok := eventRecord(ctx, deps, identity, "apidest", arnResourceName(arn, "api-destination/"))
+	if !ok {
+		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "API destination does not exist.", HTTPStatus: 404, Fault: "client"}
+	}
+	connection, ok := eventRecord(ctx, deps, identity, "connections", arnResourceName(str(destination["ConnectionArn"]), "connection/"))
+	if !ok {
+		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Connection does not exist.", HTTPStatus: 404, Fault: "client"}
+	}
+	endpoint := str(destination["InvocationEndpoint"])
+	for _, value := range anySlice(parameters["PathParameterValues"]) {
+		endpoint = strings.Replace(endpoint, "*", url.PathEscape(str(value)), 1)
+	}
+	request, err := http.NewRequestWithContext(ctx, str(destination["HttpMethod"]), endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/json; charset=utf-8")
+	applyHTTPMap(request.Header.Set, parameters["HeaderParameters"])
+	query := request.URL.Query()
+	applyHTTPMap(query.Set, parameters["QueryStringParameters"])
+	auth, _ := connection["AuthParameters"].(map[string]any)
+	invocation, _ := auth["InvocationHttpParameters"].(map[string]any)
+	applyConnectionParameters(request.Header.Set, invocation["HeaderParameters"])
+	applyConnectionParameters(query.Set, invocation["QueryStringParameters"])
+	request.URL.RawQuery = query.Encode()
+	switch str(connection["AuthorizationType"]) {
+	case "API_KEY":
+		apiKey, _ := auth["ApiKeyAuthParameters"].(map[string]any)
+		request.Header.Set(str(apiKey["ApiKeyName"]), str(apiKey["ApiKeyValue"]))
+	case "BASIC":
+		basic, _ := auth["BasicAuthParameters"].(map[string]any)
+		request.SetBasicAuth(str(basic["Username"]), str(basic["Password"]))
+	default:
+		return nil, &spi.Fault{Code: "ValidationException", Message: "Unsupported API destination authorization type.", HTTPStatus: 400, Fault: "client"}
+	}
+	request.Header.Set("User-Agent", "Amazon/EventBridge/ApiDestinations")
+	request.Header.Set("Range", "bytes=0-1048575")
+	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, (6<<20)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > 6<<20 {
+		return nil, &spi.Fault{Code: "TargetInvocationFailed", Message: "API destination response exceeds 6 MB.", HTTPStatus: 502, Fault: "server"}
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, &spi.Fault{Code: "TargetInvocationFailed", Message: response.Status, HTTPStatus: response.StatusCode, Fault: "server"}
+	}
+	return body, nil
+}
+
+func apiDestinationRetryable(status int) bool {
+	return status == 401 || status == 407 || status == 409 || status == 429 || status >= 500
+}
+
+func eventRecord(ctx context.Context, deps spi.Deps, identity spi.Identity, collection, name string) (map[string]any, bool) {
+	body, ok, _ := deps.Store.Scope(identity.Account, identity.Region).Collection(collection).Get(ctx, name)
+	var record map[string]any
+	if !ok || json.Unmarshal(body, &record) != nil {
+		return nil, false
+	}
+	return record, true
+}
+
+func arnResourceName(arn, marker string) string {
+	_, resource, _ := strings.Cut(arn, marker)
+	name, _, _ := strings.Cut(resource, "/")
+	return name
+}
+
+func applyHTTPMap(set func(string, string), raw any) {
+	values, _ := raw.(map[string]any)
+	for key, value := range values {
+		set(key, str(value))
+	}
+}
+
+func applyConnectionParameters(set func(string, string), raw any) {
+	for _, value := range anySlice(raw) {
+		parameter, _ := value.(map[string]any)
+		set(str(parameter["Key"]), str(parameter["Value"]))
+	}
+}
+
+func anySlice(value any) []any {
+	values, _ := value.([]any)
+	return values
 }
 
 func str(v any) string { s, _ := v.(string); return s }

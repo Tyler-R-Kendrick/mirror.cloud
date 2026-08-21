@@ -114,6 +114,40 @@ func TestDeliverTargetStepFunctions(t *testing.T) {
 	}
 }
 
+func TestInvokeAPIDestinationBasicAuth(t *testing.T) {
+	seen := make(chan bool, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		username, password, ok := r.BasicAuth()
+		seen <- ok && username == "user" && password == "pass" && r.URL.Path == "/items/widget" && r.URL.Query().Get("source") == "test" && r.Header.Get("X-Test") == "value"
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	connection, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateConnection", Input: map[string]any{
+		"Name": "basic", "AuthorizationType": "BASIC", "AuthParameters": map[string]any{"BasicAuthParameters": map[string]any{"Username": "user", "Password": "pass"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateApiDestination", Input: map[string]any{
+		"Name": "basic", "ConnectionArn": connection.Output["ConnectionArn"], "InvocationEndpoint": server.URL + "/items/*", "HttpMethod": "POST",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := InvokeAPIDestination(context.Background(), deps, id, str(destination.Output["ApiDestinationArn"]), map[string]any{
+		"PathParameterValues": []any{"widget"}, "QueryStringParameters": map[string]any{"source": "test"}, "HeaderParameters": map[string]any{"X-Test": "value"},
+	}, []byte(`{"value":1}`))
+	if err != nil || string(body) != `{"ok":true}` || !<-seen {
+		t.Fatalf("API destination body=%s err=%v", body, err)
+	}
+	if !apiDestinationRetryable(401) || !apiDestinationRetryable(500) || apiDestinationRetryable(400) || apiDestinationRetryable(302) {
+		t.Fatal("API destination retry classification changed")
+	}
+}
+
 func TestTargetsUpsertRemoveAndEventBusIsolation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, sp := New(deps), sqs.New(deps)

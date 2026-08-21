@@ -1,6 +1,7 @@
 package lambda
 
 import (
+	"context"
 	"encoding/base64"
 	"io"
 	"net/http"
@@ -11,8 +12,30 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
+
+func TestInvokeEventAndDryRunStatus(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+		"FunctionName": "async", "Runtime": "unsupported", "Handler": "handler",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for kind, status := range map[string]int{"DryRun": http.StatusNoContent, "Event": http.StatusAccepted} {
+		resp, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Invoke", Input: map[string]any{"FunctionName": "async", "InvocationType": kind}})
+		if err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+		if resp.Status != status || resp.Output["StatusCode"] != status {
+			t.Fatalf("%s response %#v", kind, resp)
+		}
+	}
+}
 
 func TestBootedServerLambdaPythonInvoke(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {

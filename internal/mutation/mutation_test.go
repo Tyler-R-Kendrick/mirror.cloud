@@ -181,6 +181,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			pkg:  "./internal/services/aws/events",
 			run:  "TestMatchEventPatternOperators",
 		},
+		{
+			name: "lambda-async-to-sync",
+			file: filepath.Join("internal", "services", "aws", "lambda", "lambda.go"),
+			old:  `invocationType == "Event"`,
+			new:  `invocationType == "RequestResponse"`,
+			pkg:  "./internal/services/aws/lambda",
+			run:  "TestInvokeEventAndDryRunStatus",
+		},
 	}
 
 	for _, m := range mutants {

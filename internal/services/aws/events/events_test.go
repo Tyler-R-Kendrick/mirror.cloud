@@ -148,6 +148,51 @@ func TestInvokeAPIDestinationBasicAuth(t *testing.T) {
 	}
 }
 
+func TestInvokeAPIDestinationOAuth(t *testing.T) {
+	tokenCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			tokenCalls++
+			username, password, ok := r.BasicAuth()
+			if !ok || username != "client" || password != "secret" || r.FormValue("grant_type") != "client_credentials" {
+				t.Errorf("OAuth request auth=%v username=%q password=%q form=%v", ok, username, password, r.Form)
+			}
+			_, _ = w.Write([]byte(`{"access_token":"token","token_type":"Bearer"}`))
+		case "/destination":
+			if r.Header.Get("Authorization") != "Bearer token" {
+				t.Errorf("Authorization %q", r.Header.Get("Authorization"))
+			}
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}
+	}))
+	defer server.Close()
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	connection, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateConnection", Input: map[string]any{
+		"Name": "oauth", "AuthorizationType": "OAUTH_CLIENT_CREDENTIALS",
+		"AuthParameters": map[string]any{"OAuthParameters": map[string]any{
+			"AuthorizationEndpoint": server.URL + "/token", "HttpMethod": "POST",
+			"ClientParameters":    map[string]any{"ClientID": "client", "ClientSecret": "secret"},
+			"OAuthHttpParameters": map[string]any{"BodyParameters": []any{map[string]any{"Key": "grant_type", "Value": "client_credentials"}}},
+		}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateApiDestination", Input: map[string]any{
+		"Name": "oauth", "ConnectionArn": connection.Output["ConnectionArn"], "InvocationEndpoint": server.URL + "/destination", "HttpMethod": "POST",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := InvokeAPIDestination(context.Background(), deps, id, str(destination.Output["ApiDestinationArn"]), nil, []byte(`{}`))
+	if err != nil || string(body) != `{"ok":true}` || tokenCalls != 1 {
+		t.Fatalf("OAuth destination body=%s tokenCalls=%d err=%v", body, tokenCalls, err)
+	}
+}
+
 func TestTargetsUpsertRemoveAndEventBusIsolation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, sp := New(deps), sqs.New(deps)

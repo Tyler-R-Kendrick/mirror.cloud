@@ -397,6 +397,7 @@ func InvokeAPIDestination(ctx context.Context, deps spi.Deps, identity spi.Ident
 	applyConnectionParameters(request.Header.Set, invocation["HeaderParameters"])
 	applyConnectionParameters(query.Set, invocation["QueryStringParameters"])
 	request.URL.RawQuery = query.Encode()
+	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	switch str(connection["AuthorizationType"]) {
 	case "API_KEY":
 		apiKey, _ := auth["ApiKeyAuthParameters"].(map[string]any)
@@ -404,12 +405,17 @@ func InvokeAPIDestination(ctx context.Context, deps spi.Deps, identity spi.Ident
 	case "BASIC":
 		basic, _ := auth["BasicAuthParameters"].(map[string]any)
 		request.SetBasicAuth(str(basic["Username"]), str(basic["Password"]))
+	case "OAUTH_CLIENT_CREDENTIALS":
+		token, err := oauthToken(ctx, client, auth)
+		if err != nil {
+			return nil, err
+		}
+		request.Header.Set("Authorization", token)
 	default:
 		return nil, &spi.Fault{Code: "ValidationException", Message: "Unsupported API destination authorization type.", HTTPStatus: 400, Fault: "client"}
 	}
 	request.Header.Set("User-Agent", "Amazon/EventBridge/ApiDestinations")
 	request.Header.Set("Range", "bytes=0-1048575")
-	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, err
@@ -426,6 +432,39 @@ func InvokeAPIDestination(ctx context.Context, deps spi.Deps, identity spi.Ident
 		return nil, &spi.Fault{Code: "TargetInvocationFailed", Message: response.Status, HTTPStatus: response.StatusCode, Fault: "server"}
 	}
 	return body, nil
+}
+
+func oauthToken(ctx context.Context, client *http.Client, auth map[string]any) (string, error) {
+	oauth, _ := auth["OAuthParameters"].(map[string]any)
+	parameters, _ := oauth["OAuthHttpParameters"].(map[string]any)
+	form := url.Values{}
+	applyConnectionParameters(form.Set, parameters["BodyParameters"])
+	request, err := http.NewRequestWithContext(ctx, str(oauth["HttpMethod"]), str(oauth["AuthorizationEndpoint"]), strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	applyConnectionParameters(request.Header.Set, parameters["HeaderParameters"])
+	query := request.URL.Query()
+	applyConnectionParameters(query.Set, parameters["QueryStringParameters"])
+	request.URL.RawQuery = query.Encode()
+	credentials, _ := oauth["ClientParameters"].(map[string]any)
+	request.SetBasicAuth(str(credentials["ClientID"]), str(credentials["ClientSecret"]))
+	response, err := client.Do(request)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	var token map[string]any
+	if response.StatusCode < 200 || response.StatusCode >= 300 || json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&token) != nil || str(token["access_token"]) == "" {
+		return "", &spi.Fault{Code: "ConnectionFailure", Message: "OAuth token request failed.", HTTPStatus: 502, Fault: "server"}
+	}
+	tokenType := str(token["token_type"])
+	if tokenType == "" {
+		tokenType = "Bearer"
+	}
+	// ponytail: fetch per invocation; cache by connection when API Destination throughput makes token calls material.
+	return tokenType + " " + str(token["access_token"]), nil
 }
 
 func apiDestinationRetryable(status int) bool {

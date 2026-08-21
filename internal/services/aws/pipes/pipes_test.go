@@ -551,6 +551,7 @@ func TestPipesAPIDestinationEnrichmentAndTarget(t *testing.T) {
 	p := New(deps)
 	defer p.Close()
 	queue, eventbridge := sqs.New(deps), events.New(deps)
+	defer eventbridge.Close()
 	for _, name := range []string{"destination-source", "destination-target", "api-target-source", "destination-failed-source"} {
 		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})
 	}
@@ -613,6 +614,12 @@ func TestPipesAPIDestinationEnrichmentAndTarget(t *testing.T) {
 	})
 	if failedCall := <-calls; failedCall.path != "/fail" {
 		t.Fatalf("failed API destination call %#v", failedCall)
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if messages := storedMessages(t, deps, id, "destination-failed-source"); len(messages) != 1 {
+		t.Fatalf("failed API destination consumed source: %#v", messages)
 	}
 }
 

@@ -669,6 +669,30 @@ func TestMutantsAreKilled(t *testing.T) {
 			pkg:  "./internal/services/aws/pipes",
 			run:  "TestPipesAPIDestinationEnrichmentAndTarget",
 		},
+		{
+			name: "events-skip-api-destination-oauth",
+			file: filepath.Join("internal", "services", "aws", "events", "events.go"),
+			old:  `case "OAUTH_CLIENT_CREDENTIALS":`,
+			new:  `case "MUTATED":`,
+			pkg:  "./internal/services/aws/events",
+			run:  "TestInvokeAPIDestinationOAuth",
+		},
+		{
+			name: "events-drop-oauth-client-id",
+			file: filepath.Join("internal", "services", "aws", "events", "events.go"),
+			old:  `request.SetBasicAuth(str(credentials["ClientID"]), str(credentials["ClientSecret"]))`,
+			new:  `request.SetBasicAuth("mutated", str(credentials["ClientSecret"]))`,
+			pkg:  "./internal/services/aws/events",
+			run:  "TestInvokeAPIDestinationOAuth",
+		},
+		{
+			name: "events-drop-oauth-bearer-token",
+			file: filepath.Join("internal", "services", "aws", "events", "events.go"),
+			old:  `request.Header.Set("Authorization", token)`,
+			new:  `request.Header.Set("Authorization", "mutated")`,
+			pkg:  "./internal/services/aws/events",
+			run:  "TestInvokeAPIDestinationOAuth",
+		},
 	}
 
 	for _, m := range mutants {

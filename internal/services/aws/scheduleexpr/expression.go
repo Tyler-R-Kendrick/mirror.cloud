@@ -184,8 +184,14 @@ func parseIntField(raw string, min, max int, names map[string]int) (intField, er
 				hi = max
 			}
 		}
-		if lo < min || hi > max || lo > hi {
+		if lo < min || hi > max || (lo > hi && (min != 0 || max != 23)) {
 			return nil, fmt.Errorf("cron value %q out of range", item)
+		}
+		if lo > hi {
+			for n := lo; n <= max; n += step {
+				out[n] = true
+			}
+			lo = min
 		}
 		for n := lo; n <= hi; n += step {
 			out[n] = true

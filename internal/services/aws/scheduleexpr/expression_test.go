@@ -24,6 +24,7 @@ func TestScheduleExpressions(t *testing.T) {
 		{"cron(0 9 ? * MON#2 2024)", "UTC", "2024-01-01T00:00:00Z", "2024-01-08T09:00:00Z"},
 		{"cron(0 9 ? * FRIL 2024)", "UTC", "2024-02-01T00:00:00Z", "2024-02-23T09:00:00Z"},
 		{"cron(0 9 ? * MON-FRI 2024)", "America/Chicago", "2024-03-10T14:00:00Z", "2024-03-11T14:00:00Z"},
+		{"cron(0/30 20-2 ? * MON-FRI 2024)", "UTC", "2024-01-01T23:59:00Z", "2024-01-02T00:00:00Z"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.expression, func(t *testing.T) {

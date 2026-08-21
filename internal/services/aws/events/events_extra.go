@@ -153,24 +153,29 @@ func (p *Pack) extra(ctx context.Context, req *spi.Request) (*spi.Response, erro
 	case "ListReplays":
 		return p.listRec(ctx, req, "replays", "Replays")
 	case "DescribeRule":
-		return p.getRec(ctx, req, "rules", first(req.Input, "Name"))
+		return p.getRec(ctx, req, "rules", eventKey(eventBus(req.Input), first(req.Input, "Name")))
 	case "EnableRule", "DisableRule":
 		st := "ENABLED"
 		if op == "DisableRule" {
 			st = "DISABLED"
 		}
-		return p.patch(ctx, req, "rules", first(req.Input, "Name"), map[string]any{"State": st})
+		return p.patch(ctx, req, "rules", eventKey(eventBus(req.Input), first(req.Input, "Name")), map[string]any{"State": st})
 	case "ListRuleNamesByTarget":
 		want := first(req.Input, "TargetArn")
+		bus := eventBus(req.Input)
 		kvs, _, _ := p.col(req, "targets").List(ctx, "", "", 0)
 		var names []any
 		for _, kv := range kvs {
+			keyBus, _, _ := strings.Cut(kv.Key, "\x00")
+			if keyBus != bus {
+				continue
+			}
 			var tgs []any
 			_ = json.Unmarshal(kv.Value, &tgs)
 			for _, t := range tgs {
 				m, _ := t.(map[string]any)
 				if str(m["Arn"]) == want || want == "" {
-					names = append(names, kv.Key)
+					names = append(names, eventName(kv.Key))
 					break
 				}
 			}

@@ -41,9 +41,24 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	switch req.Operation {
 	case "PutRule":
 		name := str(req.Input["Name"])
-		b, _ := json.Marshal(req.Input)
-		_ = p.col(req, "rules").Put(ctx, name, b)
-		arn := "arn:aws:events:" + req.Identity.Region + ":" + req.Identity.Account + ":rule/" + name
+		if name == "" {
+			return nil, &spi.Fault{Code: "ValidationException", Message: "Name is required.", HTTPStatus: 400, Fault: "client"}
+		}
+		if pattern := str(req.Input["EventPattern"]); pattern != "" && !json.Valid([]byte(pattern)) {
+			return nil, &spi.Fault{Code: "InvalidEventPatternException", Message: "EventPattern is not valid JSON.", HTTPStatus: 400, Fault: "client"}
+		}
+		bus := eventBus(req.Input)
+		rec := clone(req.Input)
+		if str(rec["State"]) == "" {
+			rec["State"] = "ENABLED"
+		}
+		b, _ := json.Marshal(rec)
+		_ = p.col(req, "rules").Put(ctx, eventKey(bus, name), b)
+		path := name
+		if bus != "default" {
+			path = bus + "/" + name
+		}
+		arn := "arn:aws:events:" + req.Identity.Region + ":" + req.Identity.Account + ":rule/" + path
 		return &spi.Response{Output: map[string]any{"RuleArn": arn}}, nil
 	case "ListRules":
 		kvs, _, _ := p.col(req, "rules").List(ctx, "", "", 0)
@@ -51,33 +66,108 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		for _, kv := range kvs {
 			var m map[string]any
 			_ = json.Unmarshal(kv.Value, &m)
-			rs = append(rs, m)
+			if eventBus(m) == eventBus(req.Input) {
+				rs = append(rs, m)
+			}
 		}
 		return &spi.Response{Output: map[string]any{"Rules": rs}}, nil
 	case "DeleteRule":
-		_ = p.col(req, "rules").Delete(ctx, str(req.Input["Name"]))
+		_ = p.col(req, "rules").Delete(ctx, eventKey(eventBus(req.Input), str(req.Input["Name"])))
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "PutTargets":
-		rule := str(req.Input["Rule"])
-		b, _ := json.Marshal(req.Input["Targets"])
-		_ = p.col(req, "targets").Put(ctx, rule, b)
-		return &spi.Response{Output: map[string]any{"FailedEntryCount": 0, "FailedEntries": []any{}}}, nil
-	case "ListTargetsByRule":
-		b, ok, _ := p.col(req, "targets").Get(ctx, str(req.Input["Rule"]))
-		var tg any = []any{}
-		if ok {
-			_ = json.Unmarshal(b, &tg)
+		key := eventKey(eventBus(req.Input), str(req.Input["Rule"]))
+		if _, ok := p.load(ctx, req, "rules", key); !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Rule does not exist.", HTTPStatus: 400, Fault: "client"}
 		}
-		return &spi.Response{Output: map[string]any{"Targets": tg}}, nil
+		targets := p.targets(ctx, req, key)
+		byID := map[string]int{}
+		for i, target := range targets {
+			m, _ := target.(map[string]any)
+			byID[str(m["Id"])] = i
+		}
+		var failed []any
+		for _, raw := range asSlice(req.Input["Targets"]) {
+			target, _ := raw.(map[string]any)
+			id, arn := str(target["Id"]), str(target["Arn"])
+			if id == "" || arn == "" {
+				failed = append(failed, map[string]any{"TargetId": id, "ErrorCode": "ValidationException", "ErrorMessage": "Id and Arn are required."})
+				continue
+			}
+			if i, ok := byID[id]; ok {
+				targets[i] = target
+			} else {
+				byID[id] = len(targets)
+				targets = append(targets, target)
+			}
+		}
+		b, _ := json.Marshal(targets)
+		_ = p.col(req, "targets").Put(ctx, key, b)
+		return &spi.Response{Output: map[string]any{"FailedEntryCount": len(failed), "FailedEntries": failed}}, nil
+	case "ListTargetsByRule":
+		return &spi.Response{Output: map[string]any{"Targets": p.targets(ctx, req, eventKey(eventBus(req.Input), str(req.Input["Rule"])))}}, nil
 	case "RemoveTargets":
-		_ = p.col(req, "targets").Delete(ctx, str(req.Input["Rule"]))
-		return &spi.Response{Output: map[string]any{"FailedEntryCount": 0}}, nil
+		key := eventKey(eventBus(req.Input), str(req.Input["Rule"]))
+		remove := map[string]bool{}
+		for _, id := range asSlice(req.Input["Ids"]) {
+			remove[str(id)] = true
+		}
+		var keep []any
+		for _, target := range p.targets(ctx, req, key) {
+			m, _ := target.(map[string]any)
+			if !remove[str(m["Id"])] {
+				keep = append(keep, target)
+			}
+		}
+		b, _ := json.Marshal(keep)
+		_ = p.col(req, "targets").Put(ctx, key, b)
+		return &spi.Response{Output: map[string]any{"FailedEntryCount": 0, "FailedEntries": []any{}}}, nil
 	case "PutEvents":
 		entries, _ := req.Input["Entries"].([]any)
 		return p.putEvents(ctx, req, entries), nil
 	default:
 		return p.extra(ctx, req)
 	}
+}
+
+func (p *Pack) targets(ctx context.Context, req *spi.Request, key string) []any {
+	b, ok, _ := p.col(req, "targets").Get(ctx, key)
+	if !ok {
+		return []any{}
+	}
+	var targets []any
+	_ = json.Unmarshal(b, &targets)
+	return targets
+}
+
+func eventBus(in map[string]any) string {
+	return eventBusName(str(in["EventBusName"]))
+}
+
+func eventBusName(bus string) string {
+	if _, name, ok := strings.Cut(bus, ":event-bus/"); ok {
+		return name
+	}
+	if bus == "" {
+		return "default"
+	}
+	return bus
+}
+
+func eventKey(bus, name string) string { return bus + "\x00" + name }
+
+func eventName(key string) string {
+	if _, name, ok := strings.Cut(key, "\x00"); ok {
+		return name
+	}
+	return key
+}
+
+func clone(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func (p *Pack) putEvents(ctx context.Context, req *spi.Request, entries []any) *spi.Response {
@@ -154,13 +244,8 @@ func ruleMatches(rule map[string]any, bus string, event map[string]any) bool {
 	if str(rule["State"]) == "DISABLED" {
 		return false
 	}
-	ruleBus := str(rule["EventBusName"])
-	if ruleBus == "" {
-		ruleBus = "default"
-	}
-	if bus == "" {
-		bus = "default"
-	}
+	ruleBus := eventBusName(str(rule["EventBusName"]))
+	bus = eventBusName(bus)
 	pattern := str(rule["EventPattern"])
 	return ruleBus == bus && pattern != "" && matchEventPattern(pattern, event)
 }

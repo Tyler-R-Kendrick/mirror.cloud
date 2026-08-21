@@ -86,6 +86,62 @@ func TestPutEventsReportsInvalidEntries(t *testing.T) {
 	}
 }
 
+func TestTargetsUpsertRemoveAndEventBusIsolation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, sp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(pack spi.BehaviorPack, op string, in map[string]any) *spi.Response {
+		t.Helper()
+		resp, err := pack.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		return resp
+	}
+	for _, name := range []string{"old", "updated", "preserved", "custom"} {
+		invoke(sp, "CreateQueue", map[string]any{"QueueName": name})
+	}
+	invoke(p, "PutRule", map[string]any{"Name": "same", "EventPattern": `{}`})
+	invoke(p, "PutTargets", map[string]any{"Rule": "same", "Targets": []any{
+		map[string]any{"Id": "a", "Arn": "arn:aws:sqs:us-east-1:1:old"},
+		map[string]any{"Id": "b", "Arn": "arn:aws:sqs:us-east-1:1:preserved"},
+	}})
+	invoke(p, "PutTargets", map[string]any{"Rule": "same", "Targets": []any{
+		map[string]any{"Id": "a", "Arn": "arn:aws:sqs:us-east-1:1:updated"},
+	}})
+	listed := invoke(p, "ListTargetsByRule", map[string]any{"Rule": "same"}).Output["Targets"].([]any)
+	if len(listed) != 2 {
+		t.Fatalf("upsert replaced targets %#v", listed)
+	}
+	invoke(p, "RemoveTargets", map[string]any{"Rule": "same", "Ids": []any{"b"}})
+	listed = invoke(p, "ListTargetsByRule", map[string]any{"Rule": "same"}).Output["Targets"].([]any)
+	if len(listed) != 1 || str(listed[0].(map[string]any)["Arn"]) != "arn:aws:sqs:us-east-1:1:updated" {
+		t.Fatalf("remove targets %#v", listed)
+	}
+	custom := invoke(p, "PutRule", map[string]any{"Name": "same", "EventBusName": "custom", "EventPattern": `{}`})
+	if str(custom.Output["RuleArn"]) != "arn:aws:events:us-east-1:1:rule/custom/same" {
+		t.Fatalf("custom rule ARN %#v", custom.Output)
+	}
+	invoke(p, "PutTargets", map[string]any{"Rule": "same", "EventBusName": "custom", "Targets": []any{
+		map[string]any{"Id": "a", "Arn": "arn:aws:sqs:us-east-1:1:custom"},
+	}})
+	invoke(p, "PutEvents", map[string]any{"Entries": []any{
+		map[string]any{"Source": "app", "DetailType": "x", "Detail": `{}`},
+		map[string]any{"Source": "app", "DetailType": "x", "Detail": `{}`, "EventBusName": "arn:aws:events:us-east-1:1:event-bus/custom"},
+	}})
+	for _, queue := range []string{"updated", "custom"} {
+		if got := invoke(sp, "ReceiveMessage", map[string]any{"QueueName": queue}).Output["Messages"].([]any); len(got) != 1 {
+			t.Fatalf("%s received %d messages, want 1", queue, len(got))
+		}
+	}
+	for _, queue := range []string{"old", "preserved"} {
+		if got := invoke(sp, "ReceiveMessage", map[string]any{"QueueName": queue}).Output["Messages"].([]any); len(got) != 0 {
+			t.Fatalf("%s unexpectedly received %#v", queue, got)
+		}
+	}
+}
+
 func TestBootedServerEventBridgePutEvents(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []string{"aws.events", "aws.sqs"}

@@ -24,6 +24,9 @@ func TestLiveIDs(t *testing.T) {
 		p := filepath.Join(root, rel)
 		data, err := os.ReadFile(p)
 		if err != nil {
+			if os.IsNotExist(err) {
+				t.Skip("vendored AWS specs not present")
+			}
 			t.Fatal(p, err)
 		}
 		svcs, err := r.Ingest(context.Background(), model.SourceRef{Path: p}, data)

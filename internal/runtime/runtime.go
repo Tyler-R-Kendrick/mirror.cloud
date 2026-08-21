@@ -15,6 +15,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/blobs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bus"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/catalog"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
@@ -442,6 +443,12 @@ func Boot(cfg config.Config) (*Runtime, error) {
 		_ = c.Advance(1577836800 * 1e9) // 2020-01-01 UTC
 		clk = c
 	}
+	base := specboot.Bundle()
+	bundle := *base
+	bundle.Services = append([]model.Service(nil), base.Services...)
+	for i := range bundle.Services {
+		bundle.Services[i].Operations = append([]model.Operation(nil), base.Services[i].Operations...)
+	}
 	deps := spi.Deps{
 		Store:   store.NewMemory(cfg.LockSHA),
 		Blobs:   blobs.NewMemory(),
@@ -449,7 +456,7 @@ func Boot(cfg config.Config) (*Runtime, error) {
 		Clock:   clk,
 		Rand:    rand.New(cfg.Seed),
 		Journal: journal.New(),
-		Model:   specboot.Bundle(),
+		Model:   &bundle,
 	}
 	deps.Authorizer = iam.NewAuthorizer(deps.Store)
 	if cfg.PersistDir != "" {
@@ -465,6 +472,18 @@ func Boot(cfg config.Config) (*Runtime, error) {
 	reg, err := registry.New(deps, cfg.Services, cfg.Tiers)
 	if err != nil {
 		return nil, err
+	}
+	for _, id := range reg.Enabled() {
+		pack, ok := reg.Resolve(id)
+		svc := bundle.ServiceByID(id)
+		if !ok || svc == nil {
+			continue
+		}
+		for _, name := range pack.Operations() {
+			if svc.OperationByName(name) == nil {
+				svc.Operations = append(svc.Operations, model.Operation{Name: name, HTTP: model.HTTPBinding{Method: http.MethodPost, Code: http.StatusOK}})
+			}
+		}
 	}
 	return &Runtime{Cfg: cfg, Deps: deps, Reg: reg, HTTP: edge.New(cfg, deps, reg, Version)}, nil
 }
@@ -568,7 +587,7 @@ type SupportRow struct {
 
 // SupportRows derives emulate counts from pack Operations(), not the full ingested spec.
 func SupportRows() []SupportRow {
-	b := specboot.Bundle()
+	b := catalog.Bundle()
 	packOps := map[string]int{}
 	for _, f := range registry.Factories() {
 		if f.Tier != model.TierEmulate {

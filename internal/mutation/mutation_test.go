@@ -213,6 +213,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			pkg:  "./internal/services/aws/sqs",
 			run:  "TestSendValidationAndDelay",
 		},
+		{
+			name: "registry-skip-pack-close",
+			file: filepath.Join("internal", "registry", "registry.go"),
+			old:  "for i := len(m.order) - 1; i >= 0; i-- {",
+			new:  "for i := len(m.order) - 1; i < 0; i-- {",
+			pkg:  "./internal/registry",
+			run:  "TestCloseEnabledPacks",
+		},
 	}
 
 	for _, m := range mutants {

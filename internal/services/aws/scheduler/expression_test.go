@@ -53,3 +53,14 @@ func TestScheduleExpressionValidation(t *testing.T) {
 		t.Fatal("invalid timezone accepted")
 	}
 }
+
+func TestAtExpressionIgnoresStartDate(t *testing.T) {
+	expr, err := parseScheduleExpression("at(2024-01-02T00:00:00)", "UTC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	if got := expr.first(now, now.Add(48*time.Hour)); !got.Equal(now.Add(24 * time.Hour)) {
+		t.Fatalf("got %s", got)
+	}
+}

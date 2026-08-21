@@ -232,7 +232,7 @@ func (p *Pack) fanout(ctx context.Context, req *spi.Request, event map[string]an
 			}
 			payload := targetPayload(m, event, raw)
 			_ = p.deps.Bus.Publish(ctx, "events:"+arn, payload)
-			p.deliver(ctx, req, arn, m, payload)
+			_ = DeliverTarget(ctx, p.deps, req.Identity, arn, m, payload)
 		}
 	}
 }
@@ -284,20 +284,23 @@ func ruleMatches(rule map[string]any, bus string, event map[string]any) bool {
 	return ruleBus == bus && pattern != "" && matchEventPattern(pattern, event)
 }
 
-func (p *Pack) deliver(ctx context.Context, req *spi.Request, arn string, target map[string]any, payload []byte) {
+// DeliverTarget invokes a templated EventBridge or Scheduler target.
+func DeliverTarget(ctx context.Context, deps spi.Deps, identity spi.Identity, arn string, target map[string]any, payload []byte) error {
 	switch {
 	case strings.Contains(arn, ":sqs:"):
 		in := map[string]any{"QueueName": arn[lastColon(arn)+1:], "MessageBody": string(payload)}
 		if params, ok := target["SqsParameters"].(map[string]any); ok {
 			in["MessageGroupId"] = params["MessageGroupId"]
 		}
-		_, _ = sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "SendMessage", Input: in})
+		_, err := sqs.New(deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "SendMessage", Input: in})
+		return err
 	case strings.Contains(arn, ":sns:"):
-		_, _ = sns.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Publish", Input: map[string]any{"TopicArn": arn, "Message": string(payload)}})
+		_, err := sns.New(deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Publish", Input: map[string]any{"TopicArn": arn, "Message": string(payload)}})
+		return err
 	case strings.Contains(arn, ":lambda:"):
 		_, name, ok := strings.Cut(arn, ":function:")
 		if !ok {
-			return
+			return &spi.Fault{Code: "ValidationException", Message: "Invalid Lambda target ARN.", HTTPStatus: 400, Fault: "client"}
 		}
 		if i := strings.IndexByte(name, ':'); i >= 0 {
 			name = name[:i]
@@ -309,8 +312,10 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, arn string, target
 		}
 		in["FunctionName"] = name
 		in["InvocationType"] = "Event"
-		_, _ = lambda.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: in})
+		_, err := lambda.New(deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Invoke", Input: in})
+		return err
 	}
+	return &spi.Fault{Code: "ValidationException", Message: "Unsupported target ARN.", HTTPStatus: 400, Fault: "client"}
 }
 
 func str(v any) string { s, _ := v.(string); return s }

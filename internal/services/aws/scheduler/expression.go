@@ -63,15 +63,16 @@ func parseScheduleExpression(raw, timezone string) (scheduleExpression, error) {
 }
 
 func (e scheduleExpression) first(now, start time.Time) time.Time {
-	if start.After(now) {
-		now = start
-	}
-	switch {
-	case !e.at.IsZero():
+	if !e.at.IsZero() {
 		if e.at.Before(now) {
 			return time.Time{}
 		}
 		return e.at
+	}
+	if start.After(now) {
+		now = start
+	}
+	switch {
 	case e.every > 0:
 		return now
 	case e.cron != nil:

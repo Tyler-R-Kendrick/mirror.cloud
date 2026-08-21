@@ -1,20 +1,29 @@
 package scheduler
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/store"
 )
 
 func TestSchedulerHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
+	defer p.Close()
 	if n := len(p.Operations()); n != 9 {
 		t.Fatalf("scheduler Operations() %d want 9", n)
 	}
@@ -28,6 +37,7 @@ func TestBootedServerSchedulerCreateGetDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rt.Close()
 	ts := httptest.NewServer(rt.Handler())
 	defer ts.Close()
 	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/scheduler/aws4_request, SignedHeaders=host, Signature=00"
@@ -53,7 +63,7 @@ func TestBootedServerSchedulerCreateGetDelete(t *testing.T) {
 		_ = json.Unmarshal(raw, &out)
 		return out
 	}
-	created := call("CreateSchedule", `{"Name":"s1","ScheduleExpression":"rate(1 minute)","Target":{"Arn":"arn:aws:sqs:us-east-1:000000000000:q"}}`)
+	created := call("CreateSchedule", `{"Name":"s1","ScheduleExpression":"rate(1 minute)","FlexibleTimeWindow":{"Mode":"OFF"},"Target":{"Arn":"arn:aws:sqs:us-east-1:000000000000:q","RoleArn":"arn:aws:iam::000000000000:role/test"}}`)
 	if created["ScheduleArn"] == nil {
 		t.Fatalf("create %v", created)
 	}
@@ -71,5 +81,134 @@ func TestBootedServerSchedulerCreateGetDelete(t *testing.T) {
 	raw, _ = json.Marshal(gone)
 	if strings.Contains(string(raw), `"Name":"s1"`) {
 		t.Fatalf("still present %s", raw)
+	}
+}
+
+func TestSchedulerDeliversRestoredSchedule(t *testing.T) {
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-west-2"}
+	deps := spitest.Deps(t)
+	queue := sqs.New(deps)
+	if _, err := queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "jobs"}}); err != nil {
+		t.Fatal(err)
+	}
+	p := New(deps)
+	start := deps.Clock.Now().Add(time.Minute)
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSchedule", Input: scheduleInput("once", "at(1970-01-01T00:01:00)", start, "jobs", "work")}); err != nil {
+		t.Fatal(err)
+	}
+	if got := queueBodies(t, deps, id, "jobs"); len(got) != 0 {
+		t.Fatalf("delivered early: %v", got)
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := store.SnapshotBytes(deps.Store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored := spitest.Deps(t)
+	if err := restored.Store.Restore(ctx, bytes.NewReader(snapshot)); err != nil {
+		t.Fatal(err)
+	}
+	p = New(restored)
+	defer p.Close()
+	if err := restored.Clock.(*clock.Controllable).Advance(time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() bool {
+		got := queueBodies(t, restored, id, "jobs")
+		return len(got) == 1 && got[0] == `"work"`
+	})
+	eventually(t, func() bool {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetSchedule", Input: map[string]any{"Name": "once"}})
+		fault, _ := err.(*spi.Fault)
+		return fault != nil && fault.Code == "ResourceNotFoundException"
+	})
+}
+
+func TestSchedulerStateUpdateAndGroups(t *testing.T) {
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer p.Close()
+	queue := sqs.New(deps)
+	_, _ = queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "jobs"}})
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateScheduleGroup", Input: map[string]any{"Name": "batch"}}); err != nil {
+		t.Fatal(err)
+	}
+	input := scheduleInput("disabled", "at(1970-01-01T00:01:00)", time.Time{}, "jobs", "first")
+	input["GroupName"], input["State"] = "batch", "DISABLED"
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSchedule", Input: input}); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListSchedules", Input: map[string]any{}})
+	if err != nil || len(listed.Output["Schedules"].([]any)) != 1 {
+		t.Fatalf("all-group list: %v %v", listed, err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteScheduleGroup", Input: map[string]any{"Name": "batch"}}); err == nil {
+		t.Fatal("deleted non-empty group")
+	}
+	_ = deps.Clock.(*clock.Controllable).Advance(time.Minute)
+	runtime.Gosched()
+	if got := queueBodies(t, deps, id, "jobs"); len(got) != 0 {
+		t.Fatalf("disabled schedule delivered: %v", got)
+	}
+	input = scheduleInput("disabled", "at(1970-01-01T00:02:00)", time.Time{}, "jobs", "updated")
+	input["GroupName"] = "batch"
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "UpdateSchedule", Input: input}); err != nil {
+		t.Fatal(err)
+	}
+	_ = deps.Clock.(*clock.Controllable).Advance(time.Minute)
+	eventually(t, func() bool {
+		got := queueBodies(t, deps, id, "jobs")
+		return len(got) == 1 && got[0] == `"updated"`
+	})
+}
+
+func scheduleInput(name, expression string, start time.Time, queue, payload string) map[string]any {
+	input := map[string]any{
+		"Name": name, "ScheduleExpression": expression, "ActionAfterCompletion": "DELETE",
+		"FlexibleTimeWindow": map[string]any{"Mode": "OFF"},
+		"Target": map[string]any{
+			"Arn":     "arn:aws:sqs:us-east-1:123456789012:" + queue,
+			"RoleArn": "arn:aws:iam::123456789012:role/scheduler", "Input": `"` + payload + `"`,
+		},
+	}
+	if !start.IsZero() {
+		input["StartDate"] = start
+	}
+	return input
+}
+
+func queueBodies(t *testing.T, deps spi.Deps, id spi.Identity, queue string) []string {
+	t.Helper()
+	kvs, _, err := deps.Store.Scope(id.Account, id.Region).Collection("msgs:"+queue).List(context.Background(), "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bodies := make([]string, 0, len(kvs))
+	for _, kv := range kvs {
+		var message map[string]any
+		if err := json.Unmarshal(kv.Value, &message); err != nil {
+			t.Fatal(err)
+		}
+		bodies = append(bodies, message["body"].(string))
+	}
+	return bodies
+}
+
+func eventually(t *testing.T, condition func() bool) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for !condition() {
+		select {
+		case <-deadline:
+			t.Fatal("condition not met")
+		default:
+			runtime.Gosched()
+		}
 	}
 }

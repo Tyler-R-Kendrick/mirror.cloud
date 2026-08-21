@@ -189,6 +189,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			pkg:  "./internal/services/aws/lambda",
 			run:  "TestInvokeEventAndDryRunStatus",
 		},
+		{
+			name: "sqs-disable-queue-existence-guard",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `queueScoped(req.Operation) && !p.queueExists(ctx, req, queueName(req))`,
+			new:  `false && !p.queueExists(ctx, req, queueName(req))`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestQueueScopedOperationsRejectMissingQueue",
+		},
 	}
 
 	for _, m := range mutants {

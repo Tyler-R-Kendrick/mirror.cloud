@@ -296,8 +296,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "pipes-retain-successful-source-message",
 			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
-			old:  "\t\tif events.DeliverTarget(ctx, p.deps, identity, target, config, payload) == nil {\n\t\t\tif !enriched {",
-			new:  "\t\tif events.DeliverTarget(ctx, p.deps, identity, target, config, payload) != nil {\n\t\t\tif !enriched {",
+			old:  `if err := events.DeliverTarget(ctx, p.deps, identity, target, config, payload); err == nil || (strings.Contains(target, ":api-destination/") && !events.TargetErrorRetryable(err)) {`,
+			new:  `if false {`,
 			pkg:  "./internal/services/aws/pipes",
 			run:  "TestPipesSQSDeliveryStateAndFiltering",
 		},
@@ -973,7 +973,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			if err := os.WriteFile(overlay, enc, 0o644); err != nil {
 				t.Fatal(err)
 			}
-			cmd := exec.Command("go", "test", m.pkg, "-count=1", "-run", m.run, "-overlay", overlay)
+			cmd := exec.Command("go", "test", m.pkg, "-count=1", "-run", m.run, "-timeout", "30s", "-overlay", overlay)
 			cmd.Dir = root
 			out, err := cmd.CombinedOutput()
 			if err == nil {

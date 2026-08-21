@@ -398,9 +398,21 @@ func proxyEvent(req *spi.Request, path, meth string) map[string]any {
 		bodyMap[k] = v
 	}
 	body, _ := json.Marshal(bodyMap)
+	headers, query := map[string]any{}, map[string]any{}
+	if req.HTTP != nil {
+		for key, values := range req.HTTP.Header {
+			headers[key] = strings.Join(values, ",")
+		}
+		for key, values := range req.HTTP.URL.Query() {
+			query[key] = strings.Join(values, ",")
+		}
+	}
+	if req.Body != nil {
+		body, _ = io.ReadAll(req.Body)
+	}
 	return map[string]any{
 		"httpMethod": meth, "path": path, "body": string(body),
-		"headers": map[string]any{}, "isBase64Encoded": false,
+		"headers": headers, "queryStringParameters": query, "isBase64Encoded": false,
 		"requestContext": map[string]any{"httpMethod": meth, "path": path},
 	}
 }

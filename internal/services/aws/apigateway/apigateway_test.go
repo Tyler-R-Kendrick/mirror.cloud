@@ -11,10 +11,22 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 )
+
+func TestProxyEventSyntheticMetadata(t *testing.T) {
+	request, _ := http.NewRequest(http.MethodPost, "http://local/widgets?kind=test", nil)
+	request.Header.Set("X-Test", "value")
+	event := proxyEvent(&spi.Request{
+		Input: map[string]any{"restApiId": "api"}, HTTP: request, Body: io.NopCloser(strings.NewReader(`[1,2]`)),
+	}, "/widgets", http.MethodPost)
+	if event["body"] != `[1,2]` || event["headers"].(map[string]any)["X-Test"] != "value" || event["queryStringParameters"].(map[string]any)["kind"] != "test" {
+		t.Fatalf("proxy event %#v", event)
+	}
+}
 
 func TestBootedServerAPIGatewayLambdaProxy(t *testing.T) {
 	cfg := config.Default()

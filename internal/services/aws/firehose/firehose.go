@@ -196,7 +196,7 @@ func copyDest(rec, in map[string]any, suffix string) {
 	}
 }
 
-func s3Dest(rec map[string]any) (bucket, prefix, timezone, extension, compression string) {
+func s3Dest(rec map[string]any) (bucket, prefix, errorPrefix, timezone, extension, compression string) {
 	for _, k := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration"} {
 		m, _ := rec[k].(map[string]any)
 		if m == nil {
@@ -208,16 +208,20 @@ func s3Dest(rec map[string]any) (bucket, prefix, timezone, extension, compressio
 		}
 		bucket = bucketFromARN(arn)
 		prefix = first(m, "Prefix")
+		errorPrefix = first(m, "ErrorOutputPrefix")
 		timezone = first(m, "CustomTimeZone")
 		extension = first(m, "FileExtension")
 		compression = first(m, "CompressionFormat")
-		return bucket, prefix, timezone, extension, compression
+		return bucket, prefix, errorPrefix, timezone, extension, compression
 	}
-	return "", "", "", "", ""
+	return "", "", "", "", "", ""
 }
 
 func validateDestination(rec map[string]any) error {
-	_, _, timezone, extension, compression := s3Dest(rec)
+	_, prefix, errorPrefix, timezone, extension, compression := s3Dest(rec)
+	if err := validatePrefixes(prefix, errorPrefix); err != nil {
+		return err
+	}
 	if timezone != "" {
 		if _, err := time.LoadLocation(timezone); err != nil {
 			return &spi.Fault{Code: "ValidationException", Message: "CustomTimeZone is invalid.", HTTPStatus: 400, Fault: "client"}
@@ -228,6 +232,42 @@ func validateDestination(rec map[string]any) error {
 	}
 	if compression != "" && compression != "UNCOMPRESSED" && compression != "GZIP" {
 		return spi.NotImplemented("aws.firehose", "CompressionFormat="+compression, "emulate")
+	}
+	return nil
+}
+
+func validatePrefixes(prefix, errorPrefix string) error {
+	if strings.Contains(prefix, "!{") && errorPrefix == "" {
+		return &spi.Fault{Code: "ValidationException", Message: "ErrorOutputPrefix is required when Prefix contains expressions.", HTTPStatus: 400, Fault: "client"}
+	}
+	for _, candidate := range []struct {
+		value       string
+		errorPrefix bool
+	}{{prefix, false}, {errorPrefix, true}} {
+		matches := firehosePrefixExpression.FindAllStringSubmatch(candidate.value, -1)
+		if strings.Contains(firehosePrefixExpression.ReplaceAllString(candidate.value, ""), "!{") {
+			return &spi.Fault{Code: "ValidationException", Message: "Prefix expression is invalid.", HTTPStatus: 400, Fault: "client"}
+		}
+		hasErrorType := false
+		for _, match := range matches {
+			namespace, value := match[1], match[2]
+			switch {
+			case namespace == "timestamp" && value != "":
+			case namespace == "firehose" && value == "random-string":
+			case namespace == "firehose" && value == "error-output-type" && candidate.errorPrefix:
+				hasErrorType = true
+			case namespace == "partitionKeyFromQuery" || namespace == "partitionKeyFromLambda":
+				if candidate.errorPrefix {
+					return &spi.Fault{Code: "ValidationException", Message: "Dynamic partitioning is invalid in ErrorOutputPrefix.", HTTPStatus: 400, Fault: "client"}
+				}
+				return spi.NotImplemented("aws.firehose", "dynamic partitioning", "emulate")
+			default:
+				return &spi.Fault{Code: "ValidationException", Message: "Prefix expression is invalid.", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+		if candidate.errorPrefix && len(matches) > 0 && !hasErrorType {
+			return &spi.Fault{Code: "ValidationException", Message: "ErrorOutputPrefix must contain !{firehose:error-output-type}.", HTTPStatus: 400, Fault: "client"}
+		}
 	}
 	return nil
 }
@@ -249,7 +289,7 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 	}
 	var rec map[string]any
 	_ = json.Unmarshal(raw, &rec)
-	bucket, prefix, timezone, extension, compression := s3Dest(rec)
+	bucket, prefix, _, timezone, extension, compression := s3Dest(rec)
 	if bucket == "" {
 		return
 	}
@@ -284,8 +324,9 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 }
 
 var (
-	firehoseTimestampPrefix = regexp.MustCompile(`!\{timestamp:([^}]*)\}`)
-	firehoseFileExtension   = regexp.MustCompile(`^\.[0-9a-z!\-_.*'()]+$`)
+	firehoseTimestampPrefix  = regexp.MustCompile(`!\{timestamp:([^}]*)\}`)
+	firehosePrefixExpression = regexp.MustCompile(`!\{([^}:]+):([^}]*)\}`)
+	firehoseFileExtension    = regexp.MustCompile(`^\.[0-9a-z!\-_.*'()]+$`)
 )
 
 func (p *Pack) evaluatedS3Prefix(prefix string, now time.Time) string {

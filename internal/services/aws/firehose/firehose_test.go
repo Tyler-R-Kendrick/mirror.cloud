@@ -188,6 +188,7 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	invoke("CreateDeliveryStream", map[string]any{
 		"DeliveryStreamName": "expressions", "ExtendedS3DestinationConfiguration": map[string]any{
 			"BucketARN": "arn:aws:s3:::out", "Prefix": "year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/", "FileExtension": ".jsonl",
+			"ErrorOutputPrefix": "errors/!{firehose:error-output-type}/",
 		},
 	})
 	response = invoke("PutRecord", map[string]any{"DeliveryStreamName": "expressions", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("expression"))}})
@@ -204,7 +205,7 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	}
 	invoke("CreateDeliveryStream", map[string]any{
 		"DeliveryStreamName": "timezone", "ExtendedS3DestinationConfiguration": map[string]any{
-			"BucketARN": "arn:aws:s3:::out", "Prefix": "hour=!{timestamp:HH}/", "CustomTimeZone": "Asia/Tokyo",
+			"BucketARN": "arn:aws:s3:::out", "Prefix": "hour=!{timestamp:HH}/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/", "CustomTimeZone": "Asia/Tokyo",
 		},
 	})
 	response = invoke("PutRecord", map[string]any{"DeliveryStreamName": "timezone", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("timezone"))}})
@@ -215,7 +216,7 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	}
 	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
 		"DeliveryStreamName": "bad-timezone", "ExtendedS3DestinationConfiguration": map[string]any{
-			"BucketARN": "arn:aws:s3:::out", "CustomTimeZone": "Mars/Olympus_Mons",
+			"BucketARN": "arn:aws:s3:::out", "Prefix": "hour=!{timestamp:HH}/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/", "CustomTimeZone": "Mars/Olympus_Mons",
 		},
 	}}); err == nil {
 		t.Fatal("accepted invalid CustomTimeZone")
@@ -227,6 +228,21 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 			},
 		}}); err == nil {
 			t.Fatalf("accepted invalid FileExtension %q", extension)
+		}
+	}
+	invalidPrefixes := []map[string]any{
+		{"Prefix": "year=!{timestamp:yyyy}/"},
+		{"Prefix": "!{firehose:error-output-type}/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/"},
+		{"Prefix": "year=!{timestamp:yyyy}/", "ErrorOutputPrefix": "errors/!{timestamp:yyyy}/"},
+		{"Prefix": "year=!{timestamp:yyyy", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/"},
+		{"Prefix": "key=!{partitionKeyFromQuery:id}/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/"},
+	}
+	for _, destination := range invalidPrefixes {
+		destination["BucketARN"] = "arn:aws:s3:::out"
+		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+			"DeliveryStreamName": "bad-prefix", "ExtendedS3DestinationConfiguration": destination,
+		}}); err == nil {
+			t.Fatalf("accepted invalid prefixes %#v", destination)
 		}
 	}
 	invoke("CreateDeliveryStream", map[string]any{

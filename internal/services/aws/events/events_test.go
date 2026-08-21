@@ -93,6 +93,63 @@ func TestPutEventsReportsInvalidEntries(t *testing.T) {
 	}
 }
 
+func TestEventBridgeRequestValidation(t *testing.T) {
+	p := New(spitest.Deps(t))
+	defer p.Close()
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	wantFault := func(operation string, input map[string]any, code string) {
+		t.Helper()
+		_, err := call(operation, input)
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != code {
+			t.Fatalf("%s fault=%#v want %s", operation, err, code)
+		}
+	}
+
+	wantFault("PutRule", map[string]any{"Name": "bad/name", "EventPattern": `{}`}, "ValidationException")
+	wantFault("PutRule", map[string]any{"Name": "missing-pattern"}, "InvalidEventPatternException")
+	wantFault("PutRule", map[string]any{"Name": "state", "EventPattern": `{}`, "State": "INVALID"}, "ValidationException")
+	wantFault("PutEvents", map[string]any{"Entries": []any{}}, "ValidationException")
+	eleven := make([]any, 11)
+	wantFault("PutEvents", map[string]any{"Entries": eleven}, "ValidationException")
+	wantFault("PutEvents", map[string]any{"Entries": []any{map[string]any{
+		"Source": "app", "DetailType": "test", "Detail": `"` + strings.Repeat("x", 1024*1024-len("app")-len("test")-2) + `"`,
+	}}}, "ValidationException")
+
+	if _, err := call("PutRule", map[string]any{"Name": "rule", "EventPattern": `{}`}); err != nil {
+		t.Fatal(err)
+	}
+	wantFault("PutTargets", map[string]any{"Rule": "rule", "Targets": []any{}}, "ValidationException")
+	targets := make([]any, 11)
+	wantFault("PutTargets", map[string]any{"Rule": "rule", "Targets": targets}, "ValidationException")
+	invalid := []any{
+		map[string]any{"Id": "bad/id", "Arn": "arn:aws:sqs:us-east-1:1:q"},
+		map[string]any{"Id": "input", "Arn": "arn:aws:sqs:us-east-1:1:q", "Input": `{}`, "InputPath": "$.detail"},
+		map[string]any{"Id": "json", "Arn": "arn:aws:sqs:us-east-1:1:q", "Input": `{`},
+		map[string]any{"Id": "empty", "Arn": "arn:aws:sqs:us-east-1:1:q", "Input": ""},
+	}
+	response, err := call("PutTargets", map[string]any{"Rule": "rule", "Targets": invalid})
+	if err != nil || response.Output["FailedEntryCount"] != len(invalid) {
+		t.Fatalf("invalid targets response=%#v err=%v", response, err)
+	}
+	five := make([]any, 5)
+	for i := range five {
+		five[i] = map[string]any{"Id": "target-" + toString(i), "Arn": "arn:aws:sqs:us-east-1:1:q"}
+	}
+	if response, err = call("PutTargets", map[string]any{"Rule": "rule", "Targets": five}); err != nil || response.Output["FailedEntryCount"] != 0 {
+		t.Fatalf("five targets response=%#v err=%v", response, err)
+	}
+	wantFault("PutTargets", map[string]any{"Rule": "rule", "Targets": []any{map[string]any{"Id": "sixth", "Arn": "arn:aws:sqs:us-east-1:1:q"}}}, "LimitExceededException")
+	response, err = call("ListTargetsByRule", map[string]any{"Rule": "rule"})
+	if err != nil || len(response.Output["Targets"].([]any)) != 5 {
+		t.Fatalf("stored targets response=%#v err=%v", response, err)
+	}
+}
+
 func TestPutEventsRetriesAndDeadLettersTargets(t *testing.T) {
 	var calls, succeed, retryDelay atomic.Int32
 	retryDelay.Store(3)

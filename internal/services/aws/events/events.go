@@ -75,11 +75,25 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	switch req.Operation {
 	case "PutRule":
 		name := str(req.Input["Name"])
-		if name == "" {
-			return nil, &spi.Fault{Code: "ValidationException", Message: "Name is required.", HTTPStatus: 400, Fault: "client"}
+		if !validEventName(name) {
+			return nil, validationFault("Name must be 1-64 characters containing only letters, numbers, period, hyphen, or underscore.")
 		}
-		if pattern := str(req.Input["EventPattern"]); pattern != "" && !json.Valid([]byte(pattern)) {
+		if len(str(req.Input["Description"])) > 512 {
+			return nil, validationFault("Description exceeds 512 characters.")
+		}
+		state := str(req.Input["State"])
+		if state != "" && state != "ENABLED" && state != "DISABLED" && state != "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS" {
+			return nil, validationFault("State is invalid.")
+		}
+		pattern, schedule := str(req.Input["EventPattern"]), str(req.Input["ScheduleExpression"])
+		if pattern == "" && schedule == "" {
+			return nil, &spi.Fault{Code: "InvalidEventPatternException", Message: "EventPattern or ScheduleExpression is required.", HTTPStatus: 400, Fault: "client"}
+		}
+		if len(pattern) > 4096 || (pattern != "" && !json.Valid([]byte(pattern))) {
 			return nil, &spi.Fault{Code: "InvalidEventPatternException", Message: "EventPattern is not valid JSON.", HTTPStatus: 400, Fault: "client"}
+		}
+		if len(schedule) > 256 {
+			return nil, validationFault("ScheduleExpression exceeds 256 characters.")
 		}
 		bus := eventBus(req.Input)
 		rec := clone(req.Input)
@@ -109,6 +123,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = p.col(req, "rules").Delete(ctx, eventKey(eventBus(req.Input), str(req.Input["Name"])))
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "PutTargets":
+		requested := asSlice(req.Input["Targets"])
+		if len(requested) < 1 || len(requested) > 10 {
+			return nil, validationFault("Targets must contain between 1 and 10 entries.")
+		}
 		key := eventKey(eventBus(req.Input), str(req.Input["Rule"]))
 		if _, ok := p.load(ctx, req, "rules", key); !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Rule does not exist.", HTTPStatus: 400, Fault: "client"}
@@ -120,14 +138,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			byID[str(m["Id"])] = i
 		}
 		var failed []any
-		for _, raw := range asSlice(req.Input["Targets"]) {
+		for _, raw := range requested {
 			target, _ := raw.(map[string]any)
-			id, arn := str(target["Id"]), str(target["Arn"])
-			if id == "" || arn == "" {
-				failed = append(failed, map[string]any{"TargetId": id, "ErrorCode": "ValidationException", "ErrorMessage": "Id and Arn are required."})
-				continue
-			}
-			if message := validateTargetReliability(target); message != "" {
+			id := str(target["Id"])
+			if message := validateTarget(target); message != "" {
 				failed = append(failed, map[string]any{"TargetId": id, "ErrorCode": "ValidationException", "ErrorMessage": message})
 				continue
 			}
@@ -137,6 +151,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				byID[id] = len(targets)
 				targets = append(targets, target)
 			}
+		}
+		if len(targets) > 5 {
+			return nil, &spi.Fault{Code: "LimitExceededException", Message: "A rule cannot have more than five targets.", HTTPStatus: 400, Fault: "client"}
 		}
 		b, _ := json.Marshal(targets)
 		_ = p.col(req, "targets").Put(ctx, key, b)
@@ -161,10 +178,79 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"FailedEntryCount": 0, "FailedEntries": []any{}}}, nil
 	case "PutEvents":
 		entries, _ := req.Input["Entries"].([]any)
+		if err := validatePutEvents(entries); err != nil {
+			return nil, err
+		}
 		return p.putEvents(ctx, req, entries), nil
 	default:
 		return p.extra(ctx, req)
 	}
+}
+
+func validEventName(value string) bool {
+	if len(value) < 1 || len(value) > 64 {
+		return false
+	}
+	for _, r := range value {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || strings.ContainsRune(".-_", r)) {
+			return false
+		}
+	}
+	return true
+}
+
+func validatePutEvents(entries []any) error {
+	if len(entries) < 1 || len(entries) > 10 {
+		return validationFault("Entries must contain between 1 and 10 items.")
+	}
+	total := 0
+	for _, raw := range entries {
+		entry, _ := raw.(map[string]any)
+		if len(str(entry["DetailType"])) > 128 || len(str(entry["TraceHeader"])) > 500 {
+			return validationFault("Event entry field exceeds its maximum length.")
+		}
+		total += len([]byte(str(entry["Source"]))) + len([]byte(str(entry["DetailType"]))) + len([]byte(str(entry["Detail"])))
+		if entry["Time"] != nil {
+			total += 14
+		}
+		for _, resource := range asSlice(entry["Resources"]) {
+			value := str(resource)
+			if len(value) > 2048 {
+				return validationFault("Resource exceeds 2048 characters.")
+			}
+			total += len([]byte(value))
+		}
+	}
+	if total >= 1024*1024 {
+		return validationFault("Total event entry size must be less than 1 MB.")
+	}
+	return nil
+}
+
+func validateTarget(target map[string]any) string {
+	id, arn := str(target["Id"]), str(target["Arn"])
+	if !validEventName(id) || len(arn) < 1 || len(arn) > 1600 {
+		return "Id or Arn is invalid."
+	}
+	inputs := 0
+	for _, key := range []string{"Input", "InputPath", "InputTransformer"} {
+		if _, specified := target[key]; specified {
+			inputs++
+		}
+	}
+	if inputs > 1 {
+		return "Input, InputPath, and InputTransformer are mutually exclusive."
+	}
+	if input, specified := target["Input"]; specified {
+		value := str(input)
+		if len(value) > 8192 || !json.Valid([]byte(value)) {
+			return "Input must be valid JSON and no longer than 8192 characters."
+		}
+	}
+	if len(str(target["InputPath"])) > 256 {
+		return "InputPath exceeds 256 characters."
+	}
+	return validateTargetReliability(target)
 }
 
 func (p *Pack) targets(ctx context.Context, req *spi.Request, key string) []any {

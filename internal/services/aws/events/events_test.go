@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 func TestPutEventsDeliversOnlyMatchingRules(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, sp, np := New(deps), sqs.New(deps), sns.New(deps)
+	defer p.Close()
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	invoke := func(pack spi.BehaviorPack, op string, in map[string]any) *spi.Response {
@@ -74,6 +76,7 @@ func TestPutEventsDeliversOnlyMatchingRules(t *testing.T) {
 
 func TestPutEventsReportsInvalidEntries(t *testing.T) {
 	p := New(spitest.Deps(t))
+	defer p.Close()
 	resp, err := p.Invoke(context.Background(), &spi.Request{
 		Identity:  spi.Identity{Account: "1", Region: "us-east-1"},
 		Operation: "PutEvents",
@@ -87,6 +90,161 @@ func TestPutEventsReportsInvalidEntries(t *testing.T) {
 	}
 	if resp.Output["FailedEntryCount"] != 2 || len(resp.Output["Entries"].([]any)) != 2 {
 		t.Fatalf("invalid entries %#v", resp.Output)
+	}
+}
+
+func TestPutEventsRetriesAndDeadLettersTargets(t *testing.T) {
+	var calls, succeed, retryDelay atomic.Int32
+	retryDelay.Store(3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		if succeed.Load() == 0 {
+			w.Header().Set("Retry-After", toString(retryDelay.Load()))
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer server.Close()
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	queue := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := pack.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response
+	}
+	connection := invoke(p, "CreateConnection", map[string]any{
+		"Name": "retry", "AuthorizationType": "API_KEY",
+		"AuthParameters": map[string]any{"ApiKeyAuthParameters": map[string]any{"ApiKeyName": "X-Key", "ApiKeyValue": "value"}},
+	})
+	destination := invoke(p, "CreateApiDestination", map[string]any{
+		"Name": "retry", "ConnectionArn": connection.Output["ConnectionArn"], "InvocationEndpoint": server.URL, "HttpMethod": "POST",
+	})
+	destinationARN := str(destination.Output["ApiDestinationArn"])
+	invoke(p, "PutRule", map[string]any{"Name": "retry", "EventPattern": `{"source":["retry"]}`})
+	invoke(p, "PutTargets", map[string]any{"Rule": "retry", "Targets": []any{map[string]any{
+		"Id": "destination", "Arn": destinationARN, "RetryPolicy": map[string]any{"MaximumEventAgeInSeconds": 60, "MaximumRetryAttempts": 1},
+	}}})
+	invoke(p, "PutEvents", map[string]any{"Entries": []any{map[string]any{"Source": "retry", "DetailType": "test", "Detail": `{}`}}})
+	retries := deps.Store.Scope(id.Account, id.Region).Collection("event-retries")
+	if stored, _, _ := retries.List(ctx, "", "", 0); len(stored) != 1 || calls.Load() != 1 {
+		t.Fatalf("persisted retries=%d calls=%d", len(stored), calls.Load())
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	succeed.Store(1)
+	p = New(deps)
+	_ = deps.Clock.Advance(2 * time.Second)
+	select {
+	case <-time.After(20 * time.Millisecond):
+		if calls.Load() != 1 {
+			t.Fatalf("Retry-After ignored: calls=%d", calls.Load())
+		}
+	}
+	_ = deps.Clock.Advance(time.Second)
+	eventuallyEvent(t, func() bool {
+		stored, _, _ := retries.List(ctx, "", "", 0)
+		return calls.Load() == 2 && len(stored) == 0
+	})
+
+	invoke(queue, "CreateQueue", map[string]any{"QueueName": "failures"})
+	succeed.Store(0)
+	invoke(p, "PutRule", map[string]any{"Name": "dead", "EventPattern": `{"source":["dead"]}`})
+	invoke(p, "PutTargets", map[string]any{"Rule": "dead", "Targets": []any{map[string]any{
+		"Id": "destination", "Arn": destinationARN,
+		"RetryPolicy":      map[string]any{"MaximumEventAgeInSeconds": 60, "MaximumRetryAttempts": 0},
+		"DeadLetterConfig": map[string]any{"Arn": "arn:aws:sqs:us-east-1:1:failures"},
+	}}})
+	invoke(p, "PutEvents", map[string]any{"Entries": []any{map[string]any{"Source": "dead", "DetailType": "test", "Detail": `{}`}}})
+	dead := invoke(queue, "ReceiveMessage", map[string]any{"QueueName": "failures", "MaxNumberOfMessages": 1, "MessageAttributeNames": []any{"All"}}).Output["Messages"].([]any)
+	if len(dead) != 1 {
+		t.Fatalf("dead letters %#v", dead)
+	}
+	attributes := dead[0].(map[string]any)["MessageAttributes"].(map[string]any)
+	attribute := func(name string) string { return str(attributes[name].(map[string]any)["StringValue"]) }
+	if attribute("ERROR_CODE") != "ERROR_FROM_TARGET" || attribute("EXHAUSTED_RETRY_CONDITION") != "MaximumRetryAttempts" || attribute("RETRY_ATTEMPTS") != "0" || !strings.HasSuffix(attribute("RULE_ARN"), ":rule/dead") || attribute("TARGET_ARN") != destinationARN {
+		t.Fatalf("dead-letter attributes %#v", attributes)
+	}
+
+	invoke(p, "PutRule", map[string]any{"Name": "permanent", "EventPattern": `{"source":["permanent"]}`})
+	invoke(queue, "CreateQueue", map[string]any{"QueueName": "permanent-failures"})
+	invoke(p, "PutTargets", map[string]any{"Rule": "permanent", "Targets": []any{map[string]any{
+		"Id": "missing", "Arn": "arn:aws:sqs:us-east-1:1:missing", "DeadLetterConfig": map[string]any{"Arn": "arn:aws:sqs:us-east-1:1:permanent-failures"},
+	}}})
+	invoke(p, "PutEvents", map[string]any{"Entries": []any{map[string]any{"Source": "permanent", "DetailType": "test", "Detail": `{}`}}})
+	permanent := invoke(queue, "ReceiveMessage", map[string]any{"QueueName": "permanent-failures", "MaxNumberOfMessages": 1, "MessageAttributeNames": []any{"All"}}).Output["Messages"].([]any)
+	if len(permanent) != 1 {
+		t.Fatalf("permanent dead letters %#v", permanent)
+	}
+	attributes = permanent[0].(map[string]any)["MessageAttributes"].(map[string]any)
+	if str(attributes["ERROR_CODE"].(map[string]any)["StringValue"]) != "NO_RESOURCE" || attributes["EXHAUSTED_RETRY_CONDITION"] != nil {
+		t.Fatalf("permanent attributes %#v", attributes)
+	}
+
+	retryDelay.Store(120)
+	beforeAge := calls.Load()
+	invoke(queue, "CreateQueue", map[string]any{"QueueName": "aged-failures"})
+	invoke(p, "PutRule", map[string]any{"Name": "aged", "EventPattern": `{"source":["aged"]}`})
+	invoke(p, "PutTargets", map[string]any{"Rule": "aged", "Targets": []any{map[string]any{
+		"Id": "destination", "Arn": destinationARN,
+		"RetryPolicy":      map[string]any{"MaximumEventAgeInSeconds": 60, "MaximumRetryAttempts": 185},
+		"DeadLetterConfig": map[string]any{"Arn": "arn:aws:sqs:us-east-1:1:aged-failures"},
+	}}})
+	invoke(p, "PutEvents", map[string]any{"Entries": []any{map[string]any{"Source": "aged", "DetailType": "test", "Detail": `{}`}}})
+	_ = deps.Clock.Advance(time.Minute)
+	eventuallyEvent(t, func() bool {
+		messages := invoke(queue, "ReceiveMessage", map[string]any{"QueueName": "aged-failures", "MaxNumberOfMessages": 1, "MessageAttributeNames": []any{"All"}}).Output["Messages"].([]any)
+		if len(messages) == 0 {
+			return false
+		}
+		attributes = messages[0].(map[string]any)["MessageAttributes"].(map[string]any)
+		return str(attributes["EXHAUSTED_RETRY_CONDITION"].(map[string]any)["StringValue"]) == "MaximumEventAgeInSeconds"
+	})
+	if calls.Load() != beforeAge+1 {
+		t.Fatalf("expired event retried: calls before=%d after=%d", beforeAge, calls.Load())
+	}
+}
+
+func TestPutTargetsValidatesReliability(t *testing.T) {
+	p := New(spitest.Deps(t))
+	defer p.Close()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	ctx := context.Background()
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutRule", Input: map[string]any{"Name": "rule", "EventPattern": `{}`}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []map[string]any{
+		{"Id": "age", "Arn": "arn:aws:sqs:us-east-1:1:q", "RetryPolicy": map[string]any{"MaximumEventAgeInSeconds": 59}},
+		{"Id": "attempts", "Arn": "arn:aws:sqs:us-east-1:1:q", "RetryPolicy": map[string]any{"MaximumRetryAttempts": 186}},
+		{"Id": "fifo", "Arn": "arn:aws:sqs:us-east-1:1:q", "DeadLetterConfig": map[string]any{"Arn": "arn:aws:sqs:us-east-1:1:failures.fifo"}},
+	} {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutTargets", Input: map[string]any{"Rule": "rule", "Targets": []any{target}}})
+		if err != nil || response.Output["FailedEntryCount"] != 1 {
+			t.Fatalf("target %s response=%#v err=%v", target["Id"], response, err)
+		}
+	}
+	negative := &spi.Fault{Fields: map[string]any{"RetryAfter": "-1"}}
+	if at, specified := targetRetryAfter(negative, time.Unix(0, 0)); !specified || !at.IsZero() {
+		t.Fatalf("negative Retry-After at=%v specified=%v", at, specified)
+	}
+}
+
+func eventuallyEvent(t *testing.T, condition func() bool) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for !condition() {
+		select {
+		case <-deadline:
+			t.Fatal("condition not met")
+		default:
+			time.Sleep(time.Millisecond)
+		}
 	}
 }
 
@@ -141,6 +299,7 @@ func TestInvokeAPIDestinationBasicAuth(t *testing.T) {
 	defer server.Close()
 	deps := spitest.Deps(t)
 	p := New(deps)
+	defer p.Close()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	connection, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateConnection", Input: map[string]any{
 		"Name": "basic", "AuthorizationType": "BASIC", "AuthParameters": map[string]any{
@@ -216,6 +375,7 @@ func TestInvokeAPIDestinationOAuth(t *testing.T) {
 	defer server.Close()
 	deps := spitest.Deps(t)
 	p := New(deps)
+	defer p.Close()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	connection, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateConnection", Input: map[string]any{
 		"Name": "oauth", "AuthorizationType": "OAUTH_CLIENT_CREDENTIALS",
@@ -259,6 +419,7 @@ func TestInvokeAPIDestinationOAuth(t *testing.T) {
 func TestAPIDestinationControlPlane(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
+	defer p.Close()
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	invoke := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -343,6 +504,7 @@ func TestAPIDestinationRateLimit(t *testing.T) {
 	defer server.Close()
 	deps := spitest.Deps(t)
 	p := New(deps)
+	defer p.Close()
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	connection, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateConnection", Input: map[string]any{
@@ -407,6 +569,7 @@ func TestAPIDestinationRateLimit(t *testing.T) {
 func TestTargetsUpsertRemoveAndEventBusIsolation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, sp := New(deps), sqs.New(deps)
+	defer p.Close()
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	invoke := func(pack spi.BehaviorPack, op string, in map[string]any) *spi.Response {
@@ -463,6 +626,7 @@ func TestTargetsUpsertRemoveAndEventBusIsolation(t *testing.T) {
 func TestTargetInputTransformations(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, sp := New(deps), sqs.New(deps)
+	defer p.Close()
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	invoke := func(pack spi.BehaviorPack, op string, in map[string]any) *spi.Response {
@@ -588,6 +752,7 @@ func TestBootedServerEventBridgePutEvents(t *testing.T) {
 
 func TestEventsHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
+	defer p.Close()
 	if n := len(p.Operations()); n != 57 {
 		t.Fatalf("events Operations() %d want 57", n)
 	}

@@ -345,7 +345,9 @@ func (p *Pack) runDue(ctx context.Context) time.Time {
 				attempt, _ := integer(rec[retryAttempts])
 				payload := p.targetPayload(rec, target, scheduled, attempt+1)
 				if err := events.DeliverTarget(ctx, p.deps, identity, first(target, "Arn", "arn"), target, payload); err != nil {
-					if retryAt, retrying := p.retry(ctx, collection, kv.Key, rec, target, payload, scheduled, now, err); retrying {
+					if !events.TargetErrorRetryable(err) {
+						p.deadLetter(ctx, rec, target, payload, attempt, scheduled, "", err)
+					} else if retryAt, retrying := p.retry(ctx, collection, kv.Key, rec, target, payload, scheduled, now, err); retrying {
 						earliest = earlier(earliest, retryAt)
 						continue
 					}
@@ -466,12 +468,16 @@ func (p *Pack) deadLetter(ctx context.Context, rec, target map[string]any, paylo
 		code = fault.Code
 	}
 	attributes := map[string]any{}
-	for key, value := range map[string]string{
+	values := map[string]string{
 		"ERROR_CODE": code, "ERROR_MESSAGE": message, "EXHAUSTED_RETRY_CONDITION": exhausted,
 		"IS_PAYLOAD_TRUNCATED": "false", "RETRY_ATTEMPTS": strconv.Itoa(attempts),
 		"SCHEDULED_TIME": scheduled.UTC().Format(time.RFC3339), "SCHEDULE_ARN": stringValue(rec["Arn"]),
 		"TARGET_ARN": first(target, "Arn", "arn"),
-	} {
+	}
+	if exhausted == "" {
+		delete(values, "EXHAUSTED_RETRY_CONDITION")
+	}
+	for key, value := range values {
 		attributes[key] = map[string]any{"DataType": "String", "StringValue": value}
 	}
 	_, _ = sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: accountFromARN(arn), Region: regionFromARN(arn)}, Operation: "SendMessage", Input: map[string]any{

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -27,11 +28,38 @@ func init() {
 	}})
 }
 
-// Pack implements EventBridge.
-type Pack struct{ deps spi.Deps }
+const (
+	eventRetryAttempts = "_mirrorRetryAttempts"
+	eventRetryStarted  = "_mirrorRetryStarted"
+	eventRetryNext     = "_mirrorRetryNext"
+)
 
-// New constructs the pack.
-func New(d spi.Deps) *Pack { return &Pack{deps: d} }
+// Pack implements EventBridge.
+type Pack struct {
+	deps      spi.Deps
+	wake      chan struct{}
+	stop      chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
+}
+
+// New constructs the pack and resumes persisted target retries.
+func New(d spi.Deps) *Pack {
+	p := &Pack{deps: d, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{})}
+	if d.Store == nil || d.Clock == nil {
+		close(p.done)
+		return p
+	}
+	go p.retryLoop()
+	return p
+}
+
+// Close stops the target retry worker.
+func (p *Pack) Close() error {
+	p.closeOnce.Do(func() { close(p.stop) })
+	<-p.done
+	return nil
+}
 
 func (p *Pack) ServiceID() string { return "aws.events" }
 func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
@@ -97,6 +125,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			id, arn := str(target["Id"]), str(target["Arn"])
 			if id == "" || arn == "" {
 				failed = append(failed, map[string]any{"TargetId": id, "ErrorCode": "ValidationException", "ErrorMessage": "Id and Arn are required."})
+				continue
+			}
+			if message := validateTargetReliability(target); message != "" {
+				failed = append(failed, map[string]any{"TargetId": id, "ErrorCode": "ValidationException", "ErrorMessage": message})
 				continue
 			}
 			if i, ok := byID[id]; ok {
@@ -238,9 +270,335 @@ func (p *Pack) fanout(ctx context.Context, req *spi.Request, event map[string]an
 			}
 			payload := targetPayload(m, event, raw)
 			_ = p.deps.Bus.Publish(ctx, "events:"+arn, payload)
-			_ = DeliverTarget(ctx, p.deps, req.Identity, arn, m, payload)
+			if err := DeliverTarget(ctx, p.deps, req.Identity, arn, m, payload); err != nil {
+				p.failedTarget(ctx, req.Identity, kv.Key, m, payload, err)
+			}
 		}
 	}
+}
+
+func (p *Pack) failedTarget(ctx context.Context, identity spi.Identity, ruleKey string, target map[string]any, payload []byte, deliveryErr error) {
+	rec := map[string]any{
+		"RuleArn": ruleARN(identity, ruleKey), "Target": target, "Payload": string(payload),
+		eventRetryAttempts: 0, eventRetryStarted: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if !TargetErrorRetryable(deliveryErr) {
+		p.deadLetter(ctx, identity, rec, target, payload, 0, "", deliveryErr)
+		return
+	}
+	key := p.deps.Rand.UUID()
+	if _, retrying := p.retryTarget(ctx, identity, key, rec, target, payload, deliveryErr); retrying {
+		p.notify()
+	}
+}
+
+func (p *Pack) retryLoop() {
+	defer close(p.done)
+	for {
+		next := p.runRetries(context.Background())
+		if next.IsZero() {
+			select {
+			case <-p.wake:
+			case <-p.stop:
+				return
+			}
+			continue
+		}
+		delay := next.Sub(p.deps.Clock.Now())
+		if delay < 0 {
+			delay = 0
+		}
+		select {
+		case <-p.deps.Clock.After(delay):
+		case <-p.wake:
+		case <-p.stop:
+			return
+		}
+	}
+}
+
+func (p *Pack) runRetries(ctx context.Context) time.Time {
+	now := p.deps.Clock.Now()
+	var earliest time.Time
+	scopes, err := p.deps.Store.Scopes(ctx)
+	if err != nil {
+		return earliest
+	}
+	for _, identity := range scopes {
+		collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("event-retries")
+		kvs, _, err := collection.List(ctx, "", "", 0)
+		if err != nil {
+			continue
+		}
+		for _, kv := range kvs {
+			var rec map[string]any
+			if json.Unmarshal(kv.Value, &rec) != nil {
+				continue
+			}
+			next := parsedTime(rec[eventRetryNext])
+			if next.After(now) {
+				earliest = earlierTime(earliest, next)
+				continue
+			}
+			target, _ := rec["Target"].(map[string]any)
+			payload := []byte(str(rec["Payload"]))
+			policy, _ := target["RetryPolicy"].(map[string]any)
+			maxAge, ok := integerValue(policy["MaximumEventAgeInSeconds"])
+			if !ok {
+				maxAge = 86400
+			}
+			if started := parsedTime(rec[eventRetryStarted]); !started.IsZero() && !now.Before(started.Add(time.Duration(maxAge)*time.Second)) {
+				p.deadLetter(ctx, identity, rec, target, payload, max(intValue(rec[eventRetryAttempts])-1, 0), "MaximumEventAgeInSeconds", storedTargetError(rec))
+				_ = collection.Delete(ctx, kv.Key)
+				continue
+			}
+			deliveryErr := DeliverTarget(ctx, p.deps, identity, str(target["Arn"]), target, payload)
+			if deliveryErr == nil {
+				_ = collection.Delete(ctx, kv.Key)
+				continue
+			}
+			attempts := intValue(rec[eventRetryAttempts])
+			if !TargetErrorRetryable(deliveryErr) {
+				p.deadLetter(ctx, identity, rec, target, payload, attempts, "", deliveryErr)
+				_ = collection.Delete(ctx, kv.Key)
+				continue
+			}
+			if retryAt, retrying := p.retryTarget(ctx, identity, kv.Key, rec, target, payload, deliveryErr); retrying {
+				earliest = earlierTime(earliest, retryAt)
+			} else {
+				_ = collection.Delete(ctx, kv.Key)
+			}
+		}
+	}
+	return earliest
+}
+
+func (p *Pack) retryTarget(ctx context.Context, identity spi.Identity, key string, rec, target map[string]any, payload []byte, deliveryErr error) (time.Time, bool) {
+	policy, _ := target["RetryPolicy"].(map[string]any)
+	maxAttempts, ok := integerValue(policy["MaximumRetryAttempts"])
+	if !ok {
+		maxAttempts = 185
+	}
+	maxAge, ok := integerValue(policy["MaximumEventAgeInSeconds"])
+	if !ok {
+		maxAge = 86400
+	}
+	now := p.deps.Clock.Now()
+	started := parsedTime(rec[eventRetryStarted])
+	if started.IsZero() {
+		started = now
+	}
+	attempts := intValue(rec[eventRetryAttempts])
+	exhausted := ""
+	if !now.Before(started.Add(time.Duration(maxAge) * time.Second)) {
+		exhausted = "MaximumEventAgeInSeconds"
+	} else if attempts >= maxAttempts {
+		exhausted = "MaximumRetryAttempts"
+	}
+	if exhausted != "" {
+		p.deadLetter(ctx, identity, rec, target, payload, attempts, exhausted, deliveryErr)
+		return time.Time{}, false
+	}
+	attempts++
+	headerAt, specified := targetRetryAfter(deliveryErr, now)
+	if specified && headerAt.IsZero() {
+		p.deadLetter(ctx, identity, rec, target, payload, attempts-1, "", deliveryErr)
+		return time.Time{}, false
+	}
+	delay := time.Second << min(attempts-1, 8)
+	seconds := p.deps.Rand.Derive(key + "|retry|" + strconv.Itoa(attempts)).Intn(int(delay/time.Second) + 1)
+	if seconds == 0 {
+		seconds = 1
+	}
+	retryAt := now.Add(time.Duration(seconds) * time.Second)
+	if specified && headerAt.After(retryAt) {
+		retryAt = headerAt
+	}
+	expires := started.Add(time.Duration(maxAge) * time.Second)
+	if retryAt.After(expires) {
+		retryAt = expires
+	}
+	rec[eventRetryAttempts], rec[eventRetryStarted], rec[eventRetryNext] = attempts, started.UTC().Format(time.RFC3339Nano), retryAt.UTC().Format(time.RFC3339Nano)
+	storeTargetError(rec, deliveryErr)
+	b, _ := json.Marshal(rec)
+	_ = p.deps.Store.Scope(identity.Account, identity.Region).Collection("event-retries").Put(ctx, key, b)
+	return retryAt, true
+}
+
+func (p *Pack) deadLetter(ctx context.Context, identity spi.Identity, rec, target map[string]any, payload []byte, attempts int, exhausted string, deliveryErr error) {
+	config, _ := target["DeadLetterConfig"].(map[string]any)
+	arn := str(config["Arn"])
+	if arn == "" {
+		return
+	}
+	code, message := targetError(deliveryErr)
+	values := map[string]string{
+		"RULE_ARN": str(rec["RuleArn"]), "TARGET_ARN": str(target["Arn"]), "ERROR_CODE": code,
+		"ERROR_MESSAGE": message, "RETRY_ATTEMPTS": strconv.Itoa(attempts),
+	}
+	if exhausted != "" {
+		values["EXHAUSTED_RETRY_CONDITION"] = exhausted
+	}
+	attributes := map[string]any{}
+	for key, value := range values {
+		attributes[key] = map[string]any{"DataType": "String", "StringValue": value}
+	}
+	parts := strings.Split(arn, ":")
+	dlqIdentity := identity
+	if len(parts) > 4 {
+		dlqIdentity = spi.Identity{Region: parts[3], Account: parts[4]}
+	}
+	_, _ = sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: dlqIdentity, Operation: "SendMessage", Input: map[string]any{
+		"QueueName": arn[lastColon(arn)+1:], "MessageBody": string(payload), "MessageAttributes": attributes,
+	}})
+}
+
+func (p *Pack) notify() {
+	select {
+	case p.wake <- struct{}{}:
+	default:
+	}
+}
+
+func ruleARN(identity spi.Identity, key string) string {
+	bus, name, _ := strings.Cut(key, "\x00")
+	path := name
+	if bus != "default" {
+		path = bus + "/" + name
+	}
+	return "arn:aws:events:" + identity.Region + ":" + identity.Account + ":rule/" + path
+}
+
+func parsedTime(value any) time.Time {
+	parsed, _ := time.Parse(time.RFC3339Nano, str(value))
+	return parsed
+}
+
+func earlierTime(a, b time.Time) time.Time {
+	if a.IsZero() || (!b.IsZero() && b.Before(a)) {
+		return b
+	}
+	return a
+}
+
+func integerValue(value any) (int, bool) {
+	switch value := value.(type) {
+	case int:
+		return value, true
+	case float64:
+		if value != float64(int(value)) {
+			return 0, false
+		}
+		return int(value), true
+	}
+	return 0, false
+}
+
+func intValue(value any) int {
+	integer, _ := integerValue(value)
+	return integer
+}
+
+func targetRetryAfter(deliveryErr error, now time.Time) (time.Time, bool) {
+	fault, ok := deliveryErr.(*spi.Fault)
+	if !ok {
+		return time.Time{}, false
+	}
+	raw := str(fault.Fields["RetryAfter"])
+	if raw == "" {
+		return time.Time{}, false
+	}
+	if seconds, err := strconv.Atoi(raw); err == nil {
+		if seconds < 0 {
+			return time.Time{}, true
+		}
+		return now.Add(time.Duration(seconds) * time.Second), true
+	}
+	at, err := http.ParseTime(raw)
+	if err != nil {
+		return time.Time{}, false
+	}
+	if at.Before(now) {
+		at = now
+	}
+	return at, true
+}
+
+// TargetErrorRetryable reports whether source-specific retry handling should retry a target failure.
+func TargetErrorRetryable(deliveryErr error) bool {
+	fault, ok := deliveryErr.(*spi.Fault)
+	if !ok {
+		return true
+	}
+	return fault.HTTPStatus == 401 || fault.HTTPStatus == 407 || fault.HTTPStatus == 409 || fault.HTTPStatus == 429 || fault.HTTPStatus >= 500
+}
+
+func targetError(deliveryErr error) (string, string) {
+	fault, ok := deliveryErr.(*spi.Fault)
+	if !ok {
+		return "SDK_CLIENT_ERROR", deliveryErr.Error()
+	}
+	switch {
+	case fault.HTTPStatus == 429:
+		return "THROTTLING", deliveryErr.Error()
+	case fault.Code == "TargetInvocationFailed":
+		return "ERROR_FROM_TARGET", deliveryErr.Error()
+	case strings.Contains(strings.ToLower(fault.Code), "notfound") || strings.Contains(strings.ToLower(fault.Code), "nonexistent"):
+		return "NO_RESOURCE", deliveryErr.Error()
+	case fault.HTTPStatus >= 500:
+		return "INTERNAL_ERROR", deliveryErr.Error()
+	case fault.HTTPStatus >= 400:
+		return "INVALID_PARAMETER", deliveryErr.Error()
+	default:
+		return "UNKNOWN", deliveryErr.Error()
+	}
+}
+
+func storeTargetError(rec map[string]any, deliveryErr error) {
+	stored := map[string]any{"Message": deliveryErr.Error()}
+	if fault, ok := deliveryErr.(*spi.Fault); ok {
+		stored["Message"] = fault.Message
+		stored["Code"], stored["HTTPStatus"], stored["Fault"], stored["Fields"] = fault.Code, fault.HTTPStatus, fault.Fault, fault.Fields
+	}
+	rec["_mirrorLastError"] = stored
+}
+
+func storedTargetError(rec map[string]any) error {
+	stored, _ := rec["_mirrorLastError"].(map[string]any)
+	if code := str(stored["Code"]); code != "" {
+		fields, _ := stored["Fields"].(map[string]any)
+		return &spi.Fault{Code: code, Message: str(stored["Message"]), HTTPStatus: intValue(stored["HTTPStatus"]), Fault: str(stored["Fault"]), Fields: fields}
+	}
+	return &spi.Fault{Code: "InternalError", Message: str(stored["Message"]), HTTPStatus: 500, Fault: "server"}
+}
+
+func validateTargetReliability(target map[string]any) string {
+	if raw, exists := target["RetryPolicy"]; exists {
+		policy, ok := raw.(map[string]any)
+		if !ok {
+			return "RetryPolicy must be an object."
+		}
+		if raw, exists := policy["MaximumEventAgeInSeconds"]; exists {
+			age, ok := integerValue(raw)
+			if !ok || age < 60 || age > 86400 {
+				return "MaximumEventAgeInSeconds must be between 60 and 86400."
+			}
+		}
+		if raw, exists := policy["MaximumRetryAttempts"]; exists {
+			attempts, ok := integerValue(raw)
+			if !ok || attempts < 0 || attempts > 185 {
+				return "MaximumRetryAttempts must be between 0 and 185."
+			}
+		}
+	}
+	if raw, exists := target["DeadLetterConfig"]; exists {
+		config, ok := raw.(map[string]any)
+		arn := str(config["Arn"])
+		if !ok || (arn != "" && (!strings.Contains(arn, ":sqs:") || strings.HasSuffix(arn, ".fifo"))) {
+			return "DeadLetterConfig Arn must identify a standard SQS queue."
+		}
+	}
+	return ""
 }
 
 func targetPayload(target, event map[string]any, fallback []byte) []byte {
@@ -362,9 +720,6 @@ func DeliverTarget(ctx context.Context, deps spi.Deps, identity spi.Identity, ar
 	case strings.Contains(arn, ":api-destination/"):
 		parameters, _ := target["HttpParameters"].(map[string]any)
 		_, err := InvokeAPIDestination(ctx, deps, identity, arn, parameters, payload)
-		if fault, ok := err.(*spi.Fault); ok && !apiDestinationRetryable(fault.HTTPStatus) {
-			return nil
-		}
 		return err
 	}
 	return &spi.Fault{Code: "ValidationException", Message: "Unsupported target ARN.", HTTPStatus: 400, Fault: "client"}

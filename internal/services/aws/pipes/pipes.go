@@ -484,7 +484,7 @@ func (p *Pack) processRecords(ctx context.Context, identity spi.Identity, pipe m
 		if parameters, ok := pipe["TargetParameters"].(map[string]any); ok {
 			config["HttpParameters"] = resolvedHTTPParameters(parameters["HttpParameters"], decodedEvent(deliveryEvents[i]))
 		}
-		if events.DeliverTarget(ctx, p.deps, identity, target, config, payload) == nil {
+		if err := events.DeliverTarget(ctx, p.deps, identity, target, config, payload); err == nil || (strings.Contains(target, ":api-destination/") && !events.TargetErrorRetryable(err)) {
 			if !enriched {
 				succeeded[matchedIDs[i]] = true
 			}

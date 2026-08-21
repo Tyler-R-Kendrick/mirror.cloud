@@ -9,12 +9,14 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -182,17 +184,40 @@ func TestSchedulerStateUpdateAndGroups(t *testing.T) {
 }
 
 func TestSchedulerFlexibleWindowRetryAndDLQ(t *testing.T) {
+	var destinationCalls atomic.Int32
+	var destinationReady atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		destinationCalls.Add(1)
+		if !destinationReady.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer server.Close()
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	deps := spitest.Deps(t)
 	clock := deps.Clock.(*clock.Controllable)
 	p := New(deps)
 	defer p.Close()
+	eventPack := events.New(deps)
+	defer eventPack.Close()
 	queue := sqs.New(deps)
 	for _, name := range []string{"jobs", "failures"} {
 		if _, err := queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	connection, err := eventPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateConnection", Input: map[string]any{
+		"Name": "scheduler", "AuthorizationType": "API_KEY", "AuthParameters": map[string]any{"ApiKeyAuthParameters": map[string]any{"ApiKeyName": "X-Key", "ApiKeyValue": "value"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination, err := eventPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateApiDestination", Input: map[string]any{
+		"Name": "scheduler", "ConnectionArn": connection.Output["ConnectionArn"], "InvocationEndpoint": server.URL, "HttpMethod": "POST",
+	}})
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	flexible := scheduleInput("flexible", "at(1970-01-01T00:01:00)", time.Time{}, "jobs", "time=<aws.scheduler.scheduled-time>;attempt=<aws.scheduler.attempt-number>")
@@ -213,8 +238,10 @@ func TestSchedulerFlexibleWindowRetryAndDLQ(t *testing.T) {
 	})
 
 	retryAt := clock.Now().Add(time.Minute)
-	retrying := scheduleInput("retry", "at("+retryAt.Format("2006-01-02T15:04:05")+")", time.Time{}, "late", "attempt=<aws.scheduler.attempt-number>")
-	retrying["Target"].(map[string]any)["RetryPolicy"] = map[string]any{"MaximumEventAgeInSeconds": 60, "MaximumRetryAttempts": 1}
+	retrying := scheduleInput("retry", "at("+retryAt.Format("2006-01-02T15:04:05")+")", time.Time{}, "late", `{"attempt":"<aws.scheduler.attempt-number>"}`)
+	retryTarget := retrying["Target"].(map[string]any)
+	retryTarget["Arn"] = destination.Output["ApiDestinationArn"]
+	retryTarget["RetryPolicy"] = map[string]any{"MaximumEventAgeInSeconds": 60, "MaximumRetryAttempts": 1}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSchedule", Input: retrying}); err != nil {
 		t.Fatal(err)
 	}
@@ -223,13 +250,10 @@ func TestSchedulerFlexibleWindowRetryAndDLQ(t *testing.T) {
 		attempts, _ := integer(storedSchedule(t, deps, id, "retry")[retryAttempts])
 		return attempts == 1
 	})
-	if _, err := queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "late"}}); err != nil {
-		t.Fatal(err)
-	}
+	destinationReady.Store(true)
 	_ = clock.Advance(2 * time.Second)
 	eventually(t, func() bool {
-		got := queueBodies(t, deps, id, "late")
-		return len(got) == 1 && got[0] == "attempt=2"
+		return destinationCalls.Load() == 2
 	})
 
 	dlqAt := clock.Now().Add(time.Minute)

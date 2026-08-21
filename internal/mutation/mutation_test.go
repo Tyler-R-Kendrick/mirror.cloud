@@ -32,7 +32,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-drop-s3-object-time-name",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `key := prefix + now.Format("2006/01/02/15/") + stream + "-1-" + now.Format("2006-01-02-15-04-05-") + recID`,
+			old:  `key := evaluatedS3Prefix(prefix, now) + stream + "-1-" + now.Format("2006-01-02-15-04-05-") + recID`,
 			new:  `key := prefix + recID`,
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseS3ObjectNameFormat",

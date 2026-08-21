@@ -342,7 +342,7 @@ func TestAPIDestinationRateLimit(t *testing.T) {
 	select {
 	case err := <-done:
 		t.Fatalf("rate-limited invocation completed early: %v", err)
-	default:
+	case <-time.After(20 * time.Millisecond):
 	}
 	_ = deps.Clock.Advance(time.Second)
 	select {

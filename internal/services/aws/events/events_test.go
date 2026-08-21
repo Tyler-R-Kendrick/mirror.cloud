@@ -118,7 +118,9 @@ func TestInvokeAPIDestinationBasicAuth(t *testing.T) {
 	seen := make(chan bool, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		username, password, ok := r.BasicAuth()
-		seen <- ok && username == "user" && password == "pass" && r.URL.Path == "/items/widget" && r.URL.Query().Get("source") == "test" && r.Header.Get("X-Test") == "value"
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		seen <- ok && username == "user" && password == "pass" && r.URL.Path == "/items/widget" && r.URL.Query().Get("source") == "connection" && r.Header.Get("X-Test") == "connection" && body["value"] == "connection" && body["target"] == "yes" && body["connection"] == "yes"
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer server.Close()
@@ -126,7 +128,17 @@ func TestInvokeAPIDestinationBasicAuth(t *testing.T) {
 	p := New(deps)
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	connection, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateConnection", Input: map[string]any{
-		"Name": "basic", "AuthorizationType": "BASIC", "AuthParameters": map[string]any{"BasicAuthParameters": map[string]any{"Username": "user", "Password": "pass"}},
+		"Name": "basic", "AuthorizationType": "BASIC", "AuthParameters": map[string]any{
+			"BasicAuthParameters": map[string]any{"Username": "user", "Password": "pass"},
+			"InvocationHttpParameters": map[string]any{
+				"HeaderParameters":      []any{map[string]any{"Key": "X-Test", "Value": "connection"}},
+				"QueryStringParameters": []any{map[string]any{"Key": "source", "Value": "connection"}},
+				"BodyParameters": []any{
+					map[string]any{"Key": "value", "Value": "connection"},
+					map[string]any{"Key": "connection", "Value": "yes"},
+				},
+			},
+		},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -138,10 +150,16 @@ func TestInvokeAPIDestinationBasicAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, err := InvokeAPIDestination(context.Background(), deps, id, str(destination.Output["ApiDestinationArn"]), map[string]any{
-		"PathParameterValues": []any{"widget"}, "QueryStringParameters": map[string]any{"source": "test"}, "HeaderParameters": map[string]any{"X-Test": "value"},
-	}, []byte(`{"value":1}`))
+		"PathParameterValues": []any{"widget"}, "QueryStringParameters": map[string]any{"source": "target"}, "HeaderParameters": map[string]any{"X-Test": "target"},
+	}, []byte(`{"value":"target","target":"yes"}`))
 	if err != nil || string(body) != `{"ok":true}` || !<-seen {
 		t.Fatalf("API destination body=%s err=%v", body, err)
+	}
+	if _, err := mergeConnectionBody([]byte(`[]`), []any{map[string]any{"Key": "value", "Value": "connection"}}); err == nil {
+		t.Fatal("connection body parameters merged into a non-object payload")
+	}
+	if _, err := mergeConnectionBody([]byte(`{}`), []any{map[string]any{"Key": "value", "Value": strings.Repeat("x", 64<<10)}}); err == nil {
+		t.Fatal("connection body parameters exceeded the 64 KB payload limit")
 	}
 	if !apiDestinationRetryable(401) || !apiDestinationRetryable(500) || apiDestinationRetryable(400) || apiDestinationRetryable(302) {
 		t.Fatal("API destination retry classification changed")

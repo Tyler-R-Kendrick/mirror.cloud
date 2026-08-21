@@ -380,6 +380,12 @@ func InvokeAPIDestination(ctx context.Context, deps spi.Deps, identity spi.Ident
 	if !ok {
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Connection does not exist.", HTTPStatus: 404, Fault: "client"}
 	}
+	auth, _ := connection["AuthParameters"].(map[string]any)
+	invocation, _ := auth["InvocationHttpParameters"].(map[string]any)
+	payload, err := mergeConnectionBody(payload, invocation["BodyParameters"])
+	if err != nil {
+		return nil, err
+	}
 	endpoint := str(destination["InvocationEndpoint"])
 	for _, value := range anySlice(parameters["PathParameterValues"]) {
 		endpoint = strings.Replace(endpoint, "*", url.PathEscape(str(value)), 1)
@@ -392,8 +398,6 @@ func InvokeAPIDestination(ctx context.Context, deps spi.Deps, identity spi.Ident
 	applyHTTPMap(request.Header.Set, parameters["HeaderParameters"])
 	query := request.URL.Query()
 	applyHTTPMap(query.Set, parameters["QueryStringParameters"])
-	auth, _ := connection["AuthParameters"].(map[string]any)
-	invocation, _ := auth["InvocationHttpParameters"].(map[string]any)
 	applyConnectionParameters(request.Header.Set, invocation["HeaderParameters"])
 	applyConnectionParameters(query.Set, invocation["QueryStringParameters"])
 	request.URL.RawQuery = query.Encode()
@@ -498,6 +502,23 @@ func applyConnectionParameters(set func(string, string), raw any) {
 		parameter, _ := value.(map[string]any)
 		set(str(parameter["Key"]), str(parameter["Value"]))
 	}
+}
+
+func mergeConnectionBody(payload []byte, raw any) ([]byte, error) {
+	parameters := anySlice(raw)
+	if len(parameters) == 0 {
+		return payload, nil
+	}
+	var body map[string]any
+	if json.Unmarshal(payload, &body) != nil || body == nil {
+		return nil, &spi.Fault{Code: "TargetInvocationFailed", Message: "Connection body parameters require a JSON object payload.", HTTPStatus: 400, Fault: "client"}
+	}
+	applyConnectionParameters(func(key, value string) { body[key] = value }, parameters)
+	merged, _ := json.Marshal(body)
+	if len(merged) > 64<<10 {
+		return nil, &spi.Fault{Code: "TargetInvocationFailed", Message: "API destination payload exceeds 64 KB.", HTTPStatus: 400, Fault: "client"}
+	}
+	return merged, nil
 }
 
 func anySlice(value any) []any {

@@ -111,6 +111,7 @@ type Deps struct {
 // Store is account+region namespaced structured state.
 type Store interface {
 	Scope(account, region string) Scope
+	Scopes(ctx context.Context) ([]Identity, error)
 	Snapshot(ctx context.Context, w io.Writer) error
 	Restore(ctx context.Context, r io.Reader) error
 	Close() error

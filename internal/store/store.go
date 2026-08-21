@@ -33,6 +33,22 @@ func (m *Memory) Scope(account, region string) spi.Scope {
 	return &scope{m: m, account: account, region: region}
 }
 
+func (m *Memory) Scopes(context.Context) ([]spi.Identity, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	keys := make([]string, 0, len(m.data))
+	for key := range m.data {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]spi.Identity, 0, len(keys))
+	for _, key := range keys {
+		account, region, _ := strings.Cut(key, "\x1f")
+		out = append(out, spi.Identity{Account: account, Region: region})
+	}
+	return out, nil
+}
+
 type scope struct {
 	m               *Memory
 	account, region string

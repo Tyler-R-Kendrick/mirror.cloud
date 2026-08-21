@@ -7,13 +7,17 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apigateway"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
@@ -507,6 +511,16 @@ func (p *Pack) enrich(ctx context.Context, identity spi.Identity, pipe map[strin
 			return nil, true, false
 		}
 		raw = []byte(stringValue(response.Output["output"]))
+	case strings.Contains(arn, ":execute-api:"):
+		parameterEvent := any(fallback)
+		if len(fallback) == 1 {
+			parameterEvent = decodedEvent(fallback[0])
+		}
+		response, err := p.invokeAPIGateway(ctx, identity, pipe, arn, payload, parameterEvent)
+		if err != nil {
+			return nil, true, false
+		}
+		raw = response
 	default:
 		return nil, true, false
 	}
@@ -524,6 +538,68 @@ func (p *Pack) enrich(ctx context.Context, identity spi.Identity, pipe map[strin
 	return []any{output}, true, true
 }
 
+func (p *Pack) invokeAPIGateway(ctx context.Context, identity spi.Identity, pipe map[string]any, arn string, payload []byte, event any) ([]byte, error) {
+	parts := strings.SplitN(arn, ":", 6)
+	if len(parts) != 6 {
+		return nil, validation("Invalid API Gateway enrichment ARN.")
+	}
+	endpoint := strings.SplitN(parts[5], "/", 4)
+	if len(endpoint) < 3 || endpoint[0] == "" || endpoint[1] == "" || endpoint[2] == "" {
+		return nil, validation("Invalid API Gateway enrichment ARN.")
+	}
+	path := "/"
+	if len(endpoint) == 4 && endpoint[3] != "" {
+		path += endpoint[3]
+	}
+	parameters, _ := pipe["EnrichmentParameters"].(map[string]any)
+	httpParameters, _ := parameters["HttpParameters"].(map[string]any)
+	if values, ok := httpParameters["PathParameterValues"].([]any); ok {
+		for _, value := range values {
+			path = strings.Replace(path, "*", url.PathEscape(httpParameter(value, event)), 1)
+		}
+	}
+	request, err := http.NewRequest(endpoint[2], "http://local/restapis/"+endpoint[0]+"/"+endpoint[1]+"/_user_request_"+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if headers, ok := httpParameters["HeaderParameters"].(map[string]any); ok {
+		for key, value := range headers {
+			request.Header.Set(key, httpParameter(value, event))
+		}
+	}
+	query := request.URL.Query()
+	if values, ok := httpParameters["QueryStringParameters"].(map[string]any); ok {
+		for key, value := range values {
+			query.Set(key, httpParameter(value, event))
+		}
+	}
+	request.URL.RawQuery = query.Encode()
+	response, err := apigateway.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "ExecuteApi", HTTP: request, Body: io.NopCloser(bytes.NewReader(payload))})
+	if err != nil {
+		return nil, err
+	}
+	status := response.Status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	if status < 200 || status >= 300 {
+		return nil, validation("API Gateway enrichment failed.")
+	}
+	if response.Stream == nil {
+		return json.Marshal(response.Output)
+	}
+	defer response.Stream.Close()
+	return io.ReadAll(response.Stream)
+}
+
+func httpParameter(value, event any) string {
+	parameter := fmt.Sprint(value)
+	if strings.HasPrefix(parameter, "$") {
+		return fmt.Sprint(events.EventPath(event, parameter))
+	}
+	return parameter
+}
+
 func (p *Pack) inputPayload(pipe map[string]any, parameterName string, event any) []byte {
 	parameters, _ := pipe[parameterName].(map[string]any)
 	template := stringValue(parameters["InputTemplate"])
@@ -534,15 +610,7 @@ func (p *Pack) inputPayload(pipe map[string]any, parameterName string, event any
 		payload, _ := json.Marshal(event)
 		return payload
 	}
-	eventJSON := event
-	if record, ok := event.(map[string]any); ok {
-		eventJSON = clone(record)
-		if body := stringValue(record["body"]); json.Valid([]byte(body)) {
-			var decoded any
-			_ = json.Unmarshal([]byte(body), &decoded)
-			eventJSON.(map[string]any)["body"] = decoded
-		}
-	}
+	eventJSON := decodedEvent(event)
 	for {
 		start := strings.IndexByte(template, '<')
 		if start < 0 {
@@ -587,6 +655,20 @@ func (p *Pack) inputPayload(pipe map[string]any, parameterName string, event any
 		template = template[:start] + string(raw) + template[end+1:]
 	}
 	return []byte(template)
+}
+
+func decodedEvent(event any) any {
+	record, ok := event.(map[string]any)
+	if !ok {
+		return event
+	}
+	decoded := clone(record)
+	if body := stringValue(record["body"]); json.Valid([]byte(body)) {
+		var value any
+		_ = json.Unmarshal([]byte(body), &value)
+		decoded["body"] = value
+	}
+	return decoded
 }
 
 func (p *Pack) invokeLambda(ctx context.Context, identity spi.Identity, arn string, payload []byte, ids []string) (map[string]bool, bool) {

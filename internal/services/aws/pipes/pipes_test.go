@@ -15,6 +15,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apigateway"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
@@ -454,6 +455,68 @@ func TestPipesStepFunctionsEnrichment(t *testing.T) {
 	})
 	if messages := storedMessages(t, deps, id, "failed-enrich-states-target"); len(messages) != 0 {
 		t.Fatalf("failed enrichment invoked target: %#v", messages)
+	}
+}
+
+func TestPipesAPIGatewayEnrichment(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer p.Close()
+	queue, function, gateway := sqs.New(deps), lambda.New(deps), apigateway.New(deps)
+	for _, name := range []string{"api-source", "api-target"} {
+		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})
+	}
+	source := "def lambda_handler(event, context):\n    import json\n    body=json.loads(event['body'])\n    return {'statusCode': 200, 'body': json.dumps([{'value': body[0]['value'] * 3, 'path': event['path'], 'query': event['queryStringParameters']['kind'], 'header': event['headers']['X-Test']}])}\n"
+	invoke(t, function, id, "CreateFunction", map[string]any{
+		"FunctionName": "api-enrichment", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": lambdaCode(source),
+	})
+	api := invoke(t, gateway, id, "CreateRestApi", map[string]any{"name": "pipe-enrichment"}).Output
+	apiID, root := stringValue(api["id"]), stringValue(api["rootResourceId"])
+	invoke(t, gateway, id, "PutMethod", map[string]any{"restApiId": apiID, "resourceId": root, "httpMethod": "POST", "authorizationType": "NONE"})
+	invoke(t, gateway, id, "PutIntegration", map[string]any{
+		"restApiId": apiID, "resourceId": root, "httpMethod": "POST", "type": "AWS_PROXY", "integrationHttpMethod": "POST",
+		"uri": "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:123456789012:function:api-enrichment/invocations",
+	})
+	invoke(t, gateway, id, "CreateDeployment", map[string]any{"restApiId": apiID, "stageName": "prod"})
+
+	input := pipeInput("api-enrichment", "api-source", "api-target")
+	input["Enrichment"] = "arn:aws:execute-api:us-east-1:123456789012:" + apiID + "/prod/POST/*"
+	input["EnrichmentParameters"] = map[string]any{
+		"InputTemplate": `{"value":<$.body.value>}`,
+		"HttpParameters": map[string]any{
+			"PathParameterValues": []any{"$.body.kind"}, "QueryStringParameters": map[string]any{"kind": "$.body.kind"}, "HeaderParameters": map[string]any{"X-Test": "$.body.value"},
+		},
+	}
+	input["TargetParameters"] = map[string]any{"InputTemplate": `{"value":<$.value>,"path":<$.path>,"query":<$.query>,"header":<$.header>}`}
+	invoke(t, p, id, "CreatePipe", input)
+	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "api-source", "MessageBody": `{"value":2,"kind":"widgets"}`})
+	eventually(t, func() bool {
+		return len(storedMessages(t, deps, id, "api-source")) == 0 && len(storedMessages(t, deps, id, "api-target")) == 1
+	})
+	var enriched map[string]any
+	if err := json.Unmarshal([]byte(storedMessages(t, deps, id, "api-target")[0]["body"].(string)), &enriched); err != nil {
+		t.Fatal(err)
+	}
+	if enriched["value"] != float64(6) || enriched["path"] != "/widgets" || enriched["query"] != "widgets" || enriched["header"] != "2" {
+		t.Fatalf("API Gateway enrichment %#v", enriched)
+	}
+
+	failure := "def lambda_handler(event, context):\n    return {'statusCode': 500, 'body': 'failed'}\n"
+	invoke(t, function, id, "UpdateFunctionCode", map[string]any{"FunctionName": "api-enrichment", "ZipFile": lambdaCode(failure)["ZipFile"]})
+	if _, err := p.invokeAPIGateway(context.Background(), id, input, stringValue(input["Enrichment"]), []byte(`[{"value":3}]`), map[string]any{"body": map[string]any{"kind": "retry", "value": 3}}); err == nil {
+		t.Fatal("API Gateway enrichment accepted a 5xx response")
+	}
+	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "api-source", "MessageBody": `{"value":3,"kind":"retry"}`})
+	eventually(t, func() bool {
+		messages := storedMessages(t, deps, id, "api-source")
+		return len(messages) == 1 && messages[0]["receiveCount"] == float64(1)
+	})
+	if messages := storedMessages(t, deps, id, "api-target"); len(messages) != 1 {
+		t.Fatalf("failed API enrichment invoked target: %#v", messages)
 	}
 }
 

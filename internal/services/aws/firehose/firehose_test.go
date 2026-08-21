@@ -235,7 +235,11 @@ func TestFirehoseControlPlaneAndBatch(t *testing.T) {
 	if _, err := call("PutRecord", map[string]any{"DeliveryStreamName": "missing"}); err == nil {
 		t.Fatal("put to missing stream")
 	}
-	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "control"}); err != nil {
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "control", "ExtendedS3DestinationConfiguration": map[string]any{
+			"BucketARN": "arn:aws:s3:::original", "Prefix": "kept/",
+		},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	record := map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("batch"))}
@@ -244,12 +248,37 @@ func TestFirehoseControlPlaneAndBatch(t *testing.T) {
 		t.Fatalf("batch %#v, %v", batch, err)
 	}
 	described, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "control"})
-	if err != nil || described.Output["RecordCount"] != 2 {
+	description := described.Output["DeliveryStreamDescription"].(map[string]any)
+	if err != nil || described.Output["RecordCount"] != 2 || description["VersionId"] != "1" {
 		t.Fatalf("describe %#v, %v", described, err)
 	}
+	if _, err := call("UpdateDestination", map[string]any{"DeliveryStreamName": "control"}); err == nil {
+		t.Fatal("updated without version and destination IDs")
+	}
 	if _, err := call("UpdateDestination", map[string]any{
-		"DeliveryStreamName": "control", "ExtendedS3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::updated"},
+		"DeliveryStreamName": "control", "CurrentDeliveryStreamVersionId": "1", "DestinationId": "destinationId-000000000001",
+		"ExtendedS3DestinationUpdate": map[string]any{"BucketARN": "arn:aws:s3:::updated"},
 	}); err != nil {
+		t.Fatal(err)
+	}
+	_, staleErr := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "control", "CurrentDeliveryStreamVersionId": "1", "DestinationId": "destinationId-000000000001",
+	})
+	fault, ok := staleErr.(*spi.Fault)
+	if !ok || fault.Code != "ConcurrentModificationException" {
+		t.Fatalf("stale update error %v", staleErr)
+	}
+	described, err = call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "control"})
+	description = described.Output["DeliveryStreamDescription"].(map[string]any)
+	if err != nil || description["VersionId"] != "2" {
+		t.Fatalf("updated description %#v, %v", described, err)
+	}
+	put, err := call("PutRecord", map[string]any{"DeliveryStreamName": "control", "Record": record})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := id.Account + "/" + id.Region + "/updated/kept/1970/01/01/00/control-2-1970-01-01-00-00-00-" + put.Output["RecordId"].(string)
+	if _, _, err := deps.Blobs.Get(context.Background(), key); err != nil {
 		t.Fatal(err)
 	}
 	tags := []any{map[string]any{"Key": "env", "Value": "test"}}

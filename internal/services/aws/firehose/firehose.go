@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,12 +55,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		arn := "arn:aws:firehose:" + req.Identity.Region + ":" + req.Identity.Account + ":deliverystream/" + name
 		rec := map[string]any{
 			"DeliveryStreamName": name, "DeliveryStreamARN": arn, "DeliveryStreamStatus": "ACTIVE",
-			"DeliveryStreamType": first(req.Input, "DeliveryStreamType"),
+			"DeliveryStreamType": first(req.Input, "DeliveryStreamType"), "VersionId": "1",
 		}
 		if rec["DeliveryStreamType"] == "" {
 			rec["DeliveryStreamType"] = "DirectPut"
 		}
-		copyDest(rec, req.Input)
+		copyDest(rec, req.Input, "Configuration")
 		if err := validateDestination(rec); err != nil {
 			return nil, err
 		}
@@ -107,19 +109,35 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"FailedPutCount": 0, "RequestResponses": resp}}, nil
 	case "UpdateDestination":
-		b, ok, _ := p.col(req, "fh").Get(ctx, name)
-		if !ok {
-			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
-		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		rec["Destination"] = req.Input
-		copyDest(rec, req.Input)
-		if err := validateDestination(rec); err != nil {
+		err := p.col(req, "fh").Txn(ctx, func(tx spi.Tx) error {
+			b, ok, err := tx.Get(name)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
+			}
+			var rec map[string]any
+			_ = json.Unmarshal(b, &rec)
+			current := first(req.Input, "CurrentDeliveryStreamVersionId")
+			if current == "" || first(req.Input, "DestinationId") == "" {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			if current != first(rec, "VersionId") {
+				return &spi.Fault{Code: "ConcurrentModificationException", HTTPStatus: 400, Fault: "client"}
+			}
+			copyDest(rec, req.Input, "Update")
+			if err := validateDestination(rec); err != nil {
+				return err
+			}
+			version, _ := strconv.Atoi(current)
+			rec["VersionId"] = strconv.Itoa(version + 1)
+			nb, _ := json.Marshal(rec)
+			return tx.Put(name, nb)
+		})
+		if err != nil {
 			return nil, err
 		}
-		nb, _ := json.Marshal(rec)
-		_ = p.col(req, "fh").Put(ctx, name, nb)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "TagDeliveryStream":
 		b, _ := json.Marshal(req.Input["Tags"])
@@ -162,11 +180,18 @@ func (p *Pack) putOne(ctx context.Context, req *spi.Request, name string, rec an
 	return id
 }
 
-func copyDest(rec, in map[string]any) {
-	for _, k := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration"} {
-		if in[k] != nil {
-			rec[k] = in[k]
+func copyDest(rec, in map[string]any, suffix string) {
+	for _, base := range []string{"S3Destination", "ExtendedS3Destination"} {
+		patch, _ := in[base+suffix].(map[string]any)
+		if patch == nil {
+			continue
 		}
+		destination, _ := rec[base+"Configuration"].(map[string]any)
+		if destination == nil {
+			destination = map[string]any{}
+		}
+		maps.Copy(destination, patch)
+		rec[base+"Configuration"] = destination
 	}
 }
 
@@ -219,12 +244,16 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 	if bucket == "" {
 		return
 	}
+	version := first(rec, "VersionId")
+	if version == "" {
+		version = "1"
+	}
 	now := p.deps.Clock.Now().UTC()
 	if timezone != "" {
 		location, _ := time.LoadLocation(timezone)
 		now = now.In(location)
 	}
-	key := p.evaluatedS3Prefix(prefix, now) + stream + "-1-" + now.Format("2006-01-02-15-04-05-") + recID
+	key := p.evaluatedS3Prefix(prefix, now) + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + recID
 	info, err := p.deps.Blobs.Put(ctx, req.Identity.Account+"/"+req.Identity.Region+"/"+bucket+"/"+key, bytes.NewReader(data))
 	if err != nil {
 		return

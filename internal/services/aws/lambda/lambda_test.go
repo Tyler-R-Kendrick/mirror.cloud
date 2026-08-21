@@ -1,8 +1,10 @@
 package lambda
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -34,6 +36,33 @@ func TestInvokeEventAndDryRunStatus(t *testing.T) {
 		if resp.Status != status || resp.Output["StatusCode"] != status {
 			t.Fatalf("%s response %#v", kind, resp)
 		}
+	}
+}
+
+func TestInvokeAcceptsRawArrayPayload(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	src := "def lambda_handler(event, context):\n    return {'length': len(event)}\n"
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+		"FunctionName": "batch", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
+		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(src))},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{
+		Identity: id, Operation: "Invoke", Input: map[string]any{"FunctionName": "batch"},
+		Body: io.NopCloser(bytes.NewBufferString(`[{"id":1},{"id":2}]`)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(response.Output["Payload"].(json.RawMessage)), `"length": 2`) {
+		t.Fatalf("payload %s", response.Output["Payload"])
 	}
 }
 

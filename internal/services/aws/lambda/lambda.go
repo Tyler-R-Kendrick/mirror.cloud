@@ -336,16 +336,25 @@ func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	if invocationType == "DryRun" {
 		return &spi.Response{Status: http.StatusNoContent, Output: map[string]any{"StatusCode": http.StatusNoContent}}, nil
 	}
-	ev := map[string]any{}
-	for k, v := range req.Input {
-		if k == "FunctionName" || k == "InvocationType" || k == "LogType" || k == "Qualifier" {
-			continue
+	var payload []byte
+	if req.Body != nil {
+		var err error
+		payload, err = io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
 		}
-		ev[k] = v
-	}
-	payload, _ := json.Marshal(ev)
-	if len(ev) == 0 {
-		payload = []byte("{}")
+	} else {
+		ev := map[string]any{}
+		for k, v := range req.Input {
+			if k == "FunctionName" || k == "InvocationType" || k == "LogType" || k == "Qualifier" {
+				continue
+			}
+			ev[k] = v
+		}
+		payload, _ = json.Marshal(ev)
+		if len(ev) == 0 {
+			payload = []byte("{}")
+		}
 	}
 	out, err := runHandler(str(rec["Runtime"]), str(rec["Handler"]), rec["Code"], payload)
 	if invocationType == "Event" {

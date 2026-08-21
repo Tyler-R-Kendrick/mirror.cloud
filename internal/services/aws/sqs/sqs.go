@@ -284,6 +284,9 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 		db, _ := json.Marshal(map[string]any{"id": id, "md5": md5hex, "until": now.Add(5 * time.Minute).UnixNano()})
 		_ = p.col(req, "dedup:"+name).Put(ctx, dedup, db)
 	}
+	if p.deps.Bus != nil {
+		_ = p.deps.Bus.Publish(ctx, "sqs", raw)
+	}
 	return &spi.Response{Output: map[string]any{"MessageId": id, "MD5OfMessageBody": md5hex}}, nil
 }
 

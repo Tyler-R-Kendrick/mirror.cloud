@@ -327,6 +327,9 @@ func matchEventPattern(pattern string, event any) bool {
 	return matchFields(p, e)
 }
 
+// MatchEventPattern reports whether an event matches an EventBridge pattern.
+func MatchEventPattern(pattern string, event any) bool { return matchEventPattern(pattern, event) }
+
 func matchFields(pattern, event map[string]any) bool {
 	for key, want := range pattern {
 		if key == "$or" {

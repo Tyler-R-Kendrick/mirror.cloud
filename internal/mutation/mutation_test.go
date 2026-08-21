@@ -54,6 +54,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFirehoseS3ObjectNameFormat",
 		},
 		{
+			name: "firehose-ignore-custom-timezone",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  "if timezone != \"\" {\n\t\tlocation, _ := time.LoadLocation(timezone)\n\t\tnow = now.In(location)\n\t}",
+			new:  "if false {\n\t\tlocation, _ := time.LoadLocation(timezone)\n\t\tnow = now.In(location)\n\t}",
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseS3ObjectNameFormat",
+		},
+		{
+			name: "firehose-accept-invalid-custom-timezone",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `if _, err := time.LoadLocation(timezone); err != nil {`,
+			new:  `if _, err := time.LoadLocation(timezone); err == nil {`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseS3ObjectNameFormat",
+		},
+		{
 			name: "identity-expiry-after-to-before",
 			file: filepath.Join("internal", "identity", "identity.go"),
 			old:  "now.UTC().After(t.Add(time.Duration(secs) * time.Second))",

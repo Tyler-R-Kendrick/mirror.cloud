@@ -168,8 +168,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "events-deliver-disabled-rule",
 			file: filepath.Join("internal", "services", "aws", "events", "events.go"),
-			old:  `str(rule["State"]) == "DISABLED"`,
-			new:  `str(rule["State"]) == "ENABLED"`,
+			old:  "if str(rule[\"State\"]) == \"DISABLED\" {\n\t\treturn false",
+			new:  "if str(rule[\"State\"]) == \"ENABLED\" {\n\t\treturn false",
 			pkg:  "./internal/services/aws/events",
 			run:  "TestPutEventsDeliversOnlyMatchingRules",
 		},
@@ -976,8 +976,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "events-skip-initial-target-retry",
 			file: filepath.Join("internal", "services", "aws", "events", "events.go"),
-			old:  `if err := DeliverTarget(ctx, p.deps, req.Identity, arn, m, payload); err != nil {`,
-			new:  `if err := DeliverTarget(ctx, p.deps, req.Identity, arn, m, payload); err == nil {`,
+			old:  `if err := DeliverTarget(ctx, p.deps, identity, arn, m, payload); err != nil {`,
+			new:  `if err := DeliverTarget(ctx, p.deps, identity, arn, m, payload); err == nil {`,
 			pkg:  "./internal/services/aws/events",
 			run:  "TestPutEventsRetriesAndDeadLettersTargets",
 		},

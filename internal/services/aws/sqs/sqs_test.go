@@ -104,6 +104,56 @@ func TestQueueScopedOperationsRejectMissingQueue(t *testing.T) {
 	}
 }
 
+func TestSendValidationAndDelay(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(op string, in map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+	}
+	_, _ = invoke("CreateQueue", map[string]any{"QueueName": "strict.fifo"})
+	if _, err := invoke("SendMessage", map[string]any{"QueueName": "strict.fifo", "MessageBody": "x"}); faultCode(err) != "MissingParameter" {
+		t.Fatalf("missing group error %v", err)
+	}
+	if _, err := invoke("SendMessage", map[string]any{"QueueName": "strict.fifo", "MessageBody": "x", "MessageGroupId": "g"}); faultCode(err) != "InvalidParameterValue" {
+		t.Fatalf("missing dedup error %v", err)
+	}
+	batch, err := invoke("SendMessageBatch", map[string]any{"QueueName": "strict.fifo", "Entries": []any{
+		map[string]any{"Id": "bad", "MessageBody": "x"},
+		map[string]any{"Id": "ok", "MessageBody": "x", "MessageGroupId": "g", "MessageDeduplicationId": "d"},
+	}})
+	if err != nil || len(batch.Output["Successful"].([]any)) != 1 || len(batch.Output["Failed"].([]any)) != 1 {
+		t.Fatalf("batch response %#v error %v", batch, err)
+	}
+	_, _ = invoke("CreateQueue", map[string]any{"QueueName": "delayed", "Attributes": map[string]any{"DelaySeconds": "10"}})
+	if _, err := invoke("SendMessage", map[string]any{"QueueName": "delayed", "MessageBody": "later"}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := invoke("ReceiveMessage", map[string]any{"QueueName": "delayed"})
+	if len(before.Output["Messages"].([]any)) != 0 {
+		t.Fatalf("delayed message visible early %#v", before.Output)
+	}
+	_ = clk.Advance(10 * time.Second)
+	after, _ := invoke("ReceiveMessage", map[string]any{"QueueName": "delayed"})
+	if len(after.Output["Messages"].([]any)) != 1 {
+		t.Fatalf("delayed message missing %#v", after.Output)
+	}
+	if _, err := invoke("SendMessage", map[string]any{"QueueName": "delayed", "MessageBody": "x", "DelaySeconds": 901}); faultCode(err) != "InvalidParameterValue" {
+		t.Fatalf("invalid delay error %v", err)
+	}
+}
+
+func faultCode(err error) string {
+	fault, _ := err.(*spi.Fault)
+	if fault == nil {
+		return ""
+	}
+	return fault.Code
+}
+
 func TestFIFODedupDLQLongPoll(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)

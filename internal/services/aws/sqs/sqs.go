@@ -151,20 +151,27 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "SendMessageBatch":
 		entries, _ := req.Input["Entries"].([]any)
 		var ok []any
+		var failed []any
 		for _, e := range entries {
 			m := asMap(e)
 			sub := &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Input: map[string]any{
 				"QueueUrl": req.Input["QueueUrl"], "QueueName": queueName(req), "MessageBody": str(m["MessageBody"]),
 				"MessageGroupId": m["MessageGroupId"], "MessageDeduplicationId": m["MessageDeduplicationId"],
-				"MessageAttributes": m["MessageAttributes"],
+				"MessageAttributes": m["MessageAttributes"], "DelaySeconds": m["DelaySeconds"],
 			}, Operation: "SendMessage"}
 			resp, err := p.Invoke(ctx, sub)
 			if err != nil {
+				fault, _ := err.(*spi.Fault)
+				entry := map[string]any{"Id": m["Id"], "Code": "InternalError", "Message": err.Error(), "SenderFault": false}
+				if fault != nil {
+					entry["Code"], entry["Message"], entry["SenderFault"] = fault.Code, fault.Message, fault.Fault == "client"
+				}
+				failed = append(failed, entry)
 				continue
 			}
 			ok = append(ok, map[string]any{"Id": m["Id"], "MessageId": resp.Output["MessageId"], "MD5OfMessageBody": resp.Output["MD5OfMessageBody"]})
 		}
-		return &spi.Response{Output: map[string]any{"Successful": ok}}, nil
+		return &spi.Response{Output: map[string]any{"Successful": ok, "Failed": failed}}, nil
 	case "DeleteMessageBatch":
 		name := queueName(req)
 		entries, _ := req.Input["Entries"].([]any)
@@ -234,11 +241,23 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	md5hex := hex.EncodeToString(sum[:])
 	attrs := p.queueAttrs(ctx, req, name)
 	now := p.deps.Clock.Now()
+	group := str(req.Input["MessageGroupId"])
 	dedup := str(req.Input["MessageDeduplicationId"])
-	if dedup == "" && (str(attrs["ContentBasedDeduplication"]) == "true" || strings.HasSuffix(name, ".fifo")) {
-		if str(attrs["ContentBasedDeduplication"]) == "true" {
-			dedup = md5hex
-		}
+	if strings.HasSuffix(name, ".fifo") && group == "" {
+		return nil, &spi.Fault{Code: "MissingParameter", Message: "MessageGroupId", HTTPStatus: 400, Fault: "client"}
+	}
+	if dedup == "" && str(attrs["ContentBasedDeduplication"]) == "true" {
+		dedup = md5hex
+	}
+	if strings.HasSuffix(name, ".fifo") && dedup == "" {
+		return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "MessageDeduplicationId is required when ContentBasedDeduplication is disabled.", HTTPStatus: 400, Fault: "client"}
+	}
+	delay := asInt(req.Input["DelaySeconds"])
+	if req.Input["DelaySeconds"] == nil {
+		delay = asInt(attrs["DelaySeconds"])
+	}
+	if delay < 0 || delay > 900 {
+		return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "DelaySeconds must be between 0 and 900.", HTTPStatus: 400, Fault: "client"}
 	}
 	if dedup != "" {
 		if b, ok, _ := p.col(req, "dedup:"+name).Get(ctx, dedup); ok {
@@ -255,8 +274,8 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	seq := p.nextSeq(ctx, req, name)
 	msg := map[string]any{
 		"id": id, "body": body, "handle": rh, "md5": md5hex,
-		"group": str(req.Input["MessageGroupId"]), "seq": seq,
-		"visibleAt": now.UnixNano(), "receiveCount": 0,
+		"group": group, "seq": seq,
+		"visibleAt": now.Add(time.Duration(delay) * time.Second).UnixNano(), "receiveCount": 0,
 		"attrs": req.Input["MessageAttributes"],
 	}
 	raw, _ := json.Marshal(msg)

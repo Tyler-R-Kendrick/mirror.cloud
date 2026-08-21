@@ -1,10 +1,11 @@
-// Package events is EventBridge emulate: rules, targets, PutEvents to SQS/SNS.
+// Package events emulates EventBridge rules, schedules, targets, and event ingestion.
 package events
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/scheduleexpr"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
@@ -32,6 +34,7 @@ const (
 	eventRetryAttempts = "_mirrorRetryAttempts"
 	eventRetryStarted  = "_mirrorRetryStarted"
 	eventRetryNext     = "_mirrorRetryNext"
+	eventRuleNext      = "_mirrorNextInvocation"
 )
 
 // Pack implements EventBridge.
@@ -96,12 +99,23 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, validationFault("ScheduleExpression exceeds 256 characters.")
 		}
 		bus := eventBus(req.Input)
+		if schedule != "" && bus != "default" {
+			return nil, validationFault("Scheduled rules are supported only on the default event bus.")
+		}
 		rec := clone(req.Input)
+		if schedule != "" {
+			next, err := nextScheduledRule(schedule, p.deps.Clock.Now())
+			if err != nil {
+				return nil, validationFault(err.Error())
+			}
+			rec[eventRuleNext] = next.UTC().Format(time.RFC3339Nano)
+		}
 		if str(rec["State"]) == "" {
 			rec["State"] = "ENABLED"
 		}
 		b, _ := json.Marshal(rec)
 		_ = p.col(req, "rules").Put(ctx, eventKey(bus, name), b)
+		p.notify()
 		path := name
 		if bus != "default" {
 			path = bus + "/" + name
@@ -115,6 +129,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			var m map[string]any
 			_ = json.Unmarshal(kv.Value, &m)
 			if eventBus(m) == eventBus(req.Input) {
+				delete(m, eventRuleNext)
 				rs = append(rs, m)
 			}
 		}
@@ -254,7 +269,11 @@ func validateTarget(target map[string]any) string {
 }
 
 func (p *Pack) targets(ctx context.Context, req *spi.Request, key string) []any {
-	b, ok, _ := p.col(req, "targets").Get(ctx, key)
+	return p.targetsFor(ctx, req.Identity, key)
+}
+
+func (p *Pack) targetsFor(ctx context.Context, identity spi.Identity, key string) []any {
+	b, ok, _ := p.deps.Store.Scope(identity.Account, identity.Region).Collection("targets").Get(ctx, key)
 	if !ok {
 		return []any{}
 	}
@@ -346,19 +365,21 @@ func (p *Pack) fanout(ctx context.Context, req *spi.Request, event map[string]an
 		if !ok || !ruleMatches(rule, bus, event) {
 			continue
 		}
-		var tgs []any
-		_ = json.Unmarshal(kv.Value, &tgs)
-		for _, t := range tgs {
-			m, _ := t.(map[string]any)
-			arn := str(m["Arn"])
-			if arn == "" {
-				continue
-			}
-			payload := targetPayload(m, event, raw)
-			_ = p.deps.Bus.Publish(ctx, "events:"+arn, payload)
-			if err := DeliverTarget(ctx, p.deps, req.Identity, arn, m, payload); err != nil {
-				p.failedTarget(ctx, req.Identity, kv.Key, m, payload, err)
-			}
+		p.deliverRule(ctx, req.Identity, kv.Key, event, raw)
+	}
+}
+
+func (p *Pack) deliverRule(ctx context.Context, identity spi.Identity, ruleKey string, event map[string]any, raw []byte) {
+	for _, target := range p.targetsFor(ctx, identity, ruleKey) {
+		m, _ := target.(map[string]any)
+		arn := str(m["Arn"])
+		if arn == "" {
+			continue
+		}
+		payload := targetPayload(m, event, raw)
+		_ = p.deps.Bus.Publish(ctx, "events:"+arn, payload)
+		if err := DeliverTarget(ctx, p.deps, identity, arn, m, payload); err != nil {
+			p.failedTarget(ctx, identity, ruleKey, m, payload, err)
 		}
 	}
 }
@@ -381,7 +402,7 @@ func (p *Pack) failedTarget(ctx context.Context, identity spi.Identity, ruleKey 
 func (p *Pack) retryLoop() {
 	defer close(p.done)
 	for {
-		next := p.runRetries(context.Background())
+		next := earlierTime(p.runRetries(context.Background()), p.runScheduledRules(context.Background()))
 		if next.IsZero() {
 			select {
 			case <-p.wake:
@@ -401,6 +422,70 @@ func (p *Pack) retryLoop() {
 			return
 		}
 	}
+}
+
+func (p *Pack) runScheduledRules(ctx context.Context) time.Time {
+	now := p.deps.Clock.Now()
+	var earliest time.Time
+	scopes, err := p.deps.Store.Scopes(ctx)
+	if err != nil {
+		return earliest
+	}
+	for _, identity := range scopes {
+		collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("rules")
+		kvs, _, err := collection.List(ctx, "", "", 0)
+		if err != nil {
+			continue
+		}
+		for _, kv := range kvs {
+			var rule map[string]any
+			if json.Unmarshal(kv.Value, &rule) != nil || str(rule["State"]) == "DISABLED" || str(rule["ScheduleExpression"]) == "" {
+				continue
+			}
+			next := parsedTime(rule[eventRuleNext])
+			if next.IsZero() {
+				next, err = nextScheduledRule(str(rule["ScheduleExpression"]), now)
+				if err != nil {
+					continue
+				}
+				rule[eventRuleNext] = next.UTC().Format(time.RFC3339Nano)
+				body, _ := json.Marshal(rule)
+				_ = collection.Put(ctx, kv.Key, body)
+			}
+			if next.After(now) {
+				earliest = earlierTime(earliest, next)
+				continue
+			}
+			event := map[string]any{
+				"version": "0", "id": p.deps.Rand.UUID(), "detail-type": "Scheduled Event", "source": "aws.events",
+				"account": identity.Account, "time": next.UTC().Format(time.RFC3339), "region": identity.Region,
+				"resources": []any{ruleARN(identity, kv.Key)}, "detail": map[string]any{},
+			}
+			raw, _ := json.Marshal(event)
+			_ = p.deps.Bus.Publish(ctx, "events", raw)
+			p.deliverRule(ctx, identity, kv.Key, event, raw)
+			next, err = nextScheduledRule(str(rule["ScheduleExpression"]), next)
+			if err != nil {
+				continue
+			}
+			rule[eventRuleNext] = next.UTC().Format(time.RFC3339Nano)
+			body, _ := json.Marshal(rule)
+			_ = collection.Put(ctx, kv.Key, body)
+			earliest = earlierTime(earliest, next)
+		}
+	}
+	return earliest
+}
+
+func nextScheduledRule(raw string, after time.Time) (time.Time, error) {
+	expression, err := scheduleexpr.Parse(raw, "UTC")
+	if err != nil {
+		return time.Time{}, err
+	}
+	if expression.OneTime() {
+		return time.Time{}, errors.New("legacy EventBridge rules support only rate and cron expressions")
+	}
+	return expression.After(after), nil
 }
 
 func (p *Pack) runRetries(ctx context.Context) time.Time {

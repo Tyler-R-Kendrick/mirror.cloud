@@ -152,13 +152,31 @@ func (p *Pack) extra(ctx context.Context, req *spi.Request) (*spi.Response, erro
 	case "ListReplays":
 		return p.listRec(ctx, req, "replays", "Replays")
 	case "DescribeRule":
-		return p.getRec(ctx, req, "rules", eventKey(eventBus(req.Input), first(req.Input, "Name")))
+		rule, ok := p.load(ctx, req, "rules", eventKey(eventBus(req.Input), first(req.Input, "Name")))
+		if !ok {
+			return nil, resourceMissing("Rule")
+		}
+		delete(rule, eventRuleNext)
+		return &spi.Response{Output: rule}, nil
 	case "EnableRule", "DisableRule":
 		st := "ENABLED"
 		if op == "DisableRule" {
 			st = "DISABLED"
 		}
-		return p.patch(ctx, req, "rules", eventKey(eventBus(req.Input), first(req.Input, "Name")), map[string]any{"State": st})
+		fields := map[string]any{"State": st}
+		key := eventKey(eventBus(req.Input), first(req.Input, "Name"))
+		rule, ok := p.load(ctx, req, "rules", key)
+		if !ok {
+			return nil, resourceMissing("Rule")
+		}
+		if st == "ENABLED" && str(rule["ScheduleExpression"]) != "" {
+			if next, err := nextScheduledRule(str(rule["ScheduleExpression"]), p.deps.Clock.Now()); err == nil {
+				fields[eventRuleNext] = next.UTC().Format(time.RFC3339Nano)
+			}
+		}
+		response, err := p.patch(ctx, req, "rules", key, fields)
+		p.notify()
+		return response, err
 	case "ListRuleNamesByTarget":
 		want := first(req.Input, "TargetArn")
 		bus := eventBus(req.Input)

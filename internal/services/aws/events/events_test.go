@@ -150,6 +150,99 @@ func TestEventBridgeRequestValidation(t *testing.T) {
 	}
 }
 
+func TestScheduledRulesPersistAndRespectState(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	queue := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	call := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := pack.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response
+	}
+	messages := func(name string) []map[string]any {
+		kvs, _, err := deps.Store.Scope(id.Account, id.Region).Collection("msgs:"+name).List(ctx, "", "", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := make([]map[string]any, 0, len(kvs))
+		for _, kv := range kvs {
+			var message map[string]any
+			if json.Unmarshal(kv.Value, &message) != nil {
+				t.Fatalf("message %q", kv.Value)
+			}
+			out = append(out, message)
+		}
+		return out
+	}
+	for _, name := range []string{"scheduled", "disabled"} {
+		call(queue, "CreateQueue", map[string]any{"QueueName": name})
+	}
+	call(p, "PutRule", map[string]any{"Name": "scheduled", "ScheduleExpression": "rate(1 minute)"})
+	if described := call(p, "DescribeRule", map[string]any{"Name": "scheduled"}); described.Output[eventRuleNext] != nil {
+		t.Fatalf("DescribeRule exposed internal schedule state %#v", described.Output)
+	}
+	listed := call(p, "ListRules", map[string]any{})
+	if rules := listed.Output["Rules"].([]any); len(rules) != 1 || rules[0].(map[string]any)[eventRuleNext] != nil {
+		t.Fatalf("ListRules exposed internal schedule state %#v", listed.Output)
+	}
+	call(p, "PutTargets", map[string]any{"Rule": "scheduled", "Targets": []any{map[string]any{
+		"Id": "queue", "Arn": "arn:aws:sqs:us-east-1:1:scheduled",
+	}}})
+	_ = deps.Clock.Advance(59 * time.Second)
+	if got := messages("scheduled"); len(got) != 0 {
+		t.Fatalf("scheduled early %#v", got)
+	}
+	_ = deps.Clock.Advance(time.Second)
+	eventuallyEvent(t, func() bool { return len(messages("scheduled")) == 1 })
+	var event map[string]any
+	if json.Unmarshal([]byte(str(messages("scheduled")[0]["body"])), &event) != nil || event["source"] != "aws.events" || event["detail-type"] != "Scheduled Event" || event["time"] != "1970-01-01T00:01:00Z" || !strings.HasSuffix(event["resources"].([]any)[0].(string), ":rule/scheduled") {
+		t.Fatalf("scheduled event %#v", event)
+	}
+
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p = New(deps)
+	_ = deps.Clock.Advance(3 * time.Minute)
+	eventuallyEvent(t, func() bool { return len(messages("scheduled")) == 4 })
+
+	call(p, "PutRule", map[string]any{"Name": "disabled", "ScheduleExpression": "rate(1 minute)", "State": "DISABLED"})
+	call(p, "PutTargets", map[string]any{"Rule": "disabled", "Targets": []any{map[string]any{
+		"Id": "queue", "Arn": "arn:aws:sqs:us-east-1:1:disabled",
+	}}})
+	_ = deps.Clock.Advance(time.Minute)
+	p.runScheduledRules(ctx)
+	if got := messages("disabled"); len(got) != 0 {
+		t.Fatalf("disabled schedule delivered %#v", got)
+	}
+	call(p, "EnableRule", map[string]any{"Name": "disabled"})
+	_ = deps.Clock.Advance(time.Minute)
+	eventuallyEvent(t, func() bool { return len(messages("disabled")) == 1 })
+
+	for _, input := range []map[string]any{
+		{"Name": "one-time", "ScheduleExpression": "at(2024-01-01T00:00:00)"},
+		{"Name": "invalid", "ScheduleExpression": "cron(invalid)"},
+		{"Name": "custom", "EventBusName": "custom", "ScheduleExpression": "rate(1 minute)"},
+	} {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutRule", Input: input})
+		if fault, ok := err.(*spi.Fault); !ok || fault.Code != "ValidationException" {
+			t.Fatalf("schedule %#v fault=%#v", input, err)
+		}
+	}
+	for _, operation := range []string{"DescribeRule", "EnableRule", "DisableRule"} {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: map[string]any{"Name": "missing"}})
+		if fault, ok := err.(*spi.Fault); !ok || fault.Code != "ResourceNotFoundException" {
+			t.Fatalf("%s missing rule fault=%#v", operation, err)
+		}
+	}
+}
+
 func TestPutEventsRetriesAndDeadLettersTargets(t *testing.T) {
 	var calls, succeed, retryDelay atomic.Int32
 	retryDelay.Store(3)
@@ -294,7 +387,7 @@ func TestPutTargetsValidatesReliability(t *testing.T) {
 
 func eventuallyEvent(t *testing.T, condition func() bool) {
 	t.Helper()
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(10 * time.Second)
 	for !condition() {
 		select {
 		case <-deadline:

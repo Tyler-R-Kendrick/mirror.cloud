@@ -15,6 +15,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
@@ -255,6 +256,96 @@ func TestPipesKinesisPartialBatchCheckpoint(t *testing.T) {
 	invoke(t, function, id, "UpdateFunctionCode", map[string]any{"FunctionName": "kinesis-partial", "ZipFile": lambdaCode(success)["ZipFile"]})
 	invoke(t, p, id, "StartPipe", map[string]any{"Name": "partial-kinesis"})
 	eventually(t, func() bool { return position() == "partial|2" })
+}
+
+func TestPipesDynamoDBStreamDeliveryAndCheckpoint(t *testing.T) {
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer p.Close()
+	database, queue := dynamodb.New(deps), sqs.New(deps)
+	created := invoke(t, database, id, "CreateTable", map[string]any{
+		"TableName": "Events", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}},
+		"StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_AND_OLD_IMAGES"},
+	})
+	streamARN := stringValue(created.Output["TableDescription"].(map[string]any)["LatestStreamArn"])
+	invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": "ddb-target"})
+	invoke(t, database, id, "PutItem", map[string]any{"TableName": "Events", "Item": map[string]any{"id": map[string]any{"S": "old"}}})
+
+	input := pipeInput("dynamodb", "unused", "ddb-target")
+	input["Source"] = streamARN
+	input["SourceParameters"] = map[string]any{"DynamoDBStreamParameters": map[string]any{"StartingPosition": "LATEST", "BatchSize": 2}}
+	invoke(t, p, id, "CreatePipe", input)
+	checkpoint := deps.Store.Scope(id.Account, id.Region).Collection("pipecheckpoint")
+	eventually(t, func() bool {
+		_, ok, _ := checkpoint.Get(context.Background(), "dynamodb")
+		return ok
+	})
+	invoke(t, database, id, "PutItem", map[string]any{"TableName": "Events", "Item": map[string]any{"id": map[string]any{"S": "new"}, "value": map[string]any{"N": "2"}}})
+	eventually(t, func() bool { return len(storedMessages(t, deps, id, "ddb-target")) == 1 })
+
+	var event map[string]any
+	if err := json.Unmarshal([]byte(storedMessages(t, deps, id, "ddb-target")[0]["body"].(string)), &event); err != nil {
+		t.Fatal(err)
+	}
+	detail := event["dynamodb"].(map[string]any)
+	if event["eventSource"] != "aws:dynamodb" || event["eventVersion"] != "1.0" || event["eventSourceARN"] != strings.Split(streamARN, "/stream/")[0] || event["eventName"] != "INSERT" || detail["SequenceNumber"] != "000000000000002" {
+		t.Fatalf("DynamoDB stream event %#v", event)
+	}
+	p.drain(context.Background())
+	if got := len(storedMessages(t, deps, id, "ddb-target")); got != 1 {
+		t.Fatalf("checkpoint redelivered %d records", got)
+	}
+	assertFault(t, p, id, "UpdatePipe", map[string]any{"Name": "dynamodb", "Source": strings.Replace(streamARN, "Events", "Other", 1)}, "ValidationException")
+
+	bad := pipeInput("bad-dynamodb", "unused", "ddb-target")
+	bad["Source"] = streamARN
+	bad["SourceParameters"] = map[string]any{"DynamoDBStreamParameters": map[string]any{"StartingPosition": "AT_TIMESTAMP"}}
+	assertFault(t, p, id, "CreatePipe", bad, "ValidationException")
+	bad["SourceParameters"] = map[string]any{"DynamoDBStreamParameters": map[string]any{"StartingPosition": "TRIM_HORIZON", "BatchSize": 10001}}
+	assertFault(t, p, id, "CreatePipe", bad, "ValidationException")
+}
+
+func TestPipesDynamoDBPartialBatchCheckpoint(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer p.Close()
+	database, function := dynamodb.New(deps), lambda.New(deps)
+	created := invoke(t, database, id, "CreateTable", map[string]any{
+		"TableName": "Partial", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}},
+		"StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_IMAGE"},
+	})
+	for _, key := range []string{"done", "retry"} {
+		invoke(t, database, id, "PutItem", map[string]any{"TableName": "Partial", "Item": map[string]any{"id": map[string]any{"S": key}}})
+	}
+	partial := "def lambda_handler(event, context):\n    return {'batchItemFailures': [{'itemIdentifier': event[-1]['eventID']}]}\n"
+	invoke(t, function, id, "CreateFunction", map[string]any{
+		"FunctionName": "ddb-partial", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": lambdaCode(partial),
+	})
+	input := pipeInput("partial-dynamodb", "unused", "unused")
+	input["Source"] = created.Output["TableDescription"].(map[string]any)["LatestStreamArn"]
+	input["Target"] = "arn:aws:lambda:us-east-1:123456789012:function:ddb-partial"
+	input["DesiredState"] = "STOPPED"
+	input["SourceParameters"] = map[string]any{"DynamoDBStreamParameters": map[string]any{"StartingPosition": "TRIM_HORIZON", "BatchSize": 2}}
+	invoke(t, p, id, "CreatePipe", input)
+	checkpoint := deps.Store.Scope(id.Account, id.Region).Collection("pipecheckpoint")
+	position := func() string {
+		raw, _, _ := checkpoint.Get(context.Background(), "partial-dynamodb")
+		decoded, _ := base64.StdEncoding.DecodeString(string(raw))
+		return string(decoded)
+	}
+	invoke(t, p, id, "StartPipe", map[string]any{"Name": "partial-dynamodb"})
+	eventually(t, func() bool { return position() == "Partial|2" })
+	invoke(t, p, id, "StopPipe", map[string]any{"Name": "partial-dynamodb"})
+
+	success := "def lambda_handler(event, context):\n    return {}\n"
+	invoke(t, function, id, "UpdateFunctionCode", map[string]any{"FunctionName": "ddb-partial", "ZipFile": lambdaCode(success)["ZipFile"]})
+	invoke(t, p, id, "StartPipe", map[string]any{"Name": "partial-dynamodb"})
+	eventually(t, func() bool { return position() == "Partial|3" })
 }
 
 func TestPipesControlPlaneValidationUpdatesAndTags(t *testing.T) {

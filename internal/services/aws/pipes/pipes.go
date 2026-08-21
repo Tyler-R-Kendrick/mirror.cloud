@@ -14,6 +14,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
@@ -44,7 +45,7 @@ func New(d spi.Deps) *Pack {
 		close(p.done)
 		return p
 	}
-	for _, topic := range []string{"sqs", "kinesis"} {
+	for _, topic := range []string{"sqs", "kinesis", "dynamodb-stream"} {
 		p.cancels = append(p.cancels, d.Bus.Subscribe(topic, func(context.Context, []byte) { p.notify() }))
 	}
 	go p.loop()
@@ -136,6 +137,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		if !ok {
 			return nil, notFound()
+		}
+		if source, exists := req.Input["Source"]; exists && stringValue(source) != stringValue(rec["Source"]) {
+			return nil, validation("Source cannot be updated.")
 		}
 		for key, value := range req.Input {
 			if key != "Name" {
@@ -290,6 +294,8 @@ func (p *Pack) drain(ctx context.Context) bool {
 				more = p.drainSQS(ctx, identity, pipe, source) || more
 			case strings.Contains(source, ":kinesis:"):
 				more = p.drainKinesis(ctx, identity, pipe, source) || more
+			case strings.Contains(source, ":dynamodb:") && strings.Contains(source, "/stream/"):
+				more = p.drainDynamoDB(ctx, identity, pipe, source) || more
 			}
 		}
 	}
@@ -312,14 +318,33 @@ func (p *Pack) drainSQS(ctx context.Context, identity spi.Identity, pipe map[str
 
 func (p *Pack) drainKinesis(ctx context.Context, identity spi.Identity, pipe map[string]any, source string) bool {
 	stream := source[strings.LastIndex(source, "/")+1:]
-	request := &spi.Request{Identity: identity, Input: map[string]any{"StreamName": stream, "ShardId": "shardId-000000000000"}}
+	return p.drainStream(ctx, identity, pipe, kinesis.New(p.deps), map[string]any{
+		"StreamName": stream, "ShardId": "shardId-000000000000",
+	}, "KinesisStreamParameters", "StartingSequenceNumber", func(record map[string]any) string {
+		return stringValue(record["SequenceNumber"])
+	}, func(record map[string]any) map[string]any {
+		return kinesisRecord(record, source, identity.Region, stringValue(pipe["RoleArn"]))
+	})
+}
+
+func (p *Pack) drainDynamoDB(ctx context.Context, identity spi.Identity, pipe map[string]any, source string) bool {
+	return p.drainStream(ctx, identity, pipe, dynamodb.New(p.deps), map[string]any{
+		"StreamArn": source, "ShardId": "shardId-000000000000",
+	}, "DynamoDBStreamParameters", "SequenceNumber", func(record map[string]any) string {
+		return stringValue(record["dynamodb"].(map[string]any)["SequenceNumber"])
+	}, func(record map[string]any) map[string]any {
+		return dynamodbRecord(record, source)
+	})
+}
+
+func (p *Pack) drainStream(ctx context.Context, identity spi.Identity, pipe map[string]any, client spi.BehaviorPack, iteratorInput map[string]any, parameterName, sequenceField string, sequence func(map[string]any) string, eventFor func(map[string]any) map[string]any) bool {
+	request := &spi.Request{Identity: identity, Input: iteratorInput}
 	checkpoint := p.deps.Store.Scope(identity.Account, identity.Region).Collection("pipecheckpoint")
 	iterator, ok, err := checkpoint.Get(ctx, stringValue(pipe["Name"]))
 	if err != nil {
 		return false
 	}
-	streamParameters := sourceParameters(pipe, "KinesisStreamParameters")
-	client := kinesis.New(p.deps)
+	streamParameters := sourceParameters(pipe, parameterName)
 	if !ok {
 		request.Operation = "GetShardIterator"
 		request.Input["ShardIteratorType"] = stringValue(streamParameters["StartingPosition"])
@@ -334,7 +359,7 @@ func (p *Pack) drainKinesis(ctx context.Context, identity spi.Identity, pipe map
 		}
 	}
 	request.Operation = "GetRecords"
-	request.Input = map[string]any{"ShardIterator": string(iterator), "Limit": kinesisBatchSize(pipe)}
+	request.Input = map[string]any{"ShardIterator": string(iterator), "Limit": streamBatchSize(pipe, parameterName)}
 	response, err := client.Invoke(ctx, request)
 	if err != nil {
 		return false
@@ -347,7 +372,7 @@ func (p *Pack) drainKinesis(ctx context.Context, identity spi.Identity, pipe map
 	events, ids := make([]any, len(records)), make([]string, len(records))
 	for i, raw := range records {
 		record, _ := raw.(map[string]any)
-		event := kinesisRecord(record, source, identity.Region, stringValue(pipe["RoleArn"]))
+		event := eventFor(record)
 		events[i], ids[i] = event, stringValue(event["eventID"])
 	}
 	succeeded := p.processRecords(ctx, identity, pipe, events, ids)
@@ -356,7 +381,8 @@ func (p *Pack) drainKinesis(ctx context.Context, identity spi.Identity, pipe map
 			continue
 		}
 		request.Operation = "GetShardIterator"
-		request.Input = map[string]any{"StreamName": stream, "ShardId": "shardId-000000000000", "ShardIteratorType": "AT_SEQUENCE_NUMBER", "StartingSequenceNumber": stringValue(records[i].(map[string]any)["SequenceNumber"])}
+		request.Input = clone(iteratorInput)
+		request.Input["ShardIteratorType"], request.Input[sequenceField] = "AT_SEQUENCE_NUMBER", sequence(records[i].(map[string]any))
 		if retry, invokeErr := client.Invoke(ctx, request); invokeErr == nil {
 			_ = checkpoint.Put(ctx, stringValue(pipe["Name"]), []byte(stringValue(retry.Output["ShardIterator"])))
 		}
@@ -365,7 +391,7 @@ func (p *Pack) drainKinesis(ctx context.Context, identity spi.Identity, pipe map
 	if checkpoint.Put(ctx, stringValue(pipe["Name"]), []byte(stringValue(response.Output["NextShardIterator"]))) != nil {
 		return false
 	}
-	return len(records) == kinesisBatchSize(pipe)
+	return len(records) == streamBatchSize(pipe, parameterName)
 }
 
 func (p *Pack) processBatch(ctx context.Context, identity spi.Identity, pipe map[string]any, source, queue string, messages []any) map[string]bool {
@@ -644,6 +670,13 @@ func kinesisRecord(record map[string]any, source, region, role string) map[strin
 	}
 }
 
+func dynamodbRecord(record map[string]any, source string) map[string]any {
+	event := clone(record)
+	event["eventVersion"] = "1.0"
+	event["eventSourceARN"] = strings.Split(source, "/stream/")[0]
+	return event
+}
+
 func matchesFilters(raw any, event map[string]any) bool {
 	criteria, _ := raw.(map[string]any)
 	filters, _ := criteria["Filters"].([]any)
@@ -677,8 +710,8 @@ func sourceBatchSize(pipe map[string]any) int {
 	return size
 }
 
-func kinesisBatchSize(pipe map[string]any) int {
-	size := intValue(sourceParameters(pipe, "KinesisStreamParameters")["BatchSize"])
+func streamBatchSize(pipe map[string]any, parameterName string) int {
+	size := intValue(sourceParameters(pipe, parameterName)["BatchSize"])
 	if size < 1 {
 		return 100
 	}
@@ -695,18 +728,25 @@ func sourceParameters(pipe map[string]any, name string) map[string]any {
 }
 
 func validateSource(pipe map[string]any) error {
-	if !strings.Contains(stringValue(pipe["Source"]), ":kinesis:") {
+	source := stringValue(pipe["Source"])
+	parameterName, positions := "", map[string]bool{}
+	switch {
+	case strings.Contains(source, ":kinesis:"):
+		parameterName, positions = "KinesisStreamParameters", map[string]bool{"TRIM_HORIZON": true, "LATEST": true, "AT_TIMESTAMP": true}
+	case strings.Contains(source, ":dynamodb:") && strings.Contains(source, "/stream/"):
+		parameterName, positions = "DynamoDBStreamParameters", map[string]bool{"TRIM_HORIZON": true, "LATEST": true}
+	default:
 		return nil
 	}
-	parameters := sourceParameters(pipe, "KinesisStreamParameters")
+	parameters := sourceParameters(pipe, parameterName)
 	position := stringValue(parameters["StartingPosition"])
-	if position != "TRIM_HORIZON" && position != "LATEST" && position != "AT_TIMESTAMP" {
-		return validation("KinesisStreamParameters.StartingPosition must be TRIM_HORIZON, LATEST, or AT_TIMESTAMP.")
+	if !positions[position] {
+		return validation(parameterName + ".StartingPosition is invalid.")
 	}
 	if _, exists := parameters["BatchSize"]; exists {
 		size := intValue(parameters["BatchSize"])
 		if size < 1 || size > 10000 {
-			return validation("KinesisStreamParameters.BatchSize must be between 1 and 10000.")
+			return validation(parameterName + ".BatchSize must be between 1 and 10000.")
 		}
 	}
 	return nil

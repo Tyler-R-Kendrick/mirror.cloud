@@ -280,7 +280,7 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 
 func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body string) {
 	name := endpoint
-	if i := strings.LastIndex(endpoint, "/"); i >= 0 {
+	if i := strings.LastIndexAny(endpoint, "/:"); i >= 0 {
 		name = endpoint[i+1:]
 	}
 	sum := md5.Sum([]byte(body))

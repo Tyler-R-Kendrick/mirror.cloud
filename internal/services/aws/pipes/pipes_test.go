@@ -355,7 +355,7 @@ func TestPipesStepFunctionsTarget(t *testing.T) {
 	p := New(deps)
 	defer p.Close()
 	queue, machine := sqs.New(deps), states.New(deps)
-	for _, name := range []string{"states-source", "failed-states-source"} {
+	for _, name := range []string{"states-source", "async-states-source", "failed-states-source"} {
 		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})
 	}
 	created := invoke(t, machine, id, "CreateStateMachine", map[string]any{
@@ -377,6 +377,16 @@ func TestPipesStepFunctionsTarget(t *testing.T) {
 	if len(executions) != 1 || !strings.Contains(stringValue(executions[0].(map[string]any)["input"]), `"value":1`) {
 		t.Fatalf("state executions %#v", executions)
 	}
+	standard := invoke(t, machine, id, "CreateStateMachine", map[string]any{
+		"name": "pipe-async", "roleArn": "arn:aws:iam::123456789012:role/states",
+		"definition": `{"StartAt":"Done","States":{"Done":{"Type":"Pass","End":true}}}`,
+	})
+	async := pipeInput("async-states", "async-states-source", "unused")
+	async["Target"] = standard.Output["stateMachineArn"]
+	async["TargetParameters"] = map[string]any{"StateMachineParameters": map[string]any{"InvocationType": "FIRE_AND_FORGET"}}
+	invoke(t, p, id, "CreatePipe", async)
+	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "async-states-source", "MessageBody": "async"})
+	eventually(t, func() bool { return len(storedMessages(t, deps, id, "async-states-source")) == 0 })
 
 	failed := invoke(t, machine, id, "CreateStateMachine", map[string]any{
 		"name": "pipe-failure", "type": "EXPRESS", "roleArn": "arn:aws:iam::123456789012:role/states",

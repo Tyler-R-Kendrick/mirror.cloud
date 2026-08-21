@@ -717,7 +717,7 @@ func Bundle() *model.Bundle {
 	}
 	states := []string{
 		"CreateStateMachine", "UpdateStateMachine", "DeleteStateMachine", "DescribeStateMachine", "ListStateMachines",
-		"StartExecution", "StopExecution", "DescribeExecution", "ListExecutions", "GetExecutionHistory",
+		"StartExecution", "StartSyncExecution", "StopExecution", "DescribeExecution", "ListExecutions", "GetExecutionHistory",
 		"CreateActivity", "DeleteActivity", "DescribeActivity", "ListActivities", "GetActivityTask",
 		"SendTaskSuccess", "SendTaskFailure", "SendTaskHeartbeat",
 		"TagResource", "UntagResource", "ListTagsForResource",

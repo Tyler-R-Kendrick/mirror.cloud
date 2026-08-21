@@ -1,6 +1,7 @@
 package states
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
@@ -21,6 +23,23 @@ func TestStatesHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
 	if n := len(p.Operations()); n != 22 {
 		t.Fatalf("states Operations() %d want 22", n)
+	}
+}
+
+func TestStartSyncRejectsStandardWorkflow(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateStateMachine", Input: map[string]any{
+		"name": "standard", "definition": `{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`, "roleArn": "arn:aws:iam::1:role/states",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "StartSyncExecution", Input: map[string]any{"stateMachineArn": created.Output["stateMachineArn"]}})
+	fault, ok := err.(*spi.Fault)
+	if !ok || fault.Code != "StateMachineTypeNotSupported" {
+		t.Fatalf("sync standard error %#v", err)
 	}
 }
 

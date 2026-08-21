@@ -2389,6 +2389,7 @@
       "DescribeStateMachine",
       "ListStateMachines",
       "StartExecution",
+      "StartSyncExecution",
       "StopExecution",
       "DescribeExecution",
       "ListExecutions",

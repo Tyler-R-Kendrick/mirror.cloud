@@ -277,7 +277,7 @@ func (p *Pack) scheduleRecord(input map[string]any, name, group, arn string) (ma
 	rec := clone(input)
 	rec["Name"], rec["GroupName"], rec["Arn"], rec["State"] = name, group, arn, state
 	scheduled := expr.first(p.deps.Clock.Now(), start)
-	if expr.at.IsZero() && hasEnd && scheduled.After(end) {
+	if !expr.OneTime() && hasEnd && scheduled.After(end) {
 		scheduled = time.Time{}
 	}
 	rec[nextInvocation] = formatTime(p.withWindow(rec, arn, scheduled))
@@ -359,7 +359,7 @@ func (p *Pack) runDue(ctx context.Context) time.Time {
 					continue
 				}
 				scheduled = expr.after(now)
-				if end, ok := inputTime(rec["EndDate"]); expr.at.IsZero() && ok && scheduled.After(end) {
+				if end, ok := inputTime(rec["EndDate"]); !expr.OneTime() && ok && scheduled.After(end) {
 					scheduled = time.Time{}
 				}
 				next = p.withWindow(rec, stringValue(rec["Arn"]), scheduled)

@@ -417,7 +417,7 @@ func TestPipesStepFunctionsEnrichment(t *testing.T) {
 	}
 	created := invoke(t, machine, id, "CreateStateMachine", map[string]any{
 		"name": "pipe-enrichment", "type": "EXPRESS", "roleArn": "arn:aws:iam::123456789012:role/states",
-		"definition": `{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","End":true}}}`,
+		"definition": `{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","Result":[{"body":{"value":6},"id":"enriched"}],"End":true}}}`,
 	})
 	input := pipeInput("states-enrichment", "enrich-states-source", "enrich-states-target")
 	input["Enrichment"] = created.Output["stateMachineArn"]
@@ -432,8 +432,12 @@ func TestPipesStepFunctionsEnrichment(t *testing.T) {
 	if err := json.Unmarshal([]byte(storedMessages(t, deps, id, "enrich-states-target")[0]["body"].(string)), &enriched); err != nil {
 		t.Fatal(err)
 	}
-	if enriched["value"] != float64(3) || enriched["id"] == "" {
+	if enriched["value"] != float64(6) || enriched["id"] != "enriched" {
 		t.Fatalf("enriched output %#v", enriched)
+	}
+	executions := invoke(t, machine, id, "ListExecutions", map[string]any{}).Output["executions"].([]any)
+	if len(executions) != 1 || !strings.Contains(stringValue(executions[0].(map[string]any)["input"]), `"value":3`) {
+		t.Fatalf("enrichment input %#v", executions)
 	}
 
 	failed := invoke(t, machine, id, "CreateStateMachine", map[string]any{

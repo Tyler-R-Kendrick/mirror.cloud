@@ -88,6 +88,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if err := validateSource(req.Input); err != nil {
 			return nil, err
 		}
+		if err := validateTarget(req.Input); err != nil {
+			return nil, err
+		}
 		if _, ok, err := p.col(req, "pipe").Get(ctx, name); err != nil {
 			return nil, err
 		} else if ok {
@@ -153,6 +156,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			rec["CurrentState"] = state
 		}
 		if err := validateSource(rec); err != nil {
+			return nil, err
+		}
+		if err := validateTarget(rec); err != nil {
 			return nil, err
 		}
 		if err := putRecord(ctx, p.col(req, "pipe"), name, rec); err != nil {
@@ -427,6 +433,9 @@ func (p *Pack) processRecords(ctx context.Context, identity spi.Identity, pipe m
 	if parameters, ok := pipe["TargetParameters"].(map[string]any); ok {
 		if sqsParameters, ok := parameters["SqsQueueParameters"].(map[string]any); ok {
 			config["SqsParameters"] = sqsParameters
+		}
+		if stateMachineParameters, ok := parameters["StateMachineParameters"].(map[string]any); ok {
+			config["StateMachineParameters"] = stateMachineParameters
 		}
 	}
 	payloads := make([][]byte, len(matchedRecords))
@@ -748,6 +757,19 @@ func validateSource(pipe map[string]any) error {
 		if size < 1 || size > 10000 {
 			return validation(parameterName + ".BatchSize must be between 1 and 10000.")
 		}
+	}
+	return nil
+}
+
+func validateTarget(pipe map[string]any) error {
+	if !strings.Contains(stringValue(pipe["Target"]), ":states:") {
+		return nil
+	}
+	parameters, _ := pipe["TargetParameters"].(map[string]any)
+	stateMachine, _ := parameters["StateMachineParameters"].(map[string]any)
+	invocation := stringValue(stateMachine["InvocationType"])
+	if invocation != "" && invocation != "REQUEST_RESPONSE" && invocation != "FIRE_AND_FORGET" {
+		return validation("StateMachineParameters.InvocationType must be REQUEST_RESPONSE or FIRE_AND_FORGET.")
 	}
 	return nil
 }

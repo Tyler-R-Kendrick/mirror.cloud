@@ -14,6 +14,7 @@ import (
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -84,6 +85,32 @@ func TestPutEventsReportsInvalidEntries(t *testing.T) {
 	}
 	if resp.Output["FailedEntryCount"] != 2 || len(resp.Output["Entries"].([]any)) != 2 {
 		t.Fatalf("invalid entries %#v", resp.Output)
+	}
+}
+
+func TestDeliverTargetStepFunctions(t *testing.T) {
+	deps := spitest.Deps(t)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	machine := states.New(deps)
+	created, err := machine.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateStateMachine", Input: map[string]any{
+		"name": "target", "type": "EXPRESS", "roleArn": "arn:aws:iam::1:role/states",
+		"definition": `{"StartAt":"Done","States":{"Done":{"Type":"Pass","End":true}}}`,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arn := str(created.Output["stateMachineArn"])
+	for _, invocation := range []string{"REQUEST_RESPONSE", "FIRE_AND_FORGET"} {
+		if err := DeliverTarget(context.Background(), deps, id, arn, map[string]any{"StateMachineParameters": map[string]any{"InvocationType": invocation}}, []byte(`{"value":1}`)); err != nil {
+			t.Fatalf("%s: %v", invocation, err)
+		}
+	}
+	executions, err := machine.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "ListExecutions", Input: map[string]any{}})
+	if err != nil || len(executions.Output["executions"].([]any)) != 2 {
+		t.Fatalf("executions %#v err=%v", executions, err)
+	}
+	if err := DeliverTarget(context.Background(), deps, id, arn, map[string]any{"StateMachineParameters": map[string]any{"InvocationType": "INVALID"}}, []byte(`{}`)); err == nil {
+		t.Fatal("invalid invocation type succeeded")
 	}
 }
 

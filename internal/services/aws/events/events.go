@@ -15,6 +15,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -339,6 +340,23 @@ func DeliverTarget(ctx context.Context, deps spi.Deps, identity spi.Identity, ar
 		in["InvocationType"] = "Event"
 		_, err := lambda.New(deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Invoke", Input: in, Body: io.NopCloser(bytes.NewReader(payload))})
 		return err
+	case strings.Contains(arn, ":states:"):
+		parameters, _ := target["StateMachineParameters"].(map[string]any)
+		invocation := str(parameters["InvocationType"])
+		operation := "StartSyncExecution"
+		if invocation == "FIRE_AND_FORGET" {
+			operation = "StartExecution"
+		} else if invocation != "" && invocation != "REQUEST_RESPONSE" {
+			return &spi.Fault{Code: "ValidationException", Message: "Invalid Step Functions invocation type.", HTTPStatus: 400, Fault: "client"}
+		}
+		response, err := states.New(deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: operation, Input: map[string]any{"stateMachineArn": arn, "input": string(payload)}})
+		if err != nil {
+			return err
+		}
+		if operation == "StartSyncExecution" && str(response.Output["status"]) != "SUCCEEDED" {
+			return &spi.Fault{Code: "TargetInvocationFailed", Message: str(response.Output["cause"]), HTTPStatus: 500, Fault: "server"}
+		}
+		return nil
 	}
 	return &spi.Fault{Code: "ValidationException", Message: "Unsupported target ARN.", HTTPStatus: 400, Fault: "client"}
 }

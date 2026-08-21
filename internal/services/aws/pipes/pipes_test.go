@@ -19,6 +19,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -346,6 +347,53 @@ func TestPipesDynamoDBPartialBatchCheckpoint(t *testing.T) {
 	invoke(t, function, id, "UpdateFunctionCode", map[string]any{"FunctionName": "ddb-partial", "ZipFile": lambdaCode(success)["ZipFile"]})
 	invoke(t, p, id, "StartPipe", map[string]any{"Name": "partial-dynamodb"})
 	eventually(t, func() bool { return position() == "Partial|3" })
+}
+
+func TestPipesStepFunctionsTarget(t *testing.T) {
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer p.Close()
+	queue, machine := sqs.New(deps), states.New(deps)
+	for _, name := range []string{"states-source", "failed-states-source"} {
+		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})
+	}
+	created := invoke(t, machine, id, "CreateStateMachine", map[string]any{
+		"name": "pipe-target", "type": "EXPRESS", "roleArn": "arn:aws:iam::123456789012:role/states",
+		"definition": `{"StartAt":"Done","States":{"Done":{"Type":"Pass","End":true}}}`,
+	})
+	input := pipeInput("states", "states-source", "unused")
+	input["Target"] = created.Output["stateMachineArn"]
+	input["DesiredState"] = "STOPPED"
+	input["TargetParameters"] = map[string]any{
+		"InputTemplate":          `{"body":<$.body>}`,
+		"StateMachineParameters": map[string]any{"InvocationType": "REQUEST_RESPONSE"},
+	}
+	invoke(t, p, id, "CreatePipe", input)
+	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "states-source", "MessageBody": `{"value":1}`})
+	invoke(t, p, id, "StartPipe", map[string]any{"Name": "states"})
+	eventually(t, func() bool { return len(storedMessages(t, deps, id, "states-source")) == 0 })
+	executions := invoke(t, machine, id, "ListExecutions", map[string]any{}).Output["executions"].([]any)
+	if len(executions) != 1 || !strings.Contains(stringValue(executions[0].(map[string]any)["input"]), `"value":1`) {
+		t.Fatalf("state executions %#v", executions)
+	}
+
+	failed := invoke(t, machine, id, "CreateStateMachine", map[string]any{
+		"name": "pipe-failure", "type": "EXPRESS", "roleArn": "arn:aws:iam::123456789012:role/states",
+		"definition": `{"StartAt":"Failed","States":{"Failed":{"Type":"Fail","Error":"Nope","Cause":"retry"}}}`,
+	})
+	failing := pipeInput("failed-states", "failed-states-source", "unused")
+	failing["Target"] = failed.Output["stateMachineArn"]
+	invoke(t, p, id, "CreatePipe", failing)
+	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "failed-states-source", "MessageBody": "retry"})
+	eventually(t, func() bool {
+		messages := storedMessages(t, deps, id, "failed-states-source")
+		return len(messages) == 1 && messages[0]["receiveCount"] == float64(1)
+	})
+	invalid := pipeInput("invalid-states", "states-source", "unused")
+	invalid["Target"] = created.Output["stateMachineArn"]
+	invalid["TargetParameters"] = map[string]any{"StateMachineParameters": map[string]any{"InvocationType": "INVALID"}}
+	assertFault(t, p, id, "CreatePipe", invalid, "ValidationException")
 }
 
 func TestPipesControlPlaneValidationUpdatesAndTags(t *testing.T) {

@@ -102,6 +102,7 @@ func TestPipesSQSDeliveryStateAndFiltering(t *testing.T) {
 	for _, body := range []string{"one", "two"} {
 		invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "source", "MessageBody": body})
 	}
+	p.drain(context.Background())
 	if got := storedMessages(t, deps, id, "target"); len(got) != 0 {
 		t.Fatalf("stopped pipe delivered %d messages", len(got))
 	}

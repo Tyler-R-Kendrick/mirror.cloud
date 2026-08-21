@@ -277,6 +277,38 @@ func TestMutantsAreKilled(t *testing.T) {
 			pkg:  "./internal/services/aws/scheduler",
 			run:  "TestSchedulerFlexibleWindowRetryAndDLQ",
 		},
+		{
+			name: "pipes-run-stopped-pipe",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `stringValue(pipe["CurrentState"]) != "RUNNING"`,
+			new:  `stringValue(pipe["CurrentState"]) != "STOPPED"`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesSQSDeliveryStateAndFiltering",
+		},
+		{
+			name: "pipes-invert-filter-match",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `events.MatchEventPattern(first(filter, "Pattern"), filterEvent)`,
+			new:  `!events.MatchEventPattern(first(filter, "Pattern"), filterEvent)`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesSQSDeliveryStateAndFiltering",
+		},
+		{
+			name: "pipes-retain-successful-source-message",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  "for i, record := range records {\n\t\tpayload, _ := json.Marshal(record)\n\t\tif events.DeliverTarget(ctx, p.deps, identity, target, config, payload) == nil {",
+			new:  "for i, record := range records {\n\t\tpayload, _ := json.Marshal(record)\n\t\tif events.DeliverTarget(ctx, p.deps, identity, target, config, payload) != nil {",
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesSQSDeliveryStateAndFiltering",
+		},
+		{
+			name: "lambda-ignore-raw-array-payload",
+			file: filepath.Join("internal", "services", "aws", "lambda", "lambda.go"),
+			old:  "if req.Body != nil {",
+			new:  "if req.Body == nil {",
+			pkg:  "./internal/services/aws/lambda",
+			run:  "TestInvokeAcceptsRawArrayPayload",
+		},
 	}
 
 	for _, m := range mutants {

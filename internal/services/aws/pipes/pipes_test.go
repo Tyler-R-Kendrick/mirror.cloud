@@ -301,6 +301,75 @@ func TestPipesLambdaPartialBatchResponse(t *testing.T) {
 	}
 }
 
+func TestPipesLambdaEnrichment(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer p.Close()
+	queue := sqs.New(deps)
+	function := lambda.New(deps)
+	for _, name := range []string{"source", "target", "empty-source", "empty-target", "failed-source", "failed-target"} {
+		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})
+	}
+	enrich := "def lambda_handler(event, context):\n    return [{'messageId': item['messageId'], 'value': item['value'] * 2} for item in event]\n"
+	invoke(t, function, id, "CreateFunction", map[string]any{
+		"FunctionName": "enrich", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": lambdaCode(enrich),
+	})
+	input := pipeInput("enrich", "source", "target")
+	input["DesiredState"] = "STOPPED"
+	input["Enrichment"] = "arn:aws:lambda:us-east-1:123456789012:function:enrich"
+	input["EnrichmentParameters"] = map[string]any{"InputTemplate": `{"messageId":<$.messageId>,"value":<$.body.value>}`}
+	input["TargetParameters"] = map[string]any{"InputTemplate": `{"id":<$.messageId>,"value":<$.value>}`}
+	input["SourceParameters"] = map[string]any{"SqsQueueParameters": map[string]any{"BatchSize": 2}}
+	invoke(t, p, id, "CreatePipe", input)
+	for _, body := range []string{`{"value":1}`, `{"value":2}`} {
+		invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "source", "MessageBody": body})
+	}
+	invoke(t, p, id, "StartPipe", map[string]any{"Name": "enrich"})
+	eventually(t, func() bool {
+		return len(storedMessages(t, deps, id, "source")) == 0 && len(storedMessages(t, deps, id, "target")) == 2
+	})
+	values := map[float64]bool{}
+	for _, message := range storedMessages(t, deps, id, "target") {
+		var output map[string]any
+		if err := json.Unmarshal([]byte(message["body"].(string)), &output); err != nil {
+			t.Fatal(err)
+		}
+		values[output["value"].(float64)] = output["id"] != ""
+	}
+	if !values[2] || !values[4] {
+		t.Fatalf("enriched values %#v", values)
+	}
+
+	empty := "def lambda_handler(event, context):\n    return []\n"
+	invoke(t, function, id, "UpdateFunctionCode", map[string]any{"FunctionName": "enrich", "ZipFile": lambdaCode(empty)["ZipFile"]})
+	filtered := pipeInput("empty", "empty-source", "empty-target")
+	filtered["DesiredState"] = "STOPPED"
+	filtered["Enrichment"] = input["Enrichment"]
+	invoke(t, p, id, "CreatePipe", filtered)
+	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "empty-source", "MessageBody": "filtered"})
+	invoke(t, p, id, "StartPipe", map[string]any{"Name": "empty"})
+	eventually(t, func() bool { return len(storedMessages(t, deps, id, "empty-source")) == 0 })
+	if messages := storedMessages(t, deps, id, "empty-target"); len(messages) != 0 {
+		t.Fatalf("empty enrichment invoked target: %#v", messages)
+	}
+
+	failed := pipeInput("failed", "failed-source", "failed-target")
+	failed["Enrichment"] = "arn:aws:lambda:us-east-1:123456789012:function:missing"
+	invoke(t, p, id, "CreatePipe", failed)
+	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "failed-source", "MessageBody": "retry"})
+	eventually(t, func() bool {
+		messages := storedMessages(t, deps, id, "failed-source")
+		return len(messages) == 1 && messages[0]["receiveCount"] == float64(1)
+	})
+	if messages := storedMessages(t, deps, id, "failed-target"); len(messages) != 0 {
+		t.Fatalf("failed enrichment invoked target: %#v", messages)
+	}
+}
+
 func lambdaCode(source string) map[string]any {
 	return map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(source))}
 }

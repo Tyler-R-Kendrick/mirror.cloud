@@ -319,19 +319,24 @@ func (p *Pack) processBatch(ctx context.Context, identity spi.Identity, pipe map
 	}
 	payloads := make([][]byte, len(records))
 	for i, record := range records {
-		payloads[i] = p.targetPayload(pipe, record.(map[string]any))
+		payloads[i] = p.inputPayload(pipe, "EnrichmentParameters", record)
+	}
+	deliveryEvents, enriched, ok := p.enrich(ctx, identity, pipe, payloads, records)
+	if !ok {
+		return
+	}
+	if len(deliveryEvents) == 0 {
+		for _, message := range matched {
+			p.deleteMessage(ctx, identity, queue, stringValue(message["ReceiptHandle"]))
+		}
+		return
+	}
+	payloads = make([][]byte, len(deliveryEvents))
+	for i, event := range deliveryEvents {
+		payloads[i] = p.inputPayload(pipe, "TargetParameters", event)
 	}
 	if strings.Contains(target, ":lambda:") {
-		batch := make([]json.RawMessage, len(payloads))
-		for i, payload := range payloads {
-			if json.Valid(payload) {
-				batch[i] = payload
-			} else {
-				batch[i], _ = json.Marshal(string(payload))
-			}
-		}
-		payload, _ := json.Marshal(batch)
-		failed, ok := p.invokeLambda(ctx, identity, target, payload, matched)
+		failed, ok := p.invokeLambda(ctx, identity, target, batchPayload(payloads), matched)
 		if !ok {
 			return
 		}
@@ -342,25 +347,67 @@ func (p *Pack) processBatch(ctx context.Context, identity spi.Identity, pipe map
 		}
 		return
 	}
+	allDelivered := true
 	for i, payload := range payloads {
 		if events.DeliverTarget(ctx, p.deps, identity, target, config, payload) == nil {
-			p.deleteMessage(ctx, identity, queue, stringValue(matched[i]["ReceiptHandle"]))
+			if !enriched {
+				p.deleteMessage(ctx, identity, queue, stringValue(matched[i]["ReceiptHandle"]))
+			}
+		} else {
+			allDelivered = false
+		}
+	}
+	if enriched && allDelivered {
+		for _, message := range matched {
+			p.deleteMessage(ctx, identity, queue, stringValue(message["ReceiptHandle"]))
 		}
 	}
 }
 
-func (p *Pack) targetPayload(pipe, record map[string]any) []byte {
-	parameters, _ := pipe["TargetParameters"].(map[string]any)
+func (p *Pack) enrich(ctx context.Context, identity spi.Identity, pipe map[string]any, inputs [][]byte, fallback []any) ([]any, bool, bool) {
+	arn := stringValue(pipe["Enrichment"])
+	if arn == "" {
+		return fallback, false, true
+	}
+	if !strings.Contains(arn, ":lambda:") {
+		return nil, true, false
+	}
+	raw, err := p.invokeLambdaPayload(ctx, identity, arn, batchPayload(inputs))
+	if err != nil {
+		return nil, true, false
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || bytes.Equal(trimmed, []byte(`""`)) || bytes.Equal(trimmed, []byte("{}")) || bytes.Equal(trimmed, []byte("[]")) {
+		return nil, true, true
+	}
+	var output any
+	if json.Unmarshal(trimmed, &output) != nil {
+		return []any{[]byte(trimmed)}, true, true
+	}
+	if batch, ok := output.([]any); ok {
+		return batch, true, true
+	}
+	return []any{output}, true, true
+}
+
+func (p *Pack) inputPayload(pipe map[string]any, parameterName string, event any) []byte {
+	parameters, _ := pipe[parameterName].(map[string]any)
 	template := stringValue(parameters["InputTemplate"])
 	if template == "" {
-		payload, _ := json.Marshal(record)
+		if payload, ok := event.([]byte); ok {
+			return payload
+		}
+		payload, _ := json.Marshal(event)
 		return payload
 	}
-	eventJSON := clone(record)
-	if body := stringValue(record["body"]); json.Valid([]byte(body)) {
-		var decoded any
-		_ = json.Unmarshal([]byte(body), &decoded)
-		eventJSON["body"] = decoded
+	eventJSON := event
+	if record, ok := event.(map[string]any); ok {
+		eventJSON = clone(record)
+		if body := stringValue(record["body"]); json.Valid([]byte(body)) {
+			var decoded any
+			_ = json.Unmarshal([]byte(body), &decoded)
+			eventJSON.(map[string]any)["body"] = decoded
+		}
 	}
 	for {
 		start := strings.IndexByte(template, '<')
@@ -388,7 +435,7 @@ func (p *Pack) targetPayload(pipe, record map[string]any) []byte {
 		case "aws.pipes.event.ingestion-time":
 			value = p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)
 		case "aws.pipes.event":
-			value = record
+			value = event
 		case "aws.pipes.event.json":
 			value = eventJSON
 		default:
@@ -409,21 +456,11 @@ func (p *Pack) targetPayload(pipe, record map[string]any) []byte {
 }
 
 func (p *Pack) invokeLambda(ctx context.Context, identity spi.Identity, arn string, payload []byte, messages []map[string]any) (map[string]bool, bool) {
-	_, name, ok := strings.Cut(arn, ":function:")
-	if !ok {
-		return nil, false
-	}
-	if index := strings.IndexByte(name, ':'); index >= 0 {
-		name = name[:index]
-	}
-	response, err := lambda.New(p.deps).Invoke(ctx, &spi.Request{
-		Identity: identity, Operation: "Invoke", Input: map[string]any{"FunctionName": name}, Body: io.NopCloser(bytes.NewReader(payload)),
-	})
+	raw, err := p.invokeLambdaPayload(ctx, identity, arn, payload)
 	if err != nil {
 		return nil, false
 	}
 	var output map[string]any
-	raw, _ := response.Output["Payload"].(json.RawMessage)
 	if json.Unmarshal(raw, &output) != nil || output["batchItemFailures"] == nil {
 		return map[string]bool{}, true
 	}
@@ -445,6 +482,37 @@ func (p *Pack) invokeLambda(ctx context.Context, identity spi.Identity, arn stri
 		failed[id] = true
 	}
 	return failed, true
+}
+
+func (p *Pack) invokeLambdaPayload(ctx context.Context, identity spi.Identity, arn string, payload []byte) (json.RawMessage, error) {
+	_, name, ok := strings.Cut(arn, ":function:")
+	if !ok {
+		return nil, validation("Invalid Lambda ARN.")
+	}
+	if index := strings.IndexByte(name, ':'); index >= 0 {
+		name = name[:index]
+	}
+	response, err := lambda.New(p.deps).Invoke(ctx, &spi.Request{
+		Identity: identity, Operation: "Invoke", Input: map[string]any{"FunctionName": name}, Body: io.NopCloser(bytes.NewReader(payload)),
+	})
+	if err != nil {
+		return nil, err
+	}
+	raw, _ := response.Output["Payload"].(json.RawMessage)
+	return raw, nil
+}
+
+func batchPayload(payloads [][]byte) []byte {
+	batch := make([]json.RawMessage, len(payloads))
+	for i, payload := range payloads {
+		if json.Valid(payload) {
+			batch[i] = payload
+		} else {
+			batch[i], _ = json.Marshal(string(payload))
+		}
+	}
+	payload, _ := json.Marshal(batch)
+	return payload
 }
 
 func insideJSONString(value string, end int) bool {

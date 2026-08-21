@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -262,18 +263,40 @@ func targetPayload(target, event map[string]any, fallback []byte) []byte {
 }
 
 func eventPath(event any, path string) any {
+	return EventPath(event, path)
+}
+
+// EventPath returns the value selected by the Pipes/EventBridge JSON-path subset.
+func EventPath(event any, path string) any {
 	if path == "$" {
 		return event
 	}
-	cur := event
-	for _, key := range strings.Split(strings.TrimPrefix(path, "$."), ".") {
-		m, ok := cur.(map[string]any)
-		if !ok {
+	tokens := strings.Split(strings.Trim(strings.NewReplacer("[", ".", "]", "").Replace(path), "$."), ".")
+	return eventPathTokens(event, tokens)
+}
+
+func eventPathTokens(value any, tokens []string) any {
+	if len(tokens) == 0 {
+		return value
+	}
+	switch value := value.(type) {
+	case map[string]any:
+		return eventPathTokens(value[tokens[0]], tokens[1:])
+	case []any:
+		if tokens[0] == "*" {
+			out := make([]any, 0, len(value))
+			for _, item := range value {
+				out = append(out, eventPathTokens(item, tokens[1:]))
+			}
+			return out
+		}
+		index, err := strconv.Atoi(tokens[0])
+		if err != nil || index < 0 || index >= len(value) {
 			return nil
 		}
-		cur = m[key]
+		return eventPathTokens(value[index], tokens[1:])
 	}
-	return cur
+	return nil
 }
 
 func ruleMatches(rule map[string]any, bus string, event map[string]any) bool {

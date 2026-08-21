@@ -2,10 +2,12 @@ package pipes
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -217,6 +220,83 @@ func TestPipesControlPlaneValidationUpdatesAndTags(t *testing.T) {
 	if err := New(spi.Deps{}).Close(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestPipesTargetInputTemplate(t *testing.T) {
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer p.Close()
+	queue := sqs.New(deps)
+	for _, name := range []string{"source", "target"} {
+		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})
+	}
+	input := pipeInput("transform", "source", "target")
+	input["DesiredState"] = "STOPPED"
+	input["TargetParameters"] = map[string]any{"InputTemplate": `{"kind":<$.body.kind>,"second":<$.body.items[1]>,"all":<$.body.items[*]>,"summary":"<$.body.kind>-<aws.pipes.pipe-name>","event":<aws.pipes.event.json>}`}
+	invoke(t, p, id, "CreatePipe", input)
+	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "source", "MessageBody": `{"kind":"keep","items":[1,2]}`})
+	invoke(t, p, id, "StartPipe", map[string]any{"Name": "transform"})
+	eventually(t, func() bool { return len(storedMessages(t, deps, id, "target")) == 1 })
+	var transformed map[string]any
+	if err := json.Unmarshal([]byte(storedMessages(t, deps, id, "target")[0]["body"].(string)), &transformed); err != nil {
+		t.Fatal(err)
+	}
+	event := transformed["event"].(map[string]any)
+	if transformed["kind"] != "keep" || transformed["second"] != float64(2) || transformed["summary"] != "keep-transform" || len(transformed["all"].([]any)) != 2 || event["body"].(map[string]any)["kind"] != "keep" {
+		t.Fatalf("transformed %#v", transformed)
+	}
+	if len(storedMessages(t, deps, id, "source")) != 0 {
+		t.Fatal("transformed source message retained")
+	}
+}
+
+func TestPipesLambdaPartialBatchResponse(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer p.Close()
+	queue := sqs.New(deps)
+	function := lambda.New(deps)
+	invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": "source"})
+	partial := "def lambda_handler(event, context):\n    return {'batchItemFailures': [{'itemIdentifier': event[-1]['messageId']}]}\n"
+	invoke(t, function, id, "CreateFunction", map[string]any{
+		"FunctionName": "partial", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": lambdaCode(partial),
+	})
+	input := pipeInput("partial", "source", "unused")
+	input["Target"] = "arn:aws:lambda:us-east-1:123456789012:function:partial"
+	input["DesiredState"] = "STOPPED"
+	input["SourceParameters"] = map[string]any{"SqsQueueParameters": map[string]any{"BatchSize": 2}}
+	invoke(t, p, id, "CreatePipe", input)
+	for _, body := range []string{"done", "retry"} {
+		invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "source", "MessageBody": body})
+	}
+	invoke(t, p, id, "StartPipe", map[string]any{"Name": "partial"})
+	eventually(t, func() bool {
+		messages := storedMessages(t, deps, id, "source")
+		return len(messages) == 1 && messages[0]["body"] == "retry" && messages[0]["receiveCount"] == float64(1)
+	})
+
+	invalid := "def lambda_handler(event, context):\n    return {'batchItemFailures': [{'itemIdentifier': 'unknown'}]}\n"
+	invoke(t, function, id, "UpdateFunctionCode", map[string]any{"FunctionName": "partial", "ZipFile": lambdaCode(invalid)["ZipFile"]})
+	_ = deps.Clock.(*clock.Controllable).Advance(30 * time.Second)
+	eventually(t, func() bool {
+		messages := storedMessages(t, deps, id, "source")
+		return len(messages) == 1 && messages[0]["receiveCount"] == float64(2)
+	})
+
+	success := "def lambda_handler(event, context):\n    return {}\n"
+	invoke(t, function, id, "UpdateFunctionCode", map[string]any{"FunctionName": "partial", "ZipFile": lambdaCode(success)["ZipFile"]})
+	_ = deps.Clock.(*clock.Controllable).Advance(30 * time.Second)
+	p.notify()
+	eventually(t, func() bool { return len(storedMessages(t, deps, id, "source")) == 0 })
+}
+
+func lambdaCode(source string) map[string]any {
+	return map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(source))}
 }
 
 func pipeInput(name, source, target string) map[string]any {

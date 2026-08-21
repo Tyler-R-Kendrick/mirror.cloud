@@ -2,10 +2,12 @@
 package pipes
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -314,21 +317,150 @@ func (p *Pack) processBatch(ctx context.Context, identity spi.Identity, pipe map
 			config["SqsParameters"] = sqsParameters
 		}
 	}
+	payloads := make([][]byte, len(records))
+	for i, record := range records {
+		payloads[i] = p.targetPayload(pipe, record.(map[string]any))
+	}
 	if strings.Contains(target, ":lambda:") {
-		payload, _ := json.Marshal(records)
-		if events.DeliverTarget(ctx, p.deps, identity, target, config, payload) == nil {
-			for _, message := range matched {
+		batch := make([]json.RawMessage, len(payloads))
+		for i, payload := range payloads {
+			if json.Valid(payload) {
+				batch[i] = payload
+			} else {
+				batch[i], _ = json.Marshal(string(payload))
+			}
+		}
+		payload, _ := json.Marshal(batch)
+		failed, ok := p.invokeLambda(ctx, identity, target, payload, matched)
+		if !ok {
+			return
+		}
+		for _, message := range matched {
+			if !failed[stringValue(message["MessageId"])] {
 				p.deleteMessage(ctx, identity, queue, stringValue(message["ReceiptHandle"]))
 			}
 		}
 		return
 	}
-	for i, record := range records {
-		payload, _ := json.Marshal(record)
+	for i, payload := range payloads {
 		if events.DeliverTarget(ctx, p.deps, identity, target, config, payload) == nil {
 			p.deleteMessage(ctx, identity, queue, stringValue(matched[i]["ReceiptHandle"]))
 		}
 	}
+}
+
+func (p *Pack) targetPayload(pipe, record map[string]any) []byte {
+	parameters, _ := pipe["TargetParameters"].(map[string]any)
+	template := stringValue(parameters["InputTemplate"])
+	if template == "" {
+		payload, _ := json.Marshal(record)
+		return payload
+	}
+	eventJSON := clone(record)
+	if body := stringValue(record["body"]); json.Valid([]byte(body)) {
+		var decoded any
+		_ = json.Unmarshal([]byte(body), &decoded)
+		eventJSON["body"] = decoded
+	}
+	for {
+		start := strings.IndexByte(template, '<')
+		if start < 0 {
+			break
+		}
+		end := strings.IndexByte(template[start:], '>')
+		if end < 0 {
+			break
+		}
+		end += start
+		name := template[start+1 : end]
+		var value any
+		switch name {
+		case "aws.pipes.pipe-arn":
+			value = pipe["Arn"]
+		case "aws.pipes.pipe-name":
+			value = pipe["Name"]
+		case "aws.pipes.source-arn":
+			value = pipe["Source"]
+		case "aws.pipes.enrichment-arn":
+			value = pipe["Enrichment"]
+		case "aws.pipes.target-arn":
+			value = pipe["Target"]
+		case "aws.pipes.event.ingestion-time":
+			value = p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)
+		case "aws.pipes.event":
+			value = record
+		case "aws.pipes.event.json":
+			value = eventJSON
+		default:
+			value = events.EventPath(eventJSON, name)
+		}
+		raw, _ := json.Marshal(value)
+		if insideJSONString(template, start) {
+			if len(raw) >= 2 && raw[0] == '"' {
+				raw = raw[1 : len(raw)-1]
+			} else {
+				raw, _ = json.Marshal(string(raw))
+				raw = raw[1 : len(raw)-1]
+			}
+		}
+		template = template[:start] + string(raw) + template[end+1:]
+	}
+	return []byte(template)
+}
+
+func (p *Pack) invokeLambda(ctx context.Context, identity spi.Identity, arn string, payload []byte, messages []map[string]any) (map[string]bool, bool) {
+	_, name, ok := strings.Cut(arn, ":function:")
+	if !ok {
+		return nil, false
+	}
+	if index := strings.IndexByte(name, ':'); index >= 0 {
+		name = name[:index]
+	}
+	response, err := lambda.New(p.deps).Invoke(ctx, &spi.Request{
+		Identity: identity, Operation: "Invoke", Input: map[string]any{"FunctionName": name}, Body: io.NopCloser(bytes.NewReader(payload)),
+	})
+	if err != nil {
+		return nil, false
+	}
+	var output map[string]any
+	raw, _ := response.Output["Payload"].(json.RawMessage)
+	if json.Unmarshal(raw, &output) != nil || output["batchItemFailures"] == nil {
+		return map[string]bool{}, true
+	}
+	items, ok := output["batchItemFailures"].([]any)
+	if !ok {
+		return nil, false
+	}
+	known := map[string]bool{}
+	for _, message := range messages {
+		known[stringValue(message["MessageId"])] = true
+	}
+	failed := map[string]bool{}
+	for _, item := range items {
+		entry, _ := item.(map[string]any)
+		id := stringValue(entry["itemIdentifier"])
+		if id == "" || !known[id] {
+			return nil, false
+		}
+		failed[id] = true
+	}
+	return failed, true
+}
+
+func insideJSONString(value string, end int) bool {
+	quoted, escaped := false, false
+	for _, char := range value[:end] {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if char == '\\' {
+			escaped = true
+		} else if char == '"' {
+			quoted = !quoted
+		}
+	}
+	return quoted
 }
 
 func (p *Pack) deleteMessage(ctx context.Context, identity spi.Identity, queue, handle string) {

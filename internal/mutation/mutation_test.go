@@ -296,8 +296,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "pipes-retain-successful-source-message",
 			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
-			old:  "for i, record := range records {\n\t\tpayload, _ := json.Marshal(record)\n\t\tif events.DeliverTarget(ctx, p.deps, identity, target, config, payload) == nil {",
-			new:  "for i, record := range records {\n\t\tpayload, _ := json.Marshal(record)\n\t\tif events.DeliverTarget(ctx, p.deps, identity, target, config, payload) != nil {",
+			old:  "for i, payload := range payloads {\n\t\tif events.DeliverTarget(ctx, p.deps, identity, target, config, payload) == nil {",
+			new:  "for i, payload := range payloads {\n\t\tif events.DeliverTarget(ctx, p.deps, identity, target, config, payload) != nil {",
 			pkg:  "./internal/services/aws/pipes",
 			run:  "TestPipesSQSDeliveryStateAndFiltering",
 		},

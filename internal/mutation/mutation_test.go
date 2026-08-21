@@ -197,6 +197,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			pkg:  "./internal/services/aws/sqs",
 			run:  "TestQueueScopedOperationsRejectMissingQueue",
 		},
+		{
+			name: "sqs-disable-fifo-group-validation",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `strings.HasSuffix(name, ".fifo") && group == ""`,
+			new:  `false && group == ""`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestSendValidationAndDelay",
+		},
+		{
+			name: "sqs-disable-message-delay",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "now.Add(time.Duration(delay) * time.Second).UnixNano()",
+			new:  "now.Add(0 * time.Second).UnixNano()",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestSendValidationAndDelay",
+		},
 	}
 
 	for _, m := range mutants {

@@ -144,6 +144,14 @@ func TestSchedulerStateUpdateAndGroups(t *testing.T) {
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSchedule", Input: bad}); err == nil {
 		t.Fatal("accepted non-JSON Lambda input")
 	}
+	universal := scheduleInput("universal", "at(1970-01-01T00:10:00)", time.Time{}, "jobs", "validated-at-invocation")
+	universal["Target"].(map[string]any)["Arn"] = "arn:aws:scheduler:::aws-sdk:lambda:invoke"
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSchedule", Input: universal}); err != nil {
+		t.Fatalf("universal target input was validated at creation: %v", err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteSchedule", Input: map[string]any{"Name": "universal"}}); err != nil {
+		t.Fatal(err)
+	}
 	input := scheduleInput("disabled", "at(1970-01-01T00:01:00)", time.Time{}, "jobs", "first")
 	input["GroupName"], input["State"] = "batch", "DISABLED"
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSchedule", Input: input}); err != nil {

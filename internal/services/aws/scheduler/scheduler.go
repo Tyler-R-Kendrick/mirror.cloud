@@ -454,7 +454,10 @@ func first(input map[string]any, keys ...string) string {
 func stringValue(value any) string { valueString, _ := value.(string); return valueString }
 
 func requiresJSON(arn string) bool {
-	return strings.Contains(arn, ":lambda:") || strings.Contains(arn, ":states:") || strings.Contains(arn, ":events:") || strings.Contains(arn, ":scheduler:::aws-sdk:")
+	if strings.Contains(arn, ":scheduler:::aws-sdk:") {
+		return false
+	}
+	return strings.Contains(arn, ":lambda:") || strings.Contains(arn, ":states:") || strings.Contains(arn, ":events:")
 }
 
 func number(value any) float64 {

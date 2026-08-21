@@ -92,6 +92,18 @@ func TestCreateSendReceiveDelete(t *testing.T) {
 	}
 }
 
+func TestQueueScopedOperationsRejectMissingQueue(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	for _, operation := range []string{"GetQueueUrl", "SendMessage", "ReceiveMessage", "DeleteQueue", "GetQueueAttributes", "TagQueue"} {
+		_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: map[string]any{"QueueName": "missing"}})
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "AWS.SimpleQueueService.NonExistentQueue" {
+			t.Fatalf("%s error %#v", operation, err)
+		}
+	}
+}
+
 func TestFIFODedupDLQLongPoll(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)

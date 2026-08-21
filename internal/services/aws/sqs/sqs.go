@@ -46,6 +46,9 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	base := advertise(req)
+	if queueScoped(req.Operation) && !p.queueExists(ctx, req, queueName(req)) {
+		return nil, queueMissing()
+	}
 	switch req.Operation {
 	case "CreateQueue":
 		name := str(req.Input["QueueName"])
@@ -65,7 +68,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		name := str(req.Input["QueueName"])
 		b, ok, _ := p.col(req, "queues").Get(ctx, name)
 		if !ok {
-			return nil, &spi.Fault{Code: "QueueDoesNotExist", HTTPStatus: 400, Fault: "client"}
+			return nil, queueMissing()
 		}
 		var m map[string]any
 		_ = json.Unmarshal(b, &m)
@@ -198,6 +201,25 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	default:
 		return nil, spi.NotImplemented("aws.sqs", req.Operation, "emulate")
 	}
+}
+
+func queueScoped(operation string) bool {
+	switch operation {
+	case "DeleteQueue", "GetQueueAttributes", "SetQueueAttributes", "SendMessage", "SendMessageBatch", "ReceiveMessage",
+		"DeleteMessage", "DeleteMessageBatch", "ChangeMessageVisibility", "ChangeMessageVisibilityBatch", "PurgeQueue",
+		"TagQueue", "UntagQueue", "ListQueueTags", "AddPermission", "RemovePermission", "ListDeadLetterSourceQueues":
+		return true
+	}
+	return false
+}
+
+func (p *Pack) queueExists(ctx context.Context, req *spi.Request, name string) bool {
+	_, ok, _ := p.col(req, "queues").Get(ctx, name)
+	return ok
+}
+
+func queueMissing() *spi.Fault {
+	return &spi.Fault{Code: "AWS.SimpleQueueService.NonExistentQueue", Message: "The specified queue does not exist.", HTTPStatus: 400, Fault: "client"}
 }
 
 func (p *Pack) countMsgs(ctx context.Context, req *spi.Request, name string) int {

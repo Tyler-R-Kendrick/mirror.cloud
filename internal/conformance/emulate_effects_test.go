@@ -147,6 +147,7 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv("UntagQueue", map[string]any{"QueueName": "q", "TagKeys": []any{"k"}})
 		inv("PurgeQueue", map[string]any{"QueueName": "q"})
 		inv("DeleteQueue", map[string]any{"QueueName": "q"})
+		inv("CreateQueue", map[string]any{"QueueName": "q"})
 		fat := map[string]any{
 			"QueueName": "q", "QueueUrl": "http://q", "TaskHandle": "t1",
 			"Label": "l", "AWSAccountIds": []any{"111111111111"}, "Actions": []any{"SendMessage"},

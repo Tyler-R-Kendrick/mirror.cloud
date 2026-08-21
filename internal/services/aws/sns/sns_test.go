@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -14,8 +15,10 @@ import (
 func TestTopicSubscribePublish(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := &Pack{deps: deps}
+	qp := sqs.New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	_, _ = qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "q"}})
 	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "t"}})
 	if err != nil {
 		t.Fatal(err)
@@ -47,8 +50,10 @@ func TestTopicSubscribePublish(t *testing.T) {
 func TestPublishFilterAndSQSDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
+	qp := sqs.New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	_, _ = qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "q"}})
 	inv := func(op string, in map[string]any) *spi.Response {
 		t.Helper()
 		resp, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})

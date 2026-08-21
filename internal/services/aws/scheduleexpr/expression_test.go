@@ -1,4 +1,4 @@
-package scheduler
+package scheduleexpr
 
 import (
 	"testing"
@@ -27,11 +27,11 @@ func TestScheduleExpressions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.expression, func(t *testing.T) {
-			expr, err := parseScheduleExpression(tt.expression, tt.timezone)
+			expr, err := Parse(tt.expression, tt.timezone)
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := expr.first(utc(tt.after), time.Time{})
+			got := expr.First(utc(tt.after), time.Time{})
 			if !got.Equal(utc(tt.want)) {
 				t.Fatalf("got %s want %s", got, tt.want)
 			}
@@ -45,22 +45,22 @@ func TestScheduleExpressionValidation(t *testing.T) {
 		"cron(? 0 * * ? 2024)", "cron(0 0 * * * 2024)", "cron(0 0 ? 13 MON 2024)", "cron(0 0 ? * MON#6 2024)",
 	}
 	for _, raw := range bad {
-		if _, err := parseScheduleExpression(raw, "UTC"); err == nil {
+		if _, err := Parse(raw, "UTC"); err == nil {
 			t.Errorf("%q accepted", raw)
 		}
 	}
-	if _, err := parseScheduleExpression("rate(1 minute)", "Not/A_Zone"); err == nil {
+	if _, err := Parse("rate(1 minute)", "Not/A_Zone"); err == nil {
 		t.Fatal("invalid timezone accepted")
 	}
 }
 
 func TestAtExpressionIgnoresStartDate(t *testing.T) {
-	expr, err := parseScheduleExpression("at(2024-01-02T00:00:00)", "UTC")
+	expr, err := Parse("at(2024-01-02T00:00:00)", "UTC")
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	if got := expr.first(now, now.Add(48*time.Hour)); !got.Equal(now.Add(24 * time.Hour)) {
+	if got := expr.First(now, now.Add(48*time.Hour)); !got.Equal(now.Add(24 * time.Hour)) {
 		t.Fatalf("got %s", got)
 	}
 }

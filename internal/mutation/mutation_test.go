@@ -298,7 +298,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			file: filepath.Join("internal", "services", "aws", "scheduleexpr", "expression.go"),
 			old:  "return t.Day() == lastDay",
 			new:  "return t.Day() != lastDay",
-			pkg:  "./internal/services/aws/scheduler",
+			pkg:  "./internal/services/aws/scheduleexpr",
 			run:  "TestScheduleExpressions",
 		},
 		{

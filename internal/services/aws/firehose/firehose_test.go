@@ -298,6 +298,11 @@ func TestFirehoseControlPlaneAndBatch(t *testing.T) {
 	if _, err := call("CreateDeliveryStream", map[string]any{}); err == nil {
 		t.Fatal("created unnamed stream")
 	}
+	for _, name := range []string{"bad/name", strings.Repeat("a", 65)} {
+		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": name}); err == nil {
+			t.Fatalf("created invalid stream %q", name)
+		}
+	}
 	if _, err := call("PutRecord", map[string]any{"DeliveryStreamName": "missing"}); err == nil {
 		t.Fatal("put to missing stream")
 	}
@@ -307,6 +312,11 @@ func TestFirehoseControlPlaneAndBatch(t *testing.T) {
 		},
 	}); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "control"}); err == nil {
+		t.Fatal("recreated existing stream")
+	} else if fault, ok := err.(*spi.Fault); !ok || fault.Code != "ResourceInUseException" {
+		t.Fatalf("duplicate create error %v", err)
 	}
 	record := map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("batch"))}
 	batch, err := call("PutRecordBatch", map[string]any{"DeliveryStreamName": "control", "Records": []any{record, record}})

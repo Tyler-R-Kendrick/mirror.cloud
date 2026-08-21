@@ -50,8 +50,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	name := first(req.Input, "DeliveryStreamName", "deliveryStreamName")
 	switch req.Operation {
 	case "CreateDeliveryStream":
-		if name == "" {
-			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		if len(name) > 64 || !firehoseStreamName.MatchString(name) {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
 		arn := "arn:aws:firehose:" + req.Identity.Region + ":" + req.Identity.Account + ":deliverystream/" + name
 		rec := map[string]any{
@@ -66,7 +66,16 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, err
 		}
 		b, _ := json.Marshal(rec)
-		_ = p.col(req, "fh").Put(ctx, name, b)
+		if err := p.col(req, "fh").Txn(ctx, func(tx spi.Tx) error {
+			if _, ok, err := tx.Get(name); err != nil {
+				return err
+			} else if ok {
+				return &spi.Fault{Code: "ResourceInUseException", HTTPStatus: 400, Fault: "client"}
+			}
+			return tx.Put(name, b)
+		}); err != nil {
+			return nil, err
+		}
 		return &spi.Response{Output: map[string]any{"DeliveryStreamARN": arn}}, nil
 	case "DeleteDeliveryStream":
 		_ = p.col(req, "fh").Delete(ctx, name)
@@ -327,6 +336,7 @@ var (
 	firehoseTimestampPrefix  = regexp.MustCompile(`!\{timestamp:([^}]*)\}`)
 	firehosePrefixExpression = regexp.MustCompile(`!\{([^}:]+):([^}]*)\}`)
 	firehoseFileExtension    = regexp.MustCompile(`^\.[0-9a-z!\-_.*'()]+$`)
+	firehoseStreamName       = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 )
 
 func (p *Pack) evaluatedS3Prefix(prefix string, now time.Time) string {

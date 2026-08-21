@@ -230,14 +230,48 @@ func (p *Pack) fanout(ctx context.Context, req *spi.Request, event map[string]an
 			if arn == "" {
 				continue
 			}
-			payload := raw
-			if input := str(m["Input"]); input != "" {
-				payload = []byte(input)
-			}
+			payload := targetPayload(m, event, raw)
 			_ = p.deps.Bus.Publish(ctx, "events:"+arn, payload)
 			p.deliver(ctx, req, arn, m, payload)
 		}
 	}
+}
+
+func targetPayload(target, event map[string]any, fallback []byte) []byte {
+	if input := str(target["Input"]); input != "" {
+		return []byte(input)
+	}
+	if path := str(target["InputPath"]); path != "" {
+		if raw, err := json.Marshal(eventPath(event, path)); err == nil {
+			return raw
+		}
+	}
+	transformer, _ := target["InputTransformer"].(map[string]any)
+	template := str(transformer["InputTemplate"])
+	paths, _ := transformer["InputPathsMap"].(map[string]any)
+	if template != "" {
+		for key, path := range paths {
+			raw, _ := json.Marshal(eventPath(event, str(path)))
+			template = strings.ReplaceAll(template, "<"+key+">", string(raw))
+		}
+		return []byte(template)
+	}
+	return fallback
+}
+
+func eventPath(event any, path string) any {
+	if path == "$" {
+		return event
+	}
+	cur := event
+	for _, key := range strings.Split(strings.TrimPrefix(path, "$."), ".") {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return nil
+		}
+		cur = m[key]
+	}
+	return cur
 }
 
 func ruleMatches(rule map[string]any, bus string, event map[string]any) bool {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -138,6 +139,52 @@ func TestTargetsUpsertRemoveAndEventBusIsolation(t *testing.T) {
 	for _, queue := range []string{"old", "preserved"} {
 		if got := invoke(sp, "ReceiveMessage", map[string]any{"QueueName": queue}).Output["Messages"].([]any); len(got) != 0 {
 			t.Fatalf("%s unexpectedly received %#v", queue, got)
+		}
+	}
+}
+
+func TestTargetInputTransformations(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, sp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(pack spi.BehaviorPack, op string, in map[string]any) *spi.Response {
+		t.Helper()
+		resp, err := pack.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		return resp
+	}
+	for _, name := range []string{"constant", "path", "template"} {
+		invoke(sp, "CreateQueue", map[string]any{"QueueName": name})
+	}
+	invoke(p, "PutRule", map[string]any{"Name": "transform", "EventPattern": `{}`})
+	invoke(p, "PutTargets", map[string]any{"Rule": "transform", "Targets": []any{
+		map[string]any{"Id": "constant", "Arn": "arn:aws:sqs:us-east-1:1:constant", "Input": `{"fixed":true}`},
+		map[string]any{"Id": "path", "Arn": "arn:aws:sqs:us-east-1:1:path", "InputPath": "$.detail"},
+		map[string]any{"Id": "template", "Arn": "arn:aws:sqs:us-east-1:1:template", "InputTransformer": map[string]any{
+			"InputPathsMap": map[string]any{"kind": "$.detail-type", "n": "$.detail.n"},
+			"InputTemplate": `{"kind":<kind>,"n":<n>}`,
+		}},
+	}})
+	invoke(p, "PutEvents", map[string]any{"Entries": []any{
+		map[string]any{"Source": "app", "DetailType": "order", "Detail": `{"n":7}`},
+	}})
+	want := map[string]map[string]any{
+		"constant": {"fixed": true},
+		"path":     {"n": float64(7)},
+		"template": {"kind": "order", "n": float64(7)},
+	}
+	for queue, expected := range want {
+		messages := invoke(sp, "ReceiveMessage", map[string]any{"QueueName": queue}).Output["Messages"].([]any)
+		if len(messages) != 1 {
+			t.Fatalf("%s received %d messages", queue, len(messages))
+		}
+		var got map[string]any
+		_ = json.Unmarshal([]byte(str(messages[0].(map[string]any)["Body"])), &got)
+		if !reflect.DeepEqual(got, expected) {
+			t.Fatalf("%s body %#v, want %#v", queue, got, expected)
 		}
 	}
 }

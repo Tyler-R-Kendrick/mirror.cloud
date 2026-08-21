@@ -333,6 +333,46 @@ func TestMutantsAreKilled(t *testing.T) {
 			pkg:  "./internal/services/aws/pipes",
 			run:  "TestPipesControlPlaneValidationUpdatesAndTags",
 		},
+		{
+			name: "pipes-disable-target-input-template",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `template := stringValue(parameters["InputTemplate"])`,
+			new:  `template := ""`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesTargetInputTemplate",
+		},
+		{
+			name: "pipes-ignore-partial-batch-failure",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `failed[id] = true`,
+			new:  `failed["mutated-"+id] = true`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesLambdaPartialBatchResponse",
+		},
+		{
+			name: "pipes-accept-unknown-partial-failure-id",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `id == "" || !known[id]`,
+			new:  `id == "" && !known[id]`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesLambdaPartialBatchResponse",
+		},
+		{
+			name: "pipes-break-quoted-template-values",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `if insideJSONString(template, start) {`,
+			new:  `if false && insideJSONString(template, start) {`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesTargetInputTemplate",
+		},
+		{
+			name: "events-json-path-always-first-array-item",
+			file: filepath.Join("internal", "services", "aws", "events", "events.go"),
+			old:  `return eventPathTokens(value[index], tokens[1:])`,
+			new:  `return eventPathTokens(value[0], tokens[1:])`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesTargetInputTemplate",
+		},
 	}
 
 	for _, m := range mutants {

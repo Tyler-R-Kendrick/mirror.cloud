@@ -279,20 +279,26 @@ func TestPipesLambdaPartialBatchResponse(t *testing.T) {
 		messages := storedMessages(t, deps, id, "source")
 		return len(messages) == 1 && messages[0]["body"] == "retry" && messages[0]["receiveCount"] == float64(1)
 	})
+	invoke(t, p, id, "StopPipe", map[string]any{"Name": "partial"})
+	pipe := invoke(t, p, id, "DescribePipe", map[string]any{"Name": "partial"}).Output
 
 	invalid := "def lambda_handler(event, context):\n    return {'batchItemFailures': [{'itemIdentifier': 'unknown'}]}\n"
 	invoke(t, function, id, "UpdateFunctionCode", map[string]any{"FunctionName": "partial", "ZipFile": lambdaCode(invalid)["ZipFile"]})
 	_ = deps.Clock.(*clock.Controllable).Advance(30 * time.Second)
-	eventually(t, func() bool {
-		messages := storedMessages(t, deps, id, "source")
-		return len(messages) == 1 && messages[0]["receiveCount"] == float64(2)
-	})
+	received := invoke(t, queue, id, "ReceiveMessage", map[string]any{"QueueName": "source", "MaxNumberOfMessages": 2}).Output["Messages"].([]any)
+	p.processBatch(context.Background(), id, pipe, queueARN(id, "source"), "source", received)
+	if messages := storedMessages(t, deps, id, "source"); len(messages) != 1 || messages[0]["receiveCount"] != float64(2) {
+		t.Fatalf("invalid partial response deleted source: %#v", messages)
+	}
 
 	success := "def lambda_handler(event, context):\n    return {}\n"
 	invoke(t, function, id, "UpdateFunctionCode", map[string]any{"FunctionName": "partial", "ZipFile": lambdaCode(success)["ZipFile"]})
 	_ = deps.Clock.(*clock.Controllable).Advance(30 * time.Second)
-	p.notify()
-	eventually(t, func() bool { return len(storedMessages(t, deps, id, "source")) == 0 })
+	received = invoke(t, queue, id, "ReceiveMessage", map[string]any{"QueueName": "source"}).Output["Messages"].([]any)
+	p.processBatch(context.Background(), id, pipe, queueARN(id, "source"), "source", received)
+	if messages := storedMessages(t, deps, id, "source"); len(messages) != 0 {
+		t.Fatalf("successful retry retained source: %#v", messages)
+	}
 }
 
 func lambdaCode(source string) map[string]any {

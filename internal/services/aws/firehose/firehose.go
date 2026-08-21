@@ -195,7 +195,7 @@ func copyDest(rec, in map[string]any, suffix string) {
 	}
 }
 
-func s3Dest(rec map[string]any) (bucket, prefix, timezone string) {
+func s3Dest(rec map[string]any) (bucket, prefix, timezone, extension string) {
 	for _, k := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration"} {
 		m, _ := rec[k].(map[string]any)
 		if m == nil {
@@ -208,17 +208,21 @@ func s3Dest(rec map[string]any) (bucket, prefix, timezone string) {
 		bucket = bucketFromARN(arn)
 		prefix = first(m, "Prefix")
 		timezone = first(m, "CustomTimeZone")
-		return bucket, prefix, timezone
+		extension = first(m, "FileExtension")
+		return bucket, prefix, timezone, extension
 	}
-	return "", "", ""
+	return "", "", "", ""
 }
 
 func validateDestination(rec map[string]any) error {
-	_, _, timezone := s3Dest(rec)
+	_, _, timezone, extension := s3Dest(rec)
 	if timezone != "" {
 		if _, err := time.LoadLocation(timezone); err != nil {
 			return &spi.Fault{Code: "ValidationException", Message: "CustomTimeZone is invalid.", HTTPStatus: 400, Fault: "client"}
 		}
+	}
+	if extension != "" && (len(extension) > 128 || !firehoseFileExtension.MatchString(extension)) {
+		return &spi.Fault{Code: "ValidationException", Message: "FileExtension is invalid.", HTTPStatus: 400, Fault: "client"}
 	}
 	return nil
 }
@@ -240,7 +244,7 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 	}
 	var rec map[string]any
 	_ = json.Unmarshal(raw, &rec)
-	bucket, prefix, timezone := s3Dest(rec)
+	bucket, prefix, timezone, extension := s3Dest(rec)
 	if bucket == "" {
 		return
 	}
@@ -253,7 +257,7 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 		location, _ := time.LoadLocation(timezone)
 		now = now.In(location)
 	}
-	key := p.evaluatedS3Prefix(prefix, now) + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + recID
+	key := p.evaluatedS3Prefix(prefix, now) + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + recID + extension
 	info, err := p.deps.Blobs.Put(ctx, req.Identity.Account+"/"+req.Identity.Region+"/"+bucket+"/"+key, bytes.NewReader(data))
 	if err != nil {
 		return
@@ -264,7 +268,10 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 	_ = p.col(req, "objects").Put(ctx, bucket+"/"+key, meta)
 }
 
-var firehoseTimestampPrefix = regexp.MustCompile(`!\{timestamp:([^}]*)\}`)
+var (
+	firehoseTimestampPrefix = regexp.MustCompile(`!\{timestamp:([^}]*)\}`)
+	firehoseFileExtension   = regexp.MustCompile(`^\.[0-9a-z!\-_.*'()]+$`)
+)
 
 func (p *Pack) evaluatedS3Prefix(prefix string, now time.Time) string {
 	if !firehoseTimestampPrefix.MatchString(prefix) {

@@ -837,6 +837,38 @@ func TestMutantsAreKilled(t *testing.T) {
 			pkg:  "./internal/services/aws/events",
 			run:  "TestInvokeAPIDestinationOAuth",
 		},
+		{
+			name: "events-skip-rejected-oauth-token-refresh",
+			file: filepath.Join("internal", "services", "aws", "events", "events.go"),
+			old:  `if authorizationType == "OAUTH_CLIENT_CREDENTIALS" && (response.StatusCode == 401 || response.StatusCode == 407) {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/events",
+			run:  "TestInvokeAPIDestinationOAuth",
+		},
+		{
+			name: "events-skip-proxy-rejected-oauth-token-refresh",
+			file: filepath.Join("internal", "services", "aws", "events", "events.go"),
+			old:  `(response.StatusCode == 401 || response.StatusCode == 407)`,
+			new:  `response.StatusCode == 401`,
+			pkg:  "./internal/services/aws/events",
+			run:  "TestInvokeAPIDestinationOAuth",
+		},
+		{
+			name: "events-reuse-consumed-oauth-destination-body",
+			file: filepath.Join("internal", "services", "aws", "events", "events.go"),
+			old:  `retry.Body, _ = request.GetBody()`,
+			new:  `retry.Body = http.NoBody`,
+			pkg:  "./internal/services/aws/events",
+			run:  "TestInvokeAPIDestinationOAuth",
+		},
+		{
+			name: "events-drop-api-destination-retry-after",
+			file: filepath.Join("internal", "services", "aws", "events", "events.go"),
+			old:  `if retryAfter := response.Header.Get("Retry-After"); retryAfter != "" {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/events",
+			run:  "TestInvokeAPIDestinationOAuth",
+		},
 	}
 
 	for _, m := range mutants {

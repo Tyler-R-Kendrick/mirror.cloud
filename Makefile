@@ -41,7 +41,7 @@ test-fuzz:
 	$(GO) test ./internal/services/gcp/gcs -run '^$$' -fuzz '^FuzzParsePath$$' -fuzztime=10s
 
 test-mutation:
-	$(GO) test ./internal/mutation -count=1 -timeout 120s
+	$(GO) test ./internal/mutation -count=1 -timeout 180s
 
 test-race:
 	CGO_ENABLED=1 $(GO) test -race $$($(GO) list ./... | grep -v '/internal/mutation$$')

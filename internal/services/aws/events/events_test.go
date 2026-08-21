@@ -169,7 +169,8 @@ func TestInvokeAPIDestinationBasicAuth(t *testing.T) {
 }
 
 func TestInvokeAPIDestinationOAuth(t *testing.T) {
-	tokenCalls, destinationCalls := 0, 0
+	tokenCalls := 0
+	destinationCalls := map[string]int{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/token":
@@ -178,18 +179,19 @@ func TestInvokeAPIDestinationOAuth(t *testing.T) {
 			if !ok || username != "client" || password != "secret" || r.FormValue("grant_type") != "client_credentials" {
 				t.Errorf("OAuth request auth=%v username=%q password=%q form=%v", ok, username, password, r.Form)
 			}
-			token := "token-2"
-			if tokenCalls == 1 {
-				token = "token-1"
-			}
-			_, _ = w.Write([]byte(`{"access_token":"` + token + `","token_type":"Bearer"}`))
-		case "/destination":
-			destinationCalls++
-			if r.Header.Get("Authorization") != "Bearer token-"+toString(destinationCalls) {
+			_, _ = w.Write([]byte(`{"access_token":"token-` + toString(tokenCalls) + `","token_type":"Bearer"}`))
+		case "/unauthorized", "/proxy-auth-required":
+			destinationCalls[r.URL.Path]++
+			payload, _ := io.ReadAll(r.Body)
+			if r.Header.Get("Authorization") != "Bearer token-"+toString(tokenCalls) || string(payload) != `{}` {
 				t.Errorf("Authorization %q", r.Header.Get("Authorization"))
 			}
-			if destinationCalls == 1 {
-				w.WriteHeader(http.StatusUnauthorized)
+			if destinationCalls[r.URL.Path] == 1 {
+				status := http.StatusUnauthorized
+				if r.URL.Path == "/proxy-auth-required" {
+					status = http.StatusProxyAuthRequired
+				}
+				w.WriteHeader(status)
 				return
 			}
 			_, _ = w.Write([]byte(`{"ok":true}`))
@@ -213,15 +215,20 @@ func TestInvokeAPIDestinationOAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	destination, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateApiDestination", Input: map[string]any{
-		"Name": "oauth", "ConnectionArn": connection.Output["ConnectionArn"], "InvocationEndpoint": server.URL + "/destination", "HttpMethod": "POST",
-	}})
-	if err != nil {
-		t.Fatal(err)
+	for _, path := range []string{"unauthorized", "proxy-auth-required"} {
+		destination, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateApiDestination", Input: map[string]any{
+			"Name": "oauth-" + path, "ConnectionArn": connection.Output["ConnectionArn"], "InvocationEndpoint": server.URL + "/" + path, "HttpMethod": "POST",
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := InvokeAPIDestination(context.Background(), deps, id, str(destination.Output["ApiDestinationArn"]), nil, []byte(`{}`))
+		if err != nil || string(body) != `{"ok":true}` || destinationCalls["/"+path] != 2 {
+			t.Fatalf("OAuth %s destination body=%s tokenCalls=%d destinationCalls=%v err=%v", path, body, tokenCalls, destinationCalls, err)
+		}
 	}
-	body, err := InvokeAPIDestination(context.Background(), deps, id, str(destination.Output["ApiDestinationArn"]), nil, []byte(`{}`))
-	if err != nil || string(body) != `{"ok":true}` || tokenCalls != 2 || destinationCalls != 2 {
-		t.Fatalf("OAuth destination body=%s tokenCalls=%d destinationCalls=%d err=%v", body, tokenCalls, destinationCalls, err)
+	if tokenCalls != 4 {
+		t.Fatalf("OAuth tokenCalls=%d want 4", tokenCalls)
 	}
 	retryDestination, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateApiDestination", Input: map[string]any{
 		"Name": "oauth-retry", "ConnectionArn": connection.Output["ConnectionArn"], "InvocationEndpoint": server.URL + "/retry", "HttpMethod": "POST",

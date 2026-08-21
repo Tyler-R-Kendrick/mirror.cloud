@@ -19,6 +19,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -491,11 +492,22 @@ func (p *Pack) enrich(ctx context.Context, identity spi.Identity, pipe map[strin
 	if arn == "" {
 		return fallback, false, true
 	}
-	if !strings.Contains(arn, ":lambda:") {
-		return nil, true, false
-	}
-	raw, err := p.invokeLambdaPayload(ctx, identity, arn, batchPayload(inputs))
-	if err != nil {
+	payload := batchPayload(inputs)
+	var raw []byte
+	switch {
+	case strings.Contains(arn, ":lambda:"):
+		response, err := p.invokeLambdaPayload(ctx, identity, arn, payload)
+		if err != nil {
+			return nil, true, false
+		}
+		raw = response
+	case strings.Contains(arn, ":states:"):
+		response, err := states.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "StartSyncExecution", Input: map[string]any{"stateMachineArn": arn, "input": string(payload)}})
+		if err != nil || stringValue(response.Output["status"]) != "SUCCEEDED" {
+			return nil, true, false
+		}
+		raw = []byte(stringValue(response.Output["output"]))
+	default:
 		return nil, true, false
 	}
 	trimmed := bytes.TrimSpace(raw)

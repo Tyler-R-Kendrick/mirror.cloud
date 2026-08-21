@@ -406,6 +406,53 @@ func TestPipesStepFunctionsTarget(t *testing.T) {
 	assertFault(t, p, id, "CreatePipe", invalid, "ValidationException")
 }
 
+func TestPipesStepFunctionsEnrichment(t *testing.T) {
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer p.Close()
+	queue, machine := sqs.New(deps), states.New(deps)
+	for _, name := range []string{"enrich-states-source", "enrich-states-target", "failed-enrich-states-source", "failed-enrich-states-target"} {
+		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})
+	}
+	created := invoke(t, machine, id, "CreateStateMachine", map[string]any{
+		"name": "pipe-enrichment", "type": "EXPRESS", "roleArn": "arn:aws:iam::123456789012:role/states",
+		"definition": `{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","End":true}}}`,
+	})
+	input := pipeInput("states-enrichment", "enrich-states-source", "enrich-states-target")
+	input["Enrichment"] = created.Output["stateMachineArn"]
+	input["EnrichmentParameters"] = map[string]any{"InputTemplate": `{"body":<$.body>,"id":<$.messageId>}`}
+	input["TargetParameters"] = map[string]any{"InputTemplate": `{"value":<$.body.value>,"id":<$.id>}`}
+	invoke(t, p, id, "CreatePipe", input)
+	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "enrich-states-source", "MessageBody": `{"value":3}`})
+	eventually(t, func() bool {
+		return len(storedMessages(t, deps, id, "enrich-states-source")) == 0 && len(storedMessages(t, deps, id, "enrich-states-target")) == 1
+	})
+	var enriched map[string]any
+	if err := json.Unmarshal([]byte(storedMessages(t, deps, id, "enrich-states-target")[0]["body"].(string)), &enriched); err != nil {
+		t.Fatal(err)
+	}
+	if enriched["value"] != float64(3) || enriched["id"] == "" {
+		t.Fatalf("enriched output %#v", enriched)
+	}
+
+	failed := invoke(t, machine, id, "CreateStateMachine", map[string]any{
+		"name": "failed-enrichment", "type": "EXPRESS", "roleArn": "arn:aws:iam::123456789012:role/states",
+		"definition": `{"StartAt":"Fail","States":{"Fail":{"Type":"Fail","Error":"Nope","Cause":"retry"}}}`,
+	})
+	failing := pipeInput("failed-states-enrichment", "failed-enrich-states-source", "failed-enrich-states-target")
+	failing["Enrichment"] = failed.Output["stateMachineArn"]
+	invoke(t, p, id, "CreatePipe", failing)
+	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "failed-enrich-states-source", "MessageBody": "retry"})
+	eventually(t, func() bool {
+		messages := storedMessages(t, deps, id, "failed-enrich-states-source")
+		return len(messages) == 1 && messages[0]["receiveCount"] == float64(1)
+	})
+	if messages := storedMessages(t, deps, id, "failed-enrich-states-target"); len(messages) != 0 {
+		t.Fatalf("failed enrichment invoked target: %#v", messages)
+	}
+}
+
 func TestPipesControlPlaneValidationUpdatesAndTags(t *testing.T) {
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	deps := spitest.Deps(t)

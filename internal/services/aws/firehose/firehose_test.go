@@ -1,6 +1,7 @@
 package firehose
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
@@ -138,11 +140,48 @@ func TestBootedServerFirehoseDeliversToS3(t *testing.T) {
 	if id == "" {
 		t.Fatalf("put %v", put)
 	}
-	code, body := s3(http.MethodGet, "/fhout/fh/"+id, "")
+	code, listed := s3(http.MethodGet, "/fhout?list-type=2&prefix=fh/", "")
+	start, end := strings.Index(string(listed), "<Key>"), strings.Index(string(listed), "</Key>")
+	if code >= 300 || start < 0 || end < start {
+		t.Fatalf("list objects %d %s", code, listed)
+	}
+	key := string(listed)[start+len("<Key>") : end]
+	code, body := s3(http.MethodGet, "/fhout/"+key, "")
 	if code >= 300 {
 		t.Fatalf("get object %d %s", code, body)
 	}
 	if string(body) != "hello-firehose" {
 		t.Fatalf("s3 body %q", body)
+	}
+}
+
+func TestFirehoseS3ObjectNameFormat(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	invoke := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	invoke("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "delivery", "S3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::out", "Prefix": "logs/"},
+	})
+	response := invoke("PutRecord", map[string]any{
+		"DeliveryStreamName": "delivery", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("payload"))},
+	})
+	recordID := response.Output["RecordId"].(string)
+	key := id.Account + "/" + id.Region + "/out/logs/1970/01/01/00/delivery-1-1970-01-01-00-00-00-" + recordID
+	reader, _, err := deps.Blobs.Get(context.Background(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	body, _ := io.ReadAll(reader)
+	if string(body) != "payload" {
+		t.Fatalf("S3 object body %q", body)
 	}
 }

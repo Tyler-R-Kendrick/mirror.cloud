@@ -200,7 +200,8 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 	if bucket == "" {
 		return
 	}
-	key := prefix + recID
+	now := p.deps.Clock.Now().UTC()
+	key := prefix + now.Format("2006/01/02/15/") + stream + "-1-" + now.Format("2006-01-02-15-04-05-") + recID
 	info, err := p.deps.Blobs.Put(ctx, req.Identity.Account+"/"+req.Identity.Region+"/"+bucket+"/"+key, bytes.NewReader(data))
 	if err != nil {
 		return

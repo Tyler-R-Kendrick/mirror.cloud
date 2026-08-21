@@ -181,6 +181,75 @@ func TestSchedulerStateUpdateAndGroups(t *testing.T) {
 	})
 }
 
+func TestSchedulerFlexibleWindowRetryAndDLQ(t *testing.T) {
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	clock := deps.Clock.(*clock.Controllable)
+	p := New(deps)
+	defer p.Close()
+	queue := sqs.New(deps)
+	for _, name := range []string{"jobs", "failures"} {
+		if _, err := queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	flexible := scheduleInput("flexible", "at(1970-01-01T00:01:00)", time.Time{}, "jobs", "time=<aws.scheduler.scheduled-time>;attempt=<aws.scheduler.attempt-number>")
+	flexible["FlexibleTimeWindow"] = map[string]any{"Mode": "FLEXIBLE", "MaximumWindowInMinutes": 1}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSchedule", Input: flexible}); err != nil {
+		t.Fatal(err)
+	}
+	rec := storedSchedule(t, deps, id, "flexible")
+	next, ok := inputTime(rec[nextInvocation])
+	windowStart := time.Unix(60, 0).UTC()
+	if !ok || !next.After(windowStart) || next.After(windowStart.Add(time.Minute)) {
+		t.Fatalf("flexible invocation %v", rec[nextInvocation])
+	}
+	_ = clock.Advance(2 * time.Minute)
+	eventually(t, func() bool {
+		got := queueBodies(t, deps, id, "jobs")
+		return len(got) == 1 && got[0] == "time=1970-01-01T00:01:00Z;attempt=1"
+	})
+
+	retryAt := clock.Now().Add(time.Minute)
+	retrying := scheduleInput("retry", "at("+retryAt.Format("2006-01-02T15:04:05")+")", time.Time{}, "late", "attempt=<aws.scheduler.attempt-number>")
+	retrying["Target"].(map[string]any)["RetryPolicy"] = map[string]any{"MaximumEventAgeInSeconds": 60, "MaximumRetryAttempts": 1}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSchedule", Input: retrying}); err != nil {
+		t.Fatal(err)
+	}
+	_ = clock.Advance(time.Minute)
+	eventually(t, func() bool {
+		attempts, _ := integer(storedSchedule(t, deps, id, "retry")[retryAttempts])
+		return attempts == 1
+	})
+	if _, err := queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "late"}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = clock.Advance(2 * time.Second)
+	eventually(t, func() bool {
+		got := queueBodies(t, deps, id, "late")
+		return len(got) == 1 && got[0] == "attempt=2"
+	})
+
+	dlqAt := clock.Now().Add(time.Minute)
+	dead := scheduleInput("dead", "at("+dlqAt.Format("2006-01-02T15:04:05")+")", time.Time{}, "missing", "dead")
+	deadTarget := dead["Target"].(map[string]any)
+	deadTarget["RetryPolicy"] = map[string]any{"MaximumEventAgeInSeconds": 60, "MaximumRetryAttempts": 0}
+	deadTarget["DeadLetterConfig"] = map[string]any{"Arn": "arn:aws:sqs:us-east-1:123456789012:failures"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSchedule", Input: dead}); err != nil {
+		t.Fatal(err)
+	}
+	_ = clock.Advance(time.Minute)
+	eventually(t, func() bool { return len(queueBodies(t, deps, id, "failures")) == 1 })
+	dlq := storedMessage(t, deps, id, "failures")
+	attrs := dlq["attrs"].(map[string]any)
+	errorCode := attrs["ERROR_CODE"].(map[string]any)["StringValue"]
+	if dlq["body"] != "dead" || errorCode != "AWS.SimpleQueueService.NonExistentQueue" {
+		t.Fatalf("DLQ message %#v", dlq)
+	}
+}
+
 func scheduleInput(name, expression string, start time.Time, queue, payload string) map[string]any {
 	input := map[string]any{
 		"Name": name, "ScheduleExpression": expression, "ActionAfterCompletion": "DELETE",
@@ -211,6 +280,32 @@ func queueBodies(t *testing.T, deps spi.Deps, id spi.Identity, queue string) []s
 		bodies = append(bodies, message["body"].(string))
 	}
 	return bodies
+}
+
+func storedSchedule(t *testing.T, deps spi.Deps, id spi.Identity, name string) map[string]any {
+	t.Helper()
+	b, ok, err := deps.Store.Scope(id.Account, id.Region).Collection("sch:default").Get(context.Background(), name)
+	if err != nil || !ok {
+		t.Fatalf("schedule %s: found=%v err=%v", name, ok, err)
+	}
+	var rec map[string]any
+	if err := json.Unmarshal(b, &rec); err != nil {
+		t.Fatal(err)
+	}
+	return rec
+}
+
+func storedMessage(t *testing.T, deps spi.Deps, id spi.Identity, queue string) map[string]any {
+	t.Helper()
+	kvs, _, err := deps.Store.Scope(id.Account, id.Region).Collection("msgs:"+queue).List(context.Background(), "", "", 1)
+	if err != nil || len(kvs) != 1 {
+		t.Fatalf("queue %s: messages=%d err=%v", queue, len(kvs), err)
+	}
+	var message map[string]any
+	if err := json.Unmarshal(kvs[0].Value, &message); err != nil {
+		t.Fatal(err)
+	}
+	return message
 }
 
 func eventually(t *testing.T, condition func() bool) {

@@ -510,12 +510,12 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestPipesStepFunctionsTarget",
 		},
 		{
-			name: "events-ignore-step-functions-async-request",
+			name: "events-ignore-step-functions-sync-request",
 			file: filepath.Join("internal", "services", "aws", "events", "events.go"),
-			old:  `if invocation == "FIRE_AND_FORGET" {`,
-			new:  `if invocation == "REQUEST_RESPONSE" {`,
-			pkg:  "./internal/services/aws/pipes",
-			run:  "TestPipesStepFunctionsTarget",
+			old:  `if invocation == "REQUEST_RESPONSE" {`,
+			new:  `if invocation == "FIRE_AND_FORGET" {`,
+			pkg:  "./internal/services/aws/events",
+			run:  "TestDeliverTargetStepFunctions",
 		},
 		{
 			name: "events-reject-successful-step-functions-target",
@@ -881,6 +881,7 @@ func TestMutantsAreKilled(t *testing.T) {
 
 	for _, m := range mutants {
 		t.Run(m.name, func(t *testing.T) {
+			t.Parallel()
 			src := filepath.Join(root, m.file)
 			body, err := os.ReadFile(src)
 			if err != nil {

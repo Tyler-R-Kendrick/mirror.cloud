@@ -117,6 +117,9 @@ func TestDeliverTargetStepFunctions(t *testing.T) {
 	if err := DeliverTarget(context.Background(), deps, id, str(standard.Output["stateMachineArn"]), map[string]any{}, []byte(`{}`)); err != nil {
 		t.Fatalf("default async: %v", err)
 	}
+	if err := DeliverTarget(context.Background(), deps, id, str(standard.Output["stateMachineArn"]), map[string]any{"StateMachineParameters": map[string]any{"InvocationType": "REQUEST_RESPONSE"}}, []byte(`{}`)); err == nil {
+		t.Fatal("synchronous Standard invocation succeeded")
+	}
 	executions, err := machine.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "ListExecutions", Input: map[string]any{}})
 	if err != nil || len(executions.Output["executions"].([]any)) != 3 {
 		t.Fatalf("executions %#v err=%v", executions, err)

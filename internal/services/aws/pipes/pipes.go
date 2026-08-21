@@ -133,6 +133,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				rec[key] = value
 			}
 		}
+		if state := first(req.Input, "DesiredState"); state != "" {
+			if state != "RUNNING" && state != "STOPPED" {
+				return nil, validation("DesiredState must be RUNNING or STOPPED.")
+			}
+			rec["CurrentState"] = state
+		}
 		if err := putRecord(ctx, p.col(req, "pipe"), name, rec); err != nil {
 			return nil, err
 		}
@@ -168,13 +174,50 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"Name": name, "Arn": rec["Arn"], "CurrentState": state}}, nil
 	case "TagResource":
 		arn := first(req.Input, "resourceArn", "ResourceArn")
-		b, _ := json.Marshal(req.Input["tags"])
+		tags := map[string]any{}
+		if b, ok, err := p.col(req, "pipetag").Get(ctx, arn); err != nil {
+			return nil, err
+		} else if ok {
+			_ = json.Unmarshal(b, &tags)
+		}
+		incoming, _ := req.Input["tags"].(map[string]any)
+		if incoming == nil {
+			incoming, _ = req.Input["Tags"].(map[string]any)
+		}
+		for key, value := range incoming {
+			tags[key] = value
+		}
+		b, _ := json.Marshal(tags)
 		if err := p.col(req, "pipetag").Put(ctx, arn, b); err != nil {
 			return nil, err
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "UntagResource":
-		if err := p.col(req, "pipetag").Delete(ctx, first(req.Input, "resourceArn", "ResourceArn")); err != nil {
+		arn := first(req.Input, "resourceArn", "ResourceArn")
+		b, ok, err := p.col(req, "pipetag").Get(ctx, arn)
+		if err != nil {
+			return nil, err
+		}
+		tags := map[string]any{}
+		if ok {
+			_ = json.Unmarshal(b, &tags)
+		}
+		keys := req.Input["tagKeys"]
+		if keys == nil {
+			keys = req.Input["TagKeys"]
+		}
+		switch keys := keys.(type) {
+		case []any:
+			for _, key := range keys {
+				delete(tags, stringValue(key))
+			}
+		case []string:
+			for _, key := range keys {
+				delete(tags, key)
+			}
+		}
+		b, _ = json.Marshal(tags)
+		if err := p.col(req, "pipetag").Put(ctx, arn, b); err != nil {
 			return nil, err
 		}
 		return &spi.Response{Output: map[string]any{}}, nil

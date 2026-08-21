@@ -168,6 +168,57 @@ func TestPipesRetriesFailedTargetWithoutDeletingSource(t *testing.T) {
 	})
 }
 
+func TestPipesControlPlaneValidationUpdatesAndTags(t *testing.T) {
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer p.Close()
+	if p.ServiceID() != "aws.pipes" || p.Tier() == "" {
+		t.Fatalf("identity %q %q", p.ServiceID(), p.Tier())
+	}
+	assertFault(t, p, id, "CreatePipe", map[string]any{"Name": "bad"}, "ValidationException")
+	badState := pipeInput("bad-state", "source", "target")
+	badState["DesiredState"] = "PAUSED"
+	assertFault(t, p, id, "CreatePipe", badState, "ValidationException")
+
+	input := pipeInput("control", "source", "target")
+	input["DesiredState"] = "STOPPED"
+	created := invoke(t, p, id, "CreatePipe", input)
+	arn := created.Output["Arn"].(string)
+	assertFault(t, p, id, "CreatePipe", input, "ConflictException")
+	assertFault(t, p, id, "DescribePipe", map[string]any{"Name": "missing"}, "NotFoundException")
+	assertFault(t, p, id, "UpdatePipe", map[string]any{"Name": "control", "DesiredState": "PAUSED"}, "ValidationException")
+	updated := invoke(t, p, id, "UpdatePipe", map[string]any{"Name": "control", "DesiredState": "RUNNING", "Target": queueARN(id, "other")})
+	if updated.Output["CurrentState"] != "RUNNING" {
+		t.Fatalf("update %#v", updated.Output)
+	}
+	described := invoke(t, p, id, "DescribePipe", map[string]any{"Name": "control"})
+	if described.Output["Target"] != queueARN(id, "other") || described.Output["CurrentState"] != "RUNNING" {
+		t.Fatalf("describe %#v", described.Output)
+	}
+	if listed := invoke(t, p, id, "ListPipes", map[string]any{}).Output["Pipes"].([]any); len(listed) != 1 {
+		t.Fatalf("list %#v", listed)
+	}
+
+	invoke(t, p, id, "TagResource", map[string]any{"resourceArn": arn, "tags": map[string]any{"keep": "1", "remove": "2"}})
+	invoke(t, p, id, "TagResource", map[string]any{"resourceArn": arn, "tags": map[string]any{"keep": "updated"}})
+	invoke(t, p, id, "UntagResource", map[string]any{"resourceArn": arn, "tagKeys": []any{"remove"}})
+	tags := invoke(t, p, id, "ListTagsForResource", map[string]any{"resourceArn": arn}).Output["tags"].(map[string]any)
+	if len(tags) != 1 || tags["keep"] != "updated" {
+		t.Fatalf("tags %#v", tags)
+	}
+
+	invoke(t, p, id, "DeletePipe", map[string]any{"Name": "control"})
+	assertFault(t, p, id, "DeletePipe", map[string]any{"Name": "control"}, "NotFoundException")
+	assertFault(t, p, id, "Unknown", map[string]any{}, "MirrorNotImplemented")
+	if sourceBatchSize(map[string]any{}) != 10 || sourceBatchSize(map[string]any{"SourceParameters": map[string]any{"SqsQueueParameters": map[string]any{"BatchSize": float64(99)}}}) != 10 {
+		t.Fatal("invalid SQS batch size bounds")
+	}
+	if err := New(spi.Deps{}).Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func pipeInput(name, source, target string) map[string]any {
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	return map[string]any{
@@ -187,6 +238,15 @@ func invoke(t *testing.T, handler spi.Handler, id spi.Identity, operation string
 		t.Fatalf("%s: %v", operation, err)
 	}
 	return response
+}
+
+func assertFault(t *testing.T, handler spi.Handler, id spi.Identity, operation string, input map[string]any, code string) {
+	t.Helper()
+	_, err := handler.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	fault, _ := err.(*spi.Fault)
+	if fault == nil || fault.Code != code {
+		t.Fatalf("%s fault %v, want %s", operation, err, code)
+	}
 }
 
 func storedMessages(t *testing.T, deps spi.Deps, id spi.Identity, queue string) []map[string]any {

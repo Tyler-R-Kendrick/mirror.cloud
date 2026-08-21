@@ -309,6 +309,30 @@ func TestMutantsAreKilled(t *testing.T) {
 			pkg:  "./internal/services/aws/lambda",
 			run:  "TestInvokeAcceptsRawArrayPayload",
 		},
+		{
+			name: "pipes-ignore-updated-state",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `rec["CurrentState"] = state`,
+			new:  `rec["CurrentState"] = rec["CurrentState"]`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesControlPlaneValidationUpdatesAndTags",
+		},
+		{
+			name: "pipes-ignore-tag-upsert",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  "for key, value := range incoming {\n\t\t\ttags[key] = value\n\t\t}",
+			new:  "for key := range incoming {\n\t\t\ttags[key] = tags[key]\n\t\t}",
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesControlPlaneValidationUpdatesAndTags",
+		},
+		{
+			name: "pipes-ignore-tag-removal",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `delete(tags, stringValue(key))`,
+			new:  `delete(tags, "mutated-"+stringValue(key))`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesControlPlaneValidationUpdatesAndTags",
+		},
 	}
 
 	for _, m := range mutants {

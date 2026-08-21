@@ -528,8 +528,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "pipes-kinesis-retry-successful-prefix",
 			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
-			old:  "if succeeded[id] {\n\t\t\tcontinue\n\t\t}",
-			new:  "if !succeeded[id] {\n\t\t\tcontinue\n\t\t}",
+			old:  "if succeeded[id] {\n\t\t\t_ = attempts.Delete(ctx, id)\n\t\t\tcontinue\n\t\t}",
+			new:  "if !succeeded[id] {\n\t\t\t_ = attempts.Delete(ctx, id)\n\t\t\tcontinue\n\t\t}",
 			pkg:  "./internal/services/aws/pipes",
 			run:  "TestPipesKinesisPartialBatchCheckpoint",
 		},

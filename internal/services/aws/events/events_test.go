@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
@@ -290,6 +292,72 @@ func TestAPIDestinationControlPlane(t *testing.T) {
 		t.Fatalf("deauthorized invocation fault=%v", err)
 	}
 	wantFault("UpdateConnection", map[string]any{"Name": "missing", "Description": "updated"}, "ResourceNotFoundException")
+}
+
+func TestAPIDestinationRateLimit(t *testing.T) {
+	requests := make(chan struct{}, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests <- struct{}{} }))
+	defer server.Close()
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	connection, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateConnection", Input: map[string]any{
+		"Name": "rate", "AuthorizationType": "API_KEY", "AuthParameters": map[string]any{"ApiKeyAuthParameters": map[string]any{"ApiKeyName": "X-Key", "ApiKeyValue": "value"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateApiDestination", Input: map[string]any{
+		"Name": "rate", "ConnectionArn": connection.Output["ConnectionArn"], "InvocationEndpoint": server.URL, "HttpMethod": "POST", "InvocationRateLimitPerSecond": 1,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arn := str(destination.Output["ApiDestinationArn"])
+	if _, err := InvokeAPIDestination(ctx, deps, id, arn, nil, []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	<-requests
+	done := make(chan error, 1)
+	go func() {
+		_, err := InvokeAPIDestination(ctx, deps, id, arn, nil, []byte(`{}`))
+		done <- err
+	}()
+	reserved := false
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		body, ok, _ := deps.Store.Scope(id.Account, id.Region).Collection("apidest-rate").Get(ctx, "rate")
+		var state apiDestinationRateState
+		_ = json.Unmarshal(body, &state)
+		if ok && state.Window == int64(time.Second) {
+			reserved = true
+			break
+		}
+		runtime.Gosched()
+	}
+	if !reserved {
+		t.Fatal("second invocation did not reserve the next rate window")
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("rate-limited invocation completed early: %v", err)
+	default:
+	}
+	_ = deps.Clock.Advance(time.Second)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("rate-limited invocation did not resume")
+	}
+	select {
+	case <-requests:
+	case <-time.After(time.Second):
+		t.Fatal("rate-limited request was not sent")
+	}
 }
 
 func TestTargetsUpsertRemoveAndEventBusIsolation(t *testing.T) {

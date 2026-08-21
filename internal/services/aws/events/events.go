@@ -383,6 +383,9 @@ func InvokeAPIDestination(ctx context.Context, deps spi.Deps, identity spi.Ident
 	if connection["ConnectionState"] != "AUTHORIZED" {
 		return nil, &spi.Fault{Code: "ConnectionFailure", Message: "Connection is not authorized.", HTTPStatus: 400, Fault: "client"}
 	}
+	if err := waitAPIDestinationRate(ctx, deps, identity, arnResourceName(arn, "api-destination/"), destination); err != nil {
+		return nil, err
+	}
 	auth, _ := connection["AuthParameters"].(map[string]any)
 	invocation, _ := auth["InvocationHttpParameters"].(map[string]any)
 	payload, err := mergeConnectionBody(payload, invocation["BodyParameters"])
@@ -476,6 +479,48 @@ func oauthToken(ctx context.Context, client *http.Client, auth map[string]any) (
 
 func apiDestinationRetryable(status int) bool {
 	return status == 401 || status == 407 || status == 409 || status == 429 || status >= 500
+}
+
+type apiDestinationRateState struct {
+	Window int64
+	Count  int
+}
+
+func waitAPIDestinationRate(ctx context.Context, deps spi.Deps, identity spi.Identity, name string, destination map[string]any) error {
+	rate, err := strconv.Atoi(toString(destination["InvocationRateLimitPerSecond"]))
+	if err != nil || rate < 1 {
+		rate = 300
+	}
+	now := deps.Clock.Now()
+	wait := time.Duration(0)
+	// ponytail: fixed one-second windows; use a token bucket if burst smoothing becomes observable.
+	err = deps.Store.Scope(identity.Account, identity.Region).Collection("apidest-rate").Txn(ctx, func(tx spi.Tx) error {
+		state := apiDestinationRateState{Window: now.Truncate(time.Second).UnixNano()}
+		if body, ok, getErr := tx.Get(name); getErr != nil {
+			return getErr
+		} else if ok {
+			_ = json.Unmarshal(body, &state)
+		}
+		window := time.Unix(0, state.Window)
+		if !now.Before(window.Add(time.Second)) {
+			window, state.Count = now.Truncate(time.Second), 0
+		} else if state.Count >= rate {
+			window, state.Count = window.Add(time.Second), 0
+		}
+		state.Window, state.Count = window.UnixNano(), state.Count+1
+		wait = max(window.Sub(now), 0)
+		body, _ := json.Marshal(state)
+		return tx.Put(name, body)
+	})
+	if err != nil || wait == 0 {
+		return err
+	}
+	select {
+	case <-deps.Clock.After(wait):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func eventRecord(ctx context.Context, deps spi.Deps, identity spi.Identity, collection, name string) (map[string]any, bool) {

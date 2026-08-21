@@ -7,7 +7,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
@@ -201,7 +203,7 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 		return
 	}
 	now := p.deps.Clock.Now().UTC()
-	key := prefix + now.Format("2006/01/02/15/") + stream + "-1-" + now.Format("2006-01-02-15-04-05-") + recID
+	key := evaluatedS3Prefix(prefix, now) + stream + "-1-" + now.Format("2006-01-02-15-04-05-") + recID
 	info, err := p.deps.Blobs.Put(ctx, req.Identity.Account+"/"+req.Identity.Region+"/"+bucket+"/"+key, bytes.NewReader(data))
 	if err != nil {
 		return
@@ -210,6 +212,19 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 	mtime := p.deps.Clock.Now().UTC().Format(http.TimeFormat)
 	meta, _ := json.Marshal(map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "deleteMarker": false})
 	_ = p.col(req, "objects").Put(ctx, bucket+"/"+key, meta)
+}
+
+var firehoseTimestampPrefix = regexp.MustCompile(`!\{timestamp:([^}]*)\}`)
+
+func evaluatedS3Prefix(prefix string, now time.Time) string {
+	if !firehoseTimestampPrefix.MatchString(prefix) {
+		return prefix + now.Format("2006/01/02/15/")
+	}
+	return firehoseTimestampPrefix.ReplaceAllStringFunc(prefix, func(expression string) string {
+		pattern := expression[len("!{timestamp:") : len(expression)-1]
+		layout := strings.NewReplacer("yyyy", "2006", "MM", "01", "dd", "02", "HH", "15", "mm", "04", "ss", "05").Replace(pattern)
+		return now.Format(layout)
+	})
 }
 
 func first(in map[string]any, keys ...string) string {

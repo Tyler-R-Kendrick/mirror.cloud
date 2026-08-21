@@ -184,6 +184,17 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	if string(body) != "payload" {
 		t.Fatalf("S3 object body %q", body)
 	}
+	invoke("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "expressions", "ExtendedS3DestinationConfiguration": map[string]any{
+			"BucketARN": "arn:aws:s3:::out", "Prefix": "year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/",
+		},
+	})
+	response = invoke("PutRecord", map[string]any{"DeliveryStreamName": "expressions", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("expression"))}})
+	recordID = response.Output["RecordId"].(string)
+	key = id.Account + "/" + id.Region + "/out/year=1970/month=01/day=01/hour=00/expressions-1-1970-01-01-00-00-00-" + recordID
+	if _, _, err := deps.Blobs.Get(context.Background(), key); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestFirehoseControlPlaneAndBatch(t *testing.T) {

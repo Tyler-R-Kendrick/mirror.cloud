@@ -16,7 +16,7 @@ S1 codegen (`cmd/mirrorgen`, `specs/`) replaces `internal/catalog` as the model 
 
 ## S1 — spec ingestion
 
-- **AWS api-models-aws on-disk layout.** Verified against `github.com/aws/api-models-aws` on 2026-08-20: files live at `models/<sdk-id>/service/<version>/<sdk-id>-<version>.json`. The upstream README omits the `service/` segment. `scripts/specs-sync.sh` walks that tree rather than hardcoding a remembered layout; `internal/receiver/smithy` is a shapes-map walker and does not assume a path.
+- **AWS api-models-aws on-disk layout.** Verified against `github.com/aws/api-models-aws` on 2026-08-20: files live at `models/<sdk-id>/service/<version>/<sdk-id>-<version>.json`. The upstream README omits the `service/` segment. `scripts/specs-sync.sh` walks that tree rather than hardcoding a remembered layout; `internal/receiver/aws/smithy` is a shapes-map walker and does not assume a path.
 - **`Operation` and `Service` have no `UnknownTraits`.** Unknown traits are recorded on `Shape` only. Operation- and service-level unknown traits (endpoint rule sets, auth, examples, …) are ignored after known traits are applied — never fatal. Adding a field would unfreeze §3.1.
 - **`aws.protocols#awsQueryError` has no model cell.** It is treated as handled (not recorded as unknown) because it only affects query error wrapping in the codec, not the canonical model.
 - **Multiple protocols on one service (SQS).** The model has a single `Protocol`. The Smithy receiver prefers restJson1 > restXml > awsJson1_1 > awsJson1_0 > awsQuery > ec2Query, so SQS becomes `awsJson1_0`. Dual-protocol dispatch stays an edge concern (§4.3).

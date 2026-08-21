@@ -2,6 +2,7 @@ package edge_test
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,11 +12,70 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/s3"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/sts"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sts"
 )
+
+type recordingAuthorizer struct{ checks []string }
+
+func (a *recordingAuthorizer) Authorize(_ context.Context, _ spi.Identity, _, operation, resource string) error {
+	a.checks = append(a.checks, operation+" "+resource)
+	return nil
+}
+
+func (a *recordingAuthorizer) AuthorizeRequest(_ context.Context, req *spi.Request, resource string) error {
+	a.checks = append(a.checks, req.Operation+" "+resource)
+	return nil
+}
+
+func TestS3CopyObjectAuthorizationChecks(t *testing.T) {
+	deps := spitest.Deps(t)
+	authorizer := &recordingAuthorizer{}
+	deps.Authorizer = authorizer
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
+	defer ts.Close()
+	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=00"
+	do := func(path string, body []byte, headers map[string]string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPut, ts.URL+path, bytes.NewReader(body))
+		req.Header.Set("Authorization", auth)
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode >= 300 {
+			t.Fatalf("PUT %s: %s", path, resp.Status)
+		}
+	}
+	do("/source", nil, nil)
+	do("/destination", nil, nil)
+	do("/source/key", []byte("body"), nil)
+	authorizer.checks = nil
+	do("/destination/copy", nil, map[string]string{"x-amz-copy-source": "/source/key"})
+	want := "GetObject arn:aws:s3:::source/key\nPutObject arn:aws:s3:::destination/copy"
+	if got := strings.Join(authorizer.checks, "\n"); got != want {
+		t.Fatalf("copy checks:\n%s\nwant:\n%s", got, want)
+	}
+	authorizer.checks = nil
+	do("/destination/tagged", nil, map[string]string{"x-amz-copy-source": "/source/key", "x-amz-tagging-directive": "REPLACE", "x-amz-tagging": "team=data"})
+	if got := strings.Join(authorizer.checks, "\n"); !strings.HasSuffix(got, "PutObjectTagging arn:aws:s3:::destination/tagged") {
+		t.Fatalf("replace-tagging checks:\n%s", got)
+	}
+}
 
 func TestS3PutGetAndForeignService501(t *testing.T) {
 	deps := spitest.Deps(t)
@@ -89,6 +149,18 @@ func TestS3PutGetAndForeignService501(t *testing.T) {
 	}
 	if dres.Header.Get("x-mirror-not-implemented") == "" && !strings.Contains(string(db), "MirrorNotImplemented") {
 		t.Fatalf("not a §4.11 error: %s %v", db, dres.Header)
+	}
+
+	unknown, _ := http.NewRequest(http.MethodPost, ts.URL+"/", nil)
+	unknown.Header.Set("X-Amz-Target", "UnknownService.UnknownOperation")
+	ures, err := http.DefaultClient.Do(unknown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ubody, _ := io.ReadAll(ures.Body)
+	ures.Body.Close()
+	if ures.StatusCode != http.StatusNotImplemented || !strings.Contains(string(ubody), "unknown service") {
+		t.Fatalf("unknown service %d %s", ures.StatusCode, ubody)
 	}
 }
 

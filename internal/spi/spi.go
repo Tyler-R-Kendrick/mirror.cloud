@@ -97,13 +97,15 @@ func NotImplemented(serviceID, operation, requiredTier string) *Fault {
 
 // Deps is the dependency bundle every behavior pack receives at construction.
 type Deps struct {
-	Store   Store
-	Blobs   BlobStore
-	Bus     Bus
-	Clock   Clock
-	Rand    Rand
-	Journal Journal
-	Model   *model.Bundle
+	Store      Store
+	Blobs      BlobStore
+	Bus        Bus
+	Clock      Clock
+	Rand       Rand
+	Journal    Journal
+	Model      *model.Bundle
+	Authorizer Authorizer
+	Compute    ComputeProvider
 }
 
 // Store is account+region namespaced structured state.
@@ -227,6 +229,11 @@ type Filter struct {
 // Authorizer is the seam for future policy evaluation. v1 ships AllowAll.
 type Authorizer interface {
 	Authorize(ctx context.Context, id Identity, serviceID, operation, resource string) error
+}
+
+// RequestAuthorizer optionally evaluates decoded request fields as policy context.
+type RequestAuthorizer interface {
+	AuthorizeRequest(ctx context.Context, req *Request, resource string) error
 }
 
 // ComputeProvider is the seam for future function-execution services

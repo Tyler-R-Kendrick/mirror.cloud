@@ -67,6 +67,9 @@ func Parse(r *http.Request, defaultAcct, defaultReg string, now time.Time) spi.I
 	if id.Project == "" {
 		id.Project = id.Account
 	}
+	if v := r.Header.Get("X-Mirror-Role"); v != "" {
+		id.ARN = "arn:aws:sts::" + id.Account + ":assumed-role/" + v + "/mirror"
+	}
 	return id
 }
 

@@ -18,7 +18,7 @@ func TestExpandServices(t *testing.T) {
 		t.Fatal("all should be nil (enable every catalog service)")
 	}
 	got = runtime.ExpandServices(nil, "aws-core", false)
-	if len(got) != 8 {
+	if len(got) != 151 {
 		t.Fatalf("aws-core: %v", got)
 	}
 }
@@ -45,6 +45,17 @@ func TestEnvOutput(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in\n%s", want, out)
 		}
+	}
+}
+
+func TestSplitFlagsAllowsBindAfterService(t *testing.T) {
+	flags, pos := splitFlags([]string{"s3", "--bind", "127.0.0.1:9", "--seed", "x"}, map[string]bool{"all": true, "strict": true})
+	if len(pos) != 1 || pos[0] != "s3" {
+		t.Fatalf("pos %v", pos)
+	}
+	joined := strings.Join(flags, " ")
+	if !strings.Contains(joined, "--bind 127.0.0.1:9") || !strings.Contains(joined, "--seed x") {
+		t.Fatalf("flags %v", flags)
 	}
 }
 

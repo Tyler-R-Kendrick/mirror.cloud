@@ -31,7 +31,9 @@ aws --endpoint-url http://127.0.0.1:4566 s3 cp README.md s3://demo/README.md
 
 Dummy credentials `test`/`test` work. So does anything else — signatures are parsed, never verified. Default listen: `http://127.0.0.1:4566`.
 
-`bin/mirror up --profile aws-core` boots S3, DynamoDB, SQS, SNS, STS, IAM, SSM, Secrets Manager. `bin/mirror up --all` also serves mock-tier for every catalog service. `--strict` refuses mock.
+`bin/mirror up --profile aws-core` boots the emulate-tier AWS packs in docs/SUPPORT.md. Remaining ingested Smithy operations (if any) are mock-tier. This is not LocalStack-complete: no hypervisor, no real RDS/Redis/EKS, extra ops are named control-plane records. `bin/mirror up --all` serves mock-tier for everything else. `--strict` refuses mock. EC2 is VPC/subnet/SG/instance records on the ec2Query wire.
+
+S3 terraform refresh reads (`GetBucketAcl`, CORS, encryption, …) return the empty “not configured” document the AWS provider tolerates — they are not silent write stubs. IAM evaluates Deny then Allow (default deny when the role has policies). SSM `SecureString` is reversible local encoding, not encryption. CloudFormation accepts JSON or YAML TemplateBody and a fixed resource-type set.
 
 Hosted bind (`--bind 0.0.0.0:4566`) prints a banner: there is no authentication; do not expose the process to untrusted networks.
 

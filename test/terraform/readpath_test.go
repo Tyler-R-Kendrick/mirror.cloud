@@ -10,9 +10,9 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/dynamodb"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/s3"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/sqs"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 )
 
 func TestReadPathOpsAreImplemented(t *testing.T) {

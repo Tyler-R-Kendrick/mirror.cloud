@@ -21,8 +21,8 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/fusion"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver/discovery"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver/smithy"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver/aws/smithy"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/receiver/gcp/discovery"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/specdiff"
 )
 

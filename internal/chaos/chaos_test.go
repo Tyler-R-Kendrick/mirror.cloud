@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/s3"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )

@@ -5,9 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -70,18 +74,64 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"FailedEntryCount": 0}}, nil
 	case "PutEvents":
 		entries, _ := req.Input["Entries"].([]any)
-		p.fanout(ctx, req, entries)
-		return &spi.Response{Output: map[string]any{"FailedEntryCount": 0, "Entries": []any{}}}, nil
+		return p.putEvents(ctx, req, entries), nil
 	default:
 		return p.extra(ctx, req)
 	}
 }
 
-func (p *Pack) fanout(ctx context.Context, req *spi.Request, entries []any) {
-	raw, _ := json.Marshal(entries)
+func (p *Pack) putEvents(ctx context.Context, req *spi.Request, entries []any) *spi.Response {
+	results := make([]any, 0, len(entries))
+	failed := 0
+	for _, raw := range entries {
+		entry, _ := raw.(map[string]any)
+		if str(entry["Source"]) == "" || str(entry["DetailType"]) == "" || str(entry["Detail"]) == "" {
+			failed++
+			results = append(results, map[string]any{"ErrorCode": "ValidationException", "ErrorMessage": "Source, DetailType and Detail are required."})
+			continue
+		}
+		var detail any
+		if json.Unmarshal([]byte(str(entry["Detail"])), &detail) != nil {
+			failed++
+			results = append(results, map[string]any{"ErrorCode": "MalformedDetail", "ErrorMessage": "Detail is not valid JSON."})
+			continue
+		}
+		id := p.deps.Rand.UUID()
+		event := map[string]any{
+			"version": "0", "id": id, "detail-type": entry["DetailType"], "source": entry["Source"],
+			"account": req.Identity.Account, "time": eventTime(entry["Time"], p.deps.Clock.Now()),
+			"region": req.Identity.Region, "resources": entry["Resources"], "detail": detail,
+		}
+		if event["resources"] == nil {
+			event["resources"] = []any{}
+		}
+		p.fanout(ctx, req, event, str(entry["EventBusName"]))
+		results = append(results, map[string]any{"EventId": id})
+	}
+	return &spi.Response{Output: map[string]any{"FailedEntryCount": failed, "Entries": results}}
+}
+
+func eventTime(v any, fallback time.Time) string {
+	switch t := v.(type) {
+	case time.Time:
+		return t.UTC().Format(time.RFC3339)
+	case string:
+		if t != "" {
+			return t
+		}
+	}
+	return fallback.UTC().Format(time.RFC3339)
+}
+
+func (p *Pack) fanout(ctx context.Context, req *spi.Request, event map[string]any, bus string) {
+	raw, _ := json.Marshal(event)
 	_ = p.deps.Bus.Publish(ctx, "events", raw)
 	kvs, _, _ := p.col(req, "targets").List(ctx, "", "", 0)
 	for _, kv := range kvs {
+		rule, ok := p.load(ctx, req, "rules", kv.Key)
+		if !ok || !ruleMatches(rule, bus, event) {
+			continue
+		}
 		var tgs []any
 		_ = json.Unmarshal(kv.Value, &tgs)
 		for _, t := range tgs {
@@ -90,14 +140,57 @@ func (p *Pack) fanout(ctx context.Context, req *spi.Request, entries []any) {
 			if arn == "" {
 				continue
 			}
-			_ = p.deps.Bus.Publish(ctx, "events:"+arn, raw)
-			if i := lastColon(arn); i >= 0 && strings.Contains(arn, ":sqs:") {
-				name := arn[i+1:]
-				rh := "evt-" + name
-				msg, _ := json.Marshal(map[string]any{"id": rh, "body": string(raw), "handle": rh, "visibleAt": 0, "receiveCount": 0, "seq": 1})
-				_ = p.col(req, "msgs:"+name).Put(ctx, rh, msg)
+			payload := raw
+			if input := str(m["Input"]); input != "" {
+				payload = []byte(input)
 			}
+			_ = p.deps.Bus.Publish(ctx, "events:"+arn, payload)
+			p.deliver(ctx, req, arn, m, payload)
 		}
+	}
+}
+
+func ruleMatches(rule map[string]any, bus string, event map[string]any) bool {
+	if str(rule["State"]) == "DISABLED" {
+		return false
+	}
+	ruleBus := str(rule["EventBusName"])
+	if ruleBus == "" {
+		ruleBus = "default"
+	}
+	if bus == "" {
+		bus = "default"
+	}
+	pattern := str(rule["EventPattern"])
+	return ruleBus == bus && pattern != "" && matchEventPattern(pattern, event)
+}
+
+func (p *Pack) deliver(ctx context.Context, req *spi.Request, arn string, target map[string]any, payload []byte) {
+	switch {
+	case strings.Contains(arn, ":sqs:"):
+		in := map[string]any{"QueueName": arn[lastColon(arn)+1:], "MessageBody": string(payload)}
+		if params, ok := target["SqsParameters"].(map[string]any); ok {
+			in["MessageGroupId"] = params["MessageGroupId"]
+		}
+		_, _ = sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "SendMessage", Input: in})
+	case strings.Contains(arn, ":sns:"):
+		_, _ = sns.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Publish", Input: map[string]any{"TopicArn": arn, "Message": string(payload)}})
+	case strings.Contains(arn, ":lambda:"):
+		_, name, ok := strings.Cut(arn, ":function:")
+		if !ok {
+			return
+		}
+		if i := strings.IndexByte(name, ':'); i >= 0 {
+			name = name[:i]
+		}
+		in := map[string]any{}
+		if json.Unmarshal(payload, &in) != nil {
+			in = map[string]any{}
+			in["input"] = string(payload)
+		}
+		in["FunctionName"] = name
+		in["InvocationType"] = "Event"
+		_, _ = lambda.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: in})
 	}
 }
 

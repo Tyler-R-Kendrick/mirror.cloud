@@ -1,6 +1,7 @@
 package events
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,10 +11,80 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
-
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 )
+
+func TestPutEventsDeliversOnlyMatchingRules(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, sp, np := New(deps), sqs.New(deps), sns.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(pack spi.BehaviorPack, op string, in map[string]any) *spi.Response {
+		t.Helper()
+		resp, err := pack.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		return resp
+	}
+	for _, name := range []string{"direct", "via-sns", "ignored"} {
+		invoke(sp, "CreateQueue", map[string]any{"QueueName": name})
+	}
+	topic := str(invoke(np, "CreateTopic", map[string]any{"Name": "matched"}).Output["TopicArn"])
+	invoke(np, "Subscribe", map[string]any{
+		"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:via-sns", "RawMessageDelivery": "true",
+	})
+	invoke(p, "PutRule", map[string]any{"Name": "matched", "EventPattern": `{"source":["app"]}`})
+	invoke(p, "PutTargets", map[string]any{"Rule": "matched", "Targets": []any{
+		map[string]any{"Id": "queue", "Arn": "arn:aws:sqs:us-east-1:1:direct"},
+		map[string]any{"Id": "topic", "Arn": topic},
+	}})
+	invoke(p, "PutRule", map[string]any{"Name": "disabled", "EventPattern": `{}`, "State": "DISABLED"})
+	invoke(p, "PutTargets", map[string]any{"Rule": "disabled", "Targets": []any{map[string]any{"Id": "ignored", "Arn": "arn:aws:sqs:us-east-1:1:ignored"}}})
+
+	resp := invoke(p, "PutEvents", map[string]any{"Entries": []any{
+		map[string]any{"Source": "app", "DetailType": "order", "Detail": `{"n":1}`},
+		map[string]any{"Source": "other", "DetailType": "order", "Detail": `{}`},
+		map[string]any{"Source": "app", "DetailType": "order", "Detail": `{"n":2}`},
+	}})
+	if resp.Output["FailedEntryCount"] != 0 || len(resp.Output["Entries"].([]any)) != 3 {
+		t.Fatalf("put events response %#v", resp.Output)
+	}
+	for _, queue := range []string{"direct", "via-sns"} {
+		got := invoke(sp, "ReceiveMessage", map[string]any{"QueueName": queue, "MaxNumberOfMessages": 10}).Output["Messages"].([]any)
+		if len(got) != 2 {
+			t.Fatalf("%s received %d messages, want 2", queue, len(got))
+		}
+		var event map[string]any
+		if json.Unmarshal([]byte(str(got[0].(map[string]any)["Body"])), &event) != nil || event["source"] != "app" || event["detail-type"] != "order" {
+			t.Fatalf("%s event %#v", queue, got[0])
+		}
+	}
+	if got := invoke(sp, "ReceiveMessage", map[string]any{"QueueName": "ignored"}).Output["Messages"].([]any); len(got) != 0 {
+		t.Fatalf("disabled rule delivered %#v", got)
+	}
+}
+
+func TestPutEventsReportsInvalidEntries(t *testing.T) {
+	p := New(spitest.Deps(t))
+	resp, err := p.Invoke(context.Background(), &spi.Request{
+		Identity:  spi.Identity{Account: "1", Region: "us-east-1"},
+		Operation: "PutEvents",
+		Input: map[string]any{"Entries": []any{
+			map[string]any{"Source": "app", "DetailType": "x"},
+			map[string]any{"Source": "app", "DetailType": "x", "Detail": `{`},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Output["FailedEntryCount"] != 2 || len(resp.Output["Entries"].([]any)) != 2 {
+		t.Fatalf("invalid entries %#v", resp.Output)
+	}
+}
 
 func TestBootedServerEventBridgePutEvents(t *testing.T) {
 	cfg := config.Default()

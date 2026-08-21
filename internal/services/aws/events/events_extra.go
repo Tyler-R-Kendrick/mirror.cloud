@@ -232,8 +232,7 @@ func (p *Pack) extra(ctx context.Context, req *spi.Request) (*spi.Response, erro
 		return &spi.Response{Output: map[string]any{"Result": ok}}, nil
 	case "PutPartnerEvents":
 		entries, _ := req.Input["Entries"].([]any)
-		p.fanout(ctx, req, entries)
-		return &spi.Response{Output: map[string]any{"FailedEntryCount": 0, "Entries": []any{}}}, nil
+		return p.putEvents(ctx, req, entries), nil
 	default:
 		return nil, spi.NotImplemented("aws.events", op, "emulate")
 	}

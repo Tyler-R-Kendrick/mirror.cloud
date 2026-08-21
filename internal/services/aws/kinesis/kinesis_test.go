@@ -1,6 +1,7 @@
 package kinesis
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -8,9 +9,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
@@ -109,6 +112,36 @@ func TestBootedServerKinesisPutGet(t *testing.T) {
 	call("UpdateMaxRecordSize", `{"StreamName":"s","MaxRecordSizeInKiB":1024}`)
 	call("UpdateStreamWarmThroughput", `{"StreamName":"s","WarmThroughputMiBPerSecond":1}`)
 	call("DeregisterStreamConsumer", `{"ConsumerARN":"`+carn+`"}`)
+}
+
+func TestKinesisPublishesRecordsAndStartsAtTimestamp(t *testing.T) {
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := New(deps)
+	request := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	request("CreateStream", map[string]any{"StreamName": "events"})
+	published := 0
+	cancel := deps.Bus.Subscribe("kinesis", func(context.Context, []byte) { published++ })
+	defer cancel()
+	request("PutRecord", map[string]any{"StreamName": "events", "PartitionKey": "one", "Data": []byte("one")})
+	if err := deps.Clock.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	request("PutRecord", map[string]any{"StreamName": "events", "PartitionKey": "two", "Data": []byte("two")})
+	iterator := request("GetShardIterator", map[string]any{
+		"StreamName": "events", "ShardIteratorType": "AT_TIMESTAMP", "Timestamp": float64(deps.Clock.Now().Add(-time.Millisecond).UnixMilli()) / 1000,
+	}).Output["ShardIterator"]
+	records := request("GetRecords", map[string]any{"ShardIterator": iterator}).Output["Records"].([]any)
+	if published != 2 || len(records) != 1 || records[0].(map[string]any)["PartitionKey"] != "two" {
+		t.Fatalf("published=%d records=%#v", published, records)
+	}
 }
 
 func TestKinesisHTTPProvenOps(t *testing.T) {

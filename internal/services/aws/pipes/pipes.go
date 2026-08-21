@@ -475,6 +475,9 @@ func (p *Pack) processRecords(ctx context.Context, identity spi.Identity, pipe m
 	}
 	allDelivered := true
 	for i, payload := range payloads {
+		if parameters, ok := pipe["TargetParameters"].(map[string]any); ok {
+			config["HttpParameters"] = resolvedHTTPParameters(parameters["HttpParameters"], decodedEvent(deliveryEvents[i]))
+		}
 		if events.DeliverTarget(ctx, p.deps, identity, target, config, payload) == nil {
 			if !enriched {
 				succeeded[matchedIDs[i]] = true
@@ -521,6 +524,17 @@ func (p *Pack) enrich(ctx context.Context, identity spi.Identity, pipe map[strin
 			return nil, true, false
 		}
 		raw = response
+	case strings.Contains(arn, ":api-destination/"):
+		parameterEvent := any(fallback)
+		if len(fallback) == 1 {
+			parameterEvent = decodedEvent(fallback[0])
+		}
+		parameters, _ := pipe["EnrichmentParameters"].(map[string]any)
+		response, err := events.InvokeAPIDestination(ctx, p.deps, identity, arn, resolvedHTTPParameters(parameters["HttpParameters"], parameterEvent), payload)
+		if err != nil {
+			return nil, true, false
+		}
+		raw = response
 	default:
 		return nil, true, false
 	}
@@ -552,7 +566,7 @@ func (p *Pack) invokeAPIGateway(ctx context.Context, identity spi.Identity, pipe
 		path += endpoint[3]
 	}
 	parameters, _ := pipe["EnrichmentParameters"].(map[string]any)
-	httpParameters, _ := parameters["HttpParameters"].(map[string]any)
+	httpParameters := resolvedHTTPParameters(parameters["HttpParameters"], event)
 	if values, ok := httpParameters["PathParameterValues"].([]any); ok {
 		for _, value := range values {
 			path = strings.Replace(path, "*", url.PathEscape(httpParameter(value, event)), 1)
@@ -590,6 +604,28 @@ func (p *Pack) invokeAPIGateway(ctx context.Context, identity spi.Identity, pipe
 	}
 	defer response.Stream.Close()
 	return io.ReadAll(response.Stream)
+}
+
+func resolvedHTTPParameters(raw, event any) map[string]any {
+	parameters, _ := raw.(map[string]any)
+	resolved := map[string]any{}
+	if values, ok := parameters["PathParameterValues"].([]any); ok {
+		paths := make([]any, len(values))
+		for i, value := range values {
+			paths[i] = httpParameter(value, event)
+		}
+		resolved["PathParameterValues"] = paths
+	}
+	for _, name := range []string{"HeaderParameters", "QueryStringParameters"} {
+		if values, ok := parameters[name].(map[string]any); ok {
+			items := map[string]any{}
+			for key, value := range values {
+				items[key] = httpParameter(value, event)
+			}
+			resolved[name] = items
+		}
+	}
+	return resolved
 }
 
 func httpParameter(value, event any) string {

@@ -17,6 +17,7 @@ import (
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apigateway"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
@@ -517,6 +518,95 @@ func TestPipesAPIGatewayEnrichment(t *testing.T) {
 	})
 	if messages := storedMessages(t, deps, id, "api-target"); len(messages) != 1 {
 		t.Fatalf("failed API enrichment invoked target: %#v", messages)
+	}
+}
+
+func TestPipesAPIDestinationEnrichmentAndTarget(t *testing.T) {
+	type call struct{ path, shared, dynamic, apiKey, body string }
+	calls := make(chan call, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		calls <- call{r.URL.Path, r.URL.Query().Get("shared"), r.URL.Query().Get("dynamic"), r.Header.Get("X-Api-Key"), string(body)}
+		if r.URL.Path == "/fail" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/enrich/") {
+			_, _ = w.Write([]byte(`[{"value":9,"kind":"enriched"}]`))
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer p.Close()
+	queue, eventbridge := sqs.New(deps), events.New(deps)
+	for _, name := range []string{"destination-source", "destination-target", "api-target-source", "destination-failed-source"} {
+		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": name})
+	}
+	connection := invoke(t, eventbridge, id, "CreateConnection", map[string]any{
+		"Name": "pipe-connection", "AuthorizationType": "API_KEY",
+		"AuthParameters": map[string]any{
+			"ApiKeyAuthParameters":     map[string]any{"ApiKeyName": "X-Api-Key", "ApiKeyValue": "secret"},
+			"InvocationHttpParameters": map[string]any{"QueryStringParameters": []any{map[string]any{"Key": "shared", "Value": "connection"}}},
+		},
+	}).Output["ConnectionArn"]
+	destination := invoke(t, eventbridge, id, "CreateApiDestination", map[string]any{
+		"Name": "pipe-destination", "ConnectionArn": connection, "InvocationEndpoint": server.URL + "/enrich/*", "HttpMethod": "POST",
+	}).Output["ApiDestinationArn"]
+
+	input := pipeInput("api-destination-enrichment", "destination-source", "destination-target")
+	input["Enrichment"] = destination
+	input["EnrichmentParameters"] = map[string]any{
+		"InputTemplate": `{"value":<$.body.value>}`,
+		"HttpParameters": map[string]any{
+			"PathParameterValues":   []any{"$.body.kind"},
+			"QueryStringParameters": map[string]any{"shared": "pipe", "dynamic": "$.body.value"},
+		},
+	}
+	input["TargetParameters"] = map[string]any{"InputTemplate": `{"value":<$.value>,"kind":<$.kind>}`}
+	invoke(t, p, id, "CreatePipe", input)
+	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "destination-source", "MessageBody": `{"value":3,"kind":"widgets"}`})
+	eventually(t, func() bool { return len(storedMessages(t, deps, id, "destination-target")) == 1 })
+	firstCall := <-calls
+	if firstCall.path != "/enrich/widgets" || firstCall.shared != "connection" || firstCall.dynamic != "3" || firstCall.apiKey != "secret" || !strings.Contains(firstCall.body, `"value":3`) {
+		t.Fatalf("API destination enrichment call %#v", firstCall)
+	}
+	if body := storedMessages(t, deps, id, "destination-target")[0]["body"]; body != `{"value":9,"kind":"enriched"}` {
+		t.Fatalf("API destination enrichment body %v", body)
+	}
+
+	target := pipeInput("api-destination-target", "api-target-source", "unused")
+	target["Target"] = destination
+	target["TargetParameters"] = map[string]any{
+		"InputTemplate":  `{"value":<$.body.value>}`,
+		"HttpParameters": map[string]any{"PathParameterValues": []any{"$.body.kind"}, "QueryStringParameters": map[string]any{"dynamic": "$.body.value"}},
+	}
+	invoke(t, p, id, "CreatePipe", target)
+	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "api-target-source", "MessageBody": `{"value":4,"kind":"target"}`})
+	eventually(t, func() bool { return len(storedMessages(t, deps, id, "api-target-source")) == 0 })
+	secondCall := <-calls
+	if secondCall.path != "/enrich/target" || secondCall.dynamic != "4" || secondCall.apiKey != "secret" || !strings.Contains(secondCall.body, `"value":4`) {
+		t.Fatalf("API destination target call %#v", secondCall)
+	}
+
+	failedDestination := invoke(t, eventbridge, id, "CreateApiDestination", map[string]any{
+		"Name": "failed-destination", "ConnectionArn": connection, "InvocationEndpoint": server.URL + "/fail", "HttpMethod": "POST",
+	}).Output["ApiDestinationArn"]
+	failed := pipeInput("failed-api-destination", "destination-failed-source", "unused")
+	failed["Enrichment"] = failedDestination
+	invoke(t, p, id, "CreatePipe", failed)
+	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "destination-failed-source", "MessageBody": "retry"})
+	eventually(t, func() bool {
+		messages := storedMessages(t, deps, id, "destination-failed-source")
+		return len(messages) == 1 && messages[0]["receiveCount"] == float64(1)
+	})
+	if failedCall := <-calls; failedCall.path != "/fail" {
+		t.Fatalf("failed API destination call %#v", failedCall)
 	}
 }
 

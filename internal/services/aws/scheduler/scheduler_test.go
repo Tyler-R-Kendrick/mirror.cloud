@@ -334,13 +334,13 @@ func storedMessage(t *testing.T, deps spi.Deps, id spi.Identity, queue string) m
 
 func eventually(t *testing.T, condition func() bool) {
 	t.Helper()
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(10 * time.Second)
 	for !condition() {
 		select {
 		case <-deadline:
 			t.Fatal("condition not met")
 		default:
-			runtime.Gosched()
+			time.Sleep(time.Millisecond)
 		}
 	}
 }

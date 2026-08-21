@@ -17,6 +17,10 @@ func TestMatchEventPatternOperators(t *testing.T) {
 		{"operators", `{"source":[{"prefix":"app."}],"tags":["priority"],"detail":{"price":[{"numeric":[">",10,"<=",20]}],"ip":[{"cidr":"10.0.0.0/8"}],"status":[{"anything-but":["failed","cancelled"]}],"missing":[{"exists":false}]}}`, true},
 		{"nested mismatch", `{"detail":{"price":[{"numeric":[">",20]}]}}`, false},
 		{"or", `{"$or":[{"source":["other"]},{"source":["app.orders"]}]}`, true},
+		{"suffix", `{"source":[{"suffix":".orders"}]}`, true},
+		{"ignore case", `{"detail":{"status":[{"equals-ignore-case":"CREATED"}]}}`, true},
+		{"wildcard", `{"source":[{"wildcard":"app.*ers"}]}`, true},
+		{"wildcard anchored", `{"source":[{"wildcard":"orders*"}]}`, false},
 		{"invalid", `{`, false},
 	}
 	for _, tt := range tests {

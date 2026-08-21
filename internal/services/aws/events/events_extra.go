@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -400,6 +401,15 @@ func matchClause(clause, value any, exists bool) bool {
 	if prefix, ok := op["prefix"].(string); ok {
 		return strings.HasPrefix(got, prefix)
 	}
+	if suffix, ok := op["suffix"].(string); ok {
+		return strings.HasSuffix(got, suffix)
+	}
+	if equal, ok := op["equals-ignore-case"].(string); ok {
+		return strings.EqualFold(got, equal)
+	}
+	if wildcard, ok := op["wildcard"].(string); ok {
+		return matchWildcard(wildcard, got)
+	}
 	if cidr, ok := op["cidr"].(string); ok {
 		ip, block, err := net.ParseCIDR(cidr)
 		return err == nil && ip != nil && block.Contains(net.ParseIP(got))
@@ -420,6 +430,12 @@ func matchClause(clause, value any, exists bool) bool {
 		return matchNumeric(numeric, value)
 	}
 	return false
+}
+
+func matchWildcard(pattern, value string) bool {
+	expression := "^" + strings.ReplaceAll(regexp.QuoteMeta(pattern), `\*`, ".*") + "$"
+	matched, _ := regexp.MatchString(expression, value)
+	return matched
 }
 
 func matchNumeric(conditions []any, value any) bool {

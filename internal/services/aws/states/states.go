@@ -30,7 +30,7 @@ func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
 func (p *Pack) Operations() []string {
 	return []string{
 		"CreateStateMachine", "UpdateStateMachine", "DeleteStateMachine", "DescribeStateMachine", "ListStateMachines",
-		"StartExecution", "StopExecution", "DescribeExecution", "ListExecutions", "GetExecutionHistory",
+		"StartExecution", "StartSyncExecution", "StopExecution", "DescribeExecution", "ListExecutions", "GetExecutionHistory",
 		"CreateActivity", "DeleteActivity", "DescribeActivity", "ListActivities", "GetActivityTask",
 		"SendTaskSuccess", "SendTaskFailure", "SendTaskHeartbeat",
 		"TagResource", "UntagResource", "ListTagsForResource",
@@ -92,7 +92,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: rec}, nil
 	case "ListStateMachines":
 		return listCol(ctx, p.col(req, "sm"), "stateMachines")
-	case "StartExecution":
+	case "StartExecution", "StartSyncExecution":
 		arn := first(req.Input, "stateMachineArn", "StateMachineArn")
 		name := smName(arn)
 		b, ok, _ := p.col(req, "sm").Get(ctx, name)
@@ -101,6 +101,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		var sm map[string]any
 		_ = json.Unmarshal(b, &sm)
+		if req.Operation == "StartSyncExecution" && first(sm, "type", "Type") != "EXPRESS" {
+			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
+		}
 		exName := first(req.Input, "name", "Name")
 		if exName == "" {
 			exName = p.deps.Rand.Hex(8)
@@ -127,7 +130,17 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		eb, _ := json.Marshal(rec)
 		_ = p.col(req, "ex").Put(ctx, exName, eb)
-		return &spi.Response{Output: map[string]any{"executionArn": execARN, "startDate": float64(now)}}, nil
+		output := map[string]any{"executionArn": execARN, "startDate": float64(now)}
+		if req.Operation == "StartSyncExecution" {
+			output["status"], output["input"], output["output"] = wr.status, rec["input"], rec["output"]
+			if stop, exists := rec["stopDate"]; exists {
+				output["stopDate"] = stop
+			}
+			if wr.cause != "" {
+				output["cause"] = wr.cause
+			}
+		}
+		return &spi.Response{Output: output}, nil
 	case "StopExecution":
 		ex := execName(first(req.Input, "executionArn", "ExecutionArn"))
 		b, ok, _ := p.col(req, "ex").Get(ctx, ex)

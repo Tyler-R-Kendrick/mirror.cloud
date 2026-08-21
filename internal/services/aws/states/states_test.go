@@ -19,8 +19,8 @@ import (
 
 func TestStatesHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 21 {
-		t.Fatalf("states Operations() %d want 21", n)
+	if n := len(p.Operations()); n != 22 {
+		t.Fatalf("states Operations() %d want 22", n)
 	}
 }
 
@@ -58,7 +58,7 @@ func TestBootedServerStatesPassSucceed(t *testing.T) {
 		return out
 	}
 	def := `{"StartAt":"Hi","States":{"Hi":{"Type":"Pass","Result":{"ok":true},"End":true}}}`
-	created := call("CreateStateMachine", `{"name":"sm1","definition":`+mustJSON(def)+`,"roleArn":"arn:aws:iam::000000000000:role/x"}`)
+	created := call("CreateStateMachine", `{"name":"sm1","definition":`+mustJSON(def)+`,"roleArn":"arn:aws:iam::000000000000:role/x","type":"EXPRESS"}`)
 	arn, _ := created["stateMachineArn"].(string)
 	if arn == "" {
 		t.Fatalf("create %v", created)
@@ -78,6 +78,10 @@ func TestBootedServerStatesPassSucceed(t *testing.T) {
 	}
 	if !strings.Contains(fmtString(desc["output"]), `"ok":true`) && !strings.Contains(fmtString(desc["output"]), `"ok": true`) {
 		t.Fatalf("output %v", desc["output"])
+	}
+	sync := call("StartSyncExecution", `{"stateMachineArn":"`+arn+`","input":"{\"n\":2}"}`)
+	if sync["status"] != "SUCCEEDED" || !strings.Contains(fmtString(sync["output"]), `"ok":true`) {
+		t.Fatalf("sync %v", sync)
 	}
 	listed := call("ListStateMachines", `{}`)
 	if listed["stateMachines"] == nil {

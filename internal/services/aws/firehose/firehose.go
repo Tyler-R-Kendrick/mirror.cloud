@@ -3,6 +3,7 @@ package firehose
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -195,7 +196,7 @@ func copyDest(rec, in map[string]any, suffix string) {
 	}
 }
 
-func s3Dest(rec map[string]any) (bucket, prefix, timezone, extension string) {
+func s3Dest(rec map[string]any) (bucket, prefix, timezone, extension, compression string) {
 	for _, k := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration"} {
 		m, _ := rec[k].(map[string]any)
 		if m == nil {
@@ -209,13 +210,14 @@ func s3Dest(rec map[string]any) (bucket, prefix, timezone, extension string) {
 		prefix = first(m, "Prefix")
 		timezone = first(m, "CustomTimeZone")
 		extension = first(m, "FileExtension")
-		return bucket, prefix, timezone, extension
+		compression = first(m, "CompressionFormat")
+		return bucket, prefix, timezone, extension, compression
 	}
-	return "", "", "", ""
+	return "", "", "", "", ""
 }
 
 func validateDestination(rec map[string]any) error {
-	_, _, timezone, extension := s3Dest(rec)
+	_, _, timezone, extension, compression := s3Dest(rec)
 	if timezone != "" {
 		if _, err := time.LoadLocation(timezone); err != nil {
 			return &spi.Fault{Code: "ValidationException", Message: "CustomTimeZone is invalid.", HTTPStatus: 400, Fault: "client"}
@@ -223,6 +225,9 @@ func validateDestination(rec map[string]any) error {
 	}
 	if extension != "" && (len(extension) > 128 || !firehoseFileExtension.MatchString(extension)) {
 		return &spi.Fault{Code: "ValidationException", Message: "FileExtension is invalid.", HTTPStatus: 400, Fault: "client"}
+	}
+	if compression != "" && compression != "UNCOMPRESSED" && compression != "GZIP" {
+		return spi.NotImplemented("aws.firehose", "CompressionFormat="+compression, "emulate")
 	}
 	return nil
 }
@@ -244,7 +249,7 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 	}
 	var rec map[string]any
 	_ = json.Unmarshal(raw, &rec)
-	bucket, prefix, timezone, extension := s3Dest(rec)
+	bucket, prefix, timezone, extension, compression := s3Dest(rec)
 	if bucket == "" {
 		return
 	}
@@ -256,6 +261,16 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 	if timezone != "" {
 		location, _ := time.LoadLocation(timezone)
 		now = now.In(location)
+	}
+	if compression == "GZIP" {
+		var compressed bytes.Buffer
+		writer := gzip.NewWriter(&compressed)
+		_, _ = writer.Write(data)
+		_ = writer.Close()
+		data = compressed.Bytes()
+		if extension == "" {
+			extension = ".gz"
+		}
 	}
 	key := p.evaluatedS3Prefix(prefix, now) + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + recID + extension
 	info, err := p.deps.Blobs.Put(ctx, req.Identity.Account+"/"+req.Identity.Region+"/"+bucket+"/"+key, bytes.NewReader(data))

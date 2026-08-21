@@ -1,6 +1,7 @@
 package firehose
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -227,6 +228,46 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 		}}); err == nil {
 			t.Fatalf("accepted invalid FileExtension %q", extension)
 		}
+	}
+	invoke("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "gzip", "ExtendedS3DestinationConfiguration": map[string]any{
+			"BucketARN": "arn:aws:s3:::out", "Prefix": "gzip/", "CompressionFormat": "GZIP",
+		},
+	})
+	response = invoke("PutRecord", map[string]any{"DeliveryStreamName": "gzip", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("compressed"))}})
+	recordID = response.Output["RecordId"].(string)
+	key = id.Account + "/" + id.Region + "/out/gzip/1970/01/01/00/gzip-1-1970-01-01-00-00-00-" + recordID + ".gz"
+	reader, _, err = deps.Blobs.Get(context.Background(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compressed, err := gzip.NewReader(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(compressed)
+	_ = compressed.Close()
+	_ = reader.Close()
+	if string(body) != "compressed" {
+		t.Fatalf("gzip body %q", body)
+	}
+	invoke("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "gzip-custom", "ExtendedS3DestinationConfiguration": map[string]any{
+			"BucketARN": "arn:aws:s3:::out", "Prefix": "gzip-custom/", "CompressionFormat": "GZIP", "FileExtension": ".custom",
+		},
+	})
+	response = invoke("PutRecord", map[string]any{"DeliveryStreamName": "gzip-custom", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("compressed"))}})
+	recordID = response.Output["RecordId"].(string)
+	key = id.Account + "/" + id.Region + "/out/gzip-custom/1970/01/01/00/gzip-custom-1-1970-01-01-00-00-00-" + recordID + ".custom"
+	if _, _, err := deps.Blobs.Get(context.Background(), key); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+		"DeliveryStreamName": "zip", "ExtendedS3DestinationConfiguration": map[string]any{
+			"BucketARN": "arn:aws:s3:::out", "CompressionFormat": "ZIP",
+		},
+	}}); err == nil {
+		t.Fatal("accepted unsupported ZIP compression")
 	}
 }
 

@@ -408,7 +408,8 @@ func InvokeAPIDestination(ctx context.Context, deps spi.Deps, identity spi.Ident
 	applyConnectionParameters(query.Set, invocation["QueryStringParameters"])
 	request.URL.RawQuery = query.Encode()
 	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	switch str(connection["AuthorizationType"]) {
+	authorizationType := str(connection["AuthorizationType"])
+	switch authorizationType {
 	case "API_KEY":
 		apiKey, _ := auth["ApiKeyAuthParameters"].(map[string]any)
 		request.Header.Set(str(apiKey["ApiKeyName"]), str(apiKey["ApiKeyValue"]))
@@ -430,6 +431,24 @@ func InvokeAPIDestination(ctx context.Context, deps spi.Deps, identity spi.Ident
 	if err != nil {
 		return nil, err
 	}
+	if authorizationType == "OAUTH_CLIENT_CREDENTIALS" && (response.StatusCode == 401 || response.StatusCode == 407) {
+		response.Body.Close()
+		token, tokenErr := oauthToken(ctx, client, auth)
+		if tokenErr != nil {
+			return nil, tokenErr
+		}
+		if err := waitAPIDestinationRate(ctx, deps, identity, arnResourceName(arn, "api-destination/"), destination); err != nil {
+			return nil, err
+		}
+		retry := request.Clone(ctx)
+		retry.Header = request.Header.Clone()
+		retry.Header.Set("Authorization", token)
+		retry.Body, _ = request.GetBody()
+		response, err = client.Do(retry)
+		if err != nil {
+			return nil, err
+		}
+	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, (6<<20)+1))
 	if err != nil {
@@ -439,7 +458,11 @@ func InvokeAPIDestination(ctx context.Context, deps spi.Deps, identity spi.Ident
 		return nil, &spi.Fault{Code: "TargetInvocationFailed", Message: "API destination response exceeds 6 MB.", HTTPStatus: 502, Fault: "server"}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, &spi.Fault{Code: "TargetInvocationFailed", Message: response.Status, HTTPStatus: response.StatusCode, Fault: "server"}
+		fault := &spi.Fault{Code: "TargetInvocationFailed", Message: response.Status, HTTPStatus: response.StatusCode, Fault: "server"}
+		if retryAfter := response.Header.Get("Retry-After"); retryAfter != "" {
+			fault.Fields = map[string]any{"RetryAfter": retryAfter}
+		}
+		return nil, fault
 	}
 	return body, nil
 }

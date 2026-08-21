@@ -169,7 +169,7 @@ func TestInvokeAPIDestinationBasicAuth(t *testing.T) {
 }
 
 func TestInvokeAPIDestinationOAuth(t *testing.T) {
-	tokenCalls := 0
+	tokenCalls, destinationCalls := 0, 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/token":
@@ -178,12 +178,24 @@ func TestInvokeAPIDestinationOAuth(t *testing.T) {
 			if !ok || username != "client" || password != "secret" || r.FormValue("grant_type") != "client_credentials" {
 				t.Errorf("OAuth request auth=%v username=%q password=%q form=%v", ok, username, password, r.Form)
 			}
-			_, _ = w.Write([]byte(`{"access_token":"token","token_type":"Bearer"}`))
+			token := "token-2"
+			if tokenCalls == 1 {
+				token = "token-1"
+			}
+			_, _ = w.Write([]byte(`{"access_token":"` + token + `","token_type":"Bearer"}`))
 		case "/destination":
-			if r.Header.Get("Authorization") != "Bearer token" {
+			destinationCalls++
+			if r.Header.Get("Authorization") != "Bearer token-"+toString(destinationCalls) {
 				t.Errorf("Authorization %q", r.Header.Get("Authorization"))
 			}
+			if destinationCalls == 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
 			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/retry":
+			w.Header().Set("Retry-After", "3")
+			w.WriteHeader(http.StatusTooManyRequests)
 		}
 	}))
 	defer server.Close()
@@ -208,8 +220,19 @@ func TestInvokeAPIDestinationOAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, err := InvokeAPIDestination(context.Background(), deps, id, str(destination.Output["ApiDestinationArn"]), nil, []byte(`{}`))
-	if err != nil || string(body) != `{"ok":true}` || tokenCalls != 1 {
-		t.Fatalf("OAuth destination body=%s tokenCalls=%d err=%v", body, tokenCalls, err)
+	if err != nil || string(body) != `{"ok":true}` || tokenCalls != 2 || destinationCalls != 2 {
+		t.Fatalf("OAuth destination body=%s tokenCalls=%d destinationCalls=%d err=%v", body, tokenCalls, destinationCalls, err)
+	}
+	retryDestination, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateApiDestination", Input: map[string]any{
+		"Name": "oauth-retry", "ConnectionArn": connection.Output["ConnectionArn"], "InvocationEndpoint": server.URL + "/retry", "HttpMethod": "POST",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = InvokeAPIDestination(context.Background(), deps, id, str(retryDestination.Output["ApiDestinationArn"]), nil, []byte(`{}`))
+	fault, ok := err.(*spi.Fault)
+	if !ok || fault.HTTPStatus != http.StatusTooManyRequests || fault.Fields["RetryAfter"] != "3" {
+		t.Fatalf("retryable fault=%#v err=%v", fault, err)
 	}
 }
 

@@ -185,3 +185,55 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 		t.Fatalf("S3 object body %q", body)
 	}
 }
+
+func TestFirehoseControlPlaneAndBatch(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{}); err == nil {
+		t.Fatal("created unnamed stream")
+	}
+	if _, err := call("PutRecord", map[string]any{"DeliveryStreamName": "missing"}); err == nil {
+		t.Fatal("put to missing stream")
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "control"}); err != nil {
+		t.Fatal(err)
+	}
+	record := map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("batch"))}
+	batch, err := call("PutRecordBatch", map[string]any{"DeliveryStreamName": "control", "Records": []any{record, record}})
+	if err != nil || batch.Output["FailedPutCount"] != 0 || len(batch.Output["RequestResponses"].([]any)) != 2 {
+		t.Fatalf("batch %#v, %v", batch, err)
+	}
+	described, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "control"})
+	if err != nil || described.Output["RecordCount"] != 2 {
+		t.Fatalf("describe %#v, %v", described, err)
+	}
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "control", "ExtendedS3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::updated"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tags := []any{map[string]any{"Key": "env", "Value": "test"}}
+	if _, err := call("TagDeliveryStream", map[string]any{"DeliveryStreamName": "control", "Tags": tags}); err != nil {
+		t.Fatal(err)
+	}
+	listed, _ := call("ListTagsForDeliveryStream", map[string]any{"DeliveryStreamName": "control"})
+	if len(listed.Output["Tags"].([]any)) != 1 {
+		t.Fatalf("tags %#v", listed.Output)
+	}
+	for _, operation := range []string{"UntagDeliveryStream", "StartDeliveryStreamEncryption", "StopDeliveryStreamEncryption", "DeleteDeliveryStream"} {
+		if _, err := call(operation, map[string]any{"DeliveryStreamName": "control"}); err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+	}
+	if _, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "control"}); err == nil {
+		t.Fatal("described deleted stream")
+	}
+	if bucketFromARN("arn:aws:s3:::bucket") != "bucket" || bucketFromARN("arn:test:bucket") != "bucket" || bucketFromARN("bucket") != "bucket" {
+		t.Fatal("bucket ARN parsing")
+	}
+}

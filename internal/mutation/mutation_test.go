@@ -373,6 +373,38 @@ func TestMutantsAreKilled(t *testing.T) {
 			pkg:  "./internal/services/aws/pipes",
 			run:  "TestPipesTargetInputTemplate",
 		},
+		{
+			name: "pipes-skip-enrichment-input-template",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `p.inputPayload(pipe, "EnrichmentParameters", record)`,
+			new:  `p.inputPayload(pipe, "TargetParameters", record)`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesLambdaEnrichment",
+		},
+		{
+			name: "pipes-stop-after-successful-enrichment",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  "if !ok {\n\t\treturn\n\t}\n\tif len(deliveryEvents) == 0 {",
+			new:  "if ok {\n\t\treturn\n\t}\n\tif len(deliveryEvents) == 0 {",
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesLambdaEnrichment",
+		},
+		{
+			name: "pipes-retain-empty-enrichment-message",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `if len(deliveryEvents) == 0 {`,
+			new:  `if len(deliveryEvents) < 0 {`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesLambdaEnrichment",
+		},
+		{
+			name: "pipes-acknowledge-failed-enrichment",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  "if err != nil {\n\t\treturn nil, true, false\n\t}",
+			new:  "if err != nil {\n\t\treturn nil, true, true\n\t}",
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesLambdaEnrichment",
+		},
 	}
 
 	for _, m := range mutants {

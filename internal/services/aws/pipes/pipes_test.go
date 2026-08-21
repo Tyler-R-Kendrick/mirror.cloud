@@ -349,13 +349,11 @@ func TestPipesLambdaEnrichment(t *testing.T) {
 	filtered := pipeInput("empty", "empty-source", "empty-target")
 	filtered["DesiredState"] = "STOPPED"
 	filtered["Enrichment"] = input["Enrichment"]
+	filtered["Target"] = "arn:aws:lambda:us-east-1:123456789012:function:must-not-run"
 	invoke(t, p, id, "CreatePipe", filtered)
 	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "empty-source", "MessageBody": "filtered"})
 	invoke(t, p, id, "StartPipe", map[string]any{"Name": "empty"})
 	eventually(t, func() bool { return len(storedMessages(t, deps, id, "empty-source")) == 0 })
-	if messages := storedMessages(t, deps, id, "empty-target"); len(messages) != 0 {
-		t.Fatalf("empty enrichment invoked target: %#v", messages)
-	}
 
 	failed := pipeInput("failed", "failed-source", "failed-target")
 	failed["Enrichment"] = "arn:aws:lambda:us-east-1:123456789012:function:missing"

@@ -38,6 +38,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFirehoseS3ObjectNameFormat",
 		},
 		{
+			name: "firehose-ignore-timestamp-prefix-expression",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `return firehoseTimestampPrefix.ReplaceAllStringFunc(prefix, func(expression string) string {`,
+			new:  `return firehoseTimestampPrefix.ReplaceAllStringFunc("mutated/", func(expression string) string {`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseS3ObjectNameFormat",
+		},
+		{
 			name: "identity-expiry-after-to-before",
 			file: filepath.Join("internal", "identity", "identity.go"),
 			old:  "now.UTC().After(t.Add(time.Duration(secs) * time.Second))",

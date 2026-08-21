@@ -27,7 +27,28 @@ AWS is where the pipeline gets validated, because it has the best-published spec
 
 ## Status
 
-Pre-implementation. The design is settled and written down; the code is not yet built.
+v1 spine is in tree: frozen interfaces, edge + codecs, emulate-tier packs, mock synthesizer, CLI. Spec ingestion (`make specs-sync`) still vendors AWS Smithy / GCS Discovery; until that pin lands, the process boots from a hand-built catalog.
+
+## Quick start
+
+```bash
+go build -o bin/mirror ./cmd/mirror
+bin/mirror up s3
+# another shell:
+eval "$(bin/mirror env)"
+aws --endpoint-url http://127.0.0.1:4566 s3 mb s3://demo
+aws --endpoint-url http://127.0.0.1:4566 s3 cp README.md s3://demo/README.md
+```
+
+Dummy credentials `test`/`test` work. So does anything else — signatures are parsed, never verified. Default listen: `http://127.0.0.1:4566`.
+
+`bin/mirror up --profile aws-core` boots the emulate-tier AWS packs in docs/SUPPORT.md. Remaining ingested Smithy operations (if any) are mock-tier. This is not LocalStack-complete: no hypervisor, no real RDS/Redis/EKS, extra ops are named control-plane records. `bin/mirror up --all` serves mock-tier for everything else. `--strict` refuses mock. EC2 is VPC/subnet/SG/instance records on the ec2Query wire.
+
+S3 terraform refresh reads (`GetBucketAcl`, CORS, encryption, …) return the empty “not configured” document the AWS provider tolerates — they are not silent write stubs. IAM evaluates Deny then Allow (default deny when the role has policies). SSM `SecureString` is reversible local encoding, not encryption. CloudFormation accepts JSON or YAML TemplateBody and a fixed resource-type set.
+
+Hosted bind (`--bind 0.0.0.0:4566`) prints a banner: there is no authentication; do not expose the process to untrusted networks.
+
+See [docs/SUPPORT.md](docs/SUPPORT.md) (generated; do not hand-edit), [docs/DAY2.md](docs/DAY2.md), [docs/EXTENDING.md](docs/EXTENDING.md).
 
 ## Documents
 
@@ -42,5 +63,21 @@ These are binding project policy, decided at founding because they cannot be ret
 - No capability will ever require an auth token, an account, or a license key.
 - No telemetry, no phone-home, no usage counting.
 - Scope is **spec-complete by generation, behavior-complete only where declared** — and the declaration is generated from the model, so it cannot drift into marketing.
+
+## Development
+
+```bash
+npm install
+uv tool install pre-commit   # official pre-commit (https://pre-commit.com)
+npm run hooks:install
+```
+
+Hooks (pre-commit): trailing whitespace and file hygiene, Gitleaks, **anti-slop Oxlint**, and `tsc --noEmit`. Bypass only in an emergency with `SKIP_GIT_HOOKS=1`.
+
+```bash
+npm run lint           # anti-slop + Oxlint
+npm run typecheck
+npm run hooks:run      # run every hook against the tree
+```
 
 Licensed under [Apache-2.0](LICENSE).

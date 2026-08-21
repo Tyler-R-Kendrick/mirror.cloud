@@ -1,0 +1,79 @@
+package inspector
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
+	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
+)
+
+func TestInspectorHTTPProvenOps(t *testing.T) {
+	p := New(spitest.Deps(t))
+	if n := len(p.Operations()); n != 10 {
+		t.Fatalf("inspector Operations() %d want 10", n)
+	}
+}
+
+func TestBootedServerInspectorCreateGetDelete(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.inspector"}
+	cfg.Seed = "insp-1"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/inspector/aws4_request, SignedHeaders=host, Signature=00"
+	call := func(op, body string) map[string]any {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+		req.Header.Set("X-Amz-Target", "InspectorService."+op)
+		req.Header.Set("Authorization", auth)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode >= 300 {
+			t.Fatalf("%s %d %s", op, res.StatusCode, raw)
+		}
+		if res.Header.Get("x-mirror-fidelity") != "emulate" {
+			t.Fatalf("fidelity %q", res.Header.Get("x-mirror-fidelity"))
+		}
+		out := map[string]any{}
+		_ = json.Unmarshal(raw, &out)
+		return out
+	}
+	created := call("CreateAssessmentTarget", `{"assessmentTargetName":"t1"}`)
+	arn, _ := created["assessmentTargetArn"].(string)
+	if arn == "" {
+		t.Fatalf("create %v", created)
+	}
+	got := call("DescribeAssessmentTargets", `{"assessmentTargetArns":["`+arn+`"]}`)
+	raw, _ := json.Marshal(got)
+	if !strings.Contains(string(raw), arn) {
+		t.Fatalf("describe %s", raw)
+	}
+	tpl := call("CreateAssessmentTemplate", `{"assessmentTargetArn":"`+arn+`","assessmentTemplateName":"p1"}`)
+	tarn, _ := tpl["assessmentTemplateArn"].(string)
+	run := call("StartAssessmentRun", `{"assessmentTemplateArn":"`+tarn+`"}`)
+	if run["assessmentRunArn"] == nil {
+		t.Fatalf("run %v", run)
+	}
+	call("DeleteAssessmentTemplate", `{"assessmentTemplateArn":"`+tarn+`"}`)
+	call("DeleteAssessmentTarget", `{"assessmentTargetArn":"`+arn+`"}`)
+	gone := call("DescribeAssessmentTargets", `{"assessmentTargetArns":["`+arn+`"]}`)
+	raw, _ = json.Marshal(gone)
+	if strings.Contains(string(raw), arn) {
+		t.Fatalf("still present %s", raw)
+	}
+}

@@ -781,7 +781,7 @@ Fourteen swarms. Every swarm codes against the frozen interfaces in §3 **from t
 
 ### S1 — Spec ingestion & code generation
 
-**Produces.** `internal/receiver/smithy` (Smithy 2.0 JSON AST → `[]model.Service`, handling every trait in §4.2); `internal/receiver/discovery` (Google Discovery document → `[]model.Service`); `internal/fusion` implementation; `cmd/mirrorgen` emitting per-service Go packages under `internal/generated/<provider>/<service>/` containing the operation dispatch table, input/output shape descriptors, validation functions, and error descriptors; `make specs-sync` and `make generate`; `specs/mirror.lock`.
+**Produces.** `internal/receiver/aws/smithy` (Smithy 2.0 JSON AST → `[]model.Service`, handling every trait in §4.2); `internal/receiver/gcp/discovery` (Google Discovery document → `[]model.Service`); `internal/fusion` implementation; `cmd/mirrorgen` emitting per-service Go packages under `internal/generated/<provider>/<service>/` containing the operation dispatch table, input/output shape descriptors, validation functions, and error descriptors; `make specs-sync` and `make generate`; `specs/mirror.lock`.
 
 **Also produces.** `internal/specdiff`: a semantic API-surface differ over two `model.Bundle`s reporting added/removed operations, changed shapes, changed required-ness, and changed error sets — human-readable and machine-readable output.
 
@@ -793,7 +793,7 @@ Fourteen swarms. Every swarm codes against the frozen interfaces in §3 **from t
 
 ### S2 — Edge, codecs & identity
 
-**Produces.** `internal/edge` (HTTP server, service demux by host/target/action/path, request-ID assignment, panic recovery, `x-mirror-*` headers, `NotImplemented` semantics per §4.11, S3 addressing per §4.4); `internal/proto/{awsjson,restjson,restxml,awsquery,ec2query,gcprest}` implementing `proto.Codec`; `internal/identity` (SigV4 parsing and derivation per §4.5, presigned URL expiry).
+**Produces.** `internal/edge` (HTTP server, service demux by host/target/action/path, request-ID assignment, panic recovery, `x-mirror-*` headers, `NotImplemented` semantics per §4.11, S3 addressing per §4.4); `internal/proto/aws/{awsjson,restjson,restxml,awsquery}` and `internal/proto/gcp/gcprest` implementing `proto.Codec`; `internal/identity` (SigV4 parsing and derivation per §4.5, presigned URL expiry).
 
 **Also owns every item in §4.12** — `aws-chunked` de-framing before the body reaches any behavior pack, checksum header handling, `Expect: 100-continue`, CORS preflight, per-protocol timestamp formats, empty-vs-absent member semantics, fault-class-to-status correctness, and `--advertise-url` resolution for self-referencing responses. These are transport concerns and must not be duplicated in behavior packs.
 
@@ -819,35 +819,35 @@ Fourteen swarms. Every swarm codes against the frozen interfaces in §3 **from t
 
 ### S5 — S3 behavior pack
 
-**Produces.** `internal/services/s3` implementing §4.8's S3 list at `emulate` tier, on `Store` + `BlobStore` + `Bus`.
+**Produces.** `internal/services/aws/s3` implementing §4.8's S3 list at `emulate` tier, on `Store` + `BlobStore` + `Bus`.
 **Success.** Unit tests against `spitest` cover every listed operation including multipart assembly, ETag computation for both single and multipart, versioning with delete markers, `ListObjectsV2` delimiter/common-prefix/continuation semantics, range and conditional GETs, and notification publication.
 
 ---
 
 ### S6 — DynamoDB behavior pack
 
-**Produces.** `internal/services/dynamodb` implementing §4.8's DynamoDB list at `emulate` tier, plus `internal/services/dynamodb/expr`: a self-contained lexer, parser, and evaluator for the expression language, delivered as an independently testable package with its own exhaustive table-driven test suite.
+**Produces.** `internal/services/aws/dynamodb` implementing §4.8's DynamoDB list at `emulate` tier, plus `internal/services/aws/dynamodb/expr`: a self-contained lexer, parser, and evaluator for the expression language, delivered as an independently testable package with its own exhaustive table-driven test suite.
 **Success.** Every construct enumerated in §4.8 parses and evaluates correctly, including precedence, parenthesization, and error cases for malformed expressions; GSI/LSI projection semantics correct; pagination cursors are opaque, stable, and resumable; conditional failures return the documented error with `Item` when requested.
 
 ---
 
 ### S7 — SQS & SNS behavior packs
 
-**Produces.** `internal/services/sqs`, `internal/services/sns`, and the SNS→SQS delivery path over `Bus`.
+**Produces.** `internal/services/aws/sqs`, `internal/services/aws/sns`, and the SNS→SQS delivery path over `Bus`.
 **Success.** Visibility timeout, long polling, and DLQ redrive all exercised on the **controllable clock** (no wall-clock sleeps in tests); FIFO ordering and deduplication correct; SNS→SQS delivery observed end-to-end in-process with and without `RawMessageDelivery`; `FilterPolicy` matching covered per match type; the HTTP subscription-confirmation handshake completes against a local test server.
 
 ---
 
 ### S8 — STS, IAM, SSM & Secrets Manager packs
 
-**Produces.** `internal/services/{sts,iam,ssm,secretsmanager}` per §4.8, plus `AllowAllAuthorizer`.
+**Produces.** `internal/services/aws/{sts,iam,ssm,secretsmanager}` per §4.8, plus `AllowAllAuthorizer`.
 **Success.** `GetCallerIdentity` and `AssumeRole` return coherent, deterministic identities that the edge then honors on subsequent requests; parameter hierarchies resolve recursively with correct pagination; secret version staging labels transition correctly across `PutSecretValue`; `DeleteSecret` recovery-window semantics behave correctly on the controllable clock.
 
 ---
 
 ### S9 — GCS pack (cross-cloud proof)
 
-**Produces.** `internal/services/gcs` per §4.8, served through the `gcpRestJson` codec, plus `internal/receiver/discovery` integration validation.
+**Produces.** `internal/services/gcp/gcs` per §4.8, served through the `gcpRestJson` codec, plus `internal/receiver/gcp/discovery` integration validation.
 **Success.** All three upload types work, including resumable sessions with chunked PUTs and interrupted-then-resumed uploads; generation/metageneration preconditions enforced; the §4.9 provider-neutrality check passes.
 
 ---

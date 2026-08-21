@@ -325,19 +325,20 @@ func TestAPIDestinationRateLimit(t *testing.T) {
 		done <- err
 	}()
 	reserved := false
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
+	timeout := time.After(time.Second)
+	for !reserved {
+		select {
+		case <-timeout:
+			t.Fatal("second invocation did not reserve the next rate window")
+		default:
+		}
 		body, ok, _ := deps.Store.Scope(id.Account, id.Region).Collection("apidest-rate").Get(ctx, "rate")
 		var state apiDestinationRateState
 		_ = json.Unmarshal(body, &state)
 		if ok && state.Window == int64(time.Second) {
 			reserved = true
-			break
 		}
 		runtime.Gosched()
-	}
-	if !reserved {
-		t.Fatal("second invocation did not reserve the next rate window")
 	}
 	select {
 	case err := <-done:

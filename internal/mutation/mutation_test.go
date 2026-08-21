@@ -229,6 +229,30 @@ func TestMutantsAreKilled(t *testing.T) {
 			pkg:  "./internal/store",
 			run:  "TestScopesAreEnumeratedDeterministically",
 		},
+		{
+			name: "scheduler-run-disabled-schedule",
+			file: filepath.Join("internal", "services", "aws", "scheduler", "scheduler.go"),
+			old:  `stringValue(rec["State"]) == "DISABLED"`,
+			new:  `stringValue(rec["State"]) == "ENABLED"`,
+			pkg:  "./internal/services/aws/scheduler",
+			run:  "TestSchedulerStateUpdateAndGroups",
+		},
+		{
+			name: "scheduler-drop-target-arn",
+			file: filepath.Join("internal", "services", "aws", "scheduler", "scheduler.go"),
+			old:  `first(target, "Arn", "arn"), target, payload`,
+			new:  `"", target, payload`,
+			pkg:  "./internal/services/aws/scheduler",
+			run:  "TestSchedulerDeliversRestoredSchedule",
+		},
+		{
+			name: "scheduler-last-day-never-matches",
+			file: filepath.Join("internal", "services", "aws", "scheduler", "expression.go"),
+			old:  "return t.Day() == lastDay",
+			new:  "return t.Day() != lastDay",
+			pkg:  "./internal/services/aws/scheduler",
+			run:  "TestScheduleExpressions",
+		},
 	}
 
 	for _, m := range mutants {

@@ -165,6 +165,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			pkg:  "./internal/catalog",
 			run:  "TestBundleCharacterization",
 		},
+		{
+			name: "events-deliver-disabled-rule",
+			file: filepath.Join("internal", "services", "aws", "events", "events.go"),
+			old:  `str(rule["State"]) == "DISABLED"`,
+			new:  `str(rule["State"]) == "ENABLED"`,
+			pkg:  "./internal/services/aws/events",
+			run:  "TestPutEventsDeliversOnlyMatchingRules",
+		},
+		{
+			name: "events-prefix-to-suffix",
+			file: filepath.Join("internal", "services", "aws", "events", "events_extra.go"),
+			old:  "strings.HasPrefix(got, prefix)",
+			new:  "strings.HasSuffix(got, prefix)",
+			pkg:  "./internal/services/aws/events",
+			run:  "TestMatchEventPatternOperators",
+		},
 	}
 
 	for _, m := range mutants {

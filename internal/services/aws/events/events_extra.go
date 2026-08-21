@@ -3,6 +3,10 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"net"
+	"reflect"
+	"strconv"
+	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -227,7 +231,6 @@ func (p *Pack) extra(ctx context.Context, req *spi.Request) (*spi.Response, erro
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "TestEventPattern":
-		// ponytail: EventBridge matcher is prefix/exists/numeric/cidr; this is exact-value subset of pattern arrays.
 		ok := matchEventPattern(str(req.Input["EventPattern"]), req.Input["Event"])
 		return &spi.Response{Output: map[string]any{"Result": ok}}, nil
 	case "PutPartnerEvents":
@@ -301,7 +304,7 @@ func matchEventPattern(pattern string, event any) bool {
 		return true
 	}
 	if json.Unmarshal([]byte(pattern), &p) != nil {
-		return true
+		return false
 	}
 	var e map[string]any
 	switch t := event.(type) {
@@ -315,30 +318,149 @@ func matchEventPattern(pattern string, event any) bool {
 		b, _ := json.Marshal(event)
 		_ = json.Unmarshal(b, &e)
 	}
-	for k, pv := range p {
-		ev := e[k]
-		arr, ok := pv.([]any)
-		if !ok {
-			continue
-		}
-		hit := false
-		for _, a := range arr {
-			if str(a) == str(ev) {
-				hit = true
-				break
-			}
-			if sm, ok := ev.(map[string]any); ok {
-				if str(a) == str(sm[k]) {
-					hit = true
+	return matchFields(p, e)
+}
+
+func matchFields(pattern, event map[string]any) bool {
+	for key, want := range pattern {
+		if key == "$or" {
+			matched := false
+			for _, alternative := range asSlice(want) {
+				if fields, ok := alternative.(map[string]any); ok && matchFields(fields, event) {
+					matched = true
 					break
 				}
 			}
+			if !matched {
+				return false
+			}
+			continue
 		}
-		if !hit {
+		got, exists := event[key]
+		if nested, ok := want.(map[string]any); ok {
+			if !matchNested(nested, got) {
+				return false
+			}
+			continue
+		}
+		clauses, ok := want.([]any)
+		if !ok || !matchClauses(clauses, got, exists) {
 			return false
 		}
 	}
 	return true
+}
+
+func matchNested(pattern map[string]any, value any) bool {
+	if event, ok := value.(map[string]any); ok {
+		return matchFields(pattern, event)
+	}
+	for _, item := range asSlice(value) {
+		if event, ok := item.(map[string]any); ok && matchFields(pattern, event) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchClauses(clauses []any, value any, exists bool) bool {
+	for _, clause := range clauses {
+		if values, ok := value.([]any); ok {
+			for _, item := range values {
+				if matchClause(clause, item, true) {
+					return true
+				}
+			}
+			continue
+		}
+		if matchClause(clause, value, exists) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchClause(clause, value any, exists bool) bool {
+	op, ok := clause.(map[string]any)
+	if !ok {
+		return exists && reflect.DeepEqual(clause, value)
+	}
+	if want, ok := op["exists"].(bool); ok {
+		return want == exists
+	}
+	if !exists {
+		return false
+	}
+	got := str(value)
+	if prefix, ok := op["prefix"].(string); ok {
+		return strings.HasPrefix(got, prefix)
+	}
+	if cidr, ok := op["cidr"].(string); ok {
+		ip, block, err := net.ParseCIDR(cidr)
+		return err == nil && ip != nil && block.Contains(net.ParseIP(got))
+	}
+	if reject, ok := op["anything-but"]; ok {
+		values := asSlice(reject)
+		if values == nil {
+			values = []any{reject}
+		}
+		for _, unwanted := range values {
+			if matchClause(unwanted, value, true) {
+				return false
+			}
+		}
+		return true
+	}
+	if numeric, ok := op["numeric"].([]any); ok {
+		return matchNumeric(numeric, value)
+	}
+	return false
+}
+
+func matchNumeric(conditions []any, value any) bool {
+	got, err := strconv.ParseFloat(strings.TrimSpace(toString(value)), 64)
+	if err != nil || len(conditions) < 2 || len(conditions)%2 != 0 {
+		return false
+	}
+	for i := 0; i < len(conditions); i += 2 {
+		want, err := strconv.ParseFloat(toString(conditions[i+1]), 64)
+		if err != nil {
+			return false
+		}
+		switch str(conditions[i]) {
+		case "=":
+			if got != want {
+				return false
+			}
+		case ">":
+			if got <= want {
+				return false
+			}
+		case ">=":
+			if got < want {
+				return false
+			}
+		case "<":
+			if got >= want {
+				return false
+			}
+		case "<=":
+			if got > want {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func toString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	b, _ := json.Marshal(v)
+	return string(b)
 }
 
 func first(in map[string]any, keys ...string) string {

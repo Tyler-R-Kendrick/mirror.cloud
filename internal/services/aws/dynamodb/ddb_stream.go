@@ -61,10 +61,11 @@ func (p *Pack) emitStream(ctx context.Context, req *spi.Request, table, event st
 		keys = p.tableKey(td, old)
 	}
 	ddb := map[string]any{
-		"Keys":           keys,
-		"SequenceNumber": fmt.Sprintf("%015d", seq),
-		"SizeBytes":      0,
-		"StreamViewType": view,
+		"ApproximateCreationDateTime": float64(p.deps.Clock.Now().UnixMilli()) / 1000,
+		"Keys":                        keys,
+		"SequenceNumber":              fmt.Sprintf("%015d", seq),
+		"SizeBytes":                   0,
+		"StreamViewType":              view,
 	}
 	switch view {
 	case "KEYS_ONLY":

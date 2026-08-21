@@ -220,6 +220,19 @@ func TestPipesKinesisDeliveryAndCheckpoint(t *testing.T) {
 	assertFault(t, p, id, "CreatePipe", bad, "ValidationException")
 	bad["SourceParameters"] = map[string]any{"KinesisStreamParameters": map[string]any{"StartingPosition": "TRIM_HORIZON", "BatchSize": 10001}}
 	assertFault(t, p, id, "CreatePipe", bad, "ValidationException")
+	for key, value := range map[string]any{
+		"MaximumBatchingWindowInSeconds": 301,
+		"MaximumRecordAgeInSeconds":      -2,
+		"MaximumRetryAttempts":           10001,
+		"ParallelizationFactor":          11,
+	} {
+		bad["SourceParameters"] = map[string]any{"KinesisStreamParameters": map[string]any{"StartingPosition": "TRIM_HORIZON", key: value}}
+		assertFault(t, p, id, "CreatePipe", bad, "ValidationException")
+	}
+	bad["SourceParameters"] = map[string]any{"KinesisStreamParameters": map[string]any{"StartingPosition": "TRIM_HORIZON", "OnPartialBatchItemFailure": "INVALID"}}
+	assertFault(t, p, id, "CreatePipe", bad, "ValidationException")
+	bad["SourceParameters"] = map[string]any{"KinesisStreamParameters": map[string]any{"StartingPosition": "TRIM_HORIZON", "DeadLetterConfig": map[string]any{"Arn": "arn:aws:sqs:us-east-1:123456789012:invalid.fifo"}}}
+	assertFault(t, p, id, "CreatePipe", bad, "ValidationException")
 }
 
 func TestPipesKinesisPartialBatchCheckpoint(t *testing.T) {
@@ -261,6 +274,60 @@ func TestPipesKinesisPartialBatchCheckpoint(t *testing.T) {
 	eventually(t, func() bool { return position() == "partial|2" })
 }
 
+func TestPipesKinesisRetryAgeAndDeadLetterPolicy(t *testing.T) {
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	stream, queue := kinesis.New(deps), sqs.New(deps)
+	invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": "stream-dlq"})
+	dlq := queueARN(id, "stream-dlq")
+
+	invoke(t, stream, id, "CreateStream", map[string]any{"StreamName": "retry-policy"})
+	invoke(t, stream, id, "PutRecord", map[string]any{"StreamName": "retry-policy", "PartitionKey": "retry", "Data": []byte("retry")})
+	retry := pipeInput("retry-policy", "unused", "missing-target")
+	retry["Source"] = "arn:aws:kinesis:us-east-1:123456789012:stream/retry-policy"
+	retry["SourceParameters"] = map[string]any{"KinesisStreamParameters": map[string]any{
+		"StartingPosition": "TRIM_HORIZON", "MaximumRetryAttempts": 1, "DeadLetterConfig": map[string]any{"Arn": dlq},
+	}}
+	p := New(deps)
+	if p.drainKinesis(context.Background(), id, retry, retry["Source"].(string)) {
+		t.Fatal("failed record reported more work")
+	}
+	attempts := deps.Store.Scope(id.Account, id.Region).Collection("pipeattempt:retry-policy")
+	if raw, ok, _ := attempts.Get(context.Background(), "shardId-000000000000:0"); !ok || string(raw) != "1" {
+		t.Fatalf("persisted attempts %q, %v", raw, ok)
+	}
+	p.Close()
+
+	p = New(deps)
+	defer p.Close()
+	p.drainKinesis(context.Background(), id, retry, retry["Source"].(string))
+	if messages := storedMessages(t, deps, id, "stream-dlq"); len(messages) != 1 || !strings.Contains(messages[0]["body"].(string), `"eventID":"shardId-000000000000:0"`) {
+		t.Fatalf("retry DLQ messages %#v", messages)
+	}
+	if _, ok, _ := attempts.Get(context.Background(), "shardId-000000000000:0"); ok {
+		t.Fatal("exhausted retry retained attempt state")
+	}
+
+	invoke(t, stream, id, "CreateStream", map[string]any{"StreamName": "age-policy"})
+	invoke(t, stream, id, "PutRecord", map[string]any{"StreamName": "age-policy", "PartitionKey": "old", "Data": []byte("old")})
+	invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": "age-target"})
+	if err := deps.Clock.Advance(61 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	age := pipeInput("age-policy", "unused", "age-target")
+	age["Source"] = "arn:aws:kinesis:us-east-1:123456789012:stream/age-policy"
+	age["SourceParameters"] = map[string]any{"KinesisStreamParameters": map[string]any{
+		"StartingPosition": "TRIM_HORIZON", "MaximumRecordAgeInSeconds": 60, "DeadLetterConfig": map[string]any{"Arn": dlq},
+	}}
+	p.drainKinesis(context.Background(), id, age, age["Source"].(string))
+	if got := len(storedMessages(t, deps, id, "age-target")); got != 0 {
+		t.Fatalf("expired record reached target %d times", got)
+	}
+	if got := len(storedMessages(t, deps, id, "stream-dlq")); got != 2 {
+		t.Fatalf("DLQ message count %d want 2", got)
+	}
+}
+
 func TestPipesDynamoDBStreamDeliveryAndCheckpoint(t *testing.T) {
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	deps := spitest.Deps(t)
@@ -292,6 +359,9 @@ func TestPipesDynamoDBStreamDeliveryAndCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	detail := event["dynamodb"].(map[string]any)
+	if _, ok := detail["ApproximateCreationDateTime"]; !ok {
+		t.Fatalf("DynamoDB stream event missing creation time %#v", event)
+	}
 	if event["eventSource"] != "aws:dynamodb" || event["eventVersion"] != "1.0" || event["eventSourceARN"] != strings.Split(streamARN, "/stream/")[0] || event["eventName"] != "INSERT" || detail["SequenceNumber"] != "000000000000002" {
 		t.Fatalf("DynamoDB stream event %#v", event)
 	}

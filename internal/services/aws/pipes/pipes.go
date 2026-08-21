@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -181,6 +182,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, err
 		}
 		_ = p.col(req, "pipecheckpoint").Delete(ctx, name)
+		attempts := p.col(req, "pipeattempt:"+name)
+		if kvs, _, listErr := attempts.List(ctx, "", "", 0); listErr == nil {
+			for _, kv := range kvs {
+				_ = attempts.Delete(ctx, kv.Key)
+			}
+		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "StartPipe", "StopPipe":
 		rec, ok, err := getRecord(ctx, p.col(req, "pipe"), name)
@@ -350,8 +357,11 @@ func (p *Pack) drainDynamoDB(ctx context.Context, identity spi.Identity, pipe ma
 
 func (p *Pack) drainStream(ctx context.Context, identity spi.Identity, pipe map[string]any, client spi.BehaviorPack, iteratorInput map[string]any, parameterName, sequenceField string, sequence func(map[string]any) string, eventFor func(map[string]any) map[string]any) bool {
 	request := &spi.Request{Identity: identity, Input: iteratorInput}
-	checkpoint := p.deps.Store.Scope(identity.Account, identity.Region).Collection("pipecheckpoint")
-	iterator, ok, err := checkpoint.Get(ctx, stringValue(pipe["Name"]))
+	scope := p.deps.Store.Scope(identity.Account, identity.Region)
+	name := stringValue(pipe["Name"])
+	checkpoint := scope.Collection("pipecheckpoint")
+	attempts := scope.Collection("pipeattempt:" + name)
+	iterator, ok, err := checkpoint.Get(ctx, name)
 	if err != nil {
 		return false
 	}
@@ -365,7 +375,7 @@ func (p *Pack) drainStream(ctx context.Context, identity spi.Identity, pipe map[
 			return false
 		}
 		iterator = []byte(stringValue(response.Output["ShardIterator"]))
-		if checkpoint.Put(ctx, stringValue(pipe["Name"]), iterator) != nil {
+		if checkpoint.Put(ctx, name, iterator) != nil {
 			return false
 		}
 	}
@@ -377,32 +387,93 @@ func (p *Pack) drainStream(ctx context.Context, identity spi.Identity, pipe map[
 	}
 	records, _ := response.Output["Records"].([]any)
 	if len(records) == 0 {
-		_ = checkpoint.Put(ctx, stringValue(pipe["Name"]), []byte(stringValue(response.Output["NextShardIterator"])))
+		_ = checkpoint.Put(ctx, name, []byte(stringValue(response.Output["NextShardIterator"])))
 		return false
 	}
 	events, ids := make([]any, len(records)), make([]string, len(records))
+	pendingEvents, pendingIDs := make([]any, 0, len(records)), make([]string, 0, len(records))
+	succeeded, expired := map[string]bool{}, map[string]bool{}
 	for i, raw := range records {
 		record, _ := raw.(map[string]any)
 		event := eventFor(record)
 		events[i], ids[i] = event, stringValue(event["eventID"])
-	}
-	succeeded := p.processRecords(ctx, identity, pipe, events, ids)
-	for i, id := range ids {
-		if succeeded[id] {
+		if streamRecordExpired(p.deps.Clock.Now(), event, streamParameters) {
+			expired[ids[i]] = true
+			if p.deadLetterStreamRecord(ctx, identity, streamParameters, event) {
+				succeeded[ids[i]] = true
+			}
 			continue
 		}
+		pendingEvents, pendingIDs = append(pendingEvents, event), append(pendingIDs, ids[i])
+	}
+	for id := range p.processRecords(ctx, identity, pipe, pendingEvents, pendingIDs) {
+		succeeded[id] = true
+	}
+	retryFrom := func(i int) {
 		request.Operation = "GetShardIterator"
 		request.Input = clone(iteratorInput)
 		request.Input["ShardIteratorType"], request.Input[sequenceField] = "AT_SEQUENCE_NUMBER", sequence(records[i].(map[string]any))
 		if retry, invokeErr := client.Invoke(ctx, request); invokeErr == nil {
-			_ = checkpoint.Put(ctx, stringValue(pipe["Name"]), []byte(stringValue(retry.Output["ShardIterator"])))
+			_ = checkpoint.Put(ctx, name, []byte(stringValue(retry.Output["ShardIterator"])))
 		}
-		return false
 	}
-	if checkpoint.Put(ctx, stringValue(pipe["Name"]), []byte(stringValue(response.Output["NextShardIterator"]))) != nil {
+	for i, id := range ids {
+		if succeeded[id] {
+			_ = attempts.Delete(ctx, id)
+			continue
+		}
+		if expired[id] {
+			retryFrom(i)
+			return false
+		}
+		failures := 1
+		if raw, found, getErr := attempts.Get(ctx, id); getErr != nil {
+			return false
+		} else if found {
+			failures, _ = strconv.Atoi(string(raw))
+			failures++
+		}
+		maximumRetries := optionalInt(streamParameters, "MaximumRetryAttempts", -1)
+		if maximumRetries < 0 || failures <= maximumRetries {
+			if attempts.Put(ctx, id, []byte(strconv.Itoa(failures))) != nil {
+				return false
+			}
+			retryFrom(i)
+			return false
+		}
+		if !p.deadLetterStreamRecord(ctx, identity, streamParameters, events[i].(map[string]any)) {
+			retryFrom(i)
+			return false
+		}
+		_ = attempts.Delete(ctx, id)
+	}
+	if checkpoint.Put(ctx, name, []byte(stringValue(response.Output["NextShardIterator"]))) != nil {
 		return false
 	}
 	return len(records) == streamBatchSize(pipe, parameterName)
+}
+
+func (p *Pack) deadLetterStreamRecord(ctx context.Context, identity spi.Identity, parameters map[string]any, event map[string]any) bool {
+	config, _ := parameters["DeadLetterConfig"].(map[string]any)
+	arn := stringValue(config["Arn"])
+	if arn == "" {
+		return true
+	}
+	payload, _ := json.Marshal(event)
+	return events.DeliverTarget(ctx, p.deps, identity, arn, map[string]any{"Arn": arn}, payload) == nil
+}
+
+func streamRecordExpired(now time.Time, event, parameters map[string]any) bool {
+	maximumAge := optionalInt(parameters, "MaximumRecordAgeInSeconds", -1)
+	if maximumAge < 0 {
+		return false
+	}
+	timestamp, ok := event["approximateArrivalTimestamp"].(float64)
+	if !ok {
+		dynamodb, _ := event["dynamodb"].(map[string]any)
+		timestamp, ok = dynamodb["ApproximateCreationDateTime"].(float64)
+	}
+	return ok && now.Sub(time.UnixMilli(int64(timestamp*1000))) > time.Duration(maximumAge)*time.Second
 }
 
 func (p *Pack) processBatch(ctx context.Context, identity spi.Identity, pipe map[string]any, source, queue string, messages []any) map[string]bool {
@@ -894,6 +965,28 @@ func validateSource(pipe map[string]any) error {
 			return validation(parameterName + ".BatchSize must be between 1 and 10000.")
 		}
 	}
+	for key, limits := range map[string][2]int{
+		"MaximumBatchingWindowInSeconds": {0, 300},
+		"MaximumRecordAgeInSeconds":      {-1, 604800},
+		"MaximumRetryAttempts":           {-1, 10000},
+		"ParallelizationFactor":          {1, 10},
+	} {
+		if _, exists := parameters[key]; exists {
+			value := intValue(parameters[key])
+			if value < limits[0] || value > limits[1] {
+				return validation(fmt.Sprintf("%s.%s must be between %d and %d.", parameterName, key, limits[0], limits[1]))
+			}
+		}
+	}
+	if value := stringValue(parameters["OnPartialBatchItemFailure"]); value != "" && value != "AUTOMATIC_BISECT" {
+		return validation(parameterName + ".OnPartialBatchItemFailure is invalid.")
+	}
+	if config, ok := parameters["DeadLetterConfig"].(map[string]any); ok {
+		arn := stringValue(config["Arn"])
+		if (!strings.Contains(arn, ":sqs:") && !strings.Contains(arn, ":sns:")) || strings.HasSuffix(arn, ".fifo") {
+			return validation(parameterName + ".DeadLetterConfig.Arn must be a standard SQS queue or SNS topic ARN.")
+		}
+	}
 	return nil
 }
 
@@ -964,6 +1057,13 @@ func intValue(value any) int {
 		return int(value)
 	}
 	return 0
+}
+
+func optionalInt(input map[string]any, key string, fallback int) int {
+	if _, ok := input[key]; !ok {
+		return fallback
+	}
+	return intValue(input[key])
 }
 
 func validation(message string) *spi.Fault {

@@ -59,6 +59,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			rec["DeliveryStreamType"] = "DirectPut"
 		}
 		copyDest(rec, req.Input)
+		if err := validateDestination(rec); err != nil {
+			return nil, err
+		}
 		b, _ := json.Marshal(rec)
 		_ = p.col(req, "fh").Put(ctx, name, b)
 		return &spi.Response{Output: map[string]any{"DeliveryStreamARN": arn}}, nil
@@ -112,6 +115,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = json.Unmarshal(b, &rec)
 		rec["Destination"] = req.Input
 		copyDest(rec, req.Input)
+		if err := validateDestination(rec); err != nil {
+			return nil, err
+		}
 		nb, _ := json.Marshal(rec)
 		_ = p.col(req, "fh").Put(ctx, name, nb)
 		return &spi.Response{Output: map[string]any{}}, nil
@@ -164,7 +170,7 @@ func copyDest(rec, in map[string]any) {
 	}
 }
 
-func s3Dest(rec map[string]any) (bucket, prefix string) {
+func s3Dest(rec map[string]any) (bucket, prefix, timezone string) {
 	for _, k := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration"} {
 		m, _ := rec[k].(map[string]any)
 		if m == nil {
@@ -176,9 +182,20 @@ func s3Dest(rec map[string]any) (bucket, prefix string) {
 		}
 		bucket = bucketFromARN(arn)
 		prefix = first(m, "Prefix")
-		return bucket, prefix
+		timezone = first(m, "CustomTimeZone")
+		return bucket, prefix, timezone
 	}
-	return "", ""
+	return "", "", ""
+}
+
+func validateDestination(rec map[string]any) error {
+	_, _, timezone := s3Dest(rec)
+	if timezone != "" {
+		if _, err := time.LoadLocation(timezone); err != nil {
+			return &spi.Fault{Code: "ValidationException", Message: "CustomTimeZone is invalid.", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	return nil
 }
 
 func bucketFromARN(arn string) string {
@@ -198,11 +215,15 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 	}
 	var rec map[string]any
 	_ = json.Unmarshal(raw, &rec)
-	bucket, prefix := s3Dest(rec)
+	bucket, prefix, timezone := s3Dest(rec)
 	if bucket == "" {
 		return
 	}
 	now := p.deps.Clock.Now().UTC()
+	if timezone != "" {
+		location, _ := time.LoadLocation(timezone)
+		now = now.In(location)
+	}
 	key := p.evaluatedS3Prefix(prefix, now) + stream + "-1-" + now.Format("2006-01-02-15-04-05-") + recID
 	info, err := p.deps.Blobs.Put(ctx, req.Identity.Account+"/"+req.Identity.Region+"/"+bucket+"/"+key, bytes.NewReader(data))
 	if err != nil {

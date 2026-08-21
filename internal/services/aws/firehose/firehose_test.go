@@ -201,6 +201,24 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	if len(first) != 11 || len(second) != 11 || first == second || !strings.HasSuffix(randomPrefix, "/1970/") {
 		t.Fatalf("random prefix %q", randomPrefix)
 	}
+	invoke("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "timezone", "ExtendedS3DestinationConfiguration": map[string]any{
+			"BucketARN": "arn:aws:s3:::out", "Prefix": "hour=!{timestamp:HH}/", "CustomTimeZone": "Asia/Tokyo",
+		},
+	})
+	response = invoke("PutRecord", map[string]any{"DeliveryStreamName": "timezone", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("timezone"))}})
+	recordID = response.Output["RecordId"].(string)
+	key = id.Account + "/" + id.Region + "/out/hour=09/timezone-1-1970-01-01-09-00-00-" + recordID
+	if _, _, err := deps.Blobs.Get(context.Background(), key); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+		"DeliveryStreamName": "bad-timezone", "ExtendedS3DestinationConfiguration": map[string]any{
+			"BucketARN": "arn:aws:s3:::out", "CustomTimeZone": "Mars/Olympus_Mons",
+		},
+	}}); err == nil {
+		t.Fatal("accepted invalid CustomTimeZone")
+	}
 }
 
 func TestFirehoseControlPlaneAndBatch(t *testing.T) {

@@ -211,6 +211,87 @@ func TestInvokeAPIDestinationOAuth(t *testing.T) {
 	}
 }
 
+func TestAPIDestinationControlPlane(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	wantFault := func(operation string, input map[string]any, code string) {
+		t.Helper()
+		_, err := invoke(operation, input)
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != code {
+			t.Fatalf("%s fault=%v want %s", operation, err, code)
+		}
+	}
+
+	wantFault("CreateConnection", map[string]any{"Name": "missing-auth"}, "ValidationException")
+	wantFault("CreateConnection", map[string]any{"Name": "wrong-auth", "AuthorizationType": "BASIC", "AuthParameters": map[string]any{"ApiKeyAuthParameters": map[string]any{"ApiKeyName": "X-Key", "ApiKeyValue": "secret"}}}, "ValidationException")
+	connection, err := invoke("CreateConnection", map[string]any{
+		"Name": "control", "Description": "original", "AuthorizationType": "API_KEY",
+		"AuthParameters": map[string]any{"ApiKeyAuthParameters": map[string]any{"ApiKeyName": "X-Key", "ApiKeyValue": "secret"}},
+	})
+	if err != nil || connection.Output["ConnectionState"] != "AUTHORIZED" || !strings.Contains(str(connection.Output["ConnectionArn"]), ":connection/control/") {
+		t.Fatalf("create connection %#v err=%v", connection, err)
+	}
+	wantFault("CreateConnection", map[string]any{
+		"Name": "control", "AuthorizationType": "API_KEY",
+		"AuthParameters": map[string]any{"ApiKeyAuthParameters": map[string]any{"ApiKeyName": "X-Key", "ApiKeyValue": "secret"}},
+	}, "ResourceAlreadyExistsException")
+	described, err := invoke("DescribeConnection", map[string]any{"Name": "control"})
+	encoded, _ := json.Marshal(described.Output)
+	if err != nil || described.Output["ConnectionState"] != "AUTHORIZED" || strings.Contains(string(encoded), "secret") {
+		t.Fatalf("describe connection %s err=%v", encoded, err)
+	}
+	listed, err := invoke("ListConnections", map[string]any{})
+	encoded, _ = json.Marshal(listed.Output)
+	if err != nil || strings.Contains(string(encoded), "AuthParameters") || strings.Contains(string(encoded), "secret") {
+		t.Fatalf("list connections %s err=%v", encoded, err)
+	}
+	updated, err := invoke("UpdateConnection", map[string]any{
+		"Name": "control", "Description": "updated",
+		"AuthParameters": map[string]any{"ApiKeyAuthParameters": map[string]any{"ApiKeyValue": "replacement"}},
+	})
+	storedConnection, _ := p.load(ctx, &spi.Request{Identity: id}, "connections", "control")
+	storedAuth := storedConnection["AuthParameters"].(map[string]any)["ApiKeyAuthParameters"].(map[string]any)
+	if err != nil || updated.Output["ConnectionState"] != "AUTHORIZED" || storedConnection["Description"] != "updated" || storedAuth["ApiKeyName"] != "X-Key" || storedAuth["ApiKeyValue"] != "replacement" {
+		t.Fatalf("update connection %#v stored=%#v err=%v", updated, storedConnection, err)
+	}
+
+	wantFault("CreateApiDestination", map[string]any{"Name": "missing", "ConnectionArn": "arn:aws:events:us-east-1:1:connection/missing/id", "InvocationEndpoint": "https://example.test", "HttpMethod": "POST"}, "ResourceNotFoundException")
+	wantFault("CreateApiDestination", map[string]any{"Name": "invalid", "ConnectionArn": connection.Output["ConnectionArn"], "InvocationEndpoint": "https://example.test", "HttpMethod": "TRACE"}, "ValidationException")
+	destination, err := invoke("CreateApiDestination", map[string]any{
+		"Name": "control", "ConnectionArn": connection.Output["ConnectionArn"], "InvocationEndpoint": "https://example.test/original", "HttpMethod": "POST",
+	})
+	if err != nil || destination.Output["ApiDestinationState"] != "ACTIVE" || !strings.Contains(str(destination.Output["ApiDestinationArn"]), ":api-destination/control/") {
+		t.Fatalf("create API destination %#v err=%v", destination, err)
+	}
+	if _, err := invoke("UpdateApiDestination", map[string]any{"Name": "control", "Description": "updated"}); err != nil {
+		t.Fatal(err)
+	}
+	storedDestination, _ := p.load(ctx, &spi.Request{Identity: id}, "apidest", "control")
+	if storedDestination["Description"] != "updated" || storedDestination["InvocationEndpoint"] != "https://example.test/original" || storedDestination["HttpMethod"] != "POST" || storedDestination["InvocationRateLimitPerSecond"] != float64(300) {
+		t.Fatalf("update API destination %#v", storedDestination)
+	}
+	wantFault("DescribeApiDestination", map[string]any{"Name": "missing"}, "ResourceNotFoundException")
+	wantFault("UpdateApiDestination", map[string]any{"Name": "missing", "Description": "updated"}, "ResourceNotFoundException")
+
+	deauthorized, err := invoke("DeauthorizeConnection", map[string]any{"Name": "control"})
+	storedConnection, _ = p.load(ctx, &spi.Request{Identity: id}, "connections", "control")
+	if err != nil || deauthorized.Output["ConnectionState"] != "DEAUTHORIZED" || storedConnection["AuthParameters"] != nil {
+		t.Fatalf("deauthorize connection %#v stored=%#v err=%v", deauthorized, storedConnection, err)
+	}
+	_, err = InvokeAPIDestination(ctx, deps, id, str(destination.Output["ApiDestinationArn"]), nil, []byte(`{}`))
+	if fault, ok := err.(*spi.Fault); !ok || fault.Code != "ConnectionFailure" {
+		t.Fatalf("deauthorized invocation fault=%v", err)
+	}
+	wantFault("UpdateConnection", map[string]any{"Name": "missing", "Description": "updated"}, "ResourceNotFoundException")
+}
+
 func TestTargetsUpsertRemoveAndEventBusIsolation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, sp := New(deps), sqs.New(deps)
@@ -363,10 +444,10 @@ func TestBootedServerEventBridgePutEvents(t *testing.T) {
 	call("CreateArchive", `{"ArchiveName":"a1","EventSourceArn":"arn:aws:events:us-east-1:000000000000:event-bus/custom"}`)
 	call("DescribeArchive", `{"ArchiveName":"a1"}`)
 	call("ListArchives", `{}`)
-	call("CreateConnection", `{"Name":"c1","AuthorizationType":"API_KEY"}`)
+	_, connection := call("CreateConnection", `{"Name":"c1","AuthorizationType":"API_KEY","AuthParameters":{"ApiKeyAuthParameters":{"ApiKeyName":"X-Key","ApiKeyValue":"value"}}}`)
 	call("DescribeConnection", `{"Name":"c1"}`)
 	call("ListConnections", `{}`)
-	call("CreateApiDestination", `{"Name":"d1","ConnectionArn":"arn:c","InvocationEndpoint":"https://example.test"}`)
+	call("CreateApiDestination", `{"Name":"d1","ConnectionArn":"`+str(connection["ConnectionArn"])+`","InvocationEndpoint":"https://example.test","HttpMethod":"POST"}`)
 	call("ListApiDestinations", `{}`)
 	call("CreateEndpoint", `{"Name":"e1"}`)
 	call("ListEndpoints", `{}`)

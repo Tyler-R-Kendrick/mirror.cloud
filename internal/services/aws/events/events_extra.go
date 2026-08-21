@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -53,30 +54,27 @@ func (p *Pack) extra(ctx context.Context, req *spi.Request) (*spi.Response, erro
 	case "DeleteArchive":
 		_ = p.col(req, "archives").Delete(ctx, first(req.Input, "ArchiveName", "Name"))
 		return &spi.Response{Output: map[string]any{}}, nil
-	case "CreateConnection", "UpdateConnection":
-		name := first(req.Input, "Name")
-		out, err := p.putARN(ctx, req, "connections", name, "connection", "ConnectionArn")
-		if err != nil {
-			return nil, err
-		}
-		out.Output["ConnectionState"] = "AUTHORIZED"
-		out.Output["Name"] = name
-		return out, nil
+	case "CreateConnection":
+		return p.createConnection(ctx, req)
+	case "UpdateConnection":
+		return p.updateConnection(ctx, req)
 	case "DescribeConnection":
-		return p.getRec(ctx, req, "connections", first(req.Input, "Name"))
+		return p.describeConnection(ctx, req)
 	case "ListConnections":
-		return p.listRec(ctx, req, "connections", "Connections")
+		return p.listConnections(ctx, req)
 	case "DeleteConnection", "DeauthorizeConnection":
 		name := first(req.Input, "Name")
 		if op == "DeauthorizeConnection" {
-			return p.patch(ctx, req, "connections", name, map[string]any{"ConnectionState": "DEAUTHORIZED"})
+			return p.deauthorizeConnection(ctx, req)
 		}
 		_ = p.col(req, "connections").Delete(ctx, name)
 		return &spi.Response{Output: map[string]any{}}, nil
-	case "CreateApiDestination", "UpdateApiDestination":
-		return p.putARN(ctx, req, "apidest", first(req.Input, "Name"), "api-destination", "ApiDestinationArn")
+	case "CreateApiDestination":
+		return p.createAPIDestination(ctx, req)
+	case "UpdateApiDestination":
+		return p.updateAPIDestination(ctx, req)
 	case "DescribeApiDestination":
-		return p.getRec(ctx, req, "apidest", first(req.Input, "Name"))
+		return p.describeAPIDestination(ctx, req)
 	case "ListApiDestinations":
 		return p.listRec(ctx, req, "apidest", "ApiDestinations")
 	case "DeleteApiDestination":
@@ -245,6 +243,293 @@ func (p *Pack) extra(ctx context.Context, req *spi.Request) (*spi.Response, erro
 	default:
 		return nil, spi.NotImplemented("aws.events", op, "emulate")
 	}
+}
+
+func (p *Pack) createConnection(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	name := first(req.Input, "Name")
+	if err := validateConnection(req.Input); err != nil {
+		return nil, err
+	}
+	if _, exists := p.load(ctx, req, "connections", name); exists {
+		return nil, resourceExists("Connection")
+	}
+	now := eventTimestamp(p.deps.Clock.Now())
+	record := map[string]any{}
+	mergeEventRecord(record, req.Input)
+	record["ConnectionArn"] = eventResourceARN(req, "connection", name, p.deps.Rand.Hex(8))
+	record["ConnectionState"] = "AUTHORIZED"
+	record["CreationTime"], record["LastModifiedTime"], record["LastAuthorizedTime"] = now, now, now
+	p.saveEventRecord(ctx, req, "connections", name, record)
+	return &spi.Response{Output: connectionResult(record)}, nil
+}
+
+func (p *Pack) updateConnection(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	name := first(req.Input, "Name")
+	previous, exists := p.load(ctx, req, "connections", name)
+	if !exists {
+		return nil, resourceMissing("Connection")
+	}
+	record := map[string]any{}
+	mergeEventRecord(record, previous)
+	if authorizationType := str(req.Input["AuthorizationType"]); authorizationType != "" && authorizationType != str(previous["AuthorizationType"]) {
+		delete(record, "AuthParameters")
+	}
+	mergeEventRecord(record, req.Input)
+	record["Name"], record["ConnectionArn"] = previous["Name"], previous["ConnectionArn"]
+	_, authChanged := req.Input["AuthParameters"]
+	_, typeChanged := req.Input["AuthorizationType"]
+	if authChanged || typeChanged {
+		if err := validateConnection(record); err != nil {
+			return nil, err
+		}
+		record["ConnectionState"] = "AUTHORIZED"
+		record["LastAuthorizedTime"] = eventTimestamp(p.deps.Clock.Now())
+	}
+	record["LastModifiedTime"] = eventTimestamp(p.deps.Clock.Now())
+	p.saveEventRecord(ctx, req, "connections", name, record)
+	return &spi.Response{Output: connectionResult(record)}, nil
+}
+
+func (p *Pack) describeConnection(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	record, exists := p.load(ctx, req, "connections", first(req.Input, "Name"))
+	if !exists {
+		return nil, resourceMissing("Connection")
+	}
+	return &spi.Response{Output: publicConnection(record)}, nil
+}
+
+func (p *Pack) listConnections(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	kvs, _, _ := p.col(req, "connections").List(ctx, "", "", 0)
+	connections := make([]any, 0, len(kvs))
+	for _, kv := range kvs {
+		var record map[string]any
+		_ = json.Unmarshal(kv.Value, &record)
+		public := publicConnection(record)
+		delete(public, "AuthParameters")
+		connections = append(connections, public)
+	}
+	return &spi.Response{Output: map[string]any{"Connections": connections}}, nil
+}
+
+func (p *Pack) deauthorizeConnection(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	name := first(req.Input, "Name")
+	record, exists := p.load(ctx, req, "connections", name)
+	if !exists {
+		return nil, resourceMissing("Connection")
+	}
+	delete(record, "AuthParameters")
+	record["ConnectionState"] = "DEAUTHORIZED"
+	record["LastModifiedTime"] = eventTimestamp(p.deps.Clock.Now())
+	p.saveEventRecord(ctx, req, "connections", name, record)
+	return &spi.Response{Output: connectionResult(record)}, nil
+}
+
+func (p *Pack) createAPIDestination(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	name := first(req.Input, "Name")
+	if err := validateAPIDestination(req.Input); err != nil {
+		return nil, err
+	}
+	if _, exists := p.load(ctx, req, "apidest", name); exists {
+		return nil, resourceExists("API destination")
+	}
+	if err := p.validateDestinationConnection(ctx, req, str(req.Input["ConnectionArn"])); err != nil {
+		return nil, err
+	}
+	now := eventTimestamp(p.deps.Clock.Now())
+	record := map[string]any{}
+	mergeEventRecord(record, req.Input)
+	if _, exists := record["InvocationRateLimitPerSecond"]; !exists {
+		record["InvocationRateLimitPerSecond"] = 300
+	}
+	record["ApiDestinationArn"] = eventResourceARN(req, "api-destination", name, p.deps.Rand.Hex(8))
+	record["ApiDestinationState"] = "ACTIVE"
+	record["CreationTime"], record["LastModifiedTime"] = now, now
+	p.saveEventRecord(ctx, req, "apidest", name, record)
+	return &spi.Response{Output: apiDestinationResult(record)}, nil
+}
+
+func (p *Pack) updateAPIDestination(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	name := first(req.Input, "Name")
+	previous, exists := p.load(ctx, req, "apidest", name)
+	if !exists {
+		return nil, resourceMissing("API destination")
+	}
+	record := map[string]any{}
+	mergeEventRecord(record, previous)
+	mergeEventRecord(record, req.Input)
+	record["Name"], record["ApiDestinationArn"] = previous["Name"], previous["ApiDestinationArn"]
+	if err := validateAPIDestination(record); err != nil {
+		return nil, err
+	}
+	if _, changed := req.Input["ConnectionArn"]; changed {
+		if err := p.validateDestinationConnection(ctx, req, str(record["ConnectionArn"])); err != nil {
+			return nil, err
+		}
+	}
+	record["LastModifiedTime"] = eventTimestamp(p.deps.Clock.Now())
+	p.saveEventRecord(ctx, req, "apidest", name, record)
+	return &spi.Response{Output: apiDestinationResult(record)}, nil
+}
+
+func (p *Pack) describeAPIDestination(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	record, exists := p.load(ctx, req, "apidest", first(req.Input, "Name"))
+	if !exists {
+		return nil, resourceMissing("API destination")
+	}
+	return &spi.Response{Output: record}, nil
+}
+
+func (p *Pack) validateDestinationConnection(ctx context.Context, req *spi.Request, arn string) error {
+	connection, exists := p.load(ctx, req, "connections", arnResourceName(arn, "connection/"))
+	if !exists {
+		return resourceMissing("Connection")
+	}
+	if connection["ConnectionState"] != "AUTHORIZED" {
+		return validationFault("Connection must be authorized.")
+	}
+	return nil
+}
+
+func validateConnection(record map[string]any) error {
+	if !validEventResourceName(first(record, "Name")) {
+		return validationFault("Name is required and must be a valid EventBridge resource name.")
+	}
+	authorizationType := str(record["AuthorizationType"])
+	auth, ok := record["AuthParameters"].(map[string]any)
+	key := map[string]string{"API_KEY": "ApiKeyAuthParameters", "BASIC": "BasicAuthParameters", "OAUTH_CLIENT_CREDENTIALS": "OAuthParameters"}[authorizationType]
+	if !ok || key == "" {
+		return validationFault("AuthorizationType and AuthParameters are required.")
+	}
+	for _, other := range []string{"ApiKeyAuthParameters", "BasicAuthParameters", "OAuthParameters"} {
+		if _, exists := auth[other]; exists && other != key {
+			return validationFault("AuthParameters must match AuthorizationType.")
+		}
+	}
+	parameters, ok := auth[key].(map[string]any)
+	if !ok {
+		return validationFault("AuthParameters must match AuthorizationType.")
+	}
+	switch authorizationType {
+	case "API_KEY":
+		if str(parameters["ApiKeyName"]) == "" || str(parameters["ApiKeyValue"]) == "" {
+			return validationFault("ApiKeyName and ApiKeyValue are required.")
+		}
+	case "BASIC":
+		if str(parameters["Username"]) == "" || str(parameters["Password"]) == "" {
+			return validationFault("Username and Password are required.")
+		}
+	case "OAUTH_CLIENT_CREDENTIALS":
+		clients, _ := parameters["ClientParameters"].(map[string]any)
+		method := str(parameters["HttpMethod"])
+		if str(parameters["AuthorizationEndpoint"]) == "" || (method != "GET" && method != "POST" && method != "PUT") || str(clients["ClientID"]) == "" || str(clients["ClientSecret"]) == "" {
+			return validationFault("Complete OAuth client credentials are required.")
+		}
+	}
+	return nil
+}
+
+func validateAPIDestination(record map[string]any) error {
+	method := str(record["HttpMethod"])
+	if !validEventResourceName(first(record, "Name")) || str(record["ConnectionArn"]) == "" || str(record["InvocationEndpoint"]) == "" || !oneOf(method, "POST", "GET", "HEAD", "OPTIONS", "PUT", "PATCH", "DELETE") {
+		return validationFault("Name, ConnectionArn, InvocationEndpoint, and a supported HttpMethod are required.")
+	}
+	if value, exists := record["InvocationRateLimitPerSecond"]; exists {
+		rate, err := strconv.Atoi(toString(value))
+		if err != nil || rate < 1 {
+			return validationFault("InvocationRateLimitPerSecond must be a positive integer.")
+		}
+	}
+	return nil
+}
+
+func validEventResourceName(name string) bool {
+	matched, _ := regexp.MatchString(`^[.\-_A-Za-z0-9]{1,64}$`, name)
+	return matched
+}
+
+func oneOf(value string, allowed ...string) bool {
+	for _, item := range allowed {
+		if value == item {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeEventRecord(destination, source map[string]any) {
+	for key, value := range source {
+		if sourceMap, ok := value.(map[string]any); ok {
+			if destinationMap, ok := destination[key].(map[string]any); ok {
+				mergeEventRecord(destinationMap, sourceMap)
+				continue
+			}
+		}
+		destination[key] = value
+	}
+}
+
+func publicConnection(record map[string]any) map[string]any {
+	body, _ := json.Marshal(record)
+	var public map[string]any
+	_ = json.Unmarshal(body, &public)
+	redactConnectionSecrets(public)
+	return public
+}
+
+func redactConnectionSecrets(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for _, key := range []string{"ApiKeyValue", "Password", "ClientSecret"} {
+			delete(typed, key)
+		}
+		if secret, _ := typed["IsValueSecret"].(bool); secret {
+			delete(typed, "Value")
+		}
+		for _, child := range typed {
+			redactConnectionSecrets(child)
+		}
+	case []any:
+		for _, child := range typed {
+			redactConnectionSecrets(child)
+		}
+	}
+}
+
+func connectionResult(record map[string]any) map[string]any {
+	return map[string]any{
+		"ConnectionArn": record["ConnectionArn"], "ConnectionState": record["ConnectionState"], "CreationTime": record["CreationTime"],
+		"LastAuthorizedTime": record["LastAuthorizedTime"], "LastModifiedTime": record["LastModifiedTime"],
+	}
+}
+
+func apiDestinationResult(record map[string]any) map[string]any {
+	return map[string]any{
+		"ApiDestinationArn": record["ApiDestinationArn"], "ApiDestinationState": record["ApiDestinationState"],
+		"CreationTime": record["CreationTime"], "LastModifiedTime": record["LastModifiedTime"],
+	}
+}
+
+func eventTimestamp(now time.Time) float64 { return float64(now.UnixNano()) / 1e9 }
+
+func eventResourceARN(req *spi.Request, kind, name, suffix string) string {
+	return "arn:aws:events:" + req.Identity.Region + ":" + req.Identity.Account + ":" + kind + "/" + name + "/" + suffix
+}
+
+func validationFault(message string) error {
+	return &spi.Fault{Code: "ValidationException", Message: message, HTTPStatus: 400, Fault: "client"}
+}
+
+func resourceMissing(kind string) error {
+	return &spi.Fault{Code: "ResourceNotFoundException", Message: kind + " does not exist.", HTTPStatus: 400, Fault: "client"}
+}
+
+func resourceExists(kind string) error {
+	return &spi.Fault{Code: "ResourceAlreadyExistsException", Message: kind + " already exists.", HTTPStatus: 400, Fault: "client"}
+}
+
+func (p *Pack) saveEventRecord(ctx context.Context, req *spi.Request, collection, name string, record map[string]any) {
+	body, _ := json.Marshal(record)
+	_ = p.col(req, collection).Put(ctx, name, body)
 }
 
 func (p *Pack) putARN(ctx context.Context, req *spi.Request, col, name, kind, arnKey string) (*spi.Response, error) {

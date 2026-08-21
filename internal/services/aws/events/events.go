@@ -380,6 +380,9 @@ func InvokeAPIDestination(ctx context.Context, deps spi.Deps, identity spi.Ident
 	if !ok {
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Connection does not exist.", HTTPStatus: 404, Fault: "client"}
 	}
+	if connection["ConnectionState"] != "AUTHORIZED" {
+		return nil, &spi.Fault{Code: "ConnectionFailure", Message: "Connection is not authorized.", HTTPStatus: 400, Fault: "client"}
+	}
 	auth, _ := connection["AuthParameters"].(map[string]any)
 	invocation, _ := auth["InvocationHttpParameters"].(map[string]any)
 	payload, err := mergeConnectionBody(payload, invocation["BodyParameters"])

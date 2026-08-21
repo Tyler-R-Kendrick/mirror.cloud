@@ -18,6 +18,17 @@ func (stub) Invoke(context.Context, *spi.Request) (*spi.Response, error) {
 	return &spi.Response{Output: map[string]any{}}, nil
 }
 
+type closingStub struct {
+	stub
+	closed *bool
+}
+
+func (s closingStub) ServiceID() string { return "aws.close" }
+func (s closingStub) Close() error {
+	*s.closed = true
+	return nil
+}
+
 func TestEnabledFilter(t *testing.T) {
 	Register(Factory{ServiceID: "aws.test", Tier: model.TierEmulate, New: func(spi.Deps) (spi.BehaviorPack, error) {
 		return stub{}, nil
@@ -31,5 +42,19 @@ func TestEnabledFilter(t *testing.T) {
 	}
 	if _, ok := r.Resolve("aws.other"); ok {
 		t.Fatal("other")
+	}
+}
+
+func TestCloseEnabledPacks(t *testing.T) {
+	closed := false
+	Register(Factory{ServiceID: "aws.close", Tier: model.TierEmulate, New: func(spi.Deps) (spi.BehaviorPack, error) {
+		return closingStub{closed: &closed}, nil
+	}})
+	r, err := New(spitest.Deps(t), []string{"aws.close"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil || !closed {
+		t.Fatalf("close error %v closed %v", err, closed)
 	}
 }

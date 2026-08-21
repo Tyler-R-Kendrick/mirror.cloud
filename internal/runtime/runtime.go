@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -490,6 +491,11 @@ func Boot(cfg config.Config) (*Runtime, error) {
 
 // Handler is the HTTP handler.
 func (rt *Runtime) Handler() http.Handler { return rt.HTTP }
+
+// Close stops behavior packs before closing shared state.
+func (rt *Runtime) Close() error {
+	return errors.Join(rt.Reg.Close(), rt.Deps.Store.Close())
+}
 
 // SavePersist writes process state to cfg.PersistDir when set.
 func (rt *Runtime) SavePersist() error {

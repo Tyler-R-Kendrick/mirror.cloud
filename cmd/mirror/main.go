@@ -284,7 +284,10 @@ func cmdUp(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = rt.SavePersist() }()
+	defer func() {
+		_ = rt.SavePersist()
+		_ = rt.Close()
+	}()
 
 	if strings.HasPrefix(cfg.Bind, "0.0.0.0") || strings.HasPrefix(cfg.Bind, "[::]") || strings.HasPrefix(cfg.Bind, ":") {
 		fmt.Fprintln(os.Stderr, "WARNING: no authentication. Do not expose this process to untrusted networks. Isolation is network-level and account+region namespacing. An auth token will never be added.")

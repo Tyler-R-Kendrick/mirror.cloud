@@ -40,8 +40,16 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-ignore-timestamp-prefix-expression",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `return firehoseTimestampPrefix.ReplaceAllStringFunc(prefix, func(expression string) string {`,
-			new:  `return firehoseTimestampPrefix.ReplaceAllStringFunc("mutated/", func(expression string) string {`,
+			old:  `prefix = firehoseTimestampPrefix.ReplaceAllStringFunc(prefix, func(expression string) string {`,
+			new:  `prefix = firehoseTimestampPrefix.ReplaceAllStringFunc("mutated/", func(expression string) string {`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseS3ObjectNameFormat",
+		},
+		{
+			name: "firehose-ignore-random-prefix-expression",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `for strings.Contains(prefix, "!{firehose:random-string}") {`,
+			new:  `for false {`,
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseS3ObjectNameFormat",
 		},

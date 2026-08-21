@@ -1,4 +1,4 @@
-// Package pipes emulates EventBridge Pipes control plane and SQS source delivery.
+// Package pipes emulates EventBridge Pipes control plane and source delivery.
 package pipes
 
 import (
@@ -15,6 +15,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -32,7 +33,7 @@ type Pack struct {
 	wake      chan struct{}
 	stop      chan struct{}
 	done      chan struct{}
-	cancel    func()
+	cancels   []func()
 	closeOnce sync.Once
 }
 
@@ -43,7 +44,9 @@ func New(d spi.Deps) *Pack {
 		close(p.done)
 		return p
 	}
-	p.cancel = d.Bus.Subscribe("sqs", func(context.Context, []byte) { p.notify() })
+	for _, topic := range []string{"sqs", "kinesis"} {
+		p.cancels = append(p.cancels, d.Bus.Subscribe(topic, func(context.Context, []byte) { p.notify() }))
+	}
 	go p.loop()
 	return p
 }
@@ -61,8 +64,8 @@ func (p *Pack) Operations() []string {
 // Close stops source polling.
 func (p *Pack) Close() error {
 	p.closeOnce.Do(func() {
-		if p.cancel != nil {
-			p.cancel()
+		for _, cancel := range p.cancels {
+			cancel()
 		}
 		close(p.stop)
 	})
@@ -80,6 +83,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "CreatePipe":
 		if name == "" || first(req.Input, "Source") == "" || first(req.Input, "Target") == "" || first(req.Input, "RoleArn") == "" {
 			return nil, validation("Name, Source, Target, and RoleArn are required.")
+		}
+		if err := validateSource(req.Input); err != nil {
+			return nil, err
 		}
 		if _, ok, err := p.col(req, "pipe").Get(ctx, name); err != nil {
 			return nil, err
@@ -142,6 +148,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			rec["CurrentState"] = state
 		}
+		if err := validateSource(rec); err != nil {
+			return nil, err
+		}
 		if err := putRecord(ctx, p.col(req, "pipe"), name, rec); err != nil {
 			return nil, err
 		}
@@ -156,6 +165,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if err := p.col(req, "pipe").Delete(ctx, name); err != nil {
 			return nil, err
 		}
+		_ = p.col(req, "pipecheckpoint").Delete(ctx, name)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "StartPipe", "StopPipe":
 		rec, ok, err := getRecord(ctx, p.col(req, "pipe"), name)
@@ -272,43 +282,119 @@ func (p *Pack) drain(ctx context.Context) bool {
 				continue
 			}
 			source, target := stringValue(pipe["Source"]), stringValue(pipe["Target"])
-			if !strings.Contains(source, ":sqs:") || target == "" {
+			if target == "" {
 				continue
 			}
-			queue := source[strings.LastIndex(source, ":")+1:]
-			batchSize := sourceBatchSize(pipe)
-			request := &spi.Request{Identity: identity, Operation: "ReceiveMessage", Input: map[string]any{
-				"QueueName": queue, "MaxNumberOfMessages": batchSize, "MessageAttributeNames": []any{"All"},
-			}}
-			response, err := sqs.New(p.deps).Invoke(ctx, request)
-			if err != nil {
-				continue
+			switch {
+			case strings.Contains(source, ":sqs:"):
+				more = p.drainSQS(ctx, identity, pipe, source) || more
+			case strings.Contains(source, ":kinesis:"):
+				more = p.drainKinesis(ctx, identity, pipe, source) || more
 			}
-			messages, _ := response.Output["Messages"].([]any)
-			if len(messages) == batchSize {
-				more = true
-			}
-			p.processBatch(ctx, identity, pipe, source, queue, messages)
 		}
 	}
 	return more
 }
 
-func (p *Pack) processBatch(ctx context.Context, identity spi.Identity, pipe map[string]any, source, queue string, messages []any) {
-	var records []any
-	var matched []map[string]any
-	for _, raw := range messages {
-		message, _ := raw.(map[string]any)
-		record := sqsRecord(message, source, identity.Region)
-		if !matchesFilters(pipe["FilterCriteria"], record) {
-			p.deleteMessage(ctx, identity, queue, stringValue(message["ReceiptHandle"]))
+func (p *Pack) drainSQS(ctx context.Context, identity spi.Identity, pipe map[string]any, source string) bool {
+	queue := source[strings.LastIndex(source, ":")+1:]
+	batchSize := sourceBatchSize(pipe)
+	response, err := sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "ReceiveMessage", Input: map[string]any{
+		"QueueName": queue, "MaxNumberOfMessages": batchSize, "MessageAttributeNames": []any{"All"},
+	}})
+	if err != nil {
+		return false
+	}
+	messages, _ := response.Output["Messages"].([]any)
+	p.processBatch(ctx, identity, pipe, source, queue, messages)
+	return len(messages) == batchSize
+}
+
+func (p *Pack) drainKinesis(ctx context.Context, identity spi.Identity, pipe map[string]any, source string) bool {
+	stream := source[strings.LastIndex(source, "/")+1:]
+	request := &spi.Request{Identity: identity, Input: map[string]any{"StreamName": stream, "ShardId": "shardId-000000000000"}}
+	checkpoint := p.deps.Store.Scope(identity.Account, identity.Region).Collection("pipecheckpoint")
+	iterator, ok, err := checkpoint.Get(ctx, stringValue(pipe["Name"]))
+	if err != nil {
+		return false
+	}
+	streamParameters := sourceParameters(pipe, "KinesisStreamParameters")
+	client := kinesis.New(p.deps)
+	if !ok {
+		request.Operation = "GetShardIterator"
+		request.Input["ShardIteratorType"] = stringValue(streamParameters["StartingPosition"])
+		request.Input["Timestamp"] = streamParameters["StartingPositionTimestamp"]
+		response, invokeErr := client.Invoke(ctx, request)
+		if invokeErr != nil {
+			return false
+		}
+		iterator = []byte(stringValue(response.Output["ShardIterator"]))
+		if checkpoint.Put(ctx, stringValue(pipe["Name"]), iterator) != nil {
+			return false
+		}
+	}
+	request.Operation = "GetRecords"
+	request.Input = map[string]any{"ShardIterator": string(iterator), "Limit": kinesisBatchSize(pipe)}
+	response, err := client.Invoke(ctx, request)
+	if err != nil {
+		return false
+	}
+	records, _ := response.Output["Records"].([]any)
+	if len(records) == 0 {
+		_ = checkpoint.Put(ctx, stringValue(pipe["Name"]), []byte(stringValue(response.Output["NextShardIterator"])))
+		return false
+	}
+	events, ids := make([]any, len(records)), make([]string, len(records))
+	for i, raw := range records {
+		record, _ := raw.(map[string]any)
+		event := kinesisRecord(record, source, identity.Region, stringValue(pipe["RoleArn"]))
+		events[i], ids[i] = event, stringValue(event["eventID"])
+	}
+	succeeded := p.processRecords(ctx, identity, pipe, events, ids)
+	for i, id := range ids {
+		if succeeded[id] {
 			continue
 		}
-		records = append(records, record)
-		matched = append(matched, message)
+		request.Operation = "GetShardIterator"
+		request.Input = map[string]any{"StreamName": stream, "ShardId": "shardId-000000000000", "ShardIteratorType": "AT_SEQUENCE_NUMBER", "StartingSequenceNumber": stringValue(records[i].(map[string]any)["SequenceNumber"])}
+		if retry, invokeErr := client.Invoke(ctx, request); invokeErr == nil {
+			_ = checkpoint.Put(ctx, stringValue(pipe["Name"]), []byte(stringValue(retry.Output["ShardIterator"])))
+		}
+		return false
 	}
-	if len(records) == 0 {
-		return
+	if checkpoint.Put(ctx, stringValue(pipe["Name"]), []byte(stringValue(response.Output["NextShardIterator"]))) != nil {
+		return false
+	}
+	return len(records) == kinesisBatchSize(pipe)
+}
+
+func (p *Pack) processBatch(ctx context.Context, identity spi.Identity, pipe map[string]any, source, queue string, messages []any) map[string]bool {
+	records, ids := make([]any, 0, len(messages)), make([]string, 0, len(messages))
+	byID := map[string]map[string]any{}
+	for _, raw := range messages {
+		message, _ := raw.(map[string]any)
+		id := stringValue(message["MessageId"])
+		records, ids, byID[id] = append(records, sqsRecord(message, source, identity.Region)), append(ids, id), message
+	}
+	succeeded := p.processRecords(ctx, identity, pipe, records, ids)
+	for id := range succeeded {
+		p.deleteMessage(ctx, identity, queue, stringValue(byID[id]["ReceiptHandle"]))
+	}
+	return succeeded
+}
+
+func (p *Pack) processRecords(ctx context.Context, identity spi.Identity, pipe map[string]any, records []any, ids []string) map[string]bool {
+	succeeded := map[string]bool{}
+	matchedRecords, matchedIDs := make([]any, 0, len(records)), make([]string, 0, len(ids))
+	for i, record := range records {
+		if matchesFilters(pipe["FilterCriteria"], record.(map[string]any)) {
+			matchedRecords, matchedIDs = append(matchedRecords, record), append(matchedIDs, ids[i])
+		} else {
+			succeeded[ids[i]] = true
+		}
+	}
+	if len(matchedRecords) == 0 {
+		return succeeded
 	}
 	target := stringValue(pipe["Target"])
 	config := map[string]any{"Arn": target}
@@ -317,51 +403,52 @@ func (p *Pack) processBatch(ctx context.Context, identity spi.Identity, pipe map
 			config["SqsParameters"] = sqsParameters
 		}
 	}
-	payloads := make([][]byte, len(records))
-	for i, record := range records {
+	payloads := make([][]byte, len(matchedRecords))
+	for i, record := range matchedRecords {
 		payloads[i] = p.inputPayload(pipe, "EnrichmentParameters", record)
 	}
-	deliveryEvents, enriched, ok := p.enrich(ctx, identity, pipe, payloads, records)
+	deliveryEvents, enriched, ok := p.enrich(ctx, identity, pipe, payloads, matchedRecords)
 	if !ok {
-		return
+		return succeeded
 	}
 	if len(deliveryEvents) == 0 {
-		for _, message := range matched {
-			p.deleteMessage(ctx, identity, queue, stringValue(message["ReceiptHandle"]))
+		for _, id := range matchedIDs {
+			succeeded[id] = true
 		}
-		return
+		return succeeded
 	}
 	payloads = make([][]byte, len(deliveryEvents))
 	for i, event := range deliveryEvents {
 		payloads[i] = p.inputPayload(pipe, "TargetParameters", event)
 	}
 	if strings.Contains(target, ":lambda:") {
-		failed, ok := p.invokeLambda(ctx, identity, target, batchPayload(payloads), matched)
+		failed, ok := p.invokeLambda(ctx, identity, target, batchPayload(payloads), matchedIDs)
 		if !ok {
-			return
+			return succeeded
 		}
-		for _, message := range matched {
-			if !failed[stringValue(message["MessageId"])] {
-				p.deleteMessage(ctx, identity, queue, stringValue(message["ReceiptHandle"]))
+		for _, id := range matchedIDs {
+			if !failed[id] {
+				succeeded[id] = true
 			}
 		}
-		return
+		return succeeded
 	}
 	allDelivered := true
 	for i, payload := range payloads {
 		if events.DeliverTarget(ctx, p.deps, identity, target, config, payload) == nil {
 			if !enriched {
-				p.deleteMessage(ctx, identity, queue, stringValue(matched[i]["ReceiptHandle"]))
+				succeeded[matchedIDs[i]] = true
 			}
 		} else {
 			allDelivered = false
 		}
 	}
 	if enriched && allDelivered {
-		for _, message := range matched {
-			p.deleteMessage(ctx, identity, queue, stringValue(message["ReceiptHandle"]))
+		for _, id := range matchedIDs {
+			succeeded[id] = true
 		}
 	}
+	return succeeded
 }
 
 func (p *Pack) enrich(ctx context.Context, identity spi.Identity, pipe map[string]any, inputs [][]byte, fallback []any) ([]any, bool, bool) {
@@ -455,7 +542,7 @@ func (p *Pack) inputPayload(pipe map[string]any, parameterName string, event any
 	return []byte(template)
 }
 
-func (p *Pack) invokeLambda(ctx context.Context, identity spi.Identity, arn string, payload []byte, messages []map[string]any) (map[string]bool, bool) {
+func (p *Pack) invokeLambda(ctx context.Context, identity spi.Identity, arn string, payload []byte, ids []string) (map[string]bool, bool) {
 	raw, err := p.invokeLambdaPayload(ctx, identity, arn, payload)
 	if err != nil {
 		return nil, false
@@ -469,8 +556,8 @@ func (p *Pack) invokeLambda(ctx context.Context, identity spi.Identity, arn stri
 		return nil, false
 	}
 	known := map[string]bool{}
-	for _, message := range messages {
-		known[stringValue(message["MessageId"])] = true
+	for _, id := range ids {
+		known[id] = true
 	}
 	failed := map[string]bool{}
 	for _, item := range items {
@@ -547,6 +634,16 @@ func sqsRecord(message map[string]any, source, region string) map[string]any {
 	}
 }
 
+func kinesisRecord(record map[string]any, source, region, role string) map[string]any {
+	sequence := stringValue(record["SequenceNumber"])
+	return map[string]any{
+		"kinesisSchemaVersion": "1.0", "partitionKey": record["PartitionKey"], "sequenceNumber": sequence,
+		"data": record["Data"], "approximateArrivalTimestamp": record["ApproximateArrivalTimestamp"],
+		"eventSource": "aws:kinesis", "eventVersion": "1.0", "eventID": "shardId-000000000000:" + sequence,
+		"eventName": "aws:kinesis:record", "invokeIdentityArn": role, "awsRegion": region, "eventSourceARN": source,
+	}
+}
+
 func matchesFilters(raw any, event map[string]any) bool {
 	criteria, _ := raw.(map[string]any)
 	filters, _ := criteria["Filters"].([]any)
@@ -569,8 +666,7 @@ func matchesFilters(raw any, event map[string]any) bool {
 }
 
 func sourceBatchSize(pipe map[string]any) int {
-	parameters, _ := pipe["SourceParameters"].(map[string]any)
-	sqsParameters, _ := parameters["SqsQueueParameters"].(map[string]any)
+	sqsParameters := sourceParameters(pipe, "SqsQueueParameters")
 	size := intValue(sqsParameters["BatchSize"])
 	if size < 1 {
 		return 10
@@ -579,6 +675,41 @@ func sourceBatchSize(pipe map[string]any) int {
 		return 10
 	}
 	return size
+}
+
+func kinesisBatchSize(pipe map[string]any) int {
+	size := intValue(sourceParameters(pipe, "KinesisStreamParameters")["BatchSize"])
+	if size < 1 {
+		return 100
+	}
+	if size > 10000 {
+		return 10000
+	}
+	return size
+}
+
+func sourceParameters(pipe map[string]any, name string) map[string]any {
+	parameters, _ := pipe["SourceParameters"].(map[string]any)
+	result, _ := parameters[name].(map[string]any)
+	return result
+}
+
+func validateSource(pipe map[string]any) error {
+	if !strings.Contains(stringValue(pipe["Source"]), ":kinesis:") {
+		return nil
+	}
+	parameters := sourceParameters(pipe, "KinesisStreamParameters")
+	position := stringValue(parameters["StartingPosition"])
+	if position != "TRIM_HORIZON" && position != "LATEST" && position != "AT_TIMESTAMP" {
+		return validation("KinesisStreamParameters.StartingPosition must be TRIM_HORIZON, LATEST, or AT_TIMESTAMP.")
+	}
+	if _, exists := parameters["BatchSize"]; exists {
+		size := intValue(parameters["BatchSize"])
+		if size < 1 || size > 10000 {
+			return validation("KinesisStreamParameters.BatchSize must be between 1 and 10000.")
+		}
+	}
+	return nil
 }
 
 func (p *Pack) notify() {

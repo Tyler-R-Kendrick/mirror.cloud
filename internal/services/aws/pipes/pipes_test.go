@@ -15,6 +15,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -169,6 +170,91 @@ func TestPipesRetriesFailedTargetWithoutDeletingSource(t *testing.T) {
 	eventually(t, func() bool {
 		return len(storedMessages(t, deps, id, "source")) == 0 && len(storedMessages(t, deps, id, "late")) == 1
 	})
+}
+
+func TestPipesKinesisDeliveryAndCheckpoint(t *testing.T) {
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer p.Close()
+	stream, queue := kinesis.New(deps), sqs.New(deps)
+	invoke(t, stream, id, "CreateStream", map[string]any{"StreamName": "events"})
+	invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": "target"})
+	invoke(t, stream, id, "PutRecord", map[string]any{"StreamName": "events", "PartitionKey": "old", "Data": []byte("before")})
+
+	input := pipeInput("kinesis", "unused", "target")
+	input["Source"] = "arn:aws:kinesis:us-east-1:123456789012:stream/events"
+	input["SourceParameters"] = map[string]any{"KinesisStreamParameters": map[string]any{"StartingPosition": "LATEST", "BatchSize": 2}}
+	invoke(t, p, id, "CreatePipe", input)
+	checkpoint := deps.Store.Scope(id.Account, id.Region).Collection("pipecheckpoint")
+	eventually(t, func() bool {
+		_, ok, _ := checkpoint.Get(context.Background(), "kinesis")
+		return ok
+	})
+	invoke(t, stream, id, "PutRecord", map[string]any{"StreamName": "events", "PartitionKey": "new", "Data": []byte("after")})
+	eventually(t, func() bool { return len(storedMessages(t, deps, id, "target")) == 1 })
+
+	var event map[string]any
+	if err := json.Unmarshal([]byte(storedMessages(t, deps, id, "target")[0]["body"].(string)), &event); err != nil {
+		t.Fatal(err)
+	}
+	if event["data"] != base64.StdEncoding.EncodeToString([]byte("after")) || event["partitionKey"] != "new" || event["eventSource"] != "aws:kinesis" || event["eventID"] != "shardId-000000000000:1" || event["invokeIdentityArn"] != input["RoleArn"] {
+		t.Fatalf("Kinesis event %#v", event)
+	}
+	p.drain(context.Background())
+	if got := len(storedMessages(t, deps, id, "target")); got != 1 {
+		t.Fatalf("checkpoint redelivered %d records", got)
+	}
+	invoke(t, p, id, "DeletePipe", map[string]any{"Name": "kinesis"})
+	if _, ok, _ := checkpoint.Get(context.Background(), "kinesis"); ok {
+		t.Fatal("deleted pipe retained checkpoint")
+	}
+
+	bad := pipeInput("bad-kinesis", "unused", "target")
+	bad["Source"] = input["Source"]
+	bad["SourceParameters"] = map[string]any{"KinesisStreamParameters": map[string]any{"StartingPosition": "EARLIEST"}}
+	assertFault(t, p, id, "CreatePipe", bad, "ValidationException")
+	bad["SourceParameters"] = map[string]any{"KinesisStreamParameters": map[string]any{"StartingPosition": "TRIM_HORIZON", "BatchSize": 10001}}
+	assertFault(t, p, id, "CreatePipe", bad, "ValidationException")
+}
+
+func TestPipesKinesisPartialBatchCheckpoint(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer p.Close()
+	stream, function := kinesis.New(deps), lambda.New(deps)
+	invoke(t, stream, id, "CreateStream", map[string]any{"StreamName": "partial"})
+	for _, data := range []string{"done", "retry"} {
+		invoke(t, stream, id, "PutRecord", map[string]any{"StreamName": "partial", "PartitionKey": data, "Data": []byte(data)})
+	}
+	partial := "def lambda_handler(event, context):\n    return {'batchItemFailures': [{'itemIdentifier': event[-1]['eventID']}]}\n"
+	invoke(t, function, id, "CreateFunction", map[string]any{
+		"FunctionName": "kinesis-partial", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": lambdaCode(partial),
+	})
+	input := pipeInput("partial-kinesis", "unused", "unused")
+	input["Source"] = "arn:aws:kinesis:us-east-1:123456789012:stream/partial"
+	input["Target"] = "arn:aws:lambda:us-east-1:123456789012:function:kinesis-partial"
+	input["DesiredState"] = "STOPPED"
+	input["SourceParameters"] = map[string]any{"KinesisStreamParameters": map[string]any{"StartingPosition": "TRIM_HORIZON", "BatchSize": 2}}
+	invoke(t, p, id, "CreatePipe", input)
+	checkpoint := deps.Store.Scope(id.Account, id.Region).Collection("pipecheckpoint")
+	position := func() string {
+		raw, _, _ := checkpoint.Get(context.Background(), "partial-kinesis")
+		decoded, _ := base64.StdEncoding.DecodeString(string(raw))
+		return string(decoded)
+	}
+	invoke(t, p, id, "StartPipe", map[string]any{"Name": "partial-kinesis"})
+	eventually(t, func() bool { return position() == "partial|1" })
+	invoke(t, p, id, "StopPipe", map[string]any{"Name": "partial-kinesis"})
+
+	success := "def lambda_handler(event, context):\n    return {}\n"
+	invoke(t, function, id, "UpdateFunctionCode", map[string]any{"FunctionName": "kinesis-partial", "ZipFile": lambdaCode(success)["ZipFile"]})
+	invoke(t, p, id, "StartPipe", map[string]any{"Name": "partial-kinesis"})
+	eventually(t, func() bool { return position() == "partial|2" })
 }
 
 func TestPipesControlPlaneValidationUpdatesAndTags(t *testing.T) {

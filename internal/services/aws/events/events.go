@@ -345,10 +345,10 @@ func DeliverTarget(ctx context.Context, deps spi.Deps, identity spi.Identity, ar
 	case strings.Contains(arn, ":states:"):
 		parameters, _ := target["StateMachineParameters"].(map[string]any)
 		invocation := str(parameters["InvocationType"])
-		operation := "StartSyncExecution"
-		if invocation == "FIRE_AND_FORGET" {
-			operation = "StartExecution"
-		} else if invocation != "" && invocation != "REQUEST_RESPONSE" {
+		operation := "StartExecution"
+		if invocation == "REQUEST_RESPONSE" {
+			operation = "StartSyncExecution"
+		} else if invocation != "" && invocation != "FIRE_AND_FORGET" {
 			return &spi.Fault{Code: "ValidationException", Message: "Invalid Step Functions invocation type.", HTTPStatus: 400, Fault: "client"}
 		}
 		response, err := states.New(deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: operation, Input: map[string]any{"stateMachineArn": arn, "input": string(payload)}})

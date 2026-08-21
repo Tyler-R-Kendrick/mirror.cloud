@@ -107,8 +107,18 @@ func TestDeliverTargetStepFunctions(t *testing.T) {
 			t.Fatalf("%s: %v", invocation, err)
 		}
 	}
+	standard, err := machine.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateStateMachine", Input: map[string]any{
+		"name": "async-target", "roleArn": "arn:aws:iam::1:role/states",
+		"definition": `{"StartAt":"Done","States":{"Done":{"Type":"Pass","End":true}}}`,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := DeliverTarget(context.Background(), deps, id, str(standard.Output["stateMachineArn"]), map[string]any{}, []byte(`{}`)); err != nil {
+		t.Fatalf("default async: %v", err)
+	}
 	executions, err := machine.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "ListExecutions", Input: map[string]any{}})
-	if err != nil || len(executions.Output["executions"].([]any)) != 2 {
+	if err != nil || len(executions.Output["executions"].([]any)) != 3 {
 		t.Fatalf("executions %#v err=%v", executions, err)
 	}
 	if err := DeliverTarget(context.Background(), deps, id, arn, map[string]any{"StateMachineParameters": map[string]any{"InvocationType": "INVALID"}}, []byte(`{}`)); err == nil {

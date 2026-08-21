@@ -443,6 +443,12 @@ func (p *Pack) processRecords(ctx context.Context, identity spi.Identity, pipe m
 			config["StateMachineParameters"] = stateMachineParameters
 		}
 	}
+	if strings.Contains(target, ":states:") {
+		parameters, _ := config["StateMachineParameters"].(map[string]any)
+		if stringValue(parameters["InvocationType"]) == "" {
+			config["StateMachineParameters"] = map[string]any{"InvocationType": "REQUEST_RESPONSE"}
+		}
+	}
 	payloads := make([][]byte, len(matchedRecords))
 	for i, record := range matchedRecords {
 		payloads[i] = p.inputPayload(pipe, "EnrichmentParameters", record)

@@ -402,6 +402,12 @@ func TestPipesStepFunctionsTarget(t *testing.T) {
 		messages := storedMessages(t, deps, id, "failed-states-source")
 		return len(messages) == 1 && messages[0]["receiveCount"] == float64(1)
 	})
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if messages := storedMessages(t, deps, id, "failed-states-source"); len(messages) != 1 {
+		t.Fatalf("failed synchronous invocation consumed source: %#v", messages)
+	}
 	invalid := pipeInput("invalid-states", "states-source", "unused")
 	invalid["Target"] = created.Output["stateMachineArn"]
 	invalid["TargetParameters"] = map[string]any{"StateMachineParameters": map[string]any{"InvocationType": "INVALID"}}

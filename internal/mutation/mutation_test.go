@@ -253,6 +253,30 @@ func TestMutantsAreKilled(t *testing.T) {
 			pkg:  "./internal/services/aws/scheduler",
 			run:  "TestScheduleExpressions",
 		},
+		{
+			name: "scheduler-disable-flexible-window",
+			file: filepath.Join("internal", "services", "aws", "scheduler", "scheduler.go"),
+			old:  "return scheduled.Add(time.Duration(seconds) * time.Second)",
+			new:  "return scheduled",
+			pkg:  "./internal/services/aws/scheduler",
+			run:  "TestSchedulerFlexibleWindowRetryAndDLQ",
+		},
+		{
+			name: "scheduler-ignore-target-error",
+			file: filepath.Join("internal", "services", "aws", "scheduler", "scheduler.go"),
+			old:  `if err := events.DeliverTarget(ctx, p.deps, identity, first(target, "Arn", "arn"), target, payload); err != nil {`,
+			new:  `if err := events.DeliverTarget(ctx, p.deps, identity, first(target, "Arn", "arn"), target, payload); err == nil {`,
+			pkg:  "./internal/services/aws/scheduler",
+			run:  "TestSchedulerFlexibleWindowRetryAndDLQ",
+		},
+		{
+			name: "scheduler-drop-dead-letter-event",
+			file: filepath.Join("internal", "services", "aws", "scheduler", "scheduler.go"),
+			old:  `if arn == "" {`,
+			new:  `if arn != "" {`,
+			pkg:  "./internal/services/aws/scheduler",
+			run:  "TestSchedulerFlexibleWindowRetryAndDLQ",
+		},
 	}
 
 	for _, m := range mutants {

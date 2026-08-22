@@ -822,6 +822,45 @@ func TestFirehoseCreateConfiguration(t *testing.T) {
 	}
 }
 
+func TestFirehoseDirectPutSourceConfiguration(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "direct", "DirectPutSourceConfiguration": map[string]any{"ThroughputHintInMBs": float64(100)},
+		"S3DestinationConfiguration": testS3Destination(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "direct"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	description := response.Output["DeliveryStreamDescription"].(map[string]any)
+	source := description["Source"].(map[string]any)["DirectPutSourceDescription"].(map[string]any)
+	if source["ThroughputHintInMBs"] != float64(100) || description["DirectPutSourceConfiguration"] != nil {
+		t.Fatalf("direct source description %#v", description)
+	}
+
+	for _, input := range []map[string]any{
+		{"DeliveryStreamName": "wrong-type", "DirectPutSourceConfiguration": "invalid", "S3DestinationConfiguration": testS3Destination()},
+		{"DeliveryStreamName": "missing-throughput", "DirectPutSourceConfiguration": map[string]any{}, "S3DestinationConfiguration": testS3Destination()},
+		{"DeliveryStreamName": "zero-throughput", "DirectPutSourceConfiguration": map[string]any{"ThroughputHintInMBs": 0}, "S3DestinationConfiguration": testS3Destination()},
+		{"DeliveryStreamName": "high-throughput", "DirectPutSourceConfiguration": map[string]any{"ThroughputHintInMBs": 101}, "S3DestinationConfiguration": testS3Destination()},
+		{"DeliveryStreamName": "fractional-throughput", "DirectPutSourceConfiguration": map[string]any{"ThroughputHintInMBs": 1.5}, "S3DestinationConfiguration": testS3Destination()},
+		{"DeliveryStreamName": "string-throughput", "DirectPutSourceConfiguration": map[string]any{"ThroughputHintInMBs": "1"}, "S3DestinationConfiguration": testS3Destination()},
+		{"DeliveryStreamName": "kinesis-direct", "DeliveryStreamType": "KinesisStreamAsSource", "DirectPutSourceConfiguration": map[string]any{"ThroughputHintInMBs": 1}, "KinesisStreamSourceConfiguration": testKinesisSource(), "S3DestinationConfiguration": testS3Destination()},
+	} {
+		if _, err := call("CreateDeliveryStream", input); err == nil {
+			t.Errorf("accepted invalid DirectPut source %#v", input)
+		}
+	}
+}
+
 func TestFirehoseDescribeDestinationPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}

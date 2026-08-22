@@ -67,13 +67,26 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if streamType == "" {
 			streamType = "DirectPut"
 		}
-		var source map[string]any
+		var source, directPutSource map[string]any
 		switch streamType {
 		case "DirectPut":
 			if req.Input["KinesisStreamSourceConfiguration"] != nil {
 				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
+			if value := req.Input["DirectPutSourceConfiguration"]; value != nil {
+				var ok bool
+				directPutSource, ok = value.(map[string]any)
+				if !ok || directPutSource["ThroughputHintInMBs"] == nil {
+					return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+				}
+				if _, valid := inputLimit(directPutSource["ThroughputHintInMBs"], 0, 100); !valid {
+					return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+				}
+			}
 		case "KinesisStreamAsSource":
+			if req.Input["DirectPutSourceConfiguration"] != nil {
+				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
 			var ok bool
 			source, ok = req.Input["KinesisStreamSourceConfiguration"].(map[string]any)
 			if !ok || len(first(source, "KinesisStreamARN")) > 512 || !firehoseKinesisStreamARN.MatchString(first(source, "KinesisStreamARN")) || !validRoleARN(first(source, "RoleARN")) {
@@ -95,6 +108,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		if source != nil {
 			rec["KinesisStreamSourceConfiguration"] = maps.Clone(source)
+		}
+		if directPutSource != nil {
+			rec["DirectPutSourceConfiguration"] = maps.Clone(directPutSource)
 		}
 		copyDest(rec, req.Input, "Configuration")
 		if err := validateDestination(rec); err != nil {
@@ -445,6 +461,10 @@ func copyDest(rec, in map[string]any, suffix string) {
 
 func describeRecord(rec map[string]any, after string) map[string]any {
 	description := maps.Clone(rec)
+	if configuration, ok := description["DirectPutSourceConfiguration"].(map[string]any); ok {
+		description["Source"] = map[string]any{"DirectPutSourceDescription": maps.Clone(configuration)}
+		delete(description, "DirectPutSourceConfiguration")
+	}
 	if configuration, ok := description["KinesisStreamSourceConfiguration"].(map[string]any); ok {
 		source := maps.Clone(configuration)
 		source["DeliveryStartTimestamp"] = description["CreateTimestamp"]

@@ -1,4 +1,4 @@
-// Package firehose stores delivery streams and PutRecord writes to an S3 destination (no Redshift/OpenSearch/HTTP).
+// Package firehose stores delivery streams and delivers direct puts to S3 or HTTP endpoints (no Redshift/OpenSearch/Splunk).
 package firehose
 
 import (

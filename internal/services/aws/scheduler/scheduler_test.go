@@ -86,6 +86,41 @@ func TestBootedServerSchedulerCreateGetDelete(t *testing.T) {
 	}
 }
 
+func TestChangeRecordIfUnchangedRejectsStaleWorkerState(t *testing.T) {
+	ctx := context.Background()
+	collection := spitest.Deps(t).Store.Scope("123456789012", "us-east-1").Collection("sch:default")
+	original := map[string]any{"Name": "job", "State": "ENABLED"}
+	if err := putRecord(ctx, collection, "job", original); err != nil {
+		t.Fatal(err)
+	}
+	expected, _, _ := collection.Get(ctx, "job")
+	if err := collection.Delete(ctx, "job"); err != nil {
+		t.Fatal(err)
+	}
+	if err := changeRecordIfUnchanged(ctx, collection, "job", expected, map[string]any{"Name": "job", "State": "DISABLED"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := collection.Get(ctx, "job"); ok {
+		t.Fatal("stale worker resurrected deleted schedule")
+	}
+
+	if err := putRecord(ctx, collection, "job", original); err != nil {
+		t.Fatal(err)
+	}
+	expected, _, _ = collection.Get(ctx, "job")
+	fresh := map[string]any{"Name": "job", "State": "DISABLED"}
+	if err := putRecord(ctx, collection, "job", fresh); err != nil {
+		t.Fatal(err)
+	}
+	if err := changeRecordIfUnchanged(ctx, collection, "job", expected, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := getRecord(ctx, collection, "job")
+	if err != nil || !ok || got["State"] != "DISABLED" {
+		t.Fatalf("stale worker deleted replacement: %v, %v, %v", got, ok, err)
+	}
+}
+
 func TestSchedulerDeliversRestoredSchedule(t *testing.T) {
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-west-2"}

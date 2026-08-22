@@ -526,6 +526,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSchedulerDeliversRestoredSchedule",
 		},
 		{
+			name: "scheduler-overwrite-concurrent-change",
+			file: filepath.Join("internal", "services", "aws", "scheduler", "scheduler.go"),
+			old:  `err != nil || !ok || !bytes.Equal(current, expected)`,
+			new:  `err != nil || !ok`,
+			pkg:  "./internal/services/aws/scheduler",
+			run:  "TestChangeRecordIfUnchangedRejectsStaleWorkerState",
+		},
+		{
 			name: "scheduler-last-day-never-matches",
 			file: filepath.Join("internal", "services", "aws", "scheduleexpr", "expression.go"),
 			old:  "return t.Day() == lastDay",

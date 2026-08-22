@@ -2,6 +2,7 @@
 package scheduler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"math"
@@ -347,7 +348,7 @@ func (p *Pack) runDue(ctx context.Context) time.Time {
 				if err := events.DeliverTarget(ctx, p.deps, identity, first(target, "Arn", "arn"), target, payload); err != nil {
 					if !events.TargetErrorRetryable(err) {
 						p.deadLetter(ctx, rec, target, payload, attempt, scheduled, "", err)
-					} else if retryAt, retrying := p.retry(ctx, collection, kv.Key, rec, target, payload, scheduled, now, err); retrying {
+					} else if retryAt, retrying := p.retry(ctx, collection, kv.Key, kv.Value, rec, target, payload, scheduled, now, err); retrying {
 						earliest = earlier(earliest, retryAt)
 						continue
 					}
@@ -365,11 +366,11 @@ func (p *Pack) runDue(ctx context.Context) time.Time {
 				next = p.withWindow(rec, stringValue(rec["Arn"]), scheduled)
 				rec[scheduledTime] = formatTime(scheduled)
 				if next.IsZero() && stringValue(rec["ActionAfterCompletion"]) == "DELETE" {
-					_ = collection.Delete(ctx, kv.Key)
+					_ = changeRecordIfUnchanged(ctx, collection, kv.Key, kv.Value, nil)
 					continue
 				}
 				rec[nextInvocation] = formatTime(next)
-				_ = putRecord(ctx, collection, kv.Key, rec)
+				_ = changeRecordIfUnchanged(ctx, collection, kv.Key, kv.Value, rec)
 				earliest = earlier(earliest, next)
 			}
 		}
@@ -420,7 +421,7 @@ func (p *Pack) targetPayload(rec, target map[string]any, scheduled time.Time, at
 	return []byte(payload)
 }
 
-func (p *Pack) retry(ctx context.Context, collection spi.Collection, key string, rec, target map[string]any, payload []byte, scheduled, now time.Time, deliveryErr error) (time.Time, bool) {
+func (p *Pack) retry(ctx context.Context, collection spi.Collection, key string, expected []byte, rec, target map[string]any, payload []byte, scheduled, now time.Time, deliveryErr error) (time.Time, bool) {
 	policy, _ := target["RetryPolicy"].(map[string]any)
 	maxAttempts, ok := integer(policy["MaximumRetryAttempts"])
 	if !ok {
@@ -453,7 +454,7 @@ func (p *Pack) retry(ctx context.Context, collection spi.Collection, key string,
 	}
 	retryAt := now.Add(time.Duration(jitter) * time.Second)
 	rec[retryAttempts], rec[retryStarted], rec[nextInvocation] = attempts, formatTime(started), formatTime(retryAt)
-	_ = putRecord(ctx, collection, key, rec)
+	_ = changeRecordIfUnchanged(ctx, collection, key, expected, rec)
 	return retryAt, true
 }
 
@@ -547,6 +548,27 @@ func putRecord(ctx context.Context, collection spi.Collection, key string, rec m
 		return err
 	}
 	return collection.Put(ctx, key, b)
+}
+
+func changeRecordIfUnchanged(ctx context.Context, collection spi.Collection, key string, expected []byte, rec map[string]any) error {
+	var next []byte
+	var err error
+	if rec != nil {
+		next, err = json.Marshal(rec)
+		if err != nil {
+			return err
+		}
+	}
+	return collection.Txn(ctx, func(tx spi.Tx) error {
+		current, ok, err := tx.Get(key)
+		if err != nil || !ok || !bytes.Equal(current, expected) {
+			return err
+		}
+		if rec == nil {
+			return tx.Delete(key)
+		}
+		return tx.Put(key, next)
+	})
 }
 
 func publicRecord(rec map[string]any) map[string]any {

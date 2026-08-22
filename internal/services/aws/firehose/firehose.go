@@ -732,6 +732,19 @@ func validateS3Configuration(destination map[string]any, region string, processi
 			return err
 		}
 	}
+	if raw, exists := destination["DataFormatConversionConfiguration"]; exists {
+		configuration, ok := raw.(map[string]any)
+		enabled := true
+		if value, configured := configuration["Enabled"]; configured {
+			enabled, ok = value.(bool)
+		}
+		if !processingAllowed || !ok {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if enabled {
+			return spi.NotImplemented("aws.firehose", "DataFormatConversionConfiguration", "emulate")
+		}
+	}
 	if raw, exists := destination["BufferingHints"]; exists {
 		hints, ok := raw.(map[string]any)
 		_, hasInterval := hints["IntervalInSeconds"]

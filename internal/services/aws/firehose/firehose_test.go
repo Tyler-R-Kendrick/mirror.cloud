@@ -514,6 +514,77 @@ func TestFirehoseAppendDelimiterProcessing(t *testing.T) {
 	}
 }
 
+func TestFirehoseDataFormatConversionGuard(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	disabled := map[string]any{"Enabled": false, "SchemaConfiguration": map[string]any{"DatabaseName": "db", "TableName": "table"}}
+	destination := testS3Destination()
+	destination["Prefix"] = "raw/"
+	destination["DataFormatConversionConfiguration"] = disabled
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "disabled-conversion", "ExtendedS3DestinationConfiguration": destination}); err != nil {
+		t.Fatal(err)
+	}
+	described, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "disabled-conversion"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuration := described.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["ExtendedS3DestinationDescription"].(map[string]any)
+	if !reflect.DeepEqual(configuration["DataFormatConversionConfiguration"], disabled) {
+		t.Fatalf("disabled conversion description %#v", configuration["DataFormatConversionConfiguration"])
+	}
+	put, err := call("PutRecord", map[string]any{"DeliveryStreamName": "disabled-conversion", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"raw":true}`))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := id.Account + "/" + id.Region + "/out/raw/1970/01/01/00/disabled-conversion-1-1970-01-01-00-00-00-" + put.Output["RecordId"].(string)
+	reader, _, err := deps.Blobs.Get(context.Background(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	if string(body) != `{"raw":true}` {
+		t.Fatalf("disabled conversion body %q", body)
+	}
+	_, err = call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "disabled-conversion", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
+		"ExtendedS3DestinationUpdate": map[string]any{"DataFormatConversionConfiguration": map[string]any{"Enabled": true}},
+	})
+	if fault, ok := err.(*spi.Fault); !ok || fault.Code != "MirrorNotImplemented" {
+		t.Fatalf("enabled conversion update fault %#v", err)
+	}
+	described, err = call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "disabled-conversion"})
+	if err != nil || described.Output["DeliveryStreamDescription"].(map[string]any)["VersionId"] != "1" {
+		t.Fatalf("failed conversion update changed stream: %#v, %v", described, err)
+	}
+
+	for i, conversion := range []any{map[string]any{}, map[string]any{"Enabled": true}} {
+		candidate := testS3Destination()
+		candidate["DataFormatConversionConfiguration"] = conversion
+		_, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": fmt.Sprintf("enabled-conversion-%d", i), "ExtendedS3DestinationConfiguration": candidate})
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "MirrorNotImplemented" {
+			t.Fatalf("enabled conversion fault %#v", err)
+		}
+	}
+	for i, conversion := range []any{"invalid", map[string]any{"Enabled": "false"}} {
+		candidate := testS3Destination()
+		candidate["DataFormatConversionConfiguration"] = conversion
+		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": fmt.Sprintf("invalid-conversion-%d", i), "ExtendedS3DestinationConfiguration": candidate}); err == nil {
+			t.Fatalf("accepted invalid conversion %#v", conversion)
+		}
+	}
+	basic := testS3Destination()
+	basic["DataFormatConversionConfiguration"] = disabled
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "basic-conversion", "S3DestinationConfiguration": basic}); err == nil {
+		t.Fatal("accepted conversion configuration on basic S3")
+	}
+}
+
 func TestFirehoseDecompressionProcessing(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

@@ -115,7 +115,9 @@ func TestPipesSQSDeliveryStateAndFiltering(t *testing.T) {
 		t.Fatalf("stopped pipe delivered %d messages", len(got))
 	}
 	invoke(t, p, id, "StartPipe", map[string]any{"Name": "delivery"})
-	eventually(t, func() bool { return len(storedMessages(t, deps, id, "target")) == 2 })
+	eventually(t, func() bool {
+		return len(storedMessages(t, deps, id, "source")) == 0 && len(storedMessages(t, deps, id, "target")) == 2
+	})
 	if got := storedMessages(t, deps, id, "source"); len(got) != 0 {
 		t.Fatalf("successful source messages retained: %v", got)
 	}

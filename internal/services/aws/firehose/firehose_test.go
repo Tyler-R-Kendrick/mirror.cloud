@@ -2550,6 +2550,79 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		t.Fatalf("HTTP batch request %#v response %#v queued %d", request, batch.Output, len(captured))
 	}
 
+	processing := map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "AppendDelimiterToRecord"}}}
+	processedDestination := testHTTPEndpointDestination("https://example.test/ok")
+	processedDestination["ProcessingConfiguration"] = processing
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-processed", "HttpEndpointDestinationConfiguration": processedDestination}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutRecordBatch", map[string]any{
+		"DeliveryStreamName": "http-processed",
+		"Records": []any{
+			map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("processed-one"))},
+			map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("processed-two"))},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	request = <-captured
+	records, _ = request.payload["records"].([]any)
+	if len(records) != 2 {
+		t.Fatalf("processed HTTP records %#v", records)
+	}
+	processedOne, _ := base64.StdEncoding.DecodeString(first(records[0].(map[string]any), "data"))
+	processedTwo, _ := base64.StdEncoding.DecodeString(first(records[1].(map[string]any), "data"))
+	if string(processedOne) != "processed-one\n" || string(processedTwo) != "processed-two\n" {
+		t.Fatalf("processed HTTP data %q %q", processedOne, processedTwo)
+	}
+	described, err = call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "http-processed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	description = described.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["HttpEndpointDestinationDescription"].(map[string]any)
+	if !reflect.DeepEqual(description["ProcessingConfiguration"], processing) {
+		t.Fatalf("HTTP processing description %#v", description["ProcessingConfiguration"])
+	}
+
+	failureProcessing := map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "Decompression"}}}
+	processingFailureDestination := testHTTPEndpointDestination("https://example.test/ok")
+	processingFailureDestination["ProcessingConfiguration"] = failureProcessing
+	processingFailureDestination["S3BackupMode"] = "AllData"
+	processingFailureDestination["S3Configuration"].(map[string]any)["Prefix"] = "all-failed/"
+	processingFailureDestination["S3Configuration"].(map[string]any)["ErrorOutputPrefix"] = "errors/!{firehose:error-output-type}/"
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-processing-failure", "HttpEndpointDestinationConfiguration": processingFailureDestination}); err != nil {
+		t.Fatal(err)
+	}
+	failedPut, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-processing-failure", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("not-gzip"))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(captured) != 0 {
+		t.Fatal("sent an HTTP request containing only processing failures")
+	}
+	failureKey := id.Account + "/" + id.Region + "/out/errors/decompression-failed/1970/01/01/00/http-processing-failure-1-1970-01-01-00-00-00-" + failedPut.Output["RecordId"].(string)
+	reader, _, err = deps.Blobs.Get(context.Background(), failureKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failureBody, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	failureEnvelope := map[string]any{}
+	_ = json.Unmarshal(failureBody, &failureEnvelope)
+	if failureEnvelope["errorCode"] != "Decompression.Failed" || failureEnvelope["rawData"] != base64.StdEncoding.EncodeToString([]byte("not-gzip")) {
+		t.Fatalf("HTTP processing failure %#v", failureEnvelope)
+	}
+	rawBackupKey := id.Account + "/" + id.Region + "/out/all-failed/1970/01/01/00/http-processing-failure-1-1970-01-01-00-00-00-" + failedPut.Output["RecordId"].(string)
+	reader, _, err = deps.Blobs.Get(context.Background(), rawBackupKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawBackup, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	if string(rawBackup) != "not-gzip" {
+		t.Fatalf("HTTP AllData processing-failure backup %q", rawBackup)
+	}
+
 	for _, failure := range []struct {
 		name, path, prefix string
 		backedUp           bool
@@ -2606,6 +2679,7 @@ func TestFirehoseHTTPEndpointValidation(t *testing.T) {
 		{"RequestConfiguration": map[string]any{"ContentEncoding": "ZIP"}},
 		{"RequestConfiguration": map[string]any{"CommonAttributes": []any{map[string]any{"AttributeName": "", "AttributeValue": "value"}}}},
 		{"EndpointConfiguration": map[string]any{"Url": "https://example.test", "AccessKey": "bad\nkey"}},
+		{"ProcessingConfiguration": "invalid"},
 	} {
 		destination := testHTTPEndpointDestination("https://example.test")
 		maps.Copy(destination, patch)
@@ -2618,7 +2692,6 @@ func TestFirehoseHTTPEndpointValidation(t *testing.T) {
 	}
 
 	for name, patch := range map[string]map[string]any{
-		"processing": {"ProcessingConfiguration": map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "AppendDelimiterToRecord"}}}},
 		"secret": {"SecretsManagerConfiguration": map[string]any{
 			"Enabled": true, "RoleARN": testRoleARN, "SecretARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:http",
 		}},

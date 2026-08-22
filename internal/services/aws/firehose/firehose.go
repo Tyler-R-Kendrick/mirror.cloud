@@ -943,10 +943,6 @@ func validateHTTPEndpointDestination(destination map[string]any, region string) 
 		if err := validateProcessingConfiguration(raw); err != nil {
 			return err
 		}
-		processing, _ := raw.(map[string]any)
-		if processing["Enabled"] == true {
-			return spi.NotImplemented("aws.firehose", "HttpEndpointDestinationConfiguration.ProcessingConfiguration", "emulate")
-		}
 	}
 	if raw, exists := destination["BufferingHints"]; exists {
 		hints, ok := raw.(map[string]any)
@@ -1455,12 +1451,35 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 	}
 	now := p.deps.Clock.Now().UTC()
 	if destination, ok := rec["HttpEndpointDestinationConfiguration"].(map[string]any); ok {
-		delivered, permanent, message := p.deliverHTTP(ctx, rec, destination, recIDs[0], data, now)
+		processedIDs := make([]string, 0, len(recIDs))
+		processedData := make([][]byte, 0, len(data))
+		backup, _ := destination["S3Configuration"].(map[string]any)
+		bucket, _, errorPrefix, _, _, _, kmsARN := s3Configuration(backup)
+		for i := range data {
+			records, failures := p.processData(ctx, req, destination, stream, recIDs[i], data[i], now)
+			for _, failure := range failures {
+				p.logDeliveryError(ctx, req, destination, stream, failure.message, now)
+				p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)
+			}
+			for _, record := range records {
+				processedIDs = append(processedIDs, record.recID)
+				processedData = append(processedData, record.data)
+			}
+		}
+		backupMode := first(destination, "S3BackupMode")
+		if backupMode == "AllData" {
+			for i := range data {
+				p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)
+			}
+		}
+		if len(processedData) == 0 {
+			return
+		}
+		delivered, permanent, message := p.deliverHTTP(ctx, rec, destination, processedIDs[0], processedData, now)
 		if !delivered {
 			p.logDeliveryError(ctx, req, destination, stream, message, now)
 		}
-		if first(destination, "S3BackupMode") == "AllData" || (!delivered && !permanent) {
-			backup, _ := destination["S3Configuration"].(map[string]any)
+		if backupMode != "AllData" && !delivered && !permanent {
 			for i := range data {
 				p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)
 			}

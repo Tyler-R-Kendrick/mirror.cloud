@@ -881,12 +881,15 @@ func TestPipesLambdaEnrichment(t *testing.T) {
 
 	failed := pipeInput("failed", "failed-source", "failed-target")
 	failed["Enrichment"] = "arn:aws:lambda:us-east-1:123456789012:function:missing"
+	failed["DesiredState"] = "STOPPED"
 	invoke(t, p, id, "CreatePipe", failed)
 	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "failed-source", "MessageBody": "retry"})
-	eventually(t, func() bool {
-		messages := storedMessages(t, deps, id, "failed-source")
-		return len(messages) == 1 && messages[0]["receiveCount"] == float64(1)
-	})
+	received := invoke(t, queue, id, "ReceiveMessage", map[string]any{"QueueName": "failed-source"}).Output["Messages"].([]any)
+	pipe := invoke(t, p, id, "DescribePipe", map[string]any{"Name": "failed"}).Output
+	p.processBatch(context.Background(), id, pipe, queueARN(id, "failed-source"), "failed-source", received)
+	if messages := storedMessages(t, deps, id, "failed-source"); len(messages) != 1 || messages[0]["receiveCount"] != float64(1) {
+		t.Fatalf("failed enrichment acknowledged source: %#v", messages)
+	}
 	if messages := storedMessages(t, deps, id, "failed-target"); len(messages) != 0 {
 		t.Fatalf("failed enrichment invoked target: %#v", messages)
 	}

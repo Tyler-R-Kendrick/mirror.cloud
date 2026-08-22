@@ -1967,6 +1967,10 @@ func TestFirehoseEncryptionState(t *testing.T) {
 	if encryption := describeEncryption("plain"); encryption["Status"] != "ENABLED" || encryption["KeyType"] != "AWS_OWNED_CMK" || encryption["KeyARN"] != nil {
 		t.Fatalf("AWS-owned encryption %#v", encryption)
 	}
+	put, err = call("PutRecord", map[string]any{"DeliveryStreamName": "plain", "Record": record})
+	if err != nil || put.Output["Encrypted"] != true {
+		t.Fatalf("encrypted put %#v, %v", put, err)
+	}
 	batch, err := call("PutRecordBatch", map[string]any{"DeliveryStreamName": "plain", "Records": []any{record}})
 	if err != nil || batch.Output["Encrypted"] != true {
 		t.Fatalf("encrypted batch %#v, %v", batch, err)

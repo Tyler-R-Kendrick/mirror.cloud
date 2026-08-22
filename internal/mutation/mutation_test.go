@@ -440,8 +440,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-emit-error-for-successful-batch-record",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `resp = append(resp, map[string]any{"RecordId": id})`,
-			new:  `resp = append(resp, map[string]any{"RecordId": id, "ErrorCode": nil})`,
+			old:  `resp = append(resp, map[string]any{"RecordId": ids[i]})`,
+			new:  `resp = append(resp, map[string]any{"RecordId": ids[i], "ErrorCode": nil})`,
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseControlPlaneAndBatch",
 		},
@@ -1360,8 +1360,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-send-backup-to-primary-destination",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `p.deliverS3Configuration(ctx, req, backup, stream, version, recID, data, now)`,
-			new:  `p.deliverS3Configuration(ctx, req, destination, stream, version, recID, data, now)`,
+			old:  "if first(extended, \"S3BackupMode\") == \"Enabled\" {\n\t\t\tbackup, _ := extended[\"S3BackupConfiguration\"].(map[string]any)\n\t\t\tp.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)\n\t\t}",
+			new:  "if first(extended, \"S3BackupMode\") == \"Enabled\" {\n\t\t\tbackup, _ := extended[\"S3BackupConfiguration\"].(map[string]any)\n\t\t\tp.deliverS3Configuration(ctx, req, destination, stream, version, recIDs[i], data[i], now)\n\t\t}",
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseS3Backup",
 		},

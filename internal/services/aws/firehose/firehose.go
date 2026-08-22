@@ -15,6 +15,7 @@ import (
 	"maps"
 	"math"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"sort"
@@ -40,7 +41,10 @@ func init() {
 }
 
 // Pack implements Firehose-lite.
-type Pack struct{ deps spi.Deps }
+type Pack struct {
+	deps       spi.Deps
+	httpClient *http.Client
+}
 
 const destinationID = "destinationId-000000000001"
 
@@ -50,7 +54,14 @@ const (
 )
 
 // New constructs the pack.
-func New(d spi.Deps) *Pack { return &Pack{deps: d} }
+func New(d spi.Deps) *Pack {
+	return &Pack{deps: d, httpClient: &http.Client{
+		Timeout: 3 * time.Minute,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}}
+}
 
 func (p *Pack) ServiceID() string { return "aws.firehose" }
 func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
@@ -504,12 +515,12 @@ func (p *Pack) putOne(ctx context.Context, req *spi.Request, name string, rec an
 	payload := map[string]any{"Record": rec, "Decoded": string(decoded)}
 	b, _ := json.Marshal(payload)
 	_ = p.col(req, "fhrec:"+name).Put(ctx, id, b)
-	p.deliverS3(ctx, req, name, id, decoded)
+	p.deliver(ctx, req, name, id, decoded)
 	return id
 }
 
 func copyDest(rec, in map[string]any, suffix string) {
-	for _, base := range []string{"S3Destination", "ExtendedS3Destination"} {
+	for _, base := range []string{"S3Destination", "ExtendedS3Destination", "HttpEndpointDestination"} {
 		patch, _ := in[base+suffix].(map[string]any)
 		if patch == nil {
 			continue
@@ -535,6 +546,15 @@ func copyDest(rec, in map[string]any, suffix string) {
 			maps.Copy(backup, backupPatch)
 			destination["S3BackupConfiguration"] = backup
 			delete(destination, "S3BackupUpdate")
+		}
+		if s3Patch, ok := patch["S3Update"].(map[string]any); ok {
+			s3, _ := destination["S3Configuration"].(map[string]any)
+			if s3 == nil {
+				s3 = map[string]any{}
+			}
+			maps.Copy(s3, s3Patch)
+			destination["S3Configuration"] = s3
+			delete(destination, "S3Update")
 		}
 		rec[base+"Configuration"] = destination
 	}
@@ -584,6 +604,29 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 			destination[base+"Description"] = configuration
 			delete(description, base+"Configuration")
 		}
+	}
+	if configuration, ok := description["HttpEndpointDestinationConfiguration"].(map[string]any); ok {
+		if endpoint, ok := configuration["EndpointConfiguration"].(map[string]any); ok {
+			endpoint = maps.Clone(endpoint)
+			delete(endpoint, "AccessKey")
+			configuration["EndpointConfiguration"] = endpoint
+		}
+		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
+			describeS3Configuration(s3)
+			configuration["S3DestinationDescription"] = s3
+			delete(configuration, "S3Configuration")
+		}
+		if configuration["BufferingHints"] == nil {
+			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}
+		}
+		if configuration["RetryOptions"] == nil {
+			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 300}
+		}
+		if first(configuration, "S3BackupMode") == "" {
+			configuration["S3BackupMode"] = "FailedDataOnly"
+		}
+		destination["HttpEndpointDestinationDescription"] = configuration
+		delete(description, "HttpEndpointDestinationConfiguration")
 	}
 	destinations := []any{}
 	if destinationID > after {
@@ -814,8 +857,8 @@ func s3Configuration(configuration map[string]any) (bucket, prefix, errorPrefix,
 func validateDestination(rec map[string]any, region string) error {
 	count := 0
 	var destination map[string]any
-	extended := false
-	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration"} {
+	destinationType := ""
+	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration"} {
 		if value, exists := rec[key]; exists {
 			var ok bool
 			destination, ok = value.(map[string]any)
@@ -823,13 +866,16 @@ func validateDestination(rec map[string]any, region string) error {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			count++
-			extended = key == "ExtendedS3DestinationConfiguration"
+			destinationType = key
 		}
 	}
 	if count != 1 {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	if err := validateS3Configuration(destination, region, extended); err != nil {
+	if destinationType == "HttpEndpointDestinationConfiguration" {
+		return validateHTTPEndpointDestination(destination, region)
+	}
+	if err := validateS3Configuration(destination, region, destinationType == "ExtendedS3DestinationConfiguration"); err != nil {
 		return err
 	}
 	mode := ""
@@ -852,6 +898,117 @@ func validateDestination(rec map[string]any, region string) error {
 		return validateS3Configuration(backup, region, false)
 	}
 	return nil
+}
+
+func validateHTTPEndpointDestination(destination map[string]any, region string) error {
+	endpoint, endpointOK := destination["EndpointConfiguration"].(map[string]any)
+	rawURL, urlOK := endpoint["Url"].(string)
+	parsed, err := url.Parse(rawURL)
+	if !endpointOK || !urlOK || len(rawURL) < 1 || len(rawURL) > 1000 || err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || (parsed.Port() != "" && parsed.Port() != "443") {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if raw, exists := endpoint["Name"]; exists {
+		name, ok := raw.(string)
+		if !ok || len(name) > 256 || strings.TrimSpace(name) == "" {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	if raw, exists := endpoint["AccessKey"]; exists {
+		accessKey, ok := raw.(string)
+		if !ok || len(accessKey) > 4096 || strings.ContainsAny(accessKey, "\r\n") {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	if role := first(destination, "RoleARN"); role != "" && !validRoleARN(role) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	s3, ok := destination["S3Configuration"].(map[string]any)
+	if !ok {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if err := validateS3Configuration(s3, region, false); err != nil {
+		return err
+	}
+	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
+		return err
+	}
+	if raw, exists := destination["ProcessingConfiguration"]; exists {
+		if err := validateProcessingConfiguration(raw); err != nil {
+			return err
+		}
+		processing, _ := raw.(map[string]any)
+		if processing["Enabled"] == true {
+			return spi.NotImplemented("aws.firehose", "HttpEndpointDestinationConfiguration.ProcessingConfiguration", "emulate")
+		}
+	}
+	if raw, exists := destination["BufferingHints"]; exists {
+		hints, ok := raw.(map[string]any)
+		_, hasInterval := hints["IntervalInSeconds"]
+		_, hasSize := hints["SizeInMBs"]
+		if !ok || hasInterval != hasSize {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if hasInterval {
+			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			if _, valid := inputInteger(hints["SizeInMBs"], 1, 64); !valid {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+	}
+	if raw, exists := destination["RetryOptions"]; exists {
+		retry, ok := raw.(map[string]any)
+		if !ok {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if duration, exists := retry["DurationInSeconds"]; exists {
+			if _, valid := inputInteger(duration, 0, 7200); !valid {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+	}
+	if mode := first(destination, "S3BackupMode"); mode != "" && mode != "FailedDataOnly" && mode != "AllData" {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if raw, exists := destination["RequestConfiguration"]; exists {
+		request, ok := raw.(map[string]any)
+		encoding := first(request, "ContentEncoding")
+		if !ok || (encoding != "" && encoding != "NONE" && encoding != "GZIP") || !validHTTPCommonAttributes(request["CommonAttributes"]) {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	if raw, exists := destination["SecretsManagerConfiguration"]; exists {
+		secrets, ok := raw.(map[string]any)
+		enabled, enabledOK := secrets["Enabled"].(bool)
+		role, secret := first(secrets, "RoleARN"), first(secrets, "SecretARN")
+		if !ok || !enabledOK || (role != "" && !validRoleARN(role)) || (secret != "" && (len(secret) > 2048 || !firehoseSecretARN.MatchString(secret))) || (enabled && secret == "") {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if enabled {
+			return spi.NotImplemented("aws.firehose", "HttpEndpointDestinationConfiguration.SecretsManagerConfiguration", "emulate")
+		}
+	}
+	return nil
+}
+
+func validHTTPCommonAttributes(value any) bool {
+	if value == nil {
+		return true
+	}
+	attributes, ok := value.([]any)
+	if !ok || len(attributes) > 50 {
+		return false
+	}
+	for _, raw := range attributes {
+		attribute, ok := raw.(map[string]any)
+		name, nameOK := attribute["AttributeName"].(string)
+		value, valueOK := attribute["AttributeValue"].(string)
+		if !ok || !nameOK || !valueOK || len(name) > 256 || strings.TrimSpace(name) == "" || len(value) > 1024 || strings.ContainsAny(name+value, "\r\n") {
+			return false
+		}
+	}
+	return true
 }
 
 func validateS3Configuration(destination map[string]any, region string, processingAllowed bool) error {
@@ -1209,7 +1366,7 @@ func validateCreateDestination(input map[string]any) error {
 		}
 	}
 	switch destination {
-	case "S3DestinationConfiguration", "ExtendedS3DestinationConfiguration":
+	case "S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration":
 		return nil
 	case "":
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
@@ -1271,7 +1428,7 @@ func bucketFromARN(arn string) string {
 	return arn
 }
 
-func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID string, data []byte) {
+func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream, recID string, data []byte) {
 	raw, ok, _ := p.col(req, "fh").Get(ctx, stream)
 	if !ok {
 		return
@@ -1290,12 +1447,91 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 		version = "1"
 	}
 	now := p.deps.Clock.Now().UTC()
+	if destination, ok := rec["HttpEndpointDestinationConfiguration"].(map[string]any); ok {
+		delivered, permanent, message := p.deliverHTTP(ctx, rec, destination, recID, data, now)
+		if !delivered {
+			p.logDeliveryError(ctx, req, destination, stream, message, now)
+		}
+		if first(destination, "S3BackupMode") == "AllData" || (!delivered && !permanent) {
+			backup, _ := destination["S3Configuration"].(map[string]any)
+			p.deliverS3Configuration(ctx, req, backup, stream, version, recID, data, now)
+		}
+		return
+	}
 	p.deliverS3Configuration(ctx, req, destination, stream, version, recID, data, now)
 	extended, _ := rec["ExtendedS3DestinationConfiguration"].(map[string]any)
 	if first(extended, "S3BackupMode") == "Enabled" {
 		backup, _ := extended["S3BackupConfiguration"].(map[string]any)
 		p.deliverS3Configuration(ctx, req, backup, stream, version, recID, data, now)
 	}
+}
+
+func (p *Pack) deliverHTTP(ctx context.Context, stream, destination map[string]any, requestID string, data []byte, now time.Time) (bool, bool, string) {
+	payload, _ := json.Marshal(map[string]any{
+		"requestId": requestID,
+		"timestamp": now.UnixMilli(),
+		"records":   []any{map[string]any{"data": base64.StdEncoding.EncodeToString(data)}},
+	})
+	requestConfiguration, _ := destination["RequestConfiguration"].(map[string]any)
+	encoding := first(requestConfiguration, "ContentEncoding")
+	if encoding == "GZIP" {
+		var compressed bytes.Buffer
+		writer := gzip.NewWriter(&compressed)
+		_, _ = writer.Write(payload)
+		_ = writer.Close()
+		payload = compressed.Bytes()
+	}
+	endpoint, _ := destination["EndpointConfiguration"].(map[string]any)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, first(endpoint, "Url"), bytes.NewReader(payload))
+	if err != nil {
+		return false, false, err.Error()
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Amz-Firehose-Protocol-Version", "1.0")
+	request.Header.Set("X-Amz-Firehose-Request-Id", requestID)
+	request.Header.Set("X-Amz-Firehose-Source-Arn", first(stream, "DeliveryStreamARN"))
+	if encoding == "GZIP" {
+		request.Header.Set("Content-Encoding", "gzip")
+	}
+	if accessKey, ok := endpoint["AccessKey"].(string); ok {
+		request.Header.Set("X-Amz-Firehose-Access-Key", accessKey)
+	}
+	if raw, exists := requestConfiguration["CommonAttributes"]; exists {
+		common := map[string]string{}
+		for _, rawAttribute := range raw.([]any) {
+			attribute := rawAttribute.(map[string]any)
+			common[first(attribute, "AttributeName")] = first(attribute, "AttributeValue")
+		}
+		encoded, _ := json.Marshal(map[string]any{"commonAttributes": common})
+		request.Header.Set("X-Amz-Firehose-Common-Attributes", string(encoded))
+	}
+	response, err := p.httpClient.Do(request)
+	if err != nil {
+		return false, false, err.Error()
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusRequestEntityTooLarge {
+		return false, true, response.Status
+	}
+	if response.StatusCode != http.StatusOK {
+		return false, false, response.Status
+	}
+	if !strings.EqualFold(strings.TrimSpace(response.Header.Get("Content-Type")), "application/json") || response.Header.Get("Content-Encoding") != "" {
+		return false, false, "invalid HTTP endpoint acknowledgment headers"
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
+	if err != nil || len(body) > 1<<20 {
+		return false, false, "invalid HTTP endpoint acknowledgment body"
+	}
+	var acknowledgment map[string]any
+	if json.Unmarshal(body, &acknowledgment) != nil || first(acknowledgment, "requestId") != requestID {
+		return false, false, "invalid HTTP endpoint acknowledgment request ID"
+	}
+	timestamp, ok := acknowledgment["timestamp"].(float64)
+	if !ok || timestamp != math.Trunc(timestamp) {
+		return false, false, "invalid HTTP endpoint acknowledgment timestamp"
+	}
+	return true, false, ""
 }
 
 func (p *Pack) deliverS3Configuration(ctx context.Context, req *spi.Request, configuration map[string]any, stream, version, recID string, data []byte, now time.Time) {

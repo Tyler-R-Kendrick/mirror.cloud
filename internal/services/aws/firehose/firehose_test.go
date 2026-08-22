@@ -14,6 +14,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -33,8 +34,19 @@ import (
 
 const testRoleARN = "arn:aws:iam::123456789012:role/firehose"
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
+
 func testS3Destination() map[string]any {
 	return map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN}
+}
+
+func testHTTPEndpointDestination(endpoint string) map[string]any {
+	return map[string]any{
+		"EndpointConfiguration": map[string]any{"Url": endpoint},
+		"S3Configuration":       testS3Destination(),
+	}
 }
 
 func testKinesisSource() map[string]any {
@@ -2370,6 +2382,217 @@ func TestFirehoseDestinationDescriptionDefaults(t *testing.T) {
 		encryption := description["EncryptionConfiguration"].(map[string]any)
 		if hints["IntervalInSeconds"] != 300 || hints["SizeInMBs"] != 5 || description["CompressionFormat"] != "UNCOMPRESSED" || encryption["NoEncryptionConfig"] != "NoEncryption" || (test.configuration == "ExtendedS3DestinationConfiguration" && description["S3BackupMode"] != "Disabled") {
 			t.Errorf("%s defaults %#v", test.name, description)
+		}
+	}
+}
+
+func TestFirehoseHTTPEndpointDestination(t *testing.T) {
+	type capturedRequest struct {
+		path    string
+		header  http.Header
+		payload map[string]any
+	}
+	captured := make(chan capturedRequest, 8)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		body, _ := io.ReadAll(request.Body)
+		if request.Header.Get("Content-Encoding") == "gzip" {
+			reader, err := gzip.NewReader(bytes.NewReader(body))
+			if err != nil {
+				t.Error(err)
+				writer.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			body, _ = io.ReadAll(reader)
+			_ = reader.Close()
+		}
+		payload := map[string]any{}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Error(err)
+		}
+		captured <- capturedRequest{path: request.URL.RequestURI(), header: request.Header.Clone(), payload: payload}
+		if request.URL.Path == "/permanent" {
+			writer.WriteHeader(http.StatusRequestEntityTooLarge)
+			return
+		}
+		requestID := first(payload, "requestId")
+		if request.URL.Path == "/failure" {
+			requestID = "wrong-request"
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(map[string]any{"requestId": requestID, "timestamp": 1})
+	}))
+	defer server.Close()
+
+	target, _ := url.Parse(server.URL)
+	transport := server.Client().Transport
+	deps := spitest.Deps(t)
+	p := New(deps)
+	p.httpClient = &http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			clone := request.Clone(request.Context())
+			requestURL := *request.URL
+			requestURL.Scheme, requestURL.Host = target.Scheme, target.Host
+			clone.URL = &requestURL
+			return transport.RoundTrip(clone)
+		}),
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+
+	destination := testHTTPEndpointDestination("https://example.test/ok?tenant=1")
+	destination["EndpointConfiguration"] = map[string]any{"Url": "https://example.test/ok?tenant=1", "Name": "collector", "AccessKey": "secret"}
+	destination["S3Configuration"].(map[string]any)["Prefix"] = "all/"
+	destination["S3BackupMode"] = "AllData"
+	destination["RequestConfiguration"] = map[string]any{
+		"ContentEncoding":  "GZIP",
+		"CommonAttributes": []any{map[string]any{"AttributeName": "environment", "AttributeValue": "test"}},
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-endpoint", "HttpEndpointDestinationConfiguration": destination}); err != nil {
+		t.Fatal(err)
+	}
+	put, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-endpoint", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("hello"))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := <-captured
+	records, _ := request.payload["records"].([]any)
+	record, _ := records[0].(map[string]any)
+	common := map[string]any{}
+	_ = json.Unmarshal([]byte(request.header.Get("X-Amz-Firehose-Common-Attributes")), &common)
+	if request.path != "/ok?tenant=1" || request.header.Get("Content-Type") != "application/json" || request.header.Get("Content-Encoding") != "gzip" || request.header.Get("X-Amz-Firehose-Protocol-Version") != "1.0" || request.header.Get("X-Amz-Firehose-Request-Id") != first(request.payload, "requestId") || request.header.Get("X-Amz-Firehose-Source-Arn") != "arn:aws:firehose:us-east-1:123456789012:deliverystream/http-endpoint" || request.header.Get("X-Amz-Firehose-Access-Key") != "secret" || request.payload["timestamp"] != float64(0) || first(record, "data") != base64.StdEncoding.EncodeToString([]byte("hello")) || common["commonAttributes"].(map[string]any)["environment"] != "test" {
+		t.Fatalf("HTTP request %#v %#v", request, common)
+	}
+	recordID := put.Output["RecordId"].(string)
+	backupKey := id.Account + "/" + id.Region + "/out/all/1970/01/01/00/http-endpoint-1-1970-01-01-00-00-00-" + recordID
+	reader, _, err := deps.Blobs.Get(context.Background(), backupKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	if string(backup) != "hello" {
+		t.Fatalf("backup %q", backup)
+	}
+
+	described, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "http-endpoint"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	description := described.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["HttpEndpointDestinationDescription"].(map[string]any)
+	endpoint := description["EndpointConfiguration"].(map[string]any)
+	hints := description["BufferingHints"].(map[string]any)
+	retry := description["RetryOptions"].(map[string]any)
+	if endpoint["Name"] != "collector" || endpoint["Url"] != "https://example.test/ok?tenant=1" || endpoint["AccessKey"] != nil || description["S3Configuration"] != nil || description["S3DestinationDescription"].(map[string]any)["Prefix"] != "all/" || hints["IntervalInSeconds"] != 300 || hints["SizeInMBs"] != 5 || retry["DurationInSeconds"] != 300 {
+		t.Fatalf("HTTP description %#v", description)
+	}
+
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "http-endpoint", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
+		"HttpEndpointDestinationUpdate": map[string]any{
+			"EndpointConfiguration": map[string]any{"Url": "https://example.test/ok?tenant=2", "Name": "updated", "AccessKey": "updated-secret"},
+			"RequestConfiguration":  map[string]any{"ContentEncoding": "NONE"},
+			"S3BackupMode":          "FailedDataOnly",
+			"S3Update":              map[string]any{"Prefix": "updated/"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	put, err = call("PutRecord", map[string]any{"DeliveryStreamName": "http-endpoint", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("updated"))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request = <-captured
+	if request.path != "/ok?tenant=2" || request.header.Get("Content-Encoding") != "" || request.header.Get("X-Amz-Firehose-Access-Key") != "updated-secret" {
+		t.Fatalf("updated HTTP request %#v", request)
+	}
+	updatedBackupKey := id.Account + "/" + id.Region + "/out/updated/1970/01/01/00/http-endpoint-2-1970-01-01-00-00-00-" + put.Output["RecordId"].(string)
+	if _, _, err := deps.Blobs.Get(context.Background(), updatedBackupKey); err == nil {
+		t.Fatal("backed up successfully delivered FailedDataOnly record")
+	}
+
+	for _, failure := range []struct {
+		name, path, prefix string
+		backedUp           bool
+	}{
+		{name: "retryable", path: "/failure", prefix: "failed/", backedUp: true},
+		{name: "permanent", path: "/permanent", prefix: "permanent/", backedUp: false},
+	} {
+		destination := testHTTPEndpointDestination("https://example.test" + failure.path)
+		destination["S3Configuration"].(map[string]any)["Prefix"] = failure.prefix
+		destination["S3BackupMode"] = "FailedDataOnly"
+		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": failure.name, "HttpEndpointDestinationConfiguration": destination}); err != nil {
+			t.Fatal(err)
+		}
+		put, err := call("PutRecord", map[string]any{"DeliveryStreamName": failure.name, "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(failure.name))}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-captured
+		key := id.Account + "/" + id.Region + "/out/" + failure.prefix + "1970/01/01/00/" + failure.name + "-1-1970-01-01-00-00-00-" + put.Output["RecordId"].(string)
+		_, _, err = deps.Blobs.Get(context.Background(), key)
+		if (err == nil) != failure.backedUp {
+			t.Errorf("%s backup err %v", failure.name, err)
+		}
+	}
+}
+
+func TestFirehoseHTTPEndpointValidation(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	invalid := []map[string]any{
+		testHTTPEndpointDestination("http://example.test"),
+		testHTTPEndpointDestination("https://example.test:444/path"),
+		{"S3Configuration": testS3Destination()},
+		{"EndpointConfiguration": map[string]any{"Url": "https://example.test"}},
+		testHTTPEndpointDestination("not a URL"),
+	}
+	invalid[0]["EndpointConfiguration"].(map[string]any)["Name"] = " "
+	for i, destination := range invalid {
+		_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+			"DeliveryStreamName": fmt.Sprintf("invalid-http-%d", i), "HttpEndpointDestinationConfiguration": destination,
+		}})
+		if err == nil {
+			t.Errorf("accepted invalid HTTP destination %#v", destination)
+		}
+	}
+
+	for i, patch := range []map[string]any{
+		{"BufferingHints": map[string]any{"SizeInMBs": 1}},
+		{"BufferingHints": map[string]any{"SizeInMBs": 65, "IntervalInSeconds": 1}},
+		{"RetryOptions": map[string]any{"DurationInSeconds": 7201}},
+		{"S3BackupMode": "Unknown"},
+		{"RequestConfiguration": map[string]any{"ContentEncoding": "ZIP"}},
+		{"RequestConfiguration": map[string]any{"CommonAttributes": []any{map[string]any{"AttributeName": "", "AttributeValue": "value"}}}},
+		{"EndpointConfiguration": map[string]any{"Url": "https://example.test", "AccessKey": "bad\nkey"}},
+	} {
+		destination := testHTTPEndpointDestination("https://example.test")
+		maps.Copy(destination, patch)
+		_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+			"DeliveryStreamName": fmt.Sprintf("invalid-http-option-%d", i), "HttpEndpointDestinationConfiguration": destination,
+		}})
+		if err == nil {
+			t.Errorf("accepted invalid HTTP option %#v", patch)
+		}
+	}
+
+	for name, patch := range map[string]map[string]any{
+		"processing": {"ProcessingConfiguration": map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "AppendDelimiterToRecord"}}}},
+		"secret": {"SecretsManagerConfiguration": map[string]any{
+			"Enabled": true, "RoleARN": testRoleARN, "SecretARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:http",
+		}},
+	} {
+		destination := testHTTPEndpointDestination("https://example.test")
+		maps.Copy(destination, patch)
+		_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+			"DeliveryStreamName": "unsupported-http-" + name, "HttpEndpointDestinationConfiguration": destination,
+		}})
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "MirrorNotImplemented" {
+			t.Errorf("%s fault %#v", name, err)
 		}
 	}
 }

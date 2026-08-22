@@ -942,6 +942,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFirehoseS3ObjectNameFormat",
 		},
 		{
+			name: "firehose-accept-non-aws-custom-timezone-syntax",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `if len(timezone) > 50 || !firehoseTimeZone.MatchString(timezone) {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseS3ObjectNameFormat",
+		},
+		{
 			name: "identity-expiry-after-to-before",
 			file: filepath.Join("internal", "identity", "identity.go"),
 			old:  "now.UTC().After(t.Add(time.Duration(secs) * time.Second))",

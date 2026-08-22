@@ -720,6 +720,15 @@ func TestFirehoseLifecycleMetadataAndValidation(t *testing.T) {
 	if updated["CreateTimestamp"] != float64(0) || updated["LastUpdateTimestamp"] != 1.5 {
 		t.Fatalf("update timestamps %#v", updated)
 	}
+	if err := deps.Clock.Advance(500 * time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("StartDeliveryStreamEncryption", map[string]any{"DeliveryStreamName": "lifecycle"}); err != nil {
+		t.Fatal(err)
+	}
+	if encrypted := describe(); encrypted["CreateTimestamp"] != float64(0) || encrypted["LastUpdateTimestamp"] != float64(2) {
+		t.Fatalf("encryption timestamp %#v", encrypted)
+	}
 
 	for _, operation := range p.Operations() {
 		if operation == "ListDeliveryStreams" {

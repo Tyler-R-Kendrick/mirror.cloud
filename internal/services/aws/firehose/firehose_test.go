@@ -2410,6 +2410,11 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 			t.Error(err)
 		}
 		captured <- capturedRequest{path: request.URL.RequestURI(), header: request.Header.Clone(), payload: payload}
+		if request.URL.Path == "/redirect" {
+			writer.Header().Set("Location", "https://example.test/ok")
+			writer.WriteHeader(http.StatusFound)
+			return
+		}
 		if request.URL.Path == "/permanent" {
 			writer.WriteHeader(http.StatusRequestEntityTooLarge)
 			return
@@ -2427,6 +2432,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	transport := server.Client().Transport
 	deps := spitest.Deps(t)
 	p := New(deps)
+	checkRedirect := p.httpClient.CheckRedirect
 	p.httpClient = &http.Client{
 		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 			clone := request.Clone(request.Context())
@@ -2435,7 +2441,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 			clone.URL = &requestURL
 			return transport.RoundTrip(clone)
 		}),
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		CheckRedirect: checkRedirect,
 	}
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -2528,6 +2534,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		backedUp           bool
 	}{
 		{name: "retryable", path: "/failure", prefix: "failed/", backedUp: true},
+		{name: "redirect", path: "/redirect", prefix: "redirect/", backedUp: true},
 		{name: "permanent", path: "/permanent", prefix: "permanent/", backedUp: false},
 	} {
 		destination := testHTTPEndpointDestination("https://example.test" + failure.path)

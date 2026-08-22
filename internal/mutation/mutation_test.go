@@ -798,6 +798,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFirehoseHTTPEndpointDestination",
 		},
 		{
+			name: "firehose-follow-http-redirect",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `return http.ErrUseLastResponse`,
+			new:  `return nil`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseHTTPEndpointDestination",
+		},
+		{
 			name: "firehose-omit-http-access-key",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 			old:  `request.Header.Set("X-Amz-Firehose-Access-Key", accessKey)`,

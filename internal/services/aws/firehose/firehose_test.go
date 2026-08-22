@@ -1035,6 +1035,26 @@ def lambda_handler(event, context):
 	if !strings.Contains(string(body), "missing Lambda partition key: customer") || !strings.Contains(string(body), base64.StdEncoding.EncodeToString([]byte(`{"event":"missing"}`))) {
 		t.Fatalf("dynamic partition failure %s", body)
 	}
+	invalidMetadataCode := "import base64, json\ndef lambda_handler(event, context):\n    r = event['records'][0]\n    value = json.loads(base64.b64decode(r['data']))\n    metadata = {} if value['customer'] == 'shape' else {'partitionKeys': {'customer': 1}}\n    return {'records': [{'recordId': r['recordId'], 'result': 'Ok', 'data': r['data'], 'metadata': metadata}]}\n"
+	if _, err := function.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "UpdateFunctionCode", Input: map[string]any{"FunctionName": "partition", "ZipFile": base64.StdEncoding.EncodeToString([]byte(invalidMetadataCode))}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, customer := range []string{"invalid", "shape"} {
+		invalid, err := call("PutRecord", map[string]any{"DeliveryStreamName": "partitioned", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"customer":"` + customer + `"}`))}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		invalidKey := id.Account + "/" + id.Region + "/out/errors/processing-failed/1970/01/01/00/partitioned-1-1970-01-01-00-00-00-" + invalid.Output["RecordId"].(string)
+		reader, _, err = deps.Blobs.Get(context.Background(), invalidKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = io.ReadAll(reader)
+		_ = reader.Close()
+		if !strings.Contains(string(body), "invalid partition keys") {
+			t.Fatalf("invalid Lambda metadata failure %s", body)
+		}
+	}
 
 	if _, err := call("UpdateDestination", map[string]any{
 		"DeliveryStreamName": "partitioned", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
@@ -1087,6 +1107,14 @@ def lambda_handler(event, context):
 		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": fmt.Sprintf("retry-%d", duration), "ExtendedS3DestinationConfiguration": candidate}); err != nil {
 			t.Fatalf("rejected retry boundary %v: %v", duration, err)
 		}
+	}
+	if err := validatePrefixes("key=!{partitionKeyFromQuery:id}/", "errors/!{firehose:error-output-type}/", true); err == nil {
+		t.Fatal("accepted unsupported inline metadata extraction")
+	}
+	basic := testS3Destination()
+	basic["DynamicPartitioningConfiguration"] = map[string]any{"Enabled": false}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "basic-dynamic", "S3DestinationConfiguration": basic}); err == nil {
+		t.Fatal("accepted dynamic partitioning on a basic S3 destination")
 	}
 }
 

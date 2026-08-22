@@ -474,7 +474,6 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 	destination := map[string]any{"DestinationId": destinationID}
 	for _, base := range []string{"S3Destination", "ExtendedS3Destination"} {
 		if configuration, ok := description[base+"Configuration"].(map[string]any); ok {
-			configuration = maps.Clone(configuration)
 			if configuration["BufferingHints"] == nil {
 				configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}
 			}

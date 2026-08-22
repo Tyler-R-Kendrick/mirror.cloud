@@ -893,6 +893,9 @@ def lambda_handler(event, context):
 		map[string]any{"Type": "Lambda", "Parameters": []any{
 			map[string]any{"ParameterName": "LambdaArn", "ParameterValue": lambdaARN},
 			map[string]any{"ParameterName": "NumberOfRetries", "ParameterValue": "0"},
+			map[string]any{"ParameterName": "RoleArn", "ParameterValue": testRoleARN},
+			map[string]any{"ParameterName": "BufferSizeInMBs", "ParameterValue": "0.2"},
+			map[string]any{"ParameterName": "BufferIntervalInSeconds", "ParameterValue": "900"},
 		}},
 		map[string]any{"Type": "AppendDelimiterToRecord"},
 	}}
@@ -985,12 +988,28 @@ def lambda_handler(event, context):
 	if body, found := read(retryKey); !found || !strings.Contains(string(body), `"attemptsMade":"3"`) {
 		t.Fatalf("Lambda retry failure body %q found %v", body, found)
 	}
+	if err := validateProcessingConfiguration(map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "Lambda", "Parameters": []any{
+		map[string]any{"ParameterName": "LambdaArn", "ParameterValue": lambdaARN},
+		map[string]any{"ParameterName": "NumberOfRetries", "ParameterValue": "300"},
+		map[string]any{"ParameterName": "BufferSizeInMBs", "ParameterValue": "3"},
+		map[string]any{"ParameterName": "BufferIntervalInSeconds", "ParameterValue": "0"},
+	}}}}); err != nil {
+		t.Fatalf("rejected Lambda processor boundaries: %v", err)
+	}
 
 	for i, parameters := range [][]any{
 		{},
 		{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": "function"}},
 		{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": lambdaARN}, map[string]any{"ParameterName": "NumberOfRetries", "ParameterValue": "301"}},
 		{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": lambdaARN}, map[string]any{"ParameterName": "NumberOfRetries", "ParameterValue": "one"}},
+		{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": lambdaARN}, map[string]any{"ParameterName": "RoleArn", "ParameterValue": "role"}},
+		{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": lambdaARN}, map[string]any{"ParameterName": "BufferSizeInMBs", "ParameterValue": "0.19"}},
+		{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": lambdaARN}, map[string]any{"ParameterName": "BufferSizeInMBs", "ParameterValue": "3.01"}},
+		{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": lambdaARN}, map[string]any{"ParameterName": "BufferSizeInMBs", "ParameterValue": "NaN"}},
+		{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": lambdaARN}, map[string]any{"ParameterName": "BufferIntervalInSeconds", "ParameterValue": "-1"}},
+		{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": lambdaARN}, map[string]any{"ParameterName": "BufferIntervalInSeconds", "ParameterValue": "901"}},
+		{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": lambdaARN}, map[string]any{"ParameterName": "BufferIntervalInSeconds", "ParameterValue": "0.5"}},
+		{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": lambdaARN}, map[string]any{"ParameterName": "JsonParsingEngine", "ParameterValue": "JQ-1.6"}},
 	} {
 		destination := testS3Destination()
 		destination["ProcessingConfiguration"] = map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "Lambda", "Parameters": parameters}}}

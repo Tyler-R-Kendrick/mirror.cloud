@@ -974,9 +974,33 @@ func validateProcessingConfiguration(raw any) error {
 			if len(arn) > 512 || !firehoseLambdaARN.MatchString(arn) {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
+			if role := processorParameter(processor, "RoleArn"); role != "" && !validRoleARN(role) {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
 			if retries := processorParameter(processor, "NumberOfRetries"); retries != "" {
 				value, err := strconv.Atoi(retries)
 				if err != nil || value < 0 || value > 300 {
+					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+				}
+			}
+			if size := processorParameter(processor, "BufferSizeInMBs"); size != "" {
+				value, err := strconv.ParseFloat(size, 64)
+				if err != nil || math.IsNaN(value) || value < 0.2 || value > 3 {
+					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+				}
+			}
+			if interval := processorParameter(processor, "BufferIntervalInSeconds"); interval != "" {
+				value, err := strconv.Atoi(interval)
+				if err != nil || value < 0 || value > 900 {
+					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+				}
+			}
+			parameters, _ := processor["Parameters"].([]any)
+			for _, rawParameter := range parameters {
+				parameter, _ := rawParameter.(map[string]any)
+				switch first(parameter, "ParameterName") {
+				case "LambdaArn", "NumberOfRetries", "RoleArn", "BufferSizeInMBs", "BufferIntervalInSeconds":
+				default:
 					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 				}
 			}

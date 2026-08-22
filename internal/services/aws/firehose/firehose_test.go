@@ -791,6 +791,7 @@ func TestFirehoseDescribeDestinationPagination(t *testing.T) {
 		{"DeliveryStreamName": "described", "Limit": 1.5},
 		{"DeliveryStreamName": "described", "Limit": "1"},
 		{"DeliveryStreamName": "described", "ExclusiveStartDestinationId": ""},
+		{"DeliveryStreamName": "described", "ExclusiveStartDestinationId": 1},
 		{"DeliveryStreamName": "described", "ExclusiveStartDestinationId": "bad_id"},
 		{"DeliveryStreamName": "described", "ExclusiveStartDestinationId": strings.Repeat("a", 101)},
 	} {

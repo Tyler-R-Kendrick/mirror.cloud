@@ -361,7 +361,9 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	large := bytes.Repeat([]byte("incompressible-ish-data-"), 15000)
 	hadoop := hadoopSnappy(large)
 	decoded := make([]byte, 0, len(large))
+	blocks := 0
 	for payload := hadoop[4:]; len(payload) > 0; {
+		blocks++
 		size := binary.BigEndian.Uint32(payload)
 		payload = payload[4:]
 		var prefix [binary.MaxVarintLen32]byte
@@ -373,7 +375,7 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 		decoded = append(decoded, block...)
 		payload = payload[size:]
 	}
-	if !bytes.Equal(decoded, large) || binary.BigEndian.Uint32(hadoop) != uint32(len(large)) {
+	if blocks < 2 || !bytes.Equal(decoded, large) || binary.BigEndian.Uint32(hadoop) != uint32(len(large)) {
 		t.Fatal("Hadoop Snappy multi-block framing did not round trip")
 	}
 	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{

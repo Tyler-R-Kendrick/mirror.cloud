@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -57,11 +58,11 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	name := first(req.Input, "DeliveryStreamName", "deliveryStreamName")
+	if req.Operation != "ListDeliveryStreams" && slices.Contains(p.Operations(), req.Operation) && (len(name) > 64 || !firehoseStreamName.MatchString(name)) {
+		return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
 	switch req.Operation {
 	case "CreateDeliveryStream":
-		if len(name) > 64 || !firehoseStreamName.MatchString(name) {
-			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-		}
 		streamType := first(req.Input, "DeliveryStreamType")
 		if streamType == "" {
 			streamType = "DirectPut"
@@ -72,9 +73,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
 		arn := "arn:aws:firehose:" + req.Identity.Region + ":" + req.Identity.Account + ":deliverystream/" + name
+		timestamp := float64(p.deps.Clock.Now().UnixNano()) / float64(time.Second)
 		rec := map[string]any{
 			"DeliveryStreamName": name, "DeliveryStreamARN": arn, "DeliveryStreamStatus": "ACTIVE",
-			"DeliveryStreamType": streamType, "VersionId": "1",
+			"DeliveryStreamType": streamType, "VersionId": "1", "CreateTimestamp": timestamp, "LastUpdateTimestamp": timestamp,
 		}
 		copyDest(rec, req.Input, "Configuration")
 		if err := validateDestination(rec); err != nil {
@@ -108,6 +110,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"DeliveryStreamARN": arn}}, nil
 	case "DeleteDeliveryStream":
+		if _, ok, _ := p.col(req, "fh").Get(ctx, name); !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
+		}
 		_ = p.col(req, "fh").Delete(ctx, name)
 		_ = p.col(req, "fhtag").Delete(ctx, name)
 		kvs, _, _ := p.col(req, "fhrec:"+name).List(ctx, "", "", 0)
@@ -219,6 +224,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			version, _ := strconv.Atoi(current)
 			rec["VersionId"] = strconv.Itoa(version + 1)
+			rec["LastUpdateTimestamp"] = float64(p.deps.Clock.Now().UnixNano()) / float64(time.Second)
 			nb, _ := json.Marshal(rec)
 			return tx.Put(name, nb)
 		})
@@ -321,6 +327,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			rec["DeliveryStreamEncryptionConfiguration"] = encryption
+			rec["LastUpdateTimestamp"] = float64(p.deps.Clock.Now().UnixNano()) / float64(time.Second)
 			nb, _ := json.Marshal(rec)
 			return tx.Put(name, nb)
 		}); err != nil {

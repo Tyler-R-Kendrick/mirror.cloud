@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
@@ -680,5 +681,61 @@ func TestFirehoseEncryptionState(t *testing.T) {
 		if _, err := call(operation, map[string]any{"DeliveryStreamName": "missing"}); err == nil {
 			t.Fatalf("%s accepted missing stream", operation)
 		}
+	}
+}
+
+func TestFirehoseLifecycleMetadataAndValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	describe := func() map[string]any {
+		t.Helper()
+		response, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "lifecycle"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output["DeliveryStreamDescription"].(map[string]any)
+	}
+
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "lifecycle"}); err != nil {
+		t.Fatal(err)
+	}
+	created := describe()
+	if created["CreateTimestamp"] != float64(0) || created["LastUpdateTimestamp"] != float64(0) {
+		t.Fatalf("create timestamps %#v", created)
+	}
+	if err := deps.Clock.Advance(1500 * time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "lifecycle", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	updated := describe()
+	if updated["CreateTimestamp"] != float64(0) || updated["LastUpdateTimestamp"] != 1.5 {
+		t.Fatalf("update timestamps %#v", updated)
+	}
+
+	for _, operation := range p.Operations() {
+		if operation == "ListDeliveryStreams" {
+			continue
+		}
+		if _, err := call(operation, map[string]any{"DeliveryStreamName": "bad/name"}); err == nil {
+			t.Fatalf("%s accepted invalid stream name", operation)
+		}
+	}
+	if _, err := call("DeleteDeliveryStream", map[string]any{"DeliveryStreamName": "missing"}); err == nil {
+		t.Fatal("deleted missing stream")
+	}
+	if _, err := call("DeleteDeliveryStream", map[string]any{"DeliveryStreamName": "lifecycle"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("DeleteDeliveryStream", map[string]any{"DeliveryStreamName": "lifecycle"}); err == nil {
+		t.Fatal("deleted stream twice")
 	}
 }

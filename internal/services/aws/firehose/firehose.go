@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"math"
@@ -20,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/itchyny/gojq"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
@@ -765,6 +767,9 @@ func validateS3Configuration(destination map[string]any, region string, processi
 	if err != nil {
 		return err
 	}
+	if hasProcessor(destination, "MetadataExtraction") && !dynamic {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
 	if err := validatePrefixes(prefix, errorPrefix, dynamic); err != nil {
 		return err
 	}
@@ -817,6 +822,9 @@ func validateDynamicPartitioning(destination map[string]any, allowed bool) (bool
 		return false, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if strings.Contains(prefix, "!{partitionKeyFromLambda:") && !hasProcessor(destination, "Lambda") {
+		return false, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if strings.Contains(prefix, "!{partitionKeyFromQuery:") && !hasProcessor(destination, "MetadataExtraction") {
 		return false, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	return enabled, nil
@@ -971,8 +979,21 @@ func validateProcessingConfiguration(raw any) error {
 				}
 			}
 		case "MetadataExtraction":
-			if enabled {
-				return spi.NotImplemented("aws.firehose", "Processor="+typeName, "emulate")
+			query, engine := processorParameter(processor, "MetadataExtractionQuery"), processorParameter(processor, "JsonParsingEngine")
+			parsed, err := gojq.Parse(query)
+			if query == "" || engine != "JQ-1.6" || err != nil {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			if _, err := gojq.Compile(parsed); err != nil {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			parameters, _ := processor["Parameters"].([]any)
+			for _, rawParameter := range parameters {
+				parameter, _ := rawParameter.(map[string]any)
+				name := first(parameter, "ParameterName")
+				if name != "MetadataExtractionQuery" && name != "JsonParsingEngine" {
+					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+				}
 			}
 		default:
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
@@ -1051,7 +1072,6 @@ func validatePrefixes(prefix, errorPrefix string, dynamicConfig ...bool) error {
 				hasErrorType = true
 			case namespace == "partitionKeyFromLambda" && dynamic && value != "" && !candidate.errorPrefix:
 			case namespace == "partitionKeyFromQuery" && dynamic && value != "" && !candidate.errorPrefix:
-				return spi.NotImplemented("aws.firehose", "MetadataExtraction", "emulate")
 			case (namespace == "partitionKeyFromLambda" || namespace == "partitionKeyFromQuery") && candidate.errorPrefix:
 				return &spi.Fault{Code: "ValidationException", Message: "Dynamic partitioning is invalid in ErrorOutputPrefix.", HTTPStatus: 400, Fault: "client"}
 			default:
@@ -1149,7 +1169,7 @@ func (p *Pack) deliverS3Configuration(ctx context.Context, req *spi.Request, con
 				recordExtension = ".zip"
 			}
 		}
-		evaluatedPrefix, err := p.evaluatedDynamicS3Prefix(prefix, now, record.partitionKeys)
+		evaluatedPrefix, err := p.evaluatedDynamicS3Prefix(prefix, now, record.partitionKeys, record.queryPartitionKeys)
 		if err != nil {
 			failure := &processingFailure{typeName: "processing-failed", code: "DynamicPartitioning.Failed", message: err.Error(), attempts: 1, recID: record.recID, data: record.raw}
 			p.logDeliveryError(ctx, req, configuration, stream, failure.message, now)
@@ -1181,10 +1201,11 @@ type processingFailure struct {
 }
 
 type processingRecord struct {
-	recID         string
-	data          []byte
-	raw           []byte
-	partitionKeys map[string]string
+	recID              string
+	data               []byte
+	raw                []byte
+	partitionKeys      map[string]string
+	queryPartitionKeys map[string]string
 }
 
 func (p *Pack) processData(ctx context.Context, req *spi.Request, configuration map[string]any, stream, recID string, data []byte, now time.Time) ([]processingRecord, []*processingFailure) {
@@ -1265,6 +1286,18 @@ func (p *Pack) processData(ctx context.Context, req *spi.Request, configuration 
 				next = append(next, record)
 			}
 			records = next
+		case "MetadataExtraction":
+			var next []processingRecord
+			for _, record := range records {
+				partitionKeys, err := extractMetadata(processor, record.data)
+				if err != nil {
+					failures = append(failures, &processingFailure{typeName: "processing-failed", code: "MetadataExtraction.Failed", message: err.Error(), attempts: 1, recID: record.recID, data: record.raw})
+					continue
+				}
+				record.queryPartitionKeys = partitionKeys
+				next = append(next, record)
+			}
+			records = next
 		case "Lambda":
 			var next []processingRecord
 			for _, record := range records {
@@ -1283,6 +1316,46 @@ func (p *Pack) processData(ctx context.Context, req *spi.Request, configuration 
 		}
 	}
 	return records, failures
+}
+
+func extractMetadata(processor map[string]any, data []byte) (map[string]string, error) {
+	var input any
+	if err := json.Unmarshal(data, &input); err != nil {
+		return nil, err
+	}
+	// ponytail: compile per record; cache by query if inline-partition throughput becomes hot.
+	query, _ := gojq.Parse(processorParameter(processor, "MetadataExtractionQuery"))
+	code, _ := gojq.Compile(query)
+	iter := code.Run(input)
+	result, ok := iter.Next()
+	if !ok {
+		return nil, errors.New("metadata extraction returned no result")
+	}
+	if err, ok := result.(error); ok {
+		return nil, err
+	}
+	if _, more := iter.Next(); more {
+		return nil, errors.New("metadata extraction returned multiple results")
+	}
+	values, ok := result.(map[string]any)
+	if !ok || len(values) == 0 {
+		return nil, errors.New("metadata extraction must return an object")
+	}
+	partitionKeys := make(map[string]string, len(values))
+	for key, rawValue := range values {
+		switch value := rawValue.(type) {
+		case string:
+			partitionKeys[key] = value
+		case bool, int, float64:
+			partitionKeys[key] = fmt.Sprint(value)
+		default:
+			return nil, errors.New("metadata extraction values must be scalar")
+		}
+		if key == "" || partitionKeys[key] == "" {
+			return nil, errors.New("metadata extraction keys and values must be non-empty")
+		}
+	}
+	return partitionKeys, nil
 }
 
 func deaggregateData(processor map[string]any, data []byte) ([][]byte, error) {
@@ -1455,14 +1528,17 @@ func (p *Pack) evaluatedS3Prefix(prefix string, now time.Time) string {
 	return prefix
 }
 
-func (p *Pack) evaluatedDynamicS3Prefix(prefix string, now time.Time, partitionKeys map[string]string) (string, error) {
+func (p *Pack) evaluatedDynamicS3Prefix(prefix string, now time.Time, partitionKeys, queryPartitionKeys map[string]string) (string, error) {
 	missing := ""
 	prefix = firehosePrefixExpression.ReplaceAllStringFunc(prefix, func(expression string) string {
 		match := firehosePrefixExpression.FindStringSubmatch(expression)
-		if match[1] != "partitionKeyFromLambda" {
+		keys := partitionKeys
+		if match[1] == "partitionKeyFromQuery" {
+			keys = queryPartitionKeys
+		} else if match[1] != "partitionKeyFromLambda" {
 			return expression
 		}
-		value, ok := partitionKeys[match[2]]
+		value, ok := keys[match[2]]
 		if !ok {
 			missing = match[2]
 			return expression
@@ -1470,7 +1546,7 @@ func (p *Pack) evaluatedDynamicS3Prefix(prefix string, now time.Time, partitionK
 		return value
 	})
 	if missing != "" {
-		return "", errors.New("missing Lambda partition key: " + missing)
+		return "", errors.New("missing partition key: " + missing)
 	}
 	return p.evaluatedS3Prefix(prefix, now), nil
 }

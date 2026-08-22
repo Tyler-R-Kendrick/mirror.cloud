@@ -1032,7 +1032,7 @@ def lambda_handler(event, context):
 	}
 	body, _ = io.ReadAll(reader)
 	_ = reader.Close()
-	if !strings.Contains(string(body), "missing Lambda partition key: customer") || !strings.Contains(string(body), base64.StdEncoding.EncodeToString([]byte(`{"event":"missing"}`))) {
+	if !strings.Contains(string(body), "missing partition key: customer") || !strings.Contains(string(body), base64.StdEncoding.EncodeToString([]byte(`{"event":"missing"}`))) {
 		t.Fatalf("dynamic partition failure %s", body)
 	}
 	invalidMetadataCode := "import base64, json\ndef lambda_handler(event, context):\n    r = event['records'][0]\n    value = json.loads(base64.b64decode(r['data']))\n    metadata = {} if value['customer'] == 'shape' else {'partitionKeys': {'customer': 1}}\n    return {'records': [{'recordId': r['recordId'], 'result': 'Ok', 'data': r['data'], 'metadata': metadata}]}\n"
@@ -1108,13 +1108,123 @@ def lambda_handler(event, context):
 			t.Fatalf("rejected retry boundary %v: %v", duration, err)
 		}
 	}
-	if err := validatePrefixes("key=!{partitionKeyFromQuery:id}/", "errors/!{firehose:error-output-type}/", true); err == nil {
-		t.Fatal("accepted unsupported inline metadata extraction")
+	if err := validatePrefixes("key=!{partitionKeyFromQuery:id}/", "errors/!{firehose:error-output-type}/", true); err != nil {
+		t.Fatalf("rejected inline metadata prefix: %v", err)
 	}
 	basic := testS3Destination()
 	basic["DynamicPartitioningConfiguration"] = map[string]any{"Enabled": false}
 	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "basic-dynamic", "S3DestinationConfiguration": basic}); err == nil {
 		t.Fatal("accepted dynamic partitioning on a basic S3 destination")
+	}
+}
+
+func TestFirehoseMetadataExtraction(t *testing.T) {
+	deps := spitest.Deps(t)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	p := New(deps)
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	metadata := func(query, engine string) map[string]any {
+		return map[string]any{"Type": "MetadataExtraction", "Parameters": []any{
+			map[string]any{"ParameterName": "MetadataExtractionQuery", "ParameterValue": query},
+			map[string]any{"ParameterName": "JsonParsingEngine", "ParameterValue": engine},
+		}}
+	}
+	query := `{"customer": .customer_id, "year": (.event_timestamp | strftime("%Y")), "active": .active}`
+	processing := map[string]any{"Enabled": true, "Processors": []any{
+		map[string]any{"Type": "RecordDeAggregation", "Parameters": []any{map[string]any{"ParameterName": "SubRecordType", "ParameterValue": "JSON"}}},
+		metadata(query, "JQ-1.6"),
+	}}
+	destination := map[string]any{
+		"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN,
+		"Prefix":            "customer=!{partitionKeyFromQuery:customer}/year=!{partitionKeyFromQuery:year}/active=!{partitionKeyFromQuery:active}/",
+		"ErrorOutputPrefix": "errors/!{firehose:error-output-type}/", "DynamicPartitioningConfiguration": map[string]any{"Enabled": true}, "ProcessingConfiguration": processing,
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "queried", "ExtendedS3DestinationConfiguration": destination}); err != nil {
+		t.Fatal(err)
+	}
+	records := `{"customer_id":"acme","event_timestamp":0,"active":true}{"customer_id":"beta","event_timestamp":31536000,"active":false}`
+	put, err := call("PutRecord", map[string]any{"DeliveryStreamName": "queried", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(records))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordID := put.Output["RecordId"].(string)
+	for _, expected := range []struct {
+		key, body string
+	}{
+		{"customer=acme/year=1970/active=true/1970/01/01/00/queried-1-1970-01-01-00-00-00-" + recordID + ".0", `{"customer_id":"acme","event_timestamp":0,"active":true}`},
+		{"customer=beta/year=1971/active=false/1970/01/01/00/queried-1-1970-01-01-00-00-00-" + recordID + ".1", `{"customer_id":"beta","event_timestamp":31536000,"active":false}`},
+	} {
+		reader, _, err := deps.Blobs.Get(context.Background(), id.Account+"/"+id.Region+"/out/"+expected.key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(reader)
+		_ = reader.Close()
+		if string(body) != expected.body {
+			t.Fatalf("metadata-partitioned body %q", body)
+		}
+	}
+
+	missing, err := call("PutRecord", map[string]any{"DeliveryStreamName": "queried", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"customer_id":null,"event_timestamp":0,"active":true}`))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failureKey := id.Account + "/" + id.Region + "/out/errors/processing-failed/1970/01/01/00/queried-1-1970-01-01-00-00-00-" + missing.Output["RecordId"].(string)
+	reader, _, err := deps.Blobs.Get(context.Background(), failureKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	if !strings.Contains(string(body), "metadata extraction values must be scalar") {
+		t.Fatalf("metadata extraction failure %s", body)
+	}
+
+	if prefix, err := p.evaluatedDynamicS3Prefix("lambda=!{partitionKeyFromLambda:l}/query=!{partitionKeyFromQuery:q}/", deps.Clock.Now(), map[string]string{"l": "L"}, map[string]string{"q": "Q"}); err != nil || !strings.HasPrefix(prefix, "lambda=L/query=Q/") {
+		t.Fatalf("combined partition prefix %q, %v", prefix, err)
+	}
+	if _, err := p.evaluatedDynamicS3Prefix("query=!{partitionKeyFromQuery:q}/", deps.Clock.Now(), nil, nil); err == nil || !strings.Contains(err.Error(), "missing partition key: q") {
+		t.Fatalf("missing query partition key error %v", err)
+	}
+	for _, invalid := range []struct {
+		query, data, message string
+	}{
+		{query, `not json`, "invalid character"},
+		{`empty`, `{"customer_id":"acme"}`, "no result"},
+		{`error("bad query")`, `{"customer_id":"acme"}`, "bad query"},
+		{`.customer_id, .active`, `{"customer_id":"acme","active":true}`, "multiple results"},
+		{`[.customer_id]`, `{"customer_id":"acme"}`, "must return an object"},
+		{`{}`, `{"customer_id":"acme"}`, "must return an object"},
+		{`{"": "value"}`, `{"customer_id":"acme"}`, "must be non-empty"},
+		{`{"key": ""}`, `{"customer_id":"acme"}`, "must be non-empty"},
+	} {
+		if _, err := extractMetadata(metadata(invalid.query, "JQ-1.6"), []byte(invalid.data)); err == nil || !strings.Contains(err.Error(), invalid.message) {
+			t.Errorf("metadata result from %q: %v", invalid.query, err)
+		}
+	}
+	if keys, err := extractMetadata(metadata(`{"number": .number}`, "JQ-1.6"), []byte(`{"number":42}`)); err != nil || keys["number"] != "42" {
+		t.Fatalf("numeric metadata keys %#v, %v", keys, err)
+	}
+
+	validMetadata := metadata(`{"customer": .customer_id}`, "JQ-1.6")
+	extraParameter := metadata(`{"customer": .customer_id}`, "JQ-1.6")
+	extraParameter["Parameters"] = append(extraParameter["Parameters"].([]any), map[string]any{"ParameterName": "RoleArn", "ParameterValue": testRoleARN})
+	for i, invalid := range []map[string]any{
+		{"ProcessingConfiguration": map[string]any{"Enabled": true, "Processors": []any{validMetadata}}},
+		{"DynamicPartitioningConfiguration": map[string]any{"Enabled": true}, "Prefix": "key=!{partitionKeyFromQuery:customer}/", "ErrorOutputPrefix": destination["ErrorOutputPrefix"]},
+		{"DynamicPartitioningConfiguration": map[string]any{"Enabled": true}, "Prefix": "key=!{partitionKeyFromQuery:customer}/", "ErrorOutputPrefix": destination["ErrorOutputPrefix"], "ProcessingConfiguration": map[string]any{"Enabled": true, "Processors": []any{metadata(`{`, "JQ-1.6")}}},
+		{"DynamicPartitioningConfiguration": map[string]any{"Enabled": true}, "Prefix": "key=!{partitionKeyFromQuery:customer}/", "ErrorOutputPrefix": destination["ErrorOutputPrefix"], "ProcessingConfiguration": map[string]any{"Enabled": true, "Processors": []any{metadata(`unknown_function`, "JQ-1.6")}}},
+		{"DynamicPartitioningConfiguration": map[string]any{"Enabled": true}, "Prefix": "key=!{partitionKeyFromQuery:customer}/", "ErrorOutputPrefix": destination["ErrorOutputPrefix"], "ProcessingConfiguration": map[string]any{"Enabled": true, "Processors": []any{metadata(`{"customer": .customer_id}`, "JQ-1.5")}}},
+		{"DynamicPartitioningConfiguration": map[string]any{"Enabled": true}, "Prefix": "key=!{partitionKeyFromQuery:customer}/", "ErrorOutputPrefix": destination["ErrorOutputPrefix"], "ProcessingConfiguration": map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "MetadataExtraction", "Parameters": []any{map[string]any{"ParameterName": "JsonParsingEngine", "ParameterValue": "JQ-1.6"}}}}}},
+		{"DynamicPartitioningConfiguration": map[string]any{"Enabled": true}, "Prefix": "key=!{partitionKeyFromQuery:customer}/", "ErrorOutputPrefix": destination["ErrorOutputPrefix"], "ProcessingConfiguration": map[string]any{"Enabled": true, "Processors": []any{extraParameter}}},
+	} {
+		candidate := testS3Destination()
+		maps.Copy(candidate, invalid)
+		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": fmt.Sprintf("invalid-metadata-%d", i), "ExtendedS3DestinationConfiguration": candidate}); err == nil {
+			t.Errorf("accepted invalid metadata configuration %#v", invalid)
+		}
 	}
 }
 

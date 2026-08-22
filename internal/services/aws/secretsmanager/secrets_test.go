@@ -12,11 +12,11 @@ func TestCreateGetDeleteRestore(t *testing.T) {
 	p := &Pack{deps: spitest.Deps(t)}
 	ctx := context.Background()
 	id := spi.Identity{Account: "a", Region: "r"}
-	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSecret", Input: map[string]any{"Name": "n", "SecretString": "v"}})
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSecret", Input: map[string]any{"Name": "n", "SecretString": "v"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetSecretValue", Input: map[string]any{"SecretId": "n"}})
+	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetSecretValue", Input: map[string]any{"SecretId": created.Output["ARN"]}})
 	if err != nil {
 		t.Fatal(err)
 	}

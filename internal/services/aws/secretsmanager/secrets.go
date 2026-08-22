@@ -4,6 +4,7 @@ package secretsmanager
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
@@ -40,6 +41,9 @@ func (p *Pack) col(req *spi.Request) spi.Collection {
 
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	name := first(req.Input, "Name", "SecretId")
+	if i := strings.LastIndex(name, ":secret:"); i >= 0 {
+		name = name[i+8:]
+	}
 	arn := "arn:aws:secretsmanager:" + req.Identity.Region + ":" + req.Identity.Account + ":secret:" + name
 	switch req.Operation {
 	case "CreateSecret", "PutSecretValue", "UpdateSecret":

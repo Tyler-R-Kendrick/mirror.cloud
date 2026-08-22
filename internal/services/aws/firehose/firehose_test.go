@@ -298,6 +298,14 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	}}); err == nil {
 		t.Fatal("accepted unsupported ZIP compression")
 	}
+	if err := validatePrefixes(strings.Repeat("p", 1024), strings.Repeat("e", 1024)); err != nil {
+		t.Fatalf("rejected maximum-length prefixes: %v", err)
+	}
+	for _, prefixes := range [][2]string{{strings.Repeat("p", 1025), ""}, {"", strings.Repeat("e", 1025)}} {
+		if err := validatePrefixes(prefixes[0], prefixes[1]); err == nil {
+			t.Fatal("accepted oversized prefix")
+		}
+	}
 }
 
 func TestFirehoseControlPlaneAndBatch(t *testing.T) {

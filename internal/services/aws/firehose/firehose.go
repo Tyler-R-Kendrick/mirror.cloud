@@ -678,6 +678,9 @@ func validRoleARN(arn string) bool {
 }
 
 func validatePrefixes(prefix, errorPrefix string) error {
+	if len(prefix) > 1024 || len(errorPrefix) > 1024 {
+		return &spi.Fault{Code: "ValidationException", Message: "Prefix is too long.", HTTPStatus: 400, Fault: "client"}
+	}
 	if strings.Contains(prefix, "!{") && errorPrefix == "" {
 		return &spi.Fault{Code: "ValidationException", Message: "ErrorOutputPrefix is required when Prefix contains expressions.", HTTPStatus: 400, Fault: "client"}
 	}

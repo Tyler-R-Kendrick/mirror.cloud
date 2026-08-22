@@ -270,9 +270,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			extended, _ := rec["ExtendedS3DestinationConfiguration"].(map[string]any)
 			backupEnabled := first(extended, "S3BackupMode") == "Enabled"
+			dynamicEnabled := dynamicPartitioningEnabled(extended)
 			copyDest(rec, req.Input, "Update")
 			extended, _ = rec["ExtendedS3DestinationConfiguration"].(map[string]any)
 			if backupEnabled && first(extended, "S3BackupMode") != "Enabled" {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			if dynamicEnabled != dynamicPartitioningEnabled(extended) {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			if err := validateDestination(rec, req.Identity.Region); err != nil {
@@ -465,7 +469,15 @@ func copyDest(rec, in map[string]any, suffix string) {
 		if destination == nil {
 			destination = map[string]any{}
 		}
+		dynamic, _ := destination["DynamicPartitioningConfiguration"].(map[string]any)
 		maps.Copy(destination, patch)
+		if dynamicPatch, ok := patch["DynamicPartitioningConfiguration"].(map[string]any); ok {
+			if dynamic == nil {
+				dynamic = map[string]any{}
+			}
+			maps.Copy(dynamic, dynamicPatch)
+			destination["DynamicPartitioningConfiguration"] = dynamic
+		}
 		if backupPatch, ok := patch["S3BackupUpdate"].(map[string]any); ok {
 			backup, _ := destination["S3BackupConfiguration"].(map[string]any)
 			if backup == nil {
@@ -527,6 +539,9 @@ func describeS3Configuration(configuration map[string]any) {
 	}
 	if configuration["EncryptionConfiguration"] == nil {
 		configuration["EncryptionConfiguration"] = map[string]any{"NoEncryptionConfig": "NoEncryption"}
+	}
+	if dynamic, ok := configuration["DynamicPartitioningConfiguration"].(map[string]any); ok && dynamic["RetryOptions"] == nil {
+		dynamic["RetryOptions"] = map[string]any{"DurationInSeconds": 300}
 	}
 }
 
@@ -746,7 +761,11 @@ func validateS3Configuration(destination map[string]any, region string, processi
 	}
 	prefix, errorPrefix := first(destination, "Prefix"), first(destination, "ErrorOutputPrefix")
 	timezone, extension, compression := first(destination, "CustomTimeZone"), first(destination, "FileExtension"), first(destination, "CompressionFormat")
-	if err := validatePrefixes(prefix, errorPrefix); err != nil {
+	dynamic, err := validateDynamicPartitioning(destination, processingAllowed)
+	if err != nil {
+		return err
+	}
+	if err := validatePrefixes(prefix, errorPrefix, dynamic); err != nil {
 		return err
 	}
 	if timezone != "" {
@@ -764,6 +783,60 @@ func validateS3Configuration(destination map[string]any, region string, processi
 		return spi.NotImplemented("aws.firehose", "CompressionFormat="+compression, "emulate")
 	}
 	return nil
+}
+
+func validateDynamicPartitioning(destination map[string]any, allowed bool) (bool, error) {
+	raw, exists := destination["DynamicPartitioningConfiguration"]
+	if !exists {
+		return false, nil
+	}
+	configuration, ok := raw.(map[string]any)
+	if !allowed || !ok {
+		return false, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	enabled := false
+	if value, exists := configuration["Enabled"]; exists {
+		enabled, ok = value.(bool)
+		if !ok {
+			return false, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	if rawRetry, exists := configuration["RetryOptions"]; exists {
+		retry, ok := rawRetry.(map[string]any)
+		if !ok {
+			return false, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if value, exists := retry["DurationInSeconds"]; exists {
+			if _, valid := inputInteger(value, 0, 7200); !valid {
+				return false, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+	}
+	prefix := first(destination, "Prefix")
+	if enabled && (first(destination, "ErrorOutputPrefix") == "" || !strings.Contains(prefix, "!{partitionKeyFrom")) {
+		return false, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if strings.Contains(prefix, "!{partitionKeyFromLambda:") && !hasProcessor(destination, "Lambda") {
+		return false, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	return enabled, nil
+}
+
+func dynamicPartitioningEnabled(destination map[string]any) bool {
+	configuration, _ := destination["DynamicPartitioningConfiguration"].(map[string]any)
+	return configuration["Enabled"] == true
+}
+
+func hasProcessor(destination map[string]any, typeName string) bool {
+	processing, _ := destination["ProcessingConfiguration"].(map[string]any)
+	processors, _ := processing["Processors"].([]any)
+	for _, raw := range processors {
+		processor, _ := raw.(map[string]any)
+		if first(processor, "Type") == typeName {
+			return processing["Enabled"] == true
+		}
+	}
+	return false
 }
 
 func validateCloudWatchLogging(raw any) error {
@@ -952,7 +1025,8 @@ func validRoleARN(arn string) bool {
 	return len(arn) <= 512 && firehoseRoleARN.MatchString(arn)
 }
 
-func validatePrefixes(prefix, errorPrefix string) error {
+func validatePrefixes(prefix, errorPrefix string, dynamicConfig ...bool) error {
+	dynamic := len(dynamicConfig) == 1 && dynamicConfig[0]
 	if len(prefix) > 1024 || len(errorPrefix) > 1024 {
 		return &spi.Fault{Code: "ValidationException", Message: "Prefix is too long.", HTTPStatus: 400, Fault: "client"}
 	}
@@ -975,11 +1049,11 @@ func validatePrefixes(prefix, errorPrefix string) error {
 			case namespace == "firehose" && value == "random-string":
 			case namespace == "firehose" && value == "error-output-type" && candidate.errorPrefix:
 				hasErrorType = true
-			case namespace == "partitionKeyFromQuery" || namespace == "partitionKeyFromLambda":
-				if candidate.errorPrefix {
-					return &spi.Fault{Code: "ValidationException", Message: "Dynamic partitioning is invalid in ErrorOutputPrefix.", HTTPStatus: 400, Fault: "client"}
-				}
-				return spi.NotImplemented("aws.firehose", "dynamic partitioning", "emulate")
+			case namespace == "partitionKeyFromLambda" && dynamic && value != "" && !candidate.errorPrefix:
+			case namespace == "partitionKeyFromQuery" && dynamic && value != "" && !candidate.errorPrefix:
+				return spi.NotImplemented("aws.firehose", "MetadataExtraction", "emulate")
+			case (namespace == "partitionKeyFromLambda" || namespace == "partitionKeyFromQuery") && candidate.errorPrefix:
+				return &spi.Fault{Code: "ValidationException", Message: "Dynamic partitioning is invalid in ErrorOutputPrefix.", HTTPStatus: 400, Fault: "client"}
 			default:
 				return &spi.Fault{Code: "ValidationException", Message: "Prefix expression is invalid.", HTTPStatus: 400, Fault: "client"}
 			}
@@ -1037,38 +1111,54 @@ func (p *Pack) deliverS3Configuration(ctx context.Context, req *spi.Request, con
 		location, _ := time.LoadLocation(timezone)
 		now = now.In(location)
 	}
-	processed, deliver, failures := p.processData(ctx, req, configuration, stream, recID, data, now)
+	records, failures := p.processData(ctx, req, configuration, stream, recID, data, now)
 	for _, failure := range failures {
 		p.logDeliveryError(ctx, req, configuration, stream, failure.message, now)
 		p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)
 	}
-	if !deliver {
+	if len(records) == 0 {
 		return
 	}
-	data = processed
-	switch compression {
-	case "GZIP":
-		var compressed bytes.Buffer
-		writer := gzip.NewWriter(&compressed)
-		_, _ = writer.Write(data)
-		_ = writer.Close()
-		data = compressed.Bytes()
-		if extension == "" {
-			extension = ".gz"
+	if !dynamicPartitioningEnabled(configuration) {
+		var combined bytes.Buffer
+		for _, record := range records {
+			combined.Write(record.data)
 		}
-	case "ZIP":
-		var compressed bytes.Buffer
-		writer := zip.NewWriter(&compressed)
-		entry, _ := writer.Create(stream)
-		_, _ = entry.Write(data)
-		_ = writer.Close()
-		data = compressed.Bytes()
-		if extension == "" {
-			extension = ".zip"
-		}
+		records = []processingRecord{{recID: recID, data: combined.Bytes(), raw: data}}
 	}
-	key := p.evaluatedS3Prefix(prefix, now) + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + recID + extension
-	p.deliverS3Object(ctx, req, bucket, key, kmsARN, data)
+	for _, record := range records {
+		data, recordExtension := record.data, extension
+		switch compression {
+		case "GZIP":
+			var compressed bytes.Buffer
+			writer := gzip.NewWriter(&compressed)
+			_, _ = writer.Write(data)
+			_ = writer.Close()
+			data = compressed.Bytes()
+			if recordExtension == "" {
+				recordExtension = ".gz"
+			}
+		case "ZIP":
+			var compressed bytes.Buffer
+			writer := zip.NewWriter(&compressed)
+			entry, _ := writer.Create(stream)
+			_, _ = entry.Write(data)
+			_ = writer.Close()
+			data = compressed.Bytes()
+			if recordExtension == "" {
+				recordExtension = ".zip"
+			}
+		}
+		evaluatedPrefix, err := p.evaluatedDynamicS3Prefix(prefix, now, record.partitionKeys)
+		if err != nil {
+			failure := &processingFailure{typeName: "processing-failed", code: "DynamicPartitioning.Failed", message: err.Error(), attempts: 1, recID: record.recID, data: record.raw}
+			p.logDeliveryError(ctx, req, configuration, stream, failure.message, now)
+			p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)
+			continue
+		}
+		key := evaluatedPrefix + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + record.recID + recordExtension
+		p.deliverS3Object(ctx, req, bucket, key, kmsARN, data)
+	}
 }
 
 func (p *Pack) logDeliveryError(ctx context.Context, req *spi.Request, configuration map[string]any, stream, message string, now time.Time) {
@@ -1091,15 +1181,16 @@ type processingFailure struct {
 }
 
 type processingRecord struct {
-	recID string
-	data  []byte
-	raw   []byte
+	recID         string
+	data          []byte
+	raw           []byte
+	partitionKeys map[string]string
 }
 
-func (p *Pack) processData(ctx context.Context, req *spi.Request, configuration map[string]any, stream, recID string, data []byte, now time.Time) ([]byte, bool, []*processingFailure) {
+func (p *Pack) processData(ctx context.Context, req *spi.Request, configuration map[string]any, stream, recID string, data []byte, now time.Time) ([]processingRecord, []*processingFailure) {
 	processing, _ := configuration["ProcessingConfiguration"].(map[string]any)
 	if processing["Enabled"] != true {
-		return data, true, nil
+		return []processingRecord{{recID: recID, data: data, raw: data}}, nil
 	}
 	records := []processingRecord{{recID: recID, data: data, raw: data}}
 	var failures []*processingFailure
@@ -1177,24 +1268,21 @@ func (p *Pack) processData(ctx context.Context, req *spi.Request, configuration 
 		case "Lambda":
 			var next []processingRecord
 			for _, record := range records {
-				transformed, deliver, message, attempts := p.invokeProcessingLambda(ctx, req, processor, stream, record.recID, record.data, now)
+				transformed, partitionKeys, deliver, message, attempts := p.invokeProcessingLambda(ctx, req, processor, stream, record.recID, record.data, now)
 				if message != "" {
 					failures = append(failures, &processingFailure{typeName: "processing-failed", code: "Lambda.ProcessingFailed", message: message, lambdaARN: processorParameter(processor, "LambdaArn"), attempts: attempts, recID: record.recID, data: record.raw})
 					continue
 				}
 				if deliver {
 					record.data = transformed
+					record.partitionKeys = partitionKeys
 					next = append(next, record)
 				}
 			}
 			records = next
 		}
 	}
-	var processed bytes.Buffer
-	for _, record := range records {
-		processed.Write(record.data)
-	}
-	return processed.Bytes(), len(records) > 0, failures
+	return records, failures
 }
 
 func deaggregateData(processor map[string]any, data []byte) ([][]byte, error) {
@@ -1230,7 +1318,7 @@ func deaggregateData(processor map[string]any, data []byte) ([][]byte, error) {
 	}
 }
 
-func (p *Pack) invokeProcessingLambda(ctx context.Context, req *spi.Request, processor map[string]any, stream, recID string, data []byte, now time.Time) ([]byte, bool, string, int) {
+func (p *Pack) invokeProcessingLambda(ctx context.Context, req *spi.Request, processor map[string]any, stream, recID string, data []byte, now time.Time) ([]byte, map[string]string, bool, string, int) {
 	arn := processorParameter(processor, "LambdaArn")
 	name := arn[strings.Index(arn, ":function:")+len(":function:"):]
 	if index := strings.IndexByte(name, ':'); index >= 0 {
@@ -1255,31 +1343,47 @@ func (p *Pack) invokeProcessingLambda(ctx context.Context, req *spi.Request, pro
 		}
 	}
 	if err != nil {
-		return nil, false, err.Error(), attempts
+		return nil, nil, false, err.Error(), attempts
 	}
 	raw, _ := response.Output["Payload"].(json.RawMessage)
 	var output map[string]any
 	if json.Unmarshal(raw, &output) != nil {
-		return nil, false, "Lambda returned an invalid response.", attempts
+		return nil, nil, false, "Lambda returned an invalid response.", attempts
 	}
 	records, ok := output["records"].([]any)
 	if !ok || len(records) != 1 {
-		return nil, false, "Lambda returned an invalid record count.", attempts
+		return nil, nil, false, "Lambda returned an invalid record count.", attempts
 	}
 	record, ok := records[0].(map[string]any)
 	decoded, decodeErr := base64.StdEncoding.DecodeString(first(record, "data"))
 	if !ok || first(record, "recordId") != recID || decodeErr != nil {
-		return nil, false, "Lambda returned an invalid record.", attempts
+		return nil, nil, false, "Lambda returned an invalid record.", attempts
+	}
+	partitionKeys := map[string]string{}
+	if rawMetadata, exists := record["metadata"]; exists {
+		metadata, ok := rawMetadata.(map[string]any)
+		rawKeys, keysExist := metadata["partitionKeys"]
+		keys, keysOK := rawKeys.(map[string]any)
+		if !ok || !keysExist || !keysOK {
+			return nil, nil, false, "Lambda returned invalid partition keys.", attempts
+		}
+		for key, rawValue := range keys {
+			value, ok := rawValue.(string)
+			if !ok || key == "" || value == "" {
+				return nil, nil, false, "Lambda returned invalid partition keys.", attempts
+			}
+			partitionKeys[key] = value
+		}
 	}
 	switch first(record, "result") {
 	case "Ok":
-		return decoded, true, "", attempts
+		return decoded, partitionKeys, true, "", attempts
 	case "Dropped":
-		return nil, false, "", attempts
+		return nil, nil, false, "", attempts
 	case "ProcessingFailed":
-		return nil, false, "Lambda processing failed.", attempts
+		return nil, nil, false, "Lambda processing failed.", attempts
 	default:
-		return nil, false, "Lambda returned an invalid result.", attempts
+		return nil, nil, false, "Lambda returned an invalid result.", attempts
 	}
 }
 
@@ -1349,6 +1453,26 @@ func (p *Pack) evaluatedS3Prefix(prefix string, now time.Time) string {
 		prefix = strings.Replace(prefix, "!{firehose:random-string}", p.deps.Rand.Hex(11), 1)
 	}
 	return prefix
+}
+
+func (p *Pack) evaluatedDynamicS3Prefix(prefix string, now time.Time, partitionKeys map[string]string) (string, error) {
+	missing := ""
+	prefix = firehosePrefixExpression.ReplaceAllStringFunc(prefix, func(expression string) string {
+		match := firehosePrefixExpression.FindStringSubmatch(expression)
+		if match[1] != "partitionKeyFromLambda" {
+			return expression
+		}
+		value, ok := partitionKeys[match[2]]
+		if !ok {
+			missing = match[2]
+			return expression
+		}
+		return value
+	})
+	if missing != "" {
+		return "", errors.New("missing Lambda partition key: " + missing)
+	}
+	return p.evaluatedS3Prefix(prefix, now), nil
 }
 
 func first(in map[string]any, keys ...string) string {

@@ -543,6 +543,12 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if vid := str(meta["versionId"]); vid != "" {
 		h.Set("x-amz-version-id", vid)
 	}
+	if encryption := str(meta["serverSideEncryption"]); encryption != "" {
+		h.Set("x-amz-server-side-encryption", encryption)
+	}
+	if keyID := str(meta["ssekmsKeyId"]); keyID != "" {
+		h.Set("x-amz-server-side-encryption-aws-kms-key-id", keyID)
+	}
 	setReplicationHeaders(h, meta)
 	data, _ := io.ReadAll(rc)
 	_ = rc.Close()

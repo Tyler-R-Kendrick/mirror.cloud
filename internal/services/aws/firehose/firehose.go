@@ -113,7 +113,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			rec["DirectPutSourceConfiguration"] = maps.Clone(directPutSource)
 		}
 		copyDest(rec, req.Input, "Configuration")
-		if err := validateDestination(rec); err != nil {
+		if err := validateDestination(rec, req.Identity.Region); err != nil {
 			return nil, err
 		}
 		encryption, valid := encryptionDescription(req.Input["DeliveryStreamEncryptionConfigurationInput"], false)
@@ -264,7 +264,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				return &spi.Fault{Code: "ConcurrentModificationException", HTTPStatus: 400, Fault: "client"}
 			}
 			copyDest(rec, req.Input, "Update")
-			if err := validateDestination(rec); err != nil {
+			if err := validateDestination(rec, req.Identity.Region); err != nil {
 				return err
 			}
 			version, _ := strconv.Atoi(current)
@@ -611,7 +611,7 @@ func putTagsTx(tx spi.Tx, key string, tags map[string]string) error {
 	return tx.Put(key, b)
 }
 
-func s3Dest(rec map[string]any) (bucket, prefix, errorPrefix, timezone, extension, compression string) {
+func s3Dest(rec map[string]any) (bucket, prefix, errorPrefix, timezone, extension, compression, kmsARN string) {
 	for _, k := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration"} {
 		m, _ := rec[k].(map[string]any)
 		if m == nil {
@@ -627,12 +627,15 @@ func s3Dest(rec map[string]any) (bucket, prefix, errorPrefix, timezone, extensio
 		timezone = first(m, "CustomTimeZone")
 		extension = first(m, "FileExtension")
 		compression = first(m, "CompressionFormat")
-		return bucket, prefix, errorPrefix, timezone, extension, compression
+		encryption, _ := m["EncryptionConfiguration"].(map[string]any)
+		kms, _ := encryption["KMSEncryptionConfig"].(map[string]any)
+		kmsARN = first(kms, "AWSKMSKeyARN")
+		return bucket, prefix, errorPrefix, timezone, extension, compression, kmsARN
 	}
-	return "", "", "", "", "", ""
+	return "", "", "", "", "", "", ""
 }
 
-func validateDestination(rec map[string]any) error {
+func validateDestination(rec map[string]any, region string) error {
 	count := 0
 	var destination map[string]any
 	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration"} {
@@ -664,7 +667,22 @@ func validateDestination(rec map[string]any) error {
 			}
 		}
 	}
-	_, prefix, errorPrefix, timezone, extension, compression := s3Dest(rec)
+	if raw, exists := destination["EncryptionConfiguration"]; exists {
+		encryption, ok := raw.(map[string]any)
+		noEncryption, noEncryptionOK := encryption["NoEncryptionConfig"].(string)
+		kmsRaw, kmsOK := encryption["KMSEncryptionConfig"]
+		if !ok || noEncryptionOK == kmsOK || (noEncryptionOK && noEncryption != "NoEncryption") {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if kmsOK {
+			kms, ok := kmsRaw.(map[string]any)
+			arn := first(kms, "AWSKMSKeyARN")
+			if !ok || len(arn) > 512 || !firehoseDestinationKMSARN.MatchString(arn) || !strings.Contains(arn, ":kms:"+region+":") {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+	}
+	_, prefix, errorPrefix, timezone, extension, compression, _ := s3Dest(rec)
 	if err := validatePrefixes(prefix, errorPrefix); err != nil {
 		return err
 	}
@@ -762,7 +780,7 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 	}
 	var rec map[string]any
 	_ = json.Unmarshal(raw, &rec)
-	bucket, prefix, _, timezone, extension, compression := s3Dest(rec)
+	bucket, prefix, _, timezone, extension, compression, kmsARN := s3Dest(rec)
 	if bucket == "" {
 		return
 	}
@@ -792,22 +810,28 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 	}
 	etag := `"` + info.MD5 + `"`
 	mtime := p.deps.Clock.Now().UTC().Format(http.TimeFormat)
-	meta, _ := json.Marshal(map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "deleteMarker": false})
+	metadata := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "deleteMarker": false}
+	if kmsARN != "" {
+		metadata["serverSideEncryption"] = "aws:kms"
+		metadata["ssekmsKeyId"] = kmsARN
+	}
+	meta, _ := json.Marshal(metadata)
 	_ = p.col(req, "objects").Put(ctx, bucket+"/"+key, meta)
 }
 
 var (
-	firehoseTimestampPrefix  = regexp.MustCompile(`!\{timestamp:([^}]*)\}`)
-	firehosePrefixExpression = regexp.MustCompile(`!\{([^}:]+):([^}]*)\}`)
-	firehoseFileExtension    = regexp.MustCompile(`^\.[0-9a-z!\-_.*'()]+$`)
-	firehoseStreamName       = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
-	firehoseTagKey           = regexp.MustCompile(`^[\p{L}\p{Z}\p{N}_.:/=+\-@%]+$`)
-	firehoseTagValue         = regexp.MustCompile(`^[\p{L}\p{Z}\p{N}_.:/=+\-@%]*$`)
-	firehoseKMSKeyARN        = regexp.MustCompile(`^arn:[^:]+:kms:[a-zA-Z0-9\-]+:\d{12}:key/[a-zA-Z_0-9+=,.@\-_/]+$`)
-	firehoseBucketARN        = regexp.MustCompile(`^arn:.*:s3:::[\w.\-]{1,255}$`)
-	firehoseRoleARN          = regexp.MustCompile(`^arn:.*:iam::\d{12}:role/[a-zA-Z_0-9+=,.@\-_/]+$`)
-	firehoseKinesisStreamARN = regexp.MustCompile(`^arn:.*:kinesis:[a-zA-Z0-9\-]+:\d{12}:stream/[a-zA-Z0-9_.-]+$`)
-	firehoseDestinationID    = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
+	firehoseTimestampPrefix   = regexp.MustCompile(`!\{timestamp:([^}]*)\}`)
+	firehosePrefixExpression  = regexp.MustCompile(`!\{([^}:]+):([^}]*)\}`)
+	firehoseFileExtension     = regexp.MustCompile(`^\.[0-9a-z!\-_.*'()]+$`)
+	firehoseStreamName        = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
+	firehoseTagKey            = regexp.MustCompile(`^[\p{L}\p{Z}\p{N}_.:/=+\-@%]+$`)
+	firehoseTagValue          = regexp.MustCompile(`^[\p{L}\p{Z}\p{N}_.:/=+\-@%]*$`)
+	firehoseKMSKeyARN         = regexp.MustCompile(`^arn:[^:]+:kms:[a-zA-Z0-9\-]+:\d{12}:key/[a-zA-Z_0-9+=,.@\-_/]+$`)
+	firehoseDestinationKMSARN = regexp.MustCompile(`^arn:.*:kms:[a-zA-Z0-9\-]+:\d{12}:(key|alias)/[a-zA-Z_0-9+=,.@\-_/]+$`)
+	firehoseBucketARN         = regexp.MustCompile(`^arn:.*:s3:::[\w.\-]{1,255}$`)
+	firehoseRoleARN           = regexp.MustCompile(`^arn:.*:iam::\d{12}:role/[a-zA-Z_0-9+=,.@\-_/]+$`)
+	firehoseKinesisStreamARN  = regexp.MustCompile(`^arn:.*:kinesis:[a-zA-Z0-9\-]+:\d{12}:stream/[a-zA-Z0-9_.-]+$`)
+	firehoseDestinationID     = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 )
 
 func (p *Pack) evaluatedS3Prefix(prefix string, now time.Time) string {

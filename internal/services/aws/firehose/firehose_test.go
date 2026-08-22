@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -131,7 +132,7 @@ func TestBootedServerFirehoseDeliversToS3(t *testing.T) {
 		_ = json.Unmarshal(raw, &out)
 		return out
 	}
-	s3 := func(method, path, body string) (int, []byte) {
+	s3 := func(method, path, body string) (int, []byte, http.Header) {
 		t.Helper()
 		req, _ := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
 		req.Header.Set("Authorization", s3Auth)
@@ -141,30 +142,34 @@ func TestBootedServerFirehoseDeliversToS3(t *testing.T) {
 		}
 		raw, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		return res.StatusCode, raw
+		return res.StatusCode, raw, res.Header
 	}
-	if code, b := s3(http.MethodPut, "/fhout", ""); code >= 300 {
+	if code, b, _ := s3(http.MethodPut, "/fhout", ""); code >= 300 {
 		t.Fatalf("bucket %d %s", code, b)
 	}
-	call("CreateDeliveryStream", `{"DeliveryStreamName":"ds1","S3DestinationConfiguration":{"RoleARN":"arn:aws:iam::000000000000:role/fh","BucketARN":"arn:aws:s3:::fhout","Prefix":"fh/"}}`)
+	kmsARN := "arn:aws:kms:us-east-1:000000000000:key/firehose"
+	call("CreateDeliveryStream", `{"DeliveryStreamName":"ds1","S3DestinationConfiguration":{"RoleARN":"arn:aws:iam::000000000000:role/fh","BucketARN":"arn:aws:s3:::fhout","Prefix":"fh/","EncryptionConfiguration":{"KMSEncryptionConfig":{"AWSKMSKeyARN":"`+kmsARN+`"}}}}`)
 	data := base64.StdEncoding.EncodeToString([]byte("hello-firehose"))
 	put := call("PutRecord", `{"DeliveryStreamName":"ds1","Record":{"Data":"`+data+`"}}`)
 	id, _ := put["RecordId"].(string)
 	if id == "" {
 		t.Fatalf("put %v", put)
 	}
-	code, listed := s3(http.MethodGet, "/fhout?list-type=2&prefix=fh/", "")
+	code, listed, _ := s3(http.MethodGet, "/fhout?list-type=2&prefix=fh/", "")
 	start, end := strings.Index(string(listed), "<Key>"), strings.Index(string(listed), "</Key>")
 	if code >= 300 || start < 0 || end < start {
 		t.Fatalf("list objects %d %s", code, listed)
 	}
 	key := string(listed)[start+len("<Key>") : end]
-	code, body := s3(http.MethodGet, "/fhout/"+key, "")
+	code, body, headers := s3(http.MethodGet, "/fhout/"+key, "")
 	if code >= 300 {
 		t.Fatalf("get object %d %s", code, body)
 	}
 	if string(body) != "hello-firehose" {
 		t.Fatalf("s3 body %q", body)
+	}
+	if headers.Get("x-amz-server-side-encryption") != "aws:kms" || headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != kmsARN {
+		t.Fatalf("S3 encryption headers %#v", headers)
 	}
 }
 
@@ -941,6 +946,55 @@ func TestFirehoseDestinationDescriptionDefaults(t *testing.T) {
 		encryption := description["EncryptionConfiguration"].(map[string]any)
 		if hints["IntervalInSeconds"] != 300 || hints["SizeInMBs"] != 5 || description["CompressionFormat"] != "UNCOMPRESSED" || encryption["NoEncryptionConfig"] != "NoEncryption" {
 			t.Errorf("%s defaults %#v", test.name, description)
+		}
+	}
+}
+
+func TestFirehoseDestinationEncryption(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(name string, encryption any) (*spi.Response, error) {
+		t.Helper()
+		destination := testS3Destination()
+		destination["EncryptionConfiguration"] = encryption
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+			"DeliveryStreamName": name, "S3DestinationConfiguration": destination,
+		}})
+	}
+
+	for _, test := range []struct {
+		name       string
+		encryption map[string]any
+	}{
+		{"unencrypted", map[string]any{"NoEncryptionConfig": "NoEncryption"}},
+		{"kms-alias", map[string]any{"KMSEncryptionConfig": map[string]any{"AWSKMSKeyARN": "arn:aws:kms:us-east-1:123456789012:alias/firehose"}}},
+	} {
+		if _, err := call(test.name, test.encryption); err != nil {
+			t.Fatal(err)
+		}
+		response, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "DescribeDeliveryStream", Input: map[string]any{"DeliveryStreamName": test.name}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		described := response.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["S3DestinationDescription"].(map[string]any)["EncryptionConfiguration"]
+		if !reflect.DeepEqual(described, test.encryption) {
+			t.Errorf("%s encryption %#v", test.name, described)
+		}
+	}
+
+	for i, encryption := range []any{
+		"invalid",
+		map[string]any{},
+		map[string]any{"NoEncryptionConfig": "invalid"},
+		map[string]any{"NoEncryptionConfig": "NoEncryption", "KMSEncryptionConfig": map[string]any{"AWSKMSKeyARN": "arn:aws:kms:us-east-1:123456789012:key/firehose"}},
+		map[string]any{"KMSEncryptionConfig": "invalid"},
+		map[string]any{"KMSEncryptionConfig": map[string]any{}},
+		map[string]any{"KMSEncryptionConfig": map[string]any{"AWSKMSKeyARN": "key"}},
+		map[string]any{"KMSEncryptionConfig": map[string]any{"AWSKMSKeyARN": "arn:aws:kms:us-west-2:123456789012:key/firehose"}},
+		map[string]any{"KMSEncryptionConfig": map[string]any{"AWSKMSKeyARN": "arn:aws:kms:us-east-1:123456789012:key/" + strings.Repeat("a", 480)}},
+	} {
+		if _, err := call(fmt.Sprintf("invalid-encryption-%d", i), encryption); err == nil {
+			t.Errorf("accepted invalid destination encryption %#v", encryption)
 		}
 	}
 }

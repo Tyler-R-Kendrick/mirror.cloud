@@ -248,7 +248,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-accept-invalid-list-limit",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `return limit, limit >= 1 && limit <= maximum`,
+			old:  `return limit, limit >= minimum && limit <= maximum`,
 			new:  `return limit, true`,
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseListDeliveryStreamsPagination",
@@ -472,8 +472,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-accept-multiple-create-destinations",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `if count != 1 || len(first(destination, "BucketARN")) > 2048 ||`,
-			new:  `if false || len(first(destination, "BucketARN")) > 2048 ||`,
+			old:  `if count != 1 {`,
+			new:  `if false {`,
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseCreateConfiguration",
 		},

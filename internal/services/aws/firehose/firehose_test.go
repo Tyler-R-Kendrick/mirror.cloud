@@ -328,7 +328,7 @@ func TestFirehoseControlPlaneAndBatch(t *testing.T) {
 		t.Fatal("created unnamed stream")
 	}
 	for _, name := range []string{"bad/name", strings.Repeat("a", 65)} {
-		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": name}); err == nil {
+		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": name, "S3DestinationConfiguration": testS3Destination()}); err == nil {
 			t.Fatalf("created invalid stream %q", name)
 		}
 	}
@@ -806,6 +806,12 @@ func TestFirehoseCreateConfiguration(t *testing.T) {
 	source := description["Source"].(map[string]any)["KinesisStreamSourceDescription"].(map[string]any)
 	if source["KinesisStreamARN"] != testKinesisSource()["KinesisStreamARN"] || source["RoleARN"] != testRoleARN || source["DeliveryStartTimestamp"] != float64(0) || description["KinesisStreamSourceConfiguration"] != nil {
 		t.Fatalf("source description %#v", description)
+	}
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "source", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
+		"ExtendedS3DestinationUpdate": testS3Destination(),
+	}); err == nil {
+		t.Fatal("changed destination type")
 	}
 
 	for _, test := range []struct {

@@ -758,6 +758,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFirehoseDatabaseSourceConfiguration",
 		},
 		{
+			name: "firehose-allow-direct-put-on-source-stream",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `return first(rec, "DeliveryStreamType") == "DirectPut"`,
+			new:  `return true`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseRejectsDirectPutForSourceStreams",
+		},
+		{
 			name: "firehose-drop-direct-put-source",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 			old:  `if directPutSource != nil {`,

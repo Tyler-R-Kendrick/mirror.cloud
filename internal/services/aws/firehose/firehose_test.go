@@ -20,6 +20,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
@@ -473,7 +474,15 @@ func TestFirehoseLambdaProcessing(t *testing.T) {
 	}
 	deps := spitest.Deps(t)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-	p, function := New(deps), lambda.New(deps)
+	p, function, logService := New(deps), lambda.New(deps), logs.New(deps)
+	for operation, input := range map[string]map[string]any{
+		"CreateLogGroup":  {"logGroupName": "firehose"},
+		"CreateLogStream": {"logGroupName": "firehose", "logStreamName": "errors"},
+	} {
+		if _, err := logService.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	code := `import base64
 def lambda_handler(event, context):
     assert event['deliveryStreamArn'].endswith('/transformed') and event['region'] == 'us-east-1' and event['invocationId']
@@ -503,6 +512,7 @@ def lambda_handler(event, context):
 	if _, err := call("CreateDeliveryStream", map[string]any{
 		"DeliveryStreamName": "transformed", "ExtendedS3DestinationConfiguration": map[string]any{
 			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "success/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/", "ProcessingConfiguration": processing,
+			"CloudWatchLoggingOptions": map[string]any{"Enabled": true, "LogGroupName": "firehose", "LogStreamName": "errors"},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -544,6 +554,14 @@ def lambda_handler(event, context):
 	var failure map[string]any
 	if json.Unmarshal(failureBody, &failure) != nil || failure["attemptsMade"] != "1" || failure["rawData"] != base64.StdEncoding.EncodeToString([]byte("fail")) || failure["lambdaArn"] != lambdaARN {
 		t.Fatalf("Lambda processing failure %s", failureBody)
+	}
+	logged, err := logService.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "GetLogEvents", Input: map[string]any{"logGroupName": "firehose", "logStreamName": "errors"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := logged.Output["events"].([]any)
+	if len(events) != 1 || !strings.Contains(events[0].(map[string]any)["message"].(string), "Lambda processing failed") || events[0].(map[string]any)["timestamp"] != float64(0) {
+		t.Fatalf("CloudWatch events %#v", events)
 	}
 	described, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "transformed"})
 	if err != nil {
@@ -591,6 +609,33 @@ def lambda_handler(event, context):
 		destination["ProcessingConfiguration"] = map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "Lambda", "Parameters": parameters}}}
 		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": fmt.Sprintf("invalid-lambda-%d", i), "ExtendedS3DestinationConfiguration": destination}); err == nil {
 			t.Errorf("accepted invalid Lambda parameters %#v", parameters)
+		}
+	}
+}
+
+func TestFirehoseCloudWatchLoggingValidation(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(name string, options any) error {
+		destination := testS3Destination()
+		destination["CloudWatchLoggingOptions"] = options
+		_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{"DeliveryStreamName": name, "S3DestinationConfiguration": destination}})
+		return err
+	}
+	if err := call("logging-disabled", map[string]any{"Enabled": false}); err != nil {
+		t.Fatal(err)
+	}
+	for i, options := range []any{
+		"invalid",
+		map[string]any{"Enabled": "true"},
+		map[string]any{"Enabled": true},
+		map[string]any{"Enabled": true, "LogGroupName": "group", "LogStreamName": 1},
+		map[string]any{"Enabled": true, "LogGroupName": "bad?group", "LogStreamName": "stream"},
+		map[string]any{"Enabled": true, "LogGroupName": "group", "LogStreamName": "bad:stream"},
+		map[string]any{"Enabled": true, "LogGroupName": strings.Repeat("g", 513), "LogStreamName": "stream"},
+	} {
+		if err := call(fmt.Sprintf("invalid-logging-%d", i), options); err == nil {
+			t.Errorf("accepted CloudWatch logging options %#v", options)
 		}
 	}
 }

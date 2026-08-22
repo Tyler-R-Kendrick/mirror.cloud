@@ -22,6 +22,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -700,6 +701,9 @@ func validateS3Configuration(destination map[string]any, region string, processi
 	if len(first(destination, "BucketARN")) > 2048 || !firehoseBucketARN.MatchString(first(destination, "BucketARN")) || !validRoleARN(first(destination, "RoleARN")) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
+	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
+		return err
+	}
 	if raw, exists := destination["ProcessingConfiguration"]; exists {
 		if !processingAllowed {
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
@@ -757,6 +761,37 @@ func validateS3Configuration(destination map[string]any, region string, processi
 	}
 	if compression != "" && compression != "UNCOMPRESSED" && compression != "GZIP" && compression != "ZIP" {
 		return spi.NotImplemented("aws.firehose", "CompressionFormat="+compression, "emulate")
+	}
+	return nil
+}
+
+func validateCloudWatchLogging(raw any) error {
+	if raw == nil {
+		return nil
+	}
+	options, ok := raw.(map[string]any)
+	if !ok {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	enabled, _ := options["Enabled"].(bool)
+	if value, exists := options["Enabled"]; exists {
+		if _, ok := value.(bool); !ok {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	group, stream := first(options, "LogGroupName"), first(options, "LogStreamName")
+	if value, exists := options["LogGroupName"]; exists {
+		if _, ok := value.(string); !ok {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	if value, exists := options["LogStreamName"]; exists {
+		if _, ok := value.(string); !ok {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	if (enabled && (group == "" || stream == "")) || len(group) > 512 || len(stream) > 512 || !firehoseLogGroup.MatchString(group) || !firehoseLogStream.MatchString(stream) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	return nil
 }
@@ -960,6 +995,7 @@ func (p *Pack) deliverS3Configuration(ctx context.Context, req *spi.Request, con
 	}
 	processed, deliver, failure, attempts := p.processData(ctx, req, configuration, stream, recID, data, now)
 	if failure != "" {
+		p.logDeliveryError(ctx, req, configuration, stream, failure, now)
 		p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, recID, data, now, attempts, failure, processingLambdaARN(configuration))
 		return
 	}
@@ -990,6 +1026,18 @@ func (p *Pack) deliverS3Configuration(ctx context.Context, req *spi.Request, con
 	}
 	key := p.evaluatedS3Prefix(prefix, now) + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + recID + extension
 	p.deliverS3Object(ctx, req, bucket, key, kmsARN, data)
+}
+
+func (p *Pack) logDeliveryError(ctx context.Context, req *spi.Request, configuration map[string]any, stream, message string, now time.Time) {
+	options, _ := configuration["CloudWatchLoggingOptions"].(map[string]any)
+	if options["Enabled"] != true {
+		return
+	}
+	payload, _ := json.Marshal(map[string]any{"deliveryStreamName": stream, "errorMessage": message})
+	_, _ = logs.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "PutLogEvents", Input: map[string]any{
+		"logGroupName": first(options, "LogGroupName"), "logStreamName": first(options, "LogStreamName"),
+		"logEvents": []any{map[string]any{"message": string(payload), "timestamp": now.UnixMilli()}},
+	}})
 }
 
 func (p *Pack) processData(ctx context.Context, req *spi.Request, configuration map[string]any, stream, recID string, data []byte, now time.Time) ([]byte, bool, string, int) {
@@ -1124,6 +1172,8 @@ var (
 	firehoseRoleARN           = regexp.MustCompile(`^arn:.*:iam::\d{12}:role/[a-zA-Z_0-9+=,.@\-_/]+$`)
 	firehoseKinesisStreamARN  = regexp.MustCompile(`^arn:.*:kinesis:[a-zA-Z0-9\-]+:\d{12}:stream/[a-zA-Z0-9_.-]+$`)
 	firehoseLambdaARN         = regexp.MustCompile(`^arn:.*:lambda:[a-zA-Z0-9\-]+:\d{12}:function:[a-zA-Z0-9_-]+(?::[a-zA-Z0-9_-]+)?$`)
+	firehoseLogGroup          = regexp.MustCompile(`^[.\-_/#A-Za-z0-9]*$`)
+	firehoseLogStream         = regexp.MustCompile(`^[^:*]*$`)
 	firehoseDestinationID     = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 )
 

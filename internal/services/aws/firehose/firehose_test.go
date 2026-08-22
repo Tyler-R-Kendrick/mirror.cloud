@@ -661,6 +661,147 @@ func TestFirehoseCloudWatchMessageExtraction(t *testing.T) {
 	}
 }
 
+func TestFirehoseRecordDeAggregation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	read := func(key string) ([]byte, bool) {
+		t.Helper()
+		reader, _, err := deps.Blobs.Get(context.Background(), id.Account+"/"+id.Region+"/out/"+key)
+		if err != nil {
+			return nil, false
+		}
+		defer reader.Close()
+		body, _ := io.ReadAll(reader)
+		return body, true
+	}
+	put := func(stream string, data []byte) string {
+		t.Helper()
+		response, err := call("PutRecord", map[string]any{"DeliveryStreamName": stream, "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString(data)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output["RecordId"].(string)
+	}
+	processor := func(subRecordType, delimiter string) map[string]any {
+		parameters := []any{map[string]any{"ParameterName": "SubRecordType", "ParameterValue": subRecordType}}
+		if delimiter != "" {
+			parameters = append(parameters, map[string]any{"ParameterName": "Delimiter", "ParameterValue": delimiter})
+		}
+		return map[string]any{"Type": "RecordDeAggregation", "Parameters": parameters}
+	}
+	create := func(name string, deaggregation map[string]any) map[string]any {
+		t.Helper()
+		processing := map[string]any{"Enabled": true, "Processors": []any{deaggregation, map[string]any{"Type": "AppendDelimiterToRecord"}}}
+		if _, err := call("CreateDeliveryStream", map[string]any{
+			"DeliveryStreamName": name, "ExtendedS3DestinationConfiguration": map[string]any{
+				"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": name + "/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/", "ProcessingConfiguration": processing,
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return processing
+	}
+	processing := create("json-deaggregation", processor("JSON", ""))
+	for name, input := range map[string]string{
+		"consecutive": `{"a":1}{"a":2}`,
+		"jsonl":       "{\"a\":1}\n{\"a\":2}\n",
+	} {
+		recordID := put("json-deaggregation", []byte(input))
+		key := "json-deaggregation/1970/01/01/00/json-deaggregation-1-1970-01-01-00-00-00-" + recordID
+		if body, found := read(key); !found || string(body) != "{\"a\":1}\n{\"a\":2}\n" {
+			t.Fatalf("%s JSON deaggregation %q found %v", name, body, found)
+		}
+	}
+	described, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "json-deaggregation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := described.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["ExtendedS3DestinationDescription"].(map[string]any)
+	if !reflect.DeepEqual(destination["ProcessingConfiguration"], processing) {
+		t.Fatalf("deaggregation description %#v", destination["ProcessingConfiguration"])
+	}
+	invalid := []byte(`[{"a":1},{"a":2}]`)
+	failureID := put("json-deaggregation", invalid)
+	failureKey := "errors/processing-failed/1970/01/01/00/json-deaggregation-1-1970-01-01-00-00-00-" + failureID
+	failureBody, found := read(failureKey)
+	var failure map[string]any
+	if !found || json.Unmarshal(failureBody, &failure) != nil || failure["errorCode"] != "RecordDeAggregation.Failed" || failure["rawData"] != base64.StdEncoding.EncodeToString(invalid) {
+		t.Fatalf("JSON deaggregation failure %s found %v", failureBody, found)
+	}
+
+	delimiter := base64.StdEncoding.EncodeToString([]byte("####"))
+	create("delimited-deaggregation", processor("DELIMITED", delimiter))
+	delimitedID := put("delimited-deaggregation", []byte("one####two####"))
+	delimitedKey := "delimited-deaggregation/1970/01/01/00/delimited-deaggregation-1-1970-01-01-00-00-00-" + delimitedID
+	if body, found := read(delimitedKey); !found || string(body) != "one\ntwo\n" {
+		t.Fatalf("delimited deaggregation %q found %v", body, found)
+	}
+
+	aggregated := []byte(strings.Repeat(`{"a":1}`, 501))
+	overflowID := put("json-deaggregation", aggregated)
+	overflowKey := "json-deaggregation/1970/01/01/00/json-deaggregation-1-1970-01-01-00-00-00-" + overflowID
+	if body, found := read(overflowKey); !found || !bytes.Equal(body, append(aggregated, '\n')) {
+		t.Fatalf("overflow deaggregation length %d found %v", len(body), found)
+	}
+
+	for _, invalidProcessor := range []map[string]any{
+		{"Type": "RecordDeAggregation"},
+		processor("XML", ""),
+		processor("JSON", delimiter),
+		processor("DELIMITED", ""),
+		processor("DELIMITED", "not base64"),
+		{"Type": "RecordDeAggregation", "Parameters": []any{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": "ignored"}}},
+	} {
+		configuration := map[string]any{"Enabled": true, "Processors": []any{invalidProcessor}}
+		if err := validateProcessingConfiguration(configuration); err == nil {
+			t.Errorf("accepted invalid record deaggregation %#v", invalidProcessor)
+		}
+	}
+
+	if _, err := exec.LookPath("python3"); err == nil {
+		t.Run("isolates downstream Lambda failures", func(t *testing.T) {
+			function := lambda.New(deps)
+			code := `import base64
+def lambda_handler(event, context):
+    output = []
+    for record in event['records']:
+        data = base64.b64decode(record['data'])
+        result = 'ProcessingFailed' if b'"a":2' in data else 'Ok'
+        output.append({'recordId': record['recordId'], 'result': result, 'data': base64.b64encode(data.upper()).decode()})
+    return {'records': output}
+`
+			if _, err := function.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+				"FunctionName": "deaggregate", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(code))},
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			processing := map[string]any{"Enabled": true, "Processors": []any{
+				processor("JSON", ""),
+				map[string]any{"Type": "Lambda", "Parameters": []any{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": "arn:aws:lambda:us-east-1:123456789012:function:deaggregate"}, map[string]any{"ParameterName": "NumberOfRetries", "ParameterValue": "0"}}},
+				map[string]any{"Type": "AppendDelimiterToRecord"},
+			}}
+			if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "deaggregate-lambda", "ExtendedS3DestinationConfiguration": map[string]any{
+				"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "lambda/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/", "ProcessingConfiguration": processing,
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			recordID := put("deaggregate-lambda", []byte(`{"a":1}{"a":2}`))
+			successKey := "lambda/1970/01/01/00/deaggregate-lambda-1-1970-01-01-00-00-00-" + recordID
+			if body, found := read(successKey); !found || string(body) != "{\"A\":1}\n" {
+				t.Fatalf("deaggregated Lambda success %q found %v", body, found)
+			}
+			failureKey := "errors/processing-failed/1970/01/01/00/deaggregate-lambda-1-1970-01-01-00-00-00-" + recordID + ".1"
+			if body, found := read(failureKey); !found || !strings.Contains(string(body), base64.StdEncoding.EncodeToString([]byte(`{"a":2}`))) {
+				t.Fatalf("deaggregated Lambda failure %q found %v", body, found)
+			}
+		})
+	}
+}
+
 func TestFirehoseLambdaProcessing(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 not installed")

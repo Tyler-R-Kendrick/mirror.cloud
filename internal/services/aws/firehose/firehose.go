@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"maps"
 	"math"
@@ -843,6 +844,24 @@ func validateProcessingConfiguration(raw any) error {
 		}
 		switch typeName {
 		case "AppendDelimiterToRecord":
+		case "RecordDeAggregation":
+			subRecordType, delimiter := processorParameter(processor, "SubRecordType"), processorParameter(processor, "Delimiter")
+			if subRecordType != "JSON" && subRecordType != "DELIMITED" {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			if decoded, err := base64.StdEncoding.DecodeString(delimiter); subRecordType == "DELIMITED" && (err != nil || len(decoded) == 0) {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			} else if subRecordType == "JSON" && delimiter != "" {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			parameters, _ := processor["Parameters"].([]any)
+			for _, rawParameter := range parameters {
+				parameter, _ := rawParameter.(map[string]any)
+				name := first(parameter, "ParameterName")
+				if name != "SubRecordType" && name != "Delimiter" {
+					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+				}
+			}
 		case "Decompression":
 			format := processorParameter(processor, "CompressionFormat")
 			if format != "" && format != "GZIP" {
@@ -878,7 +897,7 @@ func validateProcessingConfiguration(raw any) error {
 					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 				}
 			}
-		case "RecordDeAggregation", "MetadataExtraction":
+		case "MetadataExtraction":
 			if enabled {
 				return spi.NotImplemented("aws.firehose", "Processor="+typeName, "emulate")
 			}
@@ -1018,11 +1037,10 @@ func (p *Pack) deliverS3Configuration(ctx context.Context, req *spi.Request, con
 		location, _ := time.LoadLocation(timezone)
 		now = now.In(location)
 	}
-	processed, deliver, failure := p.processData(ctx, req, configuration, stream, recID, data, now)
-	if failure != nil {
+	processed, deliver, failures := p.processData(ctx, req, configuration, stream, recID, data, now)
+	for _, failure := range failures {
 		p.logDeliveryError(ctx, req, configuration, stream, failure.message, now)
-		p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, recID, data, now, failure)
-		return
+		p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)
 	}
 	if !deliver {
 		return
@@ -1068,66 +1086,148 @@ func (p *Pack) logDeliveryError(ctx context.Context, req *spi.Request, configura
 type processingFailure struct {
 	typeName, code, message, lambdaARN string
 	attempts                           int
+	recID                              string
+	data                               []byte
 }
 
-func (p *Pack) processData(ctx context.Context, req *spi.Request, configuration map[string]any, stream, recID string, data []byte, now time.Time) ([]byte, bool, *processingFailure) {
+type processingRecord struct {
+	recID string
+	data  []byte
+	raw   []byte
+}
+
+func (p *Pack) processData(ctx context.Context, req *spi.Request, configuration map[string]any, stream, recID string, data []byte, now time.Time) ([]byte, bool, []*processingFailure) {
 	processing, _ := configuration["ProcessingConfiguration"].(map[string]any)
 	if processing["Enabled"] != true {
 		return data, true, nil
 	}
+	records := []processingRecord{{recID: recID, data: data, raw: data}}
+	var failures []*processingFailure
 	for _, raw := range processing["Processors"].([]any) {
 		processor, _ := raw.(map[string]any)
 		switch first(processor, "Type") {
-		case "AppendDelimiterToRecord":
-			data = append(bytes.Clone(data), '\n')
-		case "Decompression":
-			reader, err := gzip.NewReader(bytes.NewReader(data))
-			if err != nil {
-				return nil, false, &processingFailure{typeName: "decompression-failed", code: "Decompression.Failed", message: err.Error(), attempts: 1}
-			}
-			decompressed, err := io.ReadAll(reader)
-			_ = reader.Close()
-			if err != nil {
-				return nil, false, &processingFailure{typeName: "decompression-failed", code: "Decompression.Failed", message: err.Error(), attempts: 1}
-			}
-			data = decompressed
-		case "CloudWatchLogProcessing":
-			var envelope struct {
-				MessageType string `json:"messageType"`
-				LogEvents   []struct {
-					Message string `json:"message"`
-				} `json:"logEvents"`
-			}
-			if err := json.Unmarshal(data, &envelope); err != nil || (envelope.MessageType != "DATA_MESSAGE" && envelope.MessageType != "CONTROL_MESSAGE") || (envelope.MessageType == "DATA_MESSAGE" && len(envelope.LogEvents) == 0) {
-				message := "CloudWatch Logs message extraction failed."
+		case "RecordDeAggregation":
+			var next []processingRecord
+			for _, record := range records {
+				parts, err := deaggregateData(processor, record.data)
 				if err != nil {
-					message = err.Error()
+					failures = append(failures, &processingFailure{typeName: "processing-failed", code: "RecordDeAggregation.Failed", message: err.Error(), attempts: 1, recID: record.recID, data: record.raw})
+					continue
 				}
-				return nil, false, &processingFailure{typeName: "processing-failed", code: "CloudWatchLogProcessing.Failed", message: message, attempts: 1}
+				for index, part := range parts {
+					id := record.recID
+					if len(parts) > 1 {
+						id += "." + strconv.Itoa(index)
+					}
+					next = append(next, processingRecord{recID: id, data: part, raw: part})
+				}
 			}
-			if envelope.MessageType == "CONTROL_MESSAGE" {
-				return nil, false, nil
+			records = next
+		case "AppendDelimiterToRecord":
+			for index := range records {
+				records[index].data = append(bytes.Clone(records[index].data), '\n')
 			}
-			var extracted bytes.Buffer
-			for _, event := range envelope.LogEvents {
-				extracted.WriteString(event.Message)
-				extracted.WriteByte('\n')
+		case "Decompression":
+			var next []processingRecord
+			for _, record := range records {
+				reader, err := gzip.NewReader(bytes.NewReader(record.data))
+				if err != nil {
+					failures = append(failures, &processingFailure{typeName: "decompression-failed", code: "Decompression.Failed", message: err.Error(), attempts: 1, recID: record.recID, data: record.raw})
+					continue
+				}
+				decompressed, err := io.ReadAll(reader)
+				_ = reader.Close()
+				if err != nil {
+					failures = append(failures, &processingFailure{typeName: "decompression-failed", code: "Decompression.Failed", message: err.Error(), attempts: 1, recID: record.recID, data: record.raw})
+					continue
+				}
+				record.data = decompressed
+				next = append(next, record)
 			}
-			data = extracted.Bytes()
+			records = next
+		case "CloudWatchLogProcessing":
+			var next []processingRecord
+			for _, record := range records {
+				var envelope struct {
+					MessageType string `json:"messageType"`
+					LogEvents   []struct {
+						Message string `json:"message"`
+					} `json:"logEvents"`
+				}
+				if err := json.Unmarshal(record.data, &envelope); err != nil || (envelope.MessageType != "DATA_MESSAGE" && envelope.MessageType != "CONTROL_MESSAGE") || (envelope.MessageType == "DATA_MESSAGE" && len(envelope.LogEvents) == 0) {
+					message := "CloudWatch Logs message extraction failed."
+					if err != nil {
+						message = err.Error()
+					}
+					failures = append(failures, &processingFailure{typeName: "processing-failed", code: "CloudWatchLogProcessing.Failed", message: message, attempts: 1, recID: record.recID, data: record.raw})
+					continue
+				}
+				if envelope.MessageType == "CONTROL_MESSAGE" {
+					continue
+				}
+				var extracted bytes.Buffer
+				for _, event := range envelope.LogEvents {
+					extracted.WriteString(event.Message)
+					extracted.WriteByte('\n')
+				}
+				record.data = extracted.Bytes()
+				next = append(next, record)
+			}
+			records = next
 		case "Lambda":
-			var deliver bool
-			var failure string
-			var attempts int
-			data, deliver, failure, attempts = p.invokeProcessingLambda(ctx, req, processor, stream, recID, data, now)
-			if failure != "" || !deliver {
-				if failure == "" {
-					return data, false, nil
+			var next []processingRecord
+			for _, record := range records {
+				transformed, deliver, message, attempts := p.invokeProcessingLambda(ctx, req, processor, stream, record.recID, record.data, now)
+				if message != "" {
+					failures = append(failures, &processingFailure{typeName: "processing-failed", code: "Lambda.ProcessingFailed", message: message, lambdaARN: processorParameter(processor, "LambdaArn"), attempts: attempts, recID: record.recID, data: record.raw})
+					continue
 				}
-				return data, false, &processingFailure{typeName: "processing-failed", code: "Lambda.ProcessingFailed", message: failure, lambdaARN: processorParameter(processor, "LambdaArn"), attempts: attempts}
+				if deliver {
+					record.data = transformed
+					next = append(next, record)
+				}
 			}
+			records = next
 		}
 	}
-	return data, true, nil
+	var processed bytes.Buffer
+	for _, record := range records {
+		processed.Write(record.data)
+	}
+	return processed.Bytes(), len(records) > 0, failures
+}
+
+func deaggregateData(processor map[string]any, data []byte) ([][]byte, error) {
+	if processorParameter(processor, "SubRecordType") == "DELIMITED" {
+		delimiter, _ := base64.StdEncoding.DecodeString(processorParameter(processor, "Delimiter"))
+		records := bytes.Split(data, delimiter)
+		if len(records) > 0 && len(records[len(records)-1]) == 0 {
+			records = records[:len(records)-1]
+		}
+		if len(records) > 500 {
+			return [][]byte{data}, nil
+		}
+		return records, nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	var records [][]byte
+	for {
+		var record json.RawMessage
+		if err := decoder.Decode(&record); err != nil {
+			if err == io.EOF && len(records) > 0 {
+				return records, nil
+			}
+			return nil, err
+		}
+		record = bytes.TrimSpace(record)
+		if len(record) == 0 || record[0] != '{' {
+			return nil, errors.New("record is not a JSON object")
+		}
+		records = append(records, record)
+		if len(records) > 500 {
+			return [][]byte{data}, nil
+		}
+	}
 }
 
 func (p *Pack) invokeProcessingLambda(ctx context.Context, req *spi.Request, processor map[string]any, stream, recID string, data []byte, now time.Time) ([]byte, bool, string, int) {
@@ -1183,7 +1283,7 @@ func (p *Pack) invokeProcessingLambda(ctx context.Context, req *spi.Request, pro
 	}
 }
 
-func (p *Pack) deliverProcessingFailure(ctx context.Context, req *spi.Request, bucket, prefix, kmsARN, stream, version, recID string, data []byte, now time.Time, failure *processingFailure) {
+func (p *Pack) deliverProcessingFailure(ctx context.Context, req *spi.Request, bucket, prefix, kmsARN, stream, version string, now time.Time, failure *processingFailure) {
 	if prefix == "" {
 		prefix = failure.typeName + "/"
 	}
@@ -1191,13 +1291,13 @@ func (p *Pack) deliverProcessingFailure(ctx context.Context, req *spi.Request, b
 	timestamp := now.UTC().Format(time.RFC3339Nano)
 	payloadFields := map[string]any{
 		"attemptsMade": strconv.Itoa(failure.attempts), "arrivalTimestamp": timestamp, "errorCode": failure.code, "errorMessage": failure.message,
-		"attemptEndingTimestamp": timestamp, "rawData": base64.StdEncoding.EncodeToString(data),
+		"attemptEndingTimestamp": timestamp, "rawData": base64.StdEncoding.EncodeToString(failure.data),
 	}
 	if failure.lambdaARN != "" {
 		payloadFields["lambdaArn"] = failure.lambdaARN
 	}
 	payload, _ := json.Marshal(payloadFields)
-	key := p.evaluatedS3Prefix(prefix, now) + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + recID
+	key := p.evaluatedS3Prefix(prefix, now) + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + failure.recID
 	p.deliverS3Object(ctx, req, bucket, key, kmsARN, payload)
 }
 

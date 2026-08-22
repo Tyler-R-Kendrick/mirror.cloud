@@ -1,8 +1,8 @@
 # mirror.cloud — Direction
 
 > Critical analysis of two competing proposals, and the synthesis that becomes the project thesis.
-> Status: **decided**. The executable form of this document is [`MASTER_PROMPT.md`](./MASTER_PROMPT.md).
-> This document has been through an adversarial review; the attacks on it, and the positioning and delivery advice that came out of that review, are in [`CRITIQUE.md`](./CRITIQUE.md).
+> Status: **decided, twice**. The v1 executable form is [`MASTER_PROMPT.md`](./MASTER_PROMPT.md); the current one — after auditing the v1 implementation — is [`MASTER_PROMPT_V2.md`](./MASTER_PROMPT_V2.md) (see §9).
+> Adversarial reviews of every revision, including the implementation audit, are in [`CRITIQUE.md`](./CRITIQUE.md).
 
 ---
 
@@ -205,3 +205,18 @@ The full positioning, iteration, and delivery argument — including why this pr
 The definition of done is behavioral, automated, and hostile to self-congratulation: official SDKs (Go, Python, and the Google storage client) round-trip; AWS CLI v2 works against it unmodified; `terraform apply` and `terraform destroy` both succeed across all emulate-tier services; two accounts cannot see each other's resources; snapshot/restore round-trips; identical seeds produce byte-identical responses; a single product boots standalone; cold start is under two seconds; regeneration from pinned specs produces a zero diff; and unimplemented operations return an error that is unmistakably ours and never mistakable for the real cloud's.
 
 The full, self-contained execution specification — frozen interfaces, protocol details, per-service operation lists, swarm contracts, and every validation oracle — is in [`MASTER_PROMPT.md`](./MASTER_PROMPT.md).
+
+---
+
+## 9. The v2 correction: generate behavior, not just protocol
+
+An implementation of the v1 specification now exists in this tree — wire-compatible, well-tested, and built the wrong way. An audit (three independent explorations; findings in [`CRITIQUE.md`](./CRITIQUE.md) Part 5) established that 81% of its source is hand-written behavior across 152 service packs, the spec-ingestion pipeline is disconnected (the booted model has empty shape maps), nothing has ever been compared to a real cloud, and tier labels are self-declared rather than measured. That is the LocalStack maintenance treadmill this document's own §3 warned against — rebuilt locally, with better tests.
+
+The v2 direction closes the gap between the founding claim and the code, and widens the claim where the evidence supports it:
+
+1. **Behavior becomes data.** A Behavior IR — resources, lifecycle statecharts, CEL preconditions, a closed effect vocabulary, ordered error tables, limits, quirks — executed by one generic engine, with the genuinely algorithmic cores (DynamoDB expressions, ASL, policy eval, the object store) as budgeted, versioned primitives. Schema and worked examples: [`BEHAVIOR_IR.md`](./BEHAVIOR_IR.md).
+2. **Parity becomes a measurement.** Edge cases, failure scenarios, and undocumented behaviors — the things parity actually consists of — are acquired by maintainer-side probing of real clouds, versioned as content-addressed corpora, replayed differentially, and rolled up into per-operation provenance grades. Vendor changes that were never announced fall out mechanically as a **behavioral changelog**. Design: [`PARITY_PIPELINE.md`](./PARITY_PIPELINE.md).
+3. **The 152 packs become the migration oracle.** Strangler extraction: each pack's own tests gate its replacement's equivalence, then the pack is deleted. CI ratchets make the hand-rolling path unmergeable — new services enter as spec + behavior data only.
+4. **Provider neutrality gets real targets.** All eight intended clouds (AWS, Azure, GCP, Cloudflare, Vercel, Hetzner, Hostinger, DigitalOcean) publish machine-readable specs, and one OpenAPI receiver covers six of them. The next proof is DigitalOcean and Hetzner served with zero provider-specific Go.
+
+The execution contract for the implementing agent is [`MASTER_PROMPT_V2.md`](./MASTER_PROMPT_V2.md).

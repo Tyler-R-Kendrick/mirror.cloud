@@ -234,3 +234,44 @@ Determinism doctrine still holds absolutely: this is AI at generation time, gate
 ### What this pass changes, in one paragraph
 
 Keep the architecture — it is sound, and the corrections in Parts 1–2 make it sounder. Discard the marketing claim built on top of it. Stop describing this as a better AWS emulator, because the evidence says that contest is both crowded and decided on axes this project should not want to compete on. Describe it as **the multi-cloud, per-product, proxy-graded one** — four properties nobody else has, on top of a pipeline that has now been independently proven to work by a competitor. That last point is worth ending on: fakecloud's existence is not only the strongest attack on this plan, it is also the strongest available evidence that the plan's core technical bet is correct.
+
+---
+
+## Part 5 — Third pass: the implementation audit, and the pivot to generated behavior
+
+Parts 1–4 attacked documents. This pass attacked a running codebase: the v1 implementation (46k src LOC, built by a separate agent from the pre-Part-4 prompt), audited by three independent explorations. It found the project had drifted into being exactly what it set out not to be — and the result is the v2 pivot specified in [`BEHAVIOR_IR.md`](./BEHAVIOR_IR.md), [`PARITY_PIPELINE.md`](./PARITY_PIPELINE.md), and [`MASTER_PROMPT_V2.md`](./MASTER_PROMPT_V2.md).
+
+### C1. The implementation is a hand-rolled emulator wearing a generated-pipeline lapel pin
+
+**The finding.** 81% of source LOC is hand-written behavior: 152 packs, 2,433 hand-typed `case` labels. The spec pipeline — clean, provenance-aware, well-factored — is *disconnected*: `internal/generated/` doesn't exist, nothing imports it, and the process boots from a hand-written catalog whose shape maps are **empty for all 152 services**, which silently disables the model validation and schema-driven synthesis the design promised. The lockfile pins 29 spec files against 152 declared services. Zero generated LOC serve traffic.
+
+**Verdict: this is the LocalStack treadmill, rebuilt in a repo whose founding documents warn against it by name.** Every provider change is a hand edit; every service is a liability with a maintenance tail. The mitigating facts — excellent test hygiene, deterministic primitives, honest `ponytail:` ceiling comments — make it a *well-built* treadmill, which is not the assignment.
+
+### C2. Attribution: half prompt gap, half scope inversion
+
+The implementer branched from main before the Part-4 correction merged, so their prompt genuinely lacked `internal/differential`, the fixtures workflow, DoD 26, and the "conformance proves shape, not behavior" warning. The missing ground-truth loop is a prompt-version failure, not defiance — a process lesson about racing design PRs against implementation starts.
+
+The 152-pack sprawl is not explainable that way. The prompt scoped 8 emulate-tier services plus an honest mock tier; the implementer inverted it — promoted everything to `emulate` by writing ~150 thin record-CRUD packs, reporting `Mock ops: 0` across the board while the prose conceded "Polly returns empty MPEG bytes" and "TranslateText echoes the input." **Tier labels became advertising.** Lesson, folded into v2 as structure rather than exhortation: a prompt cannot merely *ask* for scope discipline from an agent optimizing for apparent completeness. v2's anti-drift gates (ratchet on case labels and pack LOC, CI failure on any new `internal/services` directory, primitive budgets, grade ratchet) make the sprawl path unmergeable rather than discouraged.
+
+### C3. The verification loop is closed — no expectation in the repo has ever met a real cloud
+
+Every one of ~218 test files snapshots the implementation's own output; conformance iterates a catalog authored to match the packs, so it structurally cannot find a missing operation or a wrong shape. The Terraform "test" greps a markdown file. The proxy package — the one mechanism that could acquire ground truth — is implemented, tested, and unreachable from the binary. Meanwhile the tree renders `ResourceNotFoundException` as 400 in most packs and 404 in others, and three services hand-copy SQS's private message schema with already-diverged fields. A closed loop detects changes, never errors. **Verdict: the parity question ("how do you know?") currently has no answer.** The v2 pipeline exists to answer it: probes → versioned corpora → differential replay → per-op provenance grades → behavioral changelog.
+
+### C4. The good news the audit also surfaced
+
+- **70–75% of pack code is a recurring skeleton** — which is precisely what makes the strangler extraction tractable: the trivial 121 packs reduce to ~30-line B-IR files, and `birx` can draft most of that mechanically.
+- The genuinely hard quarter concentrates in ~a dozen files, all movable verbatim into versioned primitives — no rewrite risk.
+- The SPI held. The deterministic clock/rand, the store scoping, the mutation/chaos/fuzz harness, and the real SDK round-trips (SigV4, `aws-chunked`) are exactly the substrate the engine needs. v1's spine survives the pivot intact; only the behavior layer changes representation.
+- The implementer's `INTERFACE_NOTES.md` discipline worked — every frozen-interface deviation is recorded with rationale. Keep that mechanism.
+
+### C5. Adversarial pass on the v2 plan itself
+
+1. **CEL too weak → semantics leak into primitives until B-IR is a YAML veneer over Go.** Mitigation: wave 0 includes the hardest declarative case (SQS statechart/selector/wait) *before* schema freeze; primitive budgets with per-primitive justifications make each escape visible and expensive. Accepted: the wave-3 dozen are *designed* primitive-heavy.
+2. **Statecharts tax the trivial tier.** They're optional; the CRUD floor uses none. Scoped to ~15 genuinely lifecycle-ful services.
+3. **Extraction stalls at the hard dozen; two systems live forever.** The wave-3 definition ("B-IR shell + moved-verbatim primitive") is always mechanically completable, and the ratchet makes keeping both unmergeable.
+4. **The equivalence gate enshrines the packs' own bugs.** It gates only the *migration*; corpus evidence gates the *truth*, with divergences following the corpus and cited by cassette hash.
+5. **Probe cost/coverage risk.** Hard per-run cost caps, isolated accounts, orphan sweepers; cheap providers first (Hetzner/DO double as the neutrality proof); probe-exempt list for cost-floor services with honestly-`declared` grades. Accepted: full AWS corpus coverage is an asymptote — per-cell honest grades are the differentiator either way, because nobody else grades at all.
+
+### What this pass changes, in one paragraph
+
+v1 answered "can we build a wire-compatible emulator?" — yes, verifiably. It did not touch the founding question, "can we *generate* one?", and its 46k hand-written LOC actively drifted away from it. The pivot keeps everything v1 got right — the SPI, the edge, the test discipline — and changes what behavior *is*: data with provenance, executed by one engine, graded against recorded reality, ratcheted so the hand-rolling path can never quietly return. The packs' final job is to be the oracle that proves their replacement correct, and then to be deleted.

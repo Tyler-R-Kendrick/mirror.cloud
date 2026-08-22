@@ -558,6 +558,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFirehoseDirectPutSourceConfiguration",
 		},
 		{
+			name: "firehose-accept-long-s3-prefix",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `len(prefix) > 1024 ||`,
+			new:  `false ||`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseS3ObjectNameFormat",
+		},
+		{
+			name: "firehose-accept-long-s3-error-prefix",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `len(errorPrefix) > 1024`,
+			new:  `false`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseS3ObjectNameFormat",
+		},
+		{
 			name: "firehose-allow-encryption-on-source-stream",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 			old:  `if encryption["Status"] == "ENABLED" && streamType != "DirectPut" {`,

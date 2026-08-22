@@ -990,6 +990,7 @@ func TestFirehoseDestinationEncryption(t *testing.T) {
 		map[string]any{"KMSEncryptionConfig": "invalid"},
 		map[string]any{"KMSEncryptionConfig": map[string]any{}},
 		map[string]any{"KMSEncryptionConfig": map[string]any{"AWSKMSKeyARN": "key"}},
+		map[string]any{"KMSEncryptionConfig": map[string]any{"AWSKMSKeyARN": "arn:aws:kms:us-east-1:123:key/firehose"}},
 		map[string]any{"KMSEncryptionConfig": map[string]any{"AWSKMSKeyARN": "arn:aws:kms:us-west-2:123456789012:key/firehose"}},
 		map[string]any{"KMSEncryptionConfig": map[string]any{"AWSKMSKeyARN": "arn:aws:kms:us-east-1:123456789012:key/" + strings.Repeat("a", 480)}},
 	} {

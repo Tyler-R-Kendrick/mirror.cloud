@@ -231,12 +231,14 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	if _, _, err := deps.Blobs.Get(context.Background(), key); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
-		"DeliveryStreamName": "bad-timezone", "ExtendedS3DestinationConfiguration": map[string]any{
-			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "hour=!{timestamp:HH}/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/", "CustomTimeZone": "Mars/Olympus_Mons",
-		},
-	}}); err == nil {
-		t.Fatal("accepted invalid CustomTimeZone")
+	for _, timezone := range []string{"Mars/Olympus_Mons", "Etc/GMT+1"} {
+		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+			"DeliveryStreamName": "bad-timezone", "ExtendedS3DestinationConfiguration": map[string]any{
+				"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "hour=!{timestamp:HH}/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/", "CustomTimeZone": timezone,
+			},
+		}}); err == nil {
+			t.Fatalf("accepted invalid CustomTimeZone %q", timezone)
+		}
 	}
 	for _, extension := range []string{"jsonl", ".UPPER", "." + strings.Repeat("a", 128)} {
 		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{

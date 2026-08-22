@@ -687,6 +687,9 @@ func validateDestination(rec map[string]any, region string) error {
 		return err
 	}
 	if timezone != "" {
+		if len(timezone) > 50 || !firehoseTimeZone.MatchString(timezone) {
+			return &spi.Fault{Code: "ValidationException", Message: "CustomTimeZone is invalid.", HTTPStatus: 400, Fault: "client"}
+		}
 		if _, err := time.LoadLocation(timezone); err != nil {
 			return &spi.Fault{Code: "ValidationException", Message: "CustomTimeZone is invalid.", HTTPStatus: 400, Fault: "client"}
 		}
@@ -828,6 +831,7 @@ var (
 	firehoseTagValue          = regexp.MustCompile(`^[\p{L}\p{Z}\p{N}_.:/=+\-@%]*$`)
 	firehoseKMSKeyARN         = regexp.MustCompile(`^arn:[^:]+:kms:[a-zA-Z0-9\-]+:\d{12}:key/[a-zA-Z_0-9+=,.@\-_/]+$`)
 	firehoseDestinationKMSARN = regexp.MustCompile(`^arn:.*:kms:[a-zA-Z0-9\-]+:\d{12}:(key|alias)/[a-zA-Z_0-9+=,.@\-_/]+$`)
+	firehoseTimeZone          = regexp.MustCompile(`^[a-zA-Z/_]+$`)
 	firehoseBucketARN         = regexp.MustCompile(`^arn:.*:s3:::[\w.\-]{1,255}$`)
 	firehoseRoleARN           = regexp.MustCompile(`^arn:.*:iam::\d{12}:role/[a-zA-Z_0-9+=,.@\-_/]+$`)
 	firehoseKinesisStreamARN  = regexp.MustCompile(`^arn:.*:kinesis:[a-zA-Z0-9\-]+:\d{12}:stream/[a-zA-Z0-9_.-]+$`)

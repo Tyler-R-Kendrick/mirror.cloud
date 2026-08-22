@@ -76,10 +76,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if streamType == "" {
 			streamType = "DirectPut"
 		}
-		var source, directPutSource map[string]any
+		var source, directPutSource, mskSource map[string]any
 		switch streamType {
 		case "DirectPut":
-			if req.Input["KinesisStreamSourceConfiguration"] != nil {
+			if req.Input["KinesisStreamSourceConfiguration"] != nil || req.Input["MSKSourceConfiguration"] != nil || req.Input["DatabaseSourceConfiguration"] != nil {
 				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			if value := req.Input["DirectPutSourceConfiguration"]; value != nil {
@@ -93,7 +93,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				}
 			}
 		case "KinesisStreamAsSource":
-			if req.Input["DirectPutSourceConfiguration"] != nil {
+			if req.Input["DirectPutSourceConfiguration"] != nil || req.Input["MSKSourceConfiguration"] != nil || req.Input["DatabaseSourceConfiguration"] != nil {
 				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			var ok bool
@@ -101,7 +101,25 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if !ok || len(first(source, "KinesisStreamARN")) > 512 || !firehoseKinesisStreamARN.MatchString(first(source, "KinesisStreamARN")) || !validRoleARN(first(source, "RoleARN")) {
 				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
-		case "MSKAsSource", "DatabaseAsSource":
+		case "MSKAsSource":
+			if req.Input["DirectPutSourceConfiguration"] != nil || req.Input["KinesisStreamSourceConfiguration"] != nil || req.Input["DatabaseSourceConfiguration"] != nil {
+				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			var ok bool
+			mskSource, ok = req.Input["MSKSourceConfiguration"].(map[string]any)
+			authentication, authOK := mskSource["AuthenticationConfiguration"].(map[string]any)
+			cluster, topic := first(mskSource, "MSKClusterARN"), first(mskSource, "TopicName")
+			connectivity := first(authentication, "Connectivity")
+			if !ok || !authOK || len(cluster) > 512 || !firehoseMSKClusterARN.MatchString(cluster) || len(topic) > 255 || !firehoseMSKTopic.MatchString(topic) || (connectivity != "PUBLIC" && connectivity != "PRIVATE") || !validRoleARN(first(authentication, "RoleARN")) {
+				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			if readFrom, exists := mskSource["ReadFromTimestamp"]; exists {
+				value, valid := readFrom.(float64)
+				if !valid || math.IsNaN(value) || math.IsInf(value, 0) {
+					return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+				}
+			}
+		case "DatabaseAsSource":
 			return nil, spi.NotImplemented("aws.firehose", streamType, "emulate")
 		default:
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
@@ -120,6 +138,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		if directPutSource != nil {
 			rec["DirectPutSourceConfiguration"] = maps.Clone(directPutSource)
+		}
+		if mskSource != nil {
+			rec["MSKSourceConfiguration"] = maps.Clone(mskSource)
 		}
 		copyDest(rec, req.Input, "Configuration")
 		if err := validateDestination(rec, req.Identity.Region); err != nil {
@@ -506,6 +527,16 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 		source["DeliveryStartTimestamp"] = description["CreateTimestamp"]
 		description["Source"] = map[string]any{"KinesisStreamSourceDescription": source}
 		delete(description, "KinesisStreamSourceConfiguration")
+	}
+	if configuration, ok := description["MSKSourceConfiguration"].(map[string]any); ok {
+		source := maps.Clone(configuration)
+		source["DeliveryStartTimestamp"] = source["ReadFromTimestamp"]
+		if source["DeliveryStartTimestamp"] == nil {
+			source["DeliveryStartTimestamp"] = description["CreateTimestamp"]
+		}
+		delete(source, "ReadFromTimestamp")
+		description["Source"] = map[string]any{"MSKSourceDescription": source}
+		delete(description, "MSKSourceConfiguration")
 	}
 	destination := map[string]any{"DestinationId": destinationID}
 	for _, base := range []string{"S3Destination", "ExtendedS3Destination"} {
@@ -1571,6 +1602,8 @@ var (
 	firehoseBucketARN         = regexp.MustCompile(`^arn:.*:s3:::[\w.\-]{1,255}$`)
 	firehoseRoleARN           = regexp.MustCompile(`^arn:.*:iam::\d{12}:role/[a-zA-Z_0-9+=,.@\-_/]+$`)
 	firehoseKinesisStreamARN  = regexp.MustCompile(`^arn:.*:kinesis:[a-zA-Z0-9\-]+:\d{12}:stream/[a-zA-Z0-9_.-]+$`)
+	firehoseMSKClusterARN     = regexp.MustCompile(`^arn:.*:kafka:[a-zA-Z0-9\-]+:\d{12}:cluster/[^/]+/.+$`)
+	firehoseMSKTopic          = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 	firehoseLambdaARN         = regexp.MustCompile(`^arn:.*:lambda:[a-zA-Z0-9\-]+:\d{12}:function:[a-zA-Z0-9_-]+(?::[a-zA-Z0-9_-]+)?$`)
 	firehoseLogGroup          = regexp.MustCompile(`^[.\-_/#A-Za-z0-9]*$`)
 	firehoseLogStream         = regexp.MustCompile(`^[^:*]*$`)

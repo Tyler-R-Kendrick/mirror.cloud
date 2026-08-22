@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -38,6 +39,13 @@ func testS3Destination() map[string]any {
 
 func testKinesisSource() map[string]any {
 	return map[string]any{"KinesisStreamARN": "arn:aws:kinesis:us-east-1:123456789012:stream/source", "RoleARN": testRoleARN}
+}
+
+func testMSKSource() map[string]any {
+	return map[string]any{
+		"MSKClusterARN": "arn:aws:kafka:us-east-1:123456789012:cluster/source/uuid", "TopicName": "events.v1",
+		"AuthenticationConfiguration": map[string]any{"Connectivity": "PRIVATE", "RoleARN": testRoleARN},
+	}
 }
 
 func TestFirehoseHTTPProvenOps(t *testing.T) {
@@ -178,6 +186,78 @@ func TestBootedServerFirehoseDeliversToS3(t *testing.T) {
 	}
 	if headers.Get("x-amz-server-side-encryption") != "aws:kms" || headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != kmsARN {
 		t.Fatalf("S3 encryption headers %#v", headers)
+	}
+}
+
+func TestFirehoseMSKSourceConfiguration(t *testing.T) {
+	deps := spitest.Deps(t)
+	_ = deps.Clock.Advance(time.Hour)
+	p := New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	create := func(name string, source map[string]any) {
+		t.Helper()
+		if _, err := call("CreateDeliveryStream", map[string]any{
+			"DeliveryStreamName": name, "DeliveryStreamType": "MSKAsSource", "MSKSourceConfiguration": source,
+			"ExtendedS3DestinationConfiguration": testS3Destination(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	source := testMSKSource()
+	source["ReadFromTimestamp"] = float64(123)
+	create("msk-explicit", source)
+	create("msk-default", testMSKSource())
+	for name, start := range map[string]float64{"msk-explicit": 123, "msk-default": 3600} {
+		described, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		description := described.Output["DeliveryStreamDescription"].(map[string]any)
+		msk := description["Source"].(map[string]any)["MSKSourceDescription"].(map[string]any)
+		if description["DeliveryStreamType"] != "MSKAsSource" || msk["MSKClusterARN"] != testMSKSource()["MSKClusterARN"] || msk["TopicName"] != "events.v1" || msk["DeliveryStartTimestamp"] != start || msk["ReadFromTimestamp"] != nil || description["MSKSourceConfiguration"] != nil {
+			t.Fatalf("MSK source description %#v", description)
+		}
+		if !reflect.DeepEqual(msk["AuthenticationConfiguration"], testMSKSource()["AuthenticationConfiguration"]) {
+			t.Fatalf("MSK authentication description %#v", msk["AuthenticationConfiguration"])
+		}
+	}
+	listed, err := call("ListDeliveryStreams", map[string]any{"DeliveryStreamType": "MSKAsSource"})
+	if err != nil || !reflect.DeepEqual(listed.Output["DeliveryStreamNames"], []any{"msk-default", "msk-explicit"}) {
+		t.Fatalf("MSK stream listing %#v, %v", listed, err)
+	}
+
+	invalid := []any{
+		"invalid",
+		map[string]any{},
+		map[string]any{"MSKClusterARN": "arn:aws:kinesis:us-east-1:123456789012:cluster/source/uuid", "TopicName": "events", "AuthenticationConfiguration": testMSKSource()["AuthenticationConfiguration"]},
+		map[string]any{"MSKClusterARN": testMSKSource()["MSKClusterARN"], "TopicName": "events/invalid", "AuthenticationConfiguration": testMSKSource()["AuthenticationConfiguration"]},
+		map[string]any{"MSKClusterARN": testMSKSource()["MSKClusterARN"], "TopicName": strings.Repeat("t", 256), "AuthenticationConfiguration": testMSKSource()["AuthenticationConfiguration"]},
+		map[string]any{"MSKClusterARN": testMSKSource()["MSKClusterARN"], "TopicName": "events", "AuthenticationConfiguration": "invalid"},
+		map[string]any{"MSKClusterARN": testMSKSource()["MSKClusterARN"], "TopicName": "events", "AuthenticationConfiguration": map[string]any{"Connectivity": "VPC", "RoleARN": testRoleARN}},
+		map[string]any{"MSKClusterARN": testMSKSource()["MSKClusterARN"], "TopicName": "events", "AuthenticationConfiguration": map[string]any{"Connectivity": "PUBLIC", "RoleARN": "role"}},
+		map[string]any{"MSKClusterARN": testMSKSource()["MSKClusterARN"], "TopicName": "events", "AuthenticationConfiguration": testMSKSource()["AuthenticationConfiguration"], "ReadFromTimestamp": "epoch"},
+		map[string]any{"MSKClusterARN": testMSKSource()["MSKClusterARN"], "TopicName": "events", "AuthenticationConfiguration": testMSKSource()["AuthenticationConfiguration"], "ReadFromTimestamp": math.NaN()},
+		map[string]any{"MSKClusterARN": testMSKSource()["MSKClusterARN"], "TopicName": "events", "AuthenticationConfiguration": testMSKSource()["AuthenticationConfiguration"], "ReadFromTimestamp": math.Inf(1)},
+	}
+	for index, source := range invalid {
+		if _, err := call("CreateDeliveryStream", map[string]any{
+			"DeliveryStreamName": fmt.Sprintf("invalid-msk-%d", index), "DeliveryStreamType": "MSKAsSource", "MSKSourceConfiguration": source,
+			"ExtendedS3DestinationConfiguration": testS3Destination(),
+		}); err == nil {
+			t.Fatalf("accepted invalid MSK source %#v", source)
+		}
+	}
+	for index, input := range []map[string]any{
+		{"DeliveryStreamName": "direct-with-msk", "MSKSourceConfiguration": testMSKSource(), "ExtendedS3DestinationConfiguration": testS3Destination()},
+		{"DeliveryStreamName": "kinesis-with-msk", "DeliveryStreamType": "KinesisStreamAsSource", "KinesisStreamSourceConfiguration": testKinesisSource(), "MSKSourceConfiguration": testMSKSource(), "ExtendedS3DestinationConfiguration": testS3Destination()},
+		{"DeliveryStreamName": "msk-with-kinesis", "DeliveryStreamType": "MSKAsSource", "MSKSourceConfiguration": testMSKSource(), "KinesisStreamSourceConfiguration": testKinesisSource(), "ExtendedS3DestinationConfiguration": testS3Destination()},
+	} {
+		if _, err := call("CreateDeliveryStream", input); err == nil {
+			t.Fatalf("accepted mismatched source %d", index)
+		}
 	}
 }
 

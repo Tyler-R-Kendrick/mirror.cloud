@@ -334,6 +334,7 @@ func TestFirehoseControlPlaneAndBatch(t *testing.T) {
 		{"DeliveryStreamName": "control"},
 		{"DeliveryStreamName": "control", "Record": map[string]any{}},
 		{"DeliveryStreamName": "control", "Record": map[string]any{"Data": "not base64"}},
+		{"DeliveryStreamName": "control", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString(make([]byte, maxRecordBytes+1))}},
 		{"DeliveryStreamName": "control", "Record": map[string]any{"Data": make([]byte, maxRecordBytes+1)}},
 	} {
 		if _, err := call("PutRecord", input); err == nil {
@@ -341,9 +342,13 @@ func TestFirehoseControlPlaneAndBatch(t *testing.T) {
 		}
 	}
 	large := map[string]any{"Data": make([]byte, 900*1024)}
+	tooManyRecords := make([]any, 501)
+	for i := range tooManyRecords {
+		tooManyRecords[i] = record
+	}
 	for _, records := range []any{
 		[]any{},
-		make([]any, 501),
+		tooManyRecords,
 		[]any{record, map[string]any{}},
 		[]any{large, large, large, large, large},
 	} {

@@ -919,6 +919,32 @@ func TestFirehoseBufferingHints(t *testing.T) {
 	}
 }
 
+func TestFirehoseDestinationDescriptionDefaults(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	for _, test := range []struct {
+		name, configuration, description string
+	}{
+		{"s3-defaults", "S3DestinationConfiguration", "S3DestinationDescription"},
+		{"extended-defaults", "ExtendedS3DestinationConfiguration", "ExtendedS3DestinationDescription"},
+	} {
+		input := map[string]any{"DeliveryStreamName": test.name, test.configuration: testS3Destination()}
+		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: input}); err != nil {
+			t.Fatal(err)
+		}
+		response, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "DescribeDeliveryStream", Input: map[string]any{"DeliveryStreamName": test.name}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		description := response.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)[test.description].(map[string]any)
+		hints := description["BufferingHints"].(map[string]any)
+		encryption := description["EncryptionConfiguration"].(map[string]any)
+		if hints["IntervalInSeconds"] != 300 || hints["SizeInMBs"] != 5 || description["CompressionFormat"] != "UNCOMPRESSED" || encryption["NoEncryptionConfig"] != "NoEncryption" {
+			t.Errorf("%s defaults %#v", test.name, description)
+		}
+	}
+}
+
 func TestFirehoseDescribeDestinationPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}

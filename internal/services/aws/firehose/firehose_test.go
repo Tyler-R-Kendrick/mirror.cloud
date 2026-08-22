@@ -998,6 +998,16 @@ func TestFirehoseS3Backup(t *testing.T) {
 	if description["S3BackupMode"] != "Enabled" || backupDescription["Prefix"] != "updated/" || description["S3BackupConfiguration"] != nil || description["S3BackupUpdate"] != nil {
 		t.Fatalf("backup description %#v", description)
 	}
+	put, err = call("PutRecord", map[string]any{
+		"DeliveryStreamName": "backed-up", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("updated backup"))},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedBackupKey := id.Account + "/" + id.Region + "/backup/updated/1970/01/01/00/backed-up-2-1970-01-01-00-00-00-" + put.Output["RecordId"].(string) + ".gz"
+	if _, _, err := deps.Blobs.Get(context.Background(), updatedBackupKey); err != nil {
+		t.Fatal(err)
+	}
 
 	for i, destination := range []map[string]any{
 		{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "S3BackupMode": "Unknown"},
@@ -1031,7 +1041,7 @@ func TestFirehoseDestinationDescriptionDefaults(t *testing.T) {
 		description := response.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)[test.description].(map[string]any)
 		hints := description["BufferingHints"].(map[string]any)
 		encryption := description["EncryptionConfiguration"].(map[string]any)
-		if hints["IntervalInSeconds"] != 300 || hints["SizeInMBs"] != 5 || description["CompressionFormat"] != "UNCOMPRESSED" || encryption["NoEncryptionConfig"] != "NoEncryption" {
+		if hints["IntervalInSeconds"] != 300 || hints["SizeInMBs"] != 5 || description["CompressionFormat"] != "UNCOMPRESSED" || encryption["NoEncryptionConfig"] != "NoEncryption" || (test.configuration == "ExtendedS3DestinationConfiguration" && description["S3BackupMode"] != "Disabled") {
 			t.Errorf("%s defaults %#v", test.name, description)
 		}
 	}

@@ -400,3 +400,51 @@ func TestFirehoseControlPlaneAndBatch(t *testing.T) {
 		t.Fatal("bucket ARN parsing")
 	}
 }
+
+func TestFirehoseListDeliveryStreamsPagination(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	for _, name := range []string{"direct-10", "direct-03", "direct-00", "direct-08", "direct-01", "direct-09", "direct-04", "direct-07", "direct-02", "direct-06", "direct-05"} {
+		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": name, "DeliveryStreamType": "DirectPut"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "source", "DeliveryStreamType": "KinesisStreamAsSource"}); err != nil {
+		t.Fatal(err)
+	}
+
+	firstPage, err := call("ListDeliveryStreams", map[string]any{})
+	firstNames := firstPage.Output["DeliveryStreamNames"].([]any)
+	if err != nil || len(firstNames) != 10 || firstNames[0] != "direct-00" || firstNames[9] != "direct-09" || firstPage.Output["HasMoreDeliveryStreams"] != true {
+		t.Fatalf("first page %#v, %v", firstPage, err)
+	}
+	lastPage, err := call("ListDeliveryStreams", map[string]any{"ExclusiveStartDeliveryStreamName": "direct-09"})
+	lastNames := lastPage.Output["DeliveryStreamNames"].([]any)
+	if err != nil || len(lastNames) != 2 || lastNames[0] != "direct-10" || lastNames[1] != "source" || lastPage.Output["HasMoreDeliveryStreams"] != false {
+		t.Fatalf("last page %#v, %v", lastPage, err)
+	}
+	filtered, err := call("ListDeliveryStreams", map[string]any{
+		"DeliveryStreamType": "DirectPut", "ExclusiveStartDeliveryStreamName": "direct-07", "Limit": float64(2),
+	})
+	filteredNames := filtered.Output["DeliveryStreamNames"].([]any)
+	if err != nil || len(filteredNames) != 2 || filteredNames[0] != "direct-08" || filteredNames[1] != "direct-09" || filtered.Output["HasMoreDeliveryStreams"] != true {
+		t.Fatalf("filtered page %#v, %v", filtered, err)
+	}
+	source, err := call("ListDeliveryStreams", map[string]any{"DeliveryStreamType": "KinesisStreamAsSource"})
+	if err != nil || len(source.Output["DeliveryStreamNames"].([]any)) != 1 || source.Output["DeliveryStreamNames"].([]any)[0] != "source" {
+		t.Fatalf("source page %#v, %v", source, err)
+	}
+
+	for _, input := range []map[string]any{
+		{"Limit": 0}, {"Limit": 10001}, {"Limit": 1.5}, {"Limit": "2"},
+		{"ExclusiveStartDeliveryStreamName": "bad/name"}, {"DeliveryStreamType": "Unknown"},
+	} {
+		if _, err := call("ListDeliveryStreams", input); err == nil {
+			t.Fatalf("accepted invalid list input %#v", input)
+		}
+	}
+}

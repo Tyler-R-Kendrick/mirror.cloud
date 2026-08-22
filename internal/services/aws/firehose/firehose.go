@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"maps"
+	"math"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -95,12 +96,54 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = json.Unmarshal(b, &rec)
 		return &spi.Response{Output: map[string]any{"DeliveryStreamDescription": describeRecord(rec)}}, nil
 	case "ListDeliveryStreams":
-		kvs, _, _ := p.col(req, "fh").List(ctx, "", "", 0)
-		var names []any
+		limit := 10
+		if value, ok := req.Input["Limit"]; ok {
+			switch value := value.(type) {
+			case int:
+				limit = value
+			case float64:
+				if value != math.Trunc(value) || value < 1 || value > 10000 {
+					return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+				}
+				limit = int(value)
+			default:
+				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+		if limit < 1 || limit > 10000 {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		after := first(req.Input, "ExclusiveStartDeliveryStreamName")
+		if after != "" && (len(after) > 64 || !firehoseStreamName.MatchString(after)) {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		streamType := first(req.Input, "DeliveryStreamType")
+		switch streamType {
+		case "", "DirectPut", "KinesisStreamAsSource", "MSKAsSource", "DatabaseAsSource":
+		default:
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		kvs, _, err := p.col(req, "fh").List(ctx, "", after, 0)
+		if err != nil {
+			return nil, err
+		}
+		names := make([]any, 0, min(limit, len(kvs)))
+		more := false
+		// ponytail: scan at most the regional 5,000-stream ceiling; add indexed type pages if that ceiling becomes hot.
 		for _, kv := range kvs {
+			if streamType != "" {
+				var rec map[string]any
+				if json.Unmarshal(kv.Value, &rec) != nil || first(rec, "DeliveryStreamType") != streamType {
+					continue
+				}
+			}
+			if len(names) == limit {
+				more = true
+				break
+			}
 			names = append(names, kv.Key)
 		}
-		return &spi.Response{Output: map[string]any{"DeliveryStreamNames": names, "HasMoreDeliveryStreams": false}}, nil
+		return &spi.Response{Output: map[string]any{"DeliveryStreamNames": names, "HasMoreDeliveryStreams": more}}, nil
 	case "PutRecord":
 		if _, ok, _ := p.col(req, "fh").Get(ctx, name); !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}

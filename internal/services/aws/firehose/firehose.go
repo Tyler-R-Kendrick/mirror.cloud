@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang/snappy"
 	"github.com/itchyny/gojq"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
@@ -784,7 +786,7 @@ func validateS3Configuration(destination map[string]any, region string, processi
 	if extension != "" && (len(extension) > 128 || !firehoseFileExtension.MatchString(extension)) {
 		return &spi.Fault{Code: "ValidationException", Message: "FileExtension is invalid.", HTTPStatus: 400, Fault: "client"}
 	}
-	if compression != "" && compression != "UNCOMPRESSED" && compression != "GZIP" && compression != "ZIP" {
+	if compression != "" && compression != "UNCOMPRESSED" && compression != "GZIP" && compression != "ZIP" && compression != "Snappy" && compression != "HADOOP_SNAPPY" {
 		return spi.NotImplemented("aws.firehose", "CompressionFormat="+compression, "emulate")
 	}
 	return nil
@@ -1168,6 +1170,16 @@ func (p *Pack) deliverS3Configuration(ctx context.Context, req *spi.Request, con
 			if recordExtension == "" {
 				recordExtension = ".zip"
 			}
+		case "Snappy":
+			data = snappy.Encode(nil, data)
+			if recordExtension == "" {
+				recordExtension = ".snappy"
+			}
+		case "HADOOP_SNAPPY":
+			data = hadoopSnappy(data)
+			if recordExtension == "" {
+				recordExtension = ".hsnappy"
+			}
 		}
 		evaluatedPrefix, err := p.evaluatedDynamicS3Prefix(prefix, now, record.partitionKeys, record.queryPartitionKeys)
 		if err != nil {
@@ -1179,6 +1191,21 @@ func (p *Pack) deliverS3Configuration(ctx context.Context, req *spi.Request, con
 		key := evaluatedPrefix + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + record.recID + recordExtension
 		p.deliverS3Object(ctx, req, bucket, key, kmsARN, data)
 	}
+}
+
+func hadoopSnappy(data []byte) []byte {
+	var result bytes.Buffer
+	_ = binary.Write(&result, binary.BigEndian, uint32(len(data)))
+	const blockSize = 262144 - 262144/6 - 32
+	for len(data) > 0 {
+		block := data[:min(len(data), blockSize)]
+		compressed := snappy.Encode(nil, block)
+		_, prefix := binary.Uvarint(compressed)
+		_ = binary.Write(&result, binary.BigEndian, uint32(len(compressed)-prefix))
+		result.Write(compressed[prefix:])
+		data = data[len(block):]
+	}
+	return result.Bytes()
 }
 
 func (p *Pack) logDeliveryError(ctx context.Context, req *spi.Request, configuration map[string]any, stream, message string, now time.Time) {

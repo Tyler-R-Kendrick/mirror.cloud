@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/snappy"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
@@ -331,14 +333,55 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	if string(body) != "archived" {
 		t.Fatalf("ZIP body %q", body)
 	}
-	for _, compression := range []string{"Snappy", "HADOOP_SNAPPY"} {
-		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
-			"DeliveryStreamName": "unsupported-compression", "ExtendedS3DestinationConfiguration": map[string]any{
-				"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "CompressionFormat": compression,
-			},
-		}}); err == nil {
-			t.Fatalf("accepted unsupported %s compression", compression)
+	for _, test := range []struct{ compression, extension string }{{"Snappy", ".snappy"}, {"HADOOP_SNAPPY", ".hsnappy"}} {
+		stream := strings.ToLower(test.compression)
+		invoke("CreateDeliveryStream", map[string]any{"DeliveryStreamName": stream, "ExtendedS3DestinationConfiguration": map[string]any{
+			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": stream + "/", "CompressionFormat": test.compression,
+		}})
+		response = invoke("PutRecord", map[string]any{"DeliveryStreamName": stream, "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("snappy data"))}})
+		recordID = response.Output["RecordId"].(string)
+		key = id.Account + "/" + id.Region + "/out/" + stream + "/1970/01/01/00/" + stream + "-1-1970-01-01-00-00-00-" + recordID + test.extension
+		reader, _, err = deps.Blobs.Get(context.Background(), key)
+		if err != nil {
+			t.Fatal(err)
 		}
+		body, _ = io.ReadAll(reader)
+		_ = reader.Close()
+		if test.compression == "HADOOP_SNAPPY" {
+			decodedSize, compressedSize := binary.BigEndian.Uint32(body), binary.BigEndian.Uint32(body[4:])
+			var prefix [binary.MaxVarintLen32]byte
+			n := binary.PutUvarint(prefix[:], uint64(decodedSize))
+			body = append(prefix[:n], body[8:8+compressedSize]...)
+		}
+		decoded, err := snappy.Decode(nil, body)
+		if err != nil || string(decoded) != "snappy data" {
+			t.Fatalf("%s body %q: %v", test.compression, decoded, err)
+		}
+	}
+	large := bytes.Repeat([]byte("incompressible-ish-data-"), 15000)
+	hadoop := hadoopSnappy(large)
+	decoded := make([]byte, 0, len(large))
+	for payload := hadoop[4:]; len(payload) > 0; {
+		size := binary.BigEndian.Uint32(payload)
+		payload = payload[4:]
+		var prefix [binary.MaxVarintLen32]byte
+		n := binary.PutUvarint(prefix[:], uint64(min(len(large)-len(decoded), 262144-262144/6-32)))
+		block, err := snappy.Decode(nil, append(prefix[:n], payload[:size]...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded = append(decoded, block...)
+		payload = payload[size:]
+	}
+	if !bytes.Equal(decoded, large) || binary.BigEndian.Uint32(hadoop) != uint32(len(large)) {
+		t.Fatal("Hadoop Snappy multi-block framing did not round trip")
+	}
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+		"DeliveryStreamName": "bad-snappy", "ExtendedS3DestinationConfiguration": map[string]any{
+			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "CompressionFormat": "SNAPPY",
+		},
+	}}); err == nil {
+		t.Fatal("accepted invalid SNAPPY capitalization")
 	}
 	if err := validatePrefixes(strings.Repeat("p", 1024), strings.Repeat("e", 1024)); err != nil {
 		t.Fatalf("rejected maximum-length prefixes: %v", err)

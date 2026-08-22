@@ -854,6 +854,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFirehoseHTTPEndpointDestination",
 		},
 		{
+			name: "firehose-deliver-only-first-http-batch-record",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `p.deliver(ctx, req, name, ids, decoded)`,
+			new:  `p.deliver(ctx, req, name, ids[:1], decoded[:1])`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseHTTPEndpointDestination",
+		},
+		{
 			name: "firehose-drop-direct-put-source",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 			old:  `if directPutSource != nil {`,

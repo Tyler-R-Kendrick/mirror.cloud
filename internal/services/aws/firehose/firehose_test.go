@@ -869,6 +869,56 @@ func TestFirehoseDirectPutSourceConfiguration(t *testing.T) {
 	}
 }
 
+func TestFirehoseBufferingHints(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	destination := testS3Destination()
+	destination["BufferingHints"] = map[string]any{"IntervalInSeconds": float64(0), "SizeInMBs": float64(128)}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "buffered", "S3DestinationConfiguration": destination}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "buffered"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	description := response.Output["DeliveryStreamDescription"].(map[string]any)
+	hints := description["Destinations"].([]any)[0].(map[string]any)["S3DestinationDescription"].(map[string]any)["BufferingHints"].(map[string]any)
+	if hints["IntervalInSeconds"] != float64(0) || hints["SizeInMBs"] != float64(128) {
+		t.Fatalf("buffering hints %#v", hints)
+	}
+
+	invalid := []any{
+		"invalid",
+		map[string]any{"IntervalInSeconds": 1},
+		map[string]any{"SizeInMBs": 1},
+		map[string]any{"IntervalInSeconds": -1, "SizeInMBs": 1},
+		map[string]any{"IntervalInSeconds": 901, "SizeInMBs": 1},
+		map[string]any{"IntervalInSeconds": 1.5, "SizeInMBs": 1},
+		map[string]any{"IntervalInSeconds": "1", "SizeInMBs": 1},
+		map[string]any{"IntervalInSeconds": 1, "SizeInMBs": 0},
+		map[string]any{"IntervalInSeconds": 1, "SizeInMBs": 129},
+		map[string]any{"IntervalInSeconds": 1, "SizeInMBs": 1.5},
+		map[string]any{"IntervalInSeconds": 1, "SizeInMBs": "1"},
+	}
+	for i, hints := range invalid {
+		destination := testS3Destination()
+		destination["BufferingHints"] = hints
+		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": fmt.Sprintf("invalid-buffer-%d", i), "S3DestinationConfiguration": destination}); err == nil {
+			t.Errorf("accepted invalid buffering hints %#v", hints)
+		}
+	}
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "buffered", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
+		"S3DestinationUpdate": map[string]any{"BufferingHints": map[string]any{"SizeInMBs": 1}},
+	}); err == nil {
+		t.Fatal("accepted invalid buffering hints on update")
+	}
+}
+
 func TestFirehoseDescribeDestinationPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}

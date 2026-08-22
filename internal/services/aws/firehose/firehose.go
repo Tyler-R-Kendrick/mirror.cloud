@@ -491,19 +491,23 @@ func inputLimit(value any, fallback, maximum int) (int, bool) {
 	if value == nil {
 		return fallback, true
 	}
+	return inputInteger(value, 1, maximum)
+}
+
+func inputInteger(value any, minimum, maximum int) (int, bool) {
 	var limit int
 	switch value := value.(type) {
 	case int:
 		limit = value
 	case float64:
-		if value != math.Trunc(value) || value < 1 || value > float64(maximum) {
+		if value != math.Trunc(value) || value < float64(minimum) || value > float64(maximum) {
 			return 0, false
 		}
 		limit = int(value)
 	default:
 		return 0, false
 	}
-	return limit, limit >= 1 && limit <= maximum
+	return limit, limit >= minimum && limit <= maximum
 }
 
 func parseTags(value any, required bool) (map[string]string, bool) {
@@ -634,6 +638,22 @@ func validateDestination(rec map[string]any) error {
 	}
 	if count != 1 || len(first(destination, "BucketARN")) > 2048 || !firehoseBucketARN.MatchString(first(destination, "BucketARN")) || !validRoleARN(first(destination, "RoleARN")) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if raw, exists := destination["BufferingHints"]; exists {
+		hints, ok := raw.(map[string]any)
+		_, hasInterval := hints["IntervalInSeconds"]
+		_, hasSize := hints["SizeInMBs"]
+		if !ok || hasInterval != hasSize {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if hasInterval {
+			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			if _, valid := inputInteger(hints["SizeInMBs"], 1, 128); !valid {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+		}
 	}
 	_, prefix, errorPrefix, timezone, extension, compression := s3Dest(rec)
 	if err := validatePrefixes(prefix, errorPrefix); err != nil {

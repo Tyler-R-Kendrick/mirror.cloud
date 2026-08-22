@@ -1,6 +1,7 @@
 package firehose
 
 import (
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -301,12 +302,41 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	if _, _, err := deps.Blobs.Get(context.Background(), key); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+	invoke("CreateDeliveryStream", map[string]any{
 		"DeliveryStreamName": "zip", "ExtendedS3DestinationConfiguration": map[string]any{
-			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "CompressionFormat": "ZIP",
+			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "zip/", "CompressionFormat": "ZIP",
 		},
-	}}); err == nil {
-		t.Fatal("accepted unsupported ZIP compression")
+	})
+	response = invoke("PutRecord", map[string]any{"DeliveryStreamName": "zip", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("archived"))}})
+	recordID = response.Output["RecordId"].(string)
+	key = id.Account + "/" + id.Region + "/out/zip/1970/01/01/00/zip-1-1970-01-01-00-00-00-" + recordID + ".zip"
+	reader, _, err = deps.Blobs.Get(context.Background(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archiveBody, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	archive, err := zip.NewReader(bytes.NewReader(archiveBody), int64(len(archiveBody)))
+	if err != nil || len(archive.File) != 1 || archive.File[0].Name != "zip" {
+		t.Fatalf("ZIP archive %#v: %v", archive, err)
+	}
+	entry, err := archive.File[0].Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(entry)
+	_ = entry.Close()
+	if string(body) != "archived" {
+		t.Fatalf("ZIP body %q", body)
+	}
+	for _, compression := range []string{"Snappy", "HADOOP_SNAPPY"} {
+		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+			"DeliveryStreamName": "unsupported-compression", "ExtendedS3DestinationConfiguration": map[string]any{
+				"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "CompressionFormat": compression,
+			},
+		}}); err == nil {
+			t.Fatalf("accepted unsupported %s compression", compression)
+		}
 	}
 	if err := validatePrefixes(strings.Repeat("p", 1024), strings.Repeat("e", 1024)); err != nil {
 		t.Fatalf("rejected maximum-length prefixes: %v", err)

@@ -2,6 +2,7 @@
 package firehose
 
 import (
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -754,7 +755,7 @@ func validateS3Configuration(destination map[string]any, region string, processi
 	if extension != "" && (len(extension) > 128 || !firehoseFileExtension.MatchString(extension)) {
 		return &spi.Fault{Code: "ValidationException", Message: "FileExtension is invalid.", HTTPStatus: 400, Fault: "client"}
 	}
-	if compression != "" && compression != "UNCOMPRESSED" && compression != "GZIP" {
+	if compression != "" && compression != "UNCOMPRESSED" && compression != "GZIP" && compression != "ZIP" {
 		return spi.NotImplemented("aws.firehose", "CompressionFormat="+compression, "emulate")
 	}
 	return nil
@@ -966,7 +967,8 @@ func (p *Pack) deliverS3Configuration(ctx context.Context, req *spi.Request, con
 		return
 	}
 	data = processed
-	if compression == "GZIP" {
+	switch compression {
+	case "GZIP":
 		var compressed bytes.Buffer
 		writer := gzip.NewWriter(&compressed)
 		_, _ = writer.Write(data)
@@ -974,6 +976,16 @@ func (p *Pack) deliverS3Configuration(ctx context.Context, req *spi.Request, con
 		data = compressed.Bytes()
 		if extension == "" {
 			extension = ".gz"
+		}
+	case "ZIP":
+		var compressed bytes.Buffer
+		writer := zip.NewWriter(&compressed)
+		entry, _ := writer.Create(stream)
+		_, _ = entry.Write(data)
+		_ = writer.Close()
+		data = compressed.Bytes()
+		if extension == "" {
+			extension = ".zip"
 		}
 	}
 	key := p.evaluatedS3Prefix(prefix, now) + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + recID + extension

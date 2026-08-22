@@ -1178,7 +1178,7 @@ func TestFirehoseMetadataExtraction(t *testing.T) {
 	}
 	body, _ := io.ReadAll(reader)
 	_ = reader.Close()
-	if !strings.Contains(string(body), "metadata extraction values must be scalar") {
+	if !strings.Contains(string(body), "metadata extraction values must be scalar") || !strings.Contains(string(body), `"errorCode":"MetadataExtraction.Failed"`) {
 		t.Fatalf("metadata extraction failure %s", body)
 	}
 

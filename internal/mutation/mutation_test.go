@@ -1040,8 +1040,16 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-skip-processing-configuration-validation",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `if err := validateProcessingConfiguration(destination["ProcessingConfiguration"]); err != nil {`,
+			old:  `if err := validateProcessingConfiguration(raw); err != nil {`,
 			new:  `if err := error(nil); err != nil {`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseAppendDelimiterProcessing",
+		},
+		{
+			name: "firehose-allow-processing-on-basic-s3",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `if !processingAllowed {`,
+			new:  `if false {`,
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseAppendDelimiterProcessing",
 		},

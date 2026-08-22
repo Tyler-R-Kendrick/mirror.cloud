@@ -653,6 +653,7 @@ func s3Configuration(configuration map[string]any) (bucket, prefix, errorPrefix,
 func validateDestination(rec map[string]any, region string) error {
 	count := 0
 	var destination map[string]any
+	extended := false
 	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration"} {
 		if value, exists := rec[key]; exists {
 			var ok bool
@@ -661,12 +662,13 @@ func validateDestination(rec map[string]any, region string) error {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			count++
+			extended = key == "ExtendedS3DestinationConfiguration"
 		}
 	}
 	if count != 1 {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	if err := validateS3Configuration(destination, region); err != nil {
+	if err := validateS3Configuration(destination, region, extended); err != nil {
 		return err
 	}
 	mode := ""
@@ -686,17 +688,22 @@ func validateDestination(rec map[string]any, region string) error {
 		if !ok {
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
-		return validateS3Configuration(backup, region)
+		return validateS3Configuration(backup, region, false)
 	}
 	return nil
 }
 
-func validateS3Configuration(destination map[string]any, region string) error {
+func validateS3Configuration(destination map[string]any, region string, processingAllowed bool) error {
 	if len(first(destination, "BucketARN")) > 2048 || !firehoseBucketARN.MatchString(first(destination, "BucketARN")) || !validRoleARN(first(destination, "RoleARN")) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	if err := validateProcessingConfiguration(destination["ProcessingConfiguration"]); err != nil {
-		return err
+	if raw, exists := destination["ProcessingConfiguration"]; exists {
+		if !processingAllowed {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if err := validateProcessingConfiguration(raw); err != nil {
+			return err
+		}
 	}
 	if raw, exists := destination["BufferingHints"]; exists {
 		hints, ok := raw.(map[string]any)

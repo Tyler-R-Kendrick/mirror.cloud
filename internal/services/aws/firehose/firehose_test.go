@@ -371,7 +371,7 @@ func TestFirehoseAppendDelimiterProcessing(t *testing.T) {
 	}
 
 	if _, err := call("CreateDeliveryStream", map[string]any{
-		"DeliveryStreamName": "disabled-processing", "S3DestinationConfiguration": map[string]any{
+		"DeliveryStreamName": "disabled-processing", "ExtendedS3DestinationConfiguration": map[string]any{
 			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "disabled/", "ProcessingConfiguration": processing(false),
 		},
 	}); err != nil {
@@ -387,7 +387,7 @@ func TestFirehoseAppendDelimiterProcessing(t *testing.T) {
 	}
 	if _, err := call("UpdateDestination", map[string]any{
 		"DeliveryStreamName": "disabled-processing", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
-		"S3DestinationUpdate": map[string]any{"ProcessingConfiguration": processing(true)},
+		"ExtendedS3DestinationUpdate": map[string]any{"ProcessingConfiguration": processing(true)},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -416,14 +416,22 @@ func TestFirehoseAppendDelimiterProcessing(t *testing.T) {
 	for i, configuration := range invalid {
 		destination := testS3Destination()
 		destination["ProcessingConfiguration"] = configuration
-		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": fmt.Sprintf("invalid-processing-%d", i), "S3DestinationConfiguration": destination}); err == nil {
+		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": fmt.Sprintf("invalid-processing-%d", i), "ExtendedS3DestinationConfiguration": destination}); err == nil {
 			t.Errorf("accepted processing configuration %#v", configuration)
 		}
 	}
 	destination = testS3Destination()
 	destination["ProcessingConfiguration"] = map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "Lambda"}}}
-	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "unsupported-processing", "S3DestinationConfiguration": destination}); err == nil {
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "unsupported-processing", "ExtendedS3DestinationConfiguration": destination}); err == nil {
 		t.Fatal("accepted unsupported Lambda processor")
+	}
+	processedDestination := testS3Destination()
+	processedDestination["ProcessingConfiguration"] = processing(true)
+	for name, destination := range map[string]map[string]any{"basic": {"S3DestinationConfiguration": processedDestination}, "backup": {"ExtendedS3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "S3BackupMode": "Enabled", "S3BackupConfiguration": processedDestination}}} {
+		destination["DeliveryStreamName"] = "processing-on-" + name
+		if _, err := call("CreateDeliveryStream", destination); err == nil {
+			t.Errorf("accepted processing configuration on %s S3 configuration", name)
+		}
 	}
 }
 

@@ -668,6 +668,7 @@ func TestFirehoseEncryptionState(t *testing.T) {
 		map[string]any{"KeyType": "AWS_OWNED_CMK", "KeyARN": keyARN},
 		map[string]any{"KeyType": "CUSTOMER_MANAGED_CMK"},
 		map[string]any{"KeyType": "CUSTOMER_MANAGED_CMK", "KeyARN": "not-an-arn"},
+		map[string]any{"KeyType": "CUSTOMER_MANAGED_CMK", "KeyARN": "arn:aws:kms:us-east-1:123456789012:key/" + strings.Repeat("a", 480)},
 	} {
 		if _, err := call("StartDeliveryStreamEncryption", map[string]any{
 			"DeliveryStreamName": "plain", "DeliveryStreamEncryptionConfigurationInput": input,

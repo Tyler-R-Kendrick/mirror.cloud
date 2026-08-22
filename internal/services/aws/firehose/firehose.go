@@ -256,6 +256,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
+		if !directPutStream(stream) {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
 		decoded, valid := recordData(req.Input["Record"])
 		if !valid {
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
@@ -266,6 +269,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		stream, ok, _ := p.col(req, "fh").Get(ctx, name)
 		if !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
+		}
+		if !directPutStream(stream) {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
 		recs, ok := req.Input["Records"].([]any)
 		if !ok || len(recs) < 1 || len(recs) > 500 {
@@ -485,6 +491,12 @@ func streamEncrypted(b []byte) bool {
 	_ = json.Unmarshal(b, &rec)
 	encryption, _ := rec["DeliveryStreamEncryptionConfiguration"].(map[string]any)
 	return first(encryption, "Status") == "ENABLED"
+}
+
+func directPutStream(b []byte) bool {
+	var rec map[string]any
+	_ = json.Unmarshal(b, &rec)
+	return first(rec, "DeliveryStreamType") == "DirectPut"
 }
 
 func (p *Pack) putOne(ctx context.Context, req *spi.Request, name string, rec any, decoded []byte) string {

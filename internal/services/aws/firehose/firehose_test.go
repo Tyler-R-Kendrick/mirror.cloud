@@ -380,6 +380,44 @@ func TestFirehoseDatabaseSourceConfiguration(t *testing.T) {
 	}
 }
 
+func TestFirehoseRejectsDirectPutForSourceStreams(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	for _, source := range []struct {
+		name, streamType, key string
+		configuration         map[string]any
+	}{
+		{"kinesis-guard", "KinesisStreamAsSource", "KinesisStreamSourceConfiguration", testKinesisSource()},
+		{"msk-guard", "MSKAsSource", "MSKSourceConfiguration", testMSKSource()},
+		{"database-guard", "DatabaseAsSource", "DatabaseSourceConfiguration", testDatabaseSource()},
+	} {
+		input := map[string]any{
+			"DeliveryStreamName": source.name, "DeliveryStreamType": source.streamType, source.key: source.configuration,
+			"ExtendedS3DestinationConfiguration": testS3Destination(),
+		}
+		if _, err := call("CreateDeliveryStream", input); err != nil {
+			t.Fatal(err)
+		}
+		record := map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("payload"))}
+		for operation, putInput := range map[string]map[string]any{
+			"PutRecord":      {"DeliveryStreamName": source.name, "Record": record},
+			"PutRecordBatch": {"DeliveryStreamName": source.name, "Records": []any{record}},
+		} {
+			_, err := call(operation, putInput)
+			if fault, ok := err.(*spi.Fault); !ok || fault.Code != "InvalidArgumentException" {
+				t.Fatalf("%s accepted %s stream: %#v", operation, source.streamType, err)
+			}
+		}
+		stored, _, _ := p.col(&spi.Request{Identity: id}, "fhrec:"+source.name).List(context.Background(), "", "", 0)
+		if len(stored) != 0 {
+			t.Fatalf("source-backed put stored %d records", len(stored))
+		}
+	}
+}
+
 func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

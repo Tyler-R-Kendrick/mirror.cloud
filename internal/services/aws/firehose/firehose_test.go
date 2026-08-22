@@ -672,7 +672,7 @@ func TestFirehoseEncryptionState(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, input := range []map[string]any{
-		{"DeliveryStreamName": "invalid-type", "DeliveryStreamType": "Unknown"},
+		{"DeliveryStreamName": "invalid-type", "DeliveryStreamType": "Unknown", "S3DestinationConfiguration": testS3Destination()},
 		{"DeliveryStreamName": "encrypted-source", "DeliveryStreamType": "KinesisStreamAsSource", "KinesisStreamSourceConfiguration": testKinesisSource(), "S3DestinationConfiguration": testS3Destination(), "DeliveryStreamEncryptionConfigurationInput": configuration},
 	} {
 		if _, err := call("CreateDeliveryStream", input); err == nil {
@@ -801,12 +801,15 @@ func TestFirehoseCreateConfiguration(t *testing.T) {
 		{"multiple destinations", map[string]any{"DeliveryStreamName": "two-destinations", "S3DestinationConfiguration": testS3Destination(), "ExtendedS3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
 		{"missing bucket ARN", map[string]any{"DeliveryStreamName": "no-bucket", "S3DestinationConfiguration": map[string]any{"RoleARN": testRoleARN}}, "InvalidArgumentException"},
 		{"malformed bucket ARN", map[string]any{"DeliveryStreamName": "bad-bucket", "S3DestinationConfiguration": map[string]any{"BucketARN": "bucket", "RoleARN": testRoleARN}}, "InvalidArgumentException"},
+		{"long bucket ARN", map[string]any{"DeliveryStreamName": "long-bucket", "S3DestinationConfiguration": map[string]any{"BucketARN": "arn:" + strings.Repeat("a", 2048) + ":s3:::out", "RoleARN": testRoleARN}}, "InvalidArgumentException"},
 		{"missing role ARN", map[string]any{"DeliveryStreamName": "no-role", "S3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::out"}}, "InvalidArgumentException"},
 		{"malformed role ARN", map[string]any{"DeliveryStreamName": "bad-role", "S3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": "role"}}, "InvalidArgumentException"},
+		{"long role ARN", map[string]any{"DeliveryStreamName": "long-role", "S3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": "arn:aws:iam::123456789012:role/" + strings.Repeat("a", 500)}}, "InvalidArgumentException"},
 		{"unsupported destination", map[string]any{"DeliveryStreamName": "redshift", "RedshiftDestinationConfiguration": map[string]any{}}, "MirrorNotImplemented"},
 		{"direct put with Kinesis source", map[string]any{"DeliveryStreamName": "direct-source", "KinesisStreamSourceConfiguration": testKinesisSource(), "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
 		{"missing Kinesis source", map[string]any{"DeliveryStreamName": "no-source", "DeliveryStreamType": "KinesisStreamAsSource", "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
 		{"malformed Kinesis ARN", map[string]any{"DeliveryStreamName": "bad-source", "DeliveryStreamType": "KinesisStreamAsSource", "KinesisStreamSourceConfiguration": map[string]any{"KinesisStreamARN": "stream", "RoleARN": testRoleARN}, "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
+		{"long Kinesis ARN", map[string]any{"DeliveryStreamName": "long-source", "DeliveryStreamType": "KinesisStreamAsSource", "KinesisStreamSourceConfiguration": map[string]any{"KinesisStreamARN": "arn:aws:kinesis:us-east-1:123456789012:stream/" + strings.Repeat("a", 500), "RoleARN": testRoleARN}, "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
 		{"malformed Kinesis role", map[string]any{"DeliveryStreamName": "bad-source-role", "DeliveryStreamType": "KinesisStreamAsSource", "KinesisStreamSourceConfiguration": map[string]any{"KinesisStreamARN": testKinesisSource()["KinesisStreamARN"], "RoleARN": "role"}, "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
 		{"unsupported MSK source", map[string]any{"DeliveryStreamName": "msk", "DeliveryStreamType": "MSKAsSource", "S3DestinationConfiguration": testS3Destination()}, "MirrorNotImplemented"},
 		{"unsupported database source", map[string]any{"DeliveryStreamName": "database", "DeliveryStreamType": "DatabaseAsSource", "S3DestinationConfiguration": testS3Destination()}, "MirrorNotImplemented"},

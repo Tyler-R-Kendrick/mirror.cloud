@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -388,7 +389,10 @@ func TestFirehoseControlPlaneAndBatch(t *testing.T) {
 	if len(listed.Output["Tags"].([]any)) != 1 {
 		t.Fatalf("tags %#v", listed.Output)
 	}
-	for _, operation := range []string{"UntagDeliveryStream", "StartDeliveryStreamEncryption", "StopDeliveryStreamEncryption", "DeleteDeliveryStream"} {
+	if _, err := call("UntagDeliveryStream", map[string]any{"DeliveryStreamName": "control", "TagKeys": []any{"env"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range []string{"StartDeliveryStreamEncryption", "StopDeliveryStreamEncryption", "DeleteDeliveryStream"} {
 		if _, err := call(operation, map[string]any{"DeliveryStreamName": "control"}); err != nil {
 			t.Fatalf("%s: %v", operation, err)
 		}
@@ -446,5 +450,100 @@ func TestFirehoseListDeliveryStreamsPagination(t *testing.T) {
 		if _, err := call("ListDeliveryStreams", input); err == nil {
 			t.Fatalf("accepted invalid list input %#v", input)
 		}
+	}
+}
+
+func TestFirehoseTagsMergeRemoveAndPaginate(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "tagged", "Tags": []any{
+			map[string]any{"Key": "z", "Value": "old"}, map[string]any{"Key": "a", "Value": "first"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	firstPage, err := call("ListTagsForDeliveryStream", map[string]any{"DeliveryStreamName": "tagged", "Limit": float64(1)})
+	firstTags := firstPage.Output["Tags"].([]any)
+	if err != nil || len(firstTags) != 1 || firstTags[0].(map[string]any)["Key"] != "a" || firstPage.Output["HasMoreTags"] != true {
+		t.Fatalf("first tag page %#v, %v", firstPage, err)
+	}
+	if _, err := call("TagDeliveryStream", map[string]any{
+		"DeliveryStreamName": "tagged", "Tags": []any{
+			map[string]any{"Key": "z", "Value": "new"}, map[string]any{"Key": "m", "Value": "middle"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nextPage, err := call("ListTagsForDeliveryStream", map[string]any{
+		"DeliveryStreamName": "tagged", "ExclusiveStartTagKey": "a", "Limit": 1,
+	})
+	nextTags := nextPage.Output["Tags"].([]any)
+	if err != nil || len(nextTags) != 1 || nextTags[0].(map[string]any)["Key"] != "m" || nextPage.Output["HasMoreTags"] != true {
+		t.Fatalf("next tag page %#v, %v", nextPage, err)
+	}
+	if _, err := call("UntagDeliveryStream", map[string]any{"DeliveryStreamName": "tagged", "TagKeys": []any{"m", "missing"}}); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err := call("ListTagsForDeliveryStream", map[string]any{"DeliveryStreamName": "tagged"})
+	remainingTags := remaining.Output["Tags"].([]any)
+	if err != nil || len(remainingTags) != 2 || remainingTags[0].(map[string]any)["Key"] != "a" || remainingTags[1].(map[string]any)["Value"] != "new" || remaining.Output["HasMoreTags"] != false {
+		t.Fatalf("remaining tags %#v, %v", remaining, err)
+	}
+
+	tooMany := make([]any, 49)
+	for i := range tooMany {
+		tooMany[i] = map[string]any{"Key": fmt.Sprintf("k%02d", i), "Value": "value"}
+	}
+	if _, err := call("TagDeliveryStream", map[string]any{"DeliveryStreamName": "tagged", "Tags": tooMany}); err == nil {
+		t.Fatal("exceeded 50-tag stream limit")
+	} else if fault, ok := err.(*spi.Fault); !ok || fault.Code != "LimitExceededException" {
+		t.Fatalf("tag limit error %v", err)
+	}
+	for _, input := range []map[string]any{
+		{"DeliveryStreamName": "tagged", "Tags": []any{}},
+		{"DeliveryStreamName": "tagged", "Tags": []any{map[string]any{"Key": "aws:reserved"}}},
+		{"DeliveryStreamName": "tagged", "Tags": []any{map[string]any{"Key": "bad", "Value": "bad!"}}},
+		{"DeliveryStreamName": "tagged", "Tags": []any{map[string]any{"Key": "same"}, map[string]any{"Key": "same"}}},
+	} {
+		if _, err := call("TagDeliveryStream", input); err == nil {
+			t.Fatalf("accepted invalid tags %#v", input)
+		}
+	}
+	for _, input := range []map[string]any{
+		{"DeliveryStreamName": "tagged", "TagKeys": []any{}},
+		{"DeliveryStreamName": "tagged", "TagKeys": []any{"aws:reserved"}},
+	} {
+		if _, err := call("UntagDeliveryStream", input); err == nil {
+			t.Fatalf("accepted invalid tag keys %#v", input)
+		}
+	}
+	for _, input := range []map[string]any{
+		{"DeliveryStreamName": "tagged", "Limit": 0},
+		{"DeliveryStreamName": "tagged", "Limit": 51},
+		{"DeliveryStreamName": "tagged", "ExclusiveStartTagKey": "aws:reserved"},
+	} {
+		if _, err := call("ListTagsForDeliveryStream", input); err == nil {
+			t.Fatalf("accepted invalid tag list %#v", input)
+		}
+	}
+	for _, operation := range []string{"TagDeliveryStream", "UntagDeliveryStream", "ListTagsForDeliveryStream"} {
+		if _, err := call(operation, map[string]any{"DeliveryStreamName": "missing"}); err == nil {
+			t.Fatalf("%s accepted missing stream", operation)
+		}
+	}
+	if _, err := call("DeleteDeliveryStream", map[string]any{"DeliveryStreamName": "tagged"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "tagged"}); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := call("ListTagsForDeliveryStream", map[string]any{"DeliveryStreamName": "tagged"})
+	if err != nil || len(cleared.Output["Tags"].([]any)) != 0 {
+		t.Fatalf("tags survived stream recreation %#v, %v", cleared, err)
 	}
 }

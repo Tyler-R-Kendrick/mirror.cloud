@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -68,6 +69,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if err := validateDestination(rec); err != nil {
 			return nil, err
 		}
+		tags, valid := parseTags(req.Input["Tags"], false)
+		if !valid {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
 		b, _ := json.Marshal(rec)
 		if err := p.col(req, "fh").Txn(ctx, func(tx spi.Tx) error {
 			if _, ok, err := tx.Get(name); err != nil {
@@ -79,9 +84,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}); err != nil {
 			return nil, err
 		}
+		if err := putTags(ctx, p.col(req, "fhtag"), name, tags); err != nil {
+			return nil, err
+		}
 		return &spi.Response{Output: map[string]any{"DeliveryStreamARN": arn}}, nil
 	case "DeleteDeliveryStream":
 		_ = p.col(req, "fh").Delete(ctx, name)
+		_ = p.col(req, "fhtag").Delete(ctx, name)
 		kvs, _, _ := p.col(req, "fhrec:"+name).List(ctx, "", "", 0)
 		for _, kv := range kvs {
 			_ = p.col(req, "fhrec:"+name).Delete(ctx, kv.Key)
@@ -96,21 +105,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = json.Unmarshal(b, &rec)
 		return &spi.Response{Output: map[string]any{"DeliveryStreamDescription": describeRecord(rec)}}, nil
 	case "ListDeliveryStreams":
-		limit := 10
-		if value, ok := req.Input["Limit"]; ok {
-			switch value := value.(type) {
-			case int:
-				limit = value
-			case float64:
-				if value != math.Trunc(value) || value < 1 || value > 10000 {
-					return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-				}
-				limit = int(value)
-			default:
-				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-			}
-		}
-		if limit < 1 || limit > 10000 {
+		limit, valid := inputLimit(req.Input["Limit"], 10, 10000)
+		if !valid {
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
 		after := first(req.Input, "ExclusiveStartDeliveryStreamName")
@@ -193,19 +189,77 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "TagDeliveryStream":
-		b, _ := json.Marshal(req.Input["Tags"])
-		_ = p.col(req, "fhtag").Put(ctx, name, b)
+		if _, ok, _ := p.col(req, "fh").Get(ctx, name); !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
+		}
+		updates, valid := parseTags(req.Input["Tags"], true)
+		if !valid {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if err := p.col(req, "fhtag").Txn(ctx, func(tx spi.Tx) error {
+			b, _, err := tx.Get(name)
+			if err != nil {
+				return err
+			}
+			tags := loadTags(b)
+			maps.Copy(tags, updates)
+			if len(tags) > 50 {
+				return &spi.Fault{Code: "LimitExceededException", HTTPStatus: 400, Fault: "client"}
+			}
+			return putTagsTx(tx, name, tags)
+		}); err != nil {
+			return nil, err
+		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "UntagDeliveryStream":
-		_ = p.col(req, "fhtag").Delete(ctx, name)
+		if _, ok, _ := p.col(req, "fh").Get(ctx, name); !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
+		}
+		keys, valid := tagKeys(req.Input["TagKeys"])
+		if !valid {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if err := p.col(req, "fhtag").Txn(ctx, func(tx spi.Tx) error {
+			b, _, err := tx.Get(name)
+			if err != nil {
+				return err
+			}
+			tags := loadTags(b)
+			for _, key := range keys {
+				delete(tags, key)
+			}
+			return putTagsTx(tx, name, tags)
+		}); err != nil {
+			return nil, err
+		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "ListTagsForDeliveryStream":
-		b, ok, _ := p.col(req, "fhtag").Get(ctx, name)
-		var tags any = []any{}
-		if ok {
-			_ = json.Unmarshal(b, &tags)
+		if _, ok, _ := p.col(req, "fh").Get(ctx, name); !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
-		return &spi.Response{Output: map[string]any{"Tags": tags, "HasMoreTags": false}}, nil
+		limit, valid := inputLimit(req.Input["Limit"], 50, 50)
+		after := first(req.Input, "ExclusiveStartTagKey")
+		if !valid || (after != "" && !validTagKey(after)) {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		b, ok, _ := p.col(req, "fhtag").Get(ctx, name)
+		tags := map[string]string{}
+		if ok {
+			tags = loadTags(b)
+		}
+		listed := make([]any, 0, min(limit, len(tags)))
+		more := false
+		for _, tag := range tagList(tags) {
+			if tag["Key"].(string) <= after {
+				continue
+			}
+			if len(listed) == limit {
+				more = true
+				break
+			}
+			listed = append(listed, tag)
+		}
+		return &spi.Response{Output: map[string]any{"Tags": listed, "HasMoreTags": more}}, nil
 	case "StartDeliveryStreamEncryption", "StopDeliveryStreamEncryption":
 		return &spi.Response{Output: map[string]any{}}, nil
 	default:
@@ -260,6 +314,117 @@ func describeRecord(rec map[string]any) map[string]any {
 	description["Destinations"] = []any{destination}
 	description["HasMoreDestinations"] = false
 	return description
+}
+
+func inputLimit(value any, fallback, maximum int) (int, bool) {
+	if value == nil {
+		return fallback, true
+	}
+	var limit int
+	switch value := value.(type) {
+	case int:
+		limit = value
+	case float64:
+		if value != math.Trunc(value) || value < 1 || value > float64(maximum) {
+			return 0, false
+		}
+		limit = int(value)
+	default:
+		return 0, false
+	}
+	return limit, limit >= 1 && limit <= maximum
+}
+
+func parseTags(value any, required bool) (map[string]string, bool) {
+	if value == nil && !required {
+		return map[string]string{}, true
+	}
+	items, ok := value.([]any)
+	if !ok || len(items) < 1 || len(items) > 50 {
+		return nil, false
+	}
+	tags := make(map[string]string, len(items))
+	for _, item := range items {
+		tag, ok := item.(map[string]any)
+		key, keyOK := tag["Key"].(string)
+		if !ok || !keyOK || !validTagKey(key) {
+			return nil, false
+		}
+		value := ""
+		if raw, exists := tag["Value"]; exists {
+			value, ok = raw.(string)
+			if !ok || len(value) > 256 || !firehoseTagValue.MatchString(value) {
+				return nil, false
+			}
+		}
+		if _, duplicate := tags[key]; duplicate {
+			return nil, false
+		}
+		tags[key] = value
+	}
+	return tags, true
+}
+
+func tagKeys(value any) ([]string, bool) {
+	items, ok := value.([]any)
+	if !ok || len(items) < 1 || len(items) > 50 {
+		return nil, false
+	}
+	keys := make([]string, len(items))
+	for i, item := range items {
+		keys[i], ok = item.(string)
+		if !ok || !validTagKey(keys[i]) {
+			return nil, false
+		}
+	}
+	return keys, true
+}
+
+func validTagKey(key string) bool {
+	return len(key) <= 128 && !strings.HasPrefix(key, "aws:") && firehoseTagKey.MatchString(key)
+}
+
+func loadTags(b []byte) map[string]string {
+	var stored []map[string]any
+	_ = json.Unmarshal(b, &stored)
+	tags := make(map[string]string, len(stored))
+	for _, tag := range stored {
+		key, _ := tag["Key"].(string)
+		value, _ := tag["Value"].(string)
+		if key != "" {
+			tags[key] = value
+		}
+	}
+	return tags
+}
+
+func tagList(tags map[string]string) []map[string]any {
+	keys := make([]string, 0, len(tags))
+	for key := range tags {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	listed := make([]map[string]any, 0, len(keys))
+	for _, key := range keys {
+		listed = append(listed, map[string]any{"Key": key, "Value": tags[key]})
+	}
+	return listed
+}
+
+func putTags(ctx context.Context, collection spi.Collection, key string, tags map[string]string) error {
+	if len(tags) == 0 {
+		return collection.Delete(ctx, key)
+	}
+	b, _ := json.Marshal(tagList(tags))
+	return collection.Put(ctx, key, b)
+}
+
+func putTagsTx(tx spi.Tx, key string, tags map[string]string) error {
+	if len(tags) == 0 {
+		return tx.Delete(key)
+	}
+	b, _ := json.Marshal(tagList(tags))
+	return tx.Put(key, b)
 }
 
 func s3Dest(rec map[string]any) (bucket, prefix, errorPrefix, timezone, extension, compression string) {
@@ -394,6 +559,8 @@ var (
 	firehosePrefixExpression = regexp.MustCompile(`!\{([^}:]+):([^}]*)\}`)
 	firehoseFileExtension    = regexp.MustCompile(`^\.[0-9a-z!\-_.*'()]+$`)
 	firehoseStreamName       = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
+	firehoseTagKey           = regexp.MustCompile(`^[\p{L}\p{Z}\p{N}_.:/=+\-@%]+$`)
+	firehoseTagValue         = regexp.MustCompile(`^[\p{L}\p{Z}\p{N}_.:/=+\-@%]*$`)
 )
 
 func (p *Pack) evaluatedS3Prefix(prefix string, now time.Time) string {

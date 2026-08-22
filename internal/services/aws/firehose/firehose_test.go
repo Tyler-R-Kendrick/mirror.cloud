@@ -2501,6 +2501,15 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	described, err = call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "http-endpoint"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	description = described.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["HttpEndpointDestinationDescription"].(map[string]any)
+	endpoint = description["EndpointConfiguration"].(map[string]any)
+	if endpoint["Name"] != "updated" || endpoint["Url"] != "https://example.test/ok?tenant=2" || description["S3BackupMode"] != "FailedDataOnly" || description["S3DestinationDescription"].(map[string]any)["Prefix"] != "updated/" {
+		t.Fatalf("updated HTTP description %#v", description)
+	}
 	put, err = call("PutRecord", map[string]any{"DeliveryStreamName": "http-endpoint", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("updated"))}})
 	if err != nil {
 		t.Fatal(err)
@@ -2549,8 +2558,9 @@ func TestFirehoseHTTPEndpointValidation(t *testing.T) {
 		{"S3Configuration": testS3Destination()},
 		{"EndpointConfiguration": map[string]any{"Url": "https://example.test"}},
 		testHTTPEndpointDestination("not a URL"),
+		testHTTPEndpointDestination("https://example.test"),
 	}
-	invalid[0]["EndpointConfiguration"].(map[string]any)["Name"] = " "
+	invalid[5]["EndpointConfiguration"].(map[string]any)["Name"] = " "
 	for i, destination := range invalid {
 		_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
 			"DeliveryStreamName": fmt.Sprintf("invalid-http-%d", i), "HttpEndpointDestinationConfiguration": destination,

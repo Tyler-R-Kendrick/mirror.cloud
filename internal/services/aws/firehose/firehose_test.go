@@ -583,3 +583,101 @@ func TestFirehoseTagsMergeRemoveAndPaginate(t *testing.T) {
 		t.Fatalf("tags survived stream recreation %#v, %v", cleared, err)
 	}
 }
+
+func TestFirehoseEncryptionState(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	describeEncryption := func(name string) map[string]any {
+		t.Helper()
+		response, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		description := response.Output["DeliveryStreamDescription"].(map[string]any)
+		return description["DeliveryStreamEncryptionConfiguration"].(map[string]any)
+	}
+	record := map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("encrypted"))}
+
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "plain"}); err != nil {
+		t.Fatal(err)
+	}
+	if encryption := describeEncryption("plain"); encryption["Status"] != "DISABLED" || encryption["KeyType"] != nil {
+		t.Fatalf("plain encryption %#v", encryption)
+	}
+	put, err := call("PutRecord", map[string]any{"DeliveryStreamName": "plain", "Record": record})
+	if err != nil || put.Output["Encrypted"] != false {
+		t.Fatalf("plain put %#v, %v", put, err)
+	}
+	if _, err := call("StartDeliveryStreamEncryption", map[string]any{"DeliveryStreamName": "plain"}); err != nil {
+		t.Fatal(err)
+	}
+	if encryption := describeEncryption("plain"); encryption["Status"] != "ENABLED" || encryption["KeyType"] != "AWS_OWNED_CMK" || encryption["KeyARN"] != nil {
+		t.Fatalf("AWS-owned encryption %#v", encryption)
+	}
+	batch, err := call("PutRecordBatch", map[string]any{"DeliveryStreamName": "plain", "Records": []any{record}})
+	if err != nil || batch.Output["Encrypted"] != true {
+		t.Fatalf("encrypted batch %#v, %v", batch, err)
+	}
+
+	keyARN := "arn:aws:kms:us-east-1:123456789012:key/example_key-1"
+	configuration := map[string]any{"KeyType": "CUSTOMER_MANAGED_CMK", "KeyARN": keyARN}
+	if _, err := call("StartDeliveryStreamEncryption", map[string]any{
+		"DeliveryStreamName": "plain", "DeliveryStreamEncryptionConfigurationInput": configuration,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if encryption := describeEncryption("plain"); encryption["Status"] != "ENABLED" || encryption["KeyType"] != "CUSTOMER_MANAGED_CMK" || encryption["KeyARN"] != keyARN {
+		t.Fatalf("customer encryption %#v", encryption)
+	}
+	if _, err := call("StopDeliveryStreamEncryption", map[string]any{"DeliveryStreamName": "plain"}); err != nil {
+		t.Fatal(err)
+	}
+	if encryption := describeEncryption("plain"); encryption["Status"] != "DISABLED" || encryption["KeyType"] != nil || encryption["KeyARN"] != nil {
+		t.Fatalf("stopped encryption %#v", encryption)
+	}
+
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "created-encrypted", "DeliveryStreamEncryptionConfigurationInput": configuration,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if encryption := describeEncryption("created-encrypted"); encryption["Status"] != "ENABLED" || encryption["KeyARN"] != keyARN {
+		t.Fatalf("create encryption %#v", encryption)
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "source", "DeliveryStreamType": "KinesisStreamAsSource"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []map[string]any{
+		{"DeliveryStreamName": "invalid-type", "DeliveryStreamType": "Unknown"},
+		{"DeliveryStreamName": "encrypted-source", "DeliveryStreamType": "KinesisStreamAsSource", "DeliveryStreamEncryptionConfigurationInput": configuration},
+	} {
+		if _, err := call("CreateDeliveryStream", input); err == nil {
+			t.Fatalf("accepted invalid create input %#v", input)
+		}
+	}
+	if _, err := call("StartDeliveryStreamEncryption", map[string]any{"DeliveryStreamName": "source"}); err == nil {
+		t.Fatal("encrypted non-DirectPut stream")
+	}
+	for _, input := range []any{
+		map[string]any{},
+		map[string]any{"KeyType": "UNKNOWN"},
+		map[string]any{"KeyType": "AWS_OWNED_CMK", "KeyARN": keyARN},
+		map[string]any{"KeyType": "CUSTOMER_MANAGED_CMK"},
+		map[string]any{"KeyType": "CUSTOMER_MANAGED_CMK", "KeyARN": "not-an-arn"},
+	} {
+		if _, err := call("StartDeliveryStreamEncryption", map[string]any{
+			"DeliveryStreamName": "plain", "DeliveryStreamEncryptionConfigurationInput": input,
+		}); err == nil {
+			t.Fatalf("accepted invalid encryption input %#v", input)
+		}
+	}
+	for _, operation := range []string{"StartDeliveryStreamEncryption", "StopDeliveryStreamEncryption"} {
+		if _, err := call(operation, map[string]any{"DeliveryStreamName": "missing"}); err == nil {
+			t.Fatalf("%s accepted missing stream", operation)
+		}
+	}
+}

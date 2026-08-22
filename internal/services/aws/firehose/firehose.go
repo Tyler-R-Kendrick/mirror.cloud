@@ -62,18 +62,32 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if len(name) > 64 || !firehoseStreamName.MatchString(name) {
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
+		streamType := first(req.Input, "DeliveryStreamType")
+		if streamType == "" {
+			streamType = "DirectPut"
+		}
+		switch streamType {
+		case "DirectPut", "KinesisStreamAsSource", "MSKAsSource", "DatabaseAsSource":
+		default:
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
 		arn := "arn:aws:firehose:" + req.Identity.Region + ":" + req.Identity.Account + ":deliverystream/" + name
 		rec := map[string]any{
 			"DeliveryStreamName": name, "DeliveryStreamARN": arn, "DeliveryStreamStatus": "ACTIVE",
-			"DeliveryStreamType": first(req.Input, "DeliveryStreamType"), "VersionId": "1",
-		}
-		if rec["DeliveryStreamType"] == "" {
-			rec["DeliveryStreamType"] = "DirectPut"
+			"DeliveryStreamType": streamType, "VersionId": "1",
 		}
 		copyDest(rec, req.Input, "Configuration")
 		if err := validateDestination(rec); err != nil {
 			return nil, err
 		}
+		encryption, valid := encryptionDescription(req.Input["DeliveryStreamEncryptionConfigurationInput"], false)
+		if !valid {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if encryption["Status"] == "ENABLED" && streamType != "DirectPut" {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		rec["DeliveryStreamEncryptionConfiguration"] = encryption
 		tags, valid := parseTags(req.Input["Tags"], false)
 		if !valid {
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
@@ -146,7 +160,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"DeliveryStreamNames": names, "HasMoreDeliveryStreams": more}}, nil
 	case "PutRecord":
-		if _, ok, _ := p.col(req, "fh").Get(ctx, name); !ok {
+		stream, ok, _ := p.col(req, "fh").Get(ctx, name)
+		if !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
 		decoded, valid := recordData(req.Input["Record"])
@@ -154,9 +169,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
 		id := p.putOne(ctx, req, name, req.Input["Record"], decoded)
-		return &spi.Response{Output: map[string]any{"RecordId": id, "Encrypted": false}}, nil
+		return &spi.Response{Output: map[string]any{"RecordId": id, "Encrypted": streamEncrypted(stream)}}, nil
 	case "PutRecordBatch":
-		if _, ok, _ := p.col(req, "fh").Get(ctx, name); !ok {
+		stream, ok, _ := p.col(req, "fh").Get(ctx, name)
+		if !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
 		recs, ok := req.Input["Records"].([]any)
@@ -178,7 +194,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			id := p.putOne(ctx, req, name, rec, decoded[i])
 			resp = append(resp, map[string]any{"RecordId": id})
 		}
-		return &spi.Response{Output: map[string]any{"Encrypted": false, "FailedPutCount": 0, "RequestResponses": resp}}, nil
+		return &spi.Response{Output: map[string]any{"Encrypted": streamEncrypted(stream), "FailedPutCount": 0, "RequestResponses": resp}}, nil
 	case "UpdateDestination":
 		err := p.col(req, "fh").Txn(ctx, func(tx spi.Tx) error {
 			b, ok, err := tx.Get(name)
@@ -283,6 +299,33 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"Tags": listed, "HasMoreTags": more}}, nil
 	case "StartDeliveryStreamEncryption", "StopDeliveryStreamEncryption":
+		encryption := map[string]any{"Status": "DISABLED"}
+		if req.Operation == "StartDeliveryStreamEncryption" {
+			var valid bool
+			encryption, valid = encryptionDescription(req.Input["DeliveryStreamEncryptionConfigurationInput"], true)
+			if !valid {
+				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+		if err := p.col(req, "fh").Txn(ctx, func(tx spi.Tx) error {
+			b, ok, err := tx.Get(name)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
+			}
+			var rec map[string]any
+			_ = json.Unmarshal(b, &rec)
+			if first(rec, "DeliveryStreamType") != "DirectPut" {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			rec["DeliveryStreamEncryptionConfiguration"] = encryption
+			nb, _ := json.Marshal(rec)
+			return tx.Put(name, nb)
+		}); err != nil {
+			return nil, err
+		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	default:
 		return nil, spi.NotImplemented("aws.firehose", req.Operation, "emulate")
@@ -303,6 +346,41 @@ func recordData(rec any) ([]byte, bool) {
 	default:
 		return nil, false
 	}
+}
+
+func encryptionDescription(value any, defaultAWS bool) (map[string]any, bool) {
+	if value == nil {
+		if defaultAWS {
+			return map[string]any{"KeyType": "AWS_OWNED_CMK", "Status": "ENABLED"}, true
+		}
+		return map[string]any{"Status": "DISABLED"}, true
+	}
+	input, ok := value.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	keyType, keyARN := first(input, "KeyType"), first(input, "KeyARN")
+	switch keyType {
+	case "AWS_OWNED_CMK":
+		if keyARN != "" {
+			return nil, false
+		}
+		return map[string]any{"KeyType": keyType, "Status": "ENABLED"}, true
+	case "CUSTOMER_MANAGED_CMK":
+		if len(keyARN) > 512 || !firehoseKMSKeyARN.MatchString(keyARN) {
+			return nil, false
+		}
+		return map[string]any{"KeyARN": keyARN, "KeyType": keyType, "Status": "ENABLED"}, true
+	default:
+		return nil, false
+	}
+}
+
+func streamEncrypted(b []byte) bool {
+	var rec map[string]any
+	_ = json.Unmarshal(b, &rec)
+	encryption, _ := rec["DeliveryStreamEncryptionConfiguration"].(map[string]any)
+	return first(encryption, "Status") == "ENABLED"
 }
 
 func (p *Pack) putOne(ctx context.Context, req *spi.Request, name string, rec any, decoded []byte) string {
@@ -588,6 +666,7 @@ var (
 	firehoseStreamName       = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 	firehoseTagKey           = regexp.MustCompile(`^[\p{L}\p{Z}\p{N}_.:/=+\-@%]+$`)
 	firehoseTagValue         = regexp.MustCompile(`^[\p{L}\p{Z}\p{N}_.:/=+\-@%]*$`)
+	firehoseKMSKeyARN        = regexp.MustCompile(`^arn:[^:]+:kms:[a-zA-Z0-9\-]+:\d{12}:key/[a-zA-Z_0-9+=,.@\-_/]+$`)
 )
 
 func (p *Pack) evaluatedS3Prefix(prefix string, now time.Time) string {

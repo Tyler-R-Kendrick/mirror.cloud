@@ -28,6 +28,8 @@ func init() {
 // Pack implements Firehose-lite.
 type Pack struct{ deps spi.Deps }
 
+const destinationID = "destinationId-000000000001"
+
 // New constructs the pack.
 func New(d spi.Deps) *Pack { return &Pack{deps: d} }
 
@@ -91,9 +93,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
-		kvs, _, _ := p.col(req, "fhrec:"+name).List(ctx, "", "", 0)
-		rec["HasMoreDestinations"] = false
-		return &spi.Response{Output: map[string]any{"DeliveryStreamDescription": rec, "RecordCount": len(kvs)}}, nil
+		return &spi.Response{Output: map[string]any{"DeliveryStreamDescription": describeRecord(rec)}}, nil
 	case "ListDeliveryStreams":
 		kvs, _, _ := p.col(req, "fh").List(ctx, "", "", 0)
 		var names []any
@@ -130,7 +130,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			var rec map[string]any
 			_ = json.Unmarshal(b, &rec)
 			current := first(req.Input, "CurrentDeliveryStreamVersionId")
-			if current == "" || first(req.Input, "DestinationId") == "" {
+			if current == "" || first(req.Input, "DestinationId") != destinationID {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			if current != first(rec, "VersionId") {
@@ -203,6 +203,20 @@ func copyDest(rec, in map[string]any, suffix string) {
 		maps.Copy(destination, patch)
 		rec[base+"Configuration"] = destination
 	}
+}
+
+func describeRecord(rec map[string]any) map[string]any {
+	description := maps.Clone(rec)
+	destination := map[string]any{"DestinationId": destinationID}
+	for _, base := range []string{"S3Destination", "ExtendedS3Destination"} {
+		if configuration, ok := description[base+"Configuration"]; ok {
+			destination[base+"Description"] = configuration
+			delete(description, base+"Configuration")
+		}
+	}
+	description["Destinations"] = []any{destination}
+	description["HasMoreDestinations"] = false
+	return description
 }
 
 func s3Dest(rec map[string]any) (bucket, prefix, errorPrefix, timezone, extension, compression string) {

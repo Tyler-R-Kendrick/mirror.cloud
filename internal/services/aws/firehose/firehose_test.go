@@ -325,11 +325,32 @@ func TestFirehoseControlPlaneAndBatch(t *testing.T) {
 	}
 	described, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "control"})
 	description := described.Output["DeliveryStreamDescription"].(map[string]any)
-	if err != nil || described.Output["RecordCount"] != 2 || description["VersionId"] != "1" {
+	if err != nil || description["VersionId"] != "1" {
 		t.Fatalf("describe %#v, %v", described, err)
+	}
+	if _, ok := described.Output["RecordCount"]; ok {
+		t.Fatalf("describe leaked non-AWS RecordCount: %#v", described.Output)
+	}
+	destinations, ok := description["Destinations"].([]any)
+	if !ok || len(destinations) != 1 {
+		t.Fatalf("destinations %#v", description["Destinations"])
+	}
+	destination := destinations[0].(map[string]any)
+	configuration := destination["ExtendedS3DestinationDescription"].(map[string]any)
+	if destination["DestinationId"] != "destinationId-000000000001" || configuration["BucketARN"] != "arn:aws:s3:::original" || configuration["Prefix"] != "kept/" {
+		t.Fatalf("destination description %#v", destination)
+	}
+	if description["ExtendedS3DestinationConfiguration"] != nil {
+		t.Fatalf("describe leaked stored configuration %#v", description)
 	}
 	if _, err := call("UpdateDestination", map[string]any{"DeliveryStreamName": "control"}); err == nil {
 		t.Fatal("updated without version and destination IDs")
+	}
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "control", "CurrentDeliveryStreamVersionId": "1", "DestinationId": "destinationId-000000000002",
+		"ExtendedS3DestinationUpdate": map[string]any{"BucketARN": "arn:aws:s3:::wrong"},
+	}); err == nil {
+		t.Fatal("updated unknown destination")
 	}
 	if _, err := call("UpdateDestination", map[string]any{
 		"DeliveryStreamName": "control", "CurrentDeliveryStreamVersionId": "1", "DestinationId": "destinationId-000000000001",
@@ -346,7 +367,9 @@ func TestFirehoseControlPlaneAndBatch(t *testing.T) {
 	}
 	described, err = call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "control"})
 	description = described.Output["DeliveryStreamDescription"].(map[string]any)
-	if err != nil || description["VersionId"] != "2" {
+	destination = description["Destinations"].([]any)[0].(map[string]any)
+	configuration = destination["ExtendedS3DestinationDescription"].(map[string]any)
+	if err != nil || description["VersionId"] != "2" || configuration["BucketARN"] != "arn:aws:s3:::updated" || configuration["Prefix"] != "kept/" {
 		t.Fatalf("updated description %#v, %v", described, err)
 	}
 	put, err := call("PutRecord", map[string]any{"DeliveryStreamName": "control", "Record": record})

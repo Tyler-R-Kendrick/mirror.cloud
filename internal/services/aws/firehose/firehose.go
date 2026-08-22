@@ -67,16 +67,34 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if streamType == "" {
 			streamType = "DirectPut"
 		}
+		var source map[string]any
 		switch streamType {
-		case "DirectPut", "KinesisStreamAsSource", "MSKAsSource", "DatabaseAsSource":
+		case "DirectPut":
+			if req.Input["KinesisStreamSourceConfiguration"] != nil {
+				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+		case "KinesisStreamAsSource":
+			var ok bool
+			source, ok = req.Input["KinesisStreamSourceConfiguration"].(map[string]any)
+			if !ok || len(first(source, "KinesisStreamARN")) > 512 || !firehoseKinesisStreamARN.MatchString(first(source, "KinesisStreamARN")) || !validRoleARN(first(source, "RoleARN")) {
+				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+		case "MSKAsSource", "DatabaseAsSource":
+			return nil, spi.NotImplemented("aws.firehose", streamType, "emulate")
 		default:
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if err := validateCreateDestination(req.Input); err != nil {
+			return nil, err
 		}
 		arn := "arn:aws:firehose:" + req.Identity.Region + ":" + req.Identity.Account + ":deliverystream/" + name
 		timestamp := float64(p.deps.Clock.Now().UnixNano()) / float64(time.Second)
 		rec := map[string]any{
 			"DeliveryStreamName": name, "DeliveryStreamARN": arn, "DeliveryStreamStatus": "ACTIVE",
 			"DeliveryStreamType": streamType, "VersionId": "1", "CreateTimestamp": timestamp, "LastUpdateTimestamp": timestamp,
+		}
+		if source != nil {
+			rec["KinesisStreamSourceConfiguration"] = maps.Clone(source)
 		}
 		copyDest(rec, req.Input, "Configuration")
 		if err := validateDestination(rec); err != nil {
@@ -427,6 +445,12 @@ func copyDest(rec, in map[string]any, suffix string) {
 
 func describeRecord(rec map[string]any, after string) map[string]any {
 	description := maps.Clone(rec)
+	if configuration, ok := description["KinesisStreamSourceConfiguration"].(map[string]any); ok {
+		source := maps.Clone(configuration)
+		source["DeliveryStartTimestamp"] = description["CreateTimestamp"]
+		description["Source"] = map[string]any{"KinesisStreamSourceDescription": source}
+		delete(description, "KinesisStreamSourceConfiguration")
+	}
 	destination := map[string]any{"DestinationId": destinationID}
 	for _, base := range []string{"S3Destination", "ExtendedS3Destination"} {
 		if configuration, ok := description[base+"Configuration"]; ok {
@@ -576,6 +600,21 @@ func s3Dest(rec map[string]any) (bucket, prefix, errorPrefix, timezone, extensio
 }
 
 func validateDestination(rec map[string]any) error {
+	count := 0
+	var destination map[string]any
+	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration"} {
+		if value, exists := rec[key]; exists {
+			var ok bool
+			destination, ok = value.(map[string]any)
+			if !ok {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			count++
+		}
+	}
+	if count != 1 || len(first(destination, "BucketARN")) > 2048 || !firehoseBucketARN.MatchString(first(destination, "BucketARN")) || !validRoleARN(first(destination, "RoleARN")) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
 	_, prefix, errorPrefix, timezone, extension, compression := s3Dest(rec)
 	if err := validatePrefixes(prefix, errorPrefix); err != nil {
 		return err
@@ -592,6 +631,30 @@ func validateDestination(rec map[string]any) error {
 		return spi.NotImplemented("aws.firehose", "CompressionFormat="+compression, "emulate")
 	}
 	return nil
+}
+
+func validateCreateDestination(input map[string]any) error {
+	destination := ""
+	for key := range input {
+		if strings.HasSuffix(key, "DestinationConfiguration") {
+			if destination != "" {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			destination = key
+		}
+	}
+	switch destination {
+	case "S3DestinationConfiguration", "ExtendedS3DestinationConfiguration":
+		return nil
+	case "":
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	default:
+		return spi.NotImplemented("aws.firehose", destination, "emulate")
+	}
+}
+
+func validRoleARN(arn string) bool {
+	return len(arn) <= 512 && firehoseRoleARN.MatchString(arn)
 }
 
 func validatePrefixes(prefix, errorPrefix string) error {
@@ -689,6 +752,9 @@ var (
 	firehoseTagKey           = regexp.MustCompile(`^[\p{L}\p{Z}\p{N}_.:/=+\-@%]+$`)
 	firehoseTagValue         = regexp.MustCompile(`^[\p{L}\p{Z}\p{N}_.:/=+\-@%]*$`)
 	firehoseKMSKeyARN        = regexp.MustCompile(`^arn:[^:]+:kms:[a-zA-Z0-9\-]+:\d{12}:key/[a-zA-Z_0-9+=,.@\-_/]+$`)
+	firehoseBucketARN        = regexp.MustCompile(`^arn:.*:s3:::[\w.\-]{1,255}$`)
+	firehoseRoleARN          = regexp.MustCompile(`^arn:.*:iam::\d{12}:role/[a-zA-Z_0-9+=,.@\-_/]+$`)
+	firehoseKinesisStreamARN = regexp.MustCompile(`^arn:.*:kinesis:[a-zA-Z0-9\-]+:\d{12}:stream/[a-zA-Z0-9_.-]+$`)
 	firehoseDestinationID    = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 )
 

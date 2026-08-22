@@ -21,6 +21,16 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 )
 
+const testRoleARN = "arn:aws:iam::123456789012:role/firehose"
+
+func testS3Destination() map[string]any {
+	return map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN}
+}
+
+func testKinesisSource() map[string]any {
+	return map[string]any{"KinesisStreamARN": "arn:aws:kinesis:us-east-1:123456789012:stream/source", "RoleARN": testRoleARN}
+}
+
 func TestFirehoseHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
 	if n := len(p.Operations()); n != 12 {
@@ -61,7 +71,7 @@ func TestBootedServerFirehosePutRecord(t *testing.T) {
 		_ = json.Unmarshal(raw, &out)
 		return out
 	}
-	created := call("CreateDeliveryStream", `{"DeliveryStreamName":"ds1"}`)
+	created := call("CreateDeliveryStream", `{"DeliveryStreamName":"ds1","S3DestinationConfiguration":{"RoleARN":"arn:aws:iam::000000000000:role/fh","BucketARN":"arn:aws:s3:::out"}}`)
 	if created["DeliveryStreamARN"] == nil {
 		t.Fatalf("create %v", created)
 	}
@@ -171,7 +181,7 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 		return response
 	}
 	invoke("CreateDeliveryStream", map[string]any{
-		"DeliveryStreamName": "delivery", "S3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::out", "Prefix": "logs/"},
+		"DeliveryStreamName": "delivery", "S3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "logs/"},
 	})
 	response := invoke("PutRecord", map[string]any{
 		"DeliveryStreamName": "delivery", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("payload"))},
@@ -189,7 +199,7 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	}
 	invoke("CreateDeliveryStream", map[string]any{
 		"DeliveryStreamName": "expressions", "ExtendedS3DestinationConfiguration": map[string]any{
-			"BucketARN": "arn:aws:s3:::out", "Prefix": "year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/", "FileExtension": ".jsonl",
+			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/", "FileExtension": ".jsonl",
 			"ErrorOutputPrefix": "errors/!{firehose:error-output-type}/",
 		},
 	})
@@ -207,7 +217,7 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	}
 	invoke("CreateDeliveryStream", map[string]any{
 		"DeliveryStreamName": "timezone", "ExtendedS3DestinationConfiguration": map[string]any{
-			"BucketARN": "arn:aws:s3:::out", "Prefix": "hour=!{timestamp:HH}/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/", "CustomTimeZone": "Asia/Tokyo",
+			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "hour=!{timestamp:HH}/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/", "CustomTimeZone": "Asia/Tokyo",
 		},
 	})
 	response = invoke("PutRecord", map[string]any{"DeliveryStreamName": "timezone", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("timezone"))}})
@@ -218,7 +228,7 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	}
 	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
 		"DeliveryStreamName": "bad-timezone", "ExtendedS3DestinationConfiguration": map[string]any{
-			"BucketARN": "arn:aws:s3:::out", "Prefix": "hour=!{timestamp:HH}/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/", "CustomTimeZone": "Mars/Olympus_Mons",
+			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "hour=!{timestamp:HH}/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/", "CustomTimeZone": "Mars/Olympus_Mons",
 		},
 	}}); err == nil {
 		t.Fatal("accepted invalid CustomTimeZone")
@@ -226,7 +236,7 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	for _, extension := range []string{"jsonl", ".UPPER", "." + strings.Repeat("a", 128)} {
 		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
 			"DeliveryStreamName": "bad-extension", "ExtendedS3DestinationConfiguration": map[string]any{
-				"BucketARN": "arn:aws:s3:::out", "FileExtension": extension,
+				"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "FileExtension": extension,
 			},
 		}}); err == nil {
 			t.Fatalf("accepted invalid FileExtension %q", extension)
@@ -241,6 +251,7 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	}
 	for _, destination := range invalidPrefixes {
 		destination["BucketARN"] = "arn:aws:s3:::out"
+		destination["RoleARN"] = testRoleARN
 		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
 			"DeliveryStreamName": "bad-prefix", "ExtendedS3DestinationConfiguration": destination,
 		}}); err == nil {
@@ -249,7 +260,7 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	}
 	invoke("CreateDeliveryStream", map[string]any{
 		"DeliveryStreamName": "gzip", "ExtendedS3DestinationConfiguration": map[string]any{
-			"BucketARN": "arn:aws:s3:::out", "Prefix": "gzip/", "CompressionFormat": "GZIP",
+			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "gzip/", "CompressionFormat": "GZIP",
 		},
 	})
 	response = invoke("PutRecord", map[string]any{"DeliveryStreamName": "gzip", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("compressed"))}})
@@ -271,7 +282,7 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	}
 	invoke("CreateDeliveryStream", map[string]any{
 		"DeliveryStreamName": "gzip-custom", "ExtendedS3DestinationConfiguration": map[string]any{
-			"BucketARN": "arn:aws:s3:::out", "Prefix": "gzip-custom/", "CompressionFormat": "GZIP", "FileExtension": ".custom",
+			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "gzip-custom/", "CompressionFormat": "GZIP", "FileExtension": ".custom",
 		},
 	})
 	response = invoke("PutRecord", map[string]any{"DeliveryStreamName": "gzip-custom", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("compressed"))}})
@@ -282,7 +293,7 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	}
 	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
 		"DeliveryStreamName": "zip", "ExtendedS3DestinationConfiguration": map[string]any{
-			"BucketARN": "arn:aws:s3:::out", "CompressionFormat": "ZIP",
+			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "CompressionFormat": "ZIP",
 		},
 	}}); err == nil {
 		t.Fatal("accepted unsupported ZIP compression")
@@ -310,12 +321,12 @@ func TestFirehoseControlPlaneAndBatch(t *testing.T) {
 	}
 	if _, err := call("CreateDeliveryStream", map[string]any{
 		"DeliveryStreamName": "control", "ExtendedS3DestinationConfiguration": map[string]any{
-			"BucketARN": "arn:aws:s3:::original", "Prefix": "kept/",
+			"BucketARN": "arn:aws:s3:::original", "RoleARN": testRoleARN, "Prefix": "kept/",
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "control"}); err == nil {
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "control", "S3DestinationConfiguration": testS3Destination()}); err == nil {
 		t.Fatal("recreated existing stream")
 	} else if fault, ok := err.(*spi.Fault); !ok || fault.Code != "ResourceInUseException" {
 		t.Fatalf("duplicate create error %v", err)
@@ -450,11 +461,14 @@ func TestFirehoseListDeliveryStreamsPagination(t *testing.T) {
 		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
 	}
 	for _, name := range []string{"direct-10", "direct-03", "direct-00", "direct-08", "direct-01", "direct-09", "direct-04", "direct-07", "direct-02", "direct-06", "direct-05"} {
-		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": name, "DeliveryStreamType": "DirectPut"}); err != nil {
+		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": name, "DeliveryStreamType": "DirectPut", "S3DestinationConfiguration": testS3Destination()}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "source", "DeliveryStreamType": "KinesisStreamAsSource"}); err != nil {
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "source", "DeliveryStreamType": "KinesisStreamAsSource",
+		"KinesisStreamSourceConfiguration": testKinesisSource(), "S3DestinationConfiguration": testS3Destination(),
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -501,6 +515,7 @@ func TestFirehoseTagsMergeRemoveAndPaginate(t *testing.T) {
 		"DeliveryStreamName": "tagged", "Tags": []any{
 			map[string]any{"Key": "z", "Value": "old"}, map[string]any{"Key": "a", "Value": "first"},
 		},
+		"S3DestinationConfiguration": testS3Destination(),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -576,7 +591,7 @@ func TestFirehoseTagsMergeRemoveAndPaginate(t *testing.T) {
 	if _, err := call("DeleteDeliveryStream", map[string]any{"DeliveryStreamName": "tagged"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "tagged"}); err != nil {
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "tagged", "S3DestinationConfiguration": testS3Destination()}); err != nil {
 		t.Fatal(err)
 	}
 	cleared, err := call("ListTagsForDeliveryStream", map[string]any{"DeliveryStreamName": "tagged"})
@@ -603,7 +618,7 @@ func TestFirehoseEncryptionState(t *testing.T) {
 	}
 	record := map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("encrypted"))}
 
-	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "plain"}); err != nil {
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "plain", "S3DestinationConfiguration": testS3Destination()}); err != nil {
 		t.Fatal(err)
 	}
 	if encryption := describeEncryption("plain"); encryption["Status"] != "DISABLED" || encryption["KeyType"] != nil {
@@ -643,18 +658,22 @@ func TestFirehoseEncryptionState(t *testing.T) {
 
 	if _, err := call("CreateDeliveryStream", map[string]any{
 		"DeliveryStreamName": "created-encrypted", "DeliveryStreamEncryptionConfigurationInput": configuration,
+		"S3DestinationConfiguration": testS3Destination(),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if encryption := describeEncryption("created-encrypted"); encryption["Status"] != "ENABLED" || encryption["KeyARN"] != keyARN {
 		t.Fatalf("create encryption %#v", encryption)
 	}
-	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "source", "DeliveryStreamType": "KinesisStreamAsSource"}); err != nil {
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "source", "DeliveryStreamType": "KinesisStreamAsSource",
+		"KinesisStreamSourceConfiguration": testKinesisSource(), "S3DestinationConfiguration": testS3Destination(),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	for _, input := range []map[string]any{
 		{"DeliveryStreamName": "invalid-type", "DeliveryStreamType": "Unknown"},
-		{"DeliveryStreamName": "encrypted-source", "DeliveryStreamType": "KinesisStreamAsSource", "DeliveryStreamEncryptionConfigurationInput": configuration},
+		{"DeliveryStreamName": "encrypted-source", "DeliveryStreamType": "KinesisStreamAsSource", "KinesisStreamSourceConfiguration": testKinesisSource(), "S3DestinationConfiguration": testS3Destination(), "DeliveryStreamEncryptionConfigurationInput": configuration},
 	} {
 		if _, err := call("CreateDeliveryStream", input); err == nil {
 			t.Fatalf("accepted invalid create input %#v", input)
@@ -701,7 +720,7 @@ func TestFirehoseLifecycleMetadataAndValidation(t *testing.T) {
 		return response.Output["DeliveryStreamDescription"].(map[string]any)
 	}
 
-	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "lifecycle"}); err != nil {
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "lifecycle", "S3DestinationConfiguration": testS3Destination()}); err != nil {
 		t.Fatal(err)
 	}
 	created := describe()
@@ -749,6 +768,57 @@ func TestFirehoseLifecycleMetadataAndValidation(t *testing.T) {
 	}
 }
 
+func TestFirehoseCreateConfiguration(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "source", "DeliveryStreamType": "KinesisStreamAsSource",
+		"KinesisStreamSourceConfiguration": testKinesisSource(), "S3DestinationConfiguration": testS3Destination(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "source"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	description := response.Output["DeliveryStreamDescription"].(map[string]any)
+	source := description["Source"].(map[string]any)["KinesisStreamSourceDescription"].(map[string]any)
+	if source["KinesisStreamARN"] != testKinesisSource()["KinesisStreamARN"] || source["RoleARN"] != testRoleARN || source["DeliveryStartTimestamp"] != float64(0) || description["KinesisStreamSourceConfiguration"] != nil {
+		t.Fatalf("source description %#v", description)
+	}
+
+	for _, test := range []struct {
+		name  string
+		input map[string]any
+		code  string
+	}{
+		{"missing destination", map[string]any{"DeliveryStreamName": "no-destination"}, "InvalidArgumentException"},
+		{"multiple destinations", map[string]any{"DeliveryStreamName": "two-destinations", "S3DestinationConfiguration": testS3Destination(), "ExtendedS3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
+		{"missing bucket ARN", map[string]any{"DeliveryStreamName": "no-bucket", "S3DestinationConfiguration": map[string]any{"RoleARN": testRoleARN}}, "InvalidArgumentException"},
+		{"malformed bucket ARN", map[string]any{"DeliveryStreamName": "bad-bucket", "S3DestinationConfiguration": map[string]any{"BucketARN": "bucket", "RoleARN": testRoleARN}}, "InvalidArgumentException"},
+		{"missing role ARN", map[string]any{"DeliveryStreamName": "no-role", "S3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::out"}}, "InvalidArgumentException"},
+		{"malformed role ARN", map[string]any{"DeliveryStreamName": "bad-role", "S3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": "role"}}, "InvalidArgumentException"},
+		{"unsupported destination", map[string]any{"DeliveryStreamName": "redshift", "RedshiftDestinationConfiguration": map[string]any{}}, "MirrorNotImplemented"},
+		{"direct put with Kinesis source", map[string]any{"DeliveryStreamName": "direct-source", "KinesisStreamSourceConfiguration": testKinesisSource(), "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
+		{"missing Kinesis source", map[string]any{"DeliveryStreamName": "no-source", "DeliveryStreamType": "KinesisStreamAsSource", "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
+		{"malformed Kinesis ARN", map[string]any{"DeliveryStreamName": "bad-source", "DeliveryStreamType": "KinesisStreamAsSource", "KinesisStreamSourceConfiguration": map[string]any{"KinesisStreamARN": "stream", "RoleARN": testRoleARN}, "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
+		{"malformed Kinesis role", map[string]any{"DeliveryStreamName": "bad-source-role", "DeliveryStreamType": "KinesisStreamAsSource", "KinesisStreamSourceConfiguration": map[string]any{"KinesisStreamARN": testKinesisSource()["KinesisStreamARN"], "RoleARN": "role"}, "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
+		{"unsupported MSK source", map[string]any{"DeliveryStreamName": "msk", "DeliveryStreamType": "MSKAsSource", "S3DestinationConfiguration": testS3Destination()}, "MirrorNotImplemented"},
+		{"unsupported database source", map[string]any{"DeliveryStreamName": "database", "DeliveryStreamType": "DatabaseAsSource", "S3DestinationConfiguration": testS3Destination()}, "MirrorNotImplemented"},
+	} {
+		_, err := call("CreateDeliveryStream", test.input)
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != test.code {
+			t.Errorf("%s: error %v, want %s", test.name, err, test.code)
+		}
+	}
+}
+
 func TestFirehoseDescribeDestinationPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
@@ -757,7 +827,7 @@ func TestFirehoseDescribeDestinationPagination(t *testing.T) {
 		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "DescribeDeliveryStream", Input: input})
 	}
 	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
-		"DeliveryStreamName": "described", "S3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::out"},
+		"DeliveryStreamName": "described", "S3DestinationConfiguration": testS3Destination(),
 	}}); err != nil {
 		t.Fatal(err)
 	}

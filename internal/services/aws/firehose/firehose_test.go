@@ -614,7 +614,8 @@ def lambda_handler(event, context):
 }
 
 func TestFirehoseCloudWatchLoggingValidation(t *testing.T) {
-	p := New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := New(deps)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(name string, options any) error {
 		destination := testS3Destination()
@@ -624,6 +625,11 @@ func TestFirehoseCloudWatchLoggingValidation(t *testing.T) {
 	}
 	if err := call("logging-disabled", map[string]any{"Enabled": false}); err != nil {
 		t.Fatal(err)
+	}
+	p.logDeliveryError(context.Background(), &spi.Request{Identity: id}, map[string]any{"CloudWatchLoggingOptions": map[string]any{"Enabled": false, "LogGroupName": "disabled", "LogStreamName": "errors"}}, "logging-disabled", "ignored", time.Unix(0, 0))
+	logged, err := logs.New(deps).Invoke(context.Background(), &spi.Request{Identity: id, Operation: "GetLogEvents", Input: map[string]any{"logGroupName": "disabled", "logStreamName": "errors"}})
+	if err != nil || len(logged.Output["events"].([]any)) != 0 {
+		t.Fatalf("disabled CloudWatch logging %#v %v", logged, err)
 	}
 	for i, options := range []any{
 		"invalid",

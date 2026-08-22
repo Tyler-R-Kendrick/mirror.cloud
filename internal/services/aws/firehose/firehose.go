@@ -530,9 +530,10 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 	}
 	if configuration, ok := description["MSKSourceConfiguration"].(map[string]any); ok {
 		source := maps.Clone(configuration)
+		created := description["CreateTimestamp"]
 		source["DeliveryStartTimestamp"] = source["ReadFromTimestamp"]
 		if source["DeliveryStartTimestamp"] == nil {
-			source["DeliveryStartTimestamp"] = description["CreateTimestamp"]
+			source["DeliveryStartTimestamp"] = created
 		}
 		delete(source, "ReadFromTimestamp")
 		description["Source"] = map[string]any{"MSKSourceDescription": source}

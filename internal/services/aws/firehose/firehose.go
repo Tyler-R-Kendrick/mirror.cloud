@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"maps"
 	"math"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -804,7 +806,18 @@ func validateProcessingConfiguration(raw any) error {
 		}
 		switch typeName {
 		case "AppendDelimiterToRecord":
-		case "RecordDeAggregation", "Decompression", "CloudWatchLogProcessing", "Lambda", "MetadataExtraction":
+		case "Lambda":
+			arn := processorParameter(processor, "LambdaArn")
+			if len(arn) > 512 || !firehoseLambdaARN.MatchString(arn) {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			if retries := processorParameter(processor, "NumberOfRetries"); retries != "" {
+				value, err := strconv.Atoi(retries)
+				if err != nil || value < 0 || value > 300 {
+					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+				}
+			}
+		case "RecordDeAggregation", "Decompression", "CloudWatchLogProcessing", "MetadataExtraction":
 			if enabled {
 				return spi.NotImplemented("aws.firehose", "Processor="+typeName, "emulate")
 			}
@@ -813,6 +826,17 @@ func validateProcessingConfiguration(raw any) error {
 		}
 	}
 	return nil
+}
+
+func processorParameter(processor map[string]any, name string) string {
+	parameters, _ := processor["Parameters"].([]any)
+	for _, raw := range parameters {
+		parameter, _ := raw.(map[string]any)
+		if first(parameter, "ParameterName") == name {
+			return first(parameter, "ParameterValue")
+		}
+	}
+	return ""
 }
 
 func validProcessorParameter(name string) bool {
@@ -925,22 +949,23 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 }
 
 func (p *Pack) deliverS3Configuration(ctx context.Context, req *spi.Request, configuration map[string]any, stream, version, recID string, data []byte, now time.Time) {
-	bucket, prefix, _, timezone, extension, compression, kmsARN := s3Configuration(configuration)
+	bucket, prefix, errorPrefix, timezone, extension, compression, kmsARN := s3Configuration(configuration)
 	if bucket == "" {
 		return
-	}
-	if processing, _ := configuration["ProcessingConfiguration"].(map[string]any); processing["Enabled"] == true {
-		for _, raw := range processing["Processors"].([]any) {
-			processor, _ := raw.(map[string]any)
-			if first(processor, "Type") == "AppendDelimiterToRecord" {
-				data = append(bytes.Clone(data), '\n')
-			}
-		}
 	}
 	if timezone != "" {
 		location, _ := time.LoadLocation(timezone)
 		now = now.In(location)
 	}
+	processed, deliver, failure, attempts := p.processData(ctx, req, configuration, stream, recID, data, now)
+	if failure != "" {
+		p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, recID, data, now, attempts, failure, processingLambdaARN(configuration))
+		return
+	}
+	if !deliver {
+		return
+	}
+	data = processed
 	if compression == "GZIP" {
 		var compressed bytes.Buffer
 		writer := gzip.NewWriter(&compressed)
@@ -952,6 +977,112 @@ func (p *Pack) deliverS3Configuration(ctx context.Context, req *spi.Request, con
 		}
 	}
 	key := p.evaluatedS3Prefix(prefix, now) + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + recID + extension
+	p.deliverS3Object(ctx, req, bucket, key, kmsARN, data)
+}
+
+func (p *Pack) processData(ctx context.Context, req *spi.Request, configuration map[string]any, stream, recID string, data []byte, now time.Time) ([]byte, bool, string, int) {
+	processing, _ := configuration["ProcessingConfiguration"].(map[string]any)
+	if processing["Enabled"] != true {
+		return data, true, "", 0
+	}
+	for _, raw := range processing["Processors"].([]any) {
+		processor, _ := raw.(map[string]any)
+		switch first(processor, "Type") {
+		case "AppendDelimiterToRecord":
+			data = append(bytes.Clone(data), '\n')
+		case "Lambda":
+			var deliver bool
+			var failure string
+			var attempts int
+			data, deliver, failure, attempts = p.invokeProcessingLambda(ctx, req, processor, stream, recID, data, now)
+			if failure != "" || !deliver {
+				return data, deliver, failure, attempts
+			}
+		}
+	}
+	return data, true, "", 0
+}
+
+func (p *Pack) invokeProcessingLambda(ctx context.Context, req *spi.Request, processor map[string]any, stream, recID string, data []byte, now time.Time) ([]byte, bool, string, int) {
+	arn := processorParameter(processor, "LambdaArn")
+	name := arn[strings.Index(arn, ":function:")+len(":function:"):]
+	if index := strings.IndexByte(name, ':'); index >= 0 {
+		name = name[:index]
+	}
+	event, _ := json.Marshal(map[string]any{
+		"invocationId": recID, "deliveryStreamArn": "arn:aws:firehose:" + req.Identity.Region + ":" + req.Identity.Account + ":deliverystream/" + stream, "region": req.Identity.Region,
+		"records": []any{map[string]any{"recordId": recID, "approximateArrivalTimestamp": float64(now.UnixNano()) / float64(time.Second), "data": base64.StdEncoding.EncodeToString(data)}},
+	})
+	retries := 3
+	if value := processorParameter(processor, "NumberOfRetries"); value != "" {
+		retries, _ = strconv.Atoi(value)
+	}
+	var response *spi.Response
+	var err error
+	attempts := 0
+	for attempt := 0; attempt <= retries; attempt++ {
+		attempts++
+		response, err = lambda.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: map[string]any{"FunctionName": name}, Body: io.NopCloser(bytes.NewReader(event))})
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return nil, false, err.Error(), attempts
+	}
+	raw, _ := response.Output["Payload"].(json.RawMessage)
+	var output map[string]any
+	if json.Unmarshal(raw, &output) != nil {
+		return nil, false, "Lambda returned an invalid response.", attempts
+	}
+	records, ok := output["records"].([]any)
+	if !ok || len(records) != 1 {
+		return nil, false, "Lambda returned an invalid record count.", attempts
+	}
+	record, ok := records[0].(map[string]any)
+	decoded, decodeErr := base64.StdEncoding.DecodeString(first(record, "data"))
+	if !ok || first(record, "recordId") != recID || decodeErr != nil {
+		return nil, false, "Lambda returned an invalid record.", attempts
+	}
+	switch first(record, "result") {
+	case "Ok":
+		return decoded, true, "", attempts
+	case "Dropped":
+		return nil, false, "", attempts
+	case "ProcessingFailed":
+		return nil, false, "Lambda processing failed.", attempts
+	default:
+		return nil, false, "Lambda returned an invalid result.", attempts
+	}
+}
+
+func processingLambdaARN(configuration map[string]any) string {
+	processing, _ := configuration["ProcessingConfiguration"].(map[string]any)
+	processors, _ := processing["Processors"].([]any)
+	for _, raw := range processors {
+		processor, _ := raw.(map[string]any)
+		if first(processor, "Type") == "Lambda" {
+			return processorParameter(processor, "LambdaArn")
+		}
+	}
+	return ""
+}
+
+func (p *Pack) deliverProcessingFailure(ctx context.Context, req *spi.Request, bucket, prefix, kmsARN, stream, version, recID string, data []byte, now time.Time, attempts int, message, lambdaARN string) {
+	if prefix == "" {
+		prefix = "processing-failed/"
+	}
+	prefix = strings.ReplaceAll(prefix, "!{firehose:error-output-type}", "processing-failed")
+	timestamp := now.UTC().Format(time.RFC3339Nano)
+	payload, _ := json.Marshal(map[string]any{
+		"attemptsMade": strconv.Itoa(attempts), "arrivalTimestamp": timestamp, "errorCode": "Lambda.ProcessingFailed", "errorMessage": message,
+		"attemptEndingTimestamp": timestamp, "rawData": base64.StdEncoding.EncodeToString(data), "lambdaArn": lambdaARN,
+	})
+	key := p.evaluatedS3Prefix(prefix, now) + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + recID
+	p.deliverS3Object(ctx, req, bucket, key, kmsARN, payload)
+}
+
+func (p *Pack) deliverS3Object(ctx context.Context, req *spi.Request, bucket, key, kmsARN string, data []byte) {
 	info, err := p.deps.Blobs.Put(ctx, req.Identity.Account+"/"+req.Identity.Region+"/"+bucket+"/"+key, bytes.NewReader(data))
 	if err != nil {
 		return
@@ -980,6 +1111,7 @@ var (
 	firehoseBucketARN         = regexp.MustCompile(`^arn:.*:s3:::[\w.\-]{1,255}$`)
 	firehoseRoleARN           = regexp.MustCompile(`^arn:.*:iam::\d{12}:role/[a-zA-Z_0-9+=,.@\-_/]+$`)
 	firehoseKinesisStreamARN  = regexp.MustCompile(`^arn:.*:kinesis:[a-zA-Z0-9\-]+:\d{12}:stream/[a-zA-Z0-9_.-]+$`)
+	firehoseLambdaARN         = regexp.MustCompile(`^arn:.*:lambda:[a-zA-Z0-9\-]+:\d{12}:function:[a-zA-Z0-9_-]+(?::[a-zA-Z0-9_-]+)?$`)
 	firehoseDestinationID     = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 )
 

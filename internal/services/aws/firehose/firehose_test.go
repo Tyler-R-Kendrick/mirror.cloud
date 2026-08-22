@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
@@ -431,6 +433,134 @@ func TestFirehoseAppendDelimiterProcessing(t *testing.T) {
 		destination["DeliveryStreamName"] = "processing-on-" + name
 		if _, err := call("CreateDeliveryStream", destination); err == nil {
 			t.Errorf("accepted processing configuration on %s S3 configuration", name)
+		}
+	}
+}
+
+func TestFirehoseLambdaProcessing(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	deps := spitest.Deps(t)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	p, function := New(deps), lambda.New(deps)
+	code := `import base64
+def lambda_handler(event, context):
+    assert event['deliveryStreamArn'].endswith('/transformed') and event['region'] == 'us-east-1' and event['invocationId']
+    output = []
+    for record in event['records']:
+        data = base64.b64decode(record['data'])
+        result = 'Dropped' if data == b'drop' else ('ProcessingFailed' if data == b'fail' else 'Ok')
+        output.append({'recordId': record['recordId'], 'result': result, 'data': base64.b64encode(data.upper()).decode()})
+    return {'records': output}
+`
+	if _, err := function.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+		"FunctionName": "transform", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(code))},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	lambdaARN := "arn:aws:lambda:us-east-1:123456789012:function:transform"
+	processing := map[string]any{"Enabled": true, "Processors": []any{
+		map[string]any{"Type": "Lambda", "Parameters": []any{
+			map[string]any{"ParameterName": "LambdaArn", "ParameterValue": lambdaARN},
+			map[string]any{"ParameterName": "NumberOfRetries", "ParameterValue": "0"},
+		}},
+		map[string]any{"Type": "AppendDelimiterToRecord"},
+	}}
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "transformed", "ExtendedS3DestinationConfiguration": map[string]any{
+			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "success/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/", "ProcessingConfiguration": processing,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	put := func(data string) string {
+		t.Helper()
+		response, err := call("PutRecord", map[string]any{"DeliveryStreamName": "transformed", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(data))}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output["RecordId"].(string)
+	}
+	read := func(key string) ([]byte, bool) {
+		t.Helper()
+		reader, _, err := deps.Blobs.Get(context.Background(), id.Account+"/"+id.Region+"/out/"+key)
+		if err != nil {
+			return nil, false
+		}
+		defer reader.Close()
+		body, _ := io.ReadAll(reader)
+		return body, true
+	}
+
+	okID := put("hello")
+	okKey := "success/1970/01/01/00/transformed-1-1970-01-01-00-00-00-" + okID
+	if body, found := read(okKey); !found || string(body) != "HELLO\n" {
+		t.Fatalf("transformed body %q found %v", body, found)
+	}
+	droppedID := put("drop")
+	if _, found := read("success/1970/01/01/00/transformed-1-1970-01-01-00-00-00-" + droppedID); found {
+		t.Fatal("delivered dropped Lambda record")
+	}
+	failedID := put("fail")
+	failureKey := "errors/processing-failed/1970/01/01/00/transformed-1-1970-01-01-00-00-00-" + failedID
+	failureBody, found := read(failureKey)
+	if !found {
+		t.Fatal("missing Lambda processing failure")
+	}
+	var failure map[string]any
+	if json.Unmarshal(failureBody, &failure) != nil || failure["attemptsMade"] != "1" || failure["rawData"] != base64.StdEncoding.EncodeToString([]byte("fail")) || failure["lambdaArn"] != lambdaARN {
+		t.Fatalf("Lambda processing failure %s", failureBody)
+	}
+	described, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "transformed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := described.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["ExtendedS3DestinationDescription"].(map[string]any)
+	if !reflect.DeepEqual(destination["ProcessingConfiguration"], processing) {
+		t.Fatalf("Lambda processing description %#v", destination["ProcessingConfiguration"])
+	}
+	invalidCode := "def lambda_handler(event, context):\n    return {'records': []}\n"
+	if _, err := function.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "UpdateFunctionCode", Input: map[string]any{"FunctionName": "transform", "ZipFile": base64.StdEncoding.EncodeToString([]byte(invalidCode))}}); err != nil {
+		t.Fatal(err)
+	}
+	invalidID := put("invalid-response")
+	invalidKey := "errors/processing-failed/1970/01/01/00/transformed-1-1970-01-01-00-00-00-" + invalidID
+	if body, found := read(invalidKey); !found || !strings.Contains(string(body), "invalid record count") {
+		t.Fatalf("invalid Lambda response body %q found %v", body, found)
+	}
+
+	retryDestination := testS3Destination()
+	retryDestination["ErrorOutputPrefix"] = "retry/!{firehose:error-output-type}/"
+	retryDestination["ProcessingConfiguration"] = map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "Lambda", "Parameters": []any{
+		map[string]any{"ParameterName": "LambdaArn", "ParameterValue": "arn:aws:lambda:us-east-1:123456789012:function:missing"},
+		map[string]any{"ParameterName": "NumberOfRetries", "ParameterValue": "2"},
+	}}}}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "retry-failure", "ExtendedS3DestinationConfiguration": retryDestination}); err != nil {
+		t.Fatal(err)
+	}
+	retryResponse, err := call("PutRecord", map[string]any{"DeliveryStreamName": "retry-failure", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("retry"))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retryKey := "retry/processing-failed/1970/01/01/00/retry-failure-1-1970-01-01-00-00-00-" + retryResponse.Output["RecordId"].(string)
+	if body, found := read(retryKey); !found || !strings.Contains(string(body), `"attemptsMade":"3"`) {
+		t.Fatalf("Lambda retry failure body %q found %v", body, found)
+	}
+
+	for i, parameters := range [][]any{
+		{},
+		{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": "function"}},
+		{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": lambdaARN}, map[string]any{"ParameterName": "NumberOfRetries", "ParameterValue": "301"}},
+		{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": lambdaARN}, map[string]any{"ParameterName": "NumberOfRetries", "ParameterValue": "one"}},
+	} {
+		destination := testS3Destination()
+		destination["ProcessingConfiguration"] = map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "Lambda", "Parameters": parameters}}}
+		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": fmt.Sprintf("invalid-lambda-%d", i), "ExtendedS3DestinationConfiguration": destination}); err == nil {
+			t.Errorf("accepted invalid Lambda parameters %#v", parameters)
 		}
 	}
 }

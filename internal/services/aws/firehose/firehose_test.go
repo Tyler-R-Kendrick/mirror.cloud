@@ -316,6 +316,117 @@ func TestFirehoseS3ObjectNameFormat(t *testing.T) {
 	}
 }
 
+func TestFirehoseAppendDelimiterProcessing(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	processing := func(enabled any) map[string]any {
+		return map[string]any{"Enabled": enabled, "Processors": []any{map[string]any{"Type": "AppendDelimiterToRecord"}}}
+	}
+	read := func(key string, compressed bool) string {
+		t.Helper()
+		reader, _, err := deps.Blobs.Get(context.Background(), id.Account+"/"+id.Region+"/out/"+key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer reader.Close()
+		var bodyReader io.Reader = reader
+		if compressed {
+			gzipReader, err := gzip.NewReader(reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer gzipReader.Close()
+			bodyReader = gzipReader
+		}
+		body, _ := io.ReadAll(bodyReader)
+		return string(body)
+	}
+
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "processed", "ExtendedS3DestinationConfiguration": map[string]any{
+			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "processed/", "CompressionFormat": "GZIP", "ProcessingConfiguration": processing(true),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	put, err := call("PutRecord", map[string]any{"DeliveryStreamName": "processed", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("one"))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id1 := put.Output["RecordId"].(string)
+	if body := read("processed/1970/01/01/00/processed-1-1970-01-01-00-00-00-"+id1+".gz", true); body != "one\n" {
+		t.Fatalf("processed body %q", body)
+	}
+	described, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "processed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := described.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["ExtendedS3DestinationDescription"].(map[string]any)
+	if !reflect.DeepEqual(destination["ProcessingConfiguration"], processing(true)) {
+		t.Fatalf("processing description %#v", destination["ProcessingConfiguration"])
+	}
+
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "disabled-processing", "S3DestinationConfiguration": map[string]any{
+			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "disabled/", "ProcessingConfiguration": processing(false),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	put, err = call("PutRecord", map[string]any{"DeliveryStreamName": "disabled-processing", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("two"))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id2 := put.Output["RecordId"].(string)
+	if body := read("disabled/1970/01/01/00/disabled-processing-1-1970-01-01-00-00-00-"+id2, false); body != "two" {
+		t.Fatalf("disabled body %q", body)
+	}
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "disabled-processing", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
+		"S3DestinationUpdate": map[string]any{"ProcessingConfiguration": processing(true)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	put, err = call("PutRecord", map[string]any{"DeliveryStreamName": "disabled-processing", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("three"))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id3 := put.Output["RecordId"].(string)
+	if body := read("disabled/1970/01/01/00/disabled-processing-2-1970-01-01-00-00-00-"+id3, false); body != "three\n" {
+		t.Fatalf("updated body %q", body)
+	}
+
+	invalid := []any{
+		"invalid",
+		map[string]any{"Enabled": "true"},
+		map[string]any{"Enabled": true},
+		map[string]any{"Enabled": true, "Processors": "invalid"},
+		map[string]any{"Enabled": true, "Processors": []any{}},
+		map[string]any{"Enabled": true, "Processors": []any{"invalid"}},
+		map[string]any{"Enabled": true, "Processors": []any{map[string]any{}}},
+		map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "Unknown"}}},
+		map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "AppendDelimiterToRecord", "Parameters": "invalid"}}},
+		map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "AppendDelimiterToRecord", "Parameters": []any{map[string]any{"ParameterName": "Unknown", "ParameterValue": "value"}}}}},
+		map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "AppendDelimiterToRecord", "Parameters": []any{map[string]any{"ParameterName": "Delimiter", "ParameterValue": " "}}}}},
+	}
+	for i, configuration := range invalid {
+		destination := testS3Destination()
+		destination["ProcessingConfiguration"] = configuration
+		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": fmt.Sprintf("invalid-processing-%d", i), "S3DestinationConfiguration": destination}); err == nil {
+			t.Errorf("accepted processing configuration %#v", configuration)
+		}
+	}
+	destination = testS3Destination()
+	destination["ProcessingConfiguration"] = map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "Lambda"}}}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "unsupported-processing", "S3DestinationConfiguration": destination}); err == nil {
+		t.Fatal("accepted unsupported Lambda processor")
+	}
+}
+
 func TestFirehoseControlPlaneAndBatch(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

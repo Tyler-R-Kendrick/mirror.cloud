@@ -695,6 +695,9 @@ func validateS3Configuration(destination map[string]any, region string) error {
 	if len(first(destination, "BucketARN")) > 2048 || !firehoseBucketARN.MatchString(first(destination, "BucketARN")) || !validRoleARN(first(destination, "RoleARN")) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
+	if err := validateProcessingConfiguration(destination["ProcessingConfiguration"]); err != nil {
+		return err
+	}
 	if raw, exists := destination["BufferingHints"]; exists {
 		hints, ok := raw.(map[string]any)
 		_, hasInterval := hints["IntervalInSeconds"]
@@ -746,6 +749,72 @@ func validateS3Configuration(destination map[string]any, region string) error {
 		return spi.NotImplemented("aws.firehose", "CompressionFormat="+compression, "emulate")
 	}
 	return nil
+}
+
+func validateProcessingConfiguration(raw any) error {
+	if raw == nil {
+		return nil
+	}
+	configuration, ok := raw.(map[string]any)
+	if !ok {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	enabled, _ := configuration["Enabled"].(bool)
+	if value, exists := configuration["Enabled"]; exists {
+		if _, ok := value.(bool); !ok {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	rawProcessors, exists := configuration["Processors"]
+	if !exists {
+		if enabled {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		return nil
+	}
+	processors, ok := rawProcessors.([]any)
+	if !ok || (enabled && len(processors) == 0) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	for _, rawProcessor := range processors {
+		processor, ok := rawProcessor.(map[string]any)
+		typeName := first(processor, "Type")
+		if !ok || typeName == "" {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if rawParameters, exists := processor["Parameters"]; exists {
+			parameters, ok := rawParameters.([]any)
+			if !ok {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			for _, rawParameter := range parameters {
+				parameter, ok := rawParameter.(map[string]any)
+				name, value := first(parameter, "ParameterName"), first(parameter, "ParameterValue")
+				if !ok || !validProcessorParameter(name) || len(value) > 5120 || strings.TrimSpace(value) == "" {
+					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+				}
+			}
+		}
+		switch typeName {
+		case "AppendDelimiterToRecord":
+		case "RecordDeAggregation", "Decompression", "CloudWatchLogProcessing", "Lambda", "MetadataExtraction":
+			if enabled {
+				return spi.NotImplemented("aws.firehose", "Processor="+typeName, "emulate")
+			}
+		default:
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	return nil
+}
+
+func validProcessorParameter(name string) bool {
+	switch name {
+	case "LambdaArn", "NumberOfRetries", "MetadataExtractionQuery", "JsonParsingEngine", "RoleArn", "BufferSizeInMBs", "BufferIntervalInSeconds", "SubRecordType", "Delimiter", "CompressionFormat", "DataMessageExtraction":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateCreateDestination(input map[string]any) error {
@@ -852,6 +921,14 @@ func (p *Pack) deliverS3Configuration(ctx context.Context, req *spi.Request, con
 	bucket, prefix, _, timezone, extension, compression, kmsARN := s3Configuration(configuration)
 	if bucket == "" {
 		return
+	}
+	if processing, _ := configuration["ProcessingConfiguration"].(map[string]any); processing["Enabled"] == true {
+		for _, raw := range processing["Processors"].([]any) {
+			processor, _ := raw.(map[string]any)
+			if first(processor, "Type") == "AppendDelimiterToRecord" {
+				data = append(bytes.Clone(data), '\n')
+			}
+		}
 	}
 	if timezone != "" {
 		location, _ := time.LoadLocation(timezone)

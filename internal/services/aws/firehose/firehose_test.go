@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -950,6 +951,141 @@ def lambda_handler(event, context):
 		destination["ProcessingConfiguration"] = map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "Lambda", "Parameters": parameters}}}
 		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": fmt.Sprintf("invalid-lambda-%d", i), "ExtendedS3DestinationConfiguration": destination}); err == nil {
 			t.Errorf("accepted invalid Lambda parameters %#v", parameters)
+		}
+	}
+}
+
+func TestFirehoseLambdaDynamicPartitioning(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	deps := spitest.Deps(t)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	p, function := New(deps), lambda.New(deps)
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	code := `import base64
+import json
+def lambda_handler(event, context):
+    output = []
+    for record in event['records']:
+        value = json.loads(base64.b64decode(record['data']))
+        keys = {} if 'customer' not in value else {'customer': value['customer']}
+        output.append({'recordId': record['recordId'], 'result': 'Ok', 'data': record['data'], 'metadata': {'partitionKeys': keys}})
+    return {'records': output}
+`
+	if _, err := function.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+		"FunctionName": "partition", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(code))},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	lambdaARN := "arn:aws:lambda:us-east-1:123456789012:function:partition"
+	processing := map[string]any{"Enabled": true, "Processors": []any{
+		map[string]any{"Type": "RecordDeAggregation", "Parameters": []any{map[string]any{"ParameterName": "SubRecordType", "ParameterValue": "JSON"}}},
+		map[string]any{"Type": "Lambda", "Parameters": []any{
+			map[string]any{"ParameterName": "LambdaArn", "ParameterValue": lambdaARN},
+			map[string]any{"ParameterName": "NumberOfRetries", "ParameterValue": "0"},
+		}},
+	}}
+	destination := map[string]any{
+		"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN,
+		"Prefix": "customer=!{partitionKeyFromLambda:customer}/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/",
+		"DynamicPartitioningConfiguration": map[string]any{"Enabled": true}, "ProcessingConfiguration": processing,
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "partitioned", "ExtendedS3DestinationConfiguration": destination}); err != nil {
+		t.Fatal(err)
+	}
+	put, err := call("PutRecord", map[string]any{"DeliveryStreamName": "partitioned", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"customer":"acme"}{"customer":"beta"}`))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordID := put.Output["RecordId"].(string)
+	key := id.Account + "/" + id.Region + "/out/customer=acme/1970/01/01/00/partitioned-1-1970-01-01-00-00-00-" + recordID + ".0"
+	reader, _, err := deps.Blobs.Get(context.Background(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	if string(body) != `{"customer":"acme"}` {
+		t.Fatalf("partitioned body %q", body)
+	}
+	if _, _, err := deps.Blobs.Get(context.Background(), id.Account+"/"+id.Region+"/out/customer=beta/1970/01/01/00/partitioned-1-1970-01-01-00-00-00-"+recordID+".1"); err != nil {
+		t.Fatal(err)
+	}
+	described, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "partitioned"})
+	configuration := described.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["ExtendedS3DestinationDescription"].(map[string]any)
+	dynamic := configuration["DynamicPartitioningConfiguration"].(map[string]any)
+	if err != nil || dynamic["Enabled"] != true || dynamic["RetryOptions"].(map[string]any)["DurationInSeconds"] != 300 {
+		t.Fatalf("default dynamic partition description %#v, %v", dynamic, err)
+	}
+
+	missing, err := call("PutRecord", map[string]any{"DeliveryStreamName": "partitioned", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"event":"missing"}`))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failureKey := id.Account + "/" + id.Region + "/out/errors/processing-failed/1970/01/01/00/partitioned-1-1970-01-01-00-00-00-" + missing.Output["RecordId"].(string)
+	reader, _, err = deps.Blobs.Get(context.Background(), failureKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(reader)
+	_ = reader.Close()
+	if !strings.Contains(string(body), "missing Lambda partition key: customer") || !strings.Contains(string(body), base64.StdEncoding.EncodeToString([]byte(`{"event":"missing"}`))) {
+		t.Fatalf("dynamic partition failure %s", body)
+	}
+
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "partitioned", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
+		"ExtendedS3DestinationUpdate": map[string]any{"DynamicPartitioningConfiguration": map[string]any{"RetryOptions": map[string]any{"DurationInSeconds": 12}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	described, err = call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "partitioned"})
+	configuration = described.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["ExtendedS3DestinationDescription"].(map[string]any)
+	dynamic = configuration["DynamicPartitioningConfiguration"].(map[string]any)
+	if err != nil || dynamic["Enabled"] != true || dynamic["RetryOptions"].(map[string]any)["DurationInSeconds"] != float64(12) {
+		t.Fatalf("dynamic partition description %#v, %v", dynamic, err)
+	}
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "partitioned", "CurrentDeliveryStreamVersionId": "2", "DestinationId": destinationID,
+		"ExtendedS3DestinationUpdate": map[string]any{"DynamicPartitioningConfiguration": map[string]any{"Enabled": false}},
+	}); err == nil {
+		t.Fatal("disabled dynamic partitioning")
+	}
+
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "plain", "ExtendedS3DestinationConfiguration": testS3Destination()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "plain", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
+		"ExtendedS3DestinationUpdate": map[string]any{"DynamicPartitioningConfiguration": map[string]any{"Enabled": true}, "Prefix": destination["Prefix"], "ErrorOutputPrefix": destination["ErrorOutputPrefix"], "ProcessingConfiguration": processing},
+	}); err == nil {
+		t.Fatal("enabled dynamic partitioning after stream creation")
+	}
+
+	for i, invalid := range []map[string]any{
+		{"DynamicPartitioningConfiguration": "invalid"},
+		{"DynamicPartitioningConfiguration": map[string]any{"Enabled": "true"}},
+		{"DynamicPartitioningConfiguration": map[string]any{"RetryOptions": "invalid"}},
+		{"DynamicPartitioningConfiguration": map[string]any{"RetryOptions": map[string]any{"DurationInSeconds": -1}}},
+		{"DynamicPartitioningConfiguration": map[string]any{"RetryOptions": map[string]any{"DurationInSeconds": 7201}}},
+		{"DynamicPartitioningConfiguration": map[string]any{"Enabled": true}, "Prefix": "static/", "ErrorOutputPrefix": destination["ErrorOutputPrefix"]},
+		{"DynamicPartitioningConfiguration": map[string]any{"Enabled": true}, "Prefix": destination["Prefix"], "ProcessingConfiguration": processing},
+		{"DynamicPartitioningConfiguration": map[string]any{"Enabled": true}, "Prefix": destination["Prefix"], "ErrorOutputPrefix": destination["ErrorOutputPrefix"]},
+	} {
+		candidate := testS3Destination()
+		maps.Copy(candidate, invalid)
+		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": fmt.Sprintf("invalid-dynamic-%d", i), "ExtendedS3DestinationConfiguration": candidate}); err == nil {
+			t.Errorf("accepted invalid dynamic partitioning %#v", invalid)
+		}
+	}
+	for _, duration := range []any{0, 7200} {
+		candidate := testS3Destination()
+		candidate["DynamicPartitioningConfiguration"] = map[string]any{"Enabled": false, "RetryOptions": map[string]any{"DurationInSeconds": duration}}
+		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": fmt.Sprintf("retry-%d", duration), "ExtendedS3DestinationConfiguration": candidate}); err != nil {
+			t.Fatalf("rejected retry boundary %v: %v", duration, err)
 		}
 	}
 }

@@ -2528,6 +2528,27 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	if _, _, err := deps.Blobs.Get(context.Background(), updatedBackupKey); err == nil {
 		t.Fatal("backed up successfully delivered FailedDataOnly record")
 	}
+	batch, err := call("PutRecordBatch", map[string]any{
+		"DeliveryStreamName": "http-endpoint",
+		"Records": []any{
+			map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("batch-one"))},
+			map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("batch-two"))},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request = <-captured
+	records, _ = request.payload["records"].([]any)
+	responses := batch.Output["RequestResponses"].([]any)
+	if len(records) != 2 || len(responses) != 2 {
+		t.Fatalf("HTTP batch request %#v response %#v", request, batch.Output)
+	}
+	firstBatchRecord := records[0].(map[string]any)
+	secondBatchRecord := records[1].(map[string]any)
+	if first(request.payload, "requestId") != responses[0].(map[string]any)["RecordId"] || first(firstBatchRecord, "data") != base64.StdEncoding.EncodeToString([]byte("batch-one")) || first(secondBatchRecord, "data") != base64.StdEncoding.EncodeToString([]byte("batch-two")) || len(captured) != 0 {
+		t.Fatalf("HTTP batch request %#v response %#v queued %d", request, batch.Output, len(captured))
+	}
 
 	for _, failure := range []struct {
 		name, path, prefix string

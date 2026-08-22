@@ -299,10 +299,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 		}
 		resp := make([]any, 0, len(recs))
+		ids := make([]string, len(recs))
 		for i, rec := range recs {
-			id := p.putOne(ctx, req, name, rec, decoded[i])
-			resp = append(resp, map[string]any{"RecordId": id})
+			ids[i] = p.storeOne(ctx, req, name, rec, decoded[i])
+			resp = append(resp, map[string]any{"RecordId": ids[i]})
 		}
+		p.deliver(ctx, req, name, ids, decoded)
 		return &spi.Response{Output: map[string]any{"Encrypted": streamEncrypted(stream), "FailedPutCount": 0, "RequestResponses": resp}}, nil
 	case "UpdateDestination":
 		err := p.col(req, "fh").Txn(ctx, func(tx spi.Tx) error {
@@ -511,11 +513,16 @@ func directPutStream(b []byte) bool {
 }
 
 func (p *Pack) putOne(ctx context.Context, req *spi.Request, name string, rec any, decoded []byte) string {
+	id := p.storeOne(ctx, req, name, rec, decoded)
+	p.deliver(ctx, req, name, []string{id}, [][]byte{decoded})
+	return id
+}
+
+func (p *Pack) storeOne(ctx context.Context, req *spi.Request, name string, rec any, decoded []byte) string {
 	id := p.deps.Rand.Hex(16)
 	payload := map[string]any{"Record": rec, "Decoded": string(decoded)}
 	b, _ := json.Marshal(payload)
 	_ = p.col(req, "fhrec:"+name).Put(ctx, id, b)
-	p.deliver(ctx, req, name, id, decoded)
 	return id
 }
 
@@ -1428,7 +1435,7 @@ func bucketFromARN(arn string) string {
 	return arn
 }
 
-func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream, recID string, data []byte) {
+func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, recIDs []string, data [][]byte) {
 	raw, ok, _ := p.col(req, "fh").Get(ctx, stream)
 	if !ok {
 		return
@@ -1448,29 +1455,37 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream, recID stri
 	}
 	now := p.deps.Clock.Now().UTC()
 	if destination, ok := rec["HttpEndpointDestinationConfiguration"].(map[string]any); ok {
-		delivered, permanent, message := p.deliverHTTP(ctx, rec, destination, recID, data, now)
+		delivered, permanent, message := p.deliverHTTP(ctx, rec, destination, recIDs[0], data, now)
 		if !delivered {
 			p.logDeliveryError(ctx, req, destination, stream, message, now)
 		}
 		if first(destination, "S3BackupMode") == "AllData" || (!delivered && !permanent) {
 			backup, _ := destination["S3Configuration"].(map[string]any)
-			p.deliverS3Configuration(ctx, req, backup, stream, version, recID, data, now)
+			for i := range data {
+				p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)
+			}
 		}
 		return
 	}
-	p.deliverS3Configuration(ctx, req, destination, stream, version, recID, data, now)
-	extended, _ := rec["ExtendedS3DestinationConfiguration"].(map[string]any)
-	if first(extended, "S3BackupMode") == "Enabled" {
-		backup, _ := extended["S3BackupConfiguration"].(map[string]any)
-		p.deliverS3Configuration(ctx, req, backup, stream, version, recID, data, now)
+	for i := range data {
+		p.deliverS3Configuration(ctx, req, destination, stream, version, recIDs[i], data[i], now)
+		extended, _ := rec["ExtendedS3DestinationConfiguration"].(map[string]any)
+		if first(extended, "S3BackupMode") == "Enabled" {
+			backup, _ := extended["S3BackupConfiguration"].(map[string]any)
+			p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)
+		}
 	}
 }
 
-func (p *Pack) deliverHTTP(ctx context.Context, stream, destination map[string]any, requestID string, data []byte, now time.Time) (bool, bool, string) {
+func (p *Pack) deliverHTTP(ctx context.Context, stream, destination map[string]any, requestID string, data [][]byte, now time.Time) (bool, bool, string) {
+	records := make([]any, len(data))
+	for i := range data {
+		records[i] = map[string]any{"data": base64.StdEncoding.EncodeToString(data[i])}
+	}
 	payload, _ := json.Marshal(map[string]any{
 		"requestId": requestID,
 		"timestamp": now.UnixMilli(),
-		"records":   []any{map[string]any{"data": base64.StdEncoding.EncodeToString(data)}},
+		"records":   records,
 	})
 	requestConfiguration, _ := destination["RequestConfiguration"].(map[string]any)
 	encoding := first(requestConfiguration, "ContentEncoding")

@@ -748,3 +748,54 @@ func TestFirehoseLifecycleMetadataAndValidation(t *testing.T) {
 		t.Fatal("deleted stream twice")
 	}
 }
+
+func TestFirehoseDescribeDestinationPagination(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "DescribeDeliveryStream", Input: input})
+	}
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+		"DeliveryStreamName": "described", "S3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::out"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	destinations := func(input map[string]any) []any {
+		t.Helper()
+		input["DeliveryStreamName"] = "described"
+		response, err := call(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		description := response.Output["DeliveryStreamDescription"].(map[string]any)
+		if description["HasMoreDestinations"] != false {
+			t.Fatalf("HasMoreDestinations %#v", description)
+		}
+		return description["Destinations"].([]any)
+	}
+	if page := destinations(map[string]any{}); len(page) != 1 || page[0].(map[string]any)["DestinationId"] != destinationID {
+		t.Fatalf("default page %#v", page)
+	}
+	if page := destinations(map[string]any{"Limit": float64(1), "ExclusiveStartDestinationId": "destinationId-000000000000"}); len(page) != 1 {
+		t.Fatalf("page before destination %#v", page)
+	}
+	for _, after := range []string{destinationID, "destinationId-000000000002"} {
+		if page := destinations(map[string]any{"ExclusiveStartDestinationId": after}); len(page) != 0 {
+			t.Fatalf("page after %q %#v", after, page)
+		}
+	}
+	for _, input := range []map[string]any{
+		{"DeliveryStreamName": "described", "Limit": 0},
+		{"DeliveryStreamName": "described", "Limit": 10001},
+		{"DeliveryStreamName": "described", "Limit": 1.5},
+		{"DeliveryStreamName": "described", "Limit": "1"},
+		{"DeliveryStreamName": "described", "ExclusiveStartDestinationId": ""},
+		{"DeliveryStreamName": "described", "ExclusiveStartDestinationId": "bad_id"},
+		{"DeliveryStreamName": "described", "ExclusiveStartDestinationId": strings.Repeat("a", 101)},
+	} {
+		if _, err := call(input); err == nil {
+			t.Fatalf("accepted invalid describe input %#v", input)
+		}
+	}
+}

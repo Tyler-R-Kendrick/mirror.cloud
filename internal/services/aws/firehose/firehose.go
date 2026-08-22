@@ -121,13 +121,24 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "DescribeDeliveryStream":
+		if _, valid := inputLimit(req.Input["Limit"], 10000, 10000); !valid {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		after := ""
+		if value, exists := req.Input["ExclusiveStartDestinationId"]; exists {
+			var ok bool
+			after, ok = value.(string)
+			if !ok || len(after) < 1 || len(after) > 100 || !firehoseDestinationID.MatchString(after) {
+				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+		}
 		b, ok, _ := p.col(req, "fh").Get(ctx, name)
 		if !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
-		return &spi.Response{Output: map[string]any{"DeliveryStreamDescription": describeRecord(rec)}}, nil
+		return &spi.Response{Output: map[string]any{"DeliveryStreamDescription": describeRecord(rec, after)}}, nil
 	case "ListDeliveryStreams":
 		limit, valid := inputLimit(req.Input["Limit"], 10, 10000)
 		if !valid {
@@ -414,7 +425,7 @@ func copyDest(rec, in map[string]any, suffix string) {
 	}
 }
 
-func describeRecord(rec map[string]any) map[string]any {
+func describeRecord(rec map[string]any, after string) map[string]any {
 	description := maps.Clone(rec)
 	destination := map[string]any{"DestinationId": destinationID}
 	for _, base := range []string{"S3Destination", "ExtendedS3Destination"} {
@@ -423,7 +434,11 @@ func describeRecord(rec map[string]any) map[string]any {
 			delete(description, base+"Configuration")
 		}
 	}
-	description["Destinations"] = []any{destination}
+	destinations := []any{}
+	if destinationID > after {
+		destinations = append(destinations, destination)
+	}
+	description["Destinations"] = destinations
 	description["HasMoreDestinations"] = false
 	return description
 }
@@ -674,6 +689,7 @@ var (
 	firehoseTagKey           = regexp.MustCompile(`^[\p{L}\p{Z}\p{N}_.:/=+\-@%]+$`)
 	firehoseTagValue         = regexp.MustCompile(`^[\p{L}\p{Z}\p{N}_.:/=+\-@%]*$`)
 	firehoseKMSKeyARN        = regexp.MustCompile(`^arn:[^:]+:kms:[a-zA-Z0-9\-]+:\d{12}:key/[a-zA-Z_0-9+=,.@\-_/]+$`)
+	firehoseDestinationID    = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 )
 
 func (p *Pack) evaluatedS3Prefix(prefix string, now time.Time) string {

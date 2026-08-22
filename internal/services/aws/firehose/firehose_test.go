@@ -724,13 +724,14 @@ func TestFirehoseRecordDeAggregation(t *testing.T) {
 	if !reflect.DeepEqual(destination["ProcessingConfiguration"], processing) {
 		t.Fatalf("deaggregation description %#v", destination["ProcessingConfiguration"])
 	}
-	invalid := []byte(`[{"a":1},{"a":2}]`)
-	failureID := put("json-deaggregation", invalid)
-	failureKey := "errors/processing-failed/1970/01/01/00/json-deaggregation-1-1970-01-01-00-00-00-" + failureID
-	failureBody, found := read(failureKey)
-	var failure map[string]any
-	if !found || json.Unmarshal(failureBody, &failure) != nil || failure["errorCode"] != "RecordDeAggregation.Failed" || failure["rawData"] != base64.StdEncoding.EncodeToString(invalid) {
-		t.Fatalf("JSON deaggregation failure %s found %v", failureBody, found)
+	for name, invalid := range map[string][]byte{"array": []byte(`[{"a":1},{"a":2}]`), "truncated": []byte(`{"a":`)} {
+		failureID := put("json-deaggregation", invalid)
+		failureKey := "errors/processing-failed/1970/01/01/00/json-deaggregation-1-1970-01-01-00-00-00-" + failureID
+		failureBody, found := read(failureKey)
+		var failure map[string]any
+		if !found || json.Unmarshal(failureBody, &failure) != nil || failure["errorCode"] != "RecordDeAggregation.Failed" || failure["rawData"] != base64.StdEncoding.EncodeToString(invalid) {
+			t.Fatalf("%s JSON deaggregation failure %s found %v", name, failureBody, found)
+		}
 	}
 
 	delimiter := base64.StdEncoding.EncodeToString([]byte("####"))
@@ -739,6 +740,12 @@ func TestFirehoseRecordDeAggregation(t *testing.T) {
 	delimitedKey := "delimited-deaggregation/1970/01/01/00/delimited-deaggregation-1-1970-01-01-00-00-00-" + delimitedID
 	if body, found := read(delimitedKey); !found || string(body) != "one\ntwo\n" {
 		t.Fatalf("delimited deaggregation %q found %v", body, found)
+	}
+	delimitedAggregate := []byte(strings.Repeat("x####", 501))
+	delimitedOverflowID := put("delimited-deaggregation", delimitedAggregate)
+	delimitedOverflowKey := "delimited-deaggregation/1970/01/01/00/delimited-deaggregation-1-1970-01-01-00-00-00-" + delimitedOverflowID
+	if body, found := read(delimitedOverflowKey); !found || !bytes.Equal(body, append(delimitedAggregate, '\n')) {
+		t.Fatalf("delimited overflow length %d found %v", len(body), found)
 	}
 
 	aggregated := []byte(strings.Repeat(`{"a":1}`, 501))

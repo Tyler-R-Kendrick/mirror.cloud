@@ -1,6 +1,7 @@
 package firehose
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/base64"
@@ -923,6 +924,90 @@ func TestFirehoseBufferingHints(t *testing.T) {
 		"S3DestinationUpdate": map[string]any{"BufferingHints": map[string]any{"SizeInMBs": 1}},
 	}); err == nil {
 		t.Fatal("accepted invalid buffering hints on update")
+	}
+}
+
+func TestFirehoseS3Backup(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	backup := map[string]any{
+		"BucketARN": "arn:aws:s3:::backup", "RoleARN": testRoleARN, "Prefix": "raw/", "CompressionFormat": "GZIP",
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "backed-up", "ExtendedS3DestinationConfiguration": map[string]any{
+			"BucketARN": "arn:aws:s3:::primary", "RoleARN": testRoleARN, "Prefix": "main/",
+			"S3BackupMode": "Enabled", "S3BackupConfiguration": backup,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	put, err := call("PutRecord", map[string]any{
+		"DeliveryStreamName": "backed-up", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("backup payload"))},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordID := put.Output["RecordId"].(string)
+	primaryKey := id.Account + "/" + id.Region + "/primary/main/1970/01/01/00/backed-up-1-1970-01-01-00-00-00-" + recordID
+	reader, _, err := deps.Blobs.Get(context.Background(), primaryKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	primaryBody, _ := io.ReadAll(reader)
+	reader.Close()
+	backupKey := id.Account + "/" + id.Region + "/backup/raw/1970/01/01/00/backed-up-1-1970-01-01-00-00-00-" + recordID + ".gz"
+	reader, _, err = deps.Blobs.Get(context.Background(), backupKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compressed, _ := io.ReadAll(reader)
+	reader.Close()
+	gzipReader, err := gzip.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	backupBody, _ := io.ReadAll(gzipReader)
+	gzipReader.Close()
+	if string(primaryBody) != "backup payload" || string(backupBody) != "backup payload" {
+		t.Fatalf("primary %q backup %q", primaryBody, backupBody)
+	}
+
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "backed-up", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
+		"ExtendedS3DestinationUpdate": map[string]any{"S3BackupMode": "Disabled"},
+	}); err == nil {
+		t.Fatal("disabled an enabled S3 backup")
+	}
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "backed-up", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
+		"ExtendedS3DestinationUpdate": map[string]any{"S3BackupUpdate": map[string]any{"Prefix": "updated/"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "backed-up"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	description := response.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["ExtendedS3DestinationDescription"].(map[string]any)
+	backupDescription := description["S3BackupDescription"].(map[string]any)
+	if description["S3BackupMode"] != "Enabled" || backupDescription["Prefix"] != "updated/" || description["S3BackupConfiguration"] != nil || description["S3BackupUpdate"] != nil {
+		t.Fatalf("backup description %#v", description)
+	}
+
+	for i, destination := range []map[string]any{
+		{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "S3BackupMode": "Unknown"},
+		{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "S3BackupMode": "Enabled"},
+		{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "S3BackupConfiguration": "invalid"},
+		{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "S3BackupConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::backup"}},
+	} {
+		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": fmt.Sprintf("bad-backup-%d", i), "ExtendedS3DestinationConfiguration": destination}); err == nil {
+			t.Errorf("accepted invalid backup %#v", destination)
+		}
 	}
 }
 

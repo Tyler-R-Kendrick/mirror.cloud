@@ -263,7 +263,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if current != first(rec, "VersionId") {
 				return &spi.Fault{Code: "ConcurrentModificationException", HTTPStatus: 400, Fault: "client"}
 			}
+			extended, _ := rec["ExtendedS3DestinationConfiguration"].(map[string]any)
+			backupEnabled := first(extended, "S3BackupMode") == "Enabled"
 			copyDest(rec, req.Input, "Update")
+			extended, _ = rec["ExtendedS3DestinationConfiguration"].(map[string]any)
+			if backupEnabled && first(extended, "S3BackupMode") != "Enabled" {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
 			if err := validateDestination(rec, req.Identity.Region); err != nil {
 				return err
 			}
@@ -455,6 +461,15 @@ func copyDest(rec, in map[string]any, suffix string) {
 			destination = map[string]any{}
 		}
 		maps.Copy(destination, patch)
+		if backupPatch, ok := patch["S3BackupUpdate"].(map[string]any); ok {
+			backup, _ := destination["S3BackupConfiguration"].(map[string]any)
+			if backup == nil {
+				backup = map[string]any{}
+			}
+			maps.Copy(backup, backupPatch)
+			destination["S3BackupConfiguration"] = backup
+			delete(destination, "S3BackupUpdate")
+		}
 		rec[base+"Configuration"] = destination
 	}
 }
@@ -474,14 +489,16 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 	destination := map[string]any{"DestinationId": destinationID}
 	for _, base := range []string{"S3Destination", "ExtendedS3Destination"} {
 		if configuration, ok := description[base+"Configuration"].(map[string]any); ok {
-			if configuration["BufferingHints"] == nil {
-				configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}
-			}
-			if first(configuration, "CompressionFormat") == "" {
-				configuration["CompressionFormat"] = "UNCOMPRESSED"
-			}
-			if configuration["EncryptionConfiguration"] == nil {
-				configuration["EncryptionConfiguration"] = map[string]any{"NoEncryptionConfig": "NoEncryption"}
+			describeS3Configuration(configuration)
+			if base == "ExtendedS3Destination" {
+				if first(configuration, "S3BackupMode") == "" {
+					configuration["S3BackupMode"] = "Disabled"
+				}
+				if backup, ok := configuration["S3BackupConfiguration"].(map[string]any); ok {
+					describeS3Configuration(backup)
+					configuration["S3BackupDescription"] = backup
+					delete(configuration, "S3BackupConfiguration")
+				}
 			}
 			destination[base+"Description"] = configuration
 			delete(description, base+"Configuration")
@@ -494,6 +511,18 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 	description["Destinations"] = destinations
 	description["HasMoreDestinations"] = false
 	return description
+}
+
+func describeS3Configuration(configuration map[string]any) {
+	if configuration["BufferingHints"] == nil {
+		configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}
+	}
+	if first(configuration, "CompressionFormat") == "" {
+		configuration["CompressionFormat"] = "UNCOMPRESSED"
+	}
+	if configuration["EncryptionConfiguration"] == nil {
+		configuration["EncryptionConfiguration"] = map[string]any{"NoEncryptionConfig": "NoEncryption"}
+	}
 }
 
 func inputLimit(value any, fallback, maximum int) (int, bool) {
@@ -611,28 +640,14 @@ func putTagsTx(tx spi.Tx, key string, tags map[string]string) error {
 	return tx.Put(key, b)
 }
 
-func s3Dest(rec map[string]any) (bucket, prefix, errorPrefix, timezone, extension, compression, kmsARN string) {
-	for _, k := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration"} {
-		m, _ := rec[k].(map[string]any)
-		if m == nil {
-			continue
-		}
-		arn := first(m, "BucketARN")
-		if arn == "" {
-			continue
-		}
-		bucket = bucketFromARN(arn)
-		prefix = first(m, "Prefix")
-		errorPrefix = first(m, "ErrorOutputPrefix")
-		timezone = first(m, "CustomTimeZone")
-		extension = first(m, "FileExtension")
-		compression = first(m, "CompressionFormat")
-		encryption, _ := m["EncryptionConfiguration"].(map[string]any)
-		kms, _ := encryption["KMSEncryptionConfig"].(map[string]any)
-		kmsARN = first(kms, "AWSKMSKeyARN")
-		return bucket, prefix, errorPrefix, timezone, extension, compression, kmsARN
-	}
-	return "", "", "", "", "", "", ""
+func s3Configuration(configuration map[string]any) (bucket, prefix, errorPrefix, timezone, extension, compression, kmsARN string) {
+	bucket = bucketFromARN(first(configuration, "BucketARN"))
+	prefix, errorPrefix = first(configuration, "Prefix"), first(configuration, "ErrorOutputPrefix")
+	timezone, extension, compression = first(configuration, "CustomTimeZone"), first(configuration, "FileExtension"), first(configuration, "CompressionFormat")
+	encryption, _ := configuration["EncryptionConfiguration"].(map[string]any)
+	kms, _ := encryption["KMSEncryptionConfig"].(map[string]any)
+	kmsARN = first(kms, "AWSKMSKeyARN")
+	return
 }
 
 func validateDestination(rec map[string]any, region string) error {
@@ -648,7 +663,36 @@ func validateDestination(rec map[string]any, region string) error {
 			count++
 		}
 	}
-	if count != 1 || len(first(destination, "BucketARN")) > 2048 || !firehoseBucketARN.MatchString(first(destination, "BucketARN")) || !validRoleARN(first(destination, "RoleARN")) {
+	if count != 1 {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if err := validateS3Configuration(destination, region); err != nil {
+		return err
+	}
+	mode := ""
+	if raw, exists := destination["S3BackupMode"]; exists {
+		var ok bool
+		mode, ok = raw.(string)
+		if !ok || (mode != "Disabled" && mode != "Enabled") {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	backupRaw, backupExists := destination["S3BackupConfiguration"]
+	if mode == "Enabled" && !backupExists {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if backupExists {
+		backup, ok := backupRaw.(map[string]any)
+		if !ok {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		return validateS3Configuration(backup, region)
+	}
+	return nil
+}
+
+func validateS3Configuration(destination map[string]any, region string) error {
+	if len(first(destination, "BucketARN")) > 2048 || !firehoseBucketARN.MatchString(first(destination, "BucketARN")) || !validRoleARN(first(destination, "RoleARN")) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if raw, exists := destination["BufferingHints"]; exists {
@@ -682,7 +726,8 @@ func validateDestination(rec map[string]any, region string) error {
 			}
 		}
 	}
-	_, prefix, errorPrefix, timezone, extension, compression, _ := s3Dest(rec)
+	prefix, errorPrefix := first(destination, "Prefix"), first(destination, "ErrorOutputPrefix")
+	timezone, extension, compression := first(destination, "CustomTimeZone"), first(destination, "FileExtension"), first(destination, "CompressionFormat")
 	if err := validatePrefixes(prefix, errorPrefix); err != nil {
 		return err
 	}
@@ -783,15 +828,31 @@ func (p *Pack) deliverS3(ctx context.Context, req *spi.Request, stream, recID st
 	}
 	var rec map[string]any
 	_ = json.Unmarshal(raw, &rec)
-	bucket, prefix, _, timezone, extension, compression, kmsARN := s3Dest(rec)
-	if bucket == "" {
-		return
+	var destination map[string]any
+	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration"} {
+		if configuration, ok := rec[key].(map[string]any); ok {
+			destination = configuration
+			break
+		}
 	}
 	version := first(rec, "VersionId")
 	if version == "" {
 		version = "1"
 	}
 	now := p.deps.Clock.Now().UTC()
+	p.deliverS3Configuration(ctx, req, destination, stream, version, recID, data, now)
+	extended, _ := rec["ExtendedS3DestinationConfiguration"].(map[string]any)
+	if first(extended, "S3BackupMode") == "Enabled" {
+		backup, _ := extended["S3BackupConfiguration"].(map[string]any)
+		p.deliverS3Configuration(ctx, req, backup, stream, version, recID, data, now)
+	}
+}
+
+func (p *Pack) deliverS3Configuration(ctx context.Context, req *spi.Request, configuration map[string]any, stream, version, recID string, data []byte, now time.Time) {
+	bucket, prefix, _, timezone, extension, compression, kmsARN := s3Configuration(configuration)
+	if bucket == "" {
+		return
+	}
 	if timezone != "" {
 		location, _ := time.LoadLocation(timezone)
 		now = now.In(location)

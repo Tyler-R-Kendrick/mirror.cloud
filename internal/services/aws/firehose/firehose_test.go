@@ -48,6 +48,19 @@ func testMSKSource() map[string]any {
 	}
 }
 
+func testDatabaseSource() map[string]any {
+	return map[string]any{
+		"Type": "PostgreSQL", "Endpoint": "database.internal", "Port": float64(5432), "SSLMode": "Enabled",
+		"Databases": map[string]any{"Include": []any{"app"}}, "Tables": map[string]any{"Include": []any{"public.*"}},
+		"Columns": map[string]any{"Exclude": []any{"public.users.password"}}, "SurrogateKeys": []any{"public.events.id"},
+		"SnapshotWatermarkTable": "public.firehose_watermark",
+		"DatabaseSourceAuthenticationConfiguration": map[string]any{"SecretsManagerConfiguration": map[string]any{
+			"Enabled": true, "RoleARN": testRoleARN, "SecretARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:database",
+		}},
+		"DatabaseSourceVPCConfiguration": map[string]any{"VpcEndpointServiceName": "com.amazonaws.vpce.us-east-1.vpce-svc-12345678901234567"},
+	}
+}
+
 func TestFirehoseHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
 	if n := len(p.Operations()); n != 12 {
@@ -257,6 +270,112 @@ func TestFirehoseMSKSourceConfiguration(t *testing.T) {
 	} {
 		if _, err := call("CreateDeliveryStream", input); err == nil {
 			t.Fatalf("accepted mismatched source %d", index)
+		}
+	}
+}
+
+func TestFirehoseDatabaseSourceConfiguration(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	for _, name := range []string{"database-z", "database-a"} {
+		if _, err := call("CreateDeliveryStream", map[string]any{
+			"DeliveryStreamName": name, "DeliveryStreamType": "DatabaseAsSource", "DatabaseSourceConfiguration": testDatabaseSource(),
+			"ExtendedS3DestinationConfiguration": testS3Destination(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mysql := testDatabaseSource()
+	mysql["Type"], mysql["Port"] = "MySQL", float64(3306)
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "database-mysql", "DeliveryStreamType": "DatabaseAsSource", "DatabaseSourceConfiguration": mysql,
+		"ExtendedS3DestinationConfiguration": testS3Destination(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	minimal := testDatabaseSource()
+	delete(minimal, "Columns")
+	delete(minimal, "SSLMode")
+	delete(minimal, "SurrogateKeys")
+	minimal["DatabaseSourceAuthenticationConfiguration"] = map[string]any{"SecretsManagerConfiguration": map[string]any{"Enabled": false}}
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "database-minimal", "DeliveryStreamType": "DatabaseAsSource", "DatabaseSourceConfiguration": minimal,
+		"ExtendedS3DestinationConfiguration": testS3Destination(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	described, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "database-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	description := described.Output["DeliveryStreamDescription"].(map[string]any)
+	database := description["Source"].(map[string]any)["DatabaseSourceDescription"].(map[string]any)
+	if description["DeliveryStreamType"] != "DatabaseAsSource" || description["DatabaseSourceConfiguration"] != nil || !reflect.DeepEqual(database, testDatabaseSource()) {
+		t.Fatalf("database source description %#v", description)
+	}
+	listed, err := call("ListDeliveryStreams", map[string]any{"DeliveryStreamType": "DatabaseAsSource"})
+	if err != nil || !reflect.DeepEqual(listed.Output["DeliveryStreamNames"], []any{"database-a", "database-minimal", "database-mysql", "database-z"}) {
+		t.Fatalf("database stream listing %#v, %v", listed, err)
+	}
+
+	invalid := []any{"invalid", map[string]any{}}
+	for _, key := range []string{"Type", "Endpoint", "Port", "Databases", "Tables", "SnapshotWatermarkTable", "DatabaseSourceAuthenticationConfiguration", "DatabaseSourceVPCConfiguration"} {
+		source := testDatabaseSource()
+		delete(source, key)
+		invalid = append(invalid, source)
+	}
+	for _, change := range []struct {
+		key   string
+		value any
+	}{
+		{"Type", "Oracle"}, {"Endpoint", "   "}, {"Endpoint", strings.Repeat("e", 256)}, {"Port", "5432"}, {"Port", float64(3306)}, {"Port", float64(65536)},
+		{"SSLMode", "Required"}, {"SnapshotWatermarkTable", ""}, {"SnapshotWatermarkTable", "table\x00name"}, {"SnapshotWatermarkTable", "table😀"},
+		{"Databases", "app"}, {"Tables", map[string]any{"Include": []any{""}}}, {"Columns", map[string]any{"Include": []any{strings.Repeat("c", 195)}}},
+		{"SurrogateKeys", "public.events.id"}, {"SurrogateKeys", []any{"public.events event_id"}}, {"DatabaseSourceAuthenticationConfiguration", "invalid"}, {"DatabaseSourceVPCConfiguration", "invalid"},
+	} {
+		source := testDatabaseSource()
+		source[change.key] = change.value
+		invalid = append(invalid, source)
+	}
+	for _, authentication := range []any{
+		map[string]any{},
+		map[string]any{"SecretsManagerConfiguration": "invalid"},
+		map[string]any{"SecretsManagerConfiguration": map[string]any{"Enabled": "true"}},
+		map[string]any{"SecretsManagerConfiguration": map[string]any{"Enabled": true, "RoleARN": testRoleARN}},
+		map[string]any{"SecretsManagerConfiguration": map[string]any{"Enabled": true, "RoleARN": "role", "SecretARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:database"}},
+		map[string]any{"SecretsManagerConfiguration": map[string]any{"Enabled": true, "RoleARN": testRoleARN, "SecretARN": "secret"}},
+	} {
+		source := testDatabaseSource()
+		source["DatabaseSourceAuthenticationConfiguration"] = authentication
+		invalid = append(invalid, source)
+	}
+	for _, vpc := range []any{
+		map[string]any{},
+		map[string]any{"VpcEndpointServiceName": "com.amazonaws.vpce.us-east-1.vpce-svc-short"},
+	} {
+		source := testDatabaseSource()
+		source["DatabaseSourceVPCConfiguration"] = vpc
+		invalid = append(invalid, source)
+	}
+	for index, source := range invalid {
+		if _, err := call("CreateDeliveryStream", map[string]any{
+			"DeliveryStreamName": fmt.Sprintf("invalid-database-%d", index), "DeliveryStreamType": "DatabaseAsSource", "DatabaseSourceConfiguration": source,
+			"ExtendedS3DestinationConfiguration": testS3Destination(),
+		}); err == nil {
+			t.Fatalf("accepted invalid database source %#v", source)
+		}
+	}
+	for index, input := range []map[string]any{
+		{"DeliveryStreamName": "direct-with-database", "DatabaseSourceConfiguration": testDatabaseSource(), "ExtendedS3DestinationConfiguration": testS3Destination()},
+		{"DeliveryStreamName": "kinesis-with-database", "DeliveryStreamType": "KinesisStreamAsSource", "KinesisStreamSourceConfiguration": testKinesisSource(), "DatabaseSourceConfiguration": testDatabaseSource(), "ExtendedS3DestinationConfiguration": testS3Destination()},
+		{"DeliveryStreamName": "msk-with-database", "DeliveryStreamType": "MSKAsSource", "MSKSourceConfiguration": testMSKSource(), "DatabaseSourceConfiguration": testDatabaseSource(), "ExtendedS3DestinationConfiguration": testS3Destination()},
+		{"DeliveryStreamName": "database-with-msk", "DeliveryStreamType": "DatabaseAsSource", "DatabaseSourceConfiguration": testDatabaseSource(), "MSKSourceConfiguration": testMSKSource(), "ExtendedS3DestinationConfiguration": testS3Destination()},
+	} {
+		if _, err := call("CreateDeliveryStream", input); err == nil {
+			t.Fatalf("accepted mismatched database source %d", index)
 		}
 	}
 }
@@ -1994,7 +2113,7 @@ func TestFirehoseCreateConfiguration(t *testing.T) {
 		{"long Kinesis ARN", map[string]any{"DeliveryStreamName": "long-source", "DeliveryStreamType": "KinesisStreamAsSource", "KinesisStreamSourceConfiguration": map[string]any{"KinesisStreamARN": "arn:aws:kinesis:us-east-1:123456789012:stream/" + strings.Repeat("a", 500), "RoleARN": testRoleARN}, "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
 		{"malformed Kinesis role", map[string]any{"DeliveryStreamName": "bad-source-role", "DeliveryStreamType": "KinesisStreamAsSource", "KinesisStreamSourceConfiguration": map[string]any{"KinesisStreamARN": testKinesisSource()["KinesisStreamARN"], "RoleARN": "role"}, "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
 		{"missing MSK source", map[string]any{"DeliveryStreamName": "msk", "DeliveryStreamType": "MSKAsSource", "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
-		{"unsupported database source", map[string]any{"DeliveryStreamName": "database", "DeliveryStreamType": "DatabaseAsSource", "S3DestinationConfiguration": testS3Destination()}, "MirrorNotImplemented"},
+		{"missing database source", map[string]any{"DeliveryStreamName": "database", "DeliveryStreamType": "DatabaseAsSource", "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
 	} {
 		_, err := call("CreateDeliveryStream", test.input)
 		fault, ok := err.(*spi.Fault)

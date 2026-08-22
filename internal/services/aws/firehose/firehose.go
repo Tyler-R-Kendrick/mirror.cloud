@@ -21,6 +21,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/golang/snappy"
 	"github.com/itchyny/gojq"
@@ -76,7 +78,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if streamType == "" {
 			streamType = "DirectPut"
 		}
-		var source, directPutSource, mskSource map[string]any
+		var source, directPutSource, mskSource, databaseSource map[string]any
 		switch streamType {
 		case "DirectPut":
 			if req.Input["KinesisStreamSourceConfiguration"] != nil || req.Input["MSKSourceConfiguration"] != nil || req.Input["DatabaseSourceConfiguration"] != nil {
@@ -120,7 +122,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				}
 			}
 		case "DatabaseAsSource":
-			return nil, spi.NotImplemented("aws.firehose", streamType, "emulate")
+			if req.Input["DirectPutSourceConfiguration"] != nil || req.Input["KinesisStreamSourceConfiguration"] != nil || req.Input["MSKSourceConfiguration"] != nil {
+				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			var valid bool
+			databaseSource, valid = validDatabaseSource(req.Input["DatabaseSourceConfiguration"])
+			if !valid {
+				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
 		default:
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
@@ -141,6 +150,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		if mskSource != nil {
 			rec["MSKSourceConfiguration"] = maps.Clone(mskSource)
+		}
+		if databaseSource != nil {
+			rec["DatabaseSourceConfiguration"] = maps.Clone(databaseSource)
 		}
 		copyDest(rec, req.Input, "Configuration")
 		if err := validateDestination(rec, req.Identity.Region); err != nil {
@@ -539,6 +551,10 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 		description["Source"] = map[string]any{"MSKSourceDescription": source}
 		delete(description, "MSKSourceConfiguration")
 	}
+	if configuration, ok := description["DatabaseSourceConfiguration"].(map[string]any); ok {
+		description["Source"] = map[string]any{"DatabaseSourceDescription": maps.Clone(configuration)}
+		delete(description, "DatabaseSourceConfiguration")
+	}
 	destination := map[string]any{"DestinationId": destinationID}
 	for _, base := range []string{"S3Destination", "ExtendedS3Destination"} {
 		if configuration, ok := description[base+"Configuration"].(map[string]any); ok {
@@ -586,6 +602,83 @@ func inputLimit(value any, fallback, maximum int) (int, bool) {
 		return fallback, true
 	}
 	return inputInteger(value, 1, maximum)
+}
+
+func validDatabaseSource(value any) (map[string]any, bool) {
+	configuration, ok := value.(map[string]any)
+	authentication, authOK := configuration["DatabaseSourceAuthenticationConfiguration"].(map[string]any)
+	secrets, secretsOK := authentication["SecretsManagerConfiguration"].(map[string]any)
+	vpc, vpcOK := configuration["DatabaseSourceVPCConfiguration"].(map[string]any)
+	enabled, enabledOK := secrets["Enabled"].(bool)
+	engine, endpoint := first(configuration, "Type"), first(configuration, "Endpoint")
+	port, portOK := inputInteger(configuration["Port"], 0, 65535)
+	watermark, sslMode := first(configuration, "SnapshotWatermarkTable"), first(configuration, "SSLMode")
+	service, role, secret := first(vpc, "VpcEndpointServiceName"), first(secrets, "RoleARN"), first(secrets, "SecretARN")
+	if !ok || !authOK || !secretsOK || !vpcOK || !enabledOK || strings.TrimSpace(endpoint) == "" || utf8.RuneCountInString(endpoint) > 255 || !validDatabaseString(watermark, 129, false) || !portOK || (engine == "MySQL" && port != 3306) || (engine == "PostgreSQL" && port != 5432) || (engine != "MySQL" && engine != "PostgreSQL") || (sslMode != "" && sslMode != "Disabled" && sslMode != "Enabled") {
+		return nil, false
+	}
+	if len(service) < 47 || len(service) > 255 || !firehoseVPCEndpointService.MatchString(service) || !validDatabaseList(configuration["Databases"], 64, true) || !validDatabaseList(configuration["Tables"], 129, true) || !validDatabaseList(configuration["Columns"], 194, false) || !validDatabaseStrings(configuration["SurrogateKeys"], 1024) {
+		return nil, false
+	}
+	if (role != "" && !validRoleARN(role)) || (secret != "" && (len(secret) > 2048 || !firehoseSecretARN.MatchString(secret))) || (enabled && secret == "") {
+		return nil, false
+	}
+	return configuration, true
+}
+
+func validDatabaseList(value any, maximum int, required bool) bool {
+	if value == nil {
+		return !required
+	}
+	patterns, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	for _, key := range []string{"Include", "Exclude"} {
+		if raw := patterns[key]; raw != nil {
+			items, ok := raw.([]any)
+			if !ok {
+				return false
+			}
+			for _, item := range items {
+				pattern, ok := item.(string)
+				if !ok || !validDatabaseString(pattern, maximum, false) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+func validDatabaseStrings(value any, maximum int) bool {
+	if value == nil {
+		return true
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		text, ok := item.(string)
+		if !ok || !validDatabaseString(text, maximum, true) {
+			return false
+		}
+	}
+	return true
+}
+
+func validDatabaseString(value string, maximum int, noWhitespace bool) bool {
+	length := utf8.RuneCountInString(value)
+	if length < 1 || length > maximum {
+		return false
+	}
+	for _, char := range value {
+		if char == 0 || char > '\uffff' || (noWhitespace && unicode.IsSpace(char)) {
+			return false
+		}
+	}
+	return true
 }
 
 func inputInteger(value any, minimum, maximum int) (int, bool) {
@@ -1591,24 +1684,26 @@ func (p *Pack) deliverS3Object(ctx context.Context, req *spi.Request, bucket, ke
 }
 
 var (
-	firehoseTimestampPrefix   = regexp.MustCompile(`!\{timestamp:([^}]*)\}`)
-	firehosePrefixExpression  = regexp.MustCompile(`!\{([^}:]+):([^}]*)\}`)
-	firehoseFileExtension     = regexp.MustCompile(`^\.[0-9a-z!\-_.*'()]+$`)
-	firehoseStreamName        = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
-	firehoseTagKey            = regexp.MustCompile(`^[\p{L}\p{Z}\p{N}_.:/=+\-@%]+$`)
-	firehoseTagValue          = regexp.MustCompile(`^[\p{L}\p{Z}\p{N}_.:/=+\-@%]*$`)
-	firehoseKMSKeyARN         = regexp.MustCompile(`^arn:[^:]+:kms:[a-zA-Z0-9\-]+:\d{12}:key/[a-zA-Z_0-9+=,.@\-_/]+$`)
-	firehoseDestinationKMSARN = regexp.MustCompile(`^arn:.*:kms:[a-zA-Z0-9\-]+:\d{12}:(key|alias)/[a-zA-Z_0-9+=,.@\-_/]+$`)
-	firehoseTimeZone          = regexp.MustCompile(`^[a-zA-Z/_]+$`)
-	firehoseBucketARN         = regexp.MustCompile(`^arn:.*:s3:::[\w.\-]{1,255}$`)
-	firehoseRoleARN           = regexp.MustCompile(`^arn:.*:iam::\d{12}:role/[a-zA-Z_0-9+=,.@\-_/]+$`)
-	firehoseKinesisStreamARN  = regexp.MustCompile(`^arn:.*:kinesis:[a-zA-Z0-9\-]+:\d{12}:stream/[a-zA-Z0-9_.-]+$`)
-	firehoseMSKClusterARN     = regexp.MustCompile(`^arn:.*:kafka:[a-zA-Z0-9\-]+:\d{12}:cluster/[^/]+/.+$`)
-	firehoseMSKTopic          = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-	firehoseLambdaARN         = regexp.MustCompile(`^arn:.*:lambda:[a-zA-Z0-9\-]+:\d{12}:function:[a-zA-Z0-9_-]+(?::[a-zA-Z0-9_-]+)?$`)
-	firehoseLogGroup          = regexp.MustCompile(`^[.\-_/#A-Za-z0-9]*$`)
-	firehoseLogStream         = regexp.MustCompile(`^[^:*]*$`)
-	firehoseDestinationID     = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
+	firehoseTimestampPrefix    = regexp.MustCompile(`!\{timestamp:([^}]*)\}`)
+	firehosePrefixExpression   = regexp.MustCompile(`!\{([^}:]+):([^}]*)\}`)
+	firehoseFileExtension      = regexp.MustCompile(`^\.[0-9a-z!\-_.*'()]+$`)
+	firehoseStreamName         = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
+	firehoseTagKey             = regexp.MustCompile(`^[\p{L}\p{Z}\p{N}_.:/=+\-@%]+$`)
+	firehoseTagValue           = regexp.MustCompile(`^[\p{L}\p{Z}\p{N}_.:/=+\-@%]*$`)
+	firehoseKMSKeyARN          = regexp.MustCompile(`^arn:[^:]+:kms:[a-zA-Z0-9\-]+:\d{12}:key/[a-zA-Z_0-9+=,.@\-_/]+$`)
+	firehoseDestinationKMSARN  = regexp.MustCompile(`^arn:.*:kms:[a-zA-Z0-9\-]+:\d{12}:(key|alias)/[a-zA-Z_0-9+=,.@\-_/]+$`)
+	firehoseTimeZone           = regexp.MustCompile(`^[a-zA-Z/_]+$`)
+	firehoseBucketARN          = regexp.MustCompile(`^arn:.*:s3:::[\w.\-]{1,255}$`)
+	firehoseRoleARN            = regexp.MustCompile(`^arn:.*:iam::\d{12}:role/[a-zA-Z_0-9+=,.@\-_/]+$`)
+	firehoseKinesisStreamARN   = regexp.MustCompile(`^arn:.*:kinesis:[a-zA-Z0-9\-]+:\d{12}:stream/[a-zA-Z0-9_.-]+$`)
+	firehoseMSKClusterARN      = regexp.MustCompile(`^arn:.*:kafka:[a-zA-Z0-9\-]+:\d{12}:cluster/[^/]+/.+$`)
+	firehoseMSKTopic           = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	firehoseVPCEndpointService = regexp.MustCompile(`^([a-zA-Z0-9\-_]+\.){2,3}vpce\.[a-zA-Z0-9\-]*\.vpce-svc-[a-zA-Z0-9\-]{17}$`)
+	firehoseSecretARN          = regexp.MustCompile(`^arn:.*:secretsmanager:[a-zA-Z0-9\-]+:\d{12}:secret:[a-zA-Z0-9\-/_+=.@!]+$`)
+	firehoseLambdaARN          = regexp.MustCompile(`^arn:.*:lambda:[a-zA-Z0-9\-]+:\d{12}:function:[a-zA-Z0-9_-]+(?::[a-zA-Z0-9_-]+)?$`)
+	firehoseLogGroup           = regexp.MustCompile(`^[.\-_/#A-Za-z0-9]*$`)
+	firehoseLogStream          = regexp.MustCompile(`^[^:*]*$`)
+	firehoseDestinationID      = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 )
 
 func (p *Pack) evaluatedS3Prefix(prefix string, now time.Time) string {

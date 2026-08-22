@@ -579,6 +579,88 @@ func TestFirehoseDecompressionProcessing(t *testing.T) {
 	}
 }
 
+func TestFirehoseCloudWatchMessageExtraction(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	compress := func(data string) []byte {
+		t.Helper()
+		var compressed bytes.Buffer
+		writer := gzip.NewWriter(&compressed)
+		_, _ = writer.Write([]byte(data))
+		_ = writer.Close()
+		return compressed.Bytes()
+	}
+	read := func(key string) ([]byte, bool) {
+		t.Helper()
+		reader, _, err := deps.Blobs.Get(context.Background(), id.Account+"/"+id.Region+"/out/"+key)
+		if err != nil {
+			return nil, false
+		}
+		defer reader.Close()
+		body, _ := io.ReadAll(reader)
+		return body, true
+	}
+	decompression := map[string]any{"Type": "Decompression"}
+	extraction := map[string]any{"Type": "CloudWatchLogProcessing", "Parameters": []any{map[string]any{"ParameterName": "DataMessageExtraction", "ParameterValue": "true"}}}
+	processing := map[string]any{"Enabled": true, "Processors": []any{decompression, extraction}}
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "message-extraction", "ExtendedS3DestinationConfiguration": map[string]any{
+			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "messages/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/", "ProcessingConfiguration": processing,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	put := func(data []byte) string {
+		t.Helper()
+		response, err := call("PutRecord", map[string]any{"DeliveryStreamName": "message-extraction", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString(data)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output["RecordId"].(string)
+	}
+	dataMessage := `{"owner":"123456789012","messageType":"DATA_MESSAGE","logEvents":[{"message":"first"},{"message":"{\"second\":true}"}]}`
+	recordID := put(compress(dataMessage))
+	key := "messages/1970/01/01/00/message-extraction-1-1970-01-01-00-00-00-" + recordID
+	if body, found := read(key); !found || string(body) != "first\n{\"second\":true}\n" {
+		t.Fatalf("extracted messages %q found %v", body, found)
+	}
+
+	controlID := put(compress(`{"messageType":"CONTROL_MESSAGE"}`))
+	controlKey := "messages/1970/01/01/00/message-extraction-1-1970-01-01-00-00-00-" + controlID
+	if _, found := read(controlKey); found {
+		t.Fatal("delivered CloudWatch control message")
+	}
+
+	for name, invalid := range map[string][]byte{
+		"json":   compress(`{"messageType":`),
+		"events": compress(`{"messageType":"DATA_MESSAGE","logEvents":[]}`),
+	} {
+		failureID := put(invalid)
+		failureKey := "errors/processing-failed/1970/01/01/00/message-extraction-1-1970-01-01-00-00-00-" + failureID
+		failureBody, found := read(failureKey)
+		var failure map[string]any
+		if !found || json.Unmarshal(failureBody, &failure) != nil || failure["errorCode"] != "CloudWatchLogProcessing.Failed" || failure["rawData"] != base64.StdEncoding.EncodeToString(invalid) {
+			t.Fatalf("%s extraction failure %s found %v", name, failureBody, found)
+		}
+	}
+
+	for _, configuration := range []map[string]any{
+		{"Enabled": true, "Processors": []any{extraction}},
+		{"Enabled": true, "Processors": []any{extraction, decompression}},
+		{"Enabled": true, "Processors": []any{decompression, map[string]any{"Type": "CloudWatchLogProcessing"}}},
+		{"Enabled": true, "Processors": []any{decompression, map[string]any{"Type": "CloudWatchLogProcessing", "Parameters": []any{map[string]any{"ParameterName": "DataMessageExtraction", "ParameterValue": "false"}}}}},
+		{"Enabled": true, "Processors": []any{decompression, map[string]any{"Type": "CloudWatchLogProcessing", "Parameters": []any{map[string]any{"ParameterName": "CompressionFormat", "ParameterValue": "GZIP"}}}}},
+	} {
+		if err := validateProcessingConfiguration(configuration); err == nil {
+			t.Errorf("accepted invalid CloudWatch Logs processing %#v", configuration)
+		}
+	}
+}
+
 func TestFirehoseLambdaProcessing(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 not installed")

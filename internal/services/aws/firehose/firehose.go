@@ -821,6 +821,7 @@ func validateProcessingConfiguration(raw any) error {
 	if !ok || (enabled && len(processors) == 0) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
+	decompressed := false
 	for _, rawProcessor := range processors {
 		processor, ok := rawProcessor.(map[string]any)
 		typeName := first(processor, "Type")
@@ -854,6 +855,18 @@ func validateProcessingConfiguration(raw any) error {
 					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 				}
 			}
+			decompressed = true
+		case "CloudWatchLogProcessing":
+			if !decompressed || processorParameter(processor, "DataMessageExtraction") != "true" {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			parameters, _ := processor["Parameters"].([]any)
+			for _, rawParameter := range parameters {
+				parameter, _ := rawParameter.(map[string]any)
+				if first(parameter, "ParameterName") != "DataMessageExtraction" {
+					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+				}
+			}
 		case "Lambda":
 			arn := processorParameter(processor, "LambdaArn")
 			if len(arn) > 512 || !firehoseLambdaARN.MatchString(arn) {
@@ -865,7 +878,7 @@ func validateProcessingConfiguration(raw any) error {
 					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 				}
 			}
-		case "RecordDeAggregation", "CloudWatchLogProcessing", "MetadataExtraction":
+		case "RecordDeAggregation", "MetadataExtraction":
 			if enabled {
 				return spi.NotImplemented("aws.firehose", "Processor="+typeName, "emulate")
 			}
@@ -1005,10 +1018,10 @@ func (p *Pack) deliverS3Configuration(ctx context.Context, req *spi.Request, con
 		location, _ := time.LoadLocation(timezone)
 		now = now.In(location)
 	}
-	processed, deliver, failureType, failure, attempts := p.processData(ctx, req, configuration, stream, recID, data, now)
-	if failure != "" {
-		p.logDeliveryError(ctx, req, configuration, stream, failure, now)
-		p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, recID, data, now, attempts, failureType, failure, processingLambdaARN(configuration))
+	processed, deliver, failure := p.processData(ctx, req, configuration, stream, recID, data, now)
+	if failure != nil {
+		p.logDeliveryError(ctx, req, configuration, stream, failure.message, now)
+		p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, recID, data, now, failure)
 		return
 	}
 	if !deliver {
@@ -1052,10 +1065,15 @@ func (p *Pack) logDeliveryError(ctx context.Context, req *spi.Request, configura
 	}})
 }
 
-func (p *Pack) processData(ctx context.Context, req *spi.Request, configuration map[string]any, stream, recID string, data []byte, now time.Time) ([]byte, bool, string, string, int) {
+type processingFailure struct {
+	typeName, code, message, lambdaARN string
+	attempts                           int
+}
+
+func (p *Pack) processData(ctx context.Context, req *spi.Request, configuration map[string]any, stream, recID string, data []byte, now time.Time) ([]byte, bool, *processingFailure) {
 	processing, _ := configuration["ProcessingConfiguration"].(map[string]any)
 	if processing["Enabled"] != true {
-		return data, true, "", "", 0
+		return data, true, nil
 	}
 	for _, raw := range processing["Processors"].([]any) {
 		processor, _ := raw.(map[string]any)
@@ -1065,25 +1083,51 @@ func (p *Pack) processData(ctx context.Context, req *spi.Request, configuration 
 		case "Decompression":
 			reader, err := gzip.NewReader(bytes.NewReader(data))
 			if err != nil {
-				return nil, false, "decompression-failed", err.Error(), 1
+				return nil, false, &processingFailure{typeName: "decompression-failed", code: "Decompression.Failed", message: err.Error(), attempts: 1}
 			}
 			decompressed, err := io.ReadAll(reader)
 			_ = reader.Close()
 			if err != nil {
-				return nil, false, "decompression-failed", err.Error(), 1
+				return nil, false, &processingFailure{typeName: "decompression-failed", code: "Decompression.Failed", message: err.Error(), attempts: 1}
 			}
 			data = decompressed
+		case "CloudWatchLogProcessing":
+			var envelope struct {
+				MessageType string `json:"messageType"`
+				LogEvents   []struct {
+					Message string `json:"message"`
+				} `json:"logEvents"`
+			}
+			if err := json.Unmarshal(data, &envelope); err != nil || (envelope.MessageType != "DATA_MESSAGE" && envelope.MessageType != "CONTROL_MESSAGE") || (envelope.MessageType == "DATA_MESSAGE" && len(envelope.LogEvents) == 0) {
+				message := "CloudWatch Logs message extraction failed."
+				if err != nil {
+					message = err.Error()
+				}
+				return nil, false, &processingFailure{typeName: "processing-failed", code: "CloudWatchLogProcessing.Failed", message: message, attempts: 1}
+			}
+			if envelope.MessageType == "CONTROL_MESSAGE" {
+				return nil, false, nil
+			}
+			var extracted bytes.Buffer
+			for _, event := range envelope.LogEvents {
+				extracted.WriteString(event.Message)
+				extracted.WriteByte('\n')
+			}
+			data = extracted.Bytes()
 		case "Lambda":
 			var deliver bool
 			var failure string
 			var attempts int
 			data, deliver, failure, attempts = p.invokeProcessingLambda(ctx, req, processor, stream, recID, data, now)
 			if failure != "" || !deliver {
-				return data, deliver, "processing-failed", failure, attempts
+				if failure == "" {
+					return data, false, nil
+				}
+				return data, false, &processingFailure{typeName: "processing-failed", code: "Lambda.ProcessingFailed", message: failure, lambdaARN: processorParameter(processor, "LambdaArn"), attempts: attempts}
 			}
 		}
 	}
-	return data, true, "", "", 0
+	return data, true, nil
 }
 
 func (p *Pack) invokeProcessingLambda(ctx context.Context, req *spi.Request, processor map[string]any, stream, recID string, data []byte, now time.Time) ([]byte, bool, string, int) {
@@ -1139,36 +1183,20 @@ func (p *Pack) invokeProcessingLambda(ctx context.Context, req *spi.Request, pro
 	}
 }
 
-func processingLambdaARN(configuration map[string]any) string {
-	processing, _ := configuration["ProcessingConfiguration"].(map[string]any)
-	processors, _ := processing["Processors"].([]any)
-	for _, raw := range processors {
-		processor, _ := raw.(map[string]any)
-		if first(processor, "Type") == "Lambda" {
-			return processorParameter(processor, "LambdaArn")
-		}
-	}
-	return ""
-}
-
-func (p *Pack) deliverProcessingFailure(ctx context.Context, req *spi.Request, bucket, prefix, kmsARN, stream, version, recID string, data []byte, now time.Time, attempts int, failureType, message, lambdaARN string) {
+func (p *Pack) deliverProcessingFailure(ctx context.Context, req *spi.Request, bucket, prefix, kmsARN, stream, version, recID string, data []byte, now time.Time, failure *processingFailure) {
 	if prefix == "" {
-		prefix = failureType + "/"
+		prefix = failure.typeName + "/"
 	}
-	prefix = strings.ReplaceAll(prefix, "!{firehose:error-output-type}", failureType)
+	prefix = strings.ReplaceAll(prefix, "!{firehose:error-output-type}", failure.typeName)
 	timestamp := now.UTC().Format(time.RFC3339Nano)
-	errorCode := "Lambda.ProcessingFailed"
-	if failureType == "decompression-failed" {
-		errorCode = "Decompression.Failed"
-	}
-	failure := map[string]any{
-		"attemptsMade": strconv.Itoa(attempts), "arrivalTimestamp": timestamp, "errorCode": errorCode, "errorMessage": message,
+	payloadFields := map[string]any{
+		"attemptsMade": strconv.Itoa(failure.attempts), "arrivalTimestamp": timestamp, "errorCode": failure.code, "errorMessage": failure.message,
 		"attemptEndingTimestamp": timestamp, "rawData": base64.StdEncoding.EncodeToString(data),
 	}
-	if lambdaARN != "" {
-		failure["lambdaArn"] = lambdaARN
+	if failure.lambdaARN != "" {
+		payloadFields["lambdaArn"] = failure.lambdaARN
 	}
-	payload, _ := json.Marshal(failure)
+	payload, _ := json.Marshal(payloadFields)
 	key := p.evaluatedS3Prefix(prefix, now) + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + recID
 	p.deliverS3Object(ctx, req, bucket, key, kmsARN, payload)
 }

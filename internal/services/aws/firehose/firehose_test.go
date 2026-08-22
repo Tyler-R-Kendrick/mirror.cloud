@@ -423,9 +423,9 @@ func TestFirehoseAppendDelimiterProcessing(t *testing.T) {
 		}
 	}
 	destination = testS3Destination()
-	destination["ProcessingConfiguration"] = map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "Lambda"}}}
+	destination["ProcessingConfiguration"] = map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "MetadataExtraction"}}}
 	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "unsupported-processing", "ExtendedS3DestinationConfiguration": destination}); err == nil {
-		t.Fatal("accepted unsupported Lambda processor")
+		t.Fatal("accepted unsupported metadata processor")
 	}
 	processedDestination := testS3Destination()
 	processedDestination["ProcessingConfiguration"] = processing(true)

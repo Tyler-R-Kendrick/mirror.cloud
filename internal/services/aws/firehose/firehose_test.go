@@ -468,6 +468,117 @@ func TestFirehoseAppendDelimiterProcessing(t *testing.T) {
 	}
 }
 
+func TestFirehoseDecompressionProcessing(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	compress := func(data string) []byte {
+		t.Helper()
+		var compressed bytes.Buffer
+		writer := gzip.NewWriter(&compressed)
+		if _, err := writer.Write([]byte(data)); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return compressed.Bytes()
+	}
+	read := func(key string) ([]byte, bool) {
+		t.Helper()
+		reader, _, err := deps.Blobs.Get(context.Background(), id.Account+"/"+id.Region+"/out/"+key)
+		if err != nil {
+			return nil, false
+		}
+		defer reader.Close()
+		body, _ := io.ReadAll(reader)
+		return body, true
+	}
+	processing := map[string]any{"Enabled": true, "Processors": []any{
+		map[string]any{"Type": "Decompression", "Parameters": []any{map[string]any{"ParameterName": "CompressionFormat", "ParameterValue": "GZIP"}}},
+		map[string]any{"Type": "AppendDelimiterToRecord"},
+	}}
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "decompressed", "ExtendedS3DestinationConfiguration": map[string]any{
+			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "success/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/", "ProcessingConfiguration": processing,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	put := func(stream string, data []byte) string {
+		t.Helper()
+		response, err := call("PutRecord", map[string]any{"DeliveryStreamName": stream, "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString(data)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output["RecordId"].(string)
+	}
+	body := `{"owner":"123456789012","messageType":"DATA_MESSAGE"}`
+	okID := put("decompressed", compress(body))
+	okKey := "success/1970/01/01/00/decompressed-1-1970-01-01-00-00-00-" + okID
+	if delivered, found := read(okKey); !found || string(delivered) != body+"\n" {
+		t.Fatalf("decompressed body %q found %v", delivered, found)
+	}
+	described, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "decompressed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := described.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["ExtendedS3DestinationDescription"].(map[string]any)
+	if !reflect.DeepEqual(destination["ProcessingConfiguration"], processing) {
+		t.Fatalf("decompression description %#v", destination["ProcessingConfiguration"])
+	}
+
+	for name, invalid := range map[string][]byte{"header": []byte("not gzip"), "checksum": compress("corrupt")} {
+		if name == "checksum" {
+			invalid[len(invalid)-1]++
+		}
+		failureID := put("decompressed", invalid)
+		failureKey := "errors/decompression-failed/1970/01/01/00/decompressed-1-1970-01-01-00-00-00-" + failureID
+		failureBody, found := read(failureKey)
+		if !found {
+			t.Fatalf("missing %s decompression failure", name)
+		}
+		var failure map[string]any
+		if json.Unmarshal(failureBody, &failure) != nil || failure["errorCode"] != "Decompression.Failed" || failure["rawData"] != base64.StdEncoding.EncodeToString(invalid) || failure["errorMessage"] == "" || failure["lambdaArn"] != nil {
+			t.Fatalf("%s decompression failure %s", name, failureBody)
+		}
+	}
+
+	defaultProcessing := map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "Decompression"}}}
+	for name, configuration := range map[string]map[string]any{
+		"default":  defaultProcessing,
+		"disabled": {"Enabled": false, "Processors": []any{map[string]any{"Type": "Decompression"}}},
+	} {
+		destination := testS3Destination()
+		destination["Prefix"] = name + "/"
+		destination["ProcessingConfiguration"] = configuration
+		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": name + "-decompression", "ExtendedS3DestinationConfiguration": destination}); err != nil {
+			t.Fatal(err)
+		}
+		input := compress(name)
+		recordID := put(name+"-decompression", input)
+		key := name + "/1970/01/01/00/" + name + "-decompression-1-1970-01-01-00-00-00-" + recordID
+		delivered, found := read(key)
+		if want := map[string][]byte{"default": []byte(name), "disabled": input}[name]; !found || !bytes.Equal(delivered, want) {
+			t.Fatalf("%s decompression body %x found %v", name, delivered, found)
+		}
+	}
+
+	for i, processor := range []map[string]any{
+		{"Type": "Decompression", "Parameters": []any{map[string]any{"ParameterName": "CompressionFormat", "ParameterValue": "ZIP"}}},
+		{"Type": "Decompression", "Parameters": []any{map[string]any{"ParameterName": "LambdaArn", "ParameterValue": "arn:aws:lambda:us-east-1:123456789012:function:ignored"}}},
+	} {
+		destination := testS3Destination()
+		destination["ProcessingConfiguration"] = map[string]any{"Enabled": true, "Processors": []any{processor}}
+		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": fmt.Sprintf("invalid-decompression-%d", i), "ExtendedS3DestinationConfiguration": destination}); err == nil {
+			t.Errorf("accepted invalid decompression processor %#v", processor)
+		}
+	}
+}
+
 func TestFirehoseLambdaProcessing(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 not installed")

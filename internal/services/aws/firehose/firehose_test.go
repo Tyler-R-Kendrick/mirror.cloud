@@ -321,8 +321,39 @@ func TestFirehoseControlPlaneAndBatch(t *testing.T) {
 	}
 	record := map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("batch"))}
 	batch, err := call("PutRecordBatch", map[string]any{"DeliveryStreamName": "control", "Records": []any{record, record}})
-	if err != nil || batch.Output["FailedPutCount"] != 0 || len(batch.Output["RequestResponses"].([]any)) != 2 {
+	responses := batch.Output["RequestResponses"].([]any)
+	_, hasErrorCode := responses[0].(map[string]any)["ErrorCode"]
+	if err != nil || batch.Output["Encrypted"] != false || batch.Output["FailedPutCount"] != 0 || len(responses) != 2 || hasErrorCode {
 		t.Fatalf("batch %#v, %v", batch, err)
+	}
+	if decoded, valid := recordData(map[string]any{"Data": make([]byte, maxRecordBytes)}); !valid || len(decoded) != maxRecordBytes {
+		t.Fatal("rejected maximum-size record")
+	}
+	storedBefore, _, _ := p.col(&spi.Request{Identity: id}, "fhrec:control").List(context.Background(), "", "", 0)
+	for _, input := range []map[string]any{
+		{"DeliveryStreamName": "control"},
+		{"DeliveryStreamName": "control", "Record": map[string]any{}},
+		{"DeliveryStreamName": "control", "Record": map[string]any{"Data": "not base64"}},
+		{"DeliveryStreamName": "control", "Record": map[string]any{"Data": make([]byte, maxRecordBytes+1)}},
+	} {
+		if _, err := call("PutRecord", input); err == nil {
+			t.Fatalf("accepted invalid record %#v", input)
+		}
+	}
+	large := map[string]any{"Data": make([]byte, 900*1024)}
+	for _, records := range []any{
+		[]any{},
+		make([]any, 501),
+		[]any{record, map[string]any{}},
+		[]any{large, large, large, large, large},
+	} {
+		if _, err := call("PutRecordBatch", map[string]any{"DeliveryStreamName": "control", "Records": records}); err == nil {
+			t.Fatalf("accepted invalid batch with %d records", len(records.([]any)))
+		}
+	}
+	storedAfter, _, _ := p.col(&spi.Request{Identity: id}, "fhrec:control").List(context.Background(), "", "", 0)
+	if len(storedAfter) != len(storedBefore) {
+		t.Fatalf("invalid input wrote records: before %d after %d", len(storedBefore), len(storedAfter))
 	}
 	described, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "control"})
 	description := described.Output["DeliveryStreamDescription"].(map[string]any)

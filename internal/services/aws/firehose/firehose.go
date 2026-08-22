@@ -32,6 +32,11 @@ type Pack struct{ deps spi.Deps }
 
 const destinationID = "destinationId-000000000001"
 
+const (
+	maxRecordBytes = 1000 * 1024
+	maxBatchBytes  = 4 * 1024 * 1024
+)
+
 // New constructs the pack.
 func New(d spi.Deps) *Pack { return &Pack{deps: d} }
 
@@ -144,19 +149,36 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if _, ok, _ := p.col(req, "fh").Get(ctx, name); !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
-		id := p.putOne(ctx, req, name, req.Input["Record"])
+		decoded, valid := recordData(req.Input["Record"])
+		if !valid {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		id := p.putOne(ctx, req, name, req.Input["Record"], decoded)
 		return &spi.Response{Output: map[string]any{"RecordId": id, "Encrypted": false}}, nil
 	case "PutRecordBatch":
 		if _, ok, _ := p.col(req, "fh").Get(ctx, name); !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
-		recs, _ := req.Input["Records"].([]any)
-		var resp []any
-		for _, r := range recs {
-			id := p.putOne(ctx, req, name, r)
-			resp = append(resp, map[string]any{"RecordId": id, "ErrorCode": nil})
+		recs, ok := req.Input["Records"].([]any)
+		if !ok || len(recs) < 1 || len(recs) > 500 {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
-		return &spi.Response{Output: map[string]any{"FailedPutCount": 0, "RequestResponses": resp}}, nil
+		decoded := make([][]byte, len(recs))
+		total := 0
+		for i, rec := range recs {
+			var valid bool
+			decoded[i], valid = recordData(rec)
+			total += len(decoded[i])
+			if !valid || total > maxBatchBytes {
+				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+		resp := make([]any, 0, len(recs))
+		for i, rec := range recs {
+			id := p.putOne(ctx, req, name, rec, decoded[i])
+			resp = append(resp, map[string]any{"RecordId": id})
+		}
+		return &spi.Response{Output: map[string]any{"Encrypted": false, "FailedPutCount": 0, "RequestResponses": resp}}, nil
 	case "UpdateDestination":
 		err := p.col(req, "fh").Txn(ctx, func(tx spi.Tx) error {
 			b, ok, err := tx.Get(name)
@@ -267,20 +289,25 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	}
 }
 
-func (p *Pack) putOne(ctx context.Context, req *spi.Request, name string, rec any) string {
-	id := p.deps.Rand.Hex(16)
-	payload := map[string]any{"Record": rec}
-	var decoded []byte
-	if m, ok := rec.(map[string]any); ok {
-		if d, ok := m["Data"].(string); ok {
-			if raw, err := base64.StdEncoding.DecodeString(d); err == nil {
-				decoded = raw
-				payload["Decoded"] = string(raw)
-			} else {
-				decoded = []byte(d)
-			}
-		}
+func recordData(rec any) ([]byte, bool) {
+	m, ok := rec.(map[string]any)
+	if !ok {
+		return nil, false
 	}
+	switch data := m["Data"].(type) {
+	case string:
+		decoded, err := base64.StdEncoding.DecodeString(data)
+		return decoded, err == nil && len(decoded) <= maxRecordBytes
+	case []byte:
+		return data, len(data) <= maxRecordBytes
+	default:
+		return nil, false
+	}
+}
+
+func (p *Pack) putOne(ctx context.Context, req *spi.Request, name string, rec any, decoded []byte) string {
+	id := p.deps.Rand.Hex(16)
+	payload := map[string]any{"Record": rec, "Decoded": string(decoded)}
 	b, _ := json.Marshal(payload)
 	_ = p.col(req, "fhrec:"+name).Put(ctx, id, b)
 	p.deliverS3(ctx, req, name, id, decoded)

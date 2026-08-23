@@ -26,6 +26,7 @@ import (
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
@@ -2623,6 +2624,77 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		t.Fatalf("HTTP AllData processing-failure backup %q", rawBackup)
 	}
 
+	secretPack := secretsmanager.New(deps)
+	createdSecret, err := secretPack.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateSecret", Input: map[string]any{"Name": "http-key", "SecretString": `{"api_key":"from-secret"}`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretDestination := testHTTPEndpointDestination("https://example.test/ok")
+	secretDestination["EndpointConfiguration"].(map[string]any)["AccessKey"] = "ignored"
+	secretDestination["SecretsManagerConfiguration"] = map[string]any{"Enabled": true, "RoleARN": testRoleARN, "SecretARN": createdSecret.Output["ARN"]}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-secret", "HttpEndpointDestinationConfiguration": secretDestination}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-secret", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("secret"))}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(captured) != 1 {
+		t.Fatalf("HTTP secret request count %d", len(captured))
+	}
+	request = <-captured
+	if request.header.Get("X-Amz-Firehose-Access-Key") != "from-secret" {
+		t.Fatalf("HTTP secret access key %q", request.header.Get("X-Amz-Firehose-Access-Key"))
+	}
+	described, err = call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "http-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	description = described.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["HttpEndpointDestinationDescription"].(map[string]any)
+	secretDescription := description["SecretsManagerConfiguration"].(map[string]any)
+	if secretDescription["Enabled"] != true || secretDescription["SecretARN"] != createdSecret.Output["ARN"] || description["EndpointConfiguration"].(map[string]any)["AccessKey"] != nil {
+		t.Fatalf("HTTP secret description %#v", description)
+	}
+
+	badSecret, err := secretPack.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateSecret", Input: map[string]any{"Name": "bad-http-key", "SecretString": `{}`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	badSecretDestination := testHTTPEndpointDestination("https://example.test/ok")
+	badSecretDestination["S3Configuration"].(map[string]any)["Prefix"] = "secret-failed/"
+	badSecretDestination["SecretsManagerConfiguration"] = map[string]any{"Enabled": true, "RoleARN": testRoleARN, "SecretARN": badSecret.Output["ARN"]}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-bad-secret", "HttpEndpointDestinationConfiguration": badSecretDestination}); err != nil {
+		t.Fatal(err)
+	}
+	badSecretPut, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-bad-secret", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("not-sent"))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(captured) != 0 {
+		t.Fatal("sent HTTP request with malformed secret")
+	}
+	badSecretBackupKey := id.Account + "/" + id.Region + "/out/secret-failed/1970/01/01/00/http-bad-secret-1-1970-01-01-00-00-00-" + badSecretPut.Output["RecordId"].(string)
+	if _, _, err := deps.Blobs.Get(context.Background(), badSecretBackupKey); err != nil {
+		t.Fatal(err)
+	}
+
+	missingSecretDestination := testHTTPEndpointDestination("https://example.test/ok")
+	missingSecretDestination["S3Configuration"].(map[string]any)["Prefix"] = "missing-secret/"
+	missingSecretDestination["SecretsManagerConfiguration"] = map[string]any{"Enabled": true, "RoleARN": testRoleARN, "SecretARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:missing-http-key"}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-missing-secret", "HttpEndpointDestinationConfiguration": missingSecretDestination}); err != nil {
+		t.Fatal(err)
+	}
+	missingSecretPut, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-missing-secret", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("not-sent"))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(captured) != 0 {
+		t.Fatal("sent HTTP request with missing secret")
+	}
+	missingSecretBackupKey := id.Account + "/" + id.Region + "/out/missing-secret/1970/01/01/00/http-missing-secret-1-1970-01-01-00-00-00-" + missingSecretPut.Output["RecordId"].(string)
+	if _, _, err := deps.Blobs.Get(context.Background(), missingSecretBackupKey); err != nil {
+		t.Fatal(err)
+	}
+
 	for _, failure := range []struct {
 		name, path, prefix string
 		backedUp           bool
@@ -2680,6 +2752,7 @@ func TestFirehoseHTTPEndpointValidation(t *testing.T) {
 		{"RequestConfiguration": map[string]any{"CommonAttributes": []any{map[string]any{"AttributeName": "", "AttributeValue": "value"}}}},
 		{"EndpointConfiguration": map[string]any{"Url": "https://example.test", "AccessKey": "bad\nkey"}},
 		{"ProcessingConfiguration": "invalid"},
+		{"SecretsManagerConfiguration": map[string]any{"Enabled": true, "RoleARN": testRoleARN}},
 	} {
 		destination := testHTTPEndpointDestination("https://example.test")
 		maps.Copy(destination, patch)
@@ -2688,22 +2761,6 @@ func TestFirehoseHTTPEndpointValidation(t *testing.T) {
 		}})
 		if err == nil {
 			t.Errorf("accepted invalid HTTP option %#v", patch)
-		}
-	}
-
-	for name, patch := range map[string]map[string]any{
-		"secret": {"SecretsManagerConfiguration": map[string]any{
-			"Enabled": true, "RoleARN": testRoleARN, "SecretARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:http",
-		}},
-	} {
-		destination := testHTTPEndpointDestination("https://example.test")
-		maps.Copy(destination, patch)
-		_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
-			"DeliveryStreamName": "unsupported-http-" + name, "HttpEndpointDestinationConfiguration": destination,
-		}})
-		fault, ok := err.(*spi.Fault)
-		if !ok || fault.Code != "MirrorNotImplemented" {
-			t.Errorf("%s fault %#v", name, err)
 		}
 	}
 }

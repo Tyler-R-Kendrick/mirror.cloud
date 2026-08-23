@@ -31,6 +31,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -922,7 +923,7 @@ func validateHTTPEndpointDestination(destination map[string]any, region string) 
 	}
 	if raw, exists := endpoint["AccessKey"]; exists {
 		accessKey, ok := raw.(string)
-		if !ok || len(accessKey) > 4096 || strings.ContainsAny(accessKey, "\r\n") {
+		if !ok || !validHTTPAccessKey(accessKey) {
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
 	}
@@ -988,11 +989,12 @@ func validateHTTPEndpointDestination(destination map[string]any, region string) 
 		if !ok || !enabledOK || (role != "" && !validRoleARN(role)) || (secret != "" && (len(secret) > 2048 || !firehoseSecretARN.MatchString(secret))) || (enabled && secret == "") {
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
-		if enabled {
-			return spi.NotImplemented("aws.firehose", "HttpEndpointDestinationConfiguration.SecretsManagerConfiguration", "emulate")
-		}
 	}
 	return nil
+}
+
+func validHTTPAccessKey(accessKey string) bool {
+	return len(accessKey) <= 4096 && !strings.ContainsAny(accessKey, "\r\n")
 }
 
 func validHTTPCommonAttributes(value any) bool {
@@ -1475,7 +1477,7 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 		if len(processedData) == 0 {
 			return
 		}
-		delivered, permanent, message := p.deliverHTTP(ctx, rec, destination, processedIDs[0], processedData, now)
+		delivered, permanent, message := p.deliverHTTP(ctx, req, rec, destination, processedIDs[0], processedData, now)
 		if !delivered {
 			p.logDeliveryError(ctx, req, destination, stream, message, now)
 		}
@@ -1496,7 +1498,7 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 	}
 }
 
-func (p *Pack) deliverHTTP(ctx context.Context, stream, destination map[string]any, requestID string, data [][]byte, now time.Time) (bool, bool, string) {
+func (p *Pack) deliverHTTP(ctx context.Context, req *spi.Request, stream, destination map[string]any, requestID string, data [][]byte, now time.Time) (bool, bool, string) {
 	records := make([]any, len(data))
 	for i := range data {
 		records[i] = map[string]any{"data": base64.StdEncoding.EncodeToString(data[i])}
@@ -1516,6 +1518,23 @@ func (p *Pack) deliverHTTP(ctx context.Context, stream, destination map[string]a
 		payload = compressed.Bytes()
 	}
 	endpoint, _ := destination["EndpointConfiguration"].(map[string]any)
+	accessKey, hasAccessKey := endpoint["AccessKey"].(string)
+	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {
+		response, err := secretsmanager.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": first(secrets, "SecretARN")}})
+		var secret string
+		var ok bool
+		if response != nil {
+			secret, ok = response.Output["SecretString"].(string)
+		}
+		value := map[string]any{}
+		if err != nil || !ok || json.Unmarshal([]byte(secret), &value) != nil {
+			return false, false, "unable to retrieve HTTP endpoint access key"
+		}
+		accessKey, hasAccessKey = value["api_key"].(string)
+		if !hasAccessKey || !validHTTPAccessKey(accessKey) {
+			return false, false, "HTTP endpoint secret must contain a valid api_key"
+		}
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, first(endpoint, "Url"), bytes.NewReader(payload))
 	if err != nil {
 		return false, false, err.Error()
@@ -1527,7 +1546,7 @@ func (p *Pack) deliverHTTP(ctx context.Context, stream, destination map[string]a
 	if encoding == "GZIP" {
 		request.Header.Set("Content-Encoding", "gzip")
 	}
-	if accessKey, ok := endpoint["AccessKey"].(string); ok {
+	if hasAccessKey {
 		request.Header.Set("X-Amz-Firehose-Access-Key", accessKey)
 	}
 	if raw, exists := requestConfiguration["CommonAttributes"]; exists {

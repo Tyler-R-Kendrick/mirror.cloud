@@ -30,6 +30,14 @@ func TestMutantsAreKilled(t *testing.T) {
 	}
 	mutants := []mutant{
 		{
+			name: "secretsmanager-reject-secret-arn",
+			file: filepath.Join("internal", "services", "aws", "secretsmanager", "secrets.go"),
+			old:  `if i := strings.LastIndex(name, ":secret:"); i >= 0 {`,
+			new:  `if i := strings.LastIndex(name, ":secret:"); false {`,
+			pkg:  "./internal/services/aws/secretsmanager",
+			run:  "TestCreateGetDeleteRestore",
+		},
+		{
 			name: "firehose-drop-s3-object-time-name",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 			old:  `key := evaluatedPrefix + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + record.recID + recordExtension`,
@@ -810,6 +818,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 			old:  `request.Header.Set("X-Amz-Firehose-Access-Key", accessKey)`,
 			new:  `request.Header.Set("X-Amz-Firehose-Access-Key", "")`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseHTTPEndpointDestination",
+		},
+		{
+			name: "firehose-ignore-http-secret-credentials",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `secrets["Enabled"] == true`,
+			new:  `false`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseHTTPEndpointDestination",
+		},
+		{
+			name: "firehose-accept-http-secret-without-api-key",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `if !hasAccessKey || !validHTTPAccessKey(accessKey) {`,
+			new:  `if false {`,
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseHTTPEndpointDestination",
 		},

@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -45,6 +46,27 @@ func init() {
 type Pack struct {
 	deps       spi.Deps
 	httpClient *http.Client
+	wake       chan struct{}
+	stop       chan struct{}
+	done       chan struct{}
+	retryOnce  sync.Once
+	closeOnce  sync.Once
+}
+
+type httpRetry struct {
+	Stream    string
+	RequestID string
+	DataKey   string
+	Next      time.Time
+	Expires   time.Time
+	Retries   int
+	Backup    bool
+}
+
+type httpRetryPayload struct {
+	RecordIDs     []string
+	RawData       [][]byte
+	ProcessedData [][]byte
 }
 
 const destinationID = "destinationId-000000000001"
@@ -56,12 +78,24 @@ const (
 
 // New constructs the pack.
 func New(d spi.Deps) *Pack {
-	return &Pack{deps: d, httpClient: &http.Client{
+	p := &Pack{deps: d, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}), httpClient: &http.Client{
 		Timeout: 3 * time.Minute,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}}
+	if p.hasHTTPRetries(context.Background()) {
+		p.startRetryLoop()
+	}
+	return p
+}
+
+// Close stops the HTTP retry worker.
+func (p *Pack) Close() error {
+	p.startRetryLoop()
+	p.closeOnce.Do(func() { close(p.stop) })
+	<-p.done
+	return nil
 }
 
 func (p *Pack) ServiceID() string { return "aws.firehose" }
@@ -1481,7 +1515,9 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 		if !delivered {
 			p.logDeliveryError(ctx, req, destination, stream, message, now)
 		}
-		if backupMode != "AllData" && !delivered && !permanent {
+		retryDuration := httpRetryDuration(destination)
+		retrying := !delivered && !permanent && retryDuration > 0 && p.scheduleHTTPRetry(ctx, req, stream, processedIDs[0], recIDs, data, processedData, backupMode != "AllData", now, retryDuration)
+		if backupMode != "AllData" && !delivered && !permanent && !retrying {
 			for i := range data {
 				p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)
 			}
@@ -1496,6 +1532,204 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 			p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)
 		}
 	}
+}
+
+func httpRetryDuration(destination map[string]any) time.Duration {
+	retry, _ := destination["RetryOptions"].(map[string]any)
+	seconds, ok := inputInteger(retry["DurationInSeconds"], 0, 7200)
+	if !ok {
+		seconds = 300
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func (p *Pack) hasHTTPRetries(ctx context.Context) bool {
+	if p.deps.Store == nil || p.deps.Clock == nil {
+		return false
+	}
+	scopes, err := p.deps.Store.Scopes(ctx)
+	if err != nil {
+		return false
+	}
+	for _, identity := range scopes {
+		if retries, _, _ := p.deps.Store.Scope(identity.Account, identity.Region).Collection("fh-http-retries").List(ctx, "", "", 1); len(retries) != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Pack) startRetryLoop() {
+	p.retryOnce.Do(func() { go p.httpRetryLoop() })
+}
+
+func (p *Pack) notifyRetryLoop() {
+	select {
+	case p.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (p *Pack) scheduleHTTPRetry(ctx context.Context, req *spi.Request, stream, requestID string, recordIDs []string, rawData, processedData [][]byte, backup bool, now time.Time, duration time.Duration) bool {
+	key := p.deps.Rand.UUID()
+	dataKey := req.Identity.Account + "/" + req.Identity.Region + "/_mirror/firehose-http-retries/" + key
+	payload, err := json.Marshal(httpRetryPayload{RecordIDs: recordIDs, RawData: rawData, ProcessedData: processedData})
+	if err != nil || p.deps.Blobs == nil {
+		return false
+	}
+	if _, err := p.deps.Blobs.Put(ctx, dataKey, bytes.NewReader(payload)); err != nil {
+		return false
+	}
+	retry := httpRetry{
+		Stream: stream, RequestID: requestID, DataKey: dataKey,
+		Next: now.Add(p.httpRetryDelay(key, 0)), Backup: backup,
+	}
+	retry.Expires = now.Add(duration)
+	if retry.Next.After(retry.Expires) {
+		retry.Next = retry.Expires
+	}
+	body, err := json.Marshal(retry)
+	if err != nil || p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection("fh-http-retries").Put(ctx, key, body) != nil {
+		_ = p.deps.Blobs.Delete(ctx, dataKey)
+		return false
+	}
+	p.startRetryLoop()
+	p.notifyRetryLoop()
+	return true
+}
+
+func (p *Pack) httpRetryDelay(key string, retry int) time.Duration {
+	delay := time.Second << min(retry, 7)
+	if delay > 2*time.Minute {
+		delay = 2 * time.Minute
+	}
+	jitter := 100
+	if p.deps.Rand != nil {
+		jitter = 85 + p.deps.Rand.Derive(key+"|"+strconv.Itoa(retry)).Intn(31)
+	}
+	delay = delay * time.Duration(jitter) / 100
+	return min(delay, 2*time.Minute)
+}
+
+func (p *Pack) httpRetryLoop() {
+	defer close(p.done)
+	for {
+		next := p.runHTTPRetries(context.Background())
+		if next.IsZero() {
+			select {
+			case <-p.wake:
+			case <-p.stop:
+				return
+			}
+			continue
+		}
+		delay := next.Sub(p.deps.Clock.Now())
+		if delay < 0 {
+			delay = 0
+		}
+		select {
+		case <-p.deps.Clock.After(delay):
+		case <-p.wake:
+		case <-p.stop:
+			return
+		}
+	}
+}
+
+func (p *Pack) runHTTPRetries(ctx context.Context) time.Time {
+	if p.deps.Store == nil || p.deps.Clock == nil {
+		return time.Time{}
+	}
+	now := p.deps.Clock.Now().UTC()
+	var earliest time.Time
+	scopes, _ := p.deps.Store.Scopes(ctx)
+	for _, identity := range scopes {
+		collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("fh-http-retries")
+		retries, _, _ := collection.List(ctx, "", "", 0)
+		for _, item := range retries {
+			var retry httpRetry
+			if json.Unmarshal(item.Value, &retry) != nil {
+				continue
+			}
+			next := retry.Next
+			if !next.After(now) {
+				next = p.runHTTPRetry(ctx, identity, collection, item.Key, &retry, now)
+			}
+			if !next.IsZero() && (earliest.IsZero() || next.Before(earliest)) {
+				earliest = next
+			}
+		}
+	}
+	return earliest
+}
+
+func (p *Pack) deleteHTTPRetry(ctx context.Context, collection spi.Collection, key, dataKey string) {
+	_ = collection.Delete(ctx, key)
+	if p.deps.Blobs != nil {
+		_ = p.deps.Blobs.Delete(ctx, dataKey)
+	}
+}
+
+func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collection spi.Collection, key string, retry *httpRetry, now time.Time) time.Time {
+	req := &spi.Request{Identity: identity}
+	raw, ok, _ := p.col(req, "fh").Get(ctx, retry.Stream)
+	if !ok {
+		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
+		return time.Time{}
+	}
+	var stream map[string]any
+	_ = json.Unmarshal(raw, &stream)
+	destination, ok := stream["HttpEndpointDestinationConfiguration"].(map[string]any)
+	if !ok {
+		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
+		return time.Time{}
+	}
+	var payload httpRetryPayload
+	payloadOK := false
+	if p.deps.Blobs != nil {
+		if reader, _, err := p.deps.Blobs.Get(ctx, retry.DataKey); err == nil {
+			payloadBody, readErr := io.ReadAll(reader)
+			_ = reader.Close()
+			payloadOK = readErr == nil && json.Unmarshal(payloadBody, &payload) == nil && len(payload.RecordIDs) == len(payload.RawData) && len(payload.ProcessedData) != 0
+		}
+	}
+	if !payloadOK {
+		retry.Next = now.Add(time.Second)
+		body, _ := json.Marshal(retry)
+		_ = collection.Put(ctx, key, body)
+		return retry.Next
+	}
+	finish := func() {
+		if retry.Backup {
+			backup, _ := destination["S3Configuration"].(map[string]any)
+			version := first(stream, "VersionId")
+			if version == "" {
+				version = "1"
+			}
+			for i := range payload.RawData {
+				p.deliverS3Configuration(ctx, req, backup, retry.Stream, version, payload.RecordIDs[i], payload.RawData[i], now)
+			}
+		}
+		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
+	}
+	if !now.Before(retry.Expires) {
+		finish()
+		return time.Time{}
+	}
+	delivered, permanent, message := p.deliverHTTP(ctx, req, stream, destination, retry.RequestID, payload.ProcessedData, now)
+	if delivered || permanent {
+		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
+		return time.Time{}
+	}
+	p.logDeliveryError(ctx, req, destination, retry.Stream, message, now)
+	retry.Retries++
+	retry.Next = now.Add(p.httpRetryDelay(key, retry.Retries))
+	if retry.Next.After(retry.Expires) {
+		retry.Next = retry.Expires
+	}
+	body, _ := json.Marshal(retry)
+	_ = collection.Put(ctx, key, body)
+	return retry.Next
 }
 
 func (p *Pack) deliverHTTP(ctx context.Context, req *spi.Request, stream, destination map[string]any, requestID string, data [][]byte, now time.Time) (bool, bool, string) {

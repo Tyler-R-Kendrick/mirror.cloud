@@ -2420,6 +2420,10 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 			writer.WriteHeader(http.StatusRequestEntityTooLarge)
 			return
 		}
+		if request.URL.Path == "/exhaust" || (request.URL.Path == "/retry" && request.Header.Get("X-Amz-Firehose-Access-Key") != "retry-success") {
+			writer.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		requestID := first(payload, "requestId")
 		if request.URL.Path == "/failure" {
 			requestID = "wrong-request"
@@ -2433,8 +2437,9 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	transport := server.Client().Transport
 	deps := spitest.Deps(t)
 	p := New(deps)
+	defer func() { _ = p.Close() }()
 	checkRedirect := p.httpClient.CheckRedirect
-	p.httpClient = &http.Client{
+	httpClient := &http.Client{
 		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 			clone := request.Clone(request.Context())
 			requestURL := *request.URL
@@ -2444,6 +2449,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		}),
 		CheckRedirect: checkRedirect,
 	}
+	p.httpClient = httpClient
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
 		t.Helper()
@@ -2661,6 +2667,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	}
 	badSecretDestination := testHTTPEndpointDestination("https://example.test/ok")
 	badSecretDestination["S3Configuration"].(map[string]any)["Prefix"] = "secret-failed/"
+	badSecretDestination["RetryOptions"] = map[string]any{"DurationInSeconds": 0}
 	badSecretDestination["SecretsManagerConfiguration"] = map[string]any{"Enabled": true, "RoleARN": testRoleARN, "SecretARN": badSecret.Output["ARN"]}
 	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-bad-secret", "HttpEndpointDestinationConfiguration": badSecretDestination}); err != nil {
 		t.Fatal(err)
@@ -2679,6 +2686,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 
 	missingSecretDestination := testHTTPEndpointDestination("https://example.test/ok")
 	missingSecretDestination["S3Configuration"].(map[string]any)["Prefix"] = "missing-secret/"
+	missingSecretDestination["RetryOptions"] = map[string]any{"DurationInSeconds": 0}
 	missingSecretDestination["SecretsManagerConfiguration"] = map[string]any{"Enabled": true, "RoleARN": testRoleARN, "SecretARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:missing-http-key"}
 	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-missing-secret", "HttpEndpointDestinationConfiguration": missingSecretDestination}); err != nil {
 		t.Fatal(err)
@@ -2706,6 +2714,9 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		destination := testHTTPEndpointDestination("https://example.test" + failure.path)
 		destination["S3Configuration"].(map[string]any)["Prefix"] = failure.prefix
 		destination["S3BackupMode"] = "FailedDataOnly"
+		if failure.backedUp {
+			destination["RetryOptions"] = map[string]any{"DurationInSeconds": 0}
+		}
 		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": failure.name, "HttpEndpointDestinationConfiguration": destination}); err != nil {
 			t.Fatal(err)
 		}
@@ -2719,6 +2730,132 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		if (err == nil) != failure.backedUp {
 			t.Errorf("%s backup err %v", failure.name, err)
 		}
+	}
+	if retries, _, _ := deps.Store.Scope(id.Account, id.Region).Collection("fh-http-retries").List(context.Background(), "", "", 0); len(retries) != 0 {
+		t.Fatalf("scheduled permanent HTTP failure retry %#v", retries)
+	}
+
+	retryDestination := testHTTPEndpointDestination("https://example.test/retry")
+	retryDestination["EndpointConfiguration"].(map[string]any)["AccessKey"] = "retry-initial"
+	retryDestination["S3Configuration"].(map[string]any)["Prefix"] = "retry-failed/"
+	retryDestination["RetryOptions"] = map[string]any{"DurationInSeconds": 10}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-retry", "HttpEndpointDestinationConfiguration": retryDestination}); err != nil {
+		t.Fatal(err)
+	}
+	retryPut, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-retry", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("retry"))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialRetry := <-captured
+	retryCollection := deps.Store.Scope(id.Account, id.Region).Collection("fh-http-retries")
+	storedRetries, _, _ := retryCollection.List(context.Background(), "", "", 0)
+	var storedRetry httpRetry
+	if len(storedRetries) != 1 || json.Unmarshal(storedRetries[0].Value, &storedRetry) != nil || bytes.Contains(storedRetries[0].Value, []byte(base64.StdEncoding.EncodeToString([]byte("retry")))) {
+		t.Fatalf("persisted HTTP retry metadata %#v", storedRetries)
+	}
+	retryData, _, err := deps.Blobs.Get(context.Background(), storedRetry.DataKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = retryData.Close()
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "http-retry", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
+		"HttpEndpointDestinationUpdate": map[string]any{"EndpointConfiguration": map[string]any{"Url": "https://example.test/retry", "AccessKey": "retry-success"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p = New(deps)
+	p.httpClient = httpClient
+	if err := deps.Clock.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	var retried capturedRequest
+	select {
+	case retried = <-captured:
+	case <-time.After(2 * time.Second):
+		t.Fatal("persisted HTTP retry did not run")
+	}
+	if first(retried.payload, "requestId") != first(initialRetry.payload, "requestId") || retried.header.Get("X-Amz-Firehose-Access-Key") != "retry-success" {
+		t.Fatalf("HTTP retry %#v initial %#v", retried, initialRetry)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		retries, _, _ := retryCollection.List(context.Background(), "", "", 0)
+		if len(retries) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("successful HTTP retry remained persisted")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if _, _, err := deps.Blobs.Get(context.Background(), storedRetry.DataKey); err == nil {
+		t.Fatal("successful HTTP retry payload remained persisted")
+	}
+	retryBackupKey := id.Account + "/" + id.Region + "/out/retry-failed/1970/01/01/00/http-retry-2-1970-01-01-00-00-02-" + retryPut.Output["RecordId"].(string)
+	if _, _, err := deps.Blobs.Get(context.Background(), retryBackupKey); err == nil {
+		t.Fatal("backed up successfully retried HTTP record")
+	}
+
+	exhaustedDestination := testHTTPEndpointDestination("https://example.test/exhaust")
+	exhaustedDestination["S3Configuration"].(map[string]any)["Prefix"] = "exhausted/"
+	exhaustedDestination["RetryOptions"] = map[string]any{"DurationInSeconds": 4}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-exhaust", "HttpEndpointDestinationConfiguration": exhaustedDestination}); err != nil {
+		t.Fatal(err)
+	}
+	exhaustedPut, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-exhaust", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("exhaust"))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialExhausted := <-captured
+	if err := deps.Clock.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	var retriedExhausted capturedRequest
+	select {
+	case retriedExhausted = <-captured:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP retry did not run before expiration")
+	}
+	if first(retriedExhausted.payload, "requestId") != first(initialExhausted.payload, "requestId") {
+		t.Fatalf("HTTP retry request IDs %#v %#v", initialExhausted.payload, retriedExhausted.payload)
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		retries, _, _ := retryCollection.List(context.Background(), "", "", 0)
+		if len(retries) == 1 {
+			var retry httpRetry
+			_ = json.Unmarshal(retries[0].Value, &retry)
+			if retry.Retries == 1 {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("HTTP retry state was not updated")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := deps.Clock.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-captured:
+		t.Fatal("sent HTTP request after retry duration expired")
+	case <-time.After(10 * time.Millisecond):
+	}
+	exhaustedBackupKey := id.Account + "/" + id.Region + "/out/exhausted/1970/01/01/00/http-exhaust-1-1970-01-01-00-00-06-" + exhaustedPut.Output["RecordId"].(string)
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		if _, _, err := deps.Blobs.Get(context.Background(), exhaustedBackupKey); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("exhausted HTTP retry was not backed up")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -2762,6 +2899,17 @@ func TestFirehoseHTTPEndpointValidation(t *testing.T) {
 		if err == nil {
 			t.Errorf("accepted invalid HTTP option %#v", patch)
 		}
+	}
+}
+
+func TestFirehoseHTTPRetryDelay(t *testing.T) {
+	p := New(spitest.Deps(t))
+	defer func() { _ = p.Close() }()
+	if delay := p.httpRetryDelay("request", 0); delay < 850*time.Millisecond || delay > 1150*time.Millisecond {
+		t.Fatalf("initial HTTP retry delay %s", delay)
+	}
+	if delay := p.httpRetryDelay("request", 100); delay > 2*time.Minute {
+		t.Fatalf("capped HTTP retry delay %s", delay)
 	}
 }
 

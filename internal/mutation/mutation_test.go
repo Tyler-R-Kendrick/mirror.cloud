@@ -838,6 +838,53 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFirehoseHTTPEndpointDestination",
 		},
 		{
+			name: "firehose-skip-http-retry-scheduling",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `retrying := !delivered && !permanent && retryDuration > 0 && p.scheduleHTTPRetry(ctx, req, stream, processedIDs[0], recIDs, data, processedData, backupMode != "AllData", now, retryDuration)`,
+			new:  `retrying := false`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseHTTPEndpointDestination",
+		},
+		{
+			name: "firehose-change-http-retry-request-id",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `p.deliverHTTP(ctx, req, stream, destination, retry.RequestID, payload.ProcessedData, now)`,
+			new:  `p.deliverHTTP(ctx, req, stream, destination, key, payload.ProcessedData, now)`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseHTTPEndpointDestination",
+		},
+		{
+			name: "firehose-retry-http-after-expiration",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `if !now.Before(retry.Expires) {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseHTTPEndpointDestination",
+		},
+		{
+			name: "firehose-leak-successful-http-retry-payload",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old: `func (p *Pack) deleteHTTPRetry(ctx context.Context, collection spi.Collection, key, dataKey string) {
+	_ = collection.Delete(ctx, key)
+	if p.deps.Blobs != nil {
+		_ = p.deps.Blobs.Delete(ctx, dataKey)
+	}
+}`,
+			new: `func (p *Pack) deleteHTTPRetry(ctx context.Context, collection spi.Collection, key, dataKey string) {
+	_ = collection.Delete(ctx, key)
+}`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseHTTPEndpointDestination",
+		},
+		{
+			name: "firehose-uncap-http-retry-delay",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `return min(delay, 2*time.Minute)`,
+			new:  `return 3 * time.Minute`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseHTTPRetryDelay",
+		},
+		{
 			name: "firehose-omit-http-common-attributes",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 			old:  `request.Header.Set("X-Amz-Firehose-Common-Attributes", string(encoded))`,
@@ -854,7 +901,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFirehoseHTTPEndpointDestination",
 		},
 		{
-			name: "firehose-back-up-http-413",
+			name: "firehose-retry-http-413",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 			old:  `return false, true, response.Status`,
 			new:  `return false, false, response.Status`,

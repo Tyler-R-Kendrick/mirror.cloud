@@ -78,6 +78,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSecretsManagerOperationsAndMetadata",
 		},
 		{
+			name: "dynamodb-ignore-tag-update",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
+			old:  `tags[i] = tag`,
+			new:  `tags[i] = tags[i]`,
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestDynamoDBTagLifecycle",
+		},
+		{
+			name: "dynamodb-untag-all-tags",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
+			old:  `if !drop[str(asMap(tag)["Key"])] {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestDynamoDBTagLifecycle",
+		},
+		{
 			name: "firehose-drop-s3-object-time-name",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 			old:  `key := evaluatedPrefix + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + record.recID + recordExtension`,

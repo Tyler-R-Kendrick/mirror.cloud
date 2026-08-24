@@ -4880,12 +4880,83 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			if len(choices) == 0 {
 				add("MISSING_REQUIRED_FIELD", "Choice must have Choices.", "/States/"+name+"/Choices")
 			}
+			operators := []string{"And", "Or", "Not", "IsBoolean", "IsNull", "IsNumeric", "IsPresent", "IsString", "IsTimestamp", "StringMatches", "BooleanEquals", "BooleanEqualsPath"}
+			for _, prefix := range []string{"String", "Numeric", "Timestamp"} {
+				for _, suffix := range []string{"Equals", "LessThan", "LessThanEquals", "GreaterThan", "GreaterThanEquals"} {
+					operators = append(operators, prefix+suffix, prefix+suffix+"Path")
+				}
+			}
+			var validateChoiceRule func(any, bool, string)
+			validateChoiceRule = func(raw any, topLevel bool, path string) {
+				choice, object := raw.(map[string]any)
+				if !object {
+					add("SCHEMA_VALIDATION_FAILED", "Choice rule must be an object.", path)
+					return
+				}
+				if !topLevel {
+					if _, exists := choice["Next"]; exists {
+						add("SCHEMA_VALIDATION_FAILED", "Next is only supported by top-level Choice rules.", path+"/Next")
+					}
+				}
+				found := make([]string, 0, 1)
+				for _, operator := range operators {
+					if _, exists := choice[operator]; exists {
+						found = append(found, operator)
+					}
+				}
+				if isJSONata {
+					condition, exists := choice["Condition"]
+					expression, stringCondition := condition.(string)
+					_, booleanCondition := condition.(bool)
+					if !exists || len(found) != 0 || !booleanCondition && (!stringCondition || !strings.HasPrefix(expression, "{%") || !strings.HasSuffix(expression, "%}")) {
+						add("SCHEMA_VALIDATION_FAILED", "JSONata Choice rules require one boolean Condition.", path+"/Condition")
+					}
+					return
+				}
+				if _, exists := choice["Condition"]; exists || len(found) != 1 {
+					add("SCHEMA_VALIDATION_FAILED", "JSONPath Choice rules require exactly one comparison operator.", path)
+					return
+				}
+				operator, operand := found[0], choice[found[0]]
+				if operator == "And" || operator == "Or" {
+					rules, valid := operand.([]any)
+					if !valid || len(rules) == 0 {
+						add("SCHEMA_VALIDATION_FAILED", operator+" must contain Choice rules.", path+"/"+operator)
+						return
+					}
+					for i, rule := range rules {
+						validateChoiceRule(rule, false, fmt.Sprintf("%s/%s/%d", path, operator, i))
+					}
+					return
+				}
+				if operator == "Not" {
+					validateChoiceRule(operand, false, path+"/Not")
+					return
+				}
+				variable, validVariable := choice["Variable"].(string)
+				validOperand := false
+				switch {
+				case strings.HasSuffix(operator, "Path"):
+					reference, valid := operand.(string)
+					validOperand = valid && strings.HasPrefix(reference, "$")
+				case strings.HasPrefix(operator, "Numeric"):
+					_, validOperand = exactNumber(operand)
+				case strings.HasPrefix(operator, "Boolean"), strings.HasPrefix(operator, "Is"):
+					_, validOperand = operand.(bool)
+				case strings.HasPrefix(operator, "Timestamp"):
+					timestamp, valid := operand.(string)
+					_, validOperand = parseTimestamp(timestamp)
+					validOperand = valid && validOperand && strings.Contains(timestamp, "T") && strings.HasSuffix(timestamp, "Z")
+				default:
+					_, validOperand = operand.(string)
+				}
+				if !validVariable || !strings.HasPrefix(variable, "$") || !validOperand {
+					add("SCHEMA_VALIDATION_FAILED", "Choice comparison has an invalid Variable or operand.", path)
+				}
+			}
 			for i, raw := range choices {
 				choice, _ := raw.(map[string]any)
-				_, hasCondition := choice["Condition"]
-				if isJSONata != hasCondition {
-					add("SCHEMA_VALIDATION_FAILED", "Choice rules must use Condition exactly when JSONata is selected.", fmt.Sprintf("/States/%s/Choices/%d", name, i))
-				}
+				validateChoiceRule(raw, true, fmt.Sprintf("/States/%s/Choices/%d", name, i))
 				checkTarget(choice["Next"], fmt.Sprintf("/Choices/%d/Next", i))
 			}
 			if fallback, exists := state["Default"]; exists {

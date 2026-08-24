@@ -35,6 +35,10 @@ import (
 
 const testRoleARN = "arn:aws:iam::1:role/states"
 
+type zeroIntRand struct{ spi.Rand }
+
+func (zeroIntRand) Intn(int) int { return 0 }
+
 func TestStatesHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
 	if n := len(p.Operations()); n != 37 {
@@ -1790,7 +1794,7 @@ func TestStatesCallbackServiceIntegration(t *testing.T) {
 	}
 
 	queueURL := must(queue, "CreateQueue", map[string]any{"QueueName": "callbacks"})["QueueUrl"].(string)
-	definition := `{"StartAt":"Callback","States":{"Callback":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage.waitForTaskToken","Parameters":{"QueueUrl":"` + queueURL + `","MessageBody.$":"$$.Task.Token"},"Retry":[{"ErrorEquals":["Retryable"],"MaxAttempts":1}],"ResultPath":"$.callback","End":true}}}`
+	definition := `{"StartAt":"Callback","States":{"Callback":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage.waitForTaskToken","Parameters":{"QueueUrl":"` + queueURL + `","MessageBody.$":"$$.Task.Token"},"Retry":[{"ErrorEquals":["Retryable"],"IntervalSeconds":1,"MaxAttempts":1,"JitterStrategy":"FULL"}],"ResultPath":"$.callback","End":true}}}`
 	machine := must(p, "CreateStateMachine", map[string]any{"name": "callbacks", "definition": definition, "roleArn": testRoleARN})
 	invalidDefinition := `{"StartAt":"Callback","States":{"Callback":{"Type":"Task","Resource":"arn:aws:states:::dynamodb:putItem.waitForTaskToken","End":true}}}`
 	if _, err := call(p, "CreateStateMachine", map[string]any{"name": "invalid-callback", "definition": invalidDefinition, "roleArn": testRoleARN}); err == nil {
@@ -1824,10 +1828,8 @@ func TestStatesCallbackServiceIntegration(t *testing.T) {
 	retrying := must(p, "StartExecution", map[string]any{"stateMachineArn": arn, "name": "retry"})["executionArn"].(string)
 	firstToken, firstHandle := task()
 	must(queue, "DeleteMessage", map[string]any{"QueueUrl": queueURL, "ReceiptHandle": firstHandle})
+	p.deps.Rand = zeroIntRand{p.deps.Rand}
 	must(p, "SendTaskFailure", map[string]any{"taskToken": firstToken, "error": "Retryable"})
-	if err := deps.Clock.Advance(time.Second); err != nil {
-		t.Fatal(err)
-	}
 	secondToken, secondHandle := task()
 	if secondToken == firstToken {
 		t.Fatal("callback retry reused task token")
@@ -2192,17 +2194,15 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 			t.Fatalf("%s accepted missing token", operation)
 		}
 	}
-	recoveryDefinition := `{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"` + activityARN + `","Retry":[{"ErrorEquals":["Retryable"],"MaxAttempts":1}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.failure","Next":"Recovered"}],"End":true},"Recovered":{"Type":"Succeed"}}}`
+	recoveryDefinition := `{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"` + activityARN + `","Retry":[{"ErrorEquals":["Retryable"],"IntervalSeconds":1,"MaxAttempts":1,"JitterStrategy":"FULL"}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.failure","Next":"Recovered"}],"End":true},"Recovered":{"Type":"Succeed"}}}`
 	recoveryMachine := must("CreateStateMachine", map[string]any{"Name": "activity-recovery", "Definition": recoveryDefinition, "RoleArn": testRoleARN}).Output["stateMachineArn"].(string)
 	recoveryARN := must("StartExecution", map[string]any{"StateMachineArn": recoveryMachine, "Name": "recovery", "Input": `{"keep":true}`}).Output["executionArn"].(string)
 	firstToken := must("GetActivityTask", map[string]any{"ActivityArn": activityARN}).Output["taskToken"].(string)
 	must("SendTaskHeartbeat", map[string]any{"TaskToken": firstToken})
+	p.deps.Rand = zeroIntRand{p.deps.Rand}
 	must("SendTaskFailure", map[string]any{"TaskToken": firstToken, "Error": "Retryable", "Cause": "try again"})
 	if retrying := must("DescribeExecution", map[string]any{"ExecutionArn": recoveryARN}).Output; retrying["status"] != "RUNNING" {
 		t.Fatalf("activity retry %#v", retrying)
-	}
-	if err := p.deps.Clock.Advance(time.Second); err != nil {
-		t.Fatal(err)
 	}
 	secondToken := ""
 	for range 100 {

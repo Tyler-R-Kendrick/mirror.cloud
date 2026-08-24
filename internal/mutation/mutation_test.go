@@ -1208,7 +1208,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-skip-composite-retry",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if retryTask(st, name, attempts) {`,
+			old:  `if delay, retry := retryTask(st, name, attempts, random); retry {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
@@ -1240,7 +1240,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-skip-activity-retry",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if retryTask(st, failure.name, pend.Retries) {`,
+			old:  `if delay, retry := retryTask(st, failure.name, pend.Retries, p.deps.Rand); retry {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",

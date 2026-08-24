@@ -415,7 +415,16 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	if _, err := writer.Write([]parquetItem{{ID: 7, Name: "Ada"}, {ID: 8, Name: "Lin"}}); err != nil || writer.Close() != nil {
 		t.Fatalf("write parquet: %v", err)
 	}
-	invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": "items.parquet"}, parquetBody.Bytes())
+	invoke(storage, "PutBucketVersioning", map[string]any{"Bucket": "items", "Status": "Enabled"}, nil)
+	parquetRequest := &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "items", "Key": "items.parquet"}, Body: io.NopCloser(bytes.NewReader(parquetBody.Bytes()))}
+	parquetResponse, err := storage.Invoke(ctx, parquetRequest)
+	if err != nil {
+		t.Fatalf("put versioned parquet: %v", err)
+	}
+	parquetVersionID := parquetResponse.Headers.Get("x-amz-version-id")
+	if parquetVersionID == "" {
+		t.Fatal("missing parquet version ID")
+	}
 	invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": "broken.parquet"}, []byte("not parquet"))
 	processor := map[string]any{"StartAt": "Done", "ProcessorConfig": map[string]any{"Mode": "DISTRIBUTED"}, "States": map[string]any{"Done": map[string]any{"Type": "Succeed"}}}
 	for _, test := range []struct {
@@ -468,6 +477,9 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	ownerStarted = invoke(p, "StartExecution", map[string]any{"stateMachineArn": ownerMachine["stateMachineArn"]}, nil)
 	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": ownerStarted["executionArn"]}, nil); execution["status"] != "FAILED" || execution["error"] != "States.ItemReaderFailed" {
 		t.Fatalf("mismatched ExpectedBucketOwner execution %#v", execution)
+	}
+	if _, _, valid := p.mapItems(ctx, &spi.Request{Identity: id}, map[string]any{"ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": "items.parquet", "VersionId": parquetVersionID}, "ReaderConfig": map[string]any{"InputType": "PARQUET"}}}, nil, nil); valid {
+		t.Fatal("accepted Parquet ItemReader VersionId at runtime")
 	}
 	manifestState := map[string]any{
 		"Type": "Map", "ItemProcessor": processor, "ItemSelector": map[string]any{"value.$": "$$.Map.Item.Value", "source.$": "$$.Map.Item.Source"}, "End": true,

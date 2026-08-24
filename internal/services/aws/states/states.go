@@ -4673,6 +4673,27 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				add("SCHEMA_VALIDATION_FAILED", field+" is not supported with JSONata.", "/States/"+name+"/"+field)
 			}
 		}
+		if !isJSONata {
+			for _, field := range []string{"InputPath", "OutputPath", "ResultPath"} {
+				if value, exists := state[field]; exists && value != nil {
+					path, valid := value.(string)
+					if !valid || !strings.HasPrefix(path, "$") {
+						add("SCHEMA_VALIDATION_FAILED", field+" must be null or a path.", "/States/"+name+"/"+field)
+					}
+				}
+			}
+			if value, exists := state["Parameters"]; exists {
+				if _, valid := value.(map[string]any); !valid {
+					add("SCHEMA_VALIDATION_FAILED", "Parameters must be an object.", "/States/"+name+"/Parameters")
+				}
+			}
+			if value, exists := state["ResultSelector"]; exists {
+				_, valid := value.(map[string]any)
+				if !valid || typ != "Task" && typ != "Parallel" && typ != "Map" {
+					add("SCHEMA_VALIDATION_FAILED", "ResultSelector must be an object on a Task, Parallel, or Map state.", "/States/"+name+"/ResultSelector")
+				}
+			}
+		}
 		for field, value := range state {
 			if isJSONata {
 				if !validJSONataExpressions(value) {
@@ -4699,8 +4720,6 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 						add("SCHEMA_VALIDATION_FAILED", field+" is not supported by a JSONata Pass state.", "/States/"+name+"/"+field)
 					}
 				}
-			} else if _, exists := state["ResultSelector"]; exists {
-				add("SCHEMA_VALIDATION_FAILED", "Pass does not support ResultSelector.", "/States/"+name+"/ResultSelector")
 			}
 		}
 		if typ == "Wait" {

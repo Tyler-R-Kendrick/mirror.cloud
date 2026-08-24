@@ -310,6 +310,12 @@ func TestDistributedMapRuns(t *testing.T) {
 	if len(failedChildren) != 2 {
 		t.Fatalf("failed map child executions %#v", failedChildren)
 	}
+	objectDefinition := `{"StartAt":"Map","States":{"Map":{"Type":"Map","ItemsPath":"$.items","ItemSelector":{"key.$":"$$.Map.Item.Key","value.$":"$$.Map.Item.Value","index.$":"$$.Map.Item.Index"},"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`
+	objectARN := must("CreateStateMachine", map[string]any{"name": "object-items", "definition": objectDefinition, "roleArn": testRoleARN})["stateMachineArn"].(string)
+	objectExecution := must("StartExecution", map[string]any{"stateMachineArn": objectARN, "input": `{"items":{"b":2,"a":1}}`})["executionArn"].(string)
+	if execution := must("DescribeExecution", map[string]any{"executionArn": objectExecution}); execution["status"] != "SUCCEEDED" || execution["output"] != `[{"index":0,"key":"a","value":1},{"index":1,"key":"b","value":2}]` {
+		t.Fatalf("JSONPath object Map %#v", execution)
+	}
 	if originalRuns := must("ListMapRuns", map[string]any{"executionArn": executionARN})["mapRuns"].([]any); len(originalRuns) != 2 {
 		t.Fatalf("cross-execution map runs %#v", originalRuns)
 	}
@@ -781,6 +787,7 @@ func TestStatesJSONataBehavior(t *testing.T) {
 		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","TimeoutSeconds":"later","End":true}}}`,
 		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Map","Items":"{% [] %}","ToleratedFailurePercentage":101,"ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Map","ItemsPath":"$.items","MaxConcurrency":1,"MaxConcurrencyPath":"$.limit","ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`,
+		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Map","Items":{"a":1},"ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`,
 	}
 	for _, invalid := range invalidDefinitions {
 		if diagnostics := validateDefinition(invalid); len(diagnostics) == 0 {
@@ -897,6 +904,12 @@ func TestStatesJSONataErrorsAndFields(t *testing.T) {
 	numericChildren := invoke(p, "ListExecutions", map[string]any{"mapRunArn": numericRuns[0].(map[string]any)["mapRunArn"]})["executions"].([]any)
 	if len(numericChildren) != 2 || numericChildren[0].(map[string]any)["executionArn"] != numericOutput[0]["execution"] && numericChildren[1].(map[string]any)["executionArn"] != numericOutput[0]["execution"] {
 		t.Fatalf("JSONata child context %#v %#v", numericOutput, numericChildren)
+	}
+	objectMap := `{"QueryLanguage":"JSONata","StartAt":"Map","States":{"Map":{"Type":"Map","Items":"{% {'b':2,'a':1} %}","ItemSelector":{"key":"{% $states.context.Map.Item.Key %}","value":"{% $states.context.Map.Item.Value %}","index":"{% $states.context.Map.Item.Index %}"},"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`
+	objectMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonata-object-map", "definition": objectMap, "roleArn": testRoleARN})
+	objectARN := invoke(p, "StartExecution", map[string]any{"stateMachineArn": objectMachine["stateMachineArn"]})["executionArn"].(string)
+	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": objectARN}); execution["status"] != "SUCCEEDED" || execution["output"] != `[{"index":0,"key":"a","value":1},{"index":1,"key":"b","value":2}]` {
+		t.Fatalf("JSONata object Map %#v", execution)
 	}
 	writerRetry := `{"QueryLanguage":"JSONata","StartAt":"Map","States":{"Map":{"Type":"Map","Items":"{% [1] %}","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"ResultWriter":{"Resource":"arn:aws:states:::s3:putObject","Arguments":{"Bucket":"{% $states.context.State.RetryCount > 0 ? 'jsonata-items' : $states.input.missing %}","Prefix":"results"}},"Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"MaxAttempts":1}],"End":true}}}`
 	writerMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonata-writer-retry", "definition": writerRetry, "roleArn": testRoleARN})
@@ -1325,7 +1338,7 @@ func TestDistributedMapItemBatcher(t *testing.T) {
 	}
 	processor := map[string]any{"StartAt": "Done", "ProcessorConfig": map[string]any{"Mode": "DISTRIBUTED"}, "States": map[string]any{"Done": map[string]any{"Type": "Succeed"}}}
 	state := map[string]any{
-		"Type": "Map", "ItemsPath": "$.items", "ItemProcessor": processor, "End": true,
+		"Type": "Map", "ItemsPath": "$.items", "ItemSelector": map[string]any{"selected.$": "$$.Map.Item.Value"}, "ItemProcessor": processor, "End": true,
 		"ItemBatcher": map[string]any{"MaxItemsPerBatchPath": "$.size", "BatchInput": map[string]any{"factor.$": "$.factor"}},
 	}
 	definition, _ := json.Marshal(map[string]any{"StartAt": "Batch", "States": map[string]any{"Batch": state}})
@@ -1335,6 +1348,7 @@ func TestDistributedMapItemBatcher(t *testing.T) {
 	var batches []any
 	_ = json.Unmarshal([]byte(execution["output"].(string)), &batches)
 	if execution["status"] != "SUCCEEDED" || len(batches) != 3 || len(batches[0].(map[string]any)["Items"].([]any)) != 2 ||
+		batches[0].(map[string]any)["Items"].([]any)[0].(map[string]any)["selected"] != 1.0 ||
 		batches[0].(map[string]any)["BatchInput"].(map[string]any)["factor"] != 7.0 || len(batches[2].(map[string]any)["Items"].([]any)) != 1 {
 		t.Fatalf("batched execution %#v %#v", execution, batches)
 	}

@@ -1760,20 +1760,40 @@ walkLoop:
 			}
 			for {
 				setJSONataRetryCount(stateContext, retries[cur])
-				arr, source, itemsOK := p.mapItems(ctx, req, st, data, mapScope)
+				dataset, source, itemsOK := p.mapItems(ctx, req, st, data, mapScope)
 				var failed *walkResult
 				if isJSONata {
 					items := any(data)
 					_, hasReader := st["ItemReader"]
 					if hasReader {
-						items = arr
+						items = dataset
 					} else {
 						source = "STATE_DATA"
 					}
 					if configured, exists := st["Items"]; exists {
 						items, itemsOK = evalJSONataValue(configured, *mapScope)
 					}
-					arr, itemsOK = items.([]any)
+					dataset = items
+				}
+				arr := []any{}
+				var itemKeys []string
+				switch items := dataset.(type) {
+				case []any:
+					arr = items
+				case map[string]any:
+					itemsOK = distributed
+					if distributed {
+						itemKeys = make([]string, 0, len(items))
+						for key := range items {
+							itemKeys = append(itemKeys, key)
+						}
+						sort.Strings(itemKeys)
+						for _, key := range itemKeys {
+							arr = append(arr, items[key])
+						}
+					}
+				default:
+					itemsOK = false
 				}
 				if !itemsOK {
 					name := "States.Runtime"
@@ -1785,6 +1805,26 @@ walkLoop:
 						name = "States.QueryEvaluationError"
 					}
 					failed = &walkResult{out: stateInput, status: "FAILED", cause: name, errorName: name}
+				}
+				if failed == nil {
+					for index, item := range arr {
+						itemDetails := map[string]any{"Index": float64(index), "Value": item, "Source": source}
+						if itemKeys != nil {
+							itemDetails["Key"] = itemKeys[index]
+						}
+						itemContext := map[string]any{"Map": map[string]any{"Item": itemDetails}}
+						if selected, valid := selector.(map[string]any); valid && !isJSONata {
+							arr[index] = applyParams(selected, data, itemContext, p.deps.Rand)
+						} else if selector != nil {
+							arr[index], itemsOK = evalJSONataValue(selector, jsonataScope{
+								input: rawInput, context: mergeJSONataContext(stateContext, itemContext), variables: variables, random: p.deps.Rand,
+							})
+							if !itemsOK {
+								failed = &walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError"}
+								break
+							}
+						}
+					}
 				}
 				if failed == nil {
 					var batchOK bool
@@ -1818,22 +1858,8 @@ walkLoop:
 					mapRunARN = p.mapRunARN(req, mapStateMachineName(req), label)
 				}
 				if failed == nil {
-					for index, item := range arr {
+					for _, item := range arr {
 						iterationInput := item
-						itemContext := map[string]any{"Map": map[string]any{"Item": map[string]any{
-							"Index": float64(index), "Value": item, "Source": source,
-						}}}
-						if selected, valid := selector.(map[string]any); valid && !isJSONata {
-							iterationInput = applyParams(selected, data, itemContext, p.deps.Rand)
-						} else if selector != nil {
-							iterationInput, ok = evalJSONataValue(selector, jsonataScope{
-								input: rawInput, context: mergeJSONataContext(stateContext, itemContext), variables: variables, random: p.deps.Rand,
-							})
-							if !ok {
-								failed = &walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError"}
-								break
-							}
-						}
 						walkRequest := req
 						childName, childStartTime := "", ""
 						if distributed {
@@ -2435,15 +2461,19 @@ func taskPayload(st map[string]any, data any, context map[string]any, random spi
 	return p
 }
 
-func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]any, data any, scope *jsonataScope) ([]any, string, bool) {
+func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]any, data any, scope *jsonataScope) (any, string, bool) {
 	reader, hasReader := state["ItemReader"].(map[string]any)
 	if !hasReader {
 		items := data
 		if path := first(state, "ItemsPath"); path != "" {
 			items = jsonPath(data, path)
 		}
-		array, ok := items.([]any)
-		return array, "STATE_DATA", ok
+		switch items.(type) {
+		case []any, map[string]any:
+			return items, "STATE_DATA", true
+		default:
+			return nil, "", false
+		}
 	}
 	if first(reader, "Resource") != "arn:aws:states:::s3:getObject" {
 		return nil, "", false
@@ -4223,6 +4253,10 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				processor, _ = state["Iterator"].(map[string]any)
 			}
 			if processor != nil {
+				processorConfig, _ := processor["ProcessorConfig"].(map[string]any)
+				if _, objectItems := state["Items"].(map[string]any); isJSONata && objectItems && first(processorConfig, "Mode") != "DISTRIBUTED" {
+					add("SCHEMA_VALIDATION_FAILED", "Inline Map Items must be an array.", "/States/"+name+"/Items")
+				}
 				if processor["QueryLanguage"] == nil {
 					processor = maps.Clone(processor)
 					processor["QueryLanguage"] = queryLanguage

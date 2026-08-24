@@ -23,8 +23,9 @@ type Identity struct {
 
 // Request is one decoded operation invocation.
 type Request struct {
-	ServiceID string
-	Operation string
+	ServiceID     string
+	SourceService string // trusted originating service for internal service-to-service calls
+	Operation     string
 	// Input is the decoded operation input, keyed by member name as declared
 	// in the model. Values use Go-native types: string, float64, bool,
 	// []byte, time.Time, []any, map[string]any.

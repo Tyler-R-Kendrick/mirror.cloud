@@ -319,6 +319,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !directPutStream(stream) {
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
+		if requiresCloudWatchLogsSource(stream) && req.SourceService != "aws.logs" {
+			return nil, invalidSource(req, name)
+		}
 		decoded, valid := recordData(req.Input["Record"])
 		if !valid {
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
@@ -332,6 +335,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		if !directPutStream(stream) {
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if requiresCloudWatchLogsSource(stream) && req.SourceService != "aws.logs" {
+			return nil, invalidSource(req, name)
 		}
 		recs, ok := req.Input["Records"].([]any)
 		if !ok || len(recs) < 1 || len(recs) > 500 {
@@ -559,6 +565,26 @@ func directPutStream(b []byte) bool {
 	var rec map[string]any
 	_ = json.Unmarshal(b, &rec)
 	return first(rec, "DeliveryStreamType") == "DirectPut"
+}
+
+func requiresCloudWatchLogsSource(b []byte) bool {
+	var rec map[string]any
+	_ = json.Unmarshal(b, &rec)
+	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration"} {
+		if destination, ok := rec[key].(map[string]any); ok && hasProcessor(destination, "Decompression") {
+			return true
+		}
+	}
+	return false
+}
+
+func invalidSource(req *spi.Request, stream string) *spi.Fault {
+	return &spi.Fault{
+		Code:       "InvalidSourceException",
+		Message:    fmt.Sprintf("Put to Firehose failed for AccountId: %s, FirehoseName: %s because the request is not originating from allowed source types.", req.Identity.Account, stream),
+		HTTPStatus: 400,
+		Fault:      "client",
+	}
 }
 
 func (p *Pack) putOne(ctx context.Context, req *spi.Request, name string, rec any, decoded []byte) string {

@@ -132,6 +132,20 @@ func TestBootedServerFirehosePutRecord(t *testing.T) {
 	if !strings.Contains(string(raw), "ds1") {
 		t.Fatalf("list %s", raw)
 	}
+	call("CreateDeliveryStream", `{"DeliveryStreamName":"decompressed","ExtendedS3DestinationConfiguration":{"RoleARN":"arn:aws:iam::000000000000:role/fh","BucketARN":"arn:aws:s3:::out","ErrorOutputPrefix":"errors/!{firehose:error-output-type}/","ProcessingConfiguration":{"Enabled":true,"Processors":[{"Type":"Decompression"}]}}}`)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(`{"DeliveryStreamName":"decompressed","Record":{"Data":"aGVsbG8="}}`))
+	req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+	req.Header.Set("X-Amz-Target", "Firehose_20150804.PutRecord")
+	req.Header.Set("Authorization", auth)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest || res.Header.Get("x-amzn-errortype") != "InvalidSourceException" || !strings.Contains(string(raw), `"__type":"InvalidSourceException"`) {
+		t.Fatalf("decompression source response %d %s %s", res.StatusCode, res.Header.Get("x-amzn-errortype"), raw)
+	}
 	call("DeleteDeliveryStream", `{"DeliveryStreamName":"ds1"}`)
 	gone := call("ListDeliveryStreams", `{}`)
 	raw, _ = json.Marshal(gone)
@@ -842,6 +856,9 @@ func TestFirehoseDecompressionProcessing(t *testing.T) {
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
 		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
 	}
+	cloudWatchCall := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, SourceService: "aws.logs", Operation: operation, Input: input})
+	}
 	compress := func(data string) []byte {
 		t.Helper()
 		var compressed bytes.Buffer
@@ -877,11 +894,26 @@ func TestFirehoseDecompressionProcessing(t *testing.T) {
 	}
 	put := func(stream string, data []byte) string {
 		t.Helper()
-		response, err := call("PutRecord", map[string]any{"DeliveryStreamName": stream, "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString(data)}})
+		response, err := cloudWatchCall("PutRecord", map[string]any{"DeliveryStreamName": stream, "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString(data)}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return response.Output["RecordId"].(string)
+	}
+	putInput := map[string]any{"DeliveryStreamName": "decompressed", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString(compress("unauthorized"))}}
+	for _, operation := range []string{"PutRecord", "PutRecordBatch"} {
+		input := putInput
+		if operation == "PutRecordBatch" {
+			input = map[string]any{"DeliveryStreamName": "decompressed", "Records": []any{putInput["Record"]}}
+		}
+		_, err := call(operation, input)
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "InvalidSourceException" || !strings.Contains(fault.Message, "AccountId: 123456789012, FirehoseName: decompressed") {
+			t.Fatalf("%s source fault %#v", operation, err)
+		}
+	}
+	if records, _, err := p.col(&spi.Request{Identity: id}, "fhrec:decompressed").List(context.Background(), "", "", 1); err != nil || len(records) != 0 {
+		t.Fatalf("unauthorized records stored: %#v, %v", records, err)
 	}
 	body := `{"owner":"123456789012","messageType":"DATA_MESSAGE"}`
 	okID := put("decompressed", compress(body))
@@ -951,7 +983,7 @@ func TestFirehoseCloudWatchMessageExtraction(t *testing.T) {
 	p := New(deps)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
-		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, SourceService: "aws.logs", Operation: operation, Input: input})
 	}
 	compress := func(data string) []byte {
 		t.Helper()
@@ -2621,7 +2653,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-processing-failure", "HttpEndpointDestinationConfiguration": processingFailureDestination}); err != nil {
 		t.Fatal(err)
 	}
-	failedPut, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-processing-failure", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("not-gzip"))}})
+	failedPut, err := p.Invoke(context.Background(), &spi.Request{Identity: id, SourceService: "aws.logs", Operation: "PutRecord", Input: map[string]any{"DeliveryStreamName": "http-processing-failure", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("not-gzip"))}}})
 	if err != nil {
 		t.Fatal(err)
 	}

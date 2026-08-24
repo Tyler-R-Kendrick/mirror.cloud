@@ -1407,10 +1407,18 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-skip-opensearch-serverless-delivery",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `[]string{"ElasticsearchDestinationConfiguration", "AmazonOpenSearchServerlessDestinationConfiguration"}`,
-			new:  `[]string{"ElasticsearchDestinationConfiguration"}`,
+			old:  `[]string{"ElasticsearchDestinationConfiguration", "AmazonopensearchserviceDestinationConfiguration", "AmazonOpenSearchServerlessDestinationConfiguration"}`,
+			new:  `[]string{"ElasticsearchDestinationConfiguration", "AmazonopensearchserviceDestinationConfiguration"}`,
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseOpenSearchServerlessDestination",
+		},
+		{
+			name: "firehose-skip-modern-opensearch-delivery",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `[]string{"ElasticsearchDestinationConfiguration", "AmazonopensearchserviceDestinationConfiguration", "AmazonOpenSearchServerlessDestinationConfiguration"}`,
+			new:  `[]string{"ElasticsearchDestinationConfiguration", "AmazonOpenSearchServerlessDestinationConfiguration"}`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseAmazonOpenSearchServiceDestination",
 		},
 		{
 			name: "firehose-drop-persisted-opensearch-serverless-destination",
@@ -3609,10 +3617,38 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-skip-opensearch-validation",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `if destinationType == "ElasticsearchDestinationConfiguration" {`,
+			old:  `if destinationType == "ElasticsearchDestinationConfiguration" || destinationType == "AmazonopensearchserviceDestinationConfiguration" {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseOpenSearchDestination",
+		},
+		{
+			name: "firehose-skip-modern-opensearch-validation",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `if destinationType == "ElasticsearchDestinationConfiguration" || destinationType == "AmazonopensearchserviceDestinationConfiguration" {`,
+			new:  `if destinationType == "ElasticsearchDestinationConfiguration" {`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseAmazonOpenSearchServiceDestination",
+		},
+		{
+			name: "firehose-drop-modern-opensearch-domain",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `if destinationKey == "ElasticsearchDestinationConfiguration" || destinationKey == "AmazonopensearchserviceDestinationConfiguration" {`,
+			new:  `if destinationKey == "ElasticsearchDestinationConfiguration" {`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseAmazonOpenSearchServiceDestination",
+		},
+		{
+			name: "firehose-skip-opensearch-vpc-validation",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old: `if err := validateVPCConfiguration(destination["VpcConfiguration"]); err != nil {
+		return err
+	}`,
+			new: `if false {
+		return nil
+	}`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseAmazonOpenSearchServiceDestination",
 		},
 		{
 			name: "firehose-skip-opensearch-indexing",

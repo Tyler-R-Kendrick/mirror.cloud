@@ -358,7 +358,7 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	objects := map[string]string{
 		"items.json":      `[{"id":1},{"id":2}]`,
 		"items.jsonl":     "{\"id\":3}\n{\"id\":4}\n",
-		"items.csv":       "id,name\n5\n6,Lin,ignored\n",
+		"items.csv":       "id,name,path,note\n5\n6,Lin,C:\\\\Program Files\\\\App.exe,say \\\"hi\\\",ignored\n",
 		"items-path.json": `{"data":{"items":[{"id":13},{"id":14}]}}`,
 		"nested.json":     `{"data":{"a/b":{"~key":[{"id":9},{"id":10}]}}}`,
 		"objects.json":    `{"b":{"id":12},"a":{"id":11}}`,
@@ -408,7 +408,7 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		if test.limit != 0 {
 			expected = test.limit
 		}
-		if execution["status"] != "SUCCEEDED" || strings.Count(output, `"source":"`+test.inputType+`"`) != expected || test.inputType == "PARQUET" && !strings.Contains(output, `"name":"Ada"`) || test.inputType == "CSV" && (!strings.Contains(output, `"name":""`) || strings.Contains(output, "ignored")) || test.pointer != "" && !strings.Contains(output, `"id":9`) || test.itemsPath != "" && !strings.Contains(output, `"id":13`) {
+		if execution["status"] != "SUCCEEDED" || strings.Count(output, `"source":"`+test.inputType+`"`) != expected || test.inputType == "PARQUET" && !strings.Contains(output, `"name":"Ada"`) || test.inputType == "CSV" && (!strings.Contains(output, `"name":""`) || !strings.Contains(output, `"path":"C:\\Program Files\\App.exe"`) || !strings.Contains(output, `"note":"say \"hi\""`) || strings.Contains(output, "ignored")) || test.pointer != "" && !strings.Contains(output, `"id":9`) || test.itemsPath != "" && !strings.Contains(output, `"id":13`) {
 			t.Fatalf("%s ItemReader execution %#v", test.inputType, execution)
 		}
 	}

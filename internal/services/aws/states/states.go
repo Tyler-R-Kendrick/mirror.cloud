@@ -3169,6 +3169,7 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 	case "CSV":
 		parser := csv.NewReader(strings.NewReader(string(body)))
 		parser.FieldsPerRecord = -1
+		parser.LazyQuotes = true
 		delimiters := map[string]rune{"COMMA": ',', "PIPE": '|', "SEMICOLON": ';', "SPACE": ' ', "TAB": '\t'}
 		if delimiter := first(config, "CSVDelimiter"); delimiter != "" {
 			parser.Comma = delimiters[delimiter]
@@ -3195,7 +3196,7 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			for index, header := range headers {
 				item[header] = ""
 				if index < len(record) {
-					item[header] = record[index]
+					item[header] = unescapeCSVField(record[index])
 				}
 			}
 			items = append(items, item)
@@ -3228,6 +3229,20 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 	default:
 		return nil, "", false
 	}
+}
+
+func unescapeCSVField(value string) string {
+	decoded := make([]byte, 0, len(value))
+	for index := 0; index < len(value); index++ {
+		if value[index] == '\\' {
+			index++
+			if index == len(value) {
+				break
+			}
+		}
+		decoded = append(decoded, value[index])
+	}
+	return string(decoded)
 }
 
 func jsonPointerTokens(pointer string) ([]string, bool) {

@@ -582,6 +582,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesTaskTimeoutAndHeartbeat",
 		},
 		{
+			name: "states-restore-short-standard-transition-limit",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `maxTransitions := 25000`,
+			new:  `maxTransitions := 64`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
+			name: "states-limit-express-transitions",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `maxTransitions = math.MaxInt`,
+			new:  `maxTransitions = 64`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
 			name: "states-jsonata-ignore-reader-arguments",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `resolvedValue, valid = evalJSONataValue(reader["Arguments"], *scope)`,

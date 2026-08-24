@@ -45,13 +45,14 @@ func init() {
 
 // Pack implements Firehose-lite.
 type Pack struct {
-	deps       spi.Deps
-	httpClient *http.Client
-	wake       chan struct{}
-	stop       chan struct{}
-	done       chan struct{}
-	retryOnce  sync.Once
-	closeOnce  sync.Once
+	deps          spi.Deps
+	httpClient    *http.Client
+	wake          chan struct{}
+	stop          chan struct{}
+	done          chan struct{}
+	retryOnce     sync.Once
+	closeOnce     sync.Once
+	cancelKinesis func()
 }
 
 type httpRetry struct {
@@ -100,6 +101,9 @@ func New(d spi.Deps) *Pack {
 			return http.ErrUseLastResponse
 		},
 	}}
+	if d.Bus != nil {
+		p.cancelKinesis = d.Bus.Subscribe("kinesis", p.consumeKinesis)
+	}
 	if p.hasHTTPWork(context.Background()) {
 		p.startRetryLoop()
 	}
@@ -109,9 +113,45 @@ func New(d spi.Deps) *Pack {
 // Close stops the HTTP retry worker.
 func (p *Pack) Close() error {
 	p.startRetryLoop()
-	p.closeOnce.Do(func() { close(p.stop) })
+	p.closeOnce.Do(func() {
+		if p.cancelKinesis != nil {
+			p.cancelKinesis()
+		}
+		close(p.stop)
+	})
 	<-p.done
 	return nil
+}
+
+func (p *Pack) consumeKinesis(ctx context.Context, payload []byte) {
+	var event struct {
+		Account, Region, StreamName string
+		Record                      map[string]any
+	}
+	if json.Unmarshal(payload, &event) != nil || event.Account == "" || event.Region == "" || event.StreamName == "" {
+		return
+	}
+	req := &spi.Request{Identity: spi.Identity{Account: event.Account, Region: event.Region}}
+	streams, _, err := p.col(req, "fh").List(ctx, "", "", 0)
+	if err != nil {
+		return
+	}
+	data, valid := recordData(event.Record)
+	if !valid {
+		return
+	}
+	for _, stream := range streams {
+		var configuration map[string]any
+		if json.Unmarshal(stream.Value, &configuration) != nil || first(configuration, "DeliveryStreamType") != "KinesisStreamAsSource" {
+			continue
+		}
+		source, _ := configuration["KinesisStreamSourceConfiguration"].(map[string]any)
+		parts := strings.SplitN(first(source, "KinesisStreamARN"), ":", 6)
+		if len(parts) != 6 || parts[3] != event.Region || parts[4] != event.Account || parts[5] != "stream/"+event.StreamName {
+			continue
+		}
+		_, _ = p.putOne(ctx, req, stream.Key, map[string]any{"Data": event.Record["Data"]}, data, "")
+	}
 }
 
 func (p *Pack) ServiceID() string { return "aws.firehose" }

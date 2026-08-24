@@ -24,6 +24,7 @@ import (
 	"github.com/golang/snappy"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
@@ -443,6 +444,54 @@ func TestFirehoseRejectsDirectPutForSourceStreams(t *testing.T) {
 		if len(stored) != 0 {
 			t.Fatalf("source-backed put stored %d records", len(stored))
 		}
+	}
+}
+
+func TestFirehoseConsumesFutureKinesisRecords(t *testing.T) {
+	deps := spitest.Deps(t)
+	firehose := New(deps)
+	defer firehose.Close()
+	kinesis := kinesis.New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	invoke := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := pack.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	invoke(kinesis, "CreateStream", map[string]any{"StreamName": "source"})
+	invoke(kinesis, "PutRecord", map[string]any{"StreamName": "source", "PartitionKey": "before", "Data": []byte("before")})
+	otherSource := testKinesisSource()
+	otherSource["KinesisStreamARN"] = "arn:aws:kinesis:us-east-1:123456789012:stream/other"
+	invoke(firehose, "CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "from-other", "DeliveryStreamType": "KinesisStreamAsSource",
+		"KinesisStreamSourceConfiguration": otherSource, "S3DestinationConfiguration": testS3Destination(),
+	})
+	invoke(firehose, "CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "from-kinesis", "DeliveryStreamType": "KinesisStreamAsSource",
+		"KinesisStreamSourceConfiguration": testKinesisSource(), "S3DestinationConfiguration": testS3Destination(),
+	})
+	invoke(kinesis, "PutRecord", map[string]any{"StreamName": "source", "PartitionKey": "after", "Data": []byte("after")})
+
+	records, _, err := firehose.col(&spi.Request{Identity: id}, "fhrec:from-kinesis").List(context.Background(), "", "", 0)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("retained records=%d err=%v", len(records), err)
+	}
+	key := id.Account + "/" + id.Region + "/out/1970/01/01/00/from-kinesis-1-1970-01-01-00-00-00-" + records[0].Key
+	reader, _, err := deps.Blobs.Get(context.Background(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	if string(body) != "after" {
+		t.Fatalf("S3 object body %q", body)
+	}
+	unmatched, _, _ := firehose.col(&spi.Request{Identity: id}, "fhrec:from-other").List(context.Background(), "", "", 0)
+	if len(unmatched) != 0 {
+		t.Fatalf("unmatched source retained %d records", len(unmatched))
 	}
 }
 

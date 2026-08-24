@@ -128,7 +128,11 @@ func TestKinesisPublishesRecordsAndStartsAtTimestamp(t *testing.T) {
 	}
 	request("CreateStream", map[string]any{"StreamName": "events"})
 	published := 0
-	cancel := deps.Bus.Subscribe("kinesis", func(context.Context, []byte) { published++ })
+	var event map[string]any
+	cancel := deps.Bus.Subscribe("kinesis", func(_ context.Context, payload []byte) {
+		published++
+		_ = json.Unmarshal(payload, &event)
+	})
 	defer cancel()
 	request("PutRecord", map[string]any{"StreamName": "events", "PartitionKey": "one", "Data": []byte("one")})
 	if err := deps.Clock.Advance(time.Second); err != nil {
@@ -139,8 +143,8 @@ func TestKinesisPublishesRecordsAndStartsAtTimestamp(t *testing.T) {
 		"StreamName": "events", "ShardIteratorType": "AT_TIMESTAMP", "Timestamp": float64(deps.Clock.Now().Add(-time.Millisecond).UnixMilli()) / 1000,
 	}).Output["ShardIterator"]
 	records := request("GetRecords", map[string]any{"ShardIterator": iterator}).Output["Records"].([]any)
-	if published != 2 || len(records) != 1 || records[0].(map[string]any)["PartitionKey"] != "two" {
-		t.Fatalf("published=%d records=%#v", published, records)
+	if published != 2 || event["Account"] != id.Account || event["Region"] != id.Region || event["StreamName"] != "events" || len(records) != 1 || records[0].(map[string]any)["PartitionKey"] != "two" {
+		t.Fatalf("published=%d event=%#v records=%#v", published, event, records)
 	}
 }
 

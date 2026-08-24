@@ -189,7 +189,8 @@ func (p *Pack) put(ctx context.Context, req *spi.Request, name string, data any,
 	b, _ := json.Marshal(rec)
 	_ = p.col(req, "kinesis:"+name).Put(ctx, seqStr, b)
 	if p.deps.Bus != nil {
-		_ = p.deps.Bus.Publish(ctx, "kinesis", b)
+		event, _ := json.Marshal(map[string]any{"Account": req.Identity.Account, "Region": req.Identity.Region, "StreamName": name, "Record": rec})
+		_ = p.deps.Bus.Publish(ctx, "kinesis", event)
 	}
 	return &spi.Response{Output: map[string]any{"SequenceNumber": seqStr, "ShardId": "shardId-000000000000"}}, nil
 }

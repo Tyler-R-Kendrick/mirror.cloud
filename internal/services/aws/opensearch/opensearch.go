@@ -126,6 +126,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "IndexDocument":
 		idx, id := first(req.Input, "Index", "index"), first(req.Input, "Id", "id")
+		if _, ok, _ := p.col(req, "osdom").Get(ctx, name); name != "" && !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
+		}
 		if idx == "" {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}

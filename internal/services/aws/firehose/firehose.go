@@ -86,6 +86,31 @@ type httpBufferItem struct {
 	Buffer httpBuffer
 }
 
+type searchWork struct {
+	Stream       string
+	DataKey      string
+	State        string
+	Size         int
+	Order        int
+	Next         time.Time
+	Expires      time.Time
+	Retries      int
+	ErrorCode    string
+	ErrorMessage string
+}
+
+type searchPayload struct {
+	RecordIDs []string
+	RawData   [][]byte
+	Data      [][]byte
+	Arrivals  []time.Time
+}
+
+type searchWorkItem struct {
+	Key  string
+	Work searchWork
+}
+
 const destinationID = "destinationId-000000000001"
 
 var firehoseEncryptedPrefix = []byte("mirror-firehose-kms-v1:")
@@ -1930,6 +1955,7 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 	if destination, ok := rec["ElasticsearchDestinationConfiguration"].(map[string]any); ok {
 		backup, _ := destination["S3Configuration"].(map[string]any)
 		bucket, _, errorPrefix, _, _, _, kmsARN := s3Configuration(backup)
+		payload := searchPayload{}
 		for i := range data {
 			if first(destination, "S3BackupMode") == "AllDocuments" {
 				p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)
@@ -1939,25 +1965,21 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 				p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)
 			}
 			for _, record := range records {
-				document := map[string]any{}
-				if json.Unmarshal(record.data, &document) != nil {
-					failure := &processingFailure{typeName: "AmazonOpenSearchService-failed", code: "400", message: "record is not a JSON object", attempts: 1, recID: record.recID, data: record.raw}
-					p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)
-					continue
-				}
-				input := map[string]any{
-					"DomainName": elasticsearchDomain(destination), "Index": elasticsearchIndex(destination, now), "Document": document,
-				}
-				options, _ := destination["DocumentIdOptions"].(map[string]any)
-				if first(options, "DefaultDocumentIdFormat") != "NO_DOCUMENT_ID" {
-					input["Id"] = record.recID
-				}
-				if _, err := opensearch.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "IndexDocument", Input: input}); err != nil {
-					failure := &processingFailure{typeName: "AmazonOpenSearchService-failed", code: "500", message: err.Error(), attempts: 1, recID: record.recID, data: record.raw}
-					p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)
-				}
+				payload.RecordIDs = append(payload.RecordIDs, record.recID)
+				payload.RawData = append(payload.RawData, record.raw)
+				payload.Data = append(payload.Data, record.data)
+				payload.Arrivals = append(payload.Arrivals, now)
 			}
 		}
+		if len(payload.Data) == 0 {
+			return
+		}
+		if p.bufferSearch(ctx, req, stream, payload, destination, now) {
+			return
+		}
+		retryable, permanent, code, message := p.deliverSearch(ctx, req, destination, payload)
+		p.backupSearchFailures(ctx, req, rec, destination, stream, permanent, 1, "400", "record is not a JSON object", now)
+		p.retryOrBackupSearch(ctx, req, rec, destination, stream, retryable, code, message, now)
 		return
 	}
 	for i := range data {
@@ -2012,6 +2034,363 @@ func httpBufferingHints(destination map[string]any) (time.Duration, int) {
 		return 300 * time.Second, 5 * 1024 * 1024
 	}
 	return time.Duration(interval) * time.Second, size * 1024 * 1024
+}
+
+func searchBufferingHints(destination map[string]any) (time.Duration, int) {
+	hints, _ := destination["BufferingHints"].(map[string]any)
+	interval, intervalOK := inputInteger(hints["IntervalInSeconds"], 0, 900)
+	size, sizeOK := inputInteger(hints["SizeInMBs"], 1, 100)
+	if !intervalOK || !sizeOK {
+		return 300 * time.Second, 5 * 1024 * 1024
+	}
+	return time.Duration(interval) * time.Second, size * 1024 * 1024
+}
+
+func validSearchPayload(payload searchPayload) bool {
+	return len(payload.Data) != 0 && len(payload.RecordIDs) == len(payload.Data) && len(payload.RawData) == len(payload.Data) && len(payload.Arrivals) == len(payload.Data)
+}
+
+func appendSearchPayload(destination *searchPayload, source searchPayload, index int) {
+	destination.RecordIDs = append(destination.RecordIDs, source.RecordIDs[index])
+	destination.RawData = append(destination.RawData, source.RawData[index])
+	destination.Data = append(destination.Data, source.Data[index])
+	destination.Arrivals = append(destination.Arrivals, source.Arrivals[index])
+}
+
+func (p *Pack) putSearchBlob(ctx context.Context, req *spi.Request, stream string, payload searchPayload) (string, string, bool) {
+	if p.deps.Blobs == nil || !validSearchPayload(payload) {
+		return "", "", false
+	}
+	key := p.deps.Rand.UUID()
+	dataKey := req.Identity.Account + "/" + req.Identity.Region + "/_mirror/firehose-search-work/" + key
+	body, err := json.Marshal(payload)
+	if err == nil {
+		body, err = p.protectStreamData(ctx, req, stream, body)
+	}
+	if err != nil {
+		return "", "", false
+	}
+	if _, err = p.deps.Blobs.Put(ctx, dataKey, bytes.NewReader(body)); err != nil {
+		return "", "", false
+	}
+	return key, dataKey, true
+}
+
+func (p *Pack) bufferSearch(ctx context.Context, req *spi.Request, stream string, payload searchPayload, destination map[string]any, now time.Time) bool {
+	interval, sizeLimit := searchBufferingHints(destination)
+	size := 0
+	for _, data := range payload.Data {
+		size += len(data)
+	}
+	key, dataKey, ok := p.putSearchBlob(ctx, req, stream, payload)
+	if !ok {
+		return false
+	}
+	key = stream + "/buffer/" + key
+	collection := p.col(req, "fh-search-work")
+	err := collection.Txn(ctx, func(tx spi.Tx) error {
+		items, _, err := tx.List(stream+"/buffer/", "", 0)
+		if err != nil {
+			return err
+		}
+		total, order, next := 0, 0, now.Add(interval)
+		for _, item := range items {
+			var work searchWork
+			if json.Unmarshal(item.Value, &work) != nil {
+				return errors.New("invalid persisted OpenSearch buffer")
+			}
+			total += work.Size
+			order = max(order, work.Order)
+			if work.Next.Before(next) {
+				next = work.Next
+			}
+		}
+		total += size
+		if total >= sizeLimit {
+			next = now
+		}
+		for _, item := range items {
+			var work searchWork
+			_ = json.Unmarshal(item.Value, &work)
+			work.Next = next
+			stored, _ := json.Marshal(work)
+			if err := tx.Put(item.Key, stored); err != nil {
+				return err
+			}
+		}
+		stored, _ := json.Marshal(searchWork{Stream: stream, DataKey: dataKey, State: "buffer", Size: size, Order: order + 1, Next: next})
+		return tx.Put(key, stored)
+	})
+	if err != nil {
+		_ = p.deps.Blobs.Delete(ctx, dataKey)
+		return false
+	}
+	if interval == 0 {
+		p.runSearchWork(ctx)
+		return true
+	}
+	p.startRetryLoop()
+	p.notifyRetryLoop()
+	return true
+}
+
+func (p *Pack) loadSearchPayload(ctx context.Context, req *spi.Request, dataKey string) (searchPayload, bool) {
+	if p.deps.Blobs == nil {
+		return searchPayload{}, false
+	}
+	reader, _, err := p.deps.Blobs.Get(ctx, dataKey)
+	if err != nil {
+		return searchPayload{}, false
+	}
+	body, readErr := io.ReadAll(reader)
+	_ = reader.Close()
+	if readErr == nil {
+		body, readErr = p.decryptAtRest(ctx, req, body)
+	}
+	var payload searchPayload
+	return payload, readErr == nil && json.Unmarshal(body, &payload) == nil && validSearchPayload(payload)
+}
+
+func (p *Pack) writeSearchPayload(ctx context.Context, req *spi.Request, stream, dataKey string, payload searchPayload) bool {
+	body, err := json.Marshal(payload)
+	if err == nil {
+		body, err = p.protectStreamData(ctx, req, stream, body)
+	}
+	if err != nil || p.deps.Blobs == nil {
+		return false
+	}
+	_, err = p.deps.Blobs.Put(ctx, dataKey, bytes.NewReader(body))
+	return err == nil
+}
+
+func (p *Pack) runSearchWork(ctx context.Context) time.Time {
+	if p.deps.Store == nil || p.deps.Clock == nil {
+		return time.Time{}
+	}
+	now := p.deps.Clock.Now().UTC()
+	var earliest time.Time
+	scopes, _ := p.deps.Store.Scopes(ctx)
+	for _, identity := range scopes {
+		collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("fh-search-work")
+		stored, _, _ := collection.List(ctx, "", "", 0)
+		buffers := map[string][]searchWorkItem{}
+		var retries []searchWorkItem
+		for _, item := range stored {
+			var work searchWork
+			if json.Unmarshal(item.Value, &work) != nil {
+				continue
+			}
+			switch work.State {
+			case "buffer":
+				buffers[work.Stream] = append(buffers[work.Stream], searchWorkItem{Key: item.Key, Work: work})
+			case "retry":
+				retries = append(retries, searchWorkItem{Key: item.Key, Work: work})
+			}
+		}
+		for stream, items := range buffers {
+			sort.Slice(items, func(i, j int) bool { return items[i].Work.Order < items[j].Work.Order })
+			next := items[0].Work.Next
+			for _, item := range items[1:] {
+				if item.Work.Next.Before(next) {
+					next = item.Work.Next
+				}
+			}
+			if !next.After(now) {
+				next = p.flushSearchBuffer(ctx, identity, collection, stream, items, now)
+			}
+			if !next.IsZero() && (earliest.IsZero() || next.Before(earliest)) {
+				earliest = next
+			}
+		}
+		for _, item := range retries {
+			next := item.Work.Next
+			if !next.After(now) {
+				next = p.runSearchRetry(ctx, identity, collection, item.Key, &item.Work, now)
+			}
+			if !next.IsZero() && (earliest.IsZero() || next.Before(earliest)) {
+				earliest = next
+			}
+		}
+	}
+	return earliest
+}
+
+func (p *Pack) deleteSearchWork(ctx context.Context, collection spi.Collection, key, dataKey string) {
+	_ = collection.Delete(ctx, key)
+	if p.deps.Blobs != nil {
+		_ = p.deps.Blobs.Delete(ctx, dataKey)
+	}
+}
+
+func (p *Pack) deleteSearchItems(ctx context.Context, collection spi.Collection, items []searchWorkItem) {
+	for _, item := range items {
+		p.deleteSearchWork(ctx, collection, item.Key, item.Work.DataKey)
+	}
+}
+
+func (p *Pack) flushSearchBuffer(ctx context.Context, identity spi.Identity, collection spi.Collection, name string, items []searchWorkItem, now time.Time) time.Time {
+	req := &spi.Request{Identity: identity}
+	raw, ok, _ := p.col(req, "fh").Get(ctx, name)
+	if !ok {
+		p.deleteSearchItems(ctx, collection, items)
+		return time.Time{}
+	}
+	var stream map[string]any
+	_ = json.Unmarshal(raw, &stream)
+	destination, ok := stream["ElasticsearchDestinationConfiguration"].(map[string]any)
+	if !ok {
+		p.deleteSearchItems(ctx, collection, items)
+		return time.Time{}
+	}
+	var payload searchPayload
+	for _, item := range items {
+		entry, ok := p.loadSearchPayload(ctx, req, item.Work.DataKey)
+		if !ok {
+			next := now.Add(time.Second)
+			for _, item := range items {
+				item.Work.Next = next
+				stored, _ := json.Marshal(item.Work)
+				_ = collection.Put(ctx, item.Key, stored)
+			}
+			return next
+		}
+		for index := range entry.Data {
+			appendSearchPayload(&payload, entry, index)
+		}
+	}
+	retryable, permanent, code, message := p.deliverSearch(ctx, req, destination, payload)
+	p.backupSearchFailures(ctx, req, stream, destination, name, permanent, 1, "400", "record is not a JSON object", now)
+	p.retryOrBackupSearch(ctx, req, stream, destination, name, retryable, code, message, now)
+	p.deleteSearchItems(ctx, collection, items)
+	return time.Time{}
+}
+
+func (p *Pack) deliverSearch(ctx context.Context, req *spi.Request, destination map[string]any, payload searchPayload) (searchPayload, searchPayload, string, string) {
+	var retryable, permanent searchPayload
+	code, message := "", ""
+	options, _ := destination["DocumentIdOptions"].(map[string]any)
+	useID := first(options, "DefaultDocumentIdFormat") != "NO_DOCUMENT_ID"
+	for index, data := range payload.Data {
+		var document map[string]any
+		if json.Unmarshal(data, &document) != nil || document == nil {
+			appendSearchPayload(&permanent, payload, index)
+			continue
+		}
+		input := map[string]any{
+			"DomainName": elasticsearchDomain(destination), "Index": elasticsearchIndex(destination, payload.Arrivals[index]), "Document": document,
+		}
+		if useID {
+			input["Id"] = payload.RecordIDs[index]
+		}
+		if _, err := opensearch.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "IndexDocument", Input: input}); err != nil {
+			appendSearchPayload(&retryable, payload, index)
+			code, message = "500", err.Error()
+			var fault *spi.Fault
+			if errors.As(err, &fault) {
+				code = strconv.Itoa(fault.HTTPStatus)
+			}
+		}
+	}
+	return retryable, permanent, code, message
+}
+
+func (p *Pack) retryOrBackupSearch(ctx context.Context, req *spi.Request, stream, destination map[string]any, name string, payload searchPayload, code, message string, now time.Time) {
+	if !validSearchPayload(payload) {
+		return
+	}
+	duration := httpRetryDuration(destination)
+	if duration > 0 {
+		key, dataKey, ok := p.putSearchBlob(ctx, req, name, payload)
+		if !ok {
+			p.backupSearchFailures(ctx, req, stream, destination, name, payload, 1, code, message, now)
+			return
+		}
+		next := now.Add(p.httpRetryDelay(key, 0))
+		expires := now.Add(duration)
+		if next.After(expires) {
+			next = expires
+		}
+		work := searchWork{Stream: name, DataKey: dataKey, State: "retry", Next: next, Expires: expires, ErrorCode: code, ErrorMessage: message}
+		stored, err := json.Marshal(work)
+		if err == nil && p.col(req, "fh-search-work").Put(ctx, name+"/retry/"+key, stored) == nil {
+			p.startRetryLoop()
+			p.notifyRetryLoop()
+			return
+		}
+		_ = p.deps.Blobs.Delete(ctx, dataKey)
+	}
+	p.backupSearchFailures(ctx, req, stream, destination, name, payload, 1, code, message, now)
+}
+
+func (p *Pack) runSearchRetry(ctx context.Context, identity spi.Identity, collection spi.Collection, key string, work *searchWork, now time.Time) time.Time {
+	req := &spi.Request{Identity: identity}
+	raw, ok, _ := p.col(req, "fh").Get(ctx, work.Stream)
+	if !ok {
+		p.deleteSearchWork(ctx, collection, key, work.DataKey)
+		return time.Time{}
+	}
+	var stream map[string]any
+	_ = json.Unmarshal(raw, &stream)
+	destination, ok := stream["ElasticsearchDestinationConfiguration"].(map[string]any)
+	if !ok {
+		p.deleteSearchWork(ctx, collection, key, work.DataKey)
+		return time.Time{}
+	}
+	payload, ok := p.loadSearchPayload(ctx, req, work.DataKey)
+	if !ok {
+		work.Next = now.Add(time.Second)
+		stored, _ := json.Marshal(work)
+		_ = collection.Put(ctx, key, stored)
+		return work.Next
+	}
+	if !now.Before(work.Expires) {
+		p.backupSearchFailures(ctx, req, stream, destination, work.Stream, payload, work.Retries+1, work.ErrorCode, work.ErrorMessage, now)
+		p.deleteSearchWork(ctx, collection, key, work.DataKey)
+		return time.Time{}
+	}
+	retryable, permanent, code, message := p.deliverSearch(ctx, req, destination, payload)
+	p.backupSearchFailures(ctx, req, stream, destination, work.Stream, permanent, work.Retries+2, "400", "record is not a JSON object", now)
+	if !validSearchPayload(retryable) {
+		p.deleteSearchWork(ctx, collection, key, work.DataKey)
+		return time.Time{}
+	}
+	work.Retries++
+	work.ErrorCode, work.ErrorMessage = code, message
+	work.Next = now.Add(p.httpRetryDelay(key, work.Retries))
+	if work.Next.After(work.Expires) {
+		work.Next = work.Expires
+	}
+	if !p.writeSearchPayload(ctx, req, work.Stream, work.DataKey, retryable) {
+		work.Next = now.Add(time.Second)
+	}
+	stored, _ := json.Marshal(work)
+	_ = collection.Put(ctx, key, stored)
+	return work.Next
+}
+
+func (p *Pack) backupSearchFailures(ctx context.Context, req *spi.Request, stream, destination map[string]any, name string, payload searchPayload, attempts int, code, message string, now time.Time) {
+	if !validSearchPayload(payload) {
+		return
+	}
+	backup, _ := destination["S3Configuration"].(map[string]any)
+	bucket, prefix, _, _, _, _, kmsARN := s3Configuration(backup)
+	prefix += "AmazonOpenSearchService-failed/"
+	version := first(stream, "VersionId")
+	if version == "" {
+		version = "1"
+	}
+	options, _ := destination["DocumentIdOptions"].(map[string]any)
+	useID := first(options, "DefaultDocumentIdFormat") != "NO_DOCUMENT_ID"
+	for index := range payload.Data {
+		failure := &processingFailure{
+			typeName: "AmazonOpenSearchService-failed", code: code, message: message, attempts: attempts, recID: payload.RecordIDs[index], data: payload.RawData[index],
+			arrival: payload.Arrivals[index], searchIndex: elasticsearchIndex(destination, payload.Arrivals[index]), searchType: first(destination, "TypeName"),
+		}
+		if useID {
+			failure.documentID = payload.RecordIDs[index]
+		}
+		p.deliverProcessingFailure(ctx, req, bucket, prefix, kmsARN, name, version, now, failure)
+	}
 }
 
 func (p *Pack) bufferHTTP(ctx context.Context, req *spi.Request, stream, requestID string, recordIDs []string, rawData, processedData [][]byte, backup bool, destination map[string]any, now time.Time) bool {
@@ -2091,7 +2470,7 @@ func (p *Pack) hasHTTPWork(ctx context.Context) bool {
 		return false
 	}
 	for _, identity := range scopes {
-		for _, name := range []string{"fh-http-buffers", "fh-http-retries"} {
+		for _, name := range []string{"fh-http-buffers", "fh-http-retries", "fh-search-work"} {
 			if work, _, _ := p.deps.Store.Scope(identity.Account, identity.Region).Collection(name).List(ctx, "", "", 1); len(work) != 0 {
 				return true
 			}
@@ -2170,6 +2549,9 @@ func (p *Pack) httpRetryLoop() {
 		next := p.runHTTPBuffers(context.Background())
 		if retryNext := p.runHTTPRetries(context.Background()); !retryNext.IsZero() && (next.IsZero() || retryNext.Before(next)) {
 			next = retryNext
+		}
+		if searchNext := p.runSearchWork(context.Background()); !searchNext.IsZero() && (next.IsZero() || searchNext.Before(next)) {
+			next = searchNext
 		}
 		if next.IsZero() {
 			select {
@@ -2255,6 +2637,13 @@ func (p *Pack) deleteHTTPStreamWork(ctx context.Context, req *spi.Request, strea
 		if json.Unmarshal(item.Value, &retry) == nil && retry.Stream == stream {
 			p.deleteHTTPRetry(ctx, retries, item.Key, retry.DataKey)
 		}
+	}
+	search := p.col(req, "fh-search-work")
+	items, _, _ = search.List(ctx, stream+"/", "", 0)
+	for _, item := range items {
+		var work searchWork
+		_ = json.Unmarshal(item.Value, &work)
+		p.deleteSearchWork(ctx, search, item.Key, work.DataKey)
 	}
 }
 
@@ -2606,8 +2995,10 @@ func (p *Pack) logDeliveryError(ctx context.Context, req *spi.Request, configura
 type processingFailure struct {
 	typeName, code, message, lambdaARN string
 	attempts                           int
-	recID                              string
+	recID, documentID                  string
 	data                               []byte
+	arrival                            time.Time
+	searchIndex, searchType            string
 }
 
 type processingRecord struct {
@@ -2876,12 +3267,23 @@ func (p *Pack) deliverProcessingFailure(ctx context.Context, req *spi.Request, b
 	}
 	prefix = strings.ReplaceAll(prefix, "!{firehose:error-output-type}", failure.typeName)
 	timestamp := now.UTC().Format(time.RFC3339Nano)
+	arrivalTimestamp := timestamp
+	if !failure.arrival.IsZero() {
+		arrivalTimestamp = failure.arrival.UTC().Format(time.RFC3339Nano)
+	}
 	payloadFields := map[string]any{
-		"attemptsMade": strconv.Itoa(failure.attempts), "arrivalTimestamp": timestamp, "errorCode": failure.code, "errorMessage": failure.message,
+		"attemptsMade": strconv.Itoa(failure.attempts), "arrivalTimestamp": arrivalTimestamp, "errorCode": failure.code, "errorMessage": failure.message,
 		"attemptEndingTimestamp": timestamp, "rawData": base64.StdEncoding.EncodeToString(failure.data),
 	}
 	if failure.lambdaARN != "" {
 		payloadFields["lambdaArn"] = failure.lambdaARN
+	}
+	if failure.documentID != "" {
+		payloadFields["esDocumentId"] = failure.documentID
+	}
+	if failure.searchIndex != "" {
+		payloadFields["esIndexName"] = failure.searchIndex
+		payloadFields["esTypeName"] = failure.searchType
 	}
 	payload, _ := json.Marshal(payloadFields)
 	key := p.evaluatedS3Prefix(prefix, now) + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + failure.recID

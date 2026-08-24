@@ -526,7 +526,8 @@ func TestFirehoseOpenSearchDestination(t *testing.T) {
 	invoke(search, "CreateDomain", map[string]any{"DomainName": "logs"})
 	destination := map[string]any{
 		"DomainARN": "arn:aws:es:us-east-1:123456789012:domain/logs", "IndexName": "events", "RoleARN": testRoleARN,
-		"S3BackupMode": "AllDocuments", "S3Configuration": map[string]any{
+		"BufferingHints": map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 1},
+		"S3BackupMode":   "AllDocuments", "S3Configuration": map[string]any{
 			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "backup/",
 		},
 	}
@@ -554,6 +555,192 @@ func TestFirehoseOpenSearchDestination(t *testing.T) {
 	described := description["Destinations"].([]any)[0].(map[string]any)["ElasticsearchDestinationDescription"].(map[string]any)
 	if first(described, "IndexRotationPeriod") != "OneDay" || first(described, "S3BackupMode") != "AllDocuments" {
 		t.Fatalf("OpenSearch description %#v", described)
+	}
+}
+
+func TestOpenSearchBufferRetryPersistence(t *testing.T) {
+	deps := spitest.Deps(t)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	search := opensearch.New(deps)
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	call := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := pack.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	wait := func(message string, ready func() bool) {
+		t.Helper()
+		for attempt := 0; attempt < 2000; attempt++ {
+			if ready() {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		objects, _, _ := deps.Store.Scope(id.Account, id.Region).Collection("objects").List(context.Background(), "", "", 0)
+		t.Fatalf("%s: objects %#v", message, objects)
+	}
+	destination := func(domain string, interval, retry int) map[string]any {
+		return map[string]any{
+			"DomainARN": "arn:aws:es:us-east-1:123456789012:domain/" + domain, "IndexName": "events", "RoleARN": testRoleARN,
+			"BufferingHints": map[string]any{"IntervalInSeconds": interval, "SizeInMBs": 1}, "RetryOptions": map[string]any{"DurationInSeconds": retry},
+			"S3Configuration": map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "backup/"},
+		}
+	}
+	create := func(name string, destination map[string]any) {
+		call(p, "CreateDeliveryStream", map[string]any{
+			"DeliveryStreamName": name, "ElasticsearchDestinationConfiguration": destination,
+			"DeliveryStreamEncryptionConfigurationInput": map[string]any{"KeyType": "AWS_OWNED_CMK"},
+		})
+	}
+	work := deps.Store.Scope(id.Account, id.Region).Collection("fh-search-work")
+
+	call(search, "CreateDomain", map[string]any{"DomainName": "buffered"})
+	create("buffered", destination("buffered", 10, 4))
+	batch := call(p, "PutRecordBatch", map[string]any{"DeliveryStreamName": "buffered", "Records": []any{
+		map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"city":"Austin"}`))},
+		map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`not-json`))},
+	}})
+	responses := batch.Output["RequestResponses"].([]any)
+	validID := first(responses[0].(map[string]any), "RecordId")
+	invalidID := first(responses[1].(map[string]any), "RecordId")
+	items, _, _ := work.List(context.Background(), "buffered/buffer/", "", 0)
+	if len(items) != 1 {
+		t.Fatalf("persisted OpenSearch buffer %#v", items)
+	}
+	var buffered searchWork
+	_ = json.Unmarshal(items[0].Value, &buffered)
+	reader, _, err := deps.Blobs.Get(context.Background(), buffered.DataKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	if !bytes.HasPrefix(body, firehoseEncryptedPrefix) || bytes.Contains(body, []byte("Austin")) {
+		t.Fatalf("unencrypted OpenSearch buffer %q", body)
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p = New(deps)
+	if err := deps.Clock.Advance(10 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	wait("persisted OpenSearch buffer did not flush", func() bool {
+		result := call(search, "Search", map[string]any{"DomainName": "buffered", "Index": "events-1970-01-01", "query": map[string]any{"match_all": map[string]any{}}})
+		return len(result.Output["hits"].(map[string]any)["hits"].([]any)) == 1
+	})
+	result := call(search, "GetDocument", map[string]any{"DomainName": "buffered", "Index": "events-1970-01-01", "Id": validID})
+	if result.Output["found"] != true {
+		t.Fatalf("buffered document %#v", result.Output)
+	}
+	failedKey := id.Account + "/" + id.Region + "/out/backup/AmazonOpenSearchService-failed/1970/01/01/00/buffered-1-1970-01-01-00-00-10-" + invalidID
+	wait("malformed OpenSearch document was not backed up", func() bool {
+		_, _, err := deps.Blobs.Get(context.Background(), failedKey)
+		return err == nil
+	})
+	wait("delivered OpenSearch buffer remained persisted", func() bool {
+		items, _, _ := work.List(context.Background(), "buffered/", "", 0)
+		return len(items) == 0
+	})
+	if _, _, err := deps.Blobs.Get(context.Background(), buffered.DataKey); err == nil {
+		t.Fatal("delivered OpenSearch buffer blob remained persisted")
+	}
+
+	create("retrying", destination("retrying", 0, 4))
+	retryPut := call(p, "PutRecord", map[string]any{"DeliveryStreamName": "retrying", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"retry":true}`))}})
+	retryID := first(retryPut.Output, "RecordId")
+	items, _, _ = work.List(context.Background(), "retrying/retry/", "", 0)
+	if len(items) != 1 {
+		t.Fatalf("persisted OpenSearch retry %#v", items)
+	}
+	var retry searchWork
+	_ = json.Unmarshal(items[0].Value, &retry)
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	call(search, "CreateDomain", map[string]any{"DomainName": "retrying"})
+	p = New(deps)
+	if err := deps.Clock.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	wait("persisted OpenSearch retry did not run", func() bool {
+		result := call(search, "GetDocument", map[string]any{"DomainName": "retrying", "Index": "events-1970-01-01", "Id": retryID})
+		return result.Output["found"] == true
+	})
+	wait("successful OpenSearch retry remained persisted", func() bool {
+		items, _, _ := work.List(context.Background(), "retrying/", "", 0)
+		return len(items) == 0
+	})
+	if _, _, err := deps.Blobs.Get(context.Background(), retry.DataKey); err == nil {
+		t.Fatal("successful OpenSearch retry blob remained persisted")
+	}
+
+	create("expired", destination("expired", 0, 2))
+	expiredPut := call(p, "PutRecord", map[string]any{"DeliveryStreamName": "expired", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"expired":true}`))}})
+	expiredID := first(expiredPut.Output, "RecordId")
+	items, _, _ = work.List(context.Background(), "expired/retry/", "", 0)
+	if len(items) != 1 {
+		t.Fatalf("persisted expiring OpenSearch retry %#v", items)
+	}
+	var expired searchWork
+	_ = json.Unmarshal(items[0].Value, &expired)
+	if err := deps.Clock.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	expiredKey := id.Account + "/" + id.Region + "/out/backup/AmazonOpenSearchService-failed/1970/01/01/00/expired-1-1970-01-01-00-00-14-" + expiredID
+	wait("expired OpenSearch document was not backed up", func() bool {
+		_, _, err := deps.Blobs.Get(context.Background(), expiredKey)
+		return err == nil
+	})
+	reader, _, err = deps.Blobs.Get(context.Background(), expiredKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(reader)
+	_ = reader.Close()
+	var failure map[string]any
+	_ = json.Unmarshal(body, &failure)
+	if first(failure, "errorCode") != "400" || first(failure, "esDocumentId") != expiredID || first(failure, "esIndexName") != "events-1970-01-01" || first(failure, "rawData") != base64.StdEncoding.EncodeToString([]byte(`{"expired":true}`)) || first(failure, "arrivalTimestamp") != "1970-01-01T00:00:12Z" {
+		t.Fatalf("OpenSearch failure envelope %#v", failure)
+	}
+	wait("expired OpenSearch retry remained persisted", func() bool {
+		items, _, _ := work.List(context.Background(), "expired/", "", 0)
+		return len(items) == 0
+	})
+	if _, _, err := deps.Blobs.Get(context.Background(), expired.DataKey); err == nil {
+		t.Fatal("expired OpenSearch retry blob remained persisted")
+	}
+
+	call(search, "CreateDomain", map[string]any{"DomainName": "sized"})
+	create("sized", destination("sized", 900, 0))
+	padding := strings.Repeat("x", 600*1024)
+	for index := range 2 {
+		call(p, "PutRecord", map[string]any{"DeliveryStreamName": "sized", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(`{"index":%d,"padding":"%s"}`, index, padding)))}})
+	}
+	wait("OpenSearch size threshold did not flush", func() bool {
+		result := call(search, "Search", map[string]any{"DomainName": "sized", "Index": "events-1970-01-01", "query": map[string]any{"match_all": map[string]any{}}})
+		return len(result.Output["hits"].(map[string]any)["hits"].([]any)) == 2
+	})
+
+	create("deleted", destination("deleted", 900, 4))
+	call(p, "PutRecord", map[string]any{"DeliveryStreamName": "deleted", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"deleted":true}`))}})
+	items, _, _ = work.List(context.Background(), "deleted/buffer/", "", 0)
+	if len(items) != 1 {
+		t.Fatalf("persisted deletable OpenSearch buffer %#v", items)
+	}
+	var deleted searchWork
+	_ = json.Unmarshal(items[0].Value, &deleted)
+	call(p, "DeleteDeliveryStream", map[string]any{"DeliveryStreamName": "deleted"})
+	items, _, _ = work.List(context.Background(), "deleted/", "", 0)
+	if len(items) != 0 {
+		t.Fatalf("deleted stream retained OpenSearch work %#v", items)
+	}
+	if _, _, err := deps.Blobs.Get(context.Background(), deleted.DataKey); err == nil {
+		t.Fatal("deleted stream retained OpenSearch work blob")
 	}
 }
 

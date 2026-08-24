@@ -54,8 +54,14 @@ func TestKafkaPublishesMessages(t *testing.T) {
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: identity, Operation: "DeleteCluster", Input: map[string]any{"ClusterArn": arn}}); err != nil {
 		t.Fatal(err)
 	}
+	if retained, _, _ := p.col(&spi.Request{Identity: identity}, "mskrecords").List(ctx, arn+"|", "", 0); len(retained) != 0 {
+		t.Fatalf("deleted MSK cluster retained messages %#v", retained)
+	}
 	if _, err := p.Messages(ctx, identity, arn, "events", time.Time{}); err == nil {
 		t.Fatal("deleted MSK cluster retained messages")
+	}
+	if err := p.Publish(ctx, identity, arn, "events", []byte("three")); err == nil {
+		t.Fatal("published to deleted MSK cluster")
 	}
 }
 

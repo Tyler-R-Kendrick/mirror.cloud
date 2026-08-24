@@ -72,3 +72,27 @@ func TestQueryKeyConditionNotUnfilteredScan(t *testing.T) {
 		t.Fatalf("delete left item %v", miss.Output)
 	}
 }
+
+func TestDynamoDBTagLifecycle(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	arn := "arn:aws:dynamodb:us-east-1:000000000000:table/T"
+	must := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response
+	}
+	must("TagResource", map[string]any{"ResourceArn": arn, "Tags": []any{
+		map[string]any{"Key": "env", "Value": "dev"}, map[string]any{"Key": "team", "Value": "platform"},
+	}})
+	must("TagResource", map[string]any{"ResourceArn": arn, "Tags": []any{map[string]any{"Key": "env", "Value": "prod"}}})
+	must("UntagResource", map[string]any{"ResourceArn": arn, "TagKeys": []any{"team"}})
+	tags := must("ListTagsOfResource", map[string]any{"ResourceArn": arn}).Output["Tags"].([]any)
+	if len(tags) != 1 || str(asMap(tags[0])["Key"]) != "env" || str(asMap(tags[0])["Value"]) != "prod" {
+		t.Fatalf("tags %#v", tags)
+	}
+}

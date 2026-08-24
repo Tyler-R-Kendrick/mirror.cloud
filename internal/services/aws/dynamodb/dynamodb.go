@@ -399,11 +399,44 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"TableDescription": m}}, nil
 	case "TagResource":
 		arn := str(req.Input["ResourceArn"])
-		b, _ := json.Marshal(req.Input["Tags"])
+		var tags []any
+		if b, ok, _ := p.col(req, "tags").Get(ctx, arn); ok {
+			_ = json.Unmarshal(b, &tags)
+		}
+		indexes := map[string]int{}
+		for i, tag := range tags {
+			indexes[str(asMap(tag)["Key"])] = i
+		}
+		for _, tag := range asSlice(req.Input["Tags"]) {
+			key := str(asMap(tag)["Key"])
+			if i, ok := indexes[key]; ok {
+				tags[i] = tag
+			} else {
+				indexes[key] = len(tags)
+				tags = append(tags, tag)
+			}
+		}
+		b, _ := json.Marshal(tags)
 		_ = p.col(req, "tags").Put(ctx, arn, b)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "UntagResource":
-		_ = p.col(req, "tags").Delete(ctx, str(req.Input["ResourceArn"]))
+		arn := str(req.Input["ResourceArn"])
+		var tags []any
+		if b, ok, _ := p.col(req, "tags").Get(ctx, arn); ok {
+			_ = json.Unmarshal(b, &tags)
+		}
+		drop := map[string]bool{}
+		for _, key := range asSlice(req.Input["TagKeys"]) {
+			drop[str(key)] = true
+		}
+		kept := tags[:0]
+		for _, tag := range tags {
+			if !drop[str(asMap(tag)["Key"])] {
+				kept = append(kept, tag)
+			}
+		}
+		b, _ := json.Marshal(kept)
+		_ = p.col(req, "tags").Put(ctx, arn, b)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "ListTagsOfResource":
 		b, ok, _ := p.col(req, "tags").Get(ctx, str(req.Input["ResourceArn"]))

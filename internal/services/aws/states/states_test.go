@@ -1756,6 +1756,15 @@ func TestStatesMapValidation(t *testing.T) {
 	if diagnostics := validateDefinition(duplicateLabels); len(diagnostics) != 1 {
 		t.Fatalf("duplicate Map label diagnostics %#v", diagnostics)
 	}
+	mapState := `{"Type":"Map","Label":"duplicate",` + processor + `,"End":true}`
+	duplicateLabels = `{"StartAt":"Parallel","States":{"Parallel":{"Type":"Parallel","Branches":[{"StartAt":"Map","States":{"Map":` + mapState + `}},{"StartAt":"Map","States":{"Map":` + mapState + `}}],"End":true}}}`
+	if diagnostics := validateDefinition(duplicateLabels); len(diagnostics) != 1 {
+		t.Fatalf("duplicate Parallel branch Map label diagnostics %#v", diagnostics)
+	}
+	duplicateLabels = `{"StartAt":"Outer","States":{"Outer":{"Type":"Map","Label":"duplicate","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Nested","States":{"Nested":` + mapState + `}},"End":true}}}`
+	if diagnostics := validateDefinition(duplicateLabels); len(diagnostics) != 1 {
+		t.Fatalf("duplicate nested Map label diagnostics %#v", diagnostics)
+	}
 	jsonata := `{"QueryLanguage":"JSONata","StartAt":"Map","States":{"Map":{"Type":"Map","Items":[],"ItemReader":{"Resource":"reader","Arguments":[]},` + processor + `,"End":true}}}`
 	if diagnostics := validateDefinition(jsonata); len(diagnostics) != 1 {
 		t.Fatalf("JSONata Map diagnostics %#v", diagnostics)

@@ -3232,10 +3232,10 @@ func batchMapItems(state map[string]any, data any, items []any, random spi.Rand,
 }
 
 func mapStateMachineName(req *spi.Request) string {
-	if arn := first(req.Input, "stateMachineArn", "StateMachineArn"); arn != "" {
+	if arn := first(req.Input, "_stateMachineArn", "stateMachineArn", "StateMachineArn"); arn != "" {
 		return baseSMName(arn)
 	}
-	parts := strings.Split(first(req.Input, "executionArn", "ExecutionArn"), ":")
+	parts := strings.Split(first(req.Input, "_executionArn", "executionArn", "ExecutionArn"), ":")
 	if len(parts) > 6 {
 		return strings.Split(parts[6], "/")[0]
 	}

@@ -1455,6 +1455,41 @@ func TestStatesJSONataErrorsAndFields(t *testing.T) {
 		machine := invoke(p, "CreateStateMachine", map[string]any{"name": name, "definition": definition, "roleArn": testRoleARN, "type": "EXPRESS"})
 		return invoke(p, "StartSyncExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"], "input": input})
 	}
+	startAfterRetry := func(name, definition, input string) map[string]any {
+		t.Helper()
+		result := make(chan map[string]any, 1)
+		go func() { result <- start(name, definition, input) }()
+		select {
+		case execution := <-result:
+			return execution
+		case <-time.After(10 * time.Millisecond):
+		}
+		if err := deps.Clock.Advance(time.Second); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case execution := <-result:
+			return execution
+		case <-time.After(time.Second):
+			t.Fatal("Express Retry did not resume")
+			return nil
+		}
+	}
+	resumeRetry := func(executionARN string) map[string]any {
+		t.Helper()
+		if err := deps.Clock.Advance(time.Second); err != nil {
+			t.Fatal(err)
+		}
+		for range 100 {
+			execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": executionARN})
+			if execution["status"] != "RUNNING" {
+				return execution
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Fatal("Standard Retry did not resume")
+		return nil
+	}
 
 	invoke(storage, "CreateBucket", map[string]any{"Bucket": "jsonata-items"})
 	invoke(storage, "PutObject", map[string]any{"Bucket": "jsonata-items", "Key": "items.json"}, []byte(`[1,2,3,4]`))
@@ -1462,7 +1497,7 @@ func TestStatesJSONataErrorsAndFields(t *testing.T) {
 	if diagnostics := validateDefinition(mapDefinition, "EXPRESS"); len(diagnostics) != 0 {
 		t.Fatalf("jsonata field diagnostics %#v", diagnostics)
 	}
-	mapExecution := start("jsonata-fields", mapDefinition, `{"bucket":"jsonata-items","key":"items.json","tag":"t"}`)
+	mapExecution := startAfterRetry("jsonata-fields", mapDefinition, `{"bucket":"jsonata-items","key":"items.json","tag":"t"}`)
 	if mapExecution["status"] != "SUCCEEDED" {
 		t.Fatalf("jsonata map fields %#v", mapExecution)
 	}
@@ -1500,17 +1535,17 @@ func TestStatesJSONataErrorsAndFields(t *testing.T) {
 
 	queueURL := invoke(queue, "CreateQueue", map[string]any{"QueueName": "jsonpath-variables"})["QueueUrl"].(string)
 	credentialRetry := `{"QueryLanguage":"JSONata","StartAt":"Send","States":{"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Credentials":{"RoleArn":"{% $states.context.State.RetryCount > 0 ? '` + testRoleARN + `' : $states.input.missing %}"},"Arguments":{"QueueUrl":"` + queueURL + `","MessageBody":"credentials"},"Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"MaxAttempts":1}],"End":true}}}`
-	if execution := start("jsonata-credential-retry", credentialRetry, `{}`); execution["status"] != "SUCCEEDED" {
+	if execution := startAfterRetry("jsonata-credential-retry", credentialRetry, `{}`); execution["status"] != "SUCCEEDED" {
 		t.Fatalf("JSONata credential retry %#v", execution)
 	}
 	timeoutRetry := `{"QueryLanguage":"JSONata","StartAt":"Send","States":{"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","TimeoutSeconds":"{% $states.context.State.RetryCount > 0 ? 2 : 'later' %}","HeartbeatSeconds":"{% 1 %}","Arguments":{"QueueUrl":"` + queueURL + `","MessageBody":"timeout"},"Output":{"retry":"{% $states.context.State.RetryCount %}"},"Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"MaxAttempts":1}],"End":true}}}`
-	if execution := start("jsonata-timeout-retry", timeoutRetry, `{}`); execution["status"] != "SUCCEEDED" || execution["output"] != `{"retry":1}` {
+	if execution := startAfterRetry("jsonata-timeout-retry", timeoutRetry, `{}`); execution["status"] != "SUCCEEDED" || execution["output"] != `{"retry":1}` {
 		t.Fatalf("JSONata timeout retry %#v", execution)
 	}
 	numericMap := `{"QueryLanguage":"JSONata","StartAt":"Map","States":{"Map":{"Type":"Map","Items":"{% $states.context.State.RetryCount > 0 ? [1,2] : $states.input.missing %}","MaxConcurrency":"{% 2 %}","ToleratedFailureCount":"{% 1 %}","ToleratedFailurePercentage":"{% 50 %}","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Choose","States":{"Choose":{"Type":"Choice","Choices":[{"Condition":"{% $states.input = 1 %}","Next":"Bad"}],"Default":"Done"},"Bad":{"Type":"Fail","Error":"Expected"},"Done":{"Type":"Succeed","Output":{"value":"{% $states.input %}","execution":"{% $states.context.Execution.Id %}","machine":"{% $states.context.StateMachine.Id %}","input":"{% $states.context.Execution.Input %}"}}}},"Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"MaxAttempts":1}],"End":true}}}`
 	numericMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonata-numeric-map", "definition": numericMap, "roleArn": testRoleARN})
 	numericARN := invoke(p, "StartExecution", map[string]any{"stateMachineArn": numericMachine["stateMachineArn"]})["executionArn"].(string)
-	numericExecution := invoke(p, "DescribeExecution", map[string]any{"executionArn": numericARN})
+	numericExecution := resumeRetry(numericARN)
 	var numericOutput []map[string]any
 	if numericExecution["status"] != "SUCCEEDED" || json.Unmarshal([]byte(numericExecution["output"].(string)), &numericOutput) != nil || len(numericOutput) != 1 || numericOutput[0]["value"] != 2.0 || numericOutput[0]["input"] != 2.0 || numericOutput[0]["execution"] == numericARN || !strings.Contains(numericOutput[0]["execution"].(string), ":execution:jsonata-numeric-map/Map:") || !strings.HasSuffix(numericOutput[0]["machine"].(string), ":stateMachine:jsonata-numeric-map/Map") {
 		t.Fatalf("JSONata numeric Map %#v", numericExecution)
@@ -1535,7 +1570,7 @@ func TestStatesJSONataErrorsAndFields(t *testing.T) {
 	writerRetry := `{"QueryLanguage":"JSONata","StartAt":"Map","States":{"Map":{"Type":"Map","Items":"{% [1] %}","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"ResultWriter":{"Resource":"arn:aws:states:::s3:putObject","Arguments":{"Bucket":"{% $states.context.State.RetryCount > 0 ? 'jsonata-items' : $states.input.missing %}","Prefix":"results"}},"Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"MaxAttempts":1}],"End":true}}}`
 	writerMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonata-writer-retry", "definition": writerRetry, "roleArn": testRoleARN})
 	writerARN := invoke(p, "StartExecution", map[string]any{"stateMachineArn": writerMachine["stateMachineArn"]})["executionArn"].(string)
-	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": writerARN}); execution["status"] != "SUCCEEDED" || !strings.Contains(execution["output"].(string), "ResultWriterDetails") {
+	if execution := resumeRetry(writerARN); execution["status"] != "SUCCEEDED" || !strings.Contains(execution["output"].(string), "ResultWriterDetails") {
 		t.Fatalf("JSONata ResultWriter retry %#v", execution)
 	}
 	variablesDefinition := `{"StartAt":"Store","States":{"Store":{"Type":"Pass","Assign":{"saved.$":"$.value"},"Next":"Choose"},"Choose":{"Type":"Choice","Choices":[{"Variable":"$.value","NumericEquals":7,"Assign":{"chosen":"yes"},"Next":"Send"}]},"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Parameters":{"QueueUrl":"` + queueURL + `","MessageBody":"x"},"Assign":{"messageId.$":"$.MessageId"},"ResultPath":null,"Next":"Done"},"Done":{"Type":"Succeed","QueryLanguage":"JSONata","Output":{"saved":"{% $saved %}","chosen":"{% $chosen %}","messageId":"{% $messageId %}"}}}}`

@@ -186,6 +186,11 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if parallel.status != "SUCCEEDED" || len(parallel.out.([]any)) != 2 {
 		t.Fatalf("parallel %#v", parallel)
 	}
+	parallelRecovery := walk(`{"StartAt":"Parallel","States":{"Parallel":{"Type":"Parallel","Branches":[{"StartAt":"Fail","States":{"Fail":{"Type":"Fail","Error":"ParallelBoom","Cause":"branch failed"}}}],"Retry":[{"ErrorEquals":["ParallelBoom"],"MaxAttempts":1}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.failure","Next":"Recovered"}]},"Recovered":{"Type":"Succeed"}}}`, map[string]any{"keep": true})
+	parallelOutput := parallelRecovery.out.(map[string]any)
+	if parallelRecovery.status != "SUCCEEDED" || parallelOutput["keep"] != true || jsonPath(parallelOutput, "$.failure.Error") != "ParallelBoom" || jsonPath(parallelOutput, "$.failure.Cause") != "branch failed" {
+		t.Fatalf("parallel recovery %#v", parallelRecovery)
+	}
 	emptyMap := walk(`{"StartAt":"Map","States":{"Map":{"Type":"Map","ItemsPath":"$.items","ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`, map[string]any{"items": []any{}})
 	if emptyMap.status != "SUCCEEDED" || len(emptyMap.out.([]any)) != 0 {
 		t.Fatalf("empty map %#v", emptyMap)
@@ -195,6 +200,10 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	firstSelected := selected[0].(map[string]any)
 	if selectedMap.status != "SUCCEEDED" || len(selected) != 2 || firstSelected["index"] != 0.0 || firstSelected["source"] != "STATE_DATA" || firstSelected["batch"] != "a" || jsonPath(firstSelected, "$.nested.n") != 1.0 {
 		t.Fatalf("selected map %#v", selectedMap)
+	}
+	mapRecovery := walk(`{"StartAt":"Map","States":{"Map":{"Type":"Map","ItemsPath":"$.items","ItemProcessor":{"StartAt":"Fail","States":{"Fail":{"Type":"Fail","Error":"MapBoom"}}},"Catch":[{"ErrorEquals":["States.TaskFailed"],"ResultPath":null,"Next":"Recovered"}]},"Recovered":{"Type":"Succeed"}}}`, map[string]any{"items": []any{1.0}, "keep": true})
+	if output := mapRecovery.out.(map[string]any); mapRecovery.status != "SUCCEEDED" || output["keep"] != true {
+		t.Fatalf("map recovery %#v", mapRecovery)
 	}
 	data := map[string]any{"s": "yes", "n": 2.0, "b": true, "present": 1}
 	if !matchChoice(map[string]any{"Variable": "$.s", "StringEquals": "yes"}, data) ||
@@ -245,6 +254,14 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	}
 	if out, ok := applyResultPath(map[string]any{"ResultPath": "$"}, nested, 4); !ok || out != 4 {
 		t.Fatalf("root ResultPath %#v", out)
+	}
+	composite := map[string]any{"Retry": []any{map[string]any{"ErrorEquals": []any{"Boom"}, "MaxAttempts": 1.0}}, "Catch": []any{map[string]any{"ErrorEquals": []any{"States.ALL"}, "Next": "Recovered"}}}
+	compositeAttempts := map[int]int{}
+	if _, _, retry, caught := recoverState(composite, walkResult{cause: "failed", errorName: "Boom"}, nil, compositeAttempts); !retry || caught {
+		t.Fatal("composite did not retry")
+	}
+	if next, _, retry, caught := recoverState(composite, walkResult{cause: "failed", errorName: "Boom"}, nil, compositeAttempts); retry || !caught || next != "Recovered" {
+		t.Fatal("composite did not catch exhausted retry")
 	}
 }
 

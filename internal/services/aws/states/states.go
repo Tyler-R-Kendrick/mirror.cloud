@@ -292,6 +292,7 @@ type pending struct {
 type walkResult struct {
 	out           any
 	status, cause string
+	errorName     string
 	hist          []any
 	pending       *pending
 }
@@ -382,10 +383,14 @@ walkLoop:
 			return walkResult{out: data, status: "SUCCEEDED", hist: hist}
 		case "Fail":
 			cause, _ := st["Cause"].(string)
-			if cause == "" {
-				cause, _ = st["Error"].(string)
+			errorName, _ := st["Error"].(string)
+			if errorName == "" {
+				errorName = "States.TaskFailed"
 			}
-			return walkResult{out: data, status: "FAILED", cause: cause, hist: hist}
+			if cause == "" {
+				cause = errorName
+			}
+			return walkResult{out: data, status: "FAILED", cause: cause, errorName: errorName, hist: hist}
 		case "Wait":
 		case "Task":
 			res := first(st, "Resource")
@@ -412,7 +417,7 @@ walkLoop:
 					}
 					next, out, caught := catchTask(st, failure, data)
 					if !caught {
-						return walkResult{out: data, status: "FAILED", cause: failure.cause, hist: hist}
+						return walkResult{out: data, status: "FAILED", cause: failure.cause, errorName: failure.name, hist: hist}
 					}
 					if next == "" {
 						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
@@ -437,19 +442,41 @@ walkLoop:
 			cur = next
 			continue
 		case "Parallel":
-			branches, _ := st["Branches"].([]any)
-			var results []any
-			for _, br := range branches {
-				bm, _ := br.(map[string]any)
-				bdef, _ := json.Marshal(bm)
-				wr := p.walk(ctx, req, string(bdef), "", data)
-				if wr.status != "SUCCEEDED" {
-					wr.hist = hist
-					return wr
-				}
-				results = append(results, wr.out)
+			if retries[cur] == nil {
+				retries[cur] = map[int]int{}
 			}
-			data = results
+			for {
+				branches, _ := st["Branches"].([]any)
+				var results []any
+				var failed *walkResult
+				for _, br := range branches {
+					bm, _ := br.(map[string]any)
+					bdef, _ := json.Marshal(bm)
+					wr := p.walk(ctx, req, string(bdef), "", data)
+					if wr.status != "SUCCEEDED" {
+						failed = &wr
+						break
+					}
+					results = append(results, wr.out)
+				}
+				if failed == nil {
+					data = results
+					break
+				}
+				next, out, retry, caught := recoverState(st, *failed, data, retries[cur])
+				if retry {
+					continue
+				}
+				if caught {
+					if next == "" {
+						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
+					}
+					data, cur = out, next
+					continue walkLoop
+				}
+				failed.hist = hist
+				return *failed
+			}
 		case "Map":
 			path := first(st, "ItemsPath")
 			var items any
@@ -467,29 +494,51 @@ walkLoop:
 				iter, _ = st["ItemProcessor"].(map[string]any)
 			}
 			idef, _ := json.Marshal(iter)
-			var results []any
 			selector, _ := st["ItemSelector"].(map[string]any)
 			if selector == nil {
 				selector, _ = st["Parameters"].(map[string]any)
 			}
-			for index, item := range arr {
-				iterationInput := item
-				if selector != nil {
-					iterationInput = applyParams(selector, data, map[string]any{"Map": map[string]any{"Item": map[string]any{
-						"Index": float64(index), "Value": item, "Source": "STATE_DATA",
-					}}})
-				}
-				wr := p.walk(ctx, req, string(idef), "", iterationInput)
-				if wr.status != "SUCCEEDED" {
-					wr.hist = hist
-					return wr
-				}
-				results = append(results, wr.out)
+			if retries[cur] == nil {
+				retries[cur] = map[int]int{}
 			}
-			if results == nil {
-				results = []any{}
+			for {
+				var results []any
+				var failed *walkResult
+				for index, item := range arr {
+					iterationInput := item
+					if selector != nil {
+						iterationInput = applyParams(selector, data, map[string]any{"Map": map[string]any{"Item": map[string]any{
+							"Index": float64(index), "Value": item, "Source": "STATE_DATA",
+						}}})
+					}
+					wr := p.walk(ctx, req, string(idef), "", iterationInput)
+					if wr.status != "SUCCEEDED" {
+						failed = &wr
+						break
+					}
+					results = append(results, wr.out)
+				}
+				if failed == nil {
+					if results == nil {
+						results = []any{}
+					}
+					data = results
+					break
+				}
+				next, out, retry, caught := recoverState(st, *failed, data, retries[cur])
+				if retry {
+					continue
+				}
+				if caught {
+					if next == "" {
+						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
+					}
+					data, cur = out, next
+					continue walkLoop
+				}
+				failed.hist = hist
+				return *failed
 			}
-			data = results
 		default:
 			return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 		}
@@ -547,6 +596,19 @@ func catchTask(st map[string]any, failure stateFailure, input any) (string, any,
 		return first(catcher, "Next"), out, true
 	}
 	return "", input, false
+}
+
+func recoverState(st map[string]any, failed walkResult, input any, attempts map[int]int) (string, any, bool, bool) {
+	name := failed.errorName
+	if name == "" {
+		name = "States.TaskFailed"
+	}
+	failure := stateFailure{name: name, cause: failed.cause}
+	if retryTask(st, name, attempts) {
+		return "", input, true, false
+	}
+	next, out, caught := catchTask(st, failure, input)
+	return next, out, false, caught
 }
 
 func matchesError(raw any, name string) bool {

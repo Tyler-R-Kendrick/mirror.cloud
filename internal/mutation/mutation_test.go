@@ -1254,6 +1254,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestJSONPointerOffset",
 		},
 		{
+			name: "states-ignore-reader-item-size-limit",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `if textReader {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestDistributedMapS3ItemReader",
+		},
+		{
+			name: "states-allow-oversized-reader-item",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `len(encoded) > 8*1024*1024`,
+			new:  `len(encoded) > 9*1024*1024`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestDistributedMapS3ItemReader",
+		},
+		{
 			name: "states-ignore-reader-items-path",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `if _, hasReader := st["ItemReader"]; !isJSONata && hasReader {`,

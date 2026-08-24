@@ -1276,6 +1276,48 @@ func TestStatesTransitionValidation(t *testing.T) {
 	}
 }
 
+func TestStatesChoiceValidation(t *testing.T) {
+	definition := func(queryLanguage, rule string) string {
+		return fmt.Sprintf(`{"QueryLanguage":%q,"StartAt":"Choose","States":{"Choose":{"Type":"Choice","Choices":[%s],"Default":"Done"},"Done":{"Type":"Succeed"}}}`, queryLanguage, rule)
+	}
+	for _, test := range []struct{ queryLanguage, rule string }{
+		{"JSONPath", `{"Variable":"$.value","StringEquals":"ok","Next":"Done"}`},
+		{"JSONPath", `{"Variable":"$.value","StringEqualsPath":"$.other","Next":"Done"}`},
+		{"JSONPath", `{"Variable":"$.value","TimestampEquals":"2026-08-24T12:00:00Z","Next":"Done"}`},
+		{"JSONPath", `{"And":[{"Variable":"$.value","IsPresent":true},{"Variable":"$.value","NumericGreaterThan":1}],"Next":"Done"}`},
+		{"JSONata", `{"Condition":true,"Next":"Done"}`},
+		{"JSONata", `{"Condition":"{% $states.input.value = 1 %}","Next":"Done"}`},
+	} {
+		if diagnostics := validateDefinition(definition(test.queryLanguage, test.rule)); len(diagnostics) != 0 {
+			t.Fatalf("valid Choice diagnostics %#v for %s", diagnostics, test.rule)
+		}
+	}
+	for _, test := range []struct{ queryLanguage, rule string }{
+		{"JSONPath", `{"Next":"Done"}`},
+		{"JSONPath", `{"Variable":"$.value","StringEquals":"ok","IsPresent":true,"Next":"Done"}`},
+		{"JSONPath", `{"Condition":true,"Next":"Done"}`},
+		{"JSONPath", `{"And":[],"Next":"Done"}`},
+		{"JSONPath", `{"And":{},"Next":"Done"}`},
+		{"JSONPath", `{"And":[{"Variable":"$.value","IsPresent":true,"Next":"Done"}],"Next":"Done"}`},
+		{"JSONPath", `{"Not":1,"Next":"Done"}`},
+		{"JSONPath", `{"StringEquals":"ok","Next":"Done"}`},
+		{"JSONPath", `{"Variable":"value","StringEquals":"ok","Next":"Done"}`},
+		{"JSONPath", `{"Variable":"$.value","NumericEquals":"1","Next":"Done"}`},
+		{"JSONPath", `{"Variable":"$.value","BooleanEquals":"true","Next":"Done"}`},
+		{"JSONPath", `{"Variable":"$.value","IsPresent":1,"Next":"Done"}`},
+		{"JSONPath", `{"Variable":"$.value","StringEqualsPath":"other","Next":"Done"}`},
+		{"JSONPath", `{"Variable":"$.value","TimestampEquals":"2026-08-24T12:00:00+01:00","Next":"Done"}`},
+		{"JSONata", `{"Next":"Done"}`},
+		{"JSONata", `{"Condition":1,"Next":"Done"}`},
+		{"JSONata", `{"Condition":"plain text","Next":"Done"}`},
+		{"JSONata", `{"Condition":true,"StringEquals":"ok","Next":"Done"}`},
+	} {
+		if diagnostics := validateDefinition(definition(test.queryLanguage, test.rule)); len(diagnostics) != 1 {
+			t.Fatalf("Choice diagnostics = %#v for %s", diagnostics, test.rule)
+		}
+	}
+}
+
 func TestStatesExecutionTimeout(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

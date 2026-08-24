@@ -67,6 +67,147 @@ func TestStatesTagLifecycle(t *testing.T) {
 	}
 }
 
+func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	must := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := call(operation, input)
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response
+	}
+	if p.ServiceID() != "aws.states" || len(p.Operations()) != 22 {
+		t.Fatalf("metadata %s %d", p.ServiceID(), len(p.Operations()))
+	}
+	if _, err := call("CreateStateMachine", map[string]any{}); err == nil {
+		t.Fatal("created nameless state machine")
+	}
+	if _, err := call("UpdateStateMachine", map[string]any{"stateMachineArn": "missing"}); err == nil {
+		t.Fatal("updated missing state machine")
+	}
+	if _, err := call("DescribeStateMachine", map[string]any{"stateMachineArn": "missing"}); err == nil {
+		t.Fatal("described missing state machine")
+	}
+	if _, err := call("StartExecution", map[string]any{"stateMachineArn": "missing"}); err == nil {
+		t.Fatal("started missing state machine")
+	}
+	definition := `{"StartAt":"Wait","States":{"Wait":{"Type":"Wait","Next":"Done"},"Done":{"Type":"Succeed"}}}`
+	created := must("CreateStateMachine", map[string]any{"Name": "lifecycle", "Definition": definition, "RoleArn": "old", "Type": "EXPRESS"})
+	arn := created.Output["stateMachineArn"].(string)
+	must("UpdateStateMachine", map[string]any{"StateMachineArn": arn, "Definition": definition, "RoleArn": "new"})
+	if described := must("DescribeStateMachine", map[string]any{"StateMachineArn": arn}).Output; described["roleArn"] != "new" || described["type"] != "EXPRESS" {
+		t.Fatalf("state machine %#v", described)
+	}
+	if machines := must("ListStateMachines", nil).Output["stateMachines"].([]any); len(machines) != 1 {
+		t.Fatalf("state machines %#v", machines)
+	}
+	started := must("StartExecution", map[string]any{"StateMachineArn": arn, "Input": `{"n":1}`})
+	executionARN := started.Output["executionArn"].(string)
+	if execution := must("DescribeExecution", map[string]any{"ExecutionArn": executionARN}).Output; execution["status"] != "SUCCEEDED" || execution["history"] != nil {
+		t.Fatalf("execution %#v", execution)
+	}
+	if executions := must("ListExecutions", nil).Output["executions"].([]any); len(executions) != 1 {
+		t.Fatalf("executions %#v", executions)
+	}
+	if events := must("GetExecutionHistory", map[string]any{"ExecutionArn": executionARN}).Output["events"].([]any); len(events) != 2 {
+		t.Fatalf("history %#v", events)
+	}
+	if sync := must("StartSyncExecution", map[string]any{"StateMachineArn": arn, "Input": `{"n":2}`}).Output; sync["status"] != "SUCCEEDED" || sync["stopDate"] == nil {
+		t.Fatalf("sync execution %#v", sync)
+	}
+	for _, operation := range []string{"DescribeExecution", "GetExecutionHistory", "StopExecution"} {
+		if _, err := call(operation, map[string]any{"ExecutionArn": "missing"}); err == nil {
+			t.Fatalf("%s missing execution", operation)
+		}
+	}
+
+	activity := must("CreateActivity", map[string]any{"Name": "activity"})
+	activityARN := activity.Output["activityArn"].(string)
+	if must("DescribeActivity", map[string]any{"ActivityArn": activityARN}).Output["name"] != "activity" || len(must("ListActivities", nil).Output["activities"].([]any)) != 1 {
+		t.Fatal("activity lifecycle")
+	}
+	if _, err := call("DescribeActivity", map[string]any{"ActivityArn": "missing"}); err == nil {
+		t.Fatal("described missing activity")
+	}
+	if task := must("GetActivityTask", map[string]any{"ActivityArn": activityARN}).Output; task["taskToken"] != nil {
+		t.Fatalf("unexpected activity task %#v", task)
+	}
+	activityDefinition := `{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"` + activityARN + `","End":true}}}`
+	activityMachine := must("CreateStateMachine", map[string]any{"Name": "activity-machine", "Definition": activityDefinition}).Output["stateMachineArn"].(string)
+	runningARN := must("StartExecution", map[string]any{"StateMachineArn": activityMachine, "Name": "failure"}).Output["executionArn"].(string)
+	token := must("GetActivityTask", map[string]any{"ActivityArn": activityARN}).Output["taskToken"].(string)
+	must("SendTaskFailure", map[string]any{"TaskToken": token, "Error": "ActivityFailed"})
+	if failed := must("DescribeExecution", map[string]any{"ExecutionArn": runningARN}).Output; failed["status"] != "FAILED" || failed["cause"] != "ActivityFailed" {
+		t.Fatalf("failed task %#v", failed)
+	}
+	must("SendTaskSuccess", map[string]any{"TaskToken": "missing", "Output": `{}`})
+	must("SendTaskHeartbeat", map[string]any{"TaskToken": "missing"})
+	toStop := must("StartExecution", map[string]any{"StateMachineArn": activityMachine, "Name": "stop"}).Output["executionArn"].(string)
+	must("StopExecution", map[string]any{"ExecutionArn": toStop})
+	if stopped := must("DescribeExecution", map[string]any{"ExecutionArn": toStop}).Output; stopped["status"] != "ABORTED" {
+		t.Fatalf("stopped execution %#v", stopped)
+	}
+	must("DeleteActivity", map[string]any{"ActivityArn": activityARN})
+	if len(must("ListActivities", nil).Output["activities"].([]any)) != 0 {
+		t.Fatal("activity was not deleted")
+	}
+	must("DeleteStateMachine", map[string]any{"StateMachineArn": arn})
+	if _, err := call("Unknown", nil); err == nil {
+		t.Fatal("unknown operation succeeded")
+	}
+
+	walk := func(def string, input any) walkResult {
+		t.Helper()
+		return p.walk(ctx, &spi.Request{Identity: id}, def, "", input)
+	}
+	for _, tc := range []struct {
+		definition, status, cause string
+	}{
+		{"{", "FAILED", "InvalidDefinition"},
+		{`{"StartAt":"Missing","States":{}}`, "FAILED", "States.Runtime"},
+		{`{"StartAt":"Fail","States":{"Fail":{"Type":"Fail","Error":"Nope"}}}`, "FAILED", "Nope"},
+		{`{"StartAt":"Unknown","States":{"Unknown":{"Type":"Unknown"}}}`, "FAILED", "States.Runtime"},
+		{`{"StartAt":"Map","States":{"Map":{"Type":"Map","ItemsPath":"$.missing","End":true}}}`, "FAILED", "States.Runtime"},
+		{`{"StartAt":"Loop","States":{"Loop":{"Type":"Pass","Next":"Loop"}}}`, "FAILED", "States.Runtime"},
+	} {
+		result := walk(tc.definition, map[string]any{})
+		if result.status != tc.status || result.cause != tc.cause {
+			t.Fatalf("walk %s: %#v", tc.definition, result)
+		}
+	}
+	parallel := walk(`{"StartAt":"Parallel","States":{"Parallel":{"Type":"Parallel","Branches":[{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","Result":2,"End":true}}}],"End":true}}}`, map[string]any{})
+	if parallel.status != "SUCCEEDED" || len(parallel.out.([]any)) != 2 {
+		t.Fatalf("parallel %#v", parallel)
+	}
+	emptyMap := walk(`{"StartAt":"Map","States":{"Map":{"Type":"Map","ItemsPath":"$.items","ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`, map[string]any{"items": []any{}})
+	if emptyMap.status != "SUCCEEDED" || len(emptyMap.out.([]any)) != 0 {
+		t.Fatalf("empty map %#v", emptyMap)
+	}
+	data := map[string]any{"s": "yes", "n": 2.0, "b": true, "present": 1}
+	if !matchChoice(map[string]any{"Variable": "$.s", "StringEquals": "yes"}, data) ||
+		!matchChoice(map[string]any{"Variable": "$.n", "NumericEquals": 2}, data) ||
+		!matchChoice(map[string]any{"Variable": "$.b", "BooleanEquals": true}, data) ||
+		!matchChoice(map[string]any{"Variable": "$.present", "IsPresent": true}, data) ||
+		matchChoice(map[string]any{"Variable": "$.missing", "StringEquals": "yes"}, data) {
+		t.Fatal("choice matching")
+	}
+	choice := map[string]any{"Choices": []any{map[string]any{"Variable": "$.s", "StringEquals": "no", "Next": "No"}}, "Default": "Default"}
+	if choiceNext(choice, data) != "Default" {
+		t.Fatal("choice default")
+	}
+	params := taskPayload(map[string]any{"Parameters": map[string]any{"Payload": map[string]any{"value.$": "$.n"}, "nested": map[string]any{"value.$": "$.s"}}}, data)
+	if params.(map[string]any)["value"] != 2.0 || jsonPath(data, "$.missing.value") != nil || parseJSON("plain") != "plain" || toFloat(json.Number("3")) != 3 || !toBool("true") {
+		t.Fatal("data helpers")
+	}
+}
+
 func TestBootedServerStatesPassSucceed(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []string{"aws.states"}

@@ -1806,6 +1806,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesMapValidation",
 		},
 		{
+			name: "states-allow-inline-distributed-map-fields",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  "if mode != \"DISTRIBUTED\" {\n\t\t\t\t\tfor _, field := range []string{\"ItemBatcher\", \"ItemReader\", \"ResultWriter\", \"ToleratedFailureCount\", \"ToleratedFailureCountPath\", \"ToleratedFailurePercentage\", \"ToleratedFailurePercentagePath\"} {",
+			new:  "if mode != \"DISTRIBUTED\" && false {\n\t\t\t\t\tfor _, field := range []string{\"ItemBatcher\", \"ItemReader\", \"ResultWriter\", \"ToleratedFailureCount\", \"ToleratedFailureCountPath\", \"ToleratedFailurePercentage\", \"ToleratedFailurePercentagePath\"} {",
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesMapValidation",
+		},
+		{
+			name: "states-allow-inline-map-failure-tolerance",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `for _, field := range []string{"ItemBatcher", "ItemReader", "ResultWriter", "ToleratedFailureCount", "ToleratedFailureCountPath", "ToleratedFailurePercentage", "ToleratedFailurePercentagePath"} {`,
+			new:  `for _, field := range []string{"ItemBatcher", "ItemReader", "ResultWriter", "ToleratedFailureCountPath", "ToleratedFailurePercentage", "ToleratedFailurePercentagePath"} {`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesMapValidation",
+		},
+		{
 			name: "states-ignore-result-selector",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `result, valid = applyParamsValidated(selector, result, context, random, variables...)`,

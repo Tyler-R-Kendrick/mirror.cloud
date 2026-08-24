@@ -2836,7 +2836,7 @@ func (p *Pack) deliverEndpointRecords(ctx context.Context, req *spi.Request, str
 	}
 	retryDuration := endpointRetryDuration(destinationKey, destination)
 	retrying := !delivered && !permanent && retryDuration > 0 && p.scheduleEndpointRetry(ctx, req, stream, destinationKey, processedIDs[0], recIDs, data, processedData, backupFailures, code, message, now, retryDuration)
-	if backupFailures && !delivered && !permanent && !retrying {
+	if backupFailures && !delivered && (permanent || !retrying) {
 		payload := httpRetryPayload{BackupRecordIDs: recIDs, BackupData: data, Arrivals: repeatTime(now, len(data))}
 		p.backupEndpointPayload(ctx, req, streamRecord, destination, destinationKey, stream, payload, 0, code, message, now)
 	}
@@ -3672,7 +3672,7 @@ func (p *Pack) flushHTTPBuffer(ctx context.Context, identity spi.Identity, colle
 	}
 	retryDuration := endpointRetryDuration(destinationKey, destination)
 	retrying := !delivered && !permanent && retryDuration > 0 && p.scheduleEndpointRetryPayload(ctx, req, name, destinationKey, requestID, payload, code, message, now, retryDuration)
-	if !delivered && !permanent && !retrying {
+	if !delivered && (permanent || !retrying) {
 		p.backupEndpointPayload(ctx, req, stream, destination, destinationKey, name, payload, 0, code, message, now)
 	}
 	p.deleteHTTPBuffer(ctx, collection, items)

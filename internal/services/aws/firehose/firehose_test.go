@@ -4301,7 +4301,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	}{
 		{name: "retryable", path: "/failure", prefix: "failed/", backedUp: true},
 		{name: "redirect", path: "/redirect", prefix: "redirect/", backedUp: true},
-		{name: "permanent", path: "/permanent", prefix: "permanent/", backedUp: false},
+		{name: "permanent", path: "/permanent", prefix: "permanent/", backedUp: true},
 	} {
 		destination := immediateDestination("https://example.test" + failure.path)
 		destination["S3Configuration"].(map[string]any)["Prefix"] = failure.prefix

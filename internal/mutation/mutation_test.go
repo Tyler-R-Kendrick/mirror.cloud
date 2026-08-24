@@ -1422,6 +1422,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesAssignValidation",
 		},
 		{
+			name: "states-accept-jsonata-path-variable",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `if stateQueryLanguage != "JSONata" {`,
+			new:  `if true {`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesVariableNameValidation",
+		},
+		{
 			name: "states-accept-non-string-machine-comment",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `if _, valid := comment.(string); !valid {`,

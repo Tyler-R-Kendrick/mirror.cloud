@@ -1464,6 +1464,25 @@ func TestStatesAssignValidation(t *testing.T) {
 	}
 }
 
+func TestStatesVariableNameValidation(t *testing.T) {
+	for _, definition := range []string{
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","Assign":{"value.$":"$.input"},"End":true}}}`,
+		`{"QueryLanguage":"JSONata","StartAt":"Pass","States":{"Pass":{"Type":"Pass","Assign":{"value":"{% 1 %}"},"End":true}}}`,
+	} {
+		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
+			t.Fatalf("valid variable diagnostics %#v", diagnostics)
+		}
+	}
+	for _, definition := range []string{
+		`{"QueryLanguage":"JSONata","StartAt":"Pass","States":{"Pass":{"Type":"Pass","Assign":{"value.$":"{% 1 %}"},"End":true}}}`,
+		`{"QueryLanguage":"JSONata","StartAt":"Pass","States":{"Pass":{"Type":"Pass","Assign":{"value.test":1},"End":true}}}`,
+	} {
+		if diagnostics := validateDefinition(definition); len(diagnostics) != 1 {
+			t.Fatalf("variable diagnostics = %#v for %s", diagnostics, definition)
+		}
+	}
+}
+
 func TestStatesStructuralMetadataValidation(t *testing.T) {
 	validName := strings.Repeat("é", 80)
 	valid := fmt.Sprintf(`{"Comment":"machine","Version":"1.0","StartAt":%q,"States":{%q:{"Type":"Succeed","Comment":"state"}}}`, validName, validName)

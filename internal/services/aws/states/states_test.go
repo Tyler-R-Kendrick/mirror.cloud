@@ -1518,6 +1518,8 @@ func TestStatesMapValidation(t *testing.T) {
 	for _, fields := range []string{
 		`"ItemsPath":"$.items","ItemSelector":{"value.$":"$$.Map.Item.Value"},` + processor,
 		`"Iterator":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"Parameters":{"value.$":"$$.Map.Item.Value"}`,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"MaxItems":100000000}},"ItemBatcher":{"MaxItemsPerBatch":1,"MaxInputBytesPerBatch":262144},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"MaxItemsPath":"$.limit"}},"ItemBatcher":{"MaxItemsPerBatchPath":"$.batch"},` + processor,
 		`"ResultWriter":{"WriterConfig":{"Transformation":"COMPACT","OutputType":"JSONL"}},` + processor,
 		`"ResultWriter":{"Resource":"arn:aws:states:::s3:putObject","Parameters":{"Bucket":"bucket"}},` + processor,
 		`"Label":"valid-label","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
@@ -1539,7 +1541,20 @@ func TestStatesMapValidation(t *testing.T) {
 		`"ItemReader":{},` + processor,
 		`"ItemReader":{"Resource":1},` + processor,
 		`"ItemReader":{"Resource":"reader","ReaderConfig":[]},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"MaxItems":0}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"MaxItems":1.5}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"MaxItems":100000001}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"MaxItems":1,"MaxItemsPath":"$.limit"}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"MaxItemsPath":"limit"}},` + processor,
 		`"ItemReader":{"Resource":"reader","Parameters":[]},` + processor,
+		`"ItemBatcher":{},` + processor,
+		`"ItemBatcher":{"MaxItemsPerBatch":0},` + processor,
+		`"ItemBatcher":{"MaxItemsPerBatch":1.5},` + processor,
+		`"ItemBatcher":{"MaxItemsPerBatch":1,"MaxItemsPerBatchPath":"$.batch"},` + processor,
+		`"ItemBatcher":{"MaxItemsPerBatchPath":"batch"},` + processor,
+		`"ItemBatcher":{"MaxInputBytesPerBatch":262145},` + processor,
+		`"ItemBatcher":{"MaxInputBytesPerBatch":1,"MaxInputBytesPerBatchPath":"$.bytes"},` + processor,
+		`"ItemBatcher":{"MaxInputBytesPerBatchPath":"bytes"},` + processor,
 		`"ResultWriter":{},` + processor,
 		`"ResultWriter":{"Resource":1},` + processor,
 		`"ResultWriter":{"Resource":"arn:aws:states:::s3:putObject","Parameters":[]},` + processor,
@@ -1556,7 +1571,7 @@ func TestStatesMapValidation(t *testing.T) {
 		`"Label":"invalid label","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
 		`"Label":"inline",` + inlineProcessor,
 		`"ItemReader":{"Resource":"reader"},` + inlineProcessor,
-		`"ItemBatcher":{},` + inlineProcessor,
+		`"ItemBatcher":{"MaxItemsPerBatch":1},` + inlineProcessor,
 		`"ResultWriter":{"WriterConfig":{}},` + inlineProcessor,
 		`"ToleratedFailureCount":1,` + inlineProcessor,
 	} {
@@ -1568,6 +1583,10 @@ func TestStatesMapValidation(t *testing.T) {
 	jsonata := `{"QueryLanguage":"JSONata","StartAt":"Map","States":{"Map":{"Type":"Map","Items":[],"ItemReader":{"Resource":"reader","Arguments":[]},` + processor + `,"End":true}}}`
 	if diagnostics := validateDefinition(jsonata); len(diagnostics) != 1 {
 		t.Fatalf("JSONata Map diagnostics %#v", diagnostics)
+	}
+	jsonata = `{"QueryLanguage":"JSONata","StartAt":"Map","States":{"Map":{"Type":"Map","Items":[],"ItemReader":{"Resource":"reader","Arguments":{},"ReaderConfig":{"MaxItems":"{% 3 %}"}},"ItemBatcher":{"MaxItemsPerBatch":"{% 2 %}","MaxInputBytesPerBatch":"{% 1024 %}"},` + processor + `,"End":true}}}`
+	if diagnostics := validateDefinition(jsonata); len(diagnostics) != 0 {
+		t.Fatalf("valid JSONata Map diagnostics %#v", diagnostics)
 	}
 }
 

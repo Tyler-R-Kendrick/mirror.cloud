@@ -4897,14 +4897,14 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				add("SCHEMA_VALIDATION_FAILED", "Cause and CausePath are mutually exclusive.", "/States/"+name)
 			}
 		}
-		validateIntegerField := func(field string, minimum, maximum float64) (float64, bool) {
-			value, direct := state[field]
-			pathValue, path := state[field+"Path"]
+		validateInteger := func(object map[string]any, location, field string, minimum, maximum float64) (float64, bool) {
+			value, direct := object[field]
+			pathValue, path := object[field+"Path"]
 			if direct && path {
-				add("SCHEMA_VALIDATION_FAILED", field+" and "+field+"Path are mutually exclusive.", "/States/"+name+"/"+field)
+				add("SCHEMA_VALIDATION_FAILED", field+" and "+field+"Path are mutually exclusive.", location+"/"+field)
 			}
 			if reference, valid := pathValue.(string); path && (!valid || !strings.HasPrefix(reference, "$")) {
-				add("SCHEMA_VALIDATION_FAILED", field+"Path must be a reference path.", "/States/"+name+"/"+field+"Path")
+				add("SCHEMA_VALIDATION_FAILED", field+"Path must be a reference path.", location+"/"+field+"Path")
 			}
 			if !direct {
 				return 0, false
@@ -4913,11 +4913,14 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				return 0, false
 			}
 			number, numeric := exactNumber(value)
-			if !numeric || number != math.Trunc(number) || number < minimum || number > maximum {
-				add("SCHEMA_VALIDATION_FAILED", field+" must be an integer in range.", "/States/"+name+"/"+field)
+			if !numeric || number != math.Trunc(number) || number < minimum || maximum > 0 && number > maximum {
+				add("SCHEMA_VALIDATION_FAILED", field+" must be an integer in range.", location+"/"+field)
 				return 0, false
 			}
 			return number, true
+		}
+		validateIntegerField := func(field string, minimum, maximum float64) (float64, bool) {
+			return validateInteger(state, "/States/"+name, field, minimum, maximum)
 		}
 		if typ == "Wait" {
 			validateIntegerField("Seconds", 0, 99999999)
@@ -5296,14 +5299,27 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				if _, exists := reader["ReaderConfig"]; exists && !valid {
 					add("SCHEMA_VALIDATION_FAILED", "ReaderConfig must be an object.", "/States/"+name+"/ItemReader/ReaderConfig")
 				}
+				validateInteger(config, "/States/"+name+"/ItemReader/ReaderConfig", "MaxItems", 1, 100000000)
 				if _, path := config["MaxItemsPath"]; path && isJSONata {
 					add("SCHEMA_VALIDATION_FAILED", "MaxItemsPath is not supported with JSONata.", "/States/"+name+"/ItemReader/ReaderConfig/MaxItemsPath")
 				}
 			}
-			if batcher, _ := state["ItemBatcher"].(map[string]any); batcher != nil && isJSONata {
-				for _, field := range []string{"MaxItemsPerBatchPath", "MaxInputBytesPerBatchPath"} {
-					if _, exists := batcher[field]; exists {
-						add("SCHEMA_VALIDATION_FAILED", field+" is not supported with JSONata.", "/States/"+name+"/ItemBatcher/"+field)
+			if batcher, _ := state["ItemBatcher"].(map[string]any); batcher != nil {
+				path := "/States/" + name + "/ItemBatcher"
+				_, items := batcher["MaxItemsPerBatch"]
+				_, itemsPath := batcher["MaxItemsPerBatchPath"]
+				_, bytes := batcher["MaxInputBytesPerBatch"]
+				_, bytesPath := batcher["MaxInputBytesPerBatchPath"]
+				if !items && !itemsPath && !bytes && !bytesPath {
+					add("MISSING_REQUIRED_FIELD", "ItemBatcher requires an item or byte limit.", path)
+				}
+				validateInteger(batcher, path, "MaxItemsPerBatch", 1, 0)
+				validateInteger(batcher, path, "MaxInputBytesPerBatch", 1, 262144)
+				if isJSONata {
+					for _, field := range []string{"MaxItemsPerBatchPath", "MaxInputBytesPerBatchPath"} {
+						if _, exists := batcher[field]; exists {
+							add("SCHEMA_VALIDATION_FAILED", field+" is not supported with JSONata.", path+"/"+field)
+						}
 					}
 				}
 			}

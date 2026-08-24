@@ -68,6 +68,16 @@ func testMSKSource() map[string]any {
 	}
 }
 
+func testIcebergDestination() map[string]any {
+	return map[string]any{
+		"CatalogConfiguration": map[string]any{"CatalogARN": "arn:aws:glue:us-east-1:123456789012:catalog/s3tablescatalog/warehouse"},
+		"RoleARN":              testRoleARN, "S3Configuration": testS3Destination(),
+		"DestinationTableConfigurationList": []any{map[string]any{
+			"DestinationDatabaseName": "analytics", "DestinationTableName": "events", "UniqueKeys": []any{"id"},
+		}},
+	}
+}
+
 func testDatabaseSource() map[string]any {
 	return map[string]any{
 		"Type": "PostgreSQL", "Endpoint": "database.internal", "Port": float64(5432), "SSLMode": "Enabled",
@@ -1147,6 +1157,60 @@ func TestFirehoseRedshiftRetryExpiryAndDelete(t *testing.T) {
 	}
 	if _, _, err := deps.Blobs.Get(context.Background(), deleted.DataKey); err == nil {
 		t.Fatal("deleted stream retained Redshift retry payload")
+	}
+}
+
+func TestIcebergDestinationValidationAndDescription(t *testing.T) {
+	valid := testIcebergDestination()
+	if err := validateIcebergDestination(valid, "us-east-1"); err != nil {
+		t.Fatal(err)
+	}
+	invalid := []map[string]any{}
+	add := func(key string, value any) {
+		candidate := maps.Clone(valid)
+		candidate[key] = value
+		invalid = append(invalid, candidate)
+	}
+	add("CatalogConfiguration", map[string]any{"CatalogARN": "catalog"})
+	add("RoleARN", "role")
+	add("S3Configuration", nil)
+	add("BufferingHints", map[string]any{"IntervalInSeconds": 901, "SizeInMBs": 5})
+	add("RetryOptions", map[string]any{"DurationInSeconds": 7201})
+	add("S3BackupMode", "Everything")
+	add("AppendOnly", "true")
+	add("DestinationTableConfigurationList", "events")
+	add("DestinationTableConfigurationList", []any{map[string]any{"DestinationDatabaseName": "bad-name", "DestinationTableName": "events"}})
+	add("DestinationTableConfigurationList", []any{
+		map[string]any{"DestinationDatabaseName": "analytics", "DestinationTableName": "events"},
+		map[string]any{"DestinationDatabaseName": "analytics", "DestinationTableName": "events"},
+	})
+	add("DestinationTableConfigurationList", []any{map[string]any{"DestinationDatabaseName": "analytics", "DestinationTableName": "events", "UniqueKeys": []any{""}}})
+	for index, destination := range invalid {
+		if err := validateIcebergDestination(destination, "us-east-1"); err == nil {
+			t.Fatalf("accepted invalid Iceberg destination %d: %#v", index, destination)
+		}
+	}
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "iceberg", "IcebergDestinationConfiguration": valid}); err != nil {
+		t.Fatal(err)
+	}
+	described, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "iceberg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	description := described.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["IcebergDestinationDescription"].(map[string]any)
+	if first(description, "S3BackupMode") != "FailedDataOnly" || !reflect.DeepEqual(description["BufferingHints"], map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}) || !reflect.DeepEqual(description["RetryOptions"], map[string]any{"DurationInSeconds": 300}) || description["S3DestinationDescription"] == nil {
+		t.Fatalf("Iceberg destination description %#v", description)
+	}
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "iceberg", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
+		"IcebergDestinationUpdate": map[string]any{"AppendOnly": true},
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -983,7 +983,7 @@ func (p *Pack) storeOne(ctx context.Context, req *spi.Request, name string, rec 
 }
 
 func copyDest(rec, in map[string]any, suffix string) {
-	for _, base := range []string{"S3Destination", "ExtendedS3Destination", "HttpEndpointDestination", "ElasticsearchDestination", "RedshiftDestination", "SplunkDestination"} {
+	for _, base := range []string{"S3Destination", "ExtendedS3Destination", "HttpEndpointDestination", "ElasticsearchDestination", "RedshiftDestination", "SplunkDestination", "IcebergDestination"} {
 		patch, _ := in[base+suffix].(map[string]any)
 		if patch == nil {
 			continue
@@ -1159,6 +1159,25 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 		}
 		destination["SplunkDestinationDescription"] = configuration
 		delete(description, "SplunkDestinationConfiguration")
+	}
+	if configuration, ok := description["IcebergDestinationConfiguration"].(map[string]any); ok {
+		configuration = maps.Clone(configuration)
+		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
+			describeS3Configuration(s3)
+			configuration["S3DestinationDescription"] = s3
+			delete(configuration, "S3Configuration")
+		}
+		if configuration["BufferingHints"] == nil {
+			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}
+		}
+		if configuration["RetryOptions"] == nil {
+			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 300}
+		}
+		if first(configuration, "S3BackupMode") == "" {
+			configuration["S3BackupMode"] = "FailedDataOnly"
+		}
+		destination["IcebergDestinationDescription"] = configuration
+		delete(description, "IcebergDestinationConfiguration")
 	}
 	destinations := []any{}
 	if destinationID > after {
@@ -1390,7 +1409,7 @@ func validateDestination(rec map[string]any, region string) error {
 	count := 0
 	var destination map[string]any
 	destinationType := ""
-	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration"} {
+	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration", "IcebergDestinationConfiguration"} {
 		if value, exists := rec[key]; exists {
 			var ok bool
 			destination, ok = value.(map[string]any)
@@ -1416,6 +1435,9 @@ func validateDestination(rec map[string]any, region string) error {
 	if destinationType == "SplunkDestinationConfiguration" {
 		return validateSplunkDestination(destination, region)
 	}
+	if destinationType == "IcebergDestinationConfiguration" {
+		return validateIcebergDestination(destination, region)
+	}
 	if err := validateS3Configuration(destination, region, destinationType == "ExtendedS3DestinationConfiguration"); err != nil {
 		return err
 	}
@@ -1439,6 +1461,66 @@ func validateDestination(rec map[string]any, region string) error {
 		return validateS3Configuration(backup, region, false)
 	}
 	return nil
+}
+
+func validateIcebergDestination(destination map[string]any, region string) error {
+	catalog, catalogOK := destination["CatalogConfiguration"].(map[string]any)
+	s3, s3OK := destination["S3Configuration"].(map[string]any)
+	if !catalogOK || !s3OK || !validRoleARN(first(destination, "RoleARN")) || !firehoseGlueCatalogARN.MatchString(first(catalog, "CatalogARN")) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if err := validateS3Configuration(s3, region, false); err != nil {
+		return err
+	}
+	if hints, ok := destination["BufferingHints"].(map[string]any); destination["BufferingHints"] != nil && (!ok || !optionalInteger(hints, "IntervalInSeconds", 0, 900) || !optionalInteger(hints, "SizeInMBs", 1, 128)) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if retry, ok := destination["RetryOptions"].(map[string]any); destination["RetryOptions"] != nil && (!ok || !optionalInteger(retry, "DurationInSeconds", 0, 7200)) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if mode := first(destination, "S3BackupMode"); mode != "" && mode != "FailedDataOnly" && mode != "AllData" {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if appendOnly, exists := destination["AppendOnly"]; exists {
+		if _, ok := appendOnly.(bool); !ok {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	tables, ok := destination["DestinationTableConfigurationList"].([]any)
+	if destination["DestinationTableConfigurationList"] != nil && !ok {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	seen := map[string]bool{}
+	for _, raw := range tables {
+		table, ok := raw.(map[string]any)
+		database, name := first(table, "DestinationDatabaseName"), first(table, "DestinationTableName")
+		key := database + "." + name
+		if !ok || !firehoseIcebergName.MatchString(database) || !firehoseIcebergName.MatchString(name) || len(database) > 255 || len(name) > 255 || seen[key] || len(first(table, "S3ErrorOutputPrefix")) > 1024 {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		seen[key] = true
+		if keys := table["UniqueKeys"]; keys != nil && !validIcebergKeys(keys) {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
+		return err
+	}
+	return validateProcessingConfiguration(destination["ProcessingConfiguration"])
+}
+
+func validIcebergKeys(value any) bool {
+	keys, ok := value.([]any)
+	if !ok || len(keys) == 0 {
+		return false
+	}
+	for _, value := range keys {
+		key, ok := value.(string)
+		if !ok || len(key) > 1024 || strings.TrimSpace(key) != key || key == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func validateElasticsearchDestination(destination map[string]any, region string) error {
@@ -2080,7 +2162,7 @@ func validateCreateDestination(input map[string]any) error {
 		}
 	}
 	switch destination {
-	case "S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration":
+	case "S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration", "IcebergDestinationConfiguration":
 		return nil
 	case "":
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
@@ -4023,6 +4105,8 @@ var (
 	firehoseLogGroup           = regexp.MustCompile(`^[.\-_/#A-Za-z0-9]*$`)
 	firehoseLogStream          = regexp.MustCompile(`^[^:*]*$`)
 	firehoseDestinationID      = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
+	firehoseGlueCatalogARN     = regexp.MustCompile(`^arn:.*:glue:[a-zA-Z0-9-]+:\d{12}:catalog(?:/[a-z0-9_-]+(?:/[a-zA-Z0-9_.-]+)?)?$`)
+	firehoseIcebergName        = regexp.MustCompile(`^[a-zA-Z0-9._]+$`)
 )
 
 func (p *Pack) evaluatedS3Prefix(prefix string, now time.Time) string {

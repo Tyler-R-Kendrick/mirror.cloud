@@ -136,19 +136,18 @@ func (p *Pack) runDueWaits(ctx context.Context) time.Time {
 		}
 		for _, kv := range kvs {
 			var wait pending
-			if json.Unmarshal(kv.Value, &wait) != nil || wait.WaitUntil == "" && wait.Deadline == "" {
+			if json.Unmarshal(kv.Value, &wait) != nil || wait.WaitUntil == "" && wait.Deadline == "" && wait.TaskDeadline == "" && wait.HeartbeatDeadline == "" {
 				continue
 			}
-			var due, deadline time.Time
-			if wait.WaitUntil != "" {
-				due, _ = time.Parse(time.RFC3339Nano, wait.WaitUntil)
-			}
-			if wait.Deadline != "" {
-				deadline, _ = time.Parse(time.RFC3339Nano, wait.Deadline)
-			}
-			next := due
-			if next.IsZero() || !deadline.IsZero() && deadline.Before(next) {
-				next = deadline
+			var next time.Time
+			kind := ""
+			for _, candidate := range []struct{ value, kind string }{
+				{wait.Deadline, "execution"}, {wait.TaskDeadline, "task"}, {wait.HeartbeatDeadline, "task"}, {wait.WaitUntil, "wait"},
+			} {
+				parsed, err := time.Parse(time.RFC3339Nano, candidate.value)
+				if err == nil && (next.IsZero() || parsed.Before(next)) {
+					next, kind = parsed, candidate.kind
+				}
 			}
 			if next.IsZero() {
 				continue
@@ -159,14 +158,32 @@ func (p *Pack) runDueWaits(ctx context.Context) time.Time {
 				}
 				continue
 			}
-			if !deadline.IsZero() && (due.IsZero() || !due.Before(deadline)) {
+			switch kind {
+			case "execution":
 				p.timeoutExecution(ctx, request, kv.Key, wait)
-			} else {
+			case "task":
+				p.timeoutTask(ctx, request, kv.Key)
+			default:
 				p.resumeWait(ctx, request, kv.Key, wait)
 			}
 		}
 	}
 	return earliest
+}
+
+func (p *Pack) timeoutTask(ctx context.Context, req *spi.Request, token string) {
+	timeoutRequest := &spi.Request{Identity: req.Identity, Input: map[string]any{"taskToken": token, "error": "States.Timeout", "cause": "States.Timeout"}}
+	_, _ = p.finishTask(ctx, timeoutRequest, p.deps.Clock.Now().Unix(), false)
+}
+
+func startTaskTimers(task *pending, now time.Time) {
+	task.Started = true
+	if task.TimeoutSeconds > 0 {
+		task.TaskDeadline = now.Add(time.Duration(task.TimeoutSeconds) * time.Second).UTC().Format(time.RFC3339Nano)
+	}
+	if task.HeartbeatSeconds > 0 {
+		task.HeartbeatDeadline = now.Add(time.Duration(task.HeartbeatSeconds) * time.Second).UTC().Format(time.RFC3339Nano)
+	}
 }
 
 func (p *Pack) timeoutExecution(ctx context.Context, req *spi.Request, token string, wait pending) {
@@ -996,9 +1013,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		for _, kv := range kvs {
 			var pend pending
 			_ = json.Unmarshal(kv.Value, &pend)
-			if want != "" && pend.ActivityARN != want {
+			if pend.Started || want != "" && pend.ActivityARN != want {
 				continue
 			}
+			startTaskTimers(&pend, p.deps.Clock.Now())
+			encoded, _ := json.Marshal(pend)
+			_ = p.col(req, "pending").Put(ctx, pend.Token, encoded)
+			p.signalWaits()
 			inb, _ := json.Marshal(pend.Input)
 			return &spi.Response{Output: map[string]any{"taskToken": pend.Token, "input": string(inb)}}, nil
 		}
@@ -1012,8 +1033,20 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if len(token) < 1 || len(token) > 2048 {
 			return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
 		}
-		if _, found, _ := p.col(req, "pending").Get(ctx, token); !found {
+		body, found, _ := p.col(req, "pending").Get(ctx, token)
+		if !found {
 			return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
+		}
+		var pend pending
+		_ = json.Unmarshal(body, &pend)
+		if !pend.Started {
+			return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
+		}
+		if pend.HeartbeatSeconds > 0 {
+			pend.HeartbeatDeadline = p.deps.Clock.Now().Add(time.Duration(pend.HeartbeatSeconds) * time.Second).UTC().Format(time.RFC3339Nano)
+			body, _ = json.Marshal(pend)
+			_ = p.col(req, "pending").Put(ctx, token, body)
+			p.signalWaits()
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "ValidateStateMachineDefinition":
@@ -1223,12 +1256,13 @@ func (p *Pack) validateAliasRoutes(ctx context.Context, req *spi.Request, routes
 }
 
 type pending struct {
-	Token, ActivityARN, StateName, ExecARN, Definition string
-	WaitUntil, Deadline                                string
-	Input, StateInput                                  any
-	Retries                                            map[int]int
-	Variables                                          map[string]any
-	Callback, Retry                                    bool
+	Token, ActivityARN, StateName, ExecARN, Definition   string
+	WaitUntil, Deadline, TaskDeadline, HeartbeatDeadline string
+	Input, StateInput                                    any
+	Retries                                              map[int]int
+	Variables                                            map[string]any
+	TimeoutSeconds, HeartbeatSeconds                     int
+	Callback, Retry, Started                             bool
 }
 
 type walkResult struct {
@@ -1440,6 +1474,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 			}
 			if !pend.Callback {
 				pend.Token = p.deps.Rand.Hex(16)
+				pend.Started, pend.TaskDeadline, pend.HeartbeatDeadline = false, "", ""
 				pb, _ := json.Marshal(pend)
 				_ = p.col(req, "pending").Put(ctx, pend.Token, pb)
 				rec["pendingToken"] = pend.Token
@@ -1817,6 +1852,7 @@ walkLoop:
 					tok := p.deps.Rand.Hex(16)
 					return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
 						Token: tok, ActivityARN: res, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Variables: variables, Deadline: first(req.Input, "_executionDeadline"),
+						TimeoutSeconds: int(timeout), HeartbeatSeconds: int(heartbeat),
 					}}
 				}
 				if failure.name == "" {
@@ -1827,9 +1863,12 @@ walkLoop:
 					if err != nil {
 						failure = taskFailure(errorPrefix, sdk, err)
 					} else if callback {
-						return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
+						pendingTask := &pending{
 							Token: token, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Variables: variables, Callback: true, Deadline: first(req.Input, "_executionDeadline"),
-						}}
+							TimeoutSeconds: int(timeout), HeartbeatSeconds: int(heartbeat),
+						}
+						startTaskTimers(pendingTask, p.deps.Clock.Now())
+						return walkResult{out: data, status: "RUNNING", hist: hist, pending: pendingTask}
 					} else if isJSONata {
 						data, ok = applyJSONataState(st, rawInput, out, stateContext, variables, p.deps.Rand)
 						if ok {

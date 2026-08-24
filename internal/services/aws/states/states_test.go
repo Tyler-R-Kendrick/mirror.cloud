@@ -1202,6 +1202,142 @@ func TestStatesExecutionTimeout(t *testing.T) {
 	}
 }
 
+func TestStatesTaskTimeoutAndHeartbeat(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	pollTask := func(activityARN string) string {
+		t.Helper()
+		for range 100 {
+			if token, ok := invoke("GetActivityTask", map[string]any{"activityArn": activityARN})["taskToken"].(string); ok {
+				return token
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Fatal("activity task was not available")
+		return ""
+	}
+	waitStatus := func(executionARN, status string) map[string]any {
+		t.Helper()
+		var execution map[string]any
+		for range 100 {
+			execution = invoke("DescribeExecution", map[string]any{"executionArn": executionARN})
+			if execution["status"] == status {
+				return execution
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Fatalf("execution did not reach %s: %#v", status, execution)
+		return nil
+	}
+
+	heartbeatActivity := invoke("CreateActivity", map[string]any{"name": "heartbeat-timeout"})["activityArn"].(string)
+	heartbeatDefinition := `{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"` + heartbeatActivity + `","TimeoutSeconds":5,"HeartbeatSeconds":2,"Catch":[{"ErrorEquals":["States.Timeout"],"ResultPath":"$.failure","Next":"Recovered"}],"End":true},"Recovered":{"Type":"Succeed"}}}`
+	heartbeatMachine := invoke("CreateStateMachine", map[string]any{"name": "heartbeat-timeout", "definition": heartbeatDefinition, "roleArn": testRoleARN})
+	heartbeatExecution := invoke("StartExecution", map[string]any{"stateMachineArn": heartbeatMachine["stateMachineArn"], "input": `{}`})["executionArn"].(string)
+	heartbeatToken := pollTask(heartbeatActivity)
+	if err := deps.Clock.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	invoke("SendTaskHeartbeat", map[string]any{"taskToken": heartbeatToken})
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p = New(deps)
+	if err := deps.Clock.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	invoke("SendTaskHeartbeat", map[string]any{"taskToken": heartbeatToken})
+	if err := deps.Clock.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if execution := invoke("DescribeExecution", map[string]any{"executionArn": heartbeatExecution}); execution["status"] != "RUNNING" {
+		t.Fatalf("heartbeat was not extended %#v", execution)
+	}
+	if err := deps.Clock.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	heartbeatResult := waitStatus(heartbeatExecution, "SUCCEEDED")
+	if !strings.Contains(heartbeatResult["output"].(string), `"Error":"States.Timeout"`) {
+		t.Fatalf("heartbeat timeout was not caught %#v", heartbeatResult)
+	}
+
+	timeoutActivity := invoke("CreateActivity", map[string]any{"name": "task-timeout"})["activityArn"].(string)
+	timeoutDefinition := `{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"` + timeoutActivity + `","TimeoutSeconds":2,"Retry":[{"ErrorEquals":["States.Timeout"],"IntervalSeconds":1,"MaxAttempts":1}],"Catch":[{"ErrorEquals":["States.Timeout"],"ResultPath":"$.failure","Next":"Recovered"}],"End":true},"Recovered":{"Type":"Succeed"}}}`
+	timeoutMachine := invoke("CreateStateMachine", map[string]any{"name": "task-timeout", "definition": timeoutDefinition, "roleArn": testRoleARN})
+	timeoutExecution := invoke("StartExecution", map[string]any{"stateMachineArn": timeoutMachine["stateMachineArn"], "input": `{}`})["executionArn"].(string)
+	if err := deps.Clock.Advance(3 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if execution := invoke("DescribeExecution", map[string]any{"executionArn": timeoutExecution}); execution["status"] != "RUNNING" {
+		t.Fatalf("unclaimed activity timed out %#v", execution)
+	}
+	firstToken := pollTask(timeoutActivity)
+	if err := deps.Clock.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	retryScheduled := false
+	for range 100 {
+		kvs, _, _ := p.col(&spi.Request{Identity: id}, "pending").List(ctx, "", "", 0)
+		for _, kv := range kvs {
+			var pending pending
+			_ = json.Unmarshal(kv.Value, &pending)
+			if pending.ExecARN == timeoutExecution && pending.Retry {
+				retryScheduled = true
+				break
+			}
+		}
+		if retryScheduled {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if !retryScheduled {
+		t.Fatal("task timeout retry was not scheduled")
+	}
+	if err := deps.Clock.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	secondToken := pollTask(timeoutActivity)
+	if secondToken == firstToken {
+		t.Fatal("task timeout retry reused its token")
+	}
+	if err := deps.Clock.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	timeoutResult := waitStatus(timeoutExecution, "SUCCEEDED")
+	if !strings.Contains(timeoutResult["output"].(string), `"Error":"States.Timeout"`) {
+		t.Fatalf("task timeout was not caught %#v", timeoutResult)
+	}
+
+	queue := sqs.New(deps)
+	queueResponse, err := queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "callback-timeout"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queueURL := queueResponse.Output["QueueUrl"].(string)
+	callbackDefinition := `{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage.waitForTaskToken","Parameters":{"QueueUrl":"` + queueURL + `","MessageBody.$":"$$.Task.Token"},"TimeoutSeconds":2,"Catch":[{"ErrorEquals":["States.Timeout"],"ResultPath":"$.failure","Next":"Recovered"}],"End":true},"Recovered":{"Type":"Succeed"}}}`
+	callbackMachine := invoke("CreateStateMachine", map[string]any{"name": "callback-timeout", "definition": callbackDefinition, "roleArn": testRoleARN})
+	callbackExecution := invoke("StartExecution", map[string]any{"stateMachineArn": callbackMachine["stateMachineArn"], "input": `{}`})["executionArn"].(string)
+	if err := deps.Clock.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	callbackResult := waitStatus(callbackExecution, "SUCCEEDED")
+	if !strings.Contains(callbackResult["output"].(string), `"Error":"States.Timeout"`) {
+		t.Fatalf("callback timeout was not caught %#v", callbackResult)
+	}
+}
+
 func TestStatesJSONataErrorsAndFields(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

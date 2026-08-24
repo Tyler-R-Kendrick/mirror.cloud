@@ -1425,6 +1425,27 @@ func TestStatesPassValidation(t *testing.T) {
 	}
 }
 
+func TestStatesTaskFieldOwnershipValidation(t *testing.T) {
+	valid := `{"QueryLanguage":"JSONata","StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","Arguments":{"value":1},"Credentials":{"RoleArn":"arn:aws:iam::1:role/task"},"TimeoutSeconds":2,"HeartbeatSeconds":1,"End":true}}}`
+	if diagnostics := validateDefinition(valid); len(diagnostics) != 0 {
+		t.Fatalf("valid Task fields diagnostics %#v", diagnostics)
+	}
+	for _, test := range []struct{ queryLanguage, field string }{
+		{"JSONata", `"Arguments":{}`},
+		{"JSONPath", `"Credentials":{"RoleArn":"arn:aws:iam::1:role/task"}`},
+		{"JSONPath", `"HeartbeatSeconds":1`},
+		{"JSONPath", `"HeartbeatSecondsPath":"$.heartbeat"`},
+		{"JSONPath", `"Resource":"x"`},
+		{"JSONPath", `"TimeoutSeconds":1`},
+		{"JSONPath", `"TimeoutSecondsPath":"$.timeout"`},
+	} {
+		definition := fmt.Sprintf(`{"QueryLanguage":%q,"StartAt":"Pass","States":{"Pass":{"Type":"Pass",%s,"End":true}}}`, test.queryLanguage, test.field)
+		if diagnostics := validateDefinition(definition); len(diagnostics) != 1 {
+			t.Fatalf("Task field diagnostics = %#v for %s", diagnostics, test.field)
+		}
+	}
+}
+
 func TestStatesDataFlowValidation(t *testing.T) {
 	for _, definition := range []string{
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","InputPath":"$.input","Parameters":{"value.$":"$.value"},"ResultPath":null,"OutputPath":null,"End":true}}}`,

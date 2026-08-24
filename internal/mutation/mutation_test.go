@@ -1328,7 +1328,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-accept-invalid-wait-seconds",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if !numeric || number != math.Trunc(number) || number < minimum || number > maximum {`,
+			old:  `if !numeric || number != math.Trunc(number) || number < minimum || maximum > 0 && number > maximum {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesWaitValidation",

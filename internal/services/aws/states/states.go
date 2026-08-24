@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	mathrand "math/rand"
 	"reflect"
 	"slices"
 	"sort"
@@ -23,6 +22,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
+	internalrand "github.com/tyler-r-kendrick/mirror.cloud/internal/rand"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -1698,7 +1698,7 @@ func evalIntrinsic(expression string, data any, context map[string]any, random s
 				if !ok {
 					break
 				}
-				return float64(start + mathrand.New(mathrand.NewSource(int64(math.Round(seed)))).Intn(end-start)), true
+				return float64(start + internalrand.New(strconv.FormatInt(int64(math.Round(seed)), 10)).Intn(end-start)), true
 			}
 			if random != nil {
 				return float64(start + random.Intn(end-start)), true

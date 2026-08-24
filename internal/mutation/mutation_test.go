@@ -344,7 +344,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-math-random-seed",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `return float64(start + mathrand.New(mathrand.NewSource(int64(math.Round(seed)))).Intn(end-start)), true`,
+			old:  `return float64(start + internalrand.New(strconv.FormatInt(int64(math.Round(seed)), 10)).Intn(end-start)), true`,
 			new:  `return float64(start + random.Intn(end-start)), true`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",

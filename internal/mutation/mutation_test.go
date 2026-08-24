@@ -784,8 +784,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-accept-insecure-http-endpoint",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `parsed.Scheme != "https"`,
-			new:  `false`,
+			old:  `len(rawURL) > 1000 || err != nil || parsed.Scheme != "https" || parsed.Hostname() == ""`,
+			new:  `len(rawURL) > 1000 || err != nil || false || parsed.Hostname() == ""`,
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseHTTPEndpointValidation",
 		},
@@ -935,8 +935,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-ignore-persisted-http-buffers",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `[]string{"fh-http-buffers", "fh-http-retries"}`,
-			new:  `[]string{"fh-http-retries"}`,
+			old:  `[]string{"fh-http-buffers", "fh-http-retries", "fh-search-work"}`,
+			new:  `[]string{"fh-http-retries", "fh-search-work"}`,
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseHTTPEndpointDestination",
 		},
@@ -1279,8 +1279,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-store-plaintext-http-buffer",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `body, err = p.protectStreamData(ctx, req, stream, body)`,
-			new:  `body, err = body, error(nil)`,
+			old:  "body, err := json.Marshal(payload)\n\tif err != nil {\n\t\treturn false\n\t}\n\tbody, err = p.protectStreamData(ctx, req, stream, body)",
+			new:  "body, err := json.Marshal(payload)\n\tif err != nil {\n\t\treturn false\n\t}\n\tbody, err = body, error(nil)",
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseHTTPEndpointDestination",
 		},
@@ -1295,8 +1295,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-skip-http-buffer-decryption",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `body, readErr = p.decryptAtRest(ctx, req, body)`,
-			new:  `body, readErr = body, error(nil)`,
+			old:  "if readErr == nil {\n\t\t\tbody, readErr = p.decryptAtRest(ctx, req, body)\n\t\t}\n\t\tvar entry httpRetryPayload",
+			new:  "if readErr == nil {\n\t\t\tbody, readErr = body, error(nil)\n\t\t}\n\t\tvar entry httpRetryPayload",
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseHTTPEndpointDestination",
 		},

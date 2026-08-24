@@ -4686,6 +4686,31 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			}
 		}
 		if typ == "Fail" {
+			validFailPath := func(value any) bool {
+				path, valid := value.(string)
+				if !valid {
+					return false
+				}
+				if strings.HasPrefix(path, "$") {
+					return true
+				}
+				for _, intrinsic := range []string{"ArrayGetItem", "Base64Decode", "Base64Encode", "Format", "Hash", "JsonToString", "UUID"} {
+					if strings.HasPrefix(path, "States."+intrinsic+"(") && strings.HasSuffix(path, ")") {
+						return true
+					}
+				}
+				return false
+			}
+			for _, field := range []string{"Error", "Cause"} {
+				if value, exists := state[field]; exists {
+					if _, valid := value.(string); !valid {
+						add("SCHEMA_VALIDATION_FAILED", field+" must be a string.", "/States/"+name+"/"+field)
+					}
+				}
+				if value, exists := state[field+"Path"]; exists && !validFailPath(value) {
+					add("SCHEMA_VALIDATION_FAILED", field+"Path must be a reference path or supported intrinsic.", "/States/"+name+"/"+field+"Path")
+				}
+			}
 			_, errorDirect := state["Error"]
 			_, errorPath := state["ErrorPath"]
 			if errorDirect && errorPath {

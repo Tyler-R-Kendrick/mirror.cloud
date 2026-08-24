@@ -468,8 +468,18 @@ walkLoop:
 			}
 			idef, _ := json.Marshal(iter)
 			var results []any
-			for _, item := range arr {
-				wr := p.walk(ctx, req, string(idef), "", item)
+			selector, _ := st["ItemSelector"].(map[string]any)
+			if selector == nil {
+				selector, _ = st["Parameters"].(map[string]any)
+			}
+			for index, item := range arr {
+				iterationInput := item
+				if selector != nil {
+					iterationInput = applyParams(selector, data, map[string]any{"Map": map[string]any{"Item": map[string]any{
+						"Index": float64(index), "Value": item, "Source": "STATE_DATA",
+					}}})
+				}
+				wr := p.walk(ctx, req, string(idef), "", iterationInput)
 				if wr.status != "SUCCEEDED" {
 					wr.hist = hist
 					return wr
@@ -591,22 +601,27 @@ func taskPayload(st map[string]any, data any) any {
 	if !ok {
 		return data
 	}
-	p := applyParams(params, data)
+	p := applyParams(params, data, nil)
 	if pl, ok := p["Payload"]; ok {
 		return pl
 	}
 	return p
 }
 
-func applyParams(params map[string]any, data any) map[string]any {
+func applyParams(params map[string]any, data any, context map[string]any) map[string]any {
 	out := map[string]any{}
 	for k, v := range params {
 		if strings.HasSuffix(k, ".$") {
-			out[strings.TrimSuffix(k, ".$")] = jsonPath(data, fmt.Sprint(v))
+			path := fmt.Sprint(v)
+			source := data
+			if strings.HasPrefix(path, "$$.") {
+				source, path = context, strings.TrimPrefix(path, "$")
+			}
+			out[strings.TrimSuffix(k, ".$")] = jsonPath(source, path)
 			continue
 		}
 		if m, ok := v.(map[string]any); ok {
-			out[k] = applyParams(m, data)
+			out[k] = applyParams(m, data, context)
 			continue
 		}
 		out[k] = v
@@ -617,7 +632,7 @@ func applyParams(params map[string]any, data any) map[string]any {
 func (p *Pack) invokeLambda(ctx context.Context, req *spi.Request, resource string, st map[string]any, payload any) (any, error) {
 	name := ""
 	if params, ok := st["Parameters"].(map[string]any); ok {
-		ap := applyParams(params, payload)
+		ap := applyParams(params, payload, nil)
 		name, _ = ap["FunctionName"].(string)
 		if pl, ok := ap["Payload"]; ok {
 			payload = pl

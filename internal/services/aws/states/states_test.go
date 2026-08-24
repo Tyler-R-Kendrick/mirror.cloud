@@ -190,6 +190,12 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if emptyMap.status != "SUCCEEDED" || len(emptyMap.out.([]any)) != 0 {
 		t.Fatalf("empty map %#v", emptyMap)
 	}
+	selectedMap := walk(`{"StartAt":"Map","States":{"Map":{"Type":"Map","ItemsPath":"$.items","ItemSelector":{"index.$":"$$.Map.Item.Index","value.$":"$$.Map.Item.Value","source.$":"$$.Map.Item.Source","batch.$":"$.batch","nested":{"n.$":"$$.Map.Item.Value.n"}},"ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`, map[string]any{"batch": "a", "items": []any{map[string]any{"n": 1.0}, map[string]any{"n": 2.0}}})
+	selected := selectedMap.out.([]any)
+	firstSelected := selected[0].(map[string]any)
+	if selectedMap.status != "SUCCEEDED" || len(selected) != 2 || firstSelected["index"] != 0.0 || firstSelected["source"] != "STATE_DATA" || firstSelected["batch"] != "a" || jsonPath(firstSelected, "$.nested.n") != 1.0 {
+		t.Fatalf("selected map %#v", selectedMap)
+	}
 	data := map[string]any{"s": "yes", "n": 2.0, "b": true, "present": 1}
 	if !matchChoice(map[string]any{"Variable": "$.s", "StringEquals": "yes"}, data) ||
 		!matchChoice(map[string]any{"Variable": "$.n", "NumericEquals": 2}, data) ||
@@ -348,7 +354,7 @@ func TestBootedServerStatesMapLambdaActivity(t *testing.T) {
 		return out
 	}
 
-	mapDef := `{"StartAt":"M","States":{"M":{"Type":"Map","ItemsPath":"$.nums","Iterator":{"StartAt":"P","States":{"P":{"Type":"Pass","End":true}}},"End":true}}}`
+	mapDef := `{"StartAt":"M","States":{"M":{"Type":"Map","ItemsPath":"$.nums","ItemSelector":{"index.$":"$$.Map.Item.Index","value.$":"$$.Map.Item.Value"},"Iterator":{"StartAt":"P","States":{"P":{"Type":"Pass","End":true}}},"End":true}}}`
 	created := sfn("CreateStateMachine", `{"name":"mapsm","definition":`+mustJSON(mapDef)+`,"roleArn":"arn:aws:iam::000000000000:role/x"}`)
 	arn, _ := created["stateMachineArn"].(string)
 	started := sfn("StartExecution", `{"stateMachineArn":"`+arn+`","name":"mapex","input":"{\"nums\":[{\"n\":1},{\"n\":2}]}"}`)
@@ -356,7 +362,7 @@ func TestBootedServerStatesMapLambdaActivity(t *testing.T) {
 	if desc["status"] != "SUCCEEDED" {
 		t.Fatalf("map exec %v", desc)
 	}
-	if !strings.Contains(fmtString(desc["output"]), `"n":1`) || !strings.Contains(fmtString(desc["output"]), `"n":2`) {
+	if !strings.Contains(fmtString(desc["output"]), `"index":0`) || !strings.Contains(fmtString(desc["output"]), `"n":1`) || !strings.Contains(fmtString(desc["output"]), `"n":2`) {
 		t.Fatalf("map output %v", desc["output"])
 	}
 

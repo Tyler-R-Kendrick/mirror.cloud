@@ -97,14 +97,17 @@ func TestStateMachineVersionsAndAliases(t *testing.T) {
 	}
 	fault("DeleteStateMachineVersion", map[string]any{"stateMachineVersionArn": v1}, "ConflictException")
 	must("UpdateStateMachineAlias", map[string]any{"StateMachineAliasArn": alias, "Description": "second", "RoutingConfiguration": []any{map[string]any{"StateMachineVersionArn": v2, "Weight": 100.0}}})
+	fault("UpdateStateMachineAlias", map[string]any{"stateMachineAliasArn": alias}, "ValidationException")
 	definition3 := `{"StartAt":"Version","States":{"Version":{"Type":"Pass","Result":{"version":3},"End":true}}}`
 	must("UpdateStateMachine", map[string]any{"stateMachineArn": arn, "definition": definition3})
 	if sync := must("StartSyncExecution", map[string]any{"stateMachineArn": alias, "name": "alias"}).Output; !strings.Contains(fmtString(sync["output"]), `"version":2`) {
 		t.Fatalf("alias output %#v", sync)
 	}
 	must("DeleteStateMachineAlias", map[string]any{"stateMachineAliasArn": alias})
+	fault("DeleteStateMachineAlias", map[string]any{"stateMachineAliasArn": alias}, "ResourceNotFound")
 	must("DeleteStateMachineVersion", map[string]any{"stateMachineVersionArn": v1})
 	must("DeleteStateMachineVersion", map[string]any{"stateMachineVersionArn": v2})
+	fault("DeleteStateMachineVersion", map[string]any{"stateMachineVersionArn": v2}, "StateMachineDoesNotExist")
 	if versions := must("ListStateMachineVersions", map[string]any{"stateMachineArn": arn}).Output["stateMachineVersions"].([]any); len(versions) != 0 {
 		t.Fatalf("deleted versions %#v", versions)
 	}
@@ -273,6 +276,142 @@ func TestDistributedMapRuns(t *testing.T) {
 	if originalRuns := must("ListMapRuns", map[string]any{"executionArn": executionARN})["mapRuns"].([]any); len(originalRuns) != 2 {
 		t.Fatalf("cross-execution map runs %#v", originalRuns)
 	}
+}
+
+func TestStateMachineControlPlaneParity(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	must := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := call(operation, input)
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	fault := func(operation string, input map[string]any, code string) {
+		t.Helper()
+		_, err := call(operation, input)
+		if got, ok := err.(*spi.Fault); !ok || got.Code != code {
+			t.Fatalf("%s fault %#v want %s", operation, err, code)
+		}
+	}
+
+	definition1 := `{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`
+	createInput := map[string]any{
+		"name": "published", "definition": definition1, "roleArn": "original", "publish": true, "versionDescription": "initial",
+		"loggingConfiguration": map[string]any{"level": "OFF"}, "tracingConfiguration": map[string]any{"enabled": false},
+		"tags": []any{map[string]any{"key": "owner", "value": "first"}},
+	}
+	created := must("CreateStateMachine", createInput)
+	arn, version1 := created["stateMachineArn"].(string), created["stateMachineVersionArn"].(string)
+	if !strings.HasSuffix(version1, ":1") {
+		t.Fatalf("published version %#v", created)
+	}
+	idempotentInput := map[string]any{}
+	for key, value := range createInput {
+		idempotentInput[key] = value
+	}
+	idempotentInput["roleArn"] = "ignored"
+	idempotentInput["tags"] = []any{map[string]any{"key": "owner", "value": "ignored"}}
+	if repeated := must("CreateStateMachine", idempotentInput); repeated["stateMachineArn"] != arn || repeated["stateMachineVersionArn"] != version1 {
+		t.Fatalf("idempotent create %#v", repeated)
+	}
+	if described := must("DescribeStateMachine", map[string]any{"stateMachineArn": arn}); described["roleArn"] != "original" || described["_publish"] != nil {
+		t.Fatalf("described state machine %#v", described)
+	}
+	if tags := must("ListTagsForResource", map[string]any{"resourceArn": arn})["tags"].([]any); len(tags) != 1 || tags[0].(map[string]any)["value"] != "first" {
+		t.Fatalf("create tags %#v", tags)
+	}
+	changedCreate := map[string]any{}
+	for key, value := range createInput {
+		changedCreate[key] = value
+	}
+	changedCreate["definition"] = `{"StartAt":"Other","States":{"Other":{"Type":"Succeed"}}}`
+	fault("CreateStateMachine", changedCreate, "StateMachineAlreadyExists")
+	fault("CreateStateMachine", map[string]any{"name": "bad-description", "definition": definition1, "versionDescription": "invalid"}, "ValidationException")
+	if version := must("DescribeStateMachine", map[string]any{"stateMachineArn": version1}); version["stateMachineArn"] != version1 || version["definition"] != definition1 {
+		t.Fatalf("described version %#v", version)
+	}
+
+	revision1 := must("DescribeStateMachine", map[string]any{"stateMachineArn": arn})["revisionId"]
+	definition2 := `{"StartAt":"Result","States":{"Result":{"Type":"Pass","Result":2,"End":true}}}`
+	updated := must("UpdateStateMachine", map[string]any{"stateMachineArn": arn, "definition": definition2, "publish": true, "versionDescription": "second"})
+	version2 := updated["stateMachineVersionArn"].(string)
+	if !strings.HasSuffix(version2, ":2") || updated["revisionId"] == nil || updated["revisionId"] == revision1 {
+		t.Fatalf("published update %#v", updated)
+	}
+	if repeated := must("UpdateStateMachine", map[string]any{"stateMachineArn": arn, "publish": true}); repeated["stateMachineVersionArn"] != version2 {
+		t.Fatalf("idempotent update publish %#v", repeated)
+	}
+	fault("UpdateStateMachine", map[string]any{"stateMachineArn": arn, "versionDescription": "invalid"}, "ValidationException")
+	alias := must("CreateStateMachineAlias", map[string]any{"name": "live", "routingConfiguration": []any{map[string]any{"stateMachineVersionArn": version2, "weight": 100.0}}})["stateMachineAliasArn"].(string)
+	versionExecution := must("StartExecution", map[string]any{"stateMachineArn": version1, "name": "version-association"})["executionArn"].(string)
+	if execution := must("DescribeExecution", map[string]any{"executionArn": versionExecution}); execution["stateMachineVersionArn"] != version1 || execution["stateMachineAliasArn"] != nil {
+		t.Fatalf("version execution association %#v", execution)
+	}
+	aliasExecution := must("StartExecution", map[string]any{"stateMachineArn": alias, "name": "alias-association"})["executionArn"].(string)
+	if execution := must("DescribeExecution", map[string]any{"executionArn": aliasExecution}); execution["stateMachineVersionArn"] != version2 || execution["stateMachineAliasArn"] != alias {
+		t.Fatalf("alias execution association %#v", execution)
+	}
+	fault("DeleteStateMachine", map[string]any{"stateMachineArn": version1}, "ValidationException")
+	must("DeleteStateMachine", map[string]any{"stateMachineArn": arn})
+	fault("DescribeStateMachine", map[string]any{"stateMachineArn": arn}, "StateMachineDoesNotExist")
+	fault("ListStateMachineVersions", map[string]any{"stateMachineArn": arn}, "StateMachineDoesNotExist")
+	fault("DescribeStateMachineAlias", map[string]any{"stateMachineAliasArn": alias}, "ResourceNotFound")
+	if _, exists := getRecord(ctx, p.col(&spi.Request{Identity: id}, "ver"), "published:1"); exists {
+		t.Fatal("delete retained state machine version")
+	}
+	if tags := must("ListTagsForResource", map[string]any{"resourceArn": arn})["tags"].([]any); len(tags) != 0 {
+		t.Fatalf("delete retained tags %#v", tags)
+	}
+	fault("DeleteStateMachine", map[string]any{"stateMachineArn": arn}, "StateMachineDoesNotExist")
+}
+
+func TestStartExecutionAdmission(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	must := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := call(operation, input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+	fault := func(operation string, input map[string]any, code string) {
+		t.Helper()
+		_, err := call(operation, input)
+		if got, ok := err.(*spi.Fault); !ok || got.Code != code {
+			t.Fatalf("%s fault %#v want %s", operation, err, code)
+		}
+	}
+	activityARN := must("CreateActivity", map[string]any{"name": "admission"})["activityArn"].(string)
+	definition := `{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"` + activityARN + `","End":true}}}`
+	machineARN := must("CreateStateMachine", map[string]any{"name": "admission", "definition": definition})["stateMachineArn"].(string)
+	input := map[string]any{"stateMachineArn": machineARN, "name": "same", "input": `{"n":1}`}
+	started := must("StartExecution", input)
+	if repeated := must("StartExecution", input); repeated["executionArn"] != started["executionArn"] || repeated["startDate"] != started["startDate"] {
+		t.Fatalf("idempotent running execution %#v %#v", started, repeated)
+	}
+	if pending, _, _ := p.col(&spi.Request{Identity: id}, "pending").List(ctx, "", "", 0); len(pending) != 1 {
+		t.Fatalf("idempotent start created %d activity tasks", len(pending))
+	}
+	fault("StartExecution", map[string]any{"stateMachineArn": machineARN, "name": "same", "input": `{"n":2}`}, "ExecutionAlreadyExists")
+	fault("StartExecution", map[string]any{"stateMachineArn": machineARN, "name": "bad name"}, "InvalidName")
+	fault("StartExecution", map[string]any{"stateMachineArn": machineARN, "name": "invalid-input", "input": `{`}, "InvalidExecutionInput")
+	must("StopExecution", map[string]any{"executionArn": started["executionArn"]})
+	fault("StartExecution", input, "ExecutionAlreadyExists")
 }
 
 func TestStatesTagLifecycle(t *testing.T) {

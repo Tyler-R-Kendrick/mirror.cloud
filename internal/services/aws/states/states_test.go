@@ -2,6 +2,7 @@ package states
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/parquet-go/parquet-go"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
@@ -363,12 +365,28 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		"listed/a":        `{"alpha":{"id":21}}`,
 		"listed/b":        `{"beta":{"id":22}}`,
 		"flat-array/a":    `[{"id":23}]`,
+		"broken.json.gz":  "not gzip",
 		"nested.json":     `{"data":{"a/b":{"~key":[{"id":9},{"id":10}]}}}`,
 		"objects.json":    `{"b":{"id":12},"a":{"id":11}}`,
 	}
 	for key, body := range objects {
 		invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": key}, []byte(body))
 	}
+	var gzipBody bytes.Buffer
+	gzipWriter := gzip.NewWriter(&gzipBody)
+	if _, err := gzipWriter.Write([]byte(objects["items.json"])); err != nil {
+		t.Fatalf("write gzip: %v", err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatalf("close gzip: %v", err)
+	}
+	invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": "items.json.gz"}, gzipBody.Bytes())
+	zstdWriter, err := zstd.NewWriter(nil)
+	if err != nil {
+		t.Fatalf("create zstd writer: %v", err)
+	}
+	invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": "items.jsonl.zstd"}, zstdWriter.EncodeAll([]byte(objects["items.jsonl"]), nil))
+	zstdWriter.Close()
 	invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": "listed/a", "StorageClass": "STANDARD_IA"}, []byte(objects["listed/a"]))
 	type parquetItem struct {
 		ID   int64  `parquet:"id"`
@@ -385,7 +403,7 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	for _, test := range []struct {
 		key, inputType, pointer, itemsPath string
 		limit                              int
-	}{{"items.json", "JSON", "", "", 0}, {"items.jsonl", "JSONL", "", "", 0}, {"items.csv", "CSV", "", "", 0}, {"items.parquet", "PARQUET", "", "", 0}, {"nested.json", "JSON", "/data/a~1b/~0key", "", 0}, {"objects.json", "JSON", "", "", 1}, {"items-path.json", "JSON", "", "$.data.items", 0}} {
+	}{{"items.json", "JSON", "", "", 0}, {"items.json.gz", "JSON", "", "", 0}, {"items.jsonl", "JSONL", "", "", 0}, {"items.jsonl.zstd", "JSONL", "", "", 0}, {"items.csv", "CSV", "", "", 0}, {"items.parquet", "PARQUET", "", "", 0}, {"nested.json", "JSON", "/data/a~1b/~0key", "", 0}, {"objects.json", "JSON", "", "", 1}, {"items-path.json", "JSON", "", "$.data.items", 0}} {
 		readerConfig := map[string]any{"InputType": test.inputType}
 		if test.inputType == "CSV" {
 			readerConfig["CSVHeaderLocation"] = "FIRST_ROW"
@@ -450,13 +468,13 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		t.Fatalf("flatten array ItemReader execution %#v", flattenExecution)
 	}
 
-	for _, key := range []string{"missing", "broken.parquet"} {
-		missingState := map[string]any{"Type": "Map", "ItemProcessor": processor, "ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": key}, "ReaderConfig": map[string]any{"InputType": "PARQUET"}}, "End": true}
+	for _, test := range []struct{ key, inputType string }{{"missing", "PARQUET"}, {"broken.parquet", "PARQUET"}, {"broken.json.gz", "JSON"}} {
+		missingState := map[string]any{"Type": "Map", "ItemProcessor": processor, "ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": test.key}, "ReaderConfig": map[string]any{"InputType": test.inputType}}, "End": true}
 		missingDefinition, _ := json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": missingState}})
-		missingMachine := invoke(p, "CreateStateMachine", map[string]any{"name": strings.ReplaceAll(key, ".", "-") + "-reader", "definition": string(missingDefinition), "roleArn": testRoleARN}, nil)
+		missingMachine := invoke(p, "CreateStateMachine", map[string]any{"name": strings.ReplaceAll(test.key, ".", "-") + "-reader", "definition": string(missingDefinition), "roleArn": testRoleARN}, nil)
 		missingExecution := invoke(p, "StartExecution", map[string]any{"stateMachineArn": missingMachine["stateMachineArn"]}, nil)
 		if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": missingExecution["executionArn"]}, nil); execution["status"] != "FAILED" || execution["error"] != "States.ItemReaderFailed" {
-			t.Fatalf("%s ItemReader execution %#v", key, execution)
+			t.Fatalf("%s ItemReader execution %#v", test.key, execution)
 		}
 	}
 }

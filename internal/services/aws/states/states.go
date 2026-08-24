@@ -3,6 +3,7 @@ package states
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/md5"
 	"crypto/sha1"
@@ -28,6 +29,7 @@ import (
 	"unicode/utf8"
 
 	jsonata "github.com/jsonata-go/jsonata/v206"
+	"github.com/klauspost/compress/zstd"
 	"github.com/parquet-go/parquet-go"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	internalrand "github.com/tyler-r-kendrick/mirror.cloud/internal/rand"
@@ -3194,6 +3196,28 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 	closeErr := response.Stream.Close()
 	if readErr != nil || closeErr != nil {
 		return nil, "", false
+	}
+	switch key := strings.ToLower(first(input, "Key")); {
+	case strings.HasSuffix(key, ".gz"):
+		reader, err := gzip.NewReader(bytes.NewReader(body))
+		if err != nil {
+			return nil, "", false
+		}
+		body, readErr = io.ReadAll(reader)
+		closeErr = reader.Close()
+		if readErr != nil || closeErr != nil {
+			return nil, "", false
+		}
+	case strings.HasSuffix(key, ".zstd"):
+		decoder, err := zstd.NewReader(nil)
+		if err != nil {
+			return nil, "", false
+		}
+		body, readErr = decoder.DecodeAll(body, nil)
+		decoder.Close()
+		if readErr != nil {
+			return nil, "", false
+		}
 	}
 	inputType := first(config, "InputType")
 	if inputType == "" {

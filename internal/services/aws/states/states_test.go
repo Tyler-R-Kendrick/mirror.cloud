@@ -773,6 +773,11 @@ func TestStatesJSONataBehavior(t *testing.T) {
 		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Choice","Choices":[{"Variable":"$.x","NumericEquals":1,"Next":"Done"}]},"Done":{"Type":"Succeed"}}}`,
 		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"QueryLanguage":"JSONPath","Type":"Succeed"}}}`,
 		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Succeed","Output":" {% 1 %}"}}}`,
+		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Pass","Output":"{% $states.result %}","End":true}}}`,
+		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Succeed","Output":"{% $states.errorOutput %}"}}}`,
+		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Succeed","Output":"{% $eval('1') %}"}}}`,
+		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
+		`{"QueryLanguage":"JSONata","StartAt":"Outer","States":{"Outer":{"Type":"Pass","Assign":{"value":"{% 1 %}"},"Next":"Map"},"Map":{"Type":"Map","Items":"{% [] %}","ItemProcessor":{"StartAt":"Inner","States":{"Inner":{"Type":"Pass","Assign":{"value":"{% 2 %}"},"End":true}}},"End":true}}}`,
 	}
 	for _, invalid := range invalidDefinitions {
 		if diagnostics := validateDefinition(invalid); len(diagnostics) == 0 {
@@ -798,6 +803,106 @@ func TestStatesJSONataBehavior(t *testing.T) {
 	failed := invoke(p, "StartSyncExecution", map[string]any{"stateMachineArn": badMachine["stateMachineArn"]})
 	if failed["status"] != "FAILED" || failed["error"] != "States.QueryEvaluationError" {
 		t.Fatalf("jsonata error %#v", failed)
+	}
+}
+
+func TestStatesJSONataErrorsAndFields(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	storage := s3.New(deps)
+	queue := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(handler spi.Handler, operation string, input map[string]any, body ...[]byte) map[string]any {
+		t.Helper()
+		request := &spi.Request{Identity: id, Operation: operation, Input: input}
+		if len(body) != 0 {
+			request.Body = io.NopCloser(bytes.NewReader(body[0]))
+		}
+		response, err := handler.Invoke(ctx, request)
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	start := func(name, definition, input string) map[string]any {
+		t.Helper()
+		machine := invoke(p, "CreateStateMachine", map[string]any{"name": name, "definition": definition, "roleArn": testRoleARN, "type": "EXPRESS"})
+		return invoke(p, "StartSyncExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"], "input": input})
+	}
+
+	invoke(storage, "CreateBucket", map[string]any{"Bucket": "jsonata-items"})
+	invoke(storage, "PutObject", map[string]any{"Bucket": "jsonata-items", "Key": "items.json"}, []byte(`[1,2,3,4]`))
+	mapDefinition := `{"QueryLanguage":"JSONata","StartAt":"Read","States":{"Read":{"Type":"Map","ItemReader":{"Resource":"arn:aws:states:::s3:getObject","Arguments":{"Bucket":"{% $states.input.bucket %}","Key":"{% $states.input.key %}"},"ReaderConfig":{"InputType":"JSON","MaxItems":"{% 3 %}"}},"ItemBatcher":{"MaxItemsPerBatch":"{% 2 %}","BatchInput":{"tag":"{% $states.input.tag %}"}},"ItemProcessor":{"StartAt":"Echo","States":{"Echo":{"Type":"Pass","Output":"{% $states.input %}","End":true}}},"Next":"Transform"},"Transform":{"Type":"Parallel","Branches":[{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}],"Output":"{% $states.result.missing %}","Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"MaxAttempts":1}],"Catch":[{"ErrorEquals":["States.QueryEvaluationError"],"Assign":{"caught":"{% $states.errorOutput.Error %}"},"Output":{"map":"{% $states.input %}"},"Next":"Recovered"}],"End":true},"Recovered":{"Type":"Succeed","Output":{"error":"{% $caught %}","batches":"{% $states.input.map %}"}}}}`
+	if diagnostics := validateDefinition(mapDefinition, "EXPRESS"); len(diagnostics) != 0 {
+		t.Fatalf("jsonata field diagnostics %#v", diagnostics)
+	}
+	mapExecution := start("jsonata-fields", mapDefinition, `{"bucket":"jsonata-items","key":"items.json","tag":"t"}`)
+	if mapExecution["status"] != "SUCCEEDED" {
+		t.Fatalf("jsonata map fields %#v", mapExecution)
+	}
+	var mapOutput map[string]any
+	if json.Unmarshal([]byte(mapExecution["output"].(string)), &mapOutput) != nil || mapOutput["error"] != "States.QueryEvaluationError" || len(mapOutput["batches"].([]any)) != 2 {
+		t.Fatalf("jsonata map output %#v", mapExecution)
+	}
+	firstBatch := mapOutput["batches"].([]any)[0].(map[string]any)
+	secondBatch := mapOutput["batches"].([]any)[1].(map[string]any)
+	if len(firstBatch["Items"].([]any)) != 2 || len(secondBatch["Items"].([]any)) != 1 || firstBatch["BatchInput"].(map[string]any)["tag"] != "t" {
+		t.Fatalf("jsonata batch %#v", firstBatch)
+	}
+
+	taskDefinition := `{"QueryLanguage":"JSONata","StartAt":"Send","States":{"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Arguments":{"QueueUrl":"http://localhost/1/missing","MessageBody":"x"},"Catch":[{"ErrorEquals":["SQS.AmazonSQSException"],"Assign":{"caught":"{% $states.errorOutput.Error %}"},"Output":{"error":"{% $states.errorOutput.Error %}","original":"{% $states.input %}"},"Next":"Done"}],"End":true},"Done":{"Type":"Succeed","Output":{"caught":"{% $caught %}","error":"{% $states.input.error %}"}}}}`
+	if execution := start("jsonata-task-catch", taskDefinition, `{"id":1}`); execution["status"] != "SUCCEEDED" || execution["output"] != `{"caught":"SQS.AmazonSQSException","error":"SQS.AmazonSQSException"}` {
+		t.Fatalf("jsonata task catch %#v", execution)
+	}
+
+	waitFail := `{"QueryLanguage":"JSONata","StartAt":"Wait","States":{"Wait":{"Type":"Wait","Seconds":"{% $states.input.delay %}","Next":"Fail"},"Fail":{"Type":"Fail","Error":"{% $states.input.error %}","Cause":"{% $states.input.cause %}"}}}`
+	if execution := start("jsonata-wait-fail", waitFail, `{"delay":0,"error":"DynamicError","cause":"dynamic cause"}`); execution["status"] != "FAILED" || execution["error"] != "DynamicError" || execution["cause"] != "dynamic cause" {
+		t.Fatalf("jsonata wait/fail %#v", execution)
+	}
+	invalidWait := `{"QueryLanguage":"JSONata","StartAt":"Wait","States":{"Wait":{"Type":"Wait","Seconds":"{% 'later' %}","End":true}}}`
+	if execution := start("jsonata-invalid-wait", invalidWait, `{}`); execution["status"] != "FAILED" || execution["error"] != "States.QueryEvaluationError" {
+		t.Fatalf("jsonata invalid wait %#v", execution)
+	}
+
+	override := `{"StartAt":"Map","States":{"Map":{"Type":"Map","QueryLanguage":"JSONata","Items":"{% $states.input %}","ItemProcessor":{"StartAt":"Shape","States":{"Shape":{"Type":"Pass","Parameters":{"v.$":"$"},"End":true}}},"End":true}}}`
+	if diagnostics := validateDefinition(override, "EXPRESS"); len(diagnostics) != 0 {
+		t.Fatalf("per-state JSONata inheritance diagnostics %#v", diagnostics)
+	}
+	if execution := start("jsonata-override", override, `[1]`); execution["status"] != "SUCCEEDED" || execution["output"] != `[{"v":1}]` {
+		t.Fatalf("per-state JSONata inheritance %#v", execution)
+	}
+
+	queueURL := invoke(queue, "CreateQueue", map[string]any{"QueueName": "jsonpath-variables"})["QueueUrl"].(string)
+	credentialRetry := `{"QueryLanguage":"JSONata","StartAt":"Send","States":{"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Credentials":{"RoleArn":"{% $states.context.State.RetryCount > 0 ? '` + testRoleARN + `' : $states.input.missing %}"},"Arguments":{"QueueUrl":"` + queueURL + `","MessageBody":"credentials"},"Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"MaxAttempts":1}],"End":true}}}`
+	if execution := start("jsonata-credential-retry", credentialRetry, `{}`); execution["status"] != "SUCCEEDED" {
+		t.Fatalf("JSONata credential retry %#v", execution)
+	}
+	variablesDefinition := `{"StartAt":"Store","States":{"Store":{"Type":"Pass","Assign":{"saved":"{% $states.input.value %}"},"Next":"Choose"},"Choose":{"Type":"Choice","Choices":[{"Variable":"$.value","NumericEquals":7,"Assign":{"chosen":"yes"},"Next":"Send"}]},"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Parameters":{"QueueUrl":"` + queueURL + `","MessageBody":"x"},"Assign":{"messageId":"{% $states.result.MessageId %}"},"ResultPath":null,"Next":"Done"},"Done":{"Type":"Succeed","QueryLanguage":"JSONata","Output":{"saved":"{% $saved %}","chosen":"{% $chosen %}","messageId":"{% $messageId %}"}}}}`
+	if execution := start("jsonpath-variables", variablesDefinition, `{"value":7}`); execution["status"] != "SUCCEEDED" || !strings.Contains(execution["output"].(string), `"saved":7`) || !strings.Contains(execution["output"].(string), `"chosen":"yes"`) {
+		t.Fatalf("JSONPath variables %#v", execution)
+	}
+	catchVariables := `{"StartAt":"Send","States":{"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Parameters":{"QueueUrl":"http://localhost/1/missing","MessageBody":"x"},"Catch":[{"ErrorEquals":["SQS.AmazonSQSException"],"Assign":{"caught":"{% $states.errorOutput.Error %}"},"Next":"Done"}],"End":true},"Done":{"Type":"Succeed","QueryLanguage":"JSONata","Output":"{% $caught %}"}}}`
+	if execution := start("jsonpath-catch-variables", catchVariables, `{}`); execution["status"] != "SUCCEEDED" || execution["output"] != `"SQS.AmazonSQSException"` {
+		t.Fatalf("JSONPath catch variables %#v", execution)
+	}
+
+	contextDefinition := `{"QueryLanguage":"JSONata","StartAt":"Done","States":{"Done":{"Type":"Succeed","Output":{"execution":"{% $states.context.Execution.Name %}","input":"{% $states.context.Execution.Input.value %}","role":"{% $states.context.Execution.RoleArn %}","redrives":"{% $states.context.Execution.RedriveCount %}","machine":"{% $states.context.StateMachine.Name %}","state":"{% $states.context.State.Name %}","retry":"{% $states.context.State.RetryCount %}","entered":"{% $states.context.State.EnteredTime %}"}}}}`
+	contextExecution := start("jsonata-context", contextDefinition, `{"value":9}`)
+	var contextOutput map[string]any
+	if contextExecution["status"] != "SUCCEEDED" || json.Unmarshal([]byte(contextExecution["output"].(string)), &contextOutput) != nil || contextOutput["execution"] == "" || contextOutput["input"] != 9.0 || contextOutput["role"] != testRoleARN || contextOutput["redrives"] != 0.0 || contextOutput["machine"] != "jsonata-context" || contextOutput["state"] != "Done" || contextOutput["retry"] != 0.0 || contextOutput["entered"] == "" {
+		t.Fatalf("JSONata context %#v", contextExecution)
+	}
+
+	redriveDefinition := `{"QueryLanguage":"JSONata","StartAt":"Send","States":{"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Arguments":{"QueueUrl":"` + queueURL + `","MessageBody":"redrive"},"Output":"{% $states.context.Execution.RedriveCount > 0 ? {'redrives': $states.context.Execution.RedriveCount} : $states.input.missing %}","End":true}}}`
+	redriveMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonata-redrive", "definition": redriveDefinition, "roleArn": testRoleARN})
+	redriveARN := invoke(p, "StartExecution", map[string]any{"stateMachineArn": redriveMachine["stateMachineArn"]})["executionArn"].(string)
+	if before := invoke(p, "DescribeExecution", map[string]any{"executionArn": redriveARN}); before["status"] != "FAILED" || before["error"] != "States.QueryEvaluationError" {
+		t.Fatalf("JSONata before redrive %#v", before)
+	}
+	invoke(p, "RedriveExecution", map[string]any{"executionArn": redriveARN})
+	if after := invoke(p, "DescribeExecution", map[string]any{"executionArn": redriveARN}); after["status"] != "SUCCEEDED" || after["output"] != `{"redrives":1}` {
+		t.Fatalf("JSONata after redrive %#v", after)
 	}
 }
 
@@ -1047,13 +1152,26 @@ func TestStatesCallbackServiceIntegration(t *testing.T) {
 	}
 
 	jsonataQueueURL := must(queue, "CreateQueue", map[string]any{"QueueName": "callbacks-jsonata"})["QueueUrl"].(string)
-	jsonataDefinition := `{"QueryLanguage":"JSONata","StartAt":"Prepare","States":{"Prepare":{"Type":"Pass","Assign":{"prefix":"ready"},"Next":"Callback"},"Callback":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage.waitForTaskToken","Arguments":{"QueueUrl":"` + jsonataQueueURL + `","MessageBody":"{% $states.context.Task.Token %}"},"Assign":{"done":"{% $states.result.done %}"},"Output":{"done":"{% $states.result.done %}","prefix":"{% $prefix %}"},"End":true}}}`
+	jsonataDefinition := `{"QueryLanguage":"JSONata","StartAt":"Prepare","States":{"Prepare":{"Type":"Pass","Assign":{"prefix":"ready"},"Next":"Callback"},"Callback":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage.waitForTaskToken","Arguments":{"QueueUrl":"` + jsonataQueueURL + `","MessageBody":"{% $states.context.Task.Token %}"},"Assign":{"done":"{% $states.result.done %}"},"Output":{"done":"{% $states.result.done %}","prefix":"{% $prefix %}"},"Catch":[{"ErrorEquals":["Oops","States.QueryEvaluationError"],"Assign":{"caught":"{% $states.errorOutput.Error %}"},"Output":{"error":"{% $states.errorOutput.Error %}","prefix":"{% $prefix %}"},"Next":"Recovered"}],"End":true},"Recovered":{"Type":"Succeed","Output":{"error":"{% $caught %}","prefix":"{% $states.input.prefix %}"}}}}`
 	jsonataMachine := must(p, "CreateStateMachine", map[string]any{"name": "callbacks-jsonata", "definition": jsonataDefinition, "roleArn": testRoleARN})
 	jsonataExecution := must(p, "StartExecution", map[string]any{"stateMachineArn": jsonataMachine["stateMachineArn"]})["executionArn"].(string)
 	jsonataMessage := must(queue, "ReceiveMessage", map[string]any{"QueueUrl": jsonataQueueURL})["Messages"].([]any)[0].(map[string]any)
+	must(queue, "DeleteMessage", map[string]any{"QueueUrl": jsonataQueueURL, "ReceiptHandle": jsonataMessage["ReceiptHandle"]})
 	must(p, "SendTaskSuccess", map[string]any{"taskToken": jsonataMessage["Body"], "output": `{"done":true}`})
 	if execution := describe(jsonataExecution); execution["status"] != "SUCCEEDED" || execution["output"] != `{"done":true,"prefix":"ready"}` {
 		t.Fatalf("jsonata callback %#v", execution)
+	}
+	jsonataFailed := must(p, "StartExecution", map[string]any{"stateMachineArn": jsonataMachine["stateMachineArn"]})["executionArn"].(string)
+	jsonataFailureMessage := must(queue, "ReceiveMessage", map[string]any{"QueueUrl": jsonataQueueURL})["Messages"].([]any)[0].(map[string]any)
+	must(p, "SendTaskFailure", map[string]any{"taskToken": jsonataFailureMessage["Body"], "error": "Oops", "cause": "nope"})
+	if execution := describe(jsonataFailed); execution["status"] != "SUCCEEDED" || execution["output"] != `{"error":"Oops","prefix":"ready"}` {
+		t.Fatalf("jsonata callback catch %#v", execution)
+	}
+	jsonataOutputFailed := must(p, "StartExecution", map[string]any{"stateMachineArn": jsonataMachine["stateMachineArn"]})["executionArn"].(string)
+	jsonataOutputMessage := must(queue, "ReceiveMessage", map[string]any{"QueueUrl": jsonataQueueURL})["Messages"].([]any)[0].(map[string]any)
+	must(p, "SendTaskSuccess", map[string]any{"taskToken": jsonataOutputMessage["Body"], "output": `{}`})
+	if execution := describe(jsonataOutputFailed); execution["status"] != "SUCCEEDED" || execution["output"] != `{"error":"States.QueryEvaluationError","prefix":"ready"}` {
+		t.Fatalf("jsonata callback output catch %#v", execution)
 	}
 }
 
@@ -1194,10 +1312,10 @@ func TestDistributedMapItemBatcher(t *testing.T) {
 		batches[0].(map[string]any)["BatchInput"].(map[string]any)["factor"] != 7.0 || len(batches[2].(map[string]any)["Items"].([]any)) != 1 {
 		t.Fatalf("batched execution %#v %#v", execution, batches)
 	}
-	if _, ok := batchMapItems(map[string]any{"ItemBatcher": map[string]any{"MaxItemsPerBatch": 1, "MaxItemsPerBatchPath": "$.size"}}, map[string]any{"size": 2.0}, []any{1.0}, p.deps.Rand); ok {
+	if _, ok := batchMapItems(map[string]any{"ItemBatcher": map[string]any{"MaxItemsPerBatch": 1, "MaxItemsPerBatchPath": "$.size"}}, map[string]any{"size": 2.0}, []any{1.0}, p.deps.Rand, nil); ok {
 		t.Fatal("conflicting batch limits accepted")
 	}
-	if _, ok := batchMapItems(map[string]any{"ItemBatcher": map[string]any{"MaxInputBytesPerBatch": 1}}, nil, []any{"too large"}, p.deps.Rand); ok {
+	if _, ok := batchMapItems(map[string]any{"ItemBatcher": map[string]any{"MaxInputBytesPerBatch": 1}}, nil, []any{"too large"}, p.deps.Rand, nil); ok {
 		t.Fatal("oversized batch item accepted")
 	}
 }
@@ -1313,7 +1431,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if _, err := call("StartExecution", map[string]any{"stateMachineArn": "missing"}); err == nil {
 		t.Fatal("started missing state machine")
 	}
-	definition := `{"StartAt":"Wait","States":{"Wait":{"Type":"Wait","Next":"Done"},"Done":{"Type":"Succeed"}}}`
+	definition := `{"StartAt":"Wait","States":{"Wait":{"Type":"Wait","Seconds":0,"Next":"Done"},"Done":{"Type":"Succeed"}}}`
 	created := must("CreateStateMachine", map[string]any{"Name": "lifecycle", "Definition": definition, "RoleArn": testRoleARN, "Type": "EXPRESS"})
 	arn := created.Output["stateMachineArn"].(string)
 	must("UpdateStateMachine", map[string]any{"StateMachineArn": arn, "Definition": definition, "RoleArn": "arn:aws:iam::1:role/new"})

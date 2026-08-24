@@ -463,9 +463,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		def, _ := sm["definition"].(string)
 		walkRequest := *req
 		walkRequest.Input = maps.Clone(req.Input)
+		walkRequest.Input["_stateMachineArn"] = p.smARN(req, name)
 		walkRequest.Input["_executionArn"], walkRequest.Input["_executionName"] = execARN, exName
 		walkRequest.Input["_executionInput"] = in
 		walkRequest.Input["_executionStartTime"] = p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)
+		walkRequest.Input["_executionRoleArn"] = sm["roleArn"]
+		walkRequest.Input["_executionRedriveCount"] = 0.0
 		wr := p.walk(ctx, &walkRequest, def, "", in, nil)
 		baseARN := p.smARN(req, name)
 		for _, run := range wr.mapRuns {
@@ -1093,7 +1096,16 @@ func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64
 	}
 	machine["StartAt"] = state
 	redriveDefinition, _ := json.Marshal(machine)
-	result := p.walk(ctx, req, string(redriveDefinition), "", input, nil)
+	walkRequest := *req
+	walkRequest.Input = maps.Clone(req.Input)
+	walkRequest.Input["_stateMachineArn"] = record["stateMachineArn"]
+	walkRequest.Input["_executionArn"], walkRequest.Input["_executionName"] = arn, record["name"]
+	walkRequest.Input["_executionInput"] = parseJSON(first(record, "input"))
+	walkRequest.Input["_executionStartTime"] = time.Unix(int64(toFloat(record["startDate"])), 0).UTC().Format(time.RFC3339)
+	walkRequest.Input["_executionRoleArn"] = record["roleArn"]
+	walkRequest.Input["_executionRedriveCount"] = toFloat(record["redriveCount"]) + 1
+	walkRequest.Input["_executionRedriveTime"] = p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)
+	result := p.walk(ctx, &walkRequest, string(redriveDefinition), "", input, nil)
 	output, _ := json.Marshal(result.out)
 	record["status"], record["output"], record["cause"] = result.status, string(output), result.cause
 	delete(record, "error")
@@ -1186,9 +1198,12 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	isJSONata := queryLanguage == "JSONata"
 	walkRequest := *req
 	walkRequest.Input = maps.Clone(req.Input)
+	walkRequest.Input["_stateMachineArn"] = rec["stateMachineArn"]
 	walkRequest.Input["_executionArn"], walkRequest.Input["_executionName"] = pend.ExecARN, first(rec, "name")
 	walkRequest.Input["_executionInput"] = parseJSON(first(rec, "input"))
-	walkRequest.Input["_executionStartTime"] = p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)
+	walkRequest.Input["_executionStartTime"] = time.Unix(int64(toFloat(rec["startDate"])), 0).UTC().Format(time.RFC3339)
+	walkRequest.Input["_executionRoleArn"] = rec["roleArn"]
+	walkRequest.Input["_executionRedriveCount"] = rec["redriveCount"]
 	retrying := false
 	if !ok {
 		failure := stateFailure{name: first(req.Input, "error", "Error"), cause: first(req.Input, "cause", "Cause")}
@@ -1216,7 +1231,22 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 			definition, from, data, retrying = string(def), "", pend.StateInput, true
 		}
 		if !retrying {
-			next, out, caught := catchTask(st, failure, pend.StateInput)
+			var next string
+			var out any
+			var caught, valid bool
+			if isJSONata {
+				next, out, caught, valid = catchJSONata(st, failure, pend.StateInput, jsonataContext(&walkRequest, pend.StateName, nil), pend.Variables, p.deps.Rand)
+				if !valid {
+					failure = stateFailure{name: "States.QueryEvaluationError", cause: "States.QueryEvaluationError"}
+					caught = false
+				}
+			} else {
+				next, out, caught = catchTask(st, failure, pend.StateInput)
+				if caught && !applyCatchAssignments(st, failure, pend.StateInput, jsonataContext(&walkRequest, pend.StateName, nil), pend.Variables, p.deps.Rand) {
+					failure = stateFailure{name: "States.QueryEvaluationError", cause: "States.QueryEvaluationError"}
+					caught = false
+				}
+			}
 			if caught && next == "" {
 				failure = stateFailure{name: "States.Runtime", cause: "States.Runtime"}
 			}
@@ -1234,18 +1264,42 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 		var valid bool
 		data, valid = applyJSONataState(st, pend.StateInput, data, jsonataContext(&walkRequest, pend.StateName, nil), pend.Variables, p.deps.Rand)
 		if !valid {
-			rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", "States.QueryEvaluationError", "States.QueryEvaluationError", float64(now)
+			failure := stateFailure{name: "States.QueryEvaluationError", cause: "States.QueryEvaluationError"}
+			if pend.Retries == nil {
+				pend.Retries = map[int]int{}
+			}
+			if retryTask(st, failure.name, pend.Retries) {
+				sm["StartAt"] = pend.StateName
+				def, _ := json.Marshal(sm)
+				definition, from, data, retrying = string(def), "", pend.StateInput, true
+			} else if next, out, caught, catchValid := catchJSONata(st, failure, pend.StateInput, jsonataContext(&walkRequest, pend.StateName, nil), pend.Variables, p.deps.Rand); caught && catchValid && next != "" {
+				sm["StartAt"] = next
+				def, _ := json.Marshal(sm)
+				definition, from, data = string(def), "", out
+			} else {
+				rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", failure.name, failure.cause, float64(now)
+				nb, _ := json.Marshal(rec)
+				_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
+				return &spi.Response{Output: map[string]any{}}, nil
+			}
+		}
+	} else {
+		result := data
+		out, valid := applyStateResult(st, pend.StateInput, result, p.deps.Rand)
+		failure := "States.Runtime"
+		if valid {
+			failure = "States.QueryEvaluationError"
+			valid = applyJSONataAssignments(jsonataScope{
+				input: pend.StateInput, result: result, hasResult: true, context: jsonataContext(&walkRequest, pend.StateName, nil), variables: pend.Variables, random: p.deps.Rand,
+			}, pend.Variables, st)
+		}
+		if !valid {
+			rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", failure, failure, float64(now)
 			nb, _ := json.Marshal(rec)
 			_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
 			return &spi.Response{Output: map[string]any{}}, nil
 		}
-	} else if out, valid := applyStateResult(st, pend.StateInput, data, p.deps.Rand); valid {
 		data = out
-	} else {
-		rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", "States.Runtime", "States.Runtime", float64(now)
-		nb, _ := json.Marshal(rec)
-		_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
-		return &spi.Response{Output: map[string]any{}}, nil
 	}
 	if !retrying && !isJSONata {
 		if output, valid := applyDataPath(st, "OutputPath", data); valid {
@@ -1343,6 +1397,7 @@ walkLoop:
 		}
 		isJSONata := queryLanguage == "JSONata"
 		stateContext := jsonataContext(req, cur, nil)
+		stateContext["State"].(map[string]any)["EnteredTime"] = p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)
 		if !isJSONata {
 			data, ok = applyDataPath(st, "InputPath", data)
 			if !ok {
@@ -1351,6 +1406,7 @@ walkLoop:
 		}
 		typ, _ := st["Type"].(string)
 		hist = append(hist, map[string]any{"type": typ + "StateEntered", "id": hop + 1, "name": cur})
+		jsonataOutputApplied := false
 		switch typ {
 		case "Pass":
 			if isJSONata {
@@ -1379,8 +1435,29 @@ walkLoop:
 			}
 			return walkResult{out: data, status: "SUCCEEDED", hist: hist}
 		case "Fail":
-			cause, _ := st["Cause"].(string)
-			errorName, _ := st["Error"].(string)
+			resolve := func(key string) (string, bool) {
+				value := st[key]
+				if isJSONata {
+					var valid bool
+					value, valid = evalJSONataValue(value, jsonataScope{input: rawInput, context: stateContext, variables: variables, random: p.deps.Rand})
+					if !valid {
+						return "", false
+					}
+				} else if path := first(st, key+"Path"); path != "" {
+					if strings.HasPrefix(path, "States.") {
+						value, _ = evalIntrinsic(path, rawInput, nil, p.deps.Rand)
+					} else {
+						value = jsonPath(rawInput, path)
+					}
+				}
+				text, valid := value.(string)
+				return text, valid || value == nil
+			}
+			errorName, errorValid := resolve("Error")
+			cause, causeValid := resolve("Cause")
+			if !errorValid || !causeValid {
+				return walkResult{out: data, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
+			}
 			if errorName == "" {
 				errorName = "States.TaskFailed"
 			}
@@ -1389,18 +1466,24 @@ walkLoop:
 			}
 			return walkResult{out: data, status: "FAILED", cause: cause, errorName: errorName, hist: hist}
 		case "Wait":
+			if isJSONata {
+				if value, exists := st["Seconds"]; exists {
+					resolved, valid := evalJSONataValue(value, jsonataScope{input: rawInput, context: stateContext, variables: variables, random: p.deps.Rand})
+					seconds, numeric := exactNumber(resolved)
+					if !valid || !numeric || seconds != math.Trunc(seconds) || seconds < 0 || seconds > 99999999 {
+						return walkResult{out: data, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
+					}
+				} else if value, exists := st["Timestamp"]; exists {
+					resolved, valid := evalJSONataValue(value, jsonataScope{input: rawInput, context: stateContext, variables: variables, random: p.deps.Rand})
+					timestamp, stringValue := resolved.(string)
+					_, parseErr := time.Parse(time.RFC3339, timestamp)
+					if !valid || !stringValue || parseErr != nil || !strings.Contains(timestamp, "T") || !strings.HasSuffix(timestamp, "Z") {
+						return walkResult{out: data, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
+					}
+				}
+			}
 		case "Task":
 			res := first(st, "Resource")
-			taskReq := req
-			if _, exists := st["Credentials"]; exists {
-				identity, valid := taskIdentity(st, data, req.Identity, p.deps.Rand)
-				if !valid {
-					return walkResult{out: data, status: "FAILED", cause: "States.Permissions", errorName: "States.Permissions", hist: hist}
-				}
-				copy := *req
-				copy.Identity = identity
-				taskReq = &copy
-			}
 			callback := strings.HasSuffix(res, ".waitForTaskToken")
 			token := ""
 			var taskContext map[string]any
@@ -1408,69 +1491,115 @@ walkLoop:
 				token = p.deps.Rand.Hex(16)
 				taskContext = map[string]any{"Task": map[string]any{"Token": token}}
 			}
-			payload := taskPayload(st, data, taskContext, p.deps.Rand)
-			if isJSONata {
-				var valid bool
-				payload, valid = evalJSONataValue(st["Arguments"], jsonataScope{
-					input: rawInput, context: jsonataContext(req, cur, taskContext), variables: variables, random: p.deps.Rand,
-				})
-				if _, configured := st["Arguments"]; !configured {
-					payload, valid = rawInput, true
-				}
-				if !valid {
-					return walkResult{out: data, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
-				}
-			}
-			if strings.Contains(res, ":activity:") {
-				tok := p.deps.Rand.Hex(16)
-				return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
-					Token: tok, ActivityARN: res, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Variables: variables,
-				}}
-			}
 			if retries[cur] == nil {
 				retries[cur] = map[int]int{}
 			}
 			for {
-				out, err, errorPrefix, sdk, supported := p.invokeTask(ctx, taskReq, res, payload)
-				if !supported {
-					return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
+				setJSONataRetryCount(stateContext, retries[cur])
+				payload := taskPayload(st, data, taskContext, p.deps.Rand)
+				failure := stateFailure{}
+				taskReq := req
+				if _, exists := st["Credentials"]; exists {
+					var scope *jsonataScope
+					if isJSONata {
+						scope = &jsonataScope{input: rawInput, context: stateContext, variables: variables, random: p.deps.Rand}
+					}
+					identity, valid := taskIdentity(st, data, req.Identity, p.deps.Rand, scope)
+					if valid {
+						copy := *req
+						copy.Identity = identity
+						taskReq = &copy
+					} else if isJSONata {
+						failure = stateFailure{name: "States.QueryEvaluationError", cause: "States.QueryEvaluationError"}
+					} else {
+						failure = stateFailure{name: "States.Permissions", cause: "States.Permissions"}
+					}
 				}
-				if err == nil {
-					if callback {
+				if isJSONata {
+					var valid bool
+					payload, valid = evalJSONataValue(st["Arguments"], jsonataScope{
+						input: rawInput, context: mergeJSONataContext(stateContext, taskContext), variables: variables, random: p.deps.Rand,
+					})
+					if _, configured := st["Arguments"]; !configured {
+						payload, valid = rawInput, true
+					}
+					if !valid {
+						failure = stateFailure{name: "States.QueryEvaluationError", cause: "States.QueryEvaluationError"}
+					}
+				}
+				if failure.name == "" && strings.Contains(res, ":activity:") {
+					tok := p.deps.Rand.Hex(16)
+					return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
+						Token: tok, ActivityARN: res, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Variables: variables,
+					}}
+				}
+				if failure.name == "" {
+					out, err, errorPrefix, sdk, supported := p.invokeTask(ctx, taskReq, res, payload)
+					if !supported {
+						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
+					}
+					if err != nil {
+						failure = taskFailure(errorPrefix, sdk, err)
+					} else if callback {
 						return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
 							Token: token, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Variables: variables, Callback: true,
 						}}
-					}
-					data, ok = out, true
-					if !isJSONata {
+					} else if isJSONata {
+						data, ok = applyJSONataState(st, rawInput, out, stateContext, variables, p.deps.Rand)
+						if ok {
+							jsonataOutputApplied = true
+							break
+						}
+						failure = stateFailure{name: "States.QueryEvaluationError", cause: "States.QueryEvaluationError"}
+					} else {
 						data, ok = applyStateResult(st, rawInput, out, p.deps.Rand)
+						if !ok {
+							return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
+						}
+						if applyJSONataAssignments(jsonataScope{
+							input: rawInput, result: out, hasResult: true, context: stateContext, variables: variables, random: p.deps.Rand,
+						}, variables, st) {
+							break
+						}
+						failure = stateFailure{name: "States.QueryEvaluationError", cause: "States.QueryEvaluationError"}
 					}
-					if !ok {
-						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
-					}
-					break
 				}
-				failure := taskFailure(errorPrefix, sdk, err)
 				// ponytail: retry delays are instant like Wait states; add virtual scheduling when timing fidelity is required.
 				if retryTask(st, failure.name, retries[cur]) {
 					continue
 				}
-				next, out, caught := catchTask(st, failure, rawInput)
+				var next string
+				var out any
+				var caught, valid bool
+				if isJSONata {
+					next, out, caught, valid = catchJSONata(st, failure, rawInput, stateContext, variables, p.deps.Rand)
+					if !valid {
+						return walkResult{out: data, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
+					}
+				} else {
+					next, out, caught = catchTask(st, failure, rawInput)
+					if caught && !applyCatchAssignments(st, failure, rawInput, stateContext, variables, p.deps.Rand) {
+						return walkResult{out: data, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
+					}
+				}
 				if !caught {
 					return walkResult{out: data, status: "FAILED", cause: failure.cause, errorName: failure.name, hist: hist}
 				}
 				if next == "" {
 					return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 				}
-				data, ok = applyDataPath(st, "OutputPath", out)
-				if !ok {
-					return walkResult{out: rawInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+				data = out
+				if !isJSONata {
+					data, ok = applyDataPath(st, "OutputPath", out)
+					if !ok {
+						return walkResult{out: rawInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+					}
 				}
 				cur = next
 				continue walkLoop
 			}
 		case "Choice":
-			next := choiceNext(st, data)
+			next, matchedChoice := selectedChoice(st, data)
 			if isJSONata {
 				var valid bool
 				next, valid = jsonataChoiceNext(st, rawInput, stateContext, variables, p.deps.Rand)
@@ -1482,6 +1611,13 @@ walkLoop:
 				return walkResult{out: data, status: "FAILED", cause: "States.NoChoiceMatched", hist: hist}
 			}
 			if !isJSONata {
+				owners := []map[string]any{st}
+				if matchedChoice != nil {
+					owners = append(owners, matchedChoice)
+				}
+				if !applyJSONataAssignments(jsonataScope{input: rawInput, context: stateContext, variables: variables, random: p.deps.Rand}, variables, owners...) {
+					return walkResult{out: rawInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
+				}
 				data, ok = applyDataPath(st, "OutputPath", data)
 				if !ok {
 					return walkResult{out: rawInput, status: "FAILED", cause: "States.Runtime", hist: hist}
@@ -1499,14 +1635,15 @@ walkLoop:
 				retries[cur] = map[int]int{}
 			}
 			for {
+				setJSONataRetryCount(stateContext, retries[cur])
 				branches, _ := st["Branches"].([]any)
 				var results []any
 				var failed *walkResult
 				for _, br := range branches {
 					bm, _ := br.(map[string]any)
-					if isJSONata && bm["QueryLanguage"] == nil {
+					if bm["QueryLanguage"] == nil {
 						bm = maps.Clone(bm)
-						bm["QueryLanguage"] = "JSONata"
+						bm["QueryLanguage"] = machineQueryLanguage
 					}
 					bdef, _ := json.Marshal(bm)
 					wr := p.walk(ctx, req, string(bdef), "", branchInput, nil, maps.Clone(variables))
@@ -1518,16 +1655,34 @@ walkLoop:
 					results = append(results, wr.out)
 				}
 				if failed == nil {
-					data, ok = results, true
-					if !isJSONata {
-						data, ok = applyStateResult(st, stateInput, results, p.deps.Rand)
-					}
-					if !ok {
+					if isJSONata {
+						data, ok = applyJSONataState(st, stateInput, results, stateContext, variables, p.deps.Rand)
+						if ok {
+							jsonataOutputApplied = true
+							break
+						}
+						failed = &walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError"}
+					} else if data, ok = applyStateResult(st, stateInput, results, p.deps.Rand); !ok {
 						return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+					} else if applyJSONataAssignments(jsonataScope{
+						input: stateInput, result: results, hasResult: true, context: stateContext, variables: variables, random: p.deps.Rand,
+					}, variables, st) {
+						break
+					} else {
+						failed = &walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError"}
 					}
-					break
 				}
-				next, out, retry, caught := recoverState(st, *failed, stateInput, retries[cur])
+				var next string
+				var out any
+				var retry, caught, valid bool
+				if isJSONata {
+					next, out, retry, caught, valid = recoverJSONata(st, *failed, stateInput, stateContext, variables, p.deps.Rand, retries[cur])
+					if !valid {
+						return walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
+					}
+				} else {
+					next, out, retry, caught = recoverState(st, *failed, stateInput, retries[cur])
+				}
 				if retry {
 					continue
 				}
@@ -1535,9 +1690,19 @@ walkLoop:
 					if next == "" {
 						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 					}
-					data, ok = applyDataPath(st, "OutputPath", out)
-					if !ok {
-						return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+					failureName := failed.errorName
+					if failureName == "" {
+						failureName = "States.TaskFailed"
+					}
+					if !isJSONata && !applyCatchAssignments(st, stateFailure{name: failureName, cause: failed.cause}, stateInput, stateContext, variables, p.deps.Rand) {
+						return walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
+					}
+					data = out
+					if !isJSONata {
+						data, ok = applyDataPath(st, "OutputPath", out)
+						if !ok {
+							return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+						}
 					}
 					cur = next
 					continue walkLoop
@@ -1547,9 +1712,16 @@ walkLoop:
 			}
 		case "Map":
 			stateInput := rawInput
-			arr, source, ok := p.mapItems(ctx, req, st, data)
+			var mapScope *jsonataScope
+			if isJSONata {
+				mapScope = &jsonataScope{input: rawInput, context: stateContext, variables: variables, random: p.deps.Rand}
+			}
+			arr, source, ok := p.mapItems(ctx, req, st, data, mapScope)
 			if isJSONata {
 				items := any(data)
+				if _, hasReader := st["ItemReader"]; hasReader {
+					items = arr
+				}
 				if configured, exists := st["Items"]; exists {
 					items, ok = evalJSONataValue(configured, jsonataScope{input: rawInput, context: stateContext, variables: variables, random: p.deps.Rand})
 				}
@@ -1563,7 +1735,7 @@ walkLoop:
 				}
 				return walkResult{out: data, status: "FAILED", cause: failure, errorName: failure, hist: hist}
 			}
-			arr, ok = batchMapItems(st, data, arr, p.deps.Rand)
+			arr, ok = batchMapItems(st, data, arr, p.deps.Rand, mapScope)
 			if !ok {
 				return walkResult{out: data, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
 			}
@@ -1571,9 +1743,9 @@ walkLoop:
 			if iter == nil {
 				iter, _ = st["ItemProcessor"].(map[string]any)
 			}
-			if isJSONata && iter["QueryLanguage"] == nil {
+			if iter["QueryLanguage"] == nil {
 				iter = maps.Clone(iter)
-				iter["QueryLanguage"] = "JSONata"
+				iter["QueryLanguage"] = machineQueryLanguage
 			}
 			idef, _ := json.Marshal(iter)
 			processorConfig, _ := iter["ProcessorConfig"].(map[string]any)
@@ -1582,14 +1754,15 @@ walkLoop:
 			if hasResultWriter && !distributed {
 				return walkResult{out: data, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
 			}
-			selector, _ := st["ItemSelector"].(map[string]any)
+			selector := st["ItemSelector"]
 			if selector == nil && !isJSONata {
-				selector, _ = st["Parameters"].(map[string]any)
+				selector = st["Parameters"]
 			}
 			if retries[cur] == nil {
 				retries[cur] = map[int]int{}
 			}
 			for {
+				setJSONataRetryCount(stateContext, retries[cur])
 				var results []any
 				var itemResults []mapItemResult
 				var failed *walkResult
@@ -1606,11 +1779,11 @@ walkLoop:
 					itemContext := map[string]any{"Map": map[string]any{"Item": map[string]any{
 						"Index": float64(index), "Value": item, "Source": source,
 					}}}
-					if selector != nil && !isJSONata {
-						iterationInput = applyParams(selector, data, itemContext, p.deps.Rand)
+					if selected, valid := selector.(map[string]any); valid && !isJSONata {
+						iterationInput = applyParams(selected, data, itemContext, p.deps.Rand)
 					} else if selector != nil {
 						iterationInput, ok = evalJSONataValue(selector, jsonataScope{
-							input: rawInput, context: jsonataContext(req, cur, itemContext), variables: variables, random: p.deps.Rand,
+							input: rawInput, context: mergeJSONataContext(stateContext, itemContext), variables: variables, random: p.deps.Rand,
 						})
 						if !ok {
 							return walkResult{out: data, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
@@ -1657,7 +1830,7 @@ walkLoop:
 					if hasResultWriter {
 						var written int
 						var writerOK bool
-						mapOutput, written, writerOK = p.writeMapResults(ctx, req, st, data, itemResults, mapRunARN)
+						mapOutput, written, writerOK = p.writeMapResults(ctx, req, st, data, itemResults, mapRunARN, mapScope)
 						counts["resultsWritten"] = float64(written)
 						if !writerOK {
 							status = "FAILED"
@@ -1673,16 +1846,34 @@ walkLoop:
 					if mapOutput == nil {
 						mapOutput = []any{}
 					}
-					data, ok = mapOutput, true
-					if !isJSONata {
-						data, ok = applyStateResult(st, stateInput, mapOutput, p.deps.Rand)
-					}
-					if !ok {
+					if isJSONata {
+						data, ok = applyJSONataState(st, stateInput, mapOutput, stateContext, variables, p.deps.Rand)
+						if ok {
+							jsonataOutputApplied = true
+							break
+						}
+						failed = &walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError"}
+					} else if data, ok = applyStateResult(st, stateInput, mapOutput, p.deps.Rand); !ok {
 						return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+					} else if applyJSONataAssignments(jsonataScope{
+						input: stateInput, result: mapOutput, hasResult: true, context: stateContext, variables: variables, random: p.deps.Rand,
+					}, variables, st) {
+						break
+					} else {
+						failed = &walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError"}
 					}
-					break
 				}
-				next, out, retry, caught := recoverState(st, *failed, stateInput, retries[cur])
+				var next string
+				var out any
+				var retry, caught, valid bool
+				if isJSONata {
+					next, out, retry, caught, valid = recoverJSONata(st, *failed, stateInput, stateContext, variables, p.deps.Rand, retries[cur])
+					if !valid {
+						return walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
+					}
+				} else {
+					next, out, retry, caught = recoverState(st, *failed, stateInput, retries[cur])
+				}
 				if retry {
 					continue
 				}
@@ -1690,9 +1881,19 @@ walkLoop:
 					if next == "" {
 						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 					}
-					data, ok = applyDataPath(st, "OutputPath", out)
-					if !ok {
-						return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+					failureName := failed.errorName
+					if failureName == "" {
+						failureName = "States.TaskFailed"
+					}
+					if !isJSONata && !applyCatchAssignments(st, stateFailure{name: failureName, cause: failed.cause}, stateInput, stateContext, variables, p.deps.Rand) {
+						return walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
+					}
+					data = out
+					if !isJSONata {
+						data, ok = applyDataPath(st, "OutputPath", out)
+						if !ok {
+							return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+						}
 					}
 					cur = next
 					continue walkLoop
@@ -1704,9 +1905,14 @@ walkLoop:
 			return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 		}
 		if isJSONata {
-			data, ok = applyJSONataState(st, rawInput, data, stateContext, variables, p.deps.Rand)
+			if !jsonataOutputApplied {
+				data, ok = applyJSONataState(st, rawInput, data, stateContext, variables, p.deps.Rand)
+			}
 		} else {
 			data, ok = applyDataPath(st, "OutputPath", data)
+			if ok && (typ == "Pass" || typ == "Wait") {
+				ok = applyJSONataAssignments(jsonataScope{input: rawInput, context: stateContext, variables: variables, random: p.deps.Rand}, variables, st)
+			}
 		}
 		if !ok {
 			failure := "States.Runtime"
@@ -1788,6 +1994,46 @@ func catchTask(st map[string]any, failure stateFailure, input any) (string, any,
 	return "", input, false
 }
 
+func catchJSONata(state map[string]any, failure stateFailure, input any, context map[string]any, variables map[string]any, random spi.Rand) (string, any, bool, bool) {
+	errorOutput := map[string]any{"Error": failure.name, "Cause": failure.cause}
+	for _, raw := range asSlice(state["Catch"]) {
+		catcher, _ := raw.(map[string]any)
+		if !matchesError(catcher["ErrorEquals"], failure.name) {
+			continue
+		}
+		scope := jsonataScope{
+			input: input, errorOutput: errorOutput, hasErrorOutput: true,
+			context: context, variables: variables, random: random,
+		}
+		output := input
+		var ok bool
+		if configured, exists := catcher["Output"]; exists {
+			output, ok = evalJSONataValue(configured, scope)
+			if !ok {
+				return "", input, true, false
+			}
+		}
+		if !applyJSONataAssignments(scope, variables, catcher) {
+			return "", input, true, false
+		}
+		return first(catcher, "Next"), output, true, true
+	}
+	return "", input, false, true
+}
+
+func applyCatchAssignments(state map[string]any, failure stateFailure, input any, context map[string]any, variables map[string]any, random spi.Rand) bool {
+	for _, raw := range asSlice(state["Catch"]) {
+		catcher, _ := raw.(map[string]any)
+		if matchesError(catcher["ErrorEquals"], failure.name) {
+			return applyJSONataAssignments(jsonataScope{
+				input: input, errorOutput: map[string]any{"Error": failure.name, "Cause": failure.cause}, hasErrorOutput: true,
+				context: context, variables: variables, random: random,
+			}, variables, catcher)
+		}
+	}
+	return true
+}
+
 func recoverState(st map[string]any, failed walkResult, input any, attempts map[int]int) (string, any, bool, bool) {
 	name := failed.errorName
 	if name == "" {
@@ -1799,6 +2045,19 @@ func recoverState(st map[string]any, failed walkResult, input any, attempts map[
 	}
 	next, out, caught := catchTask(st, failure, input)
 	return next, out, false, caught
+}
+
+func recoverJSONata(state map[string]any, failed walkResult, input any, context map[string]any, variables map[string]any, random spi.Rand, attempts map[int]int) (string, any, bool, bool, bool) {
+	name := failed.errorName
+	if name == "" {
+		name = "States.TaskFailed"
+	}
+	failure := stateFailure{name: name, cause: failed.cause}
+	if retryTask(state, name, attempts) {
+		return "", input, true, false, true
+	}
+	next, out, caught, valid := catchJSONata(state, failure, input, context, variables, random)
+	return next, out, false, caught, valid
 }
 
 func matchesError(raw any, name string) bool {
@@ -1873,17 +2132,18 @@ func applyDataPath(state map[string]any, key string, input any) (any, bool) {
 
 type jsonataScope struct {
 	input, result, errorOutput any
+	hasResult, hasErrorOutput  bool
 	context                    map[string]any
 	variables                  map[string]any
 	random                     spi.Rand
 }
 
 func jsonataContext(req *spi.Request, state string, extra map[string]any) map[string]any {
+	machineARN := first(req.Input, "_stateMachineArn", "stateMachineArn", "StateMachineArn")
 	context := map[string]any{
-		"State": map[string]any{"Name": state},
+		"State": map[string]any{"Name": state, "RetryCount": 0.0},
 		"StateMachine": map[string]any{
-			"Id":   first(req.Input, "stateMachineArn", "StateMachineArn"),
-			"Name": baseSMName(first(req.Input, "stateMachineArn", "StateMachineArn")),
+			"Id": machineARN, "Name": baseSMName(machineARN),
 		},
 	}
 	execution := map[string]any{}
@@ -1899,6 +2159,13 @@ func jsonataContext(req *spi.Request, state string, extra map[string]any) map[st
 	if start := first(req.Input, "_executionStartTime"); start != "" {
 		execution["StartTime"] = start
 	}
+	if role := first(req.Input, "_executionRoleArn"); role != "" {
+		execution["RoleArn"] = role
+	}
+	execution["RedriveCount"] = toFloat(req.Input["_executionRedriveCount"])
+	if redrive := first(req.Input, "_executionRedriveTime"); redrive != "" {
+		execution["RedriveTime"] = redrive
+	}
 	if len(execution) != 0 {
 		context["Execution"] = execution
 	}
@@ -1906,6 +2173,22 @@ func jsonataContext(req *spi.Request, state string, extra map[string]any) map[st
 		context[key] = value
 	}
 	return context
+}
+
+func setJSONataRetryCount(context map[string]any, attempts map[int]int) {
+	count := 0
+	for _, attempts := range attempts {
+		count += attempts
+	}
+	context["State"].(map[string]any)["RetryCount"] = float64(count)
+}
+
+func mergeJSONataContext(context, extra map[string]any) map[string]any {
+	merged := maps.Clone(context)
+	for key, value := range extra {
+		merged[key] = value
+	}
+	return merged
 }
 
 func evalJSONataValue(value any, scope jsonataScope) (any, bool) {
@@ -1923,10 +2206,10 @@ func evalJSONataValue(value any, scope jsonataScope) (any, bool) {
 		compiled.SetMaxDepth(100)
 		compiled.SetMaxRange(10000)
 		states := map[string]any{"input": scope.input, "context": scope.context}
-		if scope.result != nil {
+		if scope.hasResult {
 			states["result"] = scope.result
 		}
-		if scope.errorOutput != nil {
+		if scope.hasErrorOutput {
 			states["errorOutput"] = scope.errorOutput
 		}
 		bindings := maps.Clone(scope.variables)
@@ -2010,11 +2293,7 @@ func evalJSONataValue(value any, scope jsonataScope) (any, bool) {
 			}
 			return values, nil
 		})
-		input, err := json.Marshal(scope.input)
-		if err != nil {
-			return nil, false
-		}
-		result, err := compiled.Evaluate(input, bindings)
+		result, err := compiled.Evaluate([]byte("{}"), bindings)
 		if err != nil {
 			return nil, false
 		}
@@ -2050,7 +2329,7 @@ func evalJSONataValue(value any, scope jsonataScope) (any, bool) {
 }
 
 func applyJSONataState(state map[string]any, input, result any, context map[string]any, variables map[string]any, random spi.Rand) (any, bool) {
-	scope := jsonataScope{input: input, result: result, context: context, variables: variables, random: random}
+	scope := jsonataScope{input: input, result: result, hasResult: true, context: context, variables: variables, random: random}
 	output := result
 	var ok bool
 	if configured, exists := state["Output"]; exists {
@@ -2059,22 +2338,28 @@ func applyJSONataState(state map[string]any, input, result any, context map[stri
 			return input, false
 		}
 	}
+	return output, applyJSONataAssignments(scope, variables, state)
+}
+
+func applyJSONataAssignments(scope jsonataScope, variables map[string]any, owners ...map[string]any) bool {
 	assignments := map[string]any{}
-	if assign, exists := state["Assign"].(map[string]any); exists {
+	for _, owner := range owners {
+		assign, _ := owner["Assign"].(map[string]any)
 		for name, expression := range assign {
 			if strings.ContainsAny(name, ".[]") || name == "states" {
-				return input, false
+				return false
 			}
-			assignments[name], ok = evalJSONataValue(expression, scope)
+			value, ok := evalJSONataValue(expression, scope)
 			if !ok {
-				return input, false
+				return false
 			}
+			assignments[name] = value
 		}
 	}
 	for name, value := range assignments {
 		variables[name] = value
 	}
-	return output, true
+	return true
 }
 
 func taskPayload(st map[string]any, data any, context map[string]any, random spi.Rand) any {
@@ -2086,7 +2371,7 @@ func taskPayload(st map[string]any, data any, context map[string]any, random spi
 	return p
 }
 
-func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]any, data any) ([]any, string, bool) {
+func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]any, data any, scope *jsonataScope) ([]any, string, bool) {
 	reader, hasReader := state["ItemReader"].(map[string]any)
 	if !hasReader {
 		items := data
@@ -2100,8 +2385,23 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 		return nil, "", false
 	}
 	parameters, _ := reader["Parameters"].(map[string]any)
+	resolved := any(applyParams(parameters, data, nil, p.deps.Rand))
+	if scope != nil {
+		var valid bool
+		resolved, valid = evalJSONataValue(reader["Arguments"], *scope)
+		if _, configured := reader["Arguments"]; !configured {
+			return nil, "", false
+		}
+		if !valid {
+			return nil, "", false
+		}
+	}
+	input, valid := resolved.(map[string]any)
+	if !valid {
+		return nil, "", false
+	}
 	response, err := s3.New(p.deps).Invoke(ctx, &spi.Request{
-		Identity: req.Identity, Operation: "GetObject", Input: applyParams(parameters, data, nil, p.deps.Rand),
+		Identity: req.Identity, Operation: "GetObject", Input: input,
 	})
 	if err != nil || response == nil || response.Stream == nil {
 		return nil, "", false
@@ -2119,14 +2419,17 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 	switch inputType {
 	case "JSON":
 		var items []any
-		return items, inputType, json.Unmarshal(body, &items) == nil
+		if json.Unmarshal(body, &items) != nil {
+			return nil, "", false
+		}
+		return limitReaderItems(items, inputType, config, data, scope)
 	case "JSONL":
 		decoder := json.NewDecoder(strings.NewReader(string(body)))
 		items := []any{}
 		for {
 			var item any
 			if err := decoder.Decode(&item); errors.Is(err, io.EOF) {
-				return items, inputType, true
+				return limitReaderItems(items, inputType, config, data, scope)
 			} else if err != nil {
 				return nil, "", false
 			}
@@ -2165,7 +2468,7 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			}
 			items = append(items, item)
 		}
-		return items, inputType, true
+		return limitReaderItems(items, inputType, config, data, scope)
 	case "PARQUET":
 		file, err := parquet.OpenFile(bytes.NewReader(body), int64(len(body)))
 		if err != nil {
@@ -2189,13 +2492,41 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 				items = append(items, item)
 			}
 		}
-		return items, inputType, true
+		return limitReaderItems(items, inputType, config, data, scope)
 	default:
 		return nil, "", false
 	}
 }
 
-func batchMapItems(state map[string]any, data any, items []any, random spi.Rand) ([]any, bool) {
+func limitReaderItems(items []any, source string, config map[string]any, data any, scope *jsonataScope) ([]any, string, bool) {
+	value, hasValue := config["MaxItems"]
+	path, hasPath := config["MaxItemsPath"].(string)
+	if !hasValue && !hasPath {
+		return items, source, true
+	}
+	if scope != nil {
+		var valid bool
+		value, valid = evalJSONataValue(value, *scope)
+		if !valid || hasPath {
+			return nil, "", false
+		}
+	} else if hasValue == hasPath {
+		return nil, "", false
+	} else if hasPath {
+		value = jsonPath(data, path)
+	}
+	maximum, numeric := exactNumber(value)
+	limit := int(maximum)
+	if !numeric || maximum != math.Trunc(maximum) || limit < 1 {
+		return nil, "", false
+	}
+	if limit < len(items) {
+		items = items[:limit]
+	}
+	return items, source, true
+}
+
+func batchMapItems(state map[string]any, data any, items []any, random spi.Rand, scope *jsonataScope) ([]any, bool) {
 	batcher, exists := state["ItemBatcher"].(map[string]any)
 	if !exists {
 		return items, true
@@ -2203,6 +2534,14 @@ func batchMapItems(state map[string]any, data any, items []any, random spi.Rand)
 	resolveLimit := func(valueKey, pathKey string) (int, bool) {
 		value, hasValue := batcher[valueKey]
 		path, hasPath := batcher[pathKey].(string)
+		if scope != nil && hasValue {
+			var valid bool
+			value, valid = evalJSONataValue(value, *scope)
+			if !valid {
+				return 0, false
+			}
+			hasValue = true
+		}
 		if hasValue == hasPath {
 			return 0, false
 		}
@@ -2231,11 +2570,20 @@ func batchMapItems(state map[string]any, data any, items []any, random spi.Rand)
 	}
 	var batchInput map[string]any
 	if raw, configured := batcher["BatchInput"]; configured {
-		input, ok := raw.(map[string]any)
-		if !ok {
-			return nil, false
+		if scope != nil {
+			resolved, valid := evalJSONataValue(raw, *scope)
+			var ok bool
+			batchInput, ok = resolved.(map[string]any)
+			if !valid || !ok {
+				return nil, false
+			}
+		} else {
+			input, ok := raw.(map[string]any)
+			if !ok {
+				return nil, false
+			}
+			batchInput = applyParams(input, data, nil, random)
 		}
-		batchInput = applyParams(input, data, nil, random)
 	}
 	makeBatch := func(values []any) map[string]any {
 		batch := map[string]any{"Items": append([]any(nil), values...)}
@@ -2324,7 +2672,7 @@ func (p *Pack) storeMapItemExecution(ctx context.Context, req *spi.Request, mapR
 	_ = p.col(req, "ex").Put(ctx, first(metadata, "ExecutionArn"), encoded)
 }
 
-func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[string]any, data any, items []mapItemResult, mapRunARN string) (any, int, bool) {
+func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[string]any, data any, items []mapItemResult, mapRunARN string, scope *jsonataScope) (any, int, bool) {
 	writer, ok := state["ResultWriter"].(map[string]any)
 	if !ok || len(writer) == 0 {
 		return nil, 0, false
@@ -2388,6 +2736,16 @@ func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[
 		return string(encoded), 0, valid
 	}
 	resolved := applyParams(parameters, data, nil, p.deps.Rand)
+	if scope != nil {
+		value, valid := evalJSONataValue(writer["Arguments"], *scope)
+		if !valid {
+			return nil, 0, false
+		}
+		resolved, valid = value.(map[string]any)
+		if !valid {
+			return nil, 0, false
+		}
+	}
 	bucket, prefix := first(resolved, "Bucket"), strings.Trim(first(resolved, "Prefix"), "/")
 	if bucket == "" {
 		return nil, 0, false
@@ -2427,12 +2785,22 @@ func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[
 	return map[string]any{"MapRunArn": mapRunARN, "ResultWriterDetails": map[string]any{"Bucket": bucket, "Key": manifestKey}}, len(items), true
 }
 
-func taskIdentity(st map[string]any, data any, identity spi.Identity, random spi.Rand) (spi.Identity, bool) {
+func taskIdentity(st map[string]any, data any, identity spi.Identity, random spi.Rand, scope *jsonataScope) (spi.Identity, bool) {
 	credentials, ok := st["Credentials"].(map[string]any)
 	if !ok {
 		return identity, false
 	}
 	resolved := applyParams(credentials, data, nil, random)
+	if scope != nil {
+		value, valid := evalJSONataValue(credentials, *scope)
+		if !valid {
+			return identity, false
+		}
+		resolved, ok = value.(map[string]any)
+		if !ok {
+			return identity, false
+		}
+	}
 	roleARN := first(resolved, "RoleArn")
 	parts := strings.Split(roleARN, ":")
 	if !validRoleARN(roleARN) || len(parts) < 6 || parts[4] == "" {
@@ -3035,16 +3403,21 @@ func (p *Pack) invokeLambda(ctx context.Context, req *spi.Request, resource stri
 }
 
 func choiceNext(st map[string]any, data any) string {
+	next, _ := selectedChoice(st, data)
+	return next
+}
+
+func selectedChoice(st map[string]any, data any) (string, map[string]any) {
 	choices, _ := st["Choices"].([]any)
 	for _, c := range choices {
 		cm, _ := c.(map[string]any)
 		if matchChoice(cm, data) {
 			n, _ := cm["Next"].(string)
-			return n
+			return n, cm
 		}
 	}
 	d, _ := st["Default"].(string)
-	return d
+	return d, nil
 }
 
 func jsonataChoiceNext(state map[string]any, input any, context map[string]any, variables map[string]any, random spi.Rand) (string, bool) {
@@ -3069,22 +3442,8 @@ func jsonataChoiceNext(state map[string]any, input any, context map[string]any, 
 	if matched != nil {
 		assignments = append(assignments, matched)
 	}
-	pending := map[string]any{}
-	for _, owner := range assignments {
-		assign, _ := owner["Assign"].(map[string]any)
-		for name, expression := range assign {
-			if strings.ContainsAny(name, ".[]") || name == "states" {
-				return "", false
-			}
-			value, ok := evalJSONataValue(expression, scope)
-			if !ok {
-				return "", false
-			}
-			pending[name] = value
-		}
-	}
-	for name, value := range pending {
-		variables[name] = value
+	if !applyJSONataAssignments(scope, variables, assignments...) {
+		return "", false
 	}
 	if matched != nil {
 		return first(matched, "Next"), true
@@ -3520,7 +3879,7 @@ func validateDefinition(definition string, machineType ...string) []map[string]a
 	return diagnostics
 }
 
-func validateMachine(machine map[string]any, location, machineType string, diagnostics *[]map[string]any) {
+func validateMachine(machine map[string]any, location, machineType string, diagnostics *[]map[string]any, inheritedVariables ...map[string]struct{}) {
 	start, _ := machine["StartAt"].(string)
 	states, ok := machine["States"].(map[string]any)
 	add := func(code, message, path string) {
@@ -3539,6 +3898,34 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 	if _, exists := states[start]; start == "" || !exists {
 		add("MISSING_TRANSITION_TARGET", "StartAt must name a state.", "/StartAt")
 	}
+	outerVariables := map[string]struct{}{}
+	if len(inheritedVariables) != 0 {
+		outerVariables = inheritedVariables[0]
+	}
+	scopeVariables := map[string]struct{}{}
+	for stateName, raw := range states {
+		state, _ := raw.(map[string]any)
+		owners := []any{state}
+		owners = append(owners, asSlice(state["Choices"])...)
+		owners = append(owners, asSlice(state["Catch"])...)
+		for _, rawOwner := range owners {
+			owner, _ := rawOwner.(map[string]any)
+			assign, _ := owner["Assign"].(map[string]any)
+			for variable := range assign {
+				if !validVariableName(variable) || variable == "states" {
+					add("SCHEMA_VALIDATION_FAILED", "Assign contains an invalid variable name.", "/States/"+stateName+"/Assign/"+variable)
+				}
+				if _, shadows := outerVariables[variable]; shadows {
+					add("SCHEMA_VALIDATION_FAILED", "An inner scope cannot assign an outer variable.", "/States/"+stateName+"/Assign/"+variable)
+				}
+				scopeVariables[variable] = struct{}{}
+			}
+		}
+	}
+	visibleVariables := maps.Clone(outerVariables)
+	for variable := range scopeVariables {
+		visibleVariables[variable] = struct{}{}
+	}
 	for name, raw := range states {
 		state, ok := raw.(map[string]any)
 		if !ok {
@@ -3554,7 +3941,10 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 		}
 		isJSONata := stateQueryLanguage == "JSONata"
 		jsonataOnly := []string{"Arguments", "Output", "Items"}
-		jsonPathOnly := []string{"InputPath", "Parameters", "ResultSelector", "ResultPath", "OutputPath", "ItemsPath"}
+		jsonPathOnly := []string{
+			"InputPath", "Parameters", "ResultSelector", "ResultPath", "OutputPath", "ItemsPath", "SecondsPath", "TimestampPath", "ErrorPath", "CausePath",
+			"MaxConcurrencyPath", "ToleratedFailureCountPath", "ToleratedFailurePercentagePath", "TimeoutSecondsPath", "HeartbeatSecondsPath",
+		}
 		for _, field := range jsonataOnly {
 			if _, exists := state[field]; exists && !isJSONata {
 				add("SCHEMA_VALIDATION_FAILED", field+" requires JSONata.", "/States/"+name+"/"+field)
@@ -3570,6 +3960,41 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				if !validJSONataExpressions(value) {
 					add("SCHEMA_VALIDATION_FAILED", "JSONata expression is invalid or has malformed delimiters.", "/States/"+name+"/"+field)
 				}
+				if jsonataReferences(value, "$states.result") && !((typ == "Task" || typ == "Map" || typ == "Parallel") && (field == "Assign" || field == "Output")) {
+					add("SCHEMA_VALIDATION_FAILED", "$states.result is not available in this field.", "/States/"+name+"/"+field)
+				}
+				if jsonataReferences(value, "$states.errorOutput") && field != "Catch" {
+					add("SCHEMA_VALIDATION_FAILED", "$states.errorOutput is only available in Catch Assign or Output.", "/States/"+name+"/"+field)
+				}
+			}
+		}
+		if _, assigned := state["Assign"]; assigned && (typ == "Succeed" || typ == "Fail") {
+			add("SCHEMA_VALIDATION_FAILED", "Assign is not supported by terminal states.", "/States/"+name+"/Assign")
+		}
+		if _, output := state["Output"]; output && typ == "Fail" {
+			add("SCHEMA_VALIDATION_FAILED", "Fail does not support Output.", "/States/"+name+"/Output")
+		}
+		if typ == "Wait" {
+			configured := 0
+			for _, field := range []string{"Seconds", "Timestamp", "SecondsPath", "TimestampPath"} {
+				if _, exists := state[field]; exists {
+					configured++
+				}
+			}
+			if configured != 1 {
+				add("SCHEMA_VALIDATION_FAILED", "Wait must contain exactly one wait-time field.", "/States/"+name)
+			}
+		}
+		if typ == "Fail" {
+			_, errorDirect := state["Error"]
+			_, errorPath := state["ErrorPath"]
+			if errorDirect && errorPath {
+				add("SCHEMA_VALIDATION_FAILED", "Error and ErrorPath are mutually exclusive.", "/States/"+name)
+			}
+			_, causeDirect := state["Cause"]
+			_, causePath := state["CausePath"]
+			if causeDirect && causePath {
+				add("SCHEMA_VALIDATION_FAILED", "Cause and CausePath are mutually exclusive.", "/States/"+name)
 			}
 		}
 		if !supportedStateType(typ) {
@@ -3587,7 +4012,8 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			credentials, valid := raw.(map[string]any)
 			roleARN, static := credentials["RoleArn"].(string)
 			_, dynamic := credentials["RoleArn.$"].(string)
-			if !valid || static == dynamic || static && !validRoleARN(roleARN) {
+			jsonataRole := isJSONata && static && validJSONataExpressions(roleARN)
+			if !valid || isJSONata && (!jsonataRole || dynamic) || !isJSONata && (static == dynamic || static && !validRoleARN(roleARN)) {
 				add("SCHEMA_VALIDATION_FAILED", "Credentials must contain one valid RoleArn or RoleArn.$.", "/States/"+name+"/Credentials")
 			}
 		}
@@ -3615,6 +4041,17 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 		}
 		for i, raw := range asSlice(state["Catch"]) {
 			catcher, _ := raw.(map[string]any)
+			for field, value := range catcher {
+				if jsonataReferences(value, "$states.errorOutput") && field != "Assign" && field != "Output" {
+					add("SCHEMA_VALIDATION_FAILED", "$states.errorOutput is only available in Catch Assign or Output.", fmt.Sprintf("/States/%s/Catch/%d/%s", name, i, field))
+				}
+			}
+			if _, resultPath := catcher["ResultPath"]; resultPath && isJSONata {
+				add("SCHEMA_VALIDATION_FAILED", "Catch ResultPath is not supported with JSONata.", fmt.Sprintf("/States/%s/Catch/%d/ResultPath", name, i))
+			}
+			if _, output := catcher["Output"]; output && !isJSONata {
+				add("SCHEMA_VALIDATION_FAILED", "Catch Output requires JSONata.", fmt.Sprintf("/States/%s/Catch/%d/Output", name, i))
+			}
 			checkTarget(catcher["Next"], fmt.Sprintf("/Catch/%d/Next", i))
 		}
 		if typ == "Choice" {
@@ -3643,12 +4080,37 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				branch, _ := raw.(map[string]any)
 				if branch["QueryLanguage"] == nil {
 					branch = maps.Clone(branch)
-					branch["QueryLanguage"] = stateQueryLanguage
+					branch["QueryLanguage"] = queryLanguage
 				}
-				validateMachine(branch, fmt.Sprintf("%s/States/%s/Branches/%d", location, name, i), machineType, diagnostics)
+				validateMachine(branch, fmt.Sprintf("%s/States/%s/Branches/%d", location, name, i), machineType, diagnostics, visibleVariables)
 			}
 		}
 		if typ == "Map" {
+			for _, field := range []string{"ItemReader", "ResultWriter"} {
+				configuration, _ := state[field].(map[string]any)
+				if configuration == nil {
+					continue
+				}
+				if _, parameters := configuration["Parameters"]; parameters && isJSONata {
+					add("SCHEMA_VALIDATION_FAILED", field+" Parameters is not supported with JSONata.", "/States/"+name+"/"+field+"/Parameters")
+				}
+				if _, arguments := configuration["Arguments"]; arguments && !isJSONata {
+					add("SCHEMA_VALIDATION_FAILED", field+" Arguments requires JSONata.", "/States/"+name+"/"+field+"/Arguments")
+				}
+			}
+			if reader, _ := state["ItemReader"].(map[string]any); reader != nil {
+				config, _ := reader["ReaderConfig"].(map[string]any)
+				if _, path := config["MaxItemsPath"]; path && isJSONata {
+					add("SCHEMA_VALIDATION_FAILED", "MaxItemsPath is not supported with JSONata.", "/States/"+name+"/ItemReader/ReaderConfig/MaxItemsPath")
+				}
+			}
+			if batcher, _ := state["ItemBatcher"].(map[string]any); batcher != nil && isJSONata {
+				for _, field := range []string{"MaxItemsPerBatchPath", "MaxInputBytesPerBatchPath"} {
+					if _, exists := batcher[field]; exists {
+						add("SCHEMA_VALIDATION_FAILED", field+" is not supported with JSONata.", "/States/"+name+"/ItemBatcher/"+field)
+					}
+				}
+			}
 			processor, _ := state["ItemProcessor"].(map[string]any)
 			if processor == nil {
 				processor, _ = state["Iterator"].(map[string]any)
@@ -3656,14 +4118,26 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			if processor != nil {
 				if processor["QueryLanguage"] == nil {
 					processor = maps.Clone(processor)
-					processor["QueryLanguage"] = stateQueryLanguage
+					processor["QueryLanguage"] = queryLanguage
 				}
-				validateMachine(processor, location+"/States/"+name+"/ItemProcessor", machineType, diagnostics)
+				validateMachine(processor, location+"/States/"+name+"/ItemProcessor", machineType, diagnostics, visibleVariables)
 			} else {
 				add("MISSING_REQUIRED_FIELD", "Map must have ItemProcessor.", "/States/"+name+"/ItemProcessor")
 			}
 		}
 	}
+}
+
+func validVariableName(name string) bool {
+	if name == "" || utf8.RuneCountInString(name) > 80 {
+		return false
+	}
+	for index, character := range []rune(name) {
+		if index == 0 && character != '_' && !unicode.IsLetter(character) || index > 0 && character != '_' && !unicode.IsLetter(character) && !unicode.IsDigit(character) {
+			return false
+		}
+	}
+	return true
 }
 
 func validJSONataExpressions(value any) bool {
@@ -3676,7 +4150,11 @@ func validJSONataExpressions(value any) bool {
 		if !strings.HasPrefix(value, "{%") || !strings.HasSuffix(value, "%}") || len(value) < 4 {
 			return false
 		}
-		_, err := jsonata.Compile(strings.TrimSpace(value[2:len(value)-2]), false)
+		expression := strings.TrimSpace(value[2 : len(value)-2])
+		if strings.Contains(expression, "$eval(") {
+			return false
+		}
+		_, err := jsonata.Compile(expression, false)
 		return err == nil
 	case map[string]any:
 		for _, item := range value {
@@ -3692,6 +4170,26 @@ func validJSONataExpressions(value any) bool {
 		}
 	}
 	return true
+}
+
+func jsonataReferences(value any, variable string) bool {
+	switch value := value.(type) {
+	case string:
+		return strings.HasPrefix(value, "{%") && strings.HasSuffix(value, "%}") && strings.Contains(value, variable)
+	case map[string]any:
+		for _, item := range value {
+			if jsonataReferences(item, variable) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range value {
+			if jsonataReferences(item, variable) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func supportedStateType(typ string) bool {

@@ -3,6 +3,7 @@ package edge_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -180,6 +181,53 @@ func TestHealth(t *testing.T) {
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
 		t.Fatal(res.Status)
+	}
+}
+
+func TestDiagnostics(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
+	defer ts.Close()
+	for _, path := range []string{"/_mirror/services", "/_mirror/journal?service=aws.s3", "/_mirror/model/aws.s3"} {
+		response, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK || !json.Valid(body) {
+			t.Fatalf("GET %s: %d %s", path, response.StatusCode, body)
+		}
+	}
+	response, err := http.Post(ts.URL+"/_mirror/clock/advance", "application/json", strings.NewReader(`{"duration":"1s"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("advance clock: %s", response.Status)
+	}
+	response, err = http.Get(ts.URL + "/_mirror/missing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing diagnostic: %s", response.Status)
+	}
+	response, err = http.Post(ts.URL+"/_mirror/reset", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("reset: %s", response.Status)
 	}
 }
 

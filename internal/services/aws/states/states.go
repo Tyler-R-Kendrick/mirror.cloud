@@ -744,6 +744,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: output}, nil
 	case "StopExecution":
 		ex := first(req.Input, "executionArn", "ExecutionArn")
+		if !validErrorCause(req.Input) {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
 		b, ok, _ := p.col(req, "ex").Get(ctx, ex)
 		if !ok {
 			return nil, &spi.Fault{Code: "ExecutionDoesNotExist", HTTPStatus: 400, Fault: "client"}
@@ -752,6 +755,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = json.Unmarshal(b, &rec)
 		if first(rec, "type") == "EXPRESS" {
 			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
+		}
+		if value, exists := inputValue(req.Input, "error", "Error"); exists {
+			rec["error"] = value
+		}
+		if value, exists := inputValue(req.Input, "cause", "Cause"); exists {
+			rec["cause"] = value
 		}
 		if token := first(rec, "pendingToken"); token != "" {
 			if pendingRecord, found, _ := p.col(req, "pending").Get(ctx, token); found {
@@ -1388,6 +1397,21 @@ func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64
 	return &spi.Response{Output: map[string]any{"redriveDate": float64(now)}}, nil
 }
 
+func validErrorCause(input map[string]any) bool {
+	for _, field := range []struct {
+		lower, upper string
+		maximum      int
+	}{{"error", "Error", 256}, {"cause", "Cause", 32768}} {
+		if value, exists := inputValue(input, field.lower, field.upper); exists {
+			text, valid := value.(string)
+			if !valid || len(text) > field.maximum {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok bool) (*spi.Response, error) {
 	tok := first(req.Input, "taskToken", "TaskToken")
 	if len(tok) < 1 || len(tok) > 2048 {
@@ -1401,18 +1425,8 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 		if !exists || !valid || len(output) > 262144 || !json.Valid([]byte(output)) {
 			return nil, &spi.Fault{Code: "InvalidOutput", HTTPStatus: 400, Fault: "client"}
 		}
-	} else {
-		for _, field := range []struct {
-			lower, upper string
-			maximum      int
-		}{{"error", "Error", 256}, {"cause", "Cause", 32768}} {
-			if value, exists := inputValue(req.Input, field.lower, field.upper); exists {
-				text, valid := value.(string)
-				if !valid || len(text) > field.maximum {
-					return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
-				}
-			}
-		}
+	} else if !validErrorCause(req.Input) {
+		return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 	}
 	b, found, _ := p.col(req, "pending").Get(ctx, tok)
 	if !found {

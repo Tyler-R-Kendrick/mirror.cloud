@@ -530,7 +530,22 @@ func TestStartExecutionAdmission(t *testing.T) {
 	fault("StartExecution", map[string]any{"stateMachineArn": machineARN, "name": "same", "input": `{"n":2}`}, "ExecutionAlreadyExists")
 	fault("StartExecution", map[string]any{"stateMachineArn": machineARN, "name": "bad name"}, "InvalidName")
 	fault("StartExecution", map[string]any{"stateMachineArn": machineARN, "name": "invalid-input", "input": `{`}, "InvalidExecutionInput")
-	must("StopExecution", map[string]any{"executionArn": started["executionArn"]})
+	for _, invalid := range []map[string]any{
+		{"executionArn": started["executionArn"], "error": 1},
+		{"executionArn": started["executionArn"], "cause": true},
+		{"executionArn": started["executionArn"], "error": strings.Repeat("e", 257)},
+		{"executionArn": started["executionArn"], "cause": strings.Repeat("c", 32769)},
+	} {
+		fault("StopExecution", invalid, "ValidationException")
+	}
+	if execution := must("DescribeExecution", map[string]any{"executionArn": started["executionArn"]}); execution["status"] != "RUNNING" {
+		t.Fatalf("invalid stop changed execution %#v", execution)
+	}
+	errorText, causeText := strings.Repeat("e", 256), strings.Repeat("c", 32768)
+	must("StopExecution", map[string]any{"executionArn": started["executionArn"], "error": errorText, "cause": causeText})
+	if execution := must("DescribeExecution", map[string]any{"executionArn": started["executionArn"]}); execution["status"] != "ABORTED" || execution["error"] != errorText || execution["cause"] != causeText {
+		t.Fatalf("stop details %#v", execution)
+	}
 	fault("StartExecution", input, "ExecutionAlreadyExists")
 }
 

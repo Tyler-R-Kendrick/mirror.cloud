@@ -342,6 +342,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
 		{
+			name: "states-ignore-math-random-seed",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `return float64(start + mathrand.New(mathrand.NewSource(int64(math.Round(seed)))).Intn(end-start)), true`,
+			new:  `return float64(start + random.Intn(end-start)), true`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
+			name: "states-return-non-uuid",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `return random.UUID(), true`,
+			new:  `return random.Hex(16), true`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
 			name: "cli-ignore-drift-byte-difference",
 			file: filepath.Join("cmd", "mirror", "main.go"),
 			old:  `if a[i] != b[i] {`,

@@ -26,6 +26,7 @@ import (
 	"github.com/golang/snappy"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	kafkaservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kafka"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
@@ -509,6 +510,74 @@ func TestFirehoseConsumesFutureKinesisRecords(t *testing.T) {
 	unmatched, _, _ := firehose.col(&spi.Request{Identity: id}, "fhrec:from-other").List(context.Background(), "", "", 0)
 	if len(unmatched) != 0 {
 		t.Fatalf("unmatched source retained %d records", len(unmatched))
+	}
+}
+
+func TestFirehoseConsumesMSKMessages(t *testing.T) {
+	deps := spitest.Deps(t)
+	firehose := New(deps)
+	defer firehose.Close()
+	kafka := kafkaservice.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	created, err := kafka.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateCluster", Input: map[string]any{"ClusterName": "source"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clusterARN := created.Output["ClusterArn"].(string)
+	if err := kafka.Publish(ctx, id, clusterARN, "events", []byte("before")); err != nil {
+		t.Fatal(err)
+	}
+	if err := deps.Clock.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	source := testMSKSource()
+	source["MSKClusterARN"], source["TopicName"], source["ReadFromTimestamp"] = clusterARN, "events", float64(0)
+	if _, err := firehose.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+		"DeliveryStreamName": "from-msk", "DeliveryStreamType": "MSKAsSource", "MSKSourceConfiguration": source, "S3DestinationConfiguration": testS3Destination(),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	defaultSource := maps.Clone(source)
+	delete(defaultSource, "ReadFromTimestamp")
+	if _, err := firehose.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+		"DeliveryStreamName": "from-msk-now", "DeliveryStreamType": "MSKAsSource", "MSKSourceConfiguration": defaultSource, "S3DestinationConfiguration": testS3Destination(),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := kafka.Publish(ctx, id, clusterARN, "other", []byte("ignored")); err != nil {
+		t.Fatal(err)
+	}
+	if err := kafka.Publish(ctx, id, clusterARN, "events", []byte("after")); err != nil {
+		t.Fatal(err)
+	}
+	for stream, want := range map[string]map[string]bool{
+		"from-msk": {"before": true, "after": true}, "from-msk-now": {"after": true},
+	} {
+		records, _, err := firehose.col(&spi.Request{Identity: id}, "fhrec:"+stream).List(ctx, "", "", 0)
+		if err != nil || len(records) != len(want) {
+			t.Fatalf("%s retained records=%d err=%v", stream, len(records), err)
+		}
+		seen := map[string]bool{}
+		for _, record := range records {
+			var retained map[string]any
+			_ = json.Unmarshal(record.Value, &retained)
+			decoded := first(retained, "Decoded")
+			key := id.Account + "/" + id.Region + "/out/1970/01/01/00/" + stream + "-1-1970-01-01-00-00-01-" + record.Key
+			reader, _, err := deps.Blobs.Get(ctx, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(reader)
+			_ = reader.Close()
+			if string(body) != decoded {
+				t.Fatalf("MSK S3 body %q want %q", body, decoded)
+			}
+			seen[decoded] = true
+		}
+		if !reflect.DeepEqual(seen, want) {
+			t.Fatalf("%s delivered %#v", stream, seen)
+		}
 	}
 }
 

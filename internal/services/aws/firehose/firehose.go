@@ -31,6 +31,7 @@ import (
 	"github.com/itchyny/gojq"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	kafkaservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kafka"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
@@ -56,6 +57,7 @@ type Pack struct {
 	retryOnce     sync.Once
 	closeOnce     sync.Once
 	cancelKinesis func()
+	cancelMSK     func()
 }
 
 type httpRetry struct {
@@ -145,6 +147,7 @@ func New(d spi.Deps) *Pack {
 	}}
 	if d.Bus != nil {
 		p.cancelKinesis = d.Bus.Subscribe("kinesis", p.consumeKinesis)
+		p.cancelMSK = d.Bus.Subscribe("kafka", p.consumeMSK)
 	}
 	if p.hasHTTPWork(context.Background()) {
 		p.startRetryLoop()
@@ -159,10 +162,58 @@ func (p *Pack) Close() error {
 		if p.cancelKinesis != nil {
 			p.cancelKinesis()
 		}
+		if p.cancelMSK != nil {
+			p.cancelMSK()
+		}
 		close(p.stop)
 	})
 	<-p.done
 	return nil
+}
+
+func (p *Pack) consumeMSK(ctx context.Context, payload []byte) {
+	var event struct {
+		Account, Region, ClusterARN, Topic string
+		Message                            kafkaservice.Message
+	}
+	if json.Unmarshal(payload, &event) != nil || event.Account == "" || event.Region == "" || event.ClusterARN == "" || event.Topic == "" || event.Message.Timestamp.IsZero() {
+		return
+	}
+	req := &spi.Request{Identity: spi.Identity{Account: event.Account, Region: event.Region}}
+	streams, _, err := p.col(req, "fh").List(ctx, "", "", 0)
+	if err != nil {
+		return
+	}
+	for _, stream := range streams {
+		var configuration map[string]any
+		if json.Unmarshal(stream.Value, &configuration) != nil || first(configuration, "DeliveryStreamType") != "MSKAsSource" {
+			continue
+		}
+		source, _ := configuration["MSKSourceConfiguration"].(map[string]any)
+		if first(source, "MSKClusterARN") != event.ClusterARN || first(source, "TopicName") != event.Topic || event.Message.Timestamp.Before(mskStart(source, configuration["CreateTimestamp"])) {
+			continue
+		}
+		_, _ = p.putOne(ctx, req, stream.Key, map[string]any{"Data": base64.StdEncoding.EncodeToString(event.Message.Data)}, event.Message.Data, "")
+	}
+}
+
+func (p *Pack) replayMSK(ctx context.Context, req *spi.Request, stream string, source map[string]any, created any) {
+	messages, err := kafkaservice.New(p.deps).Messages(ctx, req.Identity, first(source, "MSKClusterARN"), first(source, "TopicName"), mskStart(source, created))
+	if err != nil {
+		return
+	}
+	for _, message := range messages {
+		_, _ = p.putOne(ctx, req, stream, map[string]any{"Data": base64.StdEncoding.EncodeToString(message.Data)}, message.Data, "")
+	}
+}
+
+func mskStart(source map[string]any, created any) time.Time {
+	value := created
+	if explicit, ok := source["ReadFromTimestamp"]; ok {
+		value = explicit
+	}
+	seconds, _ := value.(float64)
+	return time.Unix(0, int64(seconds*float64(time.Second))).UTC()
 }
 
 func (p *Pack) consumeKinesis(ctx context.Context, payload []byte) {
@@ -443,6 +494,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		if err := putTags(ctx, p.col(req, "fhtag"), name, tags); err != nil {
 			return nil, err
+		}
+		if mskSource != nil {
+			p.replayMSK(ctx, req, name, mskSource, timestamp)
 		}
 		return &spi.Response{Output: map[string]any{"DeliveryStreamARN": arn}}, nil
 	case "DeleteDeliveryStream":

@@ -1519,6 +1519,7 @@ func TestStatesMapValidation(t *testing.T) {
 		`"Iterator":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"Parameters":{"value.$":"$$.Map.Item.Value"}`,
 		`"ResultWriter":{"WriterConfig":{"Transformation":"COMPACT","OutputType":"JSONL"}},` + processor,
 		`"ResultWriter":{"Resource":"arn:aws:states:::s3:putObject","Parameters":{"Bucket":"bucket"}},` + processor,
+		`"Label":"valid-label","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
 	} {
 		definition := `{"StartAt":"Map","States":{"Map":{"Type":"Map",` + fields + `,"End":true}}}`
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
@@ -1549,6 +1550,10 @@ func TestStatesMapValidation(t *testing.T) {
 		`"ResultWriter":{"WriterConfig":{"OutputType":"INVALID"}},` + processor,
 		`"ResultWriter":{"Resource":"arn:aws:states:::s3:putObject"},` + processor,
 		`"ResultWriter":{"Resource":"arn:aws:states:::lambda:invoke","Parameters":{}},` + processor,
+		`"Label":1,"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
+		`"Label":"` + strings.Repeat("x", 41) + `","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
+		`"Label":"invalid label","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
+		`"Label":"inline",` + processor,
 	} {
 		definition := `{"StartAt":"Map","States":{"Map":{"Type":"Map",` + fields + `,"End":true}}}`
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 1 {

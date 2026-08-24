@@ -5336,6 +5336,18 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				if mode == "DISTRIBUTED" && machineType == "EXPRESS" {
 					add("SCHEMA_VALIDATION_FAILED", "Express workflows do not support Distributed Map.", "/States/"+name+"/ItemProcessor/ProcessorConfig/Mode")
 				}
+				if rawLabel, exists := state["Label"]; exists {
+					label, valid := rawLabel.(string)
+					invalidCharacter := strings.ContainsAny(label, `?*<>{}[]:;,\|^~$#%&`+"`\"") || slices.ContainsFunc([]rune(label), func(character rune) bool {
+						return unicode.IsSpace(character) || unicode.IsControl(character)
+					})
+					if !valid || utf8.RuneCountInString(label) < 1 || utf8.RuneCountInString(label) > 40 || invalidCharacter {
+						add("SCHEMA_VALIDATION_FAILED", "Label contains invalid characters or length.", "/States/"+name+"/Label")
+					}
+					if mode != "DISTRIBUTED" {
+						add("SCHEMA_VALIDATION_FAILED", "Label requires a Distributed Map.", "/States/"+name+"/Label")
+					}
+				}
 				if _, objectItems := state["Items"].(map[string]any); isJSONata && objectItems && mode != "DISTRIBUTED" {
 					add("SCHEMA_VALIDATION_FAILED", "Inline Map Items must be an array.", "/States/"+name+"/Items")
 				}

@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/parquet-go/parquet-go"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
@@ -951,6 +952,74 @@ func TestVariableAssignmentLimits(t *testing.T) {
 	}
 	if commitAssignments(large, map[string]any{"more": strings.Repeat("x", 250*1024)}) {
 		t.Fatal("execution variable limit exceeded")
+	}
+}
+
+func TestStatesDurableWait(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	definition := `{"StartAt":"Wait","States":{"Wait":{"Type":"Wait","Seconds":10,"Assign":{"waited":"yes"},"Next":"Done"},"Done":{"Type":"Succeed","QueryLanguage":"JSONata","Output":"{% $waited %}"}}}`
+	machine := invoke("CreateStateMachine", map[string]any{"name": "durable-wait", "definition": definition, "roleArn": testRoleARN})
+	executionARN := invoke("StartExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"]})["executionArn"].(string)
+	if execution := invoke("DescribeExecution", map[string]any{"executionArn": executionARN}); execution["status"] != "RUNNING" {
+		t.Fatalf("Wait completed early %#v", execution)
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p = New(deps)
+	if err := deps.Clock.Advance(9 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if execution := invoke("DescribeExecution", map[string]any{"executionArn": executionARN}); execution["status"] != "RUNNING" {
+		t.Fatalf("restored Wait completed early %#v", execution)
+	}
+	if err := deps.Clock.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	var execution map[string]any
+	for range 100 {
+		execution = invoke("DescribeExecution", map[string]any{"executionArn": executionARN})
+		if execution["status"] == "SUCCEEDED" {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if execution["status"] != "SUCCEEDED" || execution["output"] != `"yes"` {
+		t.Fatalf("restored Wait did not resume %#v", execution)
+	}
+
+	express := invoke("CreateStateMachine", map[string]any{"name": "sync-wait", "definition": `{"StartAt":"Wait","States":{"Wait":{"Type":"Wait","Seconds":3,"End":true}}}`, "roleArn": testRoleARN, "type": "EXPRESS"})
+	result := make(chan map[string]any, 1)
+	go func() {
+		result <- invoke("StartSyncExecution", map[string]any{"stateMachineArn": express["stateMachineArn"]})
+	}()
+	select {
+	case early := <-result:
+		t.Fatalf("Express Wait completed early %#v", early)
+	case <-time.After(10 * time.Millisecond):
+	}
+	if err := deps.Clock.Advance(3 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case finished := <-result:
+		if finished["status"] != "SUCCEEDED" {
+			t.Fatalf("Express Wait %#v", finished)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Express Wait did not resume")
 	}
 }
 

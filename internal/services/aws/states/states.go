@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -43,10 +44,31 @@ func init() {
 }
 
 // Pack implements Step Functions-lite.
-type Pack struct{ deps spi.Deps }
+type Pack struct {
+	deps      spi.Deps
+	wake      chan struct{}
+	stop      chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
+}
 
 // New constructs the pack.
-func New(d spi.Deps) *Pack { return &Pack{deps: d} }
+func New(d spi.Deps) *Pack {
+	p := &Pack{deps: d, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{})}
+	if d.Store == nil || d.Clock == nil {
+		close(p.done)
+		return p
+	}
+	go p.waitLoop()
+	return p
+}
+
+// Close stops the durable Wait worker.
+func (p *Pack) Close() error {
+	p.closeOnce.Do(func() { close(p.stop) })
+	<-p.done
+	return nil
+}
 
 func (p *Pack) ServiceID() string { return "aws.states" }
 func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
@@ -67,6 +89,127 @@ func (p *Pack) Operations() []string {
 
 func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection(n)
+}
+
+func (p *Pack) signalWaits() {
+	select {
+	case p.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (p *Pack) waitLoop() {
+	defer close(p.done)
+	for {
+		next := p.runDueWaits(context.Background())
+		if next.IsZero() {
+			select {
+			case <-p.wake:
+			case <-p.stop:
+				return
+			}
+			continue
+		}
+		delay := max(time.Duration(0), next.Sub(p.deps.Clock.Now()))
+		select {
+		case <-p.deps.Clock.After(delay):
+		case <-p.wake:
+		case <-p.stop:
+			return
+		}
+	}
+}
+
+func (p *Pack) runDueWaits(ctx context.Context) time.Time {
+	now := p.deps.Clock.Now()
+	var earliest time.Time
+	scopes, err := p.deps.Store.Scopes(ctx)
+	if err != nil {
+		return earliest
+	}
+	for _, identity := range scopes {
+		request := &spi.Request{Identity: spi.Identity{Account: identity.Account, Region: identity.Region}, Input: map[string]any{}}
+		pendingCollection := p.col(request, "pending")
+		kvs, _, err := pendingCollection.List(ctx, "", "", 0)
+		if err != nil {
+			continue
+		}
+		for _, kv := range kvs {
+			var wait pending
+			if json.Unmarshal(kv.Value, &wait) != nil || wait.WaitUntil == "" {
+				continue
+			}
+			due, err := time.Parse(time.RFC3339Nano, wait.WaitUntil)
+			if err != nil {
+				continue
+			}
+			if due.After(now) {
+				if earliest.IsZero() || due.Before(earliest) {
+					earliest = due
+				}
+				continue
+			}
+			p.resumeWait(ctx, request, kv.Key, wait)
+		}
+	}
+	return earliest
+}
+
+func (p *Pack) resumeWait(ctx context.Context, req *spi.Request, token string, wait pending) {
+	encoded, found, _ := p.col(req, "ex").Get(ctx, wait.ExecARN)
+	if !found {
+		_ = p.col(req, "pending").Delete(ctx, token)
+		return
+	}
+	var record map[string]any
+	if json.Unmarshal(encoded, &record) != nil || first(record, "status") != "RUNNING" || first(record, "pendingToken") != token {
+		_ = p.col(req, "pending").Delete(ctx, token)
+		return
+	}
+	walkRequest := *req
+	walkRequest.Input = map[string]any{
+		"_stateMachineArn": record["stateMachineArn"], "_executionArn": wait.ExecARN, "_executionName": record["name"],
+		"_executionInput": parseJSON(first(record, "input")), "_executionStartTime": time.Unix(int64(toFloat(record["startDate"])), 0).UTC().Format(time.RFC3339),
+		"_executionRoleArn": record["roleArn"], "_executionType": record["type"], "_executionRedriveCount": record["redriveCount"],
+	}
+	result := p.walk(ctx, &walkRequest, wait.Definition, wait.StateName, wait.StateInput, nil, wait.Variables)
+	now := p.deps.Clock.Now().Unix()
+	output, _ := json.Marshal(result.out)
+	record["status"], record["output"], record["cause"] = result.status, string(output), result.cause
+	record["history"] = append(asSlice(record["history"]), result.hist...)
+	delete(record, "error")
+	delete(record, "pendingToken")
+	if result.errorName != "" {
+		record["error"] = result.errorName
+	}
+	if result.failedState != "" {
+		record["redriveState"], record["redriveInput"] = result.failedState, result.failedInput
+	}
+	if result.status != "RUNNING" {
+		record["stopDate"] = float64(now)
+	}
+	if result.pending != nil {
+		result.pending.ExecARN, result.pending.Definition = wait.ExecARN, wait.Definition
+		pendingBytes, _ := json.Marshal(result.pending)
+		_ = p.col(req, "pending").Put(ctx, result.pending.Token, pendingBytes)
+		record["pendingToken"] = result.pending.Token
+	}
+	for _, run := range result.mapRuns {
+		arn := run.arn
+		if arn == "" {
+			arn = p.mapRunARN(req, first(record, "stateMachineName"), run.label)
+		}
+		run.record["mapRunArn"], run.record["executionArn"], run.record["stateMachineArn"] = arn, wait.ExecARN, record["stateMachineArn"]
+		run.record["startDate"], run.record["stopDate"] = float64(now), float64(now)
+		body, _ := json.Marshal(run.record)
+		_ = p.col(req, "maprun").Put(ctx, arn, body)
+	}
+	body, _ := json.Marshal(record)
+	_ = p.col(req, "ex").Put(ctx, wait.ExecARN, body)
+	_ = p.col(req, "pending").Delete(ctx, token)
+	if result.pending != nil {
+		p.signalWaits()
+	}
 }
 
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -468,6 +611,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		walkRequest.Input["_executionInput"] = in
 		walkRequest.Input["_executionStartTime"] = p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)
 		walkRequest.Input["_executionRoleArn"] = sm["roleArn"]
+		walkRequest.Input["_executionType"] = sm["type"]
 		walkRequest.Input["_executionRedriveCount"] = 0.0
 		wr := p.walk(ctx, &walkRequest, def, "", in, nil)
 		baseARN := p.smARN(req, name)
@@ -515,6 +659,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		eb, _ := json.Marshal(rec)
 		_ = p.col(req, "ex").Put(ctx, execARN, eb)
+		if wr.pending != nil {
+			p.signalWaits()
+		}
 		output := map[string]any{"executionArn": execARN, "startDate": float64(now)}
 		if req.Operation == "StartSyncExecution" {
 			output["status"], output["input"], output["output"] = wr.status, rec["input"], rec["output"]
@@ -1028,6 +1175,7 @@ func (p *Pack) validateAliasRoutes(ctx context.Context, req *spi.Request, routes
 
 type pending struct {
 	Token, ActivityARN, StateName, ExecARN, Definition string
+	WaitUntil                                          string
 	Input, StateInput                                  any
 	Retries                                            map[int]int
 	Variables                                          map[string]any
@@ -1103,6 +1251,7 @@ func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64
 	walkRequest.Input["_executionInput"] = parseJSON(first(record, "input"))
 	walkRequest.Input["_executionStartTime"] = time.Unix(int64(toFloat(record["startDate"])), 0).UTC().Format(time.RFC3339)
 	walkRequest.Input["_executionRoleArn"] = record["roleArn"]
+	walkRequest.Input["_executionType"] = record["type"]
 	walkRequest.Input["_executionRedriveCount"] = toFloat(record["redriveCount"]) + 1
 	walkRequest.Input["_executionRedriveTime"] = p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)
 	result := p.walk(ctx, &walkRequest, string(redriveDefinition), "", input, nil)
@@ -1143,6 +1292,9 @@ func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64
 	}
 	encoded, _ := json.Marshal(record)
 	_ = p.col(req, "ex").Put(ctx, arn, encoded)
+	if result.pending != nil {
+		p.signalWaits()
+	}
 	return &spi.Response{Output: map[string]any{"redriveDate": float64(now)}}, nil
 }
 
@@ -1203,6 +1355,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	walkRequest.Input["_executionInput"] = parseJSON(first(rec, "input"))
 	walkRequest.Input["_executionStartTime"] = time.Unix(int64(toFloat(rec["startDate"])), 0).UTC().Format(time.RFC3339)
 	walkRequest.Input["_executionRoleArn"] = rec["roleArn"]
+	walkRequest.Input["_executionType"] = rec["type"]
 	walkRequest.Input["_executionRedriveCount"] = rec["redriveCount"]
 	retrying := false
 	if !ok {
@@ -1338,6 +1491,9 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	}
 	nb, _ := json.Marshal(rec)
 	_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
+	if wr.pending != nil {
+		p.signalWaits()
+	}
 	return &spi.Response{Output: map[string]any{}}, nil
 }
 
@@ -1406,6 +1562,7 @@ walkLoop:
 		hist = append(hist, map[string]any{"type": typ + "StateEntered", "id": hop + 1, "name": cur})
 		jsonataOutputApplied := false
 		jsonPathAssignmentInput := data
+		var waitUntil time.Time
 		switch typ {
 		case "Pass":
 			if isJSONata {
@@ -1470,6 +1627,7 @@ walkLoop:
 			}
 			return walkResult{out: data, status: "FAILED", cause: cause, errorName: errorName, hist: hist}
 		case "Wait":
+			now := p.deps.Clock.Now()
 			if isJSONata {
 				if value, exists := st["Seconds"]; exists {
 					resolved, valid := evalJSONataValue(value, jsonataScope{input: rawInput, context: stateContext, variables: variables, random: p.deps.Rand})
@@ -1477,27 +1635,44 @@ walkLoop:
 					if !valid || !numeric || seconds != math.Trunc(seconds) || seconds < 0 || seconds > 99999999 {
 						return walkResult{out: data, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
 					}
+					waitUntil = now.Add(time.Duration(seconds) * time.Second)
 				} else if value, exists := st["Timestamp"]; exists {
 					resolved, valid := evalJSONataValue(value, jsonataScope{input: rawInput, context: stateContext, variables: variables, random: p.deps.Rand})
 					timestamp, stringValue := resolved.(string)
-					_, parseErr := time.Parse(time.RFC3339, timestamp)
+					parsed, parseErr := time.Parse(time.RFC3339, timestamp)
 					if !valid || !stringValue || parseErr != nil || !strings.Contains(timestamp, "T") || !strings.HasSuffix(timestamp, "Z") {
 						return walkResult{out: data, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
 					}
+					waitUntil = parsed
 				}
+			} else if value, exists := st["Seconds"]; exists {
+				seconds, numeric := exactNumber(value)
+				if !numeric || seconds != math.Trunc(seconds) || seconds < 0 || seconds > 99999999 {
+					return walkResult{out: data, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
+				}
+				waitUntil = now.Add(time.Duration(seconds) * time.Second)
+			} else if value, exists := st["Timestamp"]; exists {
+				timestamp, stringValue := value.(string)
+				parsed, parseErr := time.Parse(time.RFC3339, timestamp)
+				if !stringValue || parseErr != nil || !strings.Contains(timestamp, "T") || !strings.HasSuffix(timestamp, "Z") {
+					return walkResult{out: data, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
+				}
+				waitUntil = parsed
 			} else if path := first(st, "SecondsPath"); path != "" {
 				resolved, found := jsonPathLookup(data, path, variables)
 				seconds, numeric := exactNumber(resolved)
 				if !found || !numeric || seconds != math.Trunc(seconds) || seconds < 0 || seconds > 99999999 {
 					return walkResult{out: data, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
 				}
+				waitUntil = now.Add(time.Duration(seconds) * time.Second)
 			} else if path := first(st, "TimestampPath"); path != "" {
 				resolved, found := jsonPathLookup(data, path, variables)
 				timestamp, stringValue := resolved.(string)
-				_, parseErr := time.Parse(time.RFC3339, timestamp)
+				parsed, parseErr := time.Parse(time.RFC3339, timestamp)
 				if !found || !stringValue || parseErr != nil || !strings.Contains(timestamp, "T") || !strings.HasSuffix(timestamp, "Z") {
 					return walkResult{out: data, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
 				}
+				waitUntil = parsed
 			}
 		case "Task":
 			res := first(st, "Resource")
@@ -1908,6 +2083,7 @@ walkLoop:
 							copy.Input["_executionName"], copy.Input["_executionInput"] = childName, iterationInput
 							copy.Input["_executionStartTime"] = childStartTime
 							copy.Input["_executionRoleArn"] = req.Input["_executionRoleArn"]
+							copy.Input["_executionType"] = executionType
 							copy.Input["_executionRedriveCount"] = 0.0
 							walkRequest = &copy
 						}
@@ -2047,6 +2223,19 @@ walkLoop:
 				failure = "States.QueryEvaluationError"
 			}
 			return walkResult{out: rawInput, status: "FAILED", cause: failure, errorName: failure, hist: hist}
+		}
+		if waitUntil.After(p.deps.Clock.Now()) {
+			if first(req.Input, "_executionType") == "EXPRESS" {
+				select {
+				case <-p.deps.Clock.After(waitUntil.Sub(p.deps.Clock.Now())):
+				case <-ctx.Done():
+					return walkResult{out: data, status: "FAILED", cause: "States.Timeout", errorName: "States.Timeout", hist: hist}
+				}
+			} else {
+				return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
+					Token: p.deps.Rand.Hex(16), StateName: cur, StateInput: data, Variables: variables, WaitUntil: waitUntil.UTC().Format(time.RFC3339Nano),
+				}}
+			}
 		}
 		if end, _ := st["End"].(bool); end {
 			return walkResult{out: data, status: "SUCCEEDED", hist: hist}

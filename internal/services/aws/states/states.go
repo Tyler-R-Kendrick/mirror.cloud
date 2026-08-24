@@ -265,14 +265,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			rec["stopDate"] = float64(now)
 		}
 		if wr.pending != nil {
-			wr.pending.ExecName = exName
+			wr.pending.ExecARN = execARN
 			wr.pending.Definition = def
 			pb, _ := json.Marshal(wr.pending)
 			_ = p.col(req, "pending").Put(ctx, wr.pending.Token, pb)
 			rec["pendingToken"] = wr.pending.Token
 		}
 		eb, _ := json.Marshal(rec)
-		_ = p.col(req, "ex").Put(ctx, exName, eb)
+		_ = p.col(req, "ex").Put(ctx, execARN, eb)
 		output := map[string]any{"executionArn": execARN, "startDate": float64(now)}
 		if req.Operation == "StartSyncExecution" {
 			output["status"], output["input"], output["output"] = wr.status, rec["input"], rec["output"]
@@ -288,7 +288,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: output}, nil
 	case "StopExecution":
-		ex := execName(first(req.Input, "executionArn", "ExecutionArn"))
+		ex := first(req.Input, "executionArn", "ExecutionArn")
 		b, ok, _ := p.col(req, "ex").Get(ctx, ex)
 		if !ok {
 			return nil, &spi.Fault{Code: "ExecutionDoesNotExist", HTTPStatus: 400, Fault: "client"}
@@ -301,7 +301,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = p.col(req, "ex").Put(ctx, ex, nb)
 		return &spi.Response{Output: map[string]any{"stopDate": float64(now)}}, nil
 	case "DescribeExecution":
-		ex := execName(first(req.Input, "executionArn", "ExecutionArn"))
+		ex := first(req.Input, "executionArn", "ExecutionArn")
 		b, ok, _ := p.col(req, "ex").Get(ctx, ex)
 		if !ok {
 			return nil, &spi.Fault{Code: "ExecutionDoesNotExist", HTTPStatus: 400, Fault: "client"}
@@ -313,7 +313,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "ListExecutions":
 		return listCol(ctx, p.col(req, "ex"), "executions")
 	case "GetExecutionHistory":
-		ex := execName(first(req.Input, "executionArn", "ExecutionArn"))
+		ex := first(req.Input, "executionArn", "ExecutionArn")
 		b, ok, _ := p.col(req, "ex").Get(ctx, ex)
 		if !ok {
 			return nil, &spi.Fault{Code: "ExecutionDoesNotExist", HTTPStatus: 400, Fault: "client"}
@@ -531,9 +531,9 @@ func (p *Pack) validateAliasRoutes(ctx context.Context, req *spi.Request, routes
 }
 
 type pending struct {
-	Token, ActivityARN, StateName, ExecName, Definition string
-	Input, StateInput                                   any
-	Retries                                             map[int]int
+	Token, ActivityARN, StateName, ExecARN, Definition string
+	Input, StateInput                                  any
+	Retries                                            map[int]int
 }
 
 type walkResult struct {
@@ -553,7 +553,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	var pend pending
 	_ = json.Unmarshal(b, &pend)
 	_ = p.col(req, "pending").Delete(ctx, tok)
-	exb, eok, _ := p.col(req, "ex").Get(ctx, pend.ExecName)
+	exb, eok, _ := p.col(req, "ex").Get(ctx, pend.ExecARN)
 	if !eok {
 		return &spi.Response{Output: map[string]any{}}, nil
 	}
@@ -582,7 +582,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 			_ = p.col(req, "pending").Put(ctx, pend.Token, pb)
 			rec["pendingToken"] = pend.Token
 			nb, _ := json.Marshal(rec)
-			_ = p.col(req, "ex").Put(ctx, pend.ExecName, nb)
+			_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
 			return &spi.Response{Output: map[string]any{}}, nil
 		}
 		next, out, caught := catchTask(st, failure, pend.StateInput)
@@ -592,7 +592,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 		if !caught || next == "" {
 			rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", failure.name, failure.cause, float64(now)
 			nb, _ := json.Marshal(rec)
-			_ = p.col(req, "ex").Put(ctx, pend.ExecName, nb)
+			_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
 			return &spi.Response{Output: map[string]any{}}, nil
 		}
 		sm["StartAt"] = next
@@ -603,7 +603,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	} else {
 		rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", "States.Runtime", "States.Runtime", float64(now)
 		nb, _ := json.Marshal(rec)
-		_ = p.col(req, "ex").Put(ctx, pend.ExecName, nb)
+		_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
 		return &spi.Response{Output: map[string]any{}}, nil
 	}
 	if output, valid := applyDataPath(st, "OutputPath", data); valid {
@@ -611,7 +611,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	} else {
 		rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", "States.Runtime", "States.Runtime", float64(now)
 		nb, _ := json.Marshal(rec)
-		_ = p.col(req, "ex").Put(ctx, pend.ExecName, nb)
+		_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
 		return &spi.Response{Output: map[string]any{}}, nil
 	}
 	wr := p.walk(ctx, req, definition, from, data)
@@ -629,7 +629,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 		rec["stopDate"] = float64(now)
 	}
 	if wr.pending != nil {
-		wr.pending.ExecName = pend.ExecName
+		wr.pending.ExecARN = pend.ExecARN
 		wr.pending.Definition = pend.Definition
 		pb, _ := json.Marshal(wr.pending)
 		_ = p.col(req, "pending").Put(ctx, wr.pending.Token, pb)
@@ -638,7 +638,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 		delete(rec, "pendingToken")
 	}
 	nb, _ := json.Marshal(rec)
-	_ = p.col(req, "ex").Put(ctx, pend.ExecName, nb)
+	_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
 	return &spi.Response{Output: map[string]any{}}, nil
 }
 
@@ -1808,10 +1808,6 @@ func validAliasName(name string) bool {
 		}
 	}
 	return hasNonDigit
-}
-
-func execName(arn string) string {
-	return lastSeg(arn, ":")
 }
 
 func actName(arn string) string {

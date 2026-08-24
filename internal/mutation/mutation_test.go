@@ -534,6 +534,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStateMachineVersionsAndAliases",
 		},
 		{
+			name: "states-key-executions-by-name",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `_ = p.col(req, "ex").Put(ctx, execARN, eb)`,
+			new:  `_ = p.col(req, "ex").Put(ctx, exName, eb)`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestExecutionNamesAreScopedToStateMachine",
+		},
+		{
 			name: "cli-ignore-drift-byte-difference",
 			file: filepath.Join("cmd", "mirror", "main.go"),
 			old:  `if a[i] != b[i] {`,

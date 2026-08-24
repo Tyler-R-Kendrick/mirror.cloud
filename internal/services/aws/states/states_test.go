@@ -110,6 +110,33 @@ func TestStateMachineVersionsAndAliases(t *testing.T) {
 	}
 }
 
+func TestExecutionNamesAreScopedToStateMachine(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+	create := func(name string) string {
+		t.Helper()
+		definition := `{"StartAt":"Done","States":{"Done":{"Type":"Pass","Result":"` + name + `","End":true}}}`
+		return invoke("CreateStateMachine", map[string]any{"name": name, "definition": definition})["stateMachineArn"].(string)
+	}
+	firstARN := invoke("StartExecution", map[string]any{"stateMachineArn": create("first"), "name": "shared"})["executionArn"].(string)
+	secondARN := invoke("StartExecution", map[string]any{"stateMachineArn": create("second"), "name": "shared"})["executionArn"].(string)
+	if first := invoke("DescribeExecution", map[string]any{"executionArn": firstARN}); !strings.Contains(fmtString(first["output"]), "first") {
+		t.Fatalf("first execution %#v", first)
+	}
+	if second := invoke("DescribeExecution", map[string]any{"executionArn": secondARN}); !strings.Contains(fmtString(second["output"]), "second") {
+		t.Fatalf("second execution %#v", second)
+	}
+}
+
 func TestStatesTagLifecycle(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

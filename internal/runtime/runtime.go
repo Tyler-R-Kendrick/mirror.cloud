@@ -682,6 +682,7 @@ func SupportMatrix() string {
 	matrix = strings.Replace(matrix, "Parquet, ItemBatcher, ResultWriter, and child-execution fanout are not implemented.", "Parquet, ResultWriter, and child-execution fanout are not implemented.", 1)
 	matrix = strings.Replace(matrix, "Parquet, ResultWriter, and child-execution fanout are not implemented.", "Parquet and child-execution fanout are not implemented.", 1)
 	matrix = strings.Replace(matrix, "Parquet and child-execution fanout are not implemented.", "Parquet ItemReader is not implemented.", 1)
+	matrix = strings.Replace(matrix, "S3 ItemReader supports JSON, JSONL, and CSV; Parquet ItemReader is not implemented.", "S3 ItemReader supports JSON, JSONL, CSV, and Parquet.", 1)
 	matrix = strings.Replace(matrix, "long-running .sync integrations such as ECS and nested Step Functions are not implemented.", "long-running .sync integrations such as ECS are not implemented.", 1)
 	return strings.Replace(matrix, "; long-running .sync integrations such as ECS are not implemented", "", 1)
 }

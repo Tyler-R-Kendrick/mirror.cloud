@@ -3230,10 +3230,68 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 		}
 	}
 	inputType := first(config, "InputType")
+	manifestType := first(config, "ManifestType")
+	if manifestType == "S3_INVENTORY" || inputType == "MANIFEST" {
+		var manifest struct {
+			SourceBucket      string `json:"sourceBucket"`
+			DestinationBucket string `json:"destinationBucket"`
+			Version           string `json:"version"`
+			CreationTimestamp string `json:"creationTimestamp"`
+			FileFormat        string `json:"fileFormat"`
+			FileSchema        string `json:"fileSchema"`
+			Files             []struct {
+				Key string `json:"key"`
+			} `json:"files"`
+		}
+		if json.Unmarshal(body, &manifest) != nil || manifest.SourceBucket == "" || manifest.DestinationBucket == "" || manifest.Version != "2016-11-30" || manifest.CreationTimestamp == "" || manifest.FileFormat != "CSV" || manifest.Files == nil {
+			return nil, "", false
+		}
+		headers, err := csv.NewReader(strings.NewReader(manifest.FileSchema)).Read()
+		if err != nil || len(headers) == 0 {
+			return nil, "", false
+		}
+		configuredHeaders := make([]any, len(headers))
+		for index, header := range headers {
+			header = strings.TrimSpace(header)
+			if header == "" {
+				return nil, "", false
+			}
+			configuredHeaders[index] = header
+		}
+		items := mapDataset{}
+		for _, file := range manifest.Files {
+			if file.Key == "" {
+				return nil, "", false
+			}
+			nestedConfig := maps.Clone(config)
+			delete(nestedConfig, "ManifestType")
+			delete(nestedConfig, "MaxItems")
+			delete(nestedConfig, "MaxItemsPath")
+			nestedConfig["InputType"] = "CSV"
+			nestedConfig["CSVHeaderLocation"] = "GIVEN"
+			nestedConfig["CSVHeaders"] = configuredHeaders
+			payload := map[string]any{"Bucket": input["Bucket"], "Key": file.Key}
+			nestedReader := map[string]any{"Resource": "arn:aws:states:::s3:getObject", "ReaderConfig": nestedConfig, "Parameters": payload}
+			if scope != nil {
+				nestedReader["Arguments"] = payload
+			}
+			dataset, nestedSource, valid := p.mapItems(ctx, req, map[string]any{"ItemReader": nestedReader}, data, scope, variables...)
+			values, array := dataset.([]any)
+			if !valid || !array {
+				return nil, "", false
+			}
+			items.values = append(items.values, values...)
+			items.keys = append(items.keys, make([]any, len(values))...)
+			for range values {
+				items.sources = append(items.sources, nestedSource)
+			}
+		}
+		return limitReaderItems(items, "", config, data, scope, variables...)
+	}
 	if inputType == "" {
 		inputType = "JSON"
 	}
-	if first(config, "ManifestType") == "ATHENA_DATA" {
+	if manifestType == "ATHENA_DATA" {
 		records, err := csv.NewReader(bytes.NewReader(body)).ReadAll()
 		if err != nil {
 			return nil, "", false

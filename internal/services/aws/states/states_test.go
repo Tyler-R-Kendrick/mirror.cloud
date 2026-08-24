@@ -358,20 +358,22 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	}
 	invoke(storage, "CreateBucket", map[string]any{"Bucket": "items"}, nil)
 	objects := map[string]string{
-		"items.json":       `[{"id":1},{"id":2}]`,
-		"items.jsonl":      "{\"id\":3}\n{\"id\":4}\n",
-		"items.csv":        "id,name,path,note\n5\n6,Lin,C:\\\\Program Files\\\\App.exe,say \\\"hi\\\",ignored\n",
-		"items-path.json":  `{"data":{"items":[{"id":13},{"id":14}]}}`,
-		"listed/a":         `{"alpha":{"id":21}}`,
-		"listed/b":         `{"beta":{"id":22}}`,
-		"flat-array/a":     `[{"id":23}]`,
-		"broken.json.gz":   "not gzip",
-		"athena/a.jsonl":   "{\"id\":31}\n",
-		"athena/b.jsonl":   "{\"id\":32}\n{\"id\":33}\n",
-		"manifest.csv":     "s3://items/athena/a.jsonl\ns3://items/athena/b.jsonl\n",
-		"bad-manifest.csv": "https://items/athena/a.jsonl\n",
-		"nested.json":      `{"data":{"a/b":{"~key":[{"id":9},{"id":10}]}}}`,
-		"objects.json":     `{"b":{"id":12},"a":{"id":11}}`,
+		"items.json":                  `[{"id":1},{"id":2}]`,
+		"items.jsonl":                 "{\"id\":3}\n{\"id\":4}\n",
+		"items.csv":                   "id,name,path,note\n5\n6,Lin,C:\\\\Program Files\\\\App.exe,say \\\"hi\\\",ignored\n",
+		"items-path.json":             `{"data":{"items":[{"id":13},{"id":14}]}}`,
+		"listed/a":                    `{"alpha":{"id":21}}`,
+		"listed/b":                    `{"beta":{"id":22}}`,
+		"flat-array/a":                `[{"id":23}]`,
+		"broken.json.gz":              "not gzip",
+		"athena/a.jsonl":              "{\"id\":31}\n",
+		"athena/b.jsonl":              "{\"id\":32}\n{\"id\":33}\n",
+		"manifest.csv":                "s3://items/athena/a.jsonl\ns3://items/athena/b.jsonl\n",
+		"bad-manifest.csv":            "https://items/athena/a.jsonl\n",
+		"inventory-manifest.json":     `{"sourceBucket":"source","destinationBucket":"arn:aws:s3:::items","version":"2016-11-30","creationTimestamp":"1787529600000","fileFormat":"CSV","fileSchema":"Bucket, Key, Size, LastModifiedDate","files":[{"key":"inventory/data.csv.gz"}]}`,
+		"bad-inventory-manifest.json": `{"sourceBucket":"source","destinationBucket":"arn:aws:s3:::items","version":"2016-11-30","creationTimestamp":"1787529600000","fileFormat":"ORC","fileSchema":"Bucket,Key","files":[]}`,
+		"nested.json":                 `{"data":{"a/b":{"~key":[{"id":9},{"id":10}]}}}`,
+		"objects.json":                `{"b":{"id":12},"a":{"id":11}}`,
 	}
 	for key, body := range objects {
 		invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": key}, []byte(body))
@@ -385,6 +387,15 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		t.Fatalf("close gzip: %v", err)
 	}
 	invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": "items.json.gz"}, gzipBody.Bytes())
+	var inventoryBody bytes.Buffer
+	inventoryWriter := gzip.NewWriter(&inventoryBody)
+	if _, err := inventoryWriter.Write([]byte("source,alpha,1,2026-08-24T00:00:00Z\nsource,beta,2,2026-08-24T00:01:00Z\n")); err != nil {
+		t.Fatalf("write inventory gzip: %v", err)
+	}
+	if err := inventoryWriter.Close(); err != nil {
+		t.Fatalf("close inventory gzip: %v", err)
+	}
+	invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": "inventory/data.csv.gz"}, inventoryBody.Bytes())
 	zstdWriter, err := zstd.NewWriter(nil)
 	if err != nil {
 		t.Fatalf("create zstd writer: %v", err)
@@ -456,6 +467,25 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	manifestStarted = invoke(p, "StartExecution", map[string]any{"stateMachineArn": manifestMachine["stateMachineArn"]}, nil)
 	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": manifestStarted["executionArn"]}, nil); execution["status"] != "FAILED" || execution["error"] != "States.ItemReaderFailed" {
 		t.Fatalf("bad Athena manifest ItemReader execution %#v", execution)
+	}
+	inventoryState := map[string]any{
+		"Type": "Map", "ItemProcessor": processor, "ItemSelector": map[string]any{"value.$": "$$.Map.Item.Value", "source.$": "$$.Map.Item.Source"}, "End": true,
+		"ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": "inventory-manifest.json"}, "ReaderConfig": map[string]any{"ManifestType": "S3_INVENTORY", "MaxItems": 1}},
+	}
+	inventoryDefinition, _ := json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": inventoryState}})
+	inventoryMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "reader-s3-inventory", "definition": string(inventoryDefinition), "roleArn": testRoleARN}, nil)
+	inventoryStarted := invoke(p, "StartExecution", map[string]any{"stateMachineArn": inventoryMachine["stateMachineArn"]}, nil)
+	inventoryExecution := invoke(p, "DescribeExecution", map[string]any{"executionArn": inventoryStarted["executionArn"]}, nil)
+	inventoryOutput := inventoryExecution["output"].(string)
+	if inventoryExecution["status"] != "SUCCEEDED" || !strings.Contains(inventoryOutput, `"source":"S3://items/inventory/data.csv.gz"`) || !strings.Contains(inventoryOutput, `"Bucket":"source"`) || !strings.Contains(inventoryOutput, `"Key":"alpha"`) || !strings.Contains(inventoryOutput, `"LastModifiedDate":"2026-08-24T00:00:00Z"`) || strings.Contains(inventoryOutput, `"Key":"beta"`) {
+		t.Fatalf("S3 inventory ItemReader execution %#v", inventoryExecution)
+	}
+	inventoryState["ItemReader"].(map[string]any)["Parameters"] = map[string]any{"Bucket": "items", "Key": "bad-inventory-manifest.json"}
+	inventoryDefinition, _ = json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": inventoryState}})
+	inventoryMachine = invoke(p, "CreateStateMachine", map[string]any{"name": "reader-bad-s3-inventory", "definition": string(inventoryDefinition), "roleArn": testRoleARN}, nil)
+	inventoryStarted = invoke(p, "StartExecution", map[string]any{"stateMachineArn": inventoryMachine["stateMachineArn"]}, nil)
+	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": inventoryStarted["executionArn"]}, nil); execution["status"] != "FAILED" || execution["error"] != "States.ItemReaderFailed" {
+		t.Fatalf("bad S3 inventory ItemReader execution %#v", execution)
 	}
 	listState := map[string]any{
 		"Type": "Map", "ItemProcessor": processor, "ItemSelector": map[string]any{"value.$": "$$.Map.Item.Value", "source.$": "$$.Map.Item.Source"}, "End": true,

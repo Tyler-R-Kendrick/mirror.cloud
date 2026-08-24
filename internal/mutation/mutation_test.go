@@ -622,6 +622,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesJSONPathVariables",
 		},
 		{
+			name: "states-ignore-assign-variable-limit",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `if err != nil || len(encoded) > 256*1024 {`,
+			new:  `if err != nil || len(encoded) > math.MaxInt {`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestVariableAssignmentLimits",
+		},
+		{
+			name: "states-ignore-execution-variable-limit",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `if err != nil || len(encoded) > 10*1024*1024 {`,
+			new:  `if err != nil || len(encoded) > math.MaxInt {`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestVariableAssignmentLimits",
+		},
+		{
 			name: "states-disable-sync-integration",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `resource, syncJSON, syncJob := syncTaskResource(resource)`,

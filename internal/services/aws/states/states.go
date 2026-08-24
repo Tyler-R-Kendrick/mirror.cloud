@@ -5238,15 +5238,39 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				if configuration == nil {
 					continue
 				}
+				resource, hasResource := configuration["Resource"]
+				resourceName, validResource := resource.(string)
+				_, hasWriterConfig := configuration["WriterConfig"]
+				if field == "ItemReader" && !hasResource || field == "ResultWriter" && !hasResource && !hasWriterConfig {
+					add("MISSING_REQUIRED_FIELD", field+" has no required configuration.", "/States/"+name+"/"+field+"/Resource")
+				} else if hasResource && (!validResource || resourceName == "") {
+					add("SCHEMA_VALIDATION_FAILED", field+" Resource must be a string.", "/States/"+name+"/"+field+"/Resource")
+				}
 				if _, parameters := configuration["Parameters"]; parameters && isJSONata {
 					add("SCHEMA_VALIDATION_FAILED", field+" Parameters is not supported with JSONata.", "/States/"+name+"/"+field+"/Parameters")
 				}
 				if _, arguments := configuration["Arguments"]; arguments && !isJSONata {
 					add("SCHEMA_VALIDATION_FAILED", field+" Arguments requires JSONata.", "/States/"+name+"/"+field+"/Arguments")
 				}
+				if value, parameters := configuration["Parameters"]; parameters && !isJSONata {
+					if _, valid := value.(map[string]any); !valid {
+						add("SCHEMA_VALIDATION_FAILED", field+" Parameters must be an object.", "/States/"+name+"/"+field+"/Parameters")
+					}
+				}
+				if value, arguments := configuration["Arguments"]; arguments && isJSONata {
+					if _, object := value.(map[string]any); !object {
+						expression, valid := value.(string)
+						if !valid || !strings.HasPrefix(expression, "{%") || !strings.HasSuffix(expression, "%}") {
+							add("SCHEMA_VALIDATION_FAILED", field+" Arguments must be an object or JSONata expression.", "/States/"+name+"/"+field+"/Arguments")
+						}
+					}
+				}
 			}
 			if reader, _ := state["ItemReader"].(map[string]any); reader != nil {
-				config, _ := reader["ReaderConfig"].(map[string]any)
+				config, valid := reader["ReaderConfig"].(map[string]any)
+				if _, exists := reader["ReaderConfig"]; exists && !valid {
+					add("SCHEMA_VALIDATION_FAILED", "ReaderConfig must be an object.", "/States/"+name+"/ItemReader/ReaderConfig")
+				}
 				if _, path := config["MaxItemsPath"]; path && isJSONata {
 					add("SCHEMA_VALIDATION_FAILED", "MaxItemsPath is not supported with JSONata.", "/States/"+name+"/ItemReader/ReaderConfig/MaxItemsPath")
 				}
@@ -5268,6 +5292,16 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 					add("SCHEMA_VALIDATION_FAILED", "ProcessorConfig must be an object.", "/States/"+name+"/ItemProcessor/ProcessorConfig")
 				}
 				mode, executionType := first(processorConfig, "Mode"), first(processorConfig, "ExecutionType")
+				if value, exists := processorConfig["Mode"]; exists {
+					if _, valid := value.(string); !valid {
+						add("SCHEMA_VALIDATION_FAILED", "ProcessorConfig Mode must be a string.", "/States/"+name+"/ItemProcessor/ProcessorConfig/Mode")
+					}
+				}
+				if value, exists := processorConfig["ExecutionType"]; exists {
+					if _, valid := value.(string); !valid {
+						add("SCHEMA_VALIDATION_FAILED", "ExecutionType must be a string.", "/States/"+name+"/ItemProcessor/ProcessorConfig/ExecutionType")
+					}
+				}
 				if mode != "" && mode != "INLINE" && mode != "DISTRIBUTED" {
 					add("SCHEMA_VALIDATION_FAILED", "ProcessorConfig Mode must be INLINE or DISTRIBUTED.", "/States/"+name+"/ItemProcessor/ProcessorConfig/Mode")
 				}

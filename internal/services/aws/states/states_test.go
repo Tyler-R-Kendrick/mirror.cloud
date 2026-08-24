@@ -1532,11 +1532,24 @@ func TestStatesMapValidation(t *testing.T) {
 		`"ItemBatcher":[],` + processor,
 		`"ResultWriter":[],` + processor,
 		`"ItemProcessor":{"ProcessorConfig":[],"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
+		`"ItemReader":{},` + processor,
+		`"ItemReader":{"Resource":1},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":[]},` + processor,
+		`"ItemReader":{"Resource":"reader","Parameters":[]},` + processor,
+		`"ResultWriter":{},` + processor,
+		`"ResultWriter":{"Resource":1},` + processor,
+		`"ResultWriter":{"Resource":"writer","Parameters":[]},` + processor,
+		`"ItemProcessor":{"ProcessorConfig":{"Mode":1},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
+		`"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED","ExecutionType":1},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
 	} {
 		definition := `{"StartAt":"Map","States":{"Map":{"Type":"Map",` + fields + `,"End":true}}}`
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 1 {
 			t.Fatalf("Map diagnostics = %#v for %s", diagnostics, fields)
 		}
+	}
+	jsonata := `{"QueryLanguage":"JSONata","StartAt":"Map","States":{"Map":{"Type":"Map","Items":[],"ItemReader":{"Resource":"reader","Arguments":[]},` + processor + `,"End":true}}}`
+	if diagnostics := validateDefinition(jsonata); len(diagnostics) != 1 {
+		t.Fatalf("JSONata Map diagnostics %#v", diagnostics)
 	}
 }
 

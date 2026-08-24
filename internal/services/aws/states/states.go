@@ -4730,10 +4730,17 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 		}
 		if typ == "Pass" {
 			if isJSONata {
-				for _, field := range []string{"Arguments", "Result"} {
+				for _, field := range []string{"Result"} {
 					if _, exists := state[field]; exists {
 						add("SCHEMA_VALIDATION_FAILED", field+" is not supported by a JSONata Pass state.", "/States/"+name+"/"+field)
 					}
+				}
+			}
+		}
+		if typ != "Task" {
+			for _, field := range []string{"Arguments", "Credentials", "HeartbeatSeconds", "HeartbeatSecondsPath", "Resource", "TimeoutSeconds", "TimeoutSecondsPath"} {
+				if _, exists := state[field]; exists {
+					add("SCHEMA_VALIDATION_FAILED", field+" is only supported by Task states.", "/States/"+name+"/"+field)
 				}
 			}
 		}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -2180,6 +2181,22 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		if result.status != tc.status || result.cause != tc.cause {
 			t.Fatalf("walk %s: %#v", tc.definition, result)
 		}
+	}
+	longStates := map[string]any{}
+	for index := range 100 {
+		name := fmt.Sprintf("State%d", index)
+		state := map[string]any{"Type": "Pass", "End": true}
+		if index < 99 {
+			state = map[string]any{"Type": "Pass", "Next": fmt.Sprintf("State%d", index+1)}
+		}
+		longStates[name] = state
+	}
+	longDefinition, _ := json.Marshal(map[string]any{"StartAt": "State0", "States": longStates})
+	if result := walk(string(longDefinition), nil); result.status != "SUCCEEDED" || len(result.hist) != 100 {
+		t.Fatalf("long state chain %#v", result)
+	}
+	if result := p.walk(ctx, &spi.Request{Identity: id, Input: map[string]any{"_executionType": "EXPRESS"}}, string(longDefinition), "", nil, nil); result.status != "SUCCEEDED" || len(result.hist) != 100 {
+		t.Fatalf("long Express state chain %#v", result)
 	}
 	activityInput := walk(`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"`+activityARN+`","InputPath":"$.task","End":true}}}`, map[string]any{"task": map[string]any{"value": 1.0}, "keep": true})
 	if activityInput.status != "RUNNING" || jsonPath(activityInput.pending.Input, "$.value") != 1.0 || jsonPath(activityInput.pending.StateInput, "$.keep") != true {

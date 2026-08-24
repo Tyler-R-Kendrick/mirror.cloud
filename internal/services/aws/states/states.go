@@ -1643,8 +1643,12 @@ func (p *Pack) walk(ctx context.Context, req *spi.Request, def, from string, inp
 	if retries == nil {
 		retries = map[string]map[int]int{}
 	}
+	maxTransitions := 25000
+	if first(req.Input, "_executionType") == "EXPRESS" {
+		maxTransitions = math.MaxInt
+	}
 walkLoop:
-	for hop := 0; hop < 64; hop++ {
+	for hop := 0; hop < maxTransitions; hop++ {
 		if deadline, err := time.Parse(time.RFC3339Nano, first(req.Input, "_executionDeadline")); err == nil && !p.deps.Clock.Now().Before(deadline) {
 			return walkResult{out: data, status: "TIMED_OUT", cause: "States.Timeout", errorName: "States.Timeout", hist: hist}
 		}

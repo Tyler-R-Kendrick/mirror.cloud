@@ -37,6 +37,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/opensearch"
 	redshiftservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/redshift"
+	s3tablesservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3tables"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -2253,6 +2254,10 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 		p.deliverRedshiftRecords(ctx, req, destination, stream, version, recIDs, data, now)
 		return
 	}
+	if destination, ok := rec["IcebergDestinationConfiguration"].(map[string]any); ok {
+		p.deliverIcebergRecords(ctx, req, destination, stream, version, recIDs, data, now)
+		return
+	}
 	if destination, ok := rec["ElasticsearchDestinationConfiguration"].(map[string]any); ok {
 		backup, _ := destination["S3Configuration"].(map[string]any)
 		bucket, _, errorPrefix, _, _, _, kmsARN := s3Configuration(backup)
@@ -2291,6 +2296,100 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 			p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)
 		}
 	}
+}
+
+func (p *Pack) deliverIcebergRecords(ctx context.Context, req *spi.Request, destination map[string]any, stream, version string, recIDs []string, data [][]byte, now time.Time) {
+	s3, _ := destination["S3Configuration"].(map[string]any)
+	bucket, _, errorPrefix, _, _, _, kmsARN := s3Configuration(s3)
+	tables, _ := destination["DestinationTableConfigurationList"].([]any)
+	catalog, _ := destination["CatalogConfiguration"].(map[string]any)
+	tableBucket := icebergTableBucket(first(catalog, "CatalogARN"))
+	for index := range data {
+		if first(destination, "S3BackupMode") == "AllData" {
+			p.deliverS3Configuration(ctx, req, s3, stream, version, recIDs[index], data[index], now)
+		}
+		records, failures := p.processData(ctx, req, destination, stream, recIDs[index], data[index], now)
+		for _, failure := range failures {
+			p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)
+		}
+		for _, record := range records {
+			values := map[string]any{}
+			if json.Unmarshal(record.data, &values) != nil || values == nil {
+				p.deliverIcebergFailure(ctx, req, s3, stream, version, now, record, "Iceberg record is not a JSON object")
+				continue
+			}
+			metadata := maps.Clone(record.queryPartitionKeys)
+			maps.Copy(metadata, record.partitionKeys)
+			table := icebergTable(tables, metadata)
+			if table == nil || tableBucket == "" {
+				p.deliverIcebergFailure(ctx, req, s3, stream, version, now, record, "Iceberg destination table was not found")
+				continue
+			}
+			operation := metadata["operation"]
+			if operation == "" {
+				operation = "insert"
+			}
+			if destination["AppendOnly"] == true && operation != "insert" {
+				p.deliverIcebergFailure(ctx, req, icebergFailureS3(s3, table), stream, version, now, record, "Iceberg append-only stream rejected a mutation")
+				continue
+			}
+			err := s3tablesservice.New(p.deps).ApplyRows(ctx, req.Identity, tableBucket, first(table, "DestinationDatabaseName"), first(table, "DestinationTableName"), []s3tablesservice.RowMutation{{
+				Operation: operation, Values: values, UniqueKeys: icebergUniqueKeys(table["UniqueKeys"]),
+			}})
+			if err != nil {
+				p.deliverIcebergFailure(ctx, req, icebergFailureS3(s3, table), stream, version, now, record, err.Error())
+			}
+		}
+	}
+}
+
+func (p *Pack) deliverIcebergFailure(ctx context.Context, req *spi.Request, s3 map[string]any, stream, version string, now time.Time, record processingRecord, message string) {
+	bucket, _, errorPrefix, _, _, _, kmsARN := s3Configuration(s3)
+	failure := &processingFailure{typeName: "iceberg-failed", code: "Iceberg.DeliveryFailed", message: message, attempts: 1, recID: record.recID, data: record.raw}
+	p.logDeliveryError(ctx, req, s3, stream, message, now)
+	p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)
+}
+
+func icebergFailureS3(s3, table map[string]any) map[string]any {
+	if prefix := first(table, "S3ErrorOutputPrefix"); prefix != "" {
+		s3 = maps.Clone(s3)
+		s3["ErrorOutputPrefix"] = prefix
+	}
+	return s3
+}
+
+func icebergTableBucket(catalogARN string) string {
+	const marker = "/s3tablescatalog/"
+	if index := strings.Index(catalogARN, marker); index >= 0 {
+		return catalogARN[index+len(marker):]
+	}
+	return ""
+}
+
+func icebergTable(tables []any, metadata map[string]string) map[string]any {
+	database, tableName := metadata["icebergDestinationDatabaseName"], metadata["icebergDestinationTableName"]
+	if database == "" && tableName == "" && len(tables) == 1 {
+		table, _ := tables[0].(map[string]any)
+		return table
+	}
+	for _, raw := range tables {
+		table, _ := raw.(map[string]any)
+		if first(table, "DestinationDatabaseName") == database && first(table, "DestinationTableName") == tableName {
+			return table
+		}
+	}
+	return nil
+}
+
+func icebergUniqueKeys(raw any) []string {
+	values, _ := raw.([]any)
+	keys := make([]string, 0, len(values))
+	for _, value := range values {
+		if key, ok := value.(string); ok {
+			keys = append(keys, key)
+		}
+	}
+	return keys
 }
 
 func (p *Pack) deliverRedshiftRecords(ctx context.Context, req *spi.Request, destination map[string]any, stream, version string, recIDs []string, data [][]byte, now time.Time) {

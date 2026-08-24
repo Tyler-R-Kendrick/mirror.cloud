@@ -33,6 +33,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/opensearch"
 	redshiftservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/redshift"
+	s3tablesservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3tables"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -1211,6 +1212,94 @@ func TestIcebergDestinationValidationAndDescription(t *testing.T) {
 		"IcebergDestinationUpdate": map[string]any{"AppendOnly": true},
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFirehoseIcebergDestination(t *testing.T) {
+	deps := spitest.Deps(t)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	tables := s3tablesservice.New(deps)
+	if _, err := tables.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTableBucket", Input: map[string]any{"name": "warehouse"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tables.CreateTable(ctx, id, "warehouse", "analytics", "events", []string{"id", "name", "op"}); err != nil {
+		t.Fatal(err)
+	}
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	destination := testIcebergDestination()
+	destination["S3BackupMode"] = "AllData"
+	destination["S3Configuration"] = map[string]any{
+		"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "source/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/",
+	}
+	destination["ProcessingConfiguration"] = map[string]any{"Enabled": true, "Processors": []any{map[string]any{
+		"Type": "MetadataExtraction", "Parameters": []any{
+			map[string]any{"ParameterName": "MetadataExtractionQuery", "ParameterValue": "{operation: .op}"},
+			map[string]any{"ParameterName": "JsonParsingEngine", "ParameterValue": "JQ-1.6"},
+		},
+	}}}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "iceberg-delivery", "IcebergDestinationConfiguration": destination}); err != nil {
+		t.Fatal(err)
+	}
+	data := []string{
+		`{"id":"1","name":"alice","op":"insert"}`,
+		`{"id":"2","name":"bob","op":"insert"}`,
+		`{"id":"2","name":"robert","op":"update"}`,
+		`{"id":"1","op":"delete"}`,
+	}
+	response, err := call("PutRecordBatch", map[string]any{"DeliveryStreamName": "iceberg-delivery", "Records": []any{
+		map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(data[0]))},
+		map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(data[1]))},
+		map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(data[2]))},
+		map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(data[3]))},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := tables.TableRows(ctx, id, "warehouse", "analytics", "events")
+	want := []map[string]any{{"id": "2", "name": "robert", "op": "update"}}
+	if err != nil || !reflect.DeepEqual(rows, want) {
+		t.Fatalf("Iceberg rows %#v, %v", rows, err)
+	}
+	for index, raw := range response.Output["RequestResponses"].([]any) {
+		recordID := first(raw.(map[string]any), "RecordId")
+		key := id.Account + "/" + id.Region + "/out/source/1970/01/01/00/iceberg-delivery-1-1970-01-01-00-00-00-" + recordID
+		reader, _, err := deps.Blobs.Get(ctx, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(reader)
+		_ = reader.Close()
+		if string(body) != data[index] {
+			t.Fatalf("Iceberg source backup %q", body)
+		}
+	}
+
+	appendOnly := maps.Clone(destination)
+	appendOnly["AppendOnly"], appendOnly["S3BackupMode"] = true, "FailedDataOnly"
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "iceberg-append", "IcebergDestinationConfiguration": appendOnly}); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := call("PutRecord", map[string]any{
+		"DeliveryStreamName": "iceberg-append", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"id":"2","name":"wrong","op":"update"}`))},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failedID := first(failed.Output, "RecordId")
+	failureKey := id.Account + "/" + id.Region + "/out/errors/iceberg-failed/1970/01/01/00/iceberg-append-1-1970-01-01-00-00-00-" + failedID
+	reader, _, err := deps.Blobs.Get(ctx, failureKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	if !bytes.Contains(body, []byte("append-only")) {
+		t.Fatalf("Iceberg failure envelope %q", body)
 	}
 }
 

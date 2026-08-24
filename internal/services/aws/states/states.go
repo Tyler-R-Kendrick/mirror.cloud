@@ -1747,6 +1747,9 @@ walkLoop:
 			idef, _ := json.Marshal(iter)
 			processorConfig, _ := iter["ProcessorConfig"].(map[string]any)
 			distributed := first(processorConfig, "Mode") == "DISTRIBUTED"
+			if distributed && mapScope != nil {
+				mapScope.variables = map[string]any{}
+			}
 			executionType := first(processorConfig, "ExecutionType")
 			if executionType == "" {
 				executionType = "STANDARD"
@@ -1811,6 +1814,10 @@ walkLoop:
 					failed = &walkResult{out: stateInput, status: "FAILED", cause: name, errorName: name}
 				}
 				if failed == nil {
+					selectorVariables := variables
+					if mapScope != nil {
+						selectorVariables = mapScope.variables
+					}
 					for index, item := range arr {
 						itemDetails := map[string]any{"Index": float64(index), "Value": item, "Source": source}
 						if itemKeys != nil {
@@ -1821,7 +1828,7 @@ walkLoop:
 							arr[index] = applyParams(selected, data, itemContext, p.deps.Rand)
 						} else if selector != nil {
 							arr[index], itemsOK = evalJSONataValue(selector, jsonataScope{
-								input: rawInput, context: mergeJSONataContext(stateContext, itemContext), variables: variables, random: p.deps.Rand,
+								input: rawInput, context: mergeJSONataContext(stateContext, itemContext), variables: selectorVariables, random: p.deps.Rand,
 							})
 							if !itemsOK {
 								failed = &walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError"}
@@ -1880,7 +1887,11 @@ walkLoop:
 							copy.Input["_executionRedriveCount"] = 0.0
 							walkRequest = &copy
 						}
-						wr := p.walk(ctx, walkRequest, string(idef), "", iterationInput, nil, maps.Clone(variables))
+						childVariables := maps.Clone(variables)
+						if distributed {
+							childVariables = map[string]any{}
+						}
+						wr := p.walk(ctx, walkRequest, string(idef), "", iterationInput, nil, childVariables)
 						mapRuns = append(mapRuns, wr.mapRuns...)
 						if distributed {
 							itemResult := p.mapItemResult(req, cur, childName, childStartTime, iterationInput, wr)
@@ -1941,7 +1952,7 @@ walkLoop:
 						mapOutput = []any{}
 					}
 					if isJSONata {
-						data, ok = applyJSONataState(st, stateInput, mapOutput, stateContext, variables, p.deps.Rand)
+						data, ok = applyJSONataState(st, stateInput, mapOutput, stateContext, variables, p.deps.Rand, mapScope.variables)
 						if ok {
 							jsonataOutputApplied = true
 							break
@@ -2422,8 +2433,12 @@ func evalJSONataValue(value any, scope jsonataScope) (any, bool) {
 	}
 }
 
-func applyJSONataState(state map[string]any, input, result any, context map[string]any, variables map[string]any, random spi.Rand) (any, bool) {
-	scope := jsonataScope{input: input, result: result, hasResult: true, context: context, variables: variables, random: random}
+func applyJSONataState(state map[string]any, input, result any, context map[string]any, variables map[string]any, random spi.Rand, visibleVariables ...map[string]any) (any, bool) {
+	visible := variables
+	if len(visibleVariables) > 0 {
+		visible = visibleVariables[0]
+	}
+	scope := jsonataScope{input: input, result: result, hasResult: true, context: context, variables: visible, random: random}
 	output := result
 	var ok bool
 	if configured, exists := state["Output"]; exists {
@@ -4288,7 +4303,9 @@ func validVariableName(name string) bool {
 		return false
 	}
 	for index, character := range []rune(name) {
-		if index == 0 && character != '_' && !unicode.IsLetter(character) || index > 0 && character != '_' && !unicode.IsLetter(character) && !unicode.IsDigit(character) {
+		start := unicode.IsLetter(character) || unicode.Is(unicode.Nl, character) || unicode.Is(unicode.Other_ID_Start, character)
+		continuation := start || unicode.Is(unicode.Mn, character) || unicode.Is(unicode.Mc, character) || unicode.Is(unicode.Nd, character) || unicode.Is(unicode.Pc, character) || unicode.Is(unicode.Other_ID_Continue, character)
+		if index == 0 && !start || index > 0 && !continuation {
 			return false
 		}
 	}

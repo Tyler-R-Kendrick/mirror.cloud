@@ -802,6 +802,16 @@ func TestStatesJSONataBehavior(t *testing.T) {
 	if diagnostics := validateDefinition(expressDistributed, "EXPRESS"); len(diagnostics) == 0 {
 		t.Fatal("Express Distributed Map accepted")
 	}
+	for _, name := range []string{"alpha", "éclair", "a\u0301", "a‿b", "℘value"} {
+		if !validVariableName(name) {
+			t.Fatalf("valid UAX31 variable rejected %q", name)
+		}
+	}
+	for _, name := range []string{"_private", "1st", "a-b", strings.Repeat("x", 81)} {
+		if validVariableName(name) {
+			t.Fatalf("invalid UAX31 variable accepted %q", name)
+		}
+	}
 	machine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonata", "definition": string(definition), "roleArn": testRoleARN, "type": "EXPRESS"})
 	execution := invoke(p, "StartSyncExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"], "input": `{"values":[1,2,3],"encoded":"{\"n\":3}"}`})
 	if execution["status"] != "SUCCEEDED" {
@@ -918,6 +928,12 @@ func TestStatesJSONataErrorsAndFields(t *testing.T) {
 	objectARN := invoke(p, "StartExecution", map[string]any{"stateMachineArn": objectMachine["stateMachineArn"]})["executionArn"].(string)
 	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": objectARN}); execution["status"] != "SUCCEEDED" || execution["output"] != `[{"index":0,"key":"a","value":1},{"index":1,"key":"b","value":2}]` {
 		t.Fatalf("JSONata object Map %#v", execution)
+	}
+	variableIsolation := `{"QueryLanguage":"JSONata","StartAt":"Prepare","States":{"Prepare":{"Type":"Pass","Assign":{"items":[1],"outer":7},"Next":"Config"},"Config":{"Type":"Map","Items":"{% $items %}","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"Catch":[{"ErrorEquals":["States.QueryEvaluationError"],"Assign":{"configBlocked":true},"Next":"Child"}],"Next":"Child"},"Child":{"Type":"Map","Items":[1],"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Read","States":{"Read":{"Type":"Succeed","Output":"{% $outer %}"}}},"Catch":[{"ErrorEquals":["States.QueryEvaluationError"],"Assign":{"childBlocked":true},"Next":"Output"}],"Next":"Output"},"Output":{"Type":"Map","Items":[1],"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"Output":"{% $outer %}","Catch":[{"ErrorEquals":["States.QueryEvaluationError"],"Assign":{"outputBlocked":true},"Next":"Assign"}],"Next":"Assign"},"Assign":{"Type":"Map","Items":[1],"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"Assign":{"leaked":"{% $outer %}"},"Catch":[{"ErrorEquals":["States.QueryEvaluationError"],"Assign":{"assignBlocked":true},"Next":"Done"}],"Next":"Done"},"Done":{"Type":"Succeed","Output":{"config":"{% $configBlocked %}","child":"{% $childBlocked %}","output":"{% $outputBlocked %}","assign":"{% $assignBlocked %}"}}}}`
+	isolationMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonata-variable-isolation", "definition": variableIsolation, "roleArn": testRoleARN})
+	isolationARN := invoke(p, "StartExecution", map[string]any{"stateMachineArn": isolationMachine["stateMachineArn"]})["executionArn"].(string)
+	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": isolationARN}); execution["status"] != "SUCCEEDED" || execution["output"] != `{"assign":true,"child":true,"config":true,"output":true}` {
+		t.Fatalf("Distributed Map variable isolation %#v", execution)
 	}
 	writerRetry := `{"QueryLanguage":"JSONata","StartAt":"Map","States":{"Map":{"Type":"Map","Items":"{% [1] %}","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"ResultWriter":{"Resource":"arn:aws:states:::s3:putObject","Arguments":{"Bucket":"{% $states.context.State.RetryCount > 0 ? 'jsonata-items' : $states.input.missing %}","Prefix":"results"}},"Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"MaxAttempts":1}],"End":true}}}`
 	writerMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonata-writer-retry", "definition": writerRetry, "roleArn": testRoleARN})

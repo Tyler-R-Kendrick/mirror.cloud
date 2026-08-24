@@ -527,6 +527,71 @@ func TestStateListsAndHistoryPagination(t *testing.T) {
 	}
 }
 
+func TestChoiceRules(t *testing.T) {
+	data := map[string]any{
+		"s": "alpha/beta", "s2": "omega", "literal": "alpha/*", "n": 2.0, "n2": 3.0, "b": true, "b2": true,
+		"ts": "2026-01-02T03:04:05Z", "tsOffset": "2026-01-02T05:04:05+02:00", "ts2": "2026-01-03T03:04:05Z", "null": nil,
+	}
+	matching := []map[string]any{
+		{"Variable": "$.s", "StringEquals": "alpha/beta"},
+		{"Variable": "$.s", "StringEqualsPath": "$.s"},
+		{"Variable": "$.s", "StringLessThan": "z"},
+		{"Variable": "$.s", "StringLessThanEqualsPath": "$.s"},
+		{"Variable": "$.s2", "StringGreaterThan": "alpha"},
+		{"Variable": "$.s2", "StringGreaterThanEqualsPath": "$.s2"},
+		{"Variable": "$.s", "StringMatches": `alpha/*`},
+		{"Variable": "$.literal", "StringMatches": `alpha/\*`},
+		{"Variable": "$.n", "NumericEquals": 2.0},
+		{"Variable": "$.n", "NumericEqualsPath": "$.n"},
+		{"Variable": "$.n", "NumericLessThan": 3.0},
+		{"Variable": "$.n", "NumericLessThanEqualsPath": "$.n"},
+		{"Variable": "$.n2", "NumericGreaterThan": 2.0},
+		{"Variable": "$.n2", "NumericGreaterThanEqualsPath": "$.n2"},
+		{"Variable": "$.b", "BooleanEquals": true},
+		{"Variable": "$.b", "BooleanEqualsPath": "$.b2"},
+		{"Variable": "$.ts", "TimestampEquals": "2026-01-02T03:04:05Z"},
+		{"Variable": "$.ts", "TimestampEqualsPath": "$.tsOffset"},
+		{"Variable": "$.ts", "TimestampLessThan": "2026-01-03T03:04:05Z"},
+		{"Variable": "$.ts", "TimestampLessThanEqualsPath": "$.ts"},
+		{"Variable": "$.ts2", "TimestampGreaterThan": "2026-01-02T03:04:05Z"},
+		{"Variable": "$.ts2", "TimestampGreaterThanEqualsPath": "$.ts2"},
+		{"Variable": "$.s", "IsString": true},
+		{"Variable": "$.n", "IsNumeric": true},
+		{"Variable": "$.b", "IsBoolean": true},
+		{"Variable": "$.ts", "IsTimestamp": true},
+		{"Variable": "$.null", "IsNull": true},
+		{"Variable": "$.null", "IsPresent": true},
+		{"Variable": "$.missing", "IsPresent": false},
+		{"And": []any{map[string]any{"Variable": "$.b", "BooleanEquals": true}, map[string]any{"Variable": "$.n", "NumericGreaterThan": 1.0}}},
+		{"Or": []any{map[string]any{"Variable": "$.missing", "IsPresent": true}, map[string]any{"Variable": "$.s", "StringEquals": "alpha/beta"}}},
+		{"Not": map[string]any{"Variable": "$.n", "NumericEquals": 3.0}},
+	}
+	for _, rule := range matching {
+		if !matchChoice(rule, data) {
+			t.Fatalf("choice did not match %#v", rule)
+		}
+	}
+	notMatching := []map[string]any{
+		{"Variable": "$.missing", "IsPresent": true},
+		{"Variable": "$.null", "IsNull": false},
+		{"Variable": "$.n", "StringEquals": "2"},
+		{"Variable": "$.s", "NumericEquals": 0.0},
+		{"Variable": "$.s", "StringMatches": `alpha/\*`},
+		{"Variable": "$.s", "TimestampEquals": "not-a-time"},
+		{"And": []any{map[string]any{"Variable": "$.b", "BooleanEquals": true}, map[string]any{"Variable": "$.n", "NumericGreaterThan": 3.0}}},
+		{"Or": []any{map[string]any{"Variable": "$.missing", "IsPresent": true}}},
+		{"Not": map[string]any{"Variable": "$.n", "NumericEquals": 2.0}},
+	}
+	for _, rule := range notMatching {
+		if matchChoice(rule, data) {
+			t.Fatalf("choice unexpectedly matched %#v", rule)
+		}
+	}
+	if value, present := jsonPathLookup(data, "$.null"); !present || value != nil {
+		t.Fatalf("null lookup %#v %v", value, present)
+	}
+}
+
 func TestStatesTagLifecycle(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

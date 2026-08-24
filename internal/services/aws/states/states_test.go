@@ -21,8 +21,8 @@ import (
 
 func TestStatesHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 24 {
-		t.Fatalf("states Operations() %d want 24", n)
+	if n := len(p.Operations()); n != 32 {
+		t.Fatalf("states Operations() %d want 32", n)
 	}
 }
 
@@ -40,6 +40,71 @@ func TestStartSyncRejectsStandardWorkflow(t *testing.T) {
 	fault, ok := err.(*spi.Fault)
 	if !ok || fault.Code != "StateMachineTypeNotSupported" {
 		t.Fatalf("sync standard error %#v", err)
+	}
+}
+
+func TestStateMachineVersionsAndAliases(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	must := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := call(operation, input)
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response
+	}
+	fault := func(operation string, input map[string]any, code string) {
+		t.Helper()
+		_, err := call(operation, input)
+		if got, ok := err.(*spi.Fault); !ok || got.Code != code {
+			t.Fatalf("%s fault %#v want %s", operation, err, code)
+		}
+	}
+
+	definition1 := `{"StartAt":"Version","States":{"Version":{"Type":"Pass","Result":{"version":1},"End":true}}}`
+	arn := must("CreateStateMachine", map[string]any{"name": "versioned", "definition": definition1, "type": "EXPRESS"}).Output["stateMachineArn"].(string)
+	v1 := must("PublishStateMachineVersion", map[string]any{"stateMachineArn": arn, "description": "one"}).Output["stateMachineVersionArn"].(string)
+	if again := must("PublishStateMachineVersion", map[string]any{"stateMachineArn": arn}).Output["stateMachineVersionArn"]; again != v1 {
+		t.Fatalf("idempotent publish %#v want %s", again, v1)
+	}
+	fault("PublishStateMachineVersion", map[string]any{"stateMachineArn": arn, "revisionId": "stale"}, "ConflictException")
+
+	definition2 := `{"StartAt":"Version","States":{"Version":{"Type":"Pass","Result":{"version":2},"End":true}}}`
+	must("UpdateStateMachine", map[string]any{"stateMachineArn": arn, "definition": definition2})
+	v2 := must("PublishStateMachineVersion", map[string]any{"stateMachineArn": arn, "description": "two"}).Output["stateMachineVersionArn"].(string)
+	versions := must("ListStateMachineVersions", map[string]any{"stateMachineArn": arn}).Output["stateMachineVersions"].([]any)
+	if len(versions) != 2 || versions[0].(map[string]any)["stateMachineVersionArn"] != v2 || versions[1].(map[string]any)["stateMachineVersionArn"] != v1 {
+		t.Fatalf("versions %#v", versions)
+	}
+	if sync := must("StartSyncExecution", map[string]any{"stateMachineArn": v1, "name": "v1"}).Output; !strings.Contains(fmtString(sync["output"]), `"version":1`) {
+		t.Fatalf("immutable version output %#v", sync)
+	}
+
+	fault("CreateStateMachineAlias", map[string]any{"name": "123", "routingConfiguration": []any{map[string]any{"stateMachineVersionArn": v1, "weight": 100.0}}}, "ValidationException")
+	fault("CreateStateMachineAlias", map[string]any{"name": "live", "routingConfiguration": []any{map[string]any{"stateMachineVersionArn": v1, "weight": 99.0}}}, "ValidationException")
+	alias := must("CreateStateMachineAlias", map[string]any{"Name": "live", "Description": "first", "RoutingConfiguration": []any{map[string]any{"StateMachineVersionArn": v1, "Weight": 100.0}}}).Output["stateMachineAliasArn"].(string)
+	if described := must("DescribeStateMachineAlias", map[string]any{"stateMachineAliasArn": alias}).Output; described["description"] != "first" {
+		t.Fatalf("alias %#v", described)
+	}
+	if aliases := must("ListStateMachineAliases", map[string]any{"stateMachineArn": arn}).Output["stateMachineAliases"].([]any); len(aliases) != 1 {
+		t.Fatalf("aliases %#v", aliases)
+	}
+	fault("DeleteStateMachineVersion", map[string]any{"stateMachineVersionArn": v1}, "ConflictException")
+	must("UpdateStateMachineAlias", map[string]any{"StateMachineAliasArn": alias, "Description": "second", "RoutingConfiguration": []any{map[string]any{"StateMachineVersionArn": v2, "Weight": 100.0}}})
+	if sync := must("StartSyncExecution", map[string]any{"stateMachineArn": alias, "name": "alias"}).Output; !strings.Contains(fmtString(sync["output"]), `"version":2`) {
+		t.Fatalf("alias output %#v", sync)
+	}
+	must("DeleteStateMachineAlias", map[string]any{"stateMachineAliasArn": alias})
+	must("DeleteStateMachineVersion", map[string]any{"stateMachineVersionArn": v1})
+	must("DeleteStateMachineVersion", map[string]any{"stateMachineVersionArn": v2})
+	if versions := must("ListStateMachineVersions", map[string]any{"stateMachineArn": arn}).Output["stateMachineVersions"].([]any); len(versions) != 0 {
+		t.Fatalf("deleted versions %#v", versions)
 	}
 }
 
@@ -83,7 +148,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		}
 		return response
 	}
-	if p.ServiceID() != "aws.states" || len(p.Operations()) != 24 {
+	if p.ServiceID() != "aws.states" || len(p.Operations()) != 32 {
 		t.Fatalf("metadata %s %d", p.ServiceID(), len(p.Operations()))
 	}
 	if _, err := call("CreateStateMachine", map[string]any{}); err == nil {

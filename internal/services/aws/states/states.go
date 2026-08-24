@@ -15,6 +15,7 @@ import (
 	"math"
 	mathrand "math/rand"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -41,6 +42,8 @@ func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
 func (p *Pack) Operations() []string {
 	return []string{
 		"CreateStateMachine", "UpdateStateMachine", "DeleteStateMachine", "DescribeStateMachine", "ListStateMachines",
+		"PublishStateMachineVersion", "ListStateMachineVersions", "DeleteStateMachineVersion",
+		"CreateStateMachineAlias", "DescribeStateMachineAlias", "ListStateMachineAliases", "UpdateStateMachineAlias", "DeleteStateMachineAlias",
 		"StartExecution", "StartSyncExecution", "StopExecution", "DescribeExecution", "ListExecutions", "GetExecutionHistory",
 		"CreateActivity", "DeleteActivity", "DescribeActivity", "ListActivities", "GetActivityTask",
 		"SendTaskSuccess", "SendTaskFailure", "SendTaskHeartbeat",
@@ -69,7 +72,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		rec := map[string]any{
 			"stateMachineArn": arn, "name": name, "definition": definition,
 			"roleArn": first(req.Input, "roleArn", "RoleArn"), "type": first(req.Input, "type", "Type"),
-			"status": "ACTIVE", "creationDate": float64(now),
+			"status": "ACTIVE", "creationDate": float64(now), "revisionId": p.deps.Rand.UUID(),
 		}
 		if rec["type"] == "" {
 			rec["type"] = "STANDARD"
@@ -94,6 +97,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if r := first(req.Input, "roleArn", "RoleArn"); r != "" {
 			rec["roleArn"] = r
 		}
+		rec["revisionId"] = p.deps.Rand.UUID()
 		nb, _ := json.Marshal(rec)
 		_ = p.col(req, "sm").Put(ctx, name, nb)
 		return &spi.Response{Output: map[string]any{"updateDate": float64(now)}}, nil
@@ -111,15 +115,132 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: rec}, nil
 	case "ListStateMachines":
 		return listCol(ctx, p.col(req, "sm"), "stateMachines")
-	case "StartExecution", "StartSyncExecution":
+	case "PublishStateMachineVersion":
 		arn := first(req.Input, "stateMachineArn", "StateMachineArn")
-		name := smName(arn)
+		name := baseSMName(arn)
 		b, ok, _ := p.col(req, "sm").Get(ctx, name)
 		if !ok {
 			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		var sm map[string]any
-		_ = json.Unmarshal(b, &sm)
+		var machine map[string]any
+		_ = json.Unmarshal(b, &machine)
+		revision := first(machine, "revisionId")
+		if wanted := first(req.Input, "revisionId", "RevisionId"); wanted != "" && wanted != revision {
+			return nil, &spi.Fault{Code: "ConflictException", HTTPStatus: 409, Fault: "client"}
+		}
+		versions, _, _ := p.col(req, "ver").List(ctx, name+":", "", 0)
+		next := 1
+		for _, version := range versions {
+			var record map[string]any
+			_ = json.Unmarshal(version.Value, &record)
+			if first(record, "revisionId") == revision {
+				return &spi.Response{Output: map[string]any{"stateMachineVersionArn": record["stateMachineVersionArn"], "creationDate": record["creationDate"]}}, nil
+			}
+			if number := versionNumber(first(record, "stateMachineVersionArn")); number >= next {
+				next = number + 1
+			}
+		}
+		baseARN := first(machine, "stateMachineArn")
+		versionARN := baseARN + ":" + strconv.Itoa(next)
+		record := map[string]any{
+			"stateMachineVersionArn": versionARN, "creationDate": float64(now), "description": first(req.Input, "description", "Description"),
+			"revisionId": revision, "definition": machine["definition"], "roleArn": machine["roleArn"], "type": machine["type"],
+		}
+		encoded, _ := json.Marshal(record)
+		_ = p.col(req, "ver").Put(ctx, name+":"+strconv.Itoa(next), encoded)
+		return &spi.Response{Output: map[string]any{"stateMachineVersionArn": versionARN, "creationDate": float64(now)}}, nil
+	case "ListStateMachineVersions":
+		name := baseSMName(first(req.Input, "stateMachineArn", "StateMachineArn"))
+		versions, _, _ := p.col(req, "ver").List(ctx, name+":", "", 0)
+		items := make([]any, 0, len(versions))
+		for _, version := range versions {
+			var record map[string]any
+			_ = json.Unmarshal(version.Value, &record)
+			items = append(items, map[string]any{"stateMachineVersionArn": record["stateMachineVersionArn"], "creationDate": record["creationDate"], "description": record["description"]})
+		}
+		sort.Slice(items, func(i, j int) bool {
+			return versionNumber(first(items[i].(map[string]any), "stateMachineVersionArn")) > versionNumber(first(items[j].(map[string]any), "stateMachineVersionArn"))
+		})
+		return &spi.Response{Output: map[string]any{"stateMachineVersions": items}}, nil
+	case "DeleteStateMachineVersion":
+		arn := first(req.Input, "stateMachineVersionArn", "StateMachineVersionArn")
+		aliases, _, _ := p.col(req, "alias").List(ctx, "", "", 0)
+		for _, alias := range aliases {
+			if strings.Contains(string(alias.Value), arn) {
+				return nil, &spi.Fault{Code: "ConflictException", HTTPStatus: 409, Fault: "client"}
+			}
+		}
+		_ = p.col(req, "ver").Delete(ctx, baseSMName(arn)+":"+strconv.Itoa(versionNumber(arn)))
+		return &spi.Response{Output: map[string]any{}}, nil
+	case "CreateStateMachineAlias":
+		name := first(req.Input, "name", "Name")
+		routes := aliasRoutes(req.Input)
+		baseARN, valid := p.validateAliasRoutes(ctx, req, routes)
+		if !validAliasName(name) || !valid {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
+		aliasARN := baseARN + ":" + name
+		if _, exists, _ := p.col(req, "alias").Get(ctx, aliasARN); exists {
+			return nil, &spi.Fault{Code: "ConflictException", HTTPStatus: 409, Fault: "client"}
+		}
+		record := map[string]any{
+			"stateMachineAliasArn": aliasARN, "name": name, "description": first(req.Input, "description", "Description"),
+			"routingConfiguration": routes, "creationDate": float64(now), "updateDate": float64(now),
+		}
+		encoded, _ := json.Marshal(record)
+		_ = p.col(req, "alias").Put(ctx, aliasARN, encoded)
+		return &spi.Response{Output: map[string]any{"stateMachineAliasArn": aliasARN, "creationDate": float64(now)}}, nil
+	case "DescribeStateMachineAlias":
+		arn := first(req.Input, "stateMachineAliasArn", "StateMachineAliasArn")
+		b, ok, _ := p.col(req, "alias").Get(ctx, arn)
+		if !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFound", HTTPStatus: 400, Fault: "client"}
+		}
+		var record map[string]any
+		_ = json.Unmarshal(b, &record)
+		return &spi.Response{Output: record}, nil
+	case "ListStateMachineAliases":
+		baseARN := first(req.Input, "stateMachineArn", "StateMachineArn")
+		aliases, _, _ := p.col(req, "alias").List(ctx, baseARN+":", "", 0)
+		items := make([]any, 0, len(aliases))
+		for _, alias := range aliases {
+			var record map[string]any
+			_ = json.Unmarshal(alias.Value, &record)
+			items = append(items, record)
+		}
+		return &spi.Response{Output: map[string]any{"stateMachineAliases": items}}, nil
+	case "UpdateStateMachineAlias":
+		arn := first(req.Input, "stateMachineAliasArn", "StateMachineAliasArn")
+		b, ok, _ := p.col(req, "alias").Get(ctx, arn)
+		if !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFound", HTTPStatus: 400, Fault: "client"}
+		}
+		var record map[string]any
+		_ = json.Unmarshal(b, &record)
+		if routes := aliasRoutes(req.Input); routes != nil {
+			baseARN, valid := p.validateAliasRoutes(ctx, req, routes)
+			if !valid || baseARN != stateMachineBaseARN(arn) {
+				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+			}
+			record["routingConfiguration"] = routes
+		}
+		if description, exists := inputValue(req.Input, "description", "Description"); exists {
+			record["description"] = description
+		}
+		record["updateDate"] = float64(now)
+		encoded, _ := json.Marshal(record)
+		_ = p.col(req, "alias").Put(ctx, arn, encoded)
+		return &spi.Response{Output: map[string]any{"updateDate": float64(now)}}, nil
+	case "DeleteStateMachineAlias":
+		_ = p.col(req, "alias").Delete(ctx, first(req.Input, "stateMachineAliasArn", "StateMachineAliasArn"))
+		return &spi.Response{Output: map[string]any{}}, nil
+	case "StartExecution", "StartSyncExecution":
+		arn := first(req.Input, "stateMachineArn", "StateMachineArn")
+		name := baseSMName(arn)
+		sm, ok := p.resolveStateMachine(ctx, req, arn)
+		if !ok {
+			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
+		}
 		if req.Operation == "StartSyncExecution" && first(sm, "type", "Type") != "EXPRESS" {
 			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
 		}
@@ -355,6 +476,58 @@ func (p *Pack) smARN(req *spi.Request, name string) string {
 
 func (p *Pack) execARN(req *spi.Request, sm, ex string) string {
 	return "arn:aws:states:" + req.Identity.Region + ":" + req.Identity.Account + ":execution:" + sm + ":" + ex
+}
+
+func (p *Pack) resolveStateMachine(ctx context.Context, req *spi.Request, arn string) (map[string]any, bool) {
+	name, qualifier := baseSMName(arn), strings.TrimPrefix(smName(arn), baseSMName(arn))
+	if qualifier == "" {
+		return getRecord(ctx, p.col(req, "sm"), name)
+	}
+	qualifier = strings.TrimPrefix(qualifier, ":")
+	if _, err := strconv.Atoi(qualifier); err == nil {
+		return getRecord(ctx, p.col(req, "ver"), name+":"+qualifier)
+	}
+	alias, ok := getRecord(ctx, p.col(req, "alias"), arn)
+	if !ok {
+		return nil, false
+	}
+	routes := asSlice(alias["routingConfiguration"])
+	pick, total := p.deps.Rand.Intn(100), 0
+	for _, raw := range routes {
+		route, _ := raw.(map[string]any)
+		total += int(inputNumber(route, "weight", "Weight"))
+		if pick < total {
+			versionARN := first(route, "stateMachineVersionArn", "StateMachineVersionArn")
+			return getRecord(ctx, p.col(req, "ver"), baseSMName(versionARN)+":"+strconv.Itoa(versionNumber(versionARN)))
+		}
+	}
+	return nil, false
+}
+
+func (p *Pack) validateAliasRoutes(ctx context.Context, req *spi.Request, routes []any) (string, bool) {
+	if len(routes) < 1 || len(routes) > 2 {
+		return "", false
+	}
+	baseARN, total := "", 0
+	for _, raw := range routes {
+		route, ok := raw.(map[string]any)
+		arn := first(route, "stateMachineVersionArn", "StateMachineVersionArn")
+		weight := inputNumber(route, "weight", "Weight")
+		if !ok || versionNumber(arn) < 1 || weight < 0 || weight > 100 || weight != math.Trunc(weight) {
+			return "", false
+		}
+		currentBase := stateMachineBaseARN(arn)
+		if baseARN == "" {
+			baseARN = currentBase
+		} else if currentBase != baseARN {
+			return "", false
+		}
+		if _, exists := getRecord(ctx, p.col(req, "ver"), baseSMName(arn)+":"+strconv.Itoa(versionNumber(arn))); !exists {
+			return "", false
+		}
+		total += int(weight)
+	}
+	return baseARN, total == 100
 }
 
 type pending struct {
@@ -1402,6 +1575,37 @@ func asSlice(v any) []any {
 	return s
 }
 
+func aliasRoutes(input map[string]any) []any {
+	value, _ := inputValue(input, "routingConfiguration", "RoutingConfiguration")
+	return asSlice(value)
+}
+
+func inputValue(input map[string]any, keys ...string) (any, bool) {
+	for _, key := range keys {
+		if value, exists := input[key]; exists {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+func inputNumber(input map[string]any, keys ...string) float64 {
+	value, _ := inputValue(input, keys...)
+	return toFloat(value)
+}
+
+func getRecord(ctx context.Context, collection spi.Collection, key string) (map[string]any, bool) {
+	encoded, ok, _ := collection.Get(ctx, key)
+	if !ok {
+		return nil, false
+	}
+	var record map[string]any
+	if json.Unmarshal(encoded, &record) != nil {
+		return nil, false
+	}
+	return record, true
+}
+
 func listCol(ctx context.Context, c spi.Collection, key string) (*spi.Response, error) {
 	kvs, _, _ := c.List(ctx, "", "", 0)
 	var items []any
@@ -1565,6 +1769,45 @@ func testDefinition(definition, stateName string, input any) (string, string, er
 
 func smName(arn string) string {
 	return lastSeg(arn, "stateMachine:")
+}
+
+func baseSMName(arn string) string {
+	name := smName(arn)
+	if base, _, found := strings.Cut(name, ":"); found {
+		return base
+	}
+	return name
+}
+
+func stateMachineBaseARN(arn string) string {
+	return strings.TrimSuffix(arn, smName(arn)) + baseSMName(arn)
+}
+
+func versionNumber(arn string) int {
+	number, _ := strconv.Atoi(lastSeg(arn, ":"))
+	return number
+}
+
+func validAliasName(name string) bool {
+	if len(name) < 1 || len(name) > 80 {
+		return false
+	}
+	hasNonDigit := false
+	for _, char := range name {
+		if char < '0' || char > '9' {
+			hasNonDigit = true
+		}
+		if char < '0' || char > '9' {
+			if char < 'A' || char > 'Z' {
+				if char < 'a' || char > 'z' {
+					if char != '-' && char != '_' {
+						return false
+					}
+				}
+			}
+		}
+	}
+	return hasNonDigit
 }
 
 func execName(arn string) string {

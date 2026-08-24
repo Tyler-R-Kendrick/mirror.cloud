@@ -1,4 +1,4 @@
-// Package kafka stores MSK cluster records (no Kafka broker).
+// Package kafka stores MSK cluster and local topic records (no Kafka broker).
 package kafka
 
 import (

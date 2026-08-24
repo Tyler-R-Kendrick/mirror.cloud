@@ -1463,20 +1463,21 @@ func TestStatesJSONataErrorsAndFields(t *testing.T) {
 		t.Helper()
 		result := make(chan map[string]any, 1)
 		go func() { result <- start(name, definition, input) }()
-		select {
-		case execution := <-result:
-			return execution
-		case <-time.After(10 * time.Millisecond):
-		}
-		if err := deps.Clock.Advance(time.Second); err != nil {
-			t.Fatal(err)
-		}
-		select {
-		case execution := <-result:
-			return execution
-		case <-time.After(time.Second):
-			t.Fatal("Express Retry did not resume")
-			return nil
+		tick := time.NewTicker(10 * time.Millisecond)
+		defer tick.Stop()
+		timeout := time.After(5 * time.Second)
+		for {
+			select {
+			case execution := <-result:
+				return execution
+			case <-tick.C:
+				if err := deps.Clock.Advance(100 * time.Millisecond); err != nil {
+					t.Fatal(err)
+				}
+			case <-timeout:
+				t.Fatal("Express Retry did not resume")
+				return nil
+			}
 		}
 	}
 	resumeRetry := func(executionARN string) map[string]any {

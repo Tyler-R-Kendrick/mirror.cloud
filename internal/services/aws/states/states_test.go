@@ -362,6 +362,7 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		"items-path.json": `{"data":{"items":[{"id":13},{"id":14}]}}`,
 		"listed/a":        `{"alpha":{"id":21}}`,
 		"listed/b":        `{"beta":{"id":22}}`,
+		"flat-array/a":    `[{"id":23}]`,
 		"nested.json":     `{"data":{"a/b":{"~key":[{"id":9},{"id":10}]}}}`,
 		"objects.json":    `{"b":{"id":12},"a":{"id":11}}`,
 	}
@@ -439,6 +440,15 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	if flattenExecution["status"] != "SUCCEEDED" || strings.Count(flattenOutput, `"source":"JSON"`) != 2 || !strings.Contains(flattenOutput, `"key":"alpha"`) || !strings.Contains(flattenOutput, `"key":"beta"`) || !strings.Contains(flattenOutput, `"id":21`) || !strings.Contains(flattenOutput, `"id":22`) {
 		t.Fatalf("flatten ItemReader execution %#v", flattenExecution)
 	}
+	flattenState["ItemSelector"] = map[string]any{"value.$": "$$.Map.Item.Value", "source.$": "$$.Map.Item.Source"}
+	flattenState["ItemReader"].(map[string]any)["Parameters"] = map[string]any{"Bucket": "items", "Prefix": "flat-array/"}
+	flattenDefinition, _ = json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": flattenState}})
+	flattenMachine = invoke(p, "CreateStateMachine", map[string]any{"name": "reader-load-flatten-array", "definition": string(flattenDefinition), "roleArn": testRoleARN}, nil)
+	flattenStarted = invoke(p, "StartExecution", map[string]any{"stateMachineArn": flattenMachine["stateMachineArn"]}, nil)
+	flattenExecution = invoke(p, "DescribeExecution", map[string]any{"executionArn": flattenStarted["executionArn"]}, nil)
+	if flattenExecution["status"] != "SUCCEEDED" || !strings.Contains(flattenExecution["output"].(string), `"id":23`) {
+		t.Fatalf("flatten array ItemReader execution %#v", flattenExecution)
+	}
 
 	for _, key := range []string{"missing", "broken.parquet"} {
 		missingState := map[string]any{"Type": "Map", "ItemProcessor": processor, "ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": key}, "ReaderConfig": map[string]any{"InputType": "PARQUET"}}, "End": true}
@@ -448,6 +458,14 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": missingExecution["executionArn"]}, nil); execution["status"] != "FAILED" || execution["error"] != "States.ItemReaderFailed" {
 			t.Fatalf("%s ItemReader execution %#v", key, execution)
 		}
+	}
+}
+
+func TestFlattenedMapDatasetLimit(t *testing.T) {
+	limited, _, valid := limitReaderItems(mapDataset{values: []any{1, 2}, keys: []any{"a", "b"}}, "JSON", map[string]any{"MaxItems": 1}, nil, nil)
+	dataset, typed := limited.(mapDataset)
+	if !valid || !typed || len(dataset.values) != 1 || len(dataset.keys) != 1 || dataset.values[0] != 1 || dataset.keys[0] != "a" {
+		t.Fatalf("limited flattened dataset %#v", limited)
 	}
 }
 

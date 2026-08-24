@@ -4614,6 +4614,10 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 	scopeVariables := map[string]struct{}{}
 	for stateName, raw := range states {
 		state, _ := raw.(map[string]any)
+		stateQueryLanguage := first(state, "QueryLanguage")
+		if stateQueryLanguage == "" {
+			stateQueryLanguage = queryLanguage
+		}
 		owners := []any{state}
 		owners = append(owners, asSlice(state["Choices"])...)
 		owners = append(owners, asSlice(state["Catch"])...)
@@ -4621,7 +4625,10 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			owner, _ := rawOwner.(map[string]any)
 			assign, _ := owner["Assign"].(map[string]any)
 			for rawVariable := range assign {
-				variable := strings.TrimSuffix(rawVariable, ".$")
+				variable := rawVariable
+				if stateQueryLanguage != "JSONata" {
+					variable = strings.TrimSuffix(variable, ".$")
+				}
 				if !validVariableName(variable) || variable == "states" {
 					add("SCHEMA_VALIDATION_FAILED", "Assign contains an invalid variable name.", "/States/"+stateName+"/Assign/"+rawVariable)
 				}

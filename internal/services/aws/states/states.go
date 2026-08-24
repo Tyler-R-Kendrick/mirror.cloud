@@ -3151,6 +3151,7 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 		}
 	case "CSV":
 		parser := csv.NewReader(strings.NewReader(string(body)))
+		parser.FieldsPerRecord = -1
 		delimiters := map[string]rune{"COMMA": ',', "PIPE": '|', "SEMICOLON": ';', "SPACE": ' ', "TAB": '\t'}
 		if delimiter := first(config, "CSVDelimiter"); delimiter != "" {
 			parser.Comma = delimiters[delimiter]
@@ -3173,12 +3174,12 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 		}
 		items := make([]any, 0, len(records))
 		for _, record := range records {
-			if len(record) != len(headers) {
-				return nil, "", false
-			}
 			item := map[string]any{}
 			for index, header := range headers {
-				item[header] = record[index]
+				item[header] = ""
+				if index < len(record) {
+					item[header] = record[index]
+				}
 			}
 			items = append(items, item)
 		}

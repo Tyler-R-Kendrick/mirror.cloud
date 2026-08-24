@@ -358,7 +358,7 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	objects := map[string]string{
 		"items.json":  `[{"id":1},{"id":2}]`,
 		"items.jsonl": "{\"id\":3}\n{\"id\":4}\n",
-		"items.csv":   "id,name\n5,Ada\n6,Lin\n",
+		"items.csv":   "id,name\n5\n6,Lin,ignored\n",
 	}
 	for key, body := range objects {
 		invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": key}, []byte(body))
@@ -384,7 +384,8 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		machine := invoke(p, "CreateStateMachine", map[string]any{"name": "reader-" + strings.ToLower(test.inputType), "definition": string(definition), "roleArn": testRoleARN}, nil)
 		started := invoke(p, "StartExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"]}, nil)
 		execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": started["executionArn"]}, nil)
-		if execution["status"] != "SUCCEEDED" || strings.Count(execution["output"].(string), `"source":"`+test.inputType+`"`) != 2 || test.inputType == "PARQUET" && !strings.Contains(execution["output"].(string), `"name":"Ada"`) {
+		output := execution["output"].(string)
+		if execution["status"] != "SUCCEEDED" || strings.Count(output, `"source":"`+test.inputType+`"`) != 2 || test.inputType == "PARQUET" && !strings.Contains(output, `"name":"Ada"`) || test.inputType == "CSV" && (!strings.Contains(output, `"name":""`) || strings.Contains(output, "ignored")) {
 			t.Fatalf("%s ItemReader execution %#v", test.inputType, execution)
 		}
 	}

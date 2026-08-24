@@ -26,6 +26,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/parquet-go/parquet-go"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	internalrand "github.com/tyler-r-kendrick/mirror.cloud/internal/rand"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
@@ -1848,6 +1849,30 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 				item[header] = record[index]
 			}
 			items = append(items, item)
+		}
+		return items, inputType, true
+	case "PARQUET":
+		file, err := parquet.OpenFile(bytes.NewReader(body), int64(len(body)))
+		if err != nil {
+			return nil, "", false
+		}
+		items := []any{}
+		for _, group := range file.RowGroups() {
+			reader := parquet.NewGenericRowGroupReader[any](group)
+			rows := make([]any, int(reader.NumRows()))
+			n, readErr := reader.Read(rows)
+			closeErr := reader.Close()
+			if readErr != nil && !errors.Is(readErr, io.EOF) || closeErr != nil {
+				return nil, "", false
+			}
+			for _, row := range rows[:n] {
+				encoded, err := json.Marshal(row)
+				var item any
+				if err != nil || json.Unmarshal(encoded, &item) != nil {
+					return nil, "", false
+				}
+				items = append(items, item)
+			}
 		}
 		return items, inputType, true
 	default:

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parquet-go/parquet-go"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/batch"
@@ -341,8 +342,19 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	for key, body := range objects {
 		invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": key}, []byte(body))
 	}
+	type parquetItem struct {
+		ID   int64  `parquet:"id"`
+		Name string `parquet:"name"`
+	}
+	var parquetBody bytes.Buffer
+	writer := parquet.NewGenericWriter[parquetItem](&parquetBody)
+	if _, err := writer.Write([]parquetItem{{ID: 7, Name: "Ada"}, {ID: 8, Name: "Lin"}}); err != nil || writer.Close() != nil {
+		t.Fatalf("write parquet: %v", err)
+	}
+	invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": "items.parquet"}, parquetBody.Bytes())
+	invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": "broken.parquet"}, []byte("not parquet"))
 	processor := map[string]any{"StartAt": "Done", "ProcessorConfig": map[string]any{"Mode": "DISTRIBUTED"}, "States": map[string]any{"Done": map[string]any{"Type": "Succeed"}}}
-	for _, test := range []struct{ key, inputType string }{{"items.json", "JSON"}, {"items.jsonl", "JSONL"}, {"items.csv", "CSV"}} {
+	for _, test := range []struct{ key, inputType string }{{"items.json", "JSON"}, {"items.jsonl", "JSONL"}, {"items.csv", "CSV"}, {"items.parquet", "PARQUET"}} {
 		state := map[string]any{
 			"Type": "Map", "ItemProcessor": processor, "ItemSelector": map[string]any{"value.$": "$$.Map.Item.Value", "source.$": "$$.Map.Item.Source"}, "End": true,
 			"ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": test.key}, "ReaderConfig": map[string]any{"InputType": test.inputType, "CSVHeaderLocation": "FIRST_ROW"}},
@@ -351,17 +363,19 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		machine := invoke(p, "CreateStateMachine", map[string]any{"name": "reader-" + strings.ToLower(test.inputType), "definition": string(definition), "roleArn": testRoleARN}, nil)
 		started := invoke(p, "StartExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"]}, nil)
 		execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": started["executionArn"]}, nil)
-		if execution["status"] != "SUCCEEDED" || strings.Count(execution["output"].(string), `"source":"`+test.inputType+`"`) != 2 {
+		if execution["status"] != "SUCCEEDED" || strings.Count(execution["output"].(string), `"source":"`+test.inputType+`"`) != 2 || test.inputType == "PARQUET" && !strings.Contains(execution["output"].(string), `"name":"Ada"`) {
 			t.Fatalf("%s ItemReader execution %#v", test.inputType, execution)
 		}
 	}
 
-	missingState := map[string]any{"Type": "Map", "ItemProcessor": processor, "ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": "missing"}}, "End": true}
-	missingDefinition, _ := json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": missingState}})
-	missingMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "missing-reader", "definition": string(missingDefinition), "roleArn": testRoleARN}, nil)
-	missingExecution := invoke(p, "StartExecution", map[string]any{"stateMachineArn": missingMachine["stateMachineArn"]}, nil)
-	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": missingExecution["executionArn"]}, nil); execution["status"] != "FAILED" || execution["error"] != "States.ItemReaderFailed" {
-		t.Fatalf("missing ItemReader execution %#v", execution)
+	for _, key := range []string{"missing", "broken.parquet"} {
+		missingState := map[string]any{"Type": "Map", "ItemProcessor": processor, "ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": key}, "ReaderConfig": map[string]any{"InputType": "PARQUET"}}, "End": true}
+		missingDefinition, _ := json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": missingState}})
+		missingMachine := invoke(p, "CreateStateMachine", map[string]any{"name": strings.ReplaceAll(key, ".", "-") + "-reader", "definition": string(missingDefinition), "roleArn": testRoleARN}, nil)
+		missingExecution := invoke(p, "StartExecution", map[string]any{"stateMachineArn": missingMachine["stateMachineArn"]}, nil)
+		if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": missingExecution["executionArn"]}, nil); execution["status"] != "FAILED" || execution["error"] != "States.ItemReaderFailed" {
+			t.Fatalf("%s ItemReader execution %#v", key, execution)
+		}
 	}
 }
 

@@ -58,19 +58,22 @@ type Pack struct {
 }
 
 type httpRetry struct {
-	Stream      string
-	Destination string
-	RequestID   string
-	DataKey     string
-	Next        time.Time
-	Expires     time.Time
-	Retries     int
+	Stream       string
+	Destination  string
+	RequestID    string
+	DataKey      string
+	Next         time.Time
+	Expires      time.Time
+	Retries      int
+	ErrorCode    string
+	ErrorMessage string
 }
 
 type httpRetryPayload struct {
 	BackupRecordIDs []string
 	BackupData      [][]byte
 	ProcessedData   [][]byte
+	Arrivals        []time.Time
 }
 
 type httpBuffer struct {
@@ -2064,21 +2067,31 @@ func (p *Pack) deliverEndpointRecords(ctx context.Context, req *spi.Request, str
 	if len(processedData) == 0 {
 		return
 	}
-	backupFailures := backupMode != allMode
+	backupFailures := destinationKey == "SplunkDestinationConfiguration" || backupMode != allMode
 	if p.bufferEndpoint(ctx, req, stream, destinationKey, processedIDs[0], recIDs, data, processedData, backupFailures, destination, now) {
 		return
 	}
-	delivered, permanent, message := p.deliverEndpoint(ctx, req, streamRecord, destination, destinationKey, processedIDs[0], processedData, now)
+	delivered, permanent, code, message := p.deliverEndpoint(ctx, req, streamRecord, destination, destinationKey, processedIDs[0], processedData, now)
+	if destinationKey == "SplunkDestinationConfiguration" {
+		now = p.deps.Clock.Now().UTC()
+	}
 	if !delivered {
 		p.logDeliveryError(ctx, req, destination, stream, message, now)
 	}
 	retryDuration := httpRetryDuration(destination)
-	retrying := !delivered && !permanent && retryDuration > 0 && p.scheduleEndpointRetry(ctx, req, stream, destinationKey, processedIDs[0], recIDs, data, processedData, backupFailures, now, retryDuration)
+	retrying := !delivered && !permanent && retryDuration > 0 && p.scheduleEndpointRetry(ctx, req, stream, destinationKey, processedIDs[0], recIDs, data, processedData, backupFailures, code, message, now, retryDuration)
 	if backupFailures && !delivered && !permanent && !retrying {
-		for index := range data {
-			p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[index], data[index], now)
-		}
+		payload := httpRetryPayload{BackupRecordIDs: recIDs, BackupData: data, Arrivals: repeatTime(now, len(data))}
+		p.backupEndpointPayload(ctx, req, streamRecord, destination, destinationKey, stream, payload, 0, code, message, now)
 	}
+}
+
+func repeatTime(value time.Time, count int) []time.Time {
+	values := make([]time.Time, count)
+	for index := range values {
+		values[index] = value
+	}
+	return values
 }
 
 func elasticsearchDomain(destination map[string]any) string {
@@ -2504,6 +2517,7 @@ func (p *Pack) bufferEndpoint(ctx context.Context, req *spi.Request, stream, des
 	payload := httpRetryPayload{ProcessedData: processedData}
 	if backup {
 		payload.BackupRecordIDs, payload.BackupData = recordIDs, rawData
+		payload.Arrivals = repeatTime(now, len(rawData))
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -2592,15 +2606,16 @@ func (p *Pack) notifyRetryLoop() {
 	}
 }
 
-func (p *Pack) scheduleEndpointRetry(ctx context.Context, req *spi.Request, stream, destinationKey, requestID string, recordIDs []string, rawData, processedData [][]byte, backup bool, now time.Time, duration time.Duration) bool {
+func (p *Pack) scheduleEndpointRetry(ctx context.Context, req *spi.Request, stream, destinationKey, requestID string, recordIDs []string, rawData, processedData [][]byte, backup bool, code, message string, now time.Time, duration time.Duration) bool {
 	retryPayload := httpRetryPayload{ProcessedData: processedData}
 	if backup {
 		retryPayload.BackupRecordIDs, retryPayload.BackupData = recordIDs, rawData
+		retryPayload.Arrivals = repeatTime(now, len(rawData))
 	}
-	return p.scheduleEndpointRetryPayload(ctx, req, stream, destinationKey, requestID, retryPayload, now, duration)
+	return p.scheduleEndpointRetryPayload(ctx, req, stream, destinationKey, requestID, retryPayload, code, message, now, duration)
 }
 
-func (p *Pack) scheduleEndpointRetryPayload(ctx context.Context, req *spi.Request, stream, destinationKey, requestID string, retryPayload httpRetryPayload, now time.Time, duration time.Duration) bool {
+func (p *Pack) scheduleEndpointRetryPayload(ctx context.Context, req *spi.Request, stream, destinationKey, requestID string, retryPayload httpRetryPayload, code, message string, now time.Time, duration time.Duration) bool {
 	key := p.deps.Rand.UUID()
 	dataKey := req.Identity.Account + "/" + req.Identity.Region + "/_mirror/firehose-http-retries/" + key
 	payload, err := json.Marshal(retryPayload)
@@ -2616,7 +2631,7 @@ func (p *Pack) scheduleEndpointRetryPayload(ctx context.Context, req *spi.Reques
 	}
 	retry := httpRetry{
 		Stream: stream, Destination: destinationKey, RequestID: requestID, DataKey: dataKey,
-		Next: now.Add(p.httpRetryDelay(key, 0)),
+		Next: now.Add(p.httpRetryDelay(key, 0)), ErrorCode: code, ErrorMessage: message,
 	}
 	retry.Expires = now.Add(duration)
 	if retry.Next.After(retry.Expires) {
@@ -2760,6 +2775,36 @@ func (p *Pack) backupHTTPPayload(ctx context.Context, req *spi.Request, stream m
 	}
 }
 
+func (p *Pack) backupEndpointPayload(ctx context.Context, req *spi.Request, stream, destination map[string]any, destinationKey, name string, payload httpRetryPayload, attempts int, code, message string, now time.Time) {
+	if destinationKey != "SplunkDestinationConfiguration" {
+		p.backupHTTPPayload(ctx, req, stream, destination, name, payload, now)
+		return
+	}
+	backup, _ := destination["S3Configuration"].(map[string]any)
+	bucket, prefix, errorPrefix, _, _, _, kmsARN := s3Configuration(backup)
+	if errorPrefix == "" {
+		errorPrefix = prefix + "splunk-failed/"
+	}
+	version := first(stream, "VersionId")
+	if version == "" {
+		version = "1"
+	}
+	for index := range payload.BackupData {
+		arrival := now
+		if len(payload.Arrivals) == len(payload.BackupData) {
+			arrival = payload.Arrivals[index]
+		}
+		fields := map[string]any{
+			"attemptsMade": attempts, "arrivalTimestamp": arrival.UnixMilli(), "errorCode": code, "errorMessage": message,
+			"attemptEndingTimestamp": now.UnixMilli(), "rawData": base64.StdEncoding.EncodeToString(payload.BackupData[index]), "EventId": payload.BackupRecordIDs[index],
+		}
+		body, _ := json.Marshal(fields)
+		failedPrefix := strings.ReplaceAll(errorPrefix, "!{firehose:error-output-type}", "splunk-failed")
+		key := p.evaluatedS3Prefix(failedPrefix, now) + name + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + payload.BackupRecordIDs[index]
+		p.deliverS3Object(ctx, req, bucket, key, kmsARN, body)
+	}
+}
+
 func (p *Pack) flushHTTPBuffer(ctx context.Context, identity spi.Identity, collection spi.Collection, name string, items []httpBufferItem, now time.Time) time.Time {
 	req := &spi.Request{Identity: identity}
 	raw, ok, _ := p.col(req, "fh").Get(ctx, name)
@@ -2792,13 +2837,14 @@ func (p *Pack) flushHTTPBuffer(ctx context.Context, identity spi.Identity, colle
 			body, readErr = p.decryptAtRest(ctx, req, body)
 		}
 		var entry httpRetryPayload
-		if readErr != nil || json.Unmarshal(body, &entry) != nil || len(entry.BackupRecordIDs) != len(entry.BackupData) || len(entry.ProcessedData) == 0 {
+		if readErr != nil || json.Unmarshal(body, &entry) != nil || len(entry.BackupRecordIDs) != len(entry.BackupData) || (len(entry.Arrivals) != 0 && len(entry.Arrivals) != len(entry.BackupData)) || len(entry.ProcessedData) == 0 {
 			payloadOK = false
 			break
 		}
 		payload.BackupRecordIDs = append(payload.BackupRecordIDs, entry.BackupRecordIDs...)
 		payload.BackupData = append(payload.BackupData, entry.BackupData...)
 		payload.ProcessedData = append(payload.ProcessedData, entry.ProcessedData...)
+		payload.Arrivals = append(payload.Arrivals, entry.Arrivals...)
 	}
 	if !payloadOK {
 		next := now.Add(time.Second)
@@ -2810,14 +2856,17 @@ func (p *Pack) flushHTTPBuffer(ctx context.Context, identity spi.Identity, colle
 		return next
 	}
 	requestID := items[0].Buffer.RequestID
-	delivered, permanent, message := p.deliverEndpoint(ctx, req, stream, destination, destinationKey, requestID, payload.ProcessedData, now)
+	delivered, permanent, code, message := p.deliverEndpoint(ctx, req, stream, destination, destinationKey, requestID, payload.ProcessedData, now)
+	if destinationKey == "SplunkDestinationConfiguration" {
+		now = p.deps.Clock.Now().UTC()
+	}
 	if !delivered {
 		p.logDeliveryError(ctx, req, destination, name, message, now)
 	}
 	retryDuration := httpRetryDuration(destination)
-	retrying := !delivered && !permanent && retryDuration > 0 && p.scheduleEndpointRetryPayload(ctx, req, name, destinationKey, requestID, payload, now, retryDuration)
+	retrying := !delivered && !permanent && retryDuration > 0 && p.scheduleEndpointRetryPayload(ctx, req, name, destinationKey, requestID, payload, code, message, now, retryDuration)
 	if !delivered && !permanent && !retrying {
-		p.backupHTTPPayload(ctx, req, stream, destination, name, payload, now)
+		p.backupEndpointPayload(ctx, req, stream, destination, destinationKey, name, payload, 0, code, message, now)
 	}
 	p.deleteHTTPBuffer(ctx, collection, items)
 	return time.Time{}
@@ -2881,7 +2930,7 @@ func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collecti
 			if readErr == nil {
 				payloadBody, readErr = p.decryptAtRest(ctx, req, payloadBody)
 			}
-			payloadOK = readErr == nil && json.Unmarshal(payloadBody, &payload) == nil && len(payload.BackupRecordIDs) == len(payload.BackupData) && len(payload.ProcessedData) != 0
+			payloadOK = readErr == nil && json.Unmarshal(payloadBody, &payload) == nil && len(payload.BackupRecordIDs) == len(payload.BackupData) && (len(payload.Arrivals) == 0 || len(payload.Arrivals) == len(payload.BackupData)) && len(payload.ProcessedData) != 0
 		}
 	}
 	if !payloadOK {
@@ -2891,18 +2940,24 @@ func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collecti
 		return retry.Next
 	}
 	if !now.Before(retry.Expires) {
-		p.backupHTTPPayload(ctx, req, stream, destination, retry.Stream, payload, now)
+		p.backupEndpointPayload(ctx, req, stream, destination, destinationKey, retry.Stream, payload, retry.Retries, retry.ErrorCode, retry.ErrorMessage, now)
 		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
 		return time.Time{}
 	}
-	delivered, permanent, message := p.deliverEndpoint(ctx, req, stream, destination, destinationKey, retry.RequestID, payload.ProcessedData, now)
+	delivered, permanent, code, message := p.deliverEndpoint(ctx, req, stream, destination, destinationKey, retry.RequestID, payload.ProcessedData, now)
+	attemptEnded := now
+	if destinationKey == "SplunkDestinationConfiguration" {
+		attemptEnded = p.deps.Clock.Now().UTC()
+		retry.Expires = retry.Expires.Add(attemptEnded.Sub(now))
+	}
 	if delivered || permanent {
 		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
 		return time.Time{}
 	}
-	p.logDeliveryError(ctx, req, destination, retry.Stream, message, now)
+	p.logDeliveryError(ctx, req, destination, retry.Stream, message, attemptEnded)
 	retry.Retries++
-	retry.Next = now.Add(p.httpRetryDelay(key, retry.Retries))
+	retry.ErrorCode, retry.ErrorMessage = code, message
+	retry.Next = attemptEnded.Add(p.httpRetryDelay(key, retry.Retries))
 	if retry.Next.After(retry.Expires) {
 		retry.Next = retry.Expires
 	}
@@ -2918,14 +2973,15 @@ func endpointDestinationKey(key string) string {
 	return key
 }
 
-func (p *Pack) deliverEndpoint(ctx context.Context, req *spi.Request, stream, destination map[string]any, destinationKey, requestID string, data [][]byte, now time.Time) (bool, bool, string) {
+func (p *Pack) deliverEndpoint(ctx context.Context, req *spi.Request, stream, destination map[string]any, destinationKey, requestID string, data [][]byte, now time.Time) (bool, bool, string, string) {
 	if destinationKey == "SplunkDestinationConfiguration" {
 		return p.deliverSplunk(ctx, req, destination, requestID, data)
 	}
-	return p.deliverHTTP(ctx, req, stream, destination, requestID, data, now)
+	delivered, permanent, message := p.deliverHTTP(ctx, req, stream, destination, requestID, data, now)
+	return delivered, permanent, "", message
 }
 
-func (p *Pack) deliverSplunk(ctx context.Context, req *spi.Request, destination map[string]any, requestID string, data [][]byte) (bool, bool, string) {
+func (p *Pack) deliverSplunk(ctx context.Context, req *spi.Request, destination map[string]any, requestID string, data [][]byte) (bool, bool, string, string) {
 	token := first(destination, "HECToken")
 	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {
 		response, err := secretsmanager.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": first(secrets, "SecretARN")}})
@@ -2936,11 +2992,11 @@ func (p *Pack) deliverSplunk(ctx context.Context, req *spi.Request, destination 
 		}
 		value := map[string]any{}
 		if err != nil || !ok || json.Unmarshal([]byte(secret), &value) != nil {
-			return false, false, "unable to retrieve Splunk HEC token"
+			return false, false, "Splunk.InvalidToken", "unable to retrieve Splunk HEC token"
 		}
 		token, ok = value["hec_token"].(string)
 		if !ok || token == "" || len(token) > 2048 || strings.ContainsAny(token, "\r\n") {
-			return false, false, "Splunk secret must contain a valid hec_token"
+			return false, false, "Splunk.InvalidToken", "Splunk secret must contain a valid hec_token"
 		}
 	}
 
@@ -2952,26 +3008,26 @@ func (p *Pack) deliverSplunk(ctx context.Context, req *spi.Request, destination 
 	body := bytes.Join(data, nil)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+path, bytes.NewReader(body))
 	if err != nil {
-		return false, false, err.Error()
+		return false, false, "Splunk.InvalidEndpoint", err.Error()
 	}
 	request.Header.Set("Authorization", "Splunk "+token)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Splunk-Request-Channel", requestID)
 	response, err := p.httpClient.Do(request)
 	if err != nil {
-		return false, false, err.Error()
+		return false, false, "Splunk.InvalidEndpoint", err.Error()
 	}
 	responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
 	_ = response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return false, false, response.Status
+		return false, false, splunkStatusError(response.StatusCode), response.Status
 	}
 	if readErr != nil || len(responseBody) > 1<<20 {
-		return false, false, "invalid Splunk HEC acknowledgment body"
+		return false, false, "Splunk.InvalidHecResponseCharacter", "invalid Splunk HEC acknowledgment body"
 	}
 	ackID, ackKey, ok := splunkAckID(responseBody)
 	if !ok {
-		return false, false, "invalid Splunk HEC acknowledgment ID"
+		return false, false, "Splunk.AcknowledgementsDisabled", "invalid Splunk HEC acknowledgment ID"
 	}
 
 	timeout, ok := inputInteger(destination["HECAcknowledgmentTimeoutInSeconds"], 180, 600)
@@ -2983,37 +3039,50 @@ func (p *Pack) deliverSplunk(ctx context.Context, req *spi.Request, destination 
 	for {
 		ackRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/services/collector/ack", bytes.NewReader(ackBody))
 		if err != nil {
-			return false, false, err.Error()
+			return false, false, "Splunk.InvalidEndpoint", err.Error()
 		}
 		ackRequest.Header.Set("Authorization", "Splunk "+token)
 		ackRequest.Header.Set("Content-Type", "application/json")
 		ackRequest.Header.Set("X-Splunk-Request-Channel", requestID)
 		ackResponse, err := p.httpClient.Do(ackRequest)
 		if err != nil {
-			return false, false, err.Error()
+			return false, false, "Splunk.InvalidEndpoint", err.Error()
 		}
 		ackResponseBody, readErr := io.ReadAll(io.LimitReader(ackResponse.Body, (1<<20)+1))
 		_ = ackResponse.Body.Close()
 		if ackResponse.StatusCode != http.StatusOK {
-			return false, false, ackResponse.Status
+			return false, false, splunkStatusError(ackResponse.StatusCode), ackResponse.Status
 		}
 		var acknowledgment struct {
 			Acks map[string]bool `json:"acks"`
 		}
 		if readErr != nil || len(ackResponseBody) > 1<<20 || json.Unmarshal(ackResponseBody, &acknowledgment) != nil {
-			return false, false, "invalid Splunk HEC acknowledgment status"
+			return false, false, "Splunk.InvalidHecResponseCharacter", "invalid Splunk HEC acknowledgment status"
 		}
 		if acknowledgment.Acks[ackKey] {
-			return true, false, ""
+			return true, false, "", ""
 		}
 		if !p.deps.Clock.Now().Before(deadline) {
-			return false, false, "Splunk HEC acknowledgment timed out"
+			return false, false, "Splunk.AckTimeout", "Did not receive an acknowledgement from HEC before the HEC acknowledgement timeout expired."
 		}
 		select {
 		case <-ctx.Done():
-			return false, false, ctx.Err().Error()
+			return false, false, "Splunk.ConnectionClosed", ctx.Err().Error()
 		case <-p.deps.Clock.After(time.Second):
 		}
+	}
+}
+
+func splunkStatusError(status int) string {
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return "Splunk.InvalidToken"
+	case http.StatusNotFound:
+		return "Splunk.URLNotFound"
+	case http.StatusRequestEntityTooLarge:
+		return "Splunk.ServerError.ContentTooLarge"
+	default:
+		return "Splunk.ServerError"
 	}
 }
 

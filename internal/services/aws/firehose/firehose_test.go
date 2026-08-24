@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -922,6 +923,211 @@ func TestFirehoseSplunkDestination(t *testing.T) {
 			t.Fatalf("Splunk backup %q", body)
 		}
 	}
+}
+
+func TestFirehoseSplunkFailureBackup(t *testing.T) {
+	requests := make(chan string, 2)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		body, _ := io.ReadAll(request.Body)
+		requests <- request.URL.Path + ":" + string(body)
+		writer.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	p.httpClient = server.Client()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	destination := map[string]any{
+		"HECEndpoint": server.URL, "HECEndpointType": "Event", "HECToken": "token", "S3BackupMode": "AllEvents",
+		"BufferingHints": map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 1}, "RetryOptions": map[string]any{"DurationInSeconds": 0},
+		"S3Configuration": map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "all/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/"},
+	}
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{"DeliveryStreamName": "splunk-failure", "SplunkDestinationConfiguration": destination}}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "PutRecord", Input: map[string]any{"DeliveryStreamName": "splunk-failure", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("failed"))}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case request := <-requests:
+		if request != "/services/collector/event:failed" {
+			t.Fatalf("Splunk event request %q", request)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Splunk failure request timed out")
+	}
+	recordID := response.Output["RecordId"].(string)
+	failureKey := id.Account + "/" + id.Region + "/out/errors/splunk-failed/1970/01/01/00/splunk-failure-1-1970-01-01-00-00-00-" + recordID
+	var failureBody []byte
+	for attempt := 0; attempt < 2000; attempt++ {
+		reader, _, err := deps.Blobs.Get(context.Background(), failureKey)
+		if err == nil {
+			failureBody, _ = io.ReadAll(reader)
+			_ = reader.Close()
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	failure := map[string]any{}
+	if json.Unmarshal(failureBody, &failure) != nil || failure["attemptsMade"] != float64(0) || failure["arrivalTimestamp"] != float64(0) || failure["attemptEndingTimestamp"] != float64(0) || failure["errorCode"] != "Splunk.ServerError" || failure["rawData"] != base64.StdEncoding.EncodeToString([]byte("failed")) || failure["EventId"] != recordID {
+		t.Fatalf("Splunk failure envelope %s", failureBody)
+	}
+	rawKey := id.Account + "/" + id.Region + "/out/all/1970/01/01/00/splunk-failure-1-1970-01-01-00-00-00-" + recordID
+	reader, _, err := deps.Blobs.Get(context.Background(), rawKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	if string(raw) != "failed" {
+		t.Fatalf("Splunk AllEvents backup %q", raw)
+	}
+}
+
+func TestFirehoseSplunkSecretAndPersistentRetry(t *testing.T) {
+	var deliveries atomic.Int32
+	requests := make(chan http.Header, 4)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests <- request.Header.Clone()
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path != "/services/collector/ack" && deliveries.Add(1) == 1 {
+			writer.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if request.URL.Path == "/services/collector/ack" {
+			_, _ = writer.Write([]byte(`{"acks":{"11":true}}`))
+			return
+		}
+		_, _ = writer.Write([]byte(`{"ackId":"11"}`))
+	}))
+	defer server.Close()
+	deps := spitest.Deps(t)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	secret, err := secretsmanager.New(deps).Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateSecret", Input: map[string]any{"Name": "splunk-token", "SecretString": `{"hec_token":"from-secret"}`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := New(deps)
+	p.httpClient = server.Client()
+	destination := map[string]any{
+		"HECEndpoint": server.URL, "HECEndpointType": "Raw", "BufferingHints": map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 1},
+		"RetryOptions": map[string]any{"DurationInSeconds": 10}, "S3Configuration": testS3Destination(),
+		"SecretsManagerConfiguration": map[string]any{"Enabled": true, "RoleARN": testRoleARN, "SecretARN": secret.Output["ARN"]},
+	}
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{"DeliveryStreamName": "splunk-retry", "SplunkDestinationConfiguration": destination}}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "PutRecord", Input: map[string]any{"DeliveryStreamName": "splunk-retry", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("retry"))}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := <-requests
+	requestID := response.Output["RecordId"].(string)
+	if initial.Get("Authorization") != "Splunk from-secret" || initial.Get("X-Splunk-Request-Channel") != requestID {
+		t.Fatalf("initial Splunk secret request %#v", initial)
+	}
+	retryCollection := deps.Store.Scope(id.Account, id.Region).Collection("fh-http-retries")
+	var retryKey, dataKey string
+	for attempt := 0; attempt < 2000; attempt++ {
+		items, _, _ := retryCollection.List(context.Background(), "", "", 0)
+		if len(items) == 1 {
+			var retry httpRetry
+			if json.Unmarshal(items[0].Value, &retry) == nil && retry.Destination == "SplunkDestinationConfiguration" && retry.ErrorCode == "Splunk.ServerError" {
+				retryKey, dataKey = items[0].Key, retry.DataKey
+				break
+			}
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if retryKey == "" {
+		t.Fatal("Splunk retry was not persisted with its destination and error")
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p = New(deps)
+	p.httpClient = server.Client()
+	defer func() { _ = p.Close() }()
+	if err := deps.Clock.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 2; index++ {
+		select {
+		case request := <-requests:
+			if request.Get("Authorization") != "Splunk from-secret" || request.Get("X-Splunk-Request-Channel") != requestID {
+				t.Fatalf("retried Splunk request %#v", request)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("persisted Splunk retry did not complete")
+		}
+	}
+	for attempt := 0; attempt < 2000; attempt++ {
+		if _, ok, _ := retryCollection.Get(context.Background(), retryKey); !ok {
+			if _, _, err := deps.Blobs.Get(context.Background(), dataKey); err == nil {
+				t.Fatal("successful Splunk retry payload remained persisted")
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("successful Splunk retry metadata remained persisted")
+}
+
+func TestFirehoseSplunkAcknowledgmentTimeout(t *testing.T) {
+	acknowledgments := make(chan struct{}, 2)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path == "/services/collector/ack" {
+			acknowledgments <- struct{}{}
+			_, _ = writer.Write([]byte(`{"acks":{"13":false}}`))
+			return
+		}
+		_, _ = writer.Write([]byte(`{"ackID":13}`))
+	}))
+	defer server.Close()
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	p.httpClient = server.Client()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	destination := map[string]any{
+		"HECEndpoint": server.URL, "HECEndpointType": "Raw", "HECToken": "token", "HECAcknowledgmentTimeoutInSeconds": 180,
+		"BufferingHints": map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 1}, "RetryOptions": map[string]any{"DurationInSeconds": 0},
+		"S3Configuration": map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "failed/"},
+	}
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{"DeliveryStreamName": "splunk-timeout", "SplunkDestinationConfiguration": destination}}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "PutRecord", Input: map[string]any{"DeliveryStreamName": "splunk-timeout", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("timeout"))}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-acknowledgments:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Splunk acknowledgment polling did not start")
+	}
+	if err := deps.Clock.Advance(180 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	recordID := response.Output["RecordId"].(string)
+	key := id.Account + "/" + id.Region + "/out/failed/splunk-failed/1970/01/01/00/splunk-timeout-1-1970-01-01-00-03-00-" + recordID
+	for attempt := 0; attempt < 2000; attempt++ {
+		reader, _, err := deps.Blobs.Get(context.Background(), key)
+		if err == nil {
+			body, _ := io.ReadAll(reader)
+			_ = reader.Close()
+			failure := map[string]any{}
+			if json.Unmarshal(body, &failure) != nil || failure["errorCode"] != "Splunk.AckTimeout" || failure["attemptEndingTimestamp"] != float64(180000) {
+				t.Fatalf("Splunk acknowledgment timeout %s", body)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("Splunk acknowledgment timeout was not backed up")
 }
 
 func TestOpenSearchDestinationValidation(t *testing.T) {

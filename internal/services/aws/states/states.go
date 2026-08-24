@@ -1298,47 +1298,46 @@ walkLoop:
 		case "Task":
 			res := first(st, "Resource")
 			payload := taskPayload(st, data, p.deps.Rand)
-			switch {
-			case strings.Contains(res, ":function:") || strings.Contains(res, "lambda:invoke"):
-				if retries[cur] == nil {
-					retries[cur] = map[int]int{}
-				}
-				for {
-					out, err := p.invokeLambda(ctx, req, res, payload)
-					if err == nil {
-						var valid bool
-						data, valid = applyStateResult(st, rawInput, out, p.deps.Rand)
-						if !valid {
-							return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
-						}
-						break
-					}
-					failure := taskFailure(err)
-					// ponytail: retry delays are instant like Wait states; add virtual scheduling when timing fidelity is required.
-					if retryTask(st, failure.name, retries[cur]) {
-						continue
-					}
-					next, out, caught := catchTask(st, failure, rawInput)
-					if !caught {
-						return walkResult{out: data, status: "FAILED", cause: failure.cause, errorName: failure.name, hist: hist}
-					}
-					if next == "" {
-						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
-					}
-					data, ok = applyDataPath(st, "OutputPath", out)
-					if !ok {
-						return walkResult{out: rawInput, status: "FAILED", cause: "States.Runtime", hist: hist}
-					}
-					cur = next
-					continue walkLoop
-				}
-			case strings.Contains(res, ":activity:"):
+			if strings.Contains(res, ":activity:") {
 				tok := p.deps.Rand.Hex(16)
 				return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
 					Token: tok, ActivityARN: res, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur],
 				}}
-			default:
-				return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
+			}
+			if retries[cur] == nil {
+				retries[cur] = map[int]int{}
+			}
+			for {
+				out, err, errorPrefix, sdk, supported := p.invokeTask(ctx, req, res, payload)
+				if !supported {
+					return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
+				}
+				if err == nil {
+					var valid bool
+					data, valid = applyStateResult(st, rawInput, out, p.deps.Rand)
+					if !valid {
+						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
+					}
+					break
+				}
+				failure := taskFailure(errorPrefix, sdk, err)
+				// ponytail: retry delays are instant like Wait states; add virtual scheduling when timing fidelity is required.
+				if retryTask(st, failure.name, retries[cur]) {
+					continue
+				}
+				next, out, caught := catchTask(st, failure, rawInput)
+				if !caught {
+					return walkResult{out: data, status: "FAILED", cause: failure.cause, errorName: failure.name, hist: hist}
+				}
+				if next == "" {
+					return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
+				}
+				data, ok = applyDataPath(st, "OutputPath", out)
+				if !ok {
+					return walkResult{out: rawInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+				}
+				cur = next
+				continue walkLoop
 			}
 		case "Choice":
 			next := choiceNext(st, data)
@@ -1527,10 +1526,27 @@ walkLoop:
 
 type stateFailure struct{ name, cause string }
 
-func taskFailure(err error) stateFailure {
+func taskFailure(prefix string, sdk bool, err error) stateFailure {
 	var fault *spi.Fault
 	if errors.As(err, &fault) {
-		return stateFailure{name: fault.Code, cause: fault.Error()}
+		name := fault.Code
+		if prefix == "SQS" {
+			name = "AmazonSQSException"
+		} else if sdk {
+			if dot := strings.LastIndex(name, "."); dot >= 0 {
+				name = name[dot+1:]
+			}
+			if prefix == "Sqs" && name == "NonExistentQueue" {
+				name = "QueueDoesNotExist"
+			}
+			if !strings.HasSuffix(name, "Exception") {
+				name += "Exception"
+			}
+		}
+		if prefix != "" && !strings.HasPrefix(name, prefix+".") {
+			name = prefix + "." + name
+		}
+		return stateFailure{name: name, cause: fault.Error()}
 	}
 	return stateFailure{name: "States.TaskFailed", cause: err.Error()}
 }
@@ -2010,6 +2026,95 @@ func intrinsicNumber(value any) (float64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func (p *Pack) invokeTask(ctx context.Context, req *spi.Request, resource string, payload any) (any, error, string, bool, bool) {
+	if strings.Contains(resource, ":function:") || strings.Contains(resource, "lambda:invoke") {
+		output, err := p.invokeLambda(ctx, req, resource, payload)
+		return output, err, "Lambda", false, true
+	}
+	service, operation, prefix, sdk, supported := taskIntegration(resource)
+	if !supported {
+		return nil, nil, "", false, false
+	}
+	input, valid := payload.(map[string]any)
+	if !valid {
+		return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}, prefix, sdk, true
+	}
+	if service == "states" {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: operation, Input: input})
+		if response == nil {
+			return nil, err, prefix, sdk, true
+		}
+		return response.Output, err, prefix, sdk, true
+	}
+	for _, factory := range registry.Factories() {
+		if !matchesTaskService(factory.ServiceID, service) {
+			continue
+		}
+		handler, err := factory.New(p.deps)
+		if err != nil {
+			return nil, err, prefix, sdk, true
+		}
+		// ponytail: construct and close integrations per task; cache only if profiling shows initialization cost matters.
+		if !slices.Contains(handler.Operations(), operation) {
+			if closer, ok := handler.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
+			return nil, spi.NotImplemented(factory.ServiceID, operation, "emulate"), prefix, sdk, true
+		}
+		response, invokeErr := handler.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: operation, Input: input})
+		if closer, ok := handler.(interface{ Close() error }); ok {
+			invokeErr = errors.Join(invokeErr, closer.Close())
+		}
+		if response == nil {
+			return nil, invokeErr, prefix, sdk, true
+		}
+		return response.Output, invokeErr, prefix, sdk, true
+	}
+	return nil, spi.NotImplemented("aws."+service, operation, "emulate"), prefix, sdk, true
+}
+
+func taskIntegration(resource string) (service, operation, prefix string, sdk, ok bool) {
+	optimized := map[string][3]string{
+		"arn:aws:states:::sqs:sendMessage":       {"sqs", "SendMessage", "SQS"},
+		"arn:aws:states:::sns:publish":           {"sns", "Publish", "SNS"},
+		"arn:aws:states:::dynamodb:getItem":      {"dynamodb", "GetItem", "DynamoDB"},
+		"arn:aws:states:::dynamodb:putItem":      {"dynamodb", "PutItem", "DynamoDB"},
+		"arn:aws:states:::dynamodb:updateItem":   {"dynamodb", "UpdateItem", "DynamoDB"},
+		"arn:aws:states:::dynamodb:deleteItem":   {"dynamodb", "DeleteItem", "DynamoDB"},
+		"arn:aws:states:::states:startExecution": {"states", "StartExecution", "StepFunctions"},
+	}
+	if integration, found := optimized[resource]; found {
+		return integration[0], integration[1], integration[2], false, true
+	}
+	const marker = "arn:aws:states:::aws-sdk:"
+	if !strings.HasPrefix(resource, marker) {
+		return "", "", "", false, false
+	}
+	service, action, found := strings.Cut(strings.TrimPrefix(resource, marker), ":")
+	if !found || service == "" || action == "" || strings.Contains(action, ".") {
+		return "", "", "", false, false
+	}
+	operation = strings.ToUpper(action[:1]) + action[1:]
+	aliases := map[string]string{"sfn": "states", "cloudwatch": "monitoring", "resourcegroupstaggingapi": "tagging"}
+	if alias := aliases[service]; alias != "" {
+		service = alias
+	}
+	prefixes := map[string]string{"dynamodb": "DynamoDb", "sqs": "Sqs", "sns": "Sns", "states": "Sfn"}
+	prefix = prefixes[service]
+	if prefix == "" {
+		prefix = strings.ToUpper(service[:1]) + service[1:]
+	}
+	return service, operation, prefix, true, true
+}
+
+func matchesTaskService(serviceID, requested string) bool {
+	name := strings.TrimPrefix(serviceID, "aws.")
+	if dot := strings.LastIndex(name, "."); dot >= 0 {
+		name = name[dot+1:]
+	}
+	return name == requested || strings.ReplaceAll(name, "-", "") == requested
 }
 
 func (p *Pack) invokeLambda(ctx context.Context, req *spi.Request, resource string, payload any) (any, error) {

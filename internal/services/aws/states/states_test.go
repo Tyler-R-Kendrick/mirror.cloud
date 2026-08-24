@@ -14,6 +14,9 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
@@ -717,6 +720,51 @@ func TestStatesRequestValidation(t *testing.T) {
 	fault("TagResource", map[string]any{"resourceArn": arn}, "ValidationException")
 }
 
+func TestStatesServiceIntegrations(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(handler spi.Handler, operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := handler.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+
+	queue := sqs.New(deps)
+	queueURL := invoke(queue, "CreateQueue", map[string]any{"QueueName": "workflow"})["QueueUrl"].(string)
+	topicARN := invoke(sns.New(deps), "CreateTopic", map[string]any{"Name": "workflow"})["TopicArn"].(string)
+	table := dynamodb.New(deps)
+	invoke(table, "CreateTable", map[string]any{"TableName": "workflow", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
+
+	definition, _ := json.Marshal(map[string]any{"StartAt": "Queue", "States": map[string]any{
+		"Queue":  map[string]any{"Type": "Task", "Resource": "arn:aws:states:::sqs:sendMessage", "Parameters": map[string]any{"QueueUrl": queueURL, "MessageBody": "queued"}, "ResultPath": nil, "Next": "Notify"},
+		"Notify": map[string]any{"Type": "Task", "Resource": "arn:aws:states:::sns:publish", "Parameters": map[string]any{"TopicArn": topicARN, "Message": "published"}, "ResultPath": nil, "Next": "Write"},
+		"Write":  map[string]any{"Type": "Task", "Resource": "arn:aws:states:::dynamodb:putItem", "Parameters": map[string]any{"TableName": "workflow", "Item": map[string]any{"id": map[string]any{"S": "1"}, "value": map[string]any{"S": "stored"}}}, "ResultPath": nil, "Next": "Read"},
+		"Read":   map[string]any{"Type": "Task", "Resource": "arn:aws:states:::aws-sdk:dynamodb:getItem", "Parameters": map[string]any{"TableName": "workflow", "Key": map[string]any{"id": map[string]any{"S": "1"}}}, "End": true},
+	}})
+	if diagnostics := validateDefinition(string(definition)); len(diagnostics) != 0 {
+		t.Fatalf("integration definition diagnostics %#v\n%s", diagnostics, definition)
+	}
+	machine := invoke(p, "CreateStateMachine", map[string]any{"name": "integrations", "definition": string(definition), "roleArn": testRoleARN, "type": "EXPRESS"})
+	execution := invoke(p, "StartSyncExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"]})
+	if execution["status"] != "SUCCEEDED" || !strings.Contains(execution["output"].(string), `"stored"`) {
+		t.Fatalf("service integration execution %#v", execution)
+	}
+	if messages := invoke(queue, "ReceiveMessage", map[string]any{"QueueUrl": queueURL})["Messages"].([]any); len(messages) != 1 || messages[0].(map[string]any)["Body"] != "queued" {
+		t.Fatalf("queued messages %#v", messages)
+	}
+
+	recoveryDefinition := `{"StartAt":"Optimized","States":{"Optimized":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Parameters":{"QueueUrl":"http://localhost/1/missing","MessageBody":"x"},"Catch":[{"ErrorEquals":["SQS.AmazonSQSException"],"Next":"SDK"}],"End":true},"SDK":{"Type":"Task","Resource":"arn:aws:states:::aws-sdk:sqs:sendMessage","Parameters":{"QueueUrl":"http://localhost/1/missing","MessageBody":"x"},"Catch":[{"ErrorEquals":["Sqs.QueueDoesNotExistException"],"Next":"Recovered"}],"End":true},"Recovered":{"Type":"Succeed"}}}`
+	recoveryMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "integration-error", "definition": recoveryDefinition, "roleArn": testRoleARN, "type": "EXPRESS"})
+	if recovered := invoke(p, "StartSyncExecution", map[string]any{"stateMachineArn": recoveryMachine["stateMachineArn"]}); recovered["status"] != "SUCCEEDED" {
+		t.Fatalf("service error recovery %#v", recovered)
+	}
+}
+
 func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -1004,10 +1052,10 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		t.Fatalf("null output path %#v", discarded)
 	}
 
-	recovery := walk(`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"arn:aws:lambda:us-east-1:1:function:missing","Retry":[{"ErrorEquals":["States.TaskFailed"],"MaxAttempts":2}],"Catch":[{"ErrorEquals":["ResourceNotFoundException"],"ResultPath":"$.error","Next":"Recovered"}]},"Recovered":{"Type":"Succeed"}}}`, map[string]any{"original": true})
+	recovery := walk(`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"arn:aws:lambda:us-east-1:1:function:missing","Retry":[{"ErrorEquals":["States.TaskFailed"],"MaxAttempts":2}],"Catch":[{"ErrorEquals":["Lambda.ResourceNotFoundException"],"ResultPath":"$.error","Next":"Recovered"}]},"Recovered":{"Type":"Succeed"}}}`, map[string]any{"original": true})
 	got, _ := recovery.out.(map[string]any)
 	failure, _ := got["error"].(map[string]any)
-	if recovery.status != "SUCCEEDED" || got["original"] != true || failure["Error"] != "ResourceNotFoundException" {
+	if recovery.status != "SUCCEEDED" || got["original"] != true || failure["Error"] != "Lambda.ResourceNotFoundException" {
 		t.Fatalf("task recovery %#v", recovery)
 	}
 	if unsupported := walk(`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}}}`, nil); unsupported.status != "FAILED" || unsupported.cause != "States.Runtime" {

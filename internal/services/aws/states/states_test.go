@@ -1417,6 +1417,32 @@ func TestStatesPassValidation(t *testing.T) {
 	}
 }
 
+func TestStatesDataFlowValidation(t *testing.T) {
+	for _, definition := range []string{
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","InputPath":"$.input","Parameters":{"value.$":"$.value"},"ResultPath":null,"OutputPath":null,"End":true}}}`,
+		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","ResultSelector":{"value.$":"$.value"},"End":true}}}`,
+	} {
+		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
+			t.Fatalf("valid data-flow diagnostics %#v", diagnostics)
+		}
+	}
+	for _, definition := range []string{
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","InputPath":1,"End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":true,"End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":1,"End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","InputPath":"input","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"output","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"result","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","Parameters":[],"End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","ResultSelector":[],"End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultSelector":{},"End":true}}}`,
+	} {
+		if diagnostics := validateDefinition(definition); len(diagnostics) != 1 {
+			t.Fatalf("data-flow diagnostics = %#v for %s", diagnostics, definition)
+		}
+	}
+}
+
 func TestStatesStructuralMetadataValidation(t *testing.T) {
 	validName := strings.Repeat("é", 80)
 	valid := fmt.Sprintf(`{"Comment":"machine","Version":"1.0","StartAt":%q,"States":{%q:{"Type":"Succeed","Comment":"state"}}}`, validName, validName)

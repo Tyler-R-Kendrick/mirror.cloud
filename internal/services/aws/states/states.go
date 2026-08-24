@@ -37,6 +37,9 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
+// ponytail: jsonata-go mutates package-global evaluator state; remove this lock when the dependency is concurrency-safe.
+var jsonataMu sync.Mutex
+
 func init() {
 	registry.Register(registry.Factory{ServiceID: "aws.states", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
 		return New(d), nil
@@ -2834,6 +2837,8 @@ func evalJSONataValue(value any, scope jsonataScope) (any, bool) {
 		if !strings.HasPrefix(value, "{%") || !strings.HasSuffix(value, "%}") {
 			return value, true
 		}
+		jsonataMu.Lock()
+		defer jsonataMu.Unlock()
 		expression := strings.TrimSpace(value[2 : len(value)-2])
 		compiled, err := jsonata.Compile("($mirrorValue := ("+expression+"); {'exists': $exists($mirrorValue), 'value': $mirrorValue})", false)
 		if err != nil {
@@ -5284,7 +5289,9 @@ func validJSONataExpressions(value any) bool {
 		if strings.Contains(expression, "$eval(") {
 			return false
 		}
+		jsonataMu.Lock()
 		_, err := jsonata.Compile(expression, false)
+		jsonataMu.Unlock()
 		return err == nil
 	case map[string]any:
 		for _, item := range value {

@@ -1406,6 +1406,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesTaskFieldOwnershipValidation|TestStatesPassValidation",
 		},
 		{
+			name: "states-accept-state-specific-fields",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `if typ == group.owner {`,
+			new:  `if true {`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesFieldOwnershipValidation",
+		},
+		{
 			name: "states-accept-invalid-data-path",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `if !valid || !strings.HasPrefix(path, "$") {`,

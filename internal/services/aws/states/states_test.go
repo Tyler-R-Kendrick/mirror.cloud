@@ -1446,6 +1446,46 @@ func TestStatesTaskFieldOwnershipValidation(t *testing.T) {
 	}
 }
 
+func TestStatesFieldOwnershipValidation(t *testing.T) {
+	for _, test := range []struct{ queryLanguage, field string }{
+		{"JSONPath", `"Choices":[]`},
+		{"JSONPath", `"Default":"Done"`},
+		{"JSONPath", `"Cause":"failed"`},
+		{"JSONPath", `"CausePath":"$.cause"`},
+		{"JSONPath", `"Error":"Boom"`},
+		{"JSONPath", `"ErrorPath":"$.error"`},
+		{"JSONPath", `"ItemBatcher":{}`},
+		{"JSONPath", `"ItemProcessor":{}`},
+		{"JSONPath", `"ItemReader":{}`},
+		{"JSONata", `"Items":[]`},
+		{"JSONPath", `"ItemsPath":"$.items"`},
+		{"JSONPath", `"ItemSelector":{}`},
+		{"JSONPath", `"Iterator":{}`},
+		{"JSONPath", `"Label":"map"`},
+		{"JSONPath", `"MaxConcurrency":1`},
+		{"JSONPath", `"MaxConcurrencyPath":"$.limit"`},
+		{"JSONPath", `"ResultWriter":{}`},
+		{"JSONPath", `"ToleratedFailureCount":1`},
+		{"JSONPath", `"ToleratedFailureCountPath":"$.count"`},
+		{"JSONPath", `"ToleratedFailurePercentage":1`},
+		{"JSONPath", `"ToleratedFailurePercentagePath":"$.percentage"`},
+		{"JSONPath", `"Branches":[]`},
+		{"JSONPath", `"Seconds":1`},
+		{"JSONPath", `"SecondsPath":"$.seconds"`},
+		{"JSONPath", `"Timestamp":"2026-08-24T12:00:00Z"`},
+		{"JSONPath", `"TimestampPath":"$.time"`},
+	} {
+		definition := fmt.Sprintf(`{"QueryLanguage":%q,"StartAt":"Pass","States":{"Pass":{"Type":"Pass",%s,"End":true},"Done":{"Type":"Succeed"}}}`, test.queryLanguage, test.field)
+		if diagnostics := validateDefinition(definition); len(diagnostics) != 1 {
+			t.Fatalf("field ownership diagnostics = %#v for %s", diagnostics, test.field)
+		}
+	}
+	result := `{"StartAt":"Done","States":{"Done":{"Type":"Succeed","Result":1}}}`
+	if diagnostics := validateDefinition(result); len(diagnostics) != 1 {
+		t.Fatalf("Result ownership diagnostics %#v", diagnostics)
+	}
+}
+
 func TestStatesDataFlowValidation(t *testing.T) {
 	for _, definition := range []string{
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","InputPath":"$.input","Parameters":{"value.$":"$.value"},"ResultPath":null,"OutputPath":null,"End":true}}}`,

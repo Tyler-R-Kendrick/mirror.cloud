@@ -360,15 +360,15 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		"items.jsonl":     "{\"id\":3}\n{\"id\":4}\n",
 		"items.csv":       "id,name,path,note\n5\n6,Lin,C:\\\\Program Files\\\\App.exe,say \\\"hi\\\",ignored\n",
 		"items-path.json": `{"data":{"items":[{"id":13},{"id":14}]}}`,
-		"listed/a":        "a",
-		"listed/b":        "b",
+		"listed/a":        `[{"id":21}]`,
+		"listed/b":        `[{"id":22}]`,
 		"nested.json":     `{"data":{"a/b":{"~key":[{"id":9},{"id":10}]}}}`,
 		"objects.json":    `{"b":{"id":12},"a":{"id":11}}`,
 	}
 	for key, body := range objects {
 		invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": key}, []byte(body))
 	}
-	invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": "listed/a", "StorageClass": "STANDARD_IA"}, []byte("a"))
+	invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": "listed/a", "StorageClass": "STANDARD_IA"}, []byte(objects["listed/a"]))
 	type parquetItem struct {
 		ID   int64  `parquet:"id"`
 		Name string `parquet:"name"`
@@ -426,6 +426,18 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	listOutput := listExecution["output"].(string)
 	if listExecution["status"] != "SUCCEEDED" || strings.Count(listOutput, `"source":"S3_OBJECT_LIST"`) != 2 || !strings.Contains(listOutput, `"Key":"listed/a"`) || !strings.Contains(listOutput, `"StorageClass":"STANDARD_IA"`) {
 		t.Fatalf("list ItemReader execution %#v", listExecution)
+	}
+	flattenState := map[string]any{
+		"Type": "Map", "ItemProcessor": processor, "ItemSelector": map[string]any{"value.$": "$$.Map.Item.Value", "source.$": "$$.Map.Item.Source"}, "End": true,
+		"ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:listObjectsV2", "Parameters": map[string]any{"Bucket": "items", "Prefix": "listed/", "MaxKeys": 1}, "ReaderConfig": map[string]any{"InputType": "JSON", "Transformation": "LOAD_AND_FLATTEN"}},
+	}
+	flattenDefinition, _ := json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": flattenState}})
+	flattenMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "reader-load-flatten", "definition": string(flattenDefinition), "roleArn": testRoleARN}, nil)
+	flattenStarted := invoke(p, "StartExecution", map[string]any{"stateMachineArn": flattenMachine["stateMachineArn"]}, nil)
+	flattenExecution := invoke(p, "DescribeExecution", map[string]any{"executionArn": flattenStarted["executionArn"]}, nil)
+	flattenOutput := flattenExecution["output"].(string)
+	if flattenExecution["status"] != "SUCCEEDED" || strings.Count(flattenOutput, `"source":"JSON"`) != 2 || !strings.Contains(flattenOutput, `"id":21`) || !strings.Contains(flattenOutput, `"id":22`) {
+		t.Fatalf("flatten ItemReader execution %#v", flattenExecution)
 	}
 
 	for _, key := range []string{"missing", "broken.parquet"} {
@@ -1563,6 +1575,7 @@ func TestStatesMapValidation(t *testing.T) {
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"CSV","CSVDelimiter":"PIPE","CSVHeaderLocation":"FIRST_ROW"}},` + processor,
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"CSV","CSVHeaderLocation":"GIVEN","CSVHeaders":["id","name"]}},` + processor,
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"MANIFEST","CSVHeaderLocation":"FIRST_ROW"}},` + processor,
+		`"ItemReader":{"Resource":"arn:aws:states:::s3:listObjectsV2","ReaderConfig":{"InputType":"JSON","Transformation":"LOAD_AND_FLATTEN"}},` + processor,
 		`"ResultWriter":{"WriterConfig":{"Transformation":"COMPACT","OutputType":"JSONL"}},` + processor,
 		`"ResultWriter":{"Resource":"arn:aws:states:::s3:putObject","Parameters":{"Bucket":"bucket"}},` + processor,
 		`"Label":"valid-label","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
@@ -1604,6 +1617,10 @@ func TestStatesMapValidation(t *testing.T) {
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"CSV","CSVHeaderLocation":"GIVEN","CSVHeaders":["` + strings.Repeat("x", 10*1024+1) + `"]}},` + processor,
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"CSV","CSVHeaderLocation":"FIRST_ROW","CSVHeaders":["id"]}},` + processor,
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"JSON","CSVDelimiter":"COMMA"}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"JSON","Transformation":"LOAD_AND_FLATTEN"}},` + processor,
+		`"ItemReader":{"Resource":"arn:aws:states:::s3:listObjectsV2","ReaderConfig":{"InputType":"JSON","Transformation":"INVALID"}},` + processor,
+		`"ItemReader":{"Resource":"arn:aws:states:::s3:listObjectsV2","ReaderConfig":{"Transformation":"LOAD_AND_FLATTEN"}},` + processor,
+		`"ItemReader":{"Resource":"arn:aws:states:::s3:listObjectsV2","ReaderConfig":{"InputType":"MANIFEST","Transformation":"LOAD_AND_FLATTEN"}},` + processor,
 		`"ItemReader":{"Resource":"reader","Parameters":[]},` + processor,
 		`"ItemBatcher":{},` + processor,
 		`"ItemBatcher":{"MaxItemsPerBatch":0},` + processor,

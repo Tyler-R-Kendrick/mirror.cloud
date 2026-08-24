@@ -3131,7 +3131,7 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			items = append(items, asSlice(response.Output["Contents"])...)
 			truncated, _ := response.Output["IsTruncated"].(bool)
 			if !truncated {
-				return limitReaderItems(items, "S3_OBJECT_LIST", config, data, scope, variables...)
+				break
 			}
 			token := first(response.Output, "NextContinuationToken")
 			if token == "" {
@@ -3140,6 +3140,37 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			request = maps.Clone(request)
 			request["ContinuationToken"] = token
 		}
+		if first(config, "Transformation") != "LOAD_AND_FLATTEN" {
+			return limitReaderItems(items, "S3_OBJECT_LIST", config, data, scope, variables...)
+		}
+		flattened := []any{}
+		for _, rawItem := range items {
+			item, _ := rawItem.(map[string]any)
+			payload := map[string]any{"Bucket": input["Bucket"], "Key": item["Key"]}
+			nestedConfig := maps.Clone(config)
+			delete(nestedConfig, "Transformation")
+			delete(nestedConfig, "MaxItems")
+			delete(nestedConfig, "MaxItemsPath")
+			nestedReader := map[string]any{"Resource": "arn:aws:states:::s3:getObject", "ReaderConfig": nestedConfig, "Parameters": payload}
+			if scope != nil {
+				nestedReader["Arguments"] = payload
+			}
+			dataset, _, valid := p.mapItems(ctx, req, map[string]any{"ItemReader": nestedReader}, data, scope, variables...)
+			if !valid {
+				return nil, "", false
+			}
+			switch values := dataset.(type) {
+			case []any:
+				flattened = append(flattened, values...)
+			case map[string]any:
+				for _, key := range slices.Sorted(maps.Keys(values)) {
+					flattened = append(flattened, values[key])
+				}
+			default:
+				return nil, "", false
+			}
+		}
+		return limitReaderItems(flattened, first(config, "InputType"), config, data, scope, variables...)
 	}
 	response, err := s3.New(p.deps).Invoke(ctx, &spi.Request{
 		Identity: req.Identity, Operation: "GetObject", Input: input,
@@ -5421,6 +5452,13 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 					configured, valid := value.(string)
 					if !valid || !slices.Contains([]string{"CSV", "JSON", "JSONL", "PARQUET", "MANIFEST"}, configured) {
 						add("SCHEMA_VALIDATION_FAILED", "InputType is invalid.", readerPath+"/InputType")
+					}
+				}
+				if value, exists := config["Transformation"]; exists {
+					transformation, valid := value.(string)
+					resource := first(reader, "Resource")
+					if !valid || transformation != "NONE" && transformation != "LOAD_AND_FLATTEN" || resource != "arn:aws:states:::s3:listObjectsV2" || transformation == "LOAD_AND_FLATTEN" && !slices.Contains([]string{"CSV", "JSON", "JSONL", "PARQUET"}, inputType) {
+						add("SCHEMA_VALIDATION_FAILED", "Transformation is invalid for this ItemReader.", readerPath+"/Transformation")
 					}
 				}
 				csvConfigured := false

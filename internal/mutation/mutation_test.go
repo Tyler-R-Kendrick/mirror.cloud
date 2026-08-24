@@ -1086,6 +1086,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFlattenedMapDatasetLimit",
 		},
 		{
+			name: "states-skip-gzip-item-reader-input",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `case strings.HasSuffix(key, ".gz"):`,
+			new:  `case strings.HasSuffix(key, ".gzip"):`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestDistributedMapS3ItemReader",
+		},
+		{
+			name: "states-skip-zstd-item-reader-input",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `case strings.HasSuffix(key, ".zstd"):`,
+			new:  `case strings.HasSuffix(key, ".zst"):`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestDistributedMapS3ItemReader",
+		},
+		{
 			name: "states-drop-map-reader-parameters",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `resolved, readerParametersOK := applyParamsValidated(parameters, data, nil, p.deps.Rand, variables...)`,

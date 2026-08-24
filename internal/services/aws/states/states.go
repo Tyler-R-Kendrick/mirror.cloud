@@ -3150,6 +3150,17 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 		return nil, "", false
 	}
 	config, _ := reader["ReaderConfig"].(map[string]any)
+	if owner, exists := input["ExpectedBucketOwner"]; exists {
+		expected, valid := owner.(string)
+		if !valid || expected != req.Identity.Account {
+			return nil, "", false
+		}
+	}
+	if resource == "arn:aws:states:::s3:getObject" && first(config, "InputType") == "PARQUET" {
+		if _, exists := input["VersionId"]; exists {
+			return nil, "", false
+		}
+	}
 	if resource == "arn:aws:states:::s3:listObjectsV2" {
 		items, request := []any{}, maps.Clone(input)
 		for {
@@ -5685,6 +5696,19 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 					configured, valid := value.(string)
 					if !valid || !slices.Contains([]string{"CSV", "JSON", "JSONL", "PARQUET", "MANIFEST"}, configured) {
 						add("SCHEMA_VALIDATION_FAILED", "InputType is invalid.", readerPath+"/InputType")
+					}
+				}
+				payloadName := "Parameters"
+				if isJSONata {
+					payloadName = "Arguments"
+				}
+				payload, _ := reader[payloadName].(map[string]any)
+				if inputType == "PARQUET" {
+					if _, versionID := payload["VersionId"]; versionID {
+						add("SCHEMA_VALIDATION_FAILED", "Parquet ItemReader does not support VersionId.", "/States/"+name+"/ItemReader/"+payloadName+"/VersionId")
+					}
+					if _, versionID := payload["VersionId.$"]; versionID {
+						add("SCHEMA_VALIDATION_FAILED", "Parquet ItemReader does not support VersionId.", "/States/"+name+"/ItemReader/"+payloadName+"/VersionId.$")
 					}
 				}
 				if value, exists := config["ManifestType"]; exists {

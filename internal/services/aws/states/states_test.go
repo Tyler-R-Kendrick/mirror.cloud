@@ -452,6 +452,23 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 			t.Fatalf("%s ItemReader execution %#v", test.inputType, execution)
 		}
 	}
+	ownerState := map[string]any{
+		"Type": "Map", "ItemProcessor": processor, "End": true,
+		"ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": "items.json", "ExpectedBucketOwner": "1"}, "ReaderConfig": map[string]any{"InputType": "JSON"}},
+	}
+	ownerDefinition, _ := json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": ownerState}})
+	ownerMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "reader-expected-owner", "definition": string(ownerDefinition), "roleArn": testRoleARN}, nil)
+	ownerStarted := invoke(p, "StartExecution", map[string]any{"stateMachineArn": ownerMachine["stateMachineArn"]}, nil)
+	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": ownerStarted["executionArn"]}, nil); execution["status"] != "SUCCEEDED" {
+		t.Fatalf("matching ExpectedBucketOwner execution %#v", execution)
+	}
+	ownerState["ItemReader"].(map[string]any)["Parameters"].(map[string]any)["ExpectedBucketOwner"] = "2"
+	ownerDefinition, _ = json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": ownerState}})
+	ownerMachine = invoke(p, "CreateStateMachine", map[string]any{"name": "reader-wrong-owner", "definition": string(ownerDefinition), "roleArn": testRoleARN}, nil)
+	ownerStarted = invoke(p, "StartExecution", map[string]any{"stateMachineArn": ownerMachine["stateMachineArn"]}, nil)
+	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": ownerStarted["executionArn"]}, nil); execution["status"] != "FAILED" || execution["error"] != "States.ItemReaderFailed" {
+		t.Fatalf("mismatched ExpectedBucketOwner execution %#v", execution)
+	}
 	manifestState := map[string]any{
 		"Type": "Map", "ItemProcessor": processor, "ItemSelector": map[string]any{"value.$": "$$.Map.Item.Value", "source.$": "$$.Map.Item.Source"}, "End": true,
 		"ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": "manifest.csv"}, "ReaderConfig": map[string]any{"ManifestType": "ATHENA_DATA", "InputType": "JSONL", "MaxItems": 2}},
@@ -1732,6 +1749,7 @@ func TestStatesMapValidation(t *testing.T) {
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"CSV","ItemsPointer":"/data"}},` + processor,
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":1}},` + processor,
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"INVALID"}},` + processor,
+		`"ItemReader":{"Resource":"arn:aws:states:::s3:getObject","Parameters":{"Bucket":"items","Key":"items.parquet","VersionId":"1"},"ReaderConfig":{"InputType":"PARQUET"}},` + processor,
 		`"ItemReader":{"Resource":"arn:aws:states:::s3:getObject","ReaderConfig":{"ManifestType":1,"InputType":"JSONL"}},` + processor,
 		`"ItemReader":{"Resource":"arn:aws:states:::s3:getObject","ReaderConfig":{"ManifestType":"INVALID","InputType":"JSONL"}},` + processor,
 		`"ItemReader":{"Resource":"arn:aws:states:::s3:getObject","ReaderConfig":{"ManifestType":"ATHENA_DATA","InputType":"JSON"}},` + processor,

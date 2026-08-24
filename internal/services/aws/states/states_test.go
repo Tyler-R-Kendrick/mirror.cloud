@@ -487,7 +487,7 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	flattenMachine = invoke(p, "CreateStateMachine", map[string]any{"name": "reader-load-flatten-array", "definition": string(flattenDefinition), "roleArn": testRoleARN}, nil)
 	flattenStarted = invoke(p, "StartExecution", map[string]any{"stateMachineArn": flattenMachine["stateMachineArn"]}, nil)
 	flattenExecution = invoke(p, "DescribeExecution", map[string]any{"executionArn": flattenStarted["executionArn"]}, nil)
-	if flattenExecution["status"] != "SUCCEEDED" || !strings.Contains(flattenExecution["output"].(string), `"id":23`) {
+	if flattenExecution["status"] != "SUCCEEDED" || !strings.Contains(flattenExecution["output"].(string), `"source":"S3://items/flat-array/a"`) || !strings.Contains(flattenExecution["output"].(string), `"id":23`) {
 		t.Fatalf("flatten array ItemReader execution %#v", flattenExecution)
 	}
 

@@ -1417,6 +1417,26 @@ func TestStatesPassValidation(t *testing.T) {
 	}
 }
 
+func TestStatesStructuralMetadataValidation(t *testing.T) {
+	validName := strings.Repeat("é", 80)
+	valid := fmt.Sprintf(`{"Comment":"machine","Version":"1.0","StartAt":%q,"States":{%q:{"Type":"Succeed","Comment":"state"}}}`, validName, validName)
+	if diagnostics := validateDefinition(valid); len(diagnostics) != 0 {
+		t.Fatalf("valid metadata diagnostics %#v", diagnostics)
+	}
+	longName := strings.Repeat("é", 81)
+	for _, definition := range []string{
+		`{"Comment":1,"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
+		`{"Version":1,"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
+		`{"Version":"2.0","StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Done","States":{"Done":{"Type":"Succeed","Comment":1}}}`,
+		fmt.Sprintf(`{"StartAt":%q,"States":{%q:{"Type":"Succeed"}}}`, longName, longName),
+	} {
+		if diagnostics := validateDefinition(definition); len(diagnostics) != 1 {
+			t.Fatalf("metadata diagnostics = %#v for %s", diagnostics, definition)
+		}
+	}
+}
+
 func TestStatesExecutionTimeout(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

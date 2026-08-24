@@ -2373,6 +2373,10 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 			return
 		}
 	}
+	if destination, ok := rec["SnowflakeDestinationConfiguration"].(map[string]any); ok {
+		p.deliverSnowflakeRecords(ctx, req, rec, destination, stream, version, recIDs, data, now)
+		return
+	}
 	if destination, ok := rec["RedshiftDestinationConfiguration"].(map[string]any); ok {
 		p.deliverRedshiftRecords(ctx, req, destination, stream, version, recIDs, data, now)
 		return
@@ -2419,6 +2423,83 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 			p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)
 		}
 	}
+}
+
+// SnowflakeRows returns rows delivered to the local Snowflake table store.
+func (p *Pack) SnowflakeRows(ctx context.Context, identity spi.Identity, accountURL, database, schema, table string) ([]map[string]any, error) {
+	stored, _, err := p.deps.Store.Scope(identity.Account, identity.Region).Collection("fhsnow").Get(ctx, snowflakeTableKey(accountURL, database, schema, table))
+	var rows []map[string]any
+	if err == nil {
+		err = json.Unmarshal(stored, &rows)
+	}
+	return rows, err
+}
+
+func (p *Pack) deliverSnowflakeRecords(ctx context.Context, req *spi.Request, streamRecord, destination map[string]any, stream, version string, recIDs []string, data [][]byte, now time.Time) {
+	s3, _ := destination["S3Configuration"].(map[string]any)
+	bucket, _, errorPrefix, _, _, _, kmsARN := s3Configuration(s3)
+	var validIDs []string
+	var validRaw, rows [][]byte
+	for index := range data {
+		if first(destination, "S3BackupMode") == "AllData" {
+			p.deliverS3Configuration(ctx, req, s3, stream, version, recIDs[index], data[index], now)
+		}
+		processed, failures := p.processData(ctx, req, destination, stream, recIDs[index], data[index], now)
+		for _, failure := range failures {
+			p.logDeliveryError(ctx, req, destination, stream, failure.message, now)
+			p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)
+		}
+		for _, record := range processed {
+			row, ok := snowflakeRow(destination, stream, now, record.data)
+			if !ok {
+				p.deliverSnowflakeFailure(ctx, req, s3, stream, version, record.recID, record.raw, 1, "Snowflake.InvalidInput", "Snowflake record is not a JSON object", now, now)
+				continue
+			}
+			encoded, _ := json.Marshal(row)
+			validIDs = append(validIDs, record.recID)
+			validRaw = append(validRaw, record.raw)
+			rows = append(rows, encoded)
+		}
+	}
+	if len(rows) == 0 {
+		return
+	}
+	backupFailures := first(destination, "S3BackupMode") != "AllData"
+	if p.bufferEndpoint(ctx, req, stream, "SnowflakeDestinationConfiguration", validIDs[0], validIDs, validRaw, rows, backupFailures, destination, now) {
+		return
+	}
+	delivered, permanent, code, message := p.deliverEndpoint(ctx, req, streamRecord, destination, "SnowflakeDestinationConfiguration", validIDs[0], rows, now)
+	if !delivered {
+		p.logDeliveryError(ctx, req, destination, stream, message, now)
+	}
+	retryDuration := endpointRetryDuration("SnowflakeDestinationConfiguration", destination)
+	retrying := !delivered && !permanent && retryDuration > 0 && p.scheduleEndpointRetry(ctx, req, stream, "SnowflakeDestinationConfiguration", validIDs[0], validIDs, validRaw, rows, backupFailures, code, message, now, retryDuration)
+	if backupFailures && !delivered && (permanent || !retrying) {
+		payload := httpRetryPayload{BackupRecordIDs: validIDs, BackupData: validRaw, Arrivals: repeatTime(now, len(validRaw))}
+		p.backupEndpointPayload(ctx, req, streamRecord, destination, "SnowflakeDestinationConfiguration", stream, payload, 1, code, message, now)
+	}
+}
+
+func snowflakeRow(destination map[string]any, stream string, now time.Time, data []byte) (map[string]any, bool) {
+	content := map[string]any{}
+	if json.Unmarshal(data, &content) != nil || content == nil {
+		return nil, false
+	}
+	switch first(destination, "DataLoadingOption") {
+	case "VARIANT_CONTENT_MAPPING":
+		return map[string]any{first(destination, "ContentColumnName"): content}, true
+	case "VARIANT_CONTENT_AND_METADATA_MAPPING":
+		return map[string]any{
+			first(destination, "ContentColumnName"):  content,
+			first(destination, "MetaDataColumnName"): map[string]any{"firehoseDeliveryStreamName": stream, "IngestionTime": now.UTC().Format(time.RFC3339Nano)},
+		}, true
+	default:
+		return content, true
+	}
+}
+
+func snowflakeTableKey(accountURL, database, schema, table string) string {
+	return strings.Join([]string{accountURL, database, schema, table}, "|")
 }
 
 func (p *Pack) deliverIcebergRecords(ctx context.Context, req *spi.Request, destination map[string]any, stream, version string, recIDs []string, data [][]byte, now time.Time) {
@@ -2753,7 +2834,7 @@ func (p *Pack) deliverEndpointRecords(ctx context.Context, req *spi.Request, str
 	if !delivered {
 		p.logDeliveryError(ctx, req, destination, stream, message, now)
 	}
-	retryDuration := httpRetryDuration(destination)
+	retryDuration := endpointRetryDuration(destinationKey, destination)
 	retrying := !delivered && !permanent && retryDuration > 0 && p.scheduleEndpointRetry(ctx, req, stream, destinationKey, processedIDs[0], recIDs, data, processedData, backupFailures, code, message, now, retryDuration)
 	if backupFailures && !delivered && !permanent && !retrying {
 		payload := httpRetryPayload{BackupRecordIDs: recIDs, BackupData: data, Arrivals: repeatTime(now, len(data))}
@@ -2823,6 +2904,15 @@ func httpBufferingHints(destination map[string]any) (time.Duration, int) {
 }
 
 func endpointBufferingHints(destinationKey string, destination map[string]any) (time.Duration, int) {
+	if destinationKey == "SnowflakeDestinationConfiguration" {
+		hints, _ := destination["BufferingHints"].(map[string]any)
+		interval, intervalOK := inputInteger(hints["IntervalInSeconds"], 0, 900)
+		size, sizeOK := inputInteger(hints["SizeInMBs"], 1, 128)
+		if !intervalOK || !sizeOK {
+			return 0, 128 * 1024 * 1024
+		}
+		return time.Duration(interval) * time.Second, size * 1024 * 1024
+	}
 	if destinationKey != "SplunkDestinationConfiguration" {
 		return httpBufferingHints(destination)
 	}
@@ -2833,6 +2923,18 @@ func endpointBufferingHints(destinationKey string, destination map[string]any) (
 		return 60 * time.Second, 5 * 1024 * 1024
 	}
 	return time.Duration(interval) * time.Second, size * 1024 * 1024
+}
+
+func endpointRetryDuration(destinationKey string, destination map[string]any) time.Duration {
+	if destinationKey != "SnowflakeDestinationConfiguration" {
+		return httpRetryDuration(destination)
+	}
+	retry, _ := destination["RetryOptions"].(map[string]any)
+	seconds, ok := inputInteger(retry["DurationInSeconds"], 0, 7200)
+	if !ok {
+		seconds = 60
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func searchBufferingHints(destination map[string]any) (time.Duration, int) {
@@ -3470,6 +3572,17 @@ func (p *Pack) backupHTTPPayload(ctx context.Context, req *spi.Request, stream m
 }
 
 func (p *Pack) backupEndpointPayload(ctx context.Context, req *spi.Request, stream, destination map[string]any, destinationKey, name string, payload httpRetryPayload, attempts int, code, message string, now time.Time) {
+	if destinationKey == "SnowflakeDestinationConfiguration" {
+		s3, _ := destination["S3Configuration"].(map[string]any)
+		for index := range payload.BackupData {
+			arrival := now
+			if len(payload.Arrivals) == len(payload.BackupData) {
+				arrival = payload.Arrivals[index]
+			}
+			p.deliverSnowflakeFailure(ctx, req, s3, name, first(stream, "VersionId"), payload.BackupRecordIDs[index], payload.BackupData[index], attempts, code, message, arrival, now)
+		}
+		return
+	}
 	if destinationKey != "SplunkDestinationConfiguration" {
 		p.backupHTTPPayload(ctx, req, stream, destination, name, payload, now)
 		return
@@ -3557,7 +3670,7 @@ func (p *Pack) flushHTTPBuffer(ctx context.Context, identity spi.Identity, colle
 	if !delivered {
 		p.logDeliveryError(ctx, req, destination, name, message, now)
 	}
-	retryDuration := httpRetryDuration(destination)
+	retryDuration := endpointRetryDuration(destinationKey, destination)
 	retrying := !delivered && !permanent && retryDuration > 0 && p.scheduleEndpointRetryPayload(ctx, req, name, destinationKey, requestID, payload, code, message, now, retryDuration)
 	if !delivered && !permanent && !retrying {
 		p.backupEndpointPayload(ctx, req, stream, destination, destinationKey, name, payload, 0, code, message, now)
@@ -3671,8 +3784,79 @@ func (p *Pack) deliverEndpoint(ctx context.Context, req *spi.Request, stream, de
 	if destinationKey == "SplunkDestinationConfiguration" {
 		return p.deliverSplunk(ctx, req, destination, requestID, data)
 	}
+	if destinationKey == "SnowflakeDestinationConfiguration" {
+		return p.deliverSnowflake(ctx, req, destination, data)
+	}
 	delivered, permanent, message := p.deliverHTTP(ctx, req, stream, destination, requestID, data, now)
 	return delivered, permanent, "", message
+}
+
+func (p *Pack) deliverSnowflake(ctx context.Context, req *spi.Request, destination map[string]any, data [][]byte) (bool, bool, string, string) {
+	if err := p.validateSnowflakeCredentials(ctx, req, destination); err != nil {
+		return false, true, "Snowflake.InvalidPrivateKeyOrPassphrase", err.Error()
+	}
+	rows := make([]map[string]any, len(data))
+	for index := range data {
+		if json.Unmarshal(data[index], &rows[index]) != nil || rows[index] == nil {
+			return false, true, "Snowflake.InvalidInput", "Snowflake record is not a JSON object"
+		}
+	}
+	key := snowflakeTableKey(first(destination, "AccountUrl"), first(destination, "Database"), first(destination, "Schema"), first(destination, "Table"))
+	err := p.col(req, "fhsnow").Txn(ctx, func(tx spi.Tx) error {
+		stored, _, err := tx.Get(key)
+		if err != nil {
+			return err
+		}
+		var existing []map[string]any
+		_ = json.Unmarshal(stored, &existing)
+		existing = append(existing, rows...)
+		encoded, _ := json.Marshal(existing)
+		return tx.Put(key, encoded)
+	})
+	if err != nil {
+		return false, false, "Snowflake.InternalFailure", err.Error()
+	}
+	return true, false, "", ""
+}
+
+func (p *Pack) validateSnowflakeCredentials(ctx context.Context, req *spi.Request, destination map[string]any) error {
+	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {
+		response, err := secretsmanager.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": first(secrets, "SecretARN")}})
+		var secret string
+		var ok bool
+		if response != nil {
+			secret, ok = response.Output["SecretString"].(string)
+		}
+		value := map[string]any{}
+		if err != nil || !ok || json.Unmarshal([]byte(secret), &value) != nil {
+			return errors.New("unable to retrieve Snowflake credentials")
+		}
+		user, userOK := value["user"].(string)
+		privateKey, keyOK := value["private_key"].(string)
+		passphrase, passphraseOK := value["key_passphrase"].(string)
+		if !userOK || user == "" || !keyOK || !validSnowflakePrivateKey(privateKey) || value["key_passphrase"] != nil && (!passphraseOK || len(passphrase) < 7 || len(passphrase) > 255) {
+			return errors.New("Snowflake secret must contain valid user and private_key values")
+		}
+	}
+	return nil
+}
+
+func (p *Pack) deliverSnowflakeFailure(ctx context.Context, req *spi.Request, s3 map[string]any, stream, version, recordID string, data []byte, attempts int, code, message string, arrival, now time.Time) {
+	bucket, prefix, errorPrefix, _, _, _, kmsARN := s3Configuration(s3)
+	if errorPrefix == "" {
+		errorPrefix = prefix + "snowflake-failed/"
+	}
+	errorPrefix = strings.ReplaceAll(errorPrefix, "!{firehose:error-output-type}", "snowflake-failed")
+	fields := map[string]any{
+		"attemptsMade": attempts, "arrivalTimestamp": arrival.UnixMilli(), "errorCode": code, "errorMessage": message,
+		"attemptEndingTimestamp": now.UnixMilli(), "rawData": base64.StdEncoding.EncodeToString(data),
+	}
+	body, _ := json.Marshal(fields)
+	if version == "" {
+		version = "1"
+	}
+	key := p.evaluatedS3Prefix(errorPrefix, now) + stream + "-" + version + "-" + now.Format("2006-01-02-15-04-05-") + recordID
+	p.deliverS3Object(ctx, req, bucket, key, kmsARN, body)
 }
 
 func (p *Pack) deliverSplunk(ctx context.Context, req *spi.Request, destination map[string]any, requestID string, data [][]byte) (bool, bool, string, string) {

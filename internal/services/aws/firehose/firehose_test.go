@@ -1374,6 +1374,80 @@ func TestSnowflakeDestinationValidationAndDescription(t *testing.T) {
 	}
 }
 
+func TestFirehoseSnowflakeDestination(t *testing.T) {
+	ctx := context.Background()
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	destination := testSnowflakeDestination()
+	destination["BufferingHints"] = map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 128}
+	destination["DataLoadingOption"] = "VARIANT_CONTENT_AND_METADATA_MAPPING"
+	destination["ContentColumnName"] = "payload"
+	destination["MetaDataColumnName"] = "metadata"
+	destination["S3BackupMode"] = "AllData"
+	destination["S3Configuration"] = map[string]any{
+		"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "source/", "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/",
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+		"DeliveryStreamName": "snowflake-delivery", "SnowflakeDestinationConfiguration": destination,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	records := []string{`{"id":"1","name":"alice"}`, `{"id":"2","name":"bob"}`, `["not-an-object"]`}
+	input := make([]any, len(records))
+	for index := range records {
+		input[index] = map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(records[index]))}
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutRecordBatch", Input: map[string]any{
+		"DeliveryStreamName": "snowflake-delivery", "Records": input,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]any
+	for attempt := 0; attempt < 2000; attempt++ {
+		rows, err = p.SnowflakeRows(ctx, id, first(destination, "AccountUrl"), "ANALYTICS", "PUBLIC", "EVENTS")
+		if err == nil && len(rows) == 2 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	want := []map[string]any{
+		{"payload": map[string]any{"id": "1", "name": "alice"}, "metadata": map[string]any{"IngestionTime": "1970-01-01T00:00:00Z", "firehoseDeliveryStreamName": "snowflake-delivery"}},
+		{"payload": map[string]any{"id": "2", "name": "bob"}, "metadata": map[string]any{"IngestionTime": "1970-01-01T00:00:00Z", "firehoseDeliveryStreamName": "snowflake-delivery"}},
+	}
+	if err != nil || !reflect.DeepEqual(rows, want) {
+		t.Fatalf("Snowflake rows %#v, %v", rows, err)
+	}
+	responses := response.Output["RequestResponses"].([]any)
+	for index := range records {
+		recordID := first(responses[index].(map[string]any), "RecordId")
+		key := id.Account + "/" + id.Region + "/out/source/1970/01/01/00/snowflake-delivery-1-1970-01-01-00-00-00-" + recordID
+		reader, _, err := deps.Blobs.Get(ctx, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(reader)
+		_ = reader.Close()
+		if string(body) != records[index] {
+			t.Fatalf("Snowflake source backup %q", body)
+		}
+	}
+	failedID := first(responses[2].(map[string]any), "RecordId")
+	failureKey := id.Account + "/" + id.Region + "/out/errors/snowflake-failed/1970/01/01/00/snowflake-delivery-1-1970-01-01-00-00-00-" + failedID
+	reader, _, err := deps.Blobs.Get(ctx, failureKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	failure := map[string]any{}
+	if json.Unmarshal(body, &failure) != nil || failure["attemptsMade"] != float64(1) || failure["arrivalTimestamp"] != float64(0) || failure["errorCode"] != "Snowflake.InvalidInput" || failure["rawData"] != base64.StdEncoding.EncodeToString([]byte(records[2])) {
+		t.Fatalf("Snowflake failure envelope %s", body)
+	}
+}
+
 func TestSplunkDestinationValidationAndDescription(t *testing.T) {
 	valid := map[string]any{
 		"HECEndpoint": "https://splunk.example.com:8088", "HECEndpointType": "Raw", "HECToken": "token",

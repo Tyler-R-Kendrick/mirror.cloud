@@ -360,12 +360,15 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		"items.jsonl":     "{\"id\":3}\n{\"id\":4}\n",
 		"items.csv":       "id,name,path,note\n5\n6,Lin,C:\\\\Program Files\\\\App.exe,say \\\"hi\\\",ignored\n",
 		"items-path.json": `{"data":{"items":[{"id":13},{"id":14}]}}`,
+		"listed/a":        "a",
+		"listed/b":        "b",
 		"nested.json":     `{"data":{"a/b":{"~key":[{"id":9},{"id":10}]}}}`,
 		"objects.json":    `{"b":{"id":12},"a":{"id":11}}`,
 	}
 	for key, body := range objects {
 		invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": key}, []byte(body))
 	}
+	invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": "listed/a", "StorageClass": "STANDARD_IA"}, []byte("a"))
 	type parquetItem struct {
 		ID   int64  `parquet:"id"`
 		Name string `parquet:"name"`
@@ -411,6 +414,18 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		if execution["status"] != "SUCCEEDED" || strings.Count(output, `"source":"`+test.inputType+`"`) != expected || test.inputType == "PARQUET" && !strings.Contains(output, `"name":"Ada"`) || test.inputType == "CSV" && (!strings.Contains(output, `"name":""`) || !strings.Contains(output, `"path":"C:\\Program Files\\App.exe"`) || !strings.Contains(output, `"note":"say \"hi\""`) || strings.Contains(output, "ignored")) || test.pointer != "" && !strings.Contains(output, `"id":9`) || test.itemsPath != "" && !strings.Contains(output, `"id":13`) {
 			t.Fatalf("%s ItemReader execution %#v", test.inputType, execution)
 		}
+	}
+	listState := map[string]any{
+		"Type": "Map", "ItemProcessor": processor, "ItemSelector": map[string]any{"value.$": "$$.Map.Item.Value", "source.$": "$$.Map.Item.Source"}, "End": true,
+		"ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:listObjectsV2", "Parameters": map[string]any{"Bucket": "items", "Prefix": "listed/", "MaxKeys": 1}},
+	}
+	listDefinition, _ := json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": listState}})
+	listMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "reader-list-objects", "definition": string(listDefinition), "roleArn": testRoleARN}, nil)
+	listStarted := invoke(p, "StartExecution", map[string]any{"stateMachineArn": listMachine["stateMachineArn"]}, nil)
+	listExecution := invoke(p, "DescribeExecution", map[string]any{"executionArn": listStarted["executionArn"]}, nil)
+	listOutput := listExecution["output"].(string)
+	if listExecution["status"] != "SUCCEEDED" || strings.Count(listOutput, `"source":"S3_OBJECT_LIST"`) != 2 || !strings.Contains(listOutput, `"Key":"listed/a"`) || !strings.Contains(listOutput, `"StorageClass":"STANDARD_IA"`) {
+		t.Fatalf("list ItemReader execution %#v", listExecution)
 	}
 
 	for _, key := range []string{"missing", "broken.parquet"} {

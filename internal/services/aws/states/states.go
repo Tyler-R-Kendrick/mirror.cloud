@@ -3093,7 +3093,8 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			return nil, "", false
 		}
 	}
-	if first(reader, "Resource") != "arn:aws:states:::s3:getObject" {
+	resource := first(reader, "Resource")
+	if resource != "arn:aws:states:::s3:getObject" && resource != "arn:aws:states:::s3:listObjectsV2" {
 		return nil, "", false
 	}
 	parameters, _ := reader["Parameters"].(map[string]any)
@@ -3119,6 +3120,27 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 		}
 		return nil, "", false
 	}
+	config, _ := reader["ReaderConfig"].(map[string]any)
+	if resource == "arn:aws:states:::s3:listObjectsV2" {
+		items, request := []any{}, maps.Clone(input)
+		for {
+			response, err := s3.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "ListObjectsV2", Input: request})
+			if err != nil || response == nil {
+				return nil, "", false
+			}
+			items = append(items, asSlice(response.Output["Contents"])...)
+			truncated, _ := response.Output["IsTruncated"].(bool)
+			if !truncated {
+				return limitReaderItems(items, "S3_OBJECT_LIST", config, data, scope, variables...)
+			}
+			token := first(response.Output, "NextContinuationToken")
+			if token == "" {
+				return nil, "", false
+			}
+			request = maps.Clone(request)
+			request["ContinuationToken"] = token
+		}
+	}
 	response, err := s3.New(p.deps).Invoke(ctx, &spi.Request{
 		Identity: req.Identity, Operation: "GetObject", Input: input,
 	})
@@ -3130,7 +3152,6 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 	if readErr != nil || closeErr != nil {
 		return nil, "", false
 	}
-	config, _ := reader["ReaderConfig"].(map[string]any)
 	inputType := first(config, "InputType")
 	if inputType == "" {
 		inputType = "JSON"

@@ -260,6 +260,24 @@ func TestDistributedMapRuns(t *testing.T) {
 	if described["status"] != "SUCCEEDED" || described["executionCounts"].(map[string]any)["total"] != 3.0 || described["itemCounts"].(map[string]any)["succeeded"] != 3.0 {
 		t.Fatalf("map run %#v", described)
 	}
+	children := must("ListExecutions", map[string]any{"mapRunArn": mapRunARN, "maxResults": 2.0})
+	if len(children["executions"].([]any)) != 2 || children["nextToken"] == nil {
+		t.Fatalf("map child execution page %#v", children)
+	}
+	childARN := children["executions"].([]any)[0].(map[string]any)["executionArn"].(string)
+	child := must("DescribeExecution", map[string]any{"executionArn": childARN})
+	if child["status"] != "SUCCEEDED" || child["mapRunArn"] != mapRunARN || child["itemCount"] != 1.0 || child["output"] == nil {
+		t.Fatalf("map child execution %#v", child)
+	}
+	childMachine := must("DescribeStateMachineForExecution", map[string]any{"executionArn": childARN})
+	childHistory := must("GetExecutionHistory", map[string]any{"executionArn": childARN})["events"].([]any)
+	if childMachine["roleArn"] != testRoleARN || !strings.Contains(childMachine["definition"].(string), `"ProcessorConfig"`) || len(childHistory) == 0 {
+		t.Fatalf("map child state machine %#v history=%#v", childMachine, childHistory)
+	}
+	remainingChildren := must("ListExecutions", map[string]any{"mapRunArn": mapRunARN, "maxResults": 2.0, "nextToken": children["nextToken"]})
+	if len(remainingChildren["executions"].([]any)) != 1 || remainingChildren["nextToken"] != nil {
+		t.Fatalf("remaining map child executions %#v", remainingChildren)
+	}
 	fault("UpdateMapRun", map[string]any{"mapRunArn": mapRunARN, "maxConcurrency": 2.0}, "ValidationException")
 	described["status"] = "RUNNING"
 	encoded, _ := json.Marshal(described)
@@ -285,6 +303,10 @@ func TestDistributedMapRuns(t *testing.T) {
 	toleratedRun := must("DescribeMapRun", map[string]any{"mapRunArn": toleratedRuns[0].(map[string]any)["mapRunArn"]})
 	if toleratedRun["status"] != "SUCCEEDED" || toleratedRun["itemCounts"].(map[string]any)["failed"] != 2.0 {
 		t.Fatalf("tolerated map run %#v", toleratedRun)
+	}
+	failedChildren := must("ListExecutions", map[string]any{"mapRunArn": toleratedRun["mapRunArn"], "statusFilter": "FAILED"})["executions"].([]any)
+	if len(failedChildren) != 2 {
+		t.Fatalf("failed map child executions %#v", failedChildren)
 	}
 	if originalRuns := must("ListMapRuns", map[string]any{"executionArn": executionARN})["mapRuns"].([]any); len(originalRuns) != 2 {
 		t.Fatalf("cross-execution map runs %#v", originalRuns)

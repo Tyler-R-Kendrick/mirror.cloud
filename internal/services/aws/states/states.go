@@ -1044,6 +1044,8 @@ type mapItemResult struct {
 	metadata  map[string]any
 	output    any
 	succeeded bool
+	itemCount int
+	history   []any
 }
 
 func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64) (*spi.Response, error) {
@@ -1500,6 +1502,13 @@ walkLoop:
 				var itemResults []mapItemResult
 				var failed *walkResult
 				failedCount := 0
+				label, mapRunARN := first(st, "Label"), ""
+				if label == "" {
+					label = cur
+				}
+				if distributed {
+					mapRunARN = p.mapRunARN(req, mapStateMachineName(req), label)
+				}
 				for index, item := range arr {
 					iterationInput := item
 					if selector != nil {
@@ -1509,8 +1518,12 @@ walkLoop:
 					}
 					wr := p.walk(ctx, req, string(idef), "", iterationInput, nil)
 					mapRuns = append(mapRuns, wr.mapRuns...)
-					if hasResultWriter {
-						itemResults = append(itemResults, p.mapItemResult(req, cur, iterationInput, wr))
+					if distributed {
+						itemResult := p.mapItemResult(req, cur, iterationInput, wr)
+						p.storeMapItemExecution(ctx, req, mapRunARN, string(idef), itemResult)
+						if hasResultWriter {
+							itemResults = append(itemResults, itemResult)
+						}
 					}
 					if wr.status != "SUCCEEDED" {
 						failedCount++
@@ -1541,11 +1554,6 @@ walkLoop:
 						"total": float64(len(arr)), "succeeded": float64(len(arr) - failedCount), "failed": float64(failedCount),
 						"aborted": 0.0, "timedOut": 0.0, "pending": 0.0, "pendingRedrive": 0.0, "failuresNotRedrivable": 0.0, "resultsWritten": 0.0, "running": 0.0,
 					}
-					label := first(st, "Label")
-					if label == "" {
-						label = cur
-					}
-					mapRunARN := p.mapRunARN(req, mapStateMachineName(req), label)
 					if hasResultWriter {
 						var written int
 						var writerOK bool
@@ -1946,7 +1954,34 @@ func (p *Pack) mapItemResult(req *spi.Request, state string, input any, result w
 	} else {
 		metadata["Error"], metadata["Cause"] = result.errorName, result.cause
 	}
-	return mapItemResult{metadata: metadata, output: result.out, succeeded: result.status == "SUCCEEDED"}
+	itemCount := 1
+	if batch, ok := input.(map[string]any); ok {
+		if items, ok := batch["Items"].([]any); ok {
+			itemCount = len(items)
+		}
+	}
+	return mapItemResult{metadata: metadata, output: result.out, succeeded: result.status == "SUCCEEDED", itemCount: itemCount, history: result.hist}
+}
+
+func (p *Pack) storeMapItemExecution(ctx context.Context, req *spi.Request, mapRunARN, definition string, item mapItemResult) {
+	metadata := item.metadata
+	now := float64(p.deps.Clock.Now().Unix())
+	record := map[string]any{
+		"executionArn": metadata["ExecutionArn"], "stateMachineArn": metadata["StateMachineArn"], "name": metadata["Name"],
+		"status": metadata["Status"], "startDate": now, "stopDate": now, "input": metadata["Input"], "mapRunArn": mapRunARN,
+		"itemCount": float64(item.itemCount), "type": "STANDARD", "definition": definition, "history": item.history,
+		"stateMachineName": lastSeg(first(metadata, "StateMachineArn"), ":"),
+	}
+	if machine, found := p.resolveStateMachine(ctx, req, first(req.Input, "stateMachineArn", "StateMachineArn")); found {
+		record["roleArn"], record["revisionId"] = machine["roleArn"], machine["revisionId"]
+	}
+	for _, field := range []string{"Output", "Error", "Cause"} {
+		if value, exists := metadata[field]; exists {
+			record[strings.ToLower(field)] = value
+		}
+	}
+	encoded, _ := json.Marshal(record)
+	_ = p.col(req, "ex").Put(ctx, first(metadata, "ExecutionArn"), encoded)
 }
 
 func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[string]any, data any, items []mapItemResult, mapRunARN string) (any, int, bool) {

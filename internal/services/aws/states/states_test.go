@@ -1019,6 +1019,86 @@ func TestDistributedMapItemBatcher(t *testing.T) {
 	}
 }
 
+func TestDistributedMapResultWriter(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	storage := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(handler spi.Handler, operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := handler.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response
+	}
+	invoke(storage, "CreateBucket", map[string]any{"Bucket": "results"})
+	processor := map[string]any{"StartAt": "Done", "ProcessorConfig": map[string]any{"Mode": "DISTRIBUTED"}, "States": map[string]any{"Done": map[string]any{"Type": "Succeed"}}}
+	state := map[string]any{
+		"Type": "Map", "ItemsPath": "$.items", "ItemProcessor": processor, "End": true,
+		"ResultWriter": map[string]any{
+			"WriterConfig": map[string]any{"Transformation": "FLATTEN", "OutputType": "JSON"},
+			"Resource":     "arn:aws:states:::s3:putObject",
+			"Parameters":   map[string]any{"Bucket.$": "$.bucket", "Prefix.$": "$.prefix"},
+		},
+	}
+	definition, _ := json.Marshal(map[string]any{"StartAt": "Write", "States": map[string]any{"Write": state}})
+	machine := invoke(p, "CreateStateMachine", map[string]any{"name": "writer", "definition": string(definition), "roleArn": testRoleARN}).Output
+	started := invoke(p, "StartExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"], "input": `{"items":[[1,2],[3]],"bucket":"results","prefix":"jobs"}`}).Output
+	execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": started["executionArn"]}).Output
+	var output map[string]any
+	_ = json.Unmarshal([]byte(execution["output"].(string)), &output)
+	details, _ := output["ResultWriterDetails"].(map[string]any)
+	if execution["status"] != "SUCCEEDED" || output["MapRunArn"] == "" || details["Bucket"] != "results" || !strings.HasSuffix(details["Key"].(string), "/manifest.json") {
+		t.Fatalf("ResultWriter execution %#v %#v", execution, output)
+	}
+	read := func(key string) []byte {
+		t.Helper()
+		response := invoke(storage, "GetObject", map[string]any{"Bucket": "results", "Key": key})
+		body, err := io.ReadAll(response.Stream)
+		if err != nil || response.Stream.Close() != nil {
+			t.Fatalf("read %s: %v", key, err)
+		}
+		return body
+	}
+	var manifest map[string]any
+	_ = json.Unmarshal(read(details["Key"].(string)), &manifest)
+	succeeded := manifest["ResultFiles"].(map[string]any)["SUCCEEDED"].([]any)[0].(map[string]any)
+	if !strings.HasSuffix(succeeded["Key"].(string), "/SUCCEEDED_0.json") {
+		t.Fatalf("ResultWriter success file %#v", succeeded)
+	}
+	var flattened []any
+	_ = json.Unmarshal(read(succeeded["Key"].(string)), &flattened)
+	if manifest["MapRunArn"] != output["MapRunArn"] || len(flattened) != 3 || flattened[2] != 3.0 {
+		t.Fatalf("ResultWriter artifacts %#v %#v", manifest, flattened)
+	}
+	runs := invoke(p, "ListMapRuns", map[string]any{"executionArn": started["executionArn"]}).Output["mapRuns"].([]any)
+	described := invoke(p, "DescribeMapRun", map[string]any{"mapRunArn": runs[0].(map[string]any)["mapRunArn"]}).Output
+	if described["itemCounts"].(map[string]any)["resultsWritten"] != 2.0 {
+		t.Fatalf("ResultWriter Map Run %#v", described)
+	}
+
+	state["ResultWriter"] = map[string]any{"WriterConfig": map[string]any{"Transformation": "COMPACT", "OutputType": "JSONL"}}
+	previewDefinition, _ := json.Marshal(map[string]any{"StartAt": "Preview", "States": map[string]any{"Preview": state}})
+	previewMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "writer-preview", "definition": string(previewDefinition), "roleArn": testRoleARN}).Output
+	previewStarted := invoke(p, "StartExecution", map[string]any{"stateMachineArn": previewMachine["stateMachineArn"], "input": `{"items":[1,2]}`}).Output
+	previewExecution := invoke(p, "DescribeExecution", map[string]any{"executionArn": previewStarted["executionArn"]}).Output
+	var preview string
+	_ = json.Unmarshal([]byte(previewExecution["output"].(string)), &preview)
+	if preview != "1\n2\n" {
+		t.Fatalf("ResultWriter preview %#v", previewExecution)
+	}
+
+	state["ResultWriter"] = map[string]any{"Resource": "arn:aws:states:::s3:putObject", "Parameters": map[string]any{"Bucket": "missing", "Prefix": "jobs"}}
+	failingDefinition, _ := json.Marshal(map[string]any{"StartAt": "Write", "States": map[string]any{"Write": state}})
+	failingMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "writer-failure", "definition": string(failingDefinition), "roleArn": testRoleARN}).Output
+	failingStarted := invoke(p, "StartExecution", map[string]any{"stateMachineArn": failingMachine["stateMachineArn"], "input": `{"items":[1]}`}).Output
+	if failed := invoke(p, "DescribeExecution", map[string]any{"executionArn": failingStarted["executionArn"]}).Output; failed["status"] != "FAILED" || failed["error"] != "States.ResultWriterFailed" {
+		t.Fatalf("ResultWriter failure %#v", failed)
+	}
+}
+
 func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

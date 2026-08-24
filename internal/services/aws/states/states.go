@@ -2,6 +2,7 @@
 package states
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"crypto/sha1"
@@ -460,7 +461,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		wr := p.walk(ctx, req, def, "", in, nil)
 		baseARN := p.smARN(req, name)
 		for _, run := range wr.mapRuns {
-			mapRunARN := p.mapRunARN(req, name, run.label)
+			mapRunARN := run.arn
+			if mapRunARN == "" {
+				mapRunARN = p.mapRunARN(req, name, run.label)
+			}
 			run.record["mapRunArn"], run.record["executionArn"], run.record["stateMachineArn"] = mapRunARN, execARN, baseARN
 			run.record["startDate"], run.record["stopDate"] = float64(now), float64(now)
 			encoded, _ := json.Marshal(run.record)
@@ -1030,8 +1034,15 @@ type walkResult struct {
 }
 
 type mapRunDraft struct {
+	arn    string
 	label  string
 	record map[string]any
+}
+
+type mapItemResult struct {
+	metadata  map[string]any
+	output    any
+	succeeded bool
 }
 
 func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64) (*spi.Response, error) {
@@ -1472,6 +1483,10 @@ walkLoop:
 			idef, _ := json.Marshal(iter)
 			processorConfig, _ := iter["ProcessorConfig"].(map[string]any)
 			distributed := first(processorConfig, "Mode") == "DISTRIBUTED"
+			_, hasResultWriter := st["ResultWriter"]
+			if hasResultWriter && !distributed {
+				return walkResult{out: data, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
+			}
 			selector, _ := st["ItemSelector"].(map[string]any)
 			if selector == nil {
 				selector, _ = st["Parameters"].(map[string]any)
@@ -1481,6 +1496,7 @@ walkLoop:
 			}
 			for {
 				var results []any
+				var itemResults []mapItemResult
 				var failed *walkResult
 				failedCount := 0
 				for index, item := range arr {
@@ -1492,6 +1508,9 @@ walkLoop:
 					}
 					wr := p.walk(ctx, req, string(idef), "", iterationInput, nil)
 					mapRuns = append(mapRuns, wr.mapRuns...)
+					if hasResultWriter {
+						itemResults = append(itemResults, p.mapItemResult(req, cur, iterationInput, wr))
+					}
 					if wr.status != "SUCCEEDED" {
 						failedCount++
 						if failed == nil {
@@ -1504,6 +1523,7 @@ walkLoop:
 					}
 					results = append(results, wr.out)
 				}
+				mapOutput := any(results)
 				if distributed {
 					allowed := failedCount == 0
 					failureCount, hasFailureCount := st["ToleratedFailureCount"]
@@ -1520,20 +1540,32 @@ walkLoop:
 						"total": float64(len(arr)), "succeeded": float64(len(arr) - failedCount), "failed": float64(failedCount),
 						"aborted": 0.0, "timedOut": 0.0, "pending": 0.0, "pendingRedrive": 0.0, "failuresNotRedrivable": 0.0, "resultsWritten": 0.0, "running": 0.0,
 					}
-					mapRuns = append(mapRuns, mapRunDraft{label: first(st, "Label"), record: map[string]any{
+					label := first(st, "Label")
+					if label == "" {
+						label = cur
+					}
+					mapRunARN := p.mapRunARN(req, mapStateMachineName(req), label)
+					if hasResultWriter {
+						var written int
+						var writerOK bool
+						mapOutput, written, writerOK = p.writeMapResults(ctx, req, st, data, itemResults, mapRunARN)
+						counts["resultsWritten"] = float64(written)
+						if !writerOK {
+							status = "FAILED"
+							failed = &walkResult{out: data, status: "FAILED", cause: "States.ResultWriterFailed", errorName: "States.ResultWriterFailed"}
+						}
+					}
+					mapRuns = append(mapRuns, mapRunDraft{arn: mapRunARN, label: label, record: map[string]any{
 						"status": status, "executionCounts": counts, "itemCounts": counts, "redriveCount": 0.0,
 						"maxConcurrency": toFloat(st["MaxConcurrency"]), "toleratedFailureCount": toFloat(failureCount), "toleratedFailurePercentage": toFloat(failurePercentage),
 					}})
-					if mapRuns[len(mapRuns)-1].label == "" {
-						mapRuns[len(mapRuns)-1].label = cur
-					}
 				}
 				if failed == nil {
-					if results == nil {
-						results = []any{}
+					if mapOutput == nil {
+						mapOutput = []any{}
 					}
 					var valid bool
-					data, valid = applyStateResult(st, stateInput, results, p.deps.Rand)
+					data, valid = applyStateResult(st, stateInput, mapOutput, p.deps.Rand)
 					if !valid {
 						return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}
 					}
@@ -1884,6 +1916,139 @@ func batchMapItems(state map[string]any, data any, items []any, random spi.Rand)
 		batched = append(batched, makeBatch(current))
 	}
 	return batched, true
+}
+
+func mapStateMachineName(req *spi.Request) string {
+	if arn := first(req.Input, "stateMachineArn", "StateMachineArn"); arn != "" {
+		return baseSMName(arn)
+	}
+	parts := strings.Split(first(req.Input, "executionArn", "ExecutionArn"), ":")
+	if len(parts) > 6 {
+		return strings.Split(parts[6], "/")[0]
+	}
+	return "stateMachine"
+}
+
+func (p *Pack) mapItemResult(req *spi.Request, state string, input any, result walkResult) mapItemResult {
+	name := p.deps.Rand.UUID()
+	machine := mapStateMachineName(req) + "/" + state
+	inputJSON, _ := json.Marshal(input)
+	metadata := map[string]any{
+		"ExecutionArn": "arn:aws:states:" + req.Identity.Region + ":" + req.Identity.Account + ":execution:" + machine + ":" + name,
+		"Input":        string(inputJSON), "InputDetails": map[string]any{"Included": true}, "Name": name,
+		"StartDate": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), "StateMachineArn": p.smARN(req, machine), "Status": result.status,
+		"StopDate": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if result.status == "SUCCEEDED" {
+		outputJSON, _ := json.Marshal(result.out)
+		metadata["Output"], metadata["OutputDetails"] = string(outputJSON), map[string]any{"Included": true}
+	} else {
+		metadata["Error"], metadata["Cause"] = result.errorName, result.cause
+	}
+	return mapItemResult{metadata: metadata, output: result.out, succeeded: result.status == "SUCCEEDED"}
+}
+
+func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[string]any, data any, items []mapItemResult, mapRunARN string) (any, int, bool) {
+	writer, ok := state["ResultWriter"].(map[string]any)
+	if !ok || len(writer) == 0 {
+		return nil, 0, false
+	}
+	config, hasConfig := writer["WriterConfig"].(map[string]any)
+	resource := first(writer, "Resource")
+	parameters, hasParameters := writer["Parameters"].(map[string]any)
+	if !hasParameters {
+		parameters, hasParameters = writer["Arguments"].(map[string]any)
+	}
+	if resource == "" && !hasConfig || resource != "" && (resource != "arn:aws:states:::s3:putObject" || !hasParameters) {
+		return nil, 0, false
+	}
+	transformation := first(config, "Transformation")
+	if transformation == "" {
+		transformation = "COMPACT"
+		if resource != "" {
+			transformation = "NONE"
+		}
+	}
+	outputType := first(config, "OutputType")
+	if outputType == "" {
+		outputType = "JSON"
+	}
+	if transformation != "NONE" && transformation != "COMPACT" && transformation != "FLATTEN" || outputType != "JSON" && outputType != "JSONL" {
+		return nil, 0, false
+	}
+	transform := func(selected []mapItemResult) []any {
+		out := []any{}
+		for _, item := range selected {
+			if !item.succeeded || transformation == "NONE" {
+				out = append(out, item.metadata)
+			} else if values, flatten := item.output.([]any); transformation == "FLATTEN" && flatten {
+				out = append(out, values...)
+			} else {
+				out = append(out, item.output)
+			}
+		}
+		return out
+	}
+	encode := func(values []any) ([]byte, bool) {
+		if outputType == "JSON" {
+			encoded, err := json.Marshal(values)
+			return encoded, err == nil
+		}
+		var encoded bytes.Buffer
+		encoder := json.NewEncoder(&encoded)
+		for _, value := range values {
+			if encoder.Encode(value) != nil {
+				return nil, false
+			}
+		}
+		return encoded.Bytes(), true
+	}
+	formatted := transform(items)
+	if resource == "" {
+		if outputType == "JSON" {
+			return formatted, 0, true
+		}
+		encoded, valid := encode(formatted)
+		return string(encoded), 0, valid
+	}
+	resolved := applyParams(parameters, data, nil, p.deps.Rand)
+	bucket, prefix := first(resolved, "Bucket"), strings.Trim(first(resolved, "Prefix"), "/")
+	if bucket == "" {
+		return nil, 0, false
+	}
+	if prefix != "" {
+		prefix += "/"
+	}
+	prefix += lastSeg(mapRunARN, ":")
+	resultFiles := map[string]any{"SUCCEEDED": []any{}, "FAILED": []any{}, "PENDING": []any{}}
+	storage := s3.New(p.deps)
+	put := func(key string, body []byte) bool {
+		_, err := storage.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "PutObject", Input: map[string]any{"Bucket": bucket, "Key": key}, Body: io.NopCloser(bytes.NewReader(body))})
+		return err == nil
+	}
+	for _, status := range []string{"SUCCEEDED", "FAILED"} {
+		selected := []mapItemResult{}
+		for _, item := range items {
+			if item.metadata["Status"] == status {
+				selected = append(selected, item)
+			}
+		}
+		if len(selected) == 0 {
+			continue
+		}
+		body, valid := encode(transform(selected))
+		key := prefix + "/" + status + "_0.json"
+		if !valid || !put(key, body) {
+			return nil, 0, false
+		}
+		resultFiles[status] = []any{map[string]any{"Key": key, "Size": len(body)}}
+	}
+	manifestKey := prefix + "/manifest.json"
+	manifest, _ := json.Marshal(map[string]any{"DestinationBucket": bucket, "MapRunArn": mapRunARN, "ResultFiles": resultFiles})
+	if !put(manifestKey, manifest) {
+		return nil, 0, false
+	}
+	return map[string]any{"MapRunArn": mapRunARN, "ResultWriterDetails": map[string]any{"Bucket": bucket, "Key": manifestKey}}, len(items), true
 }
 
 func taskIdentity(st map[string]any, data any, identity spi.Identity, random spi.Rand) (spi.Identity, bool) {

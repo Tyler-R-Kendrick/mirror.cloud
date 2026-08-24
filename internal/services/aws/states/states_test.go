@@ -1224,6 +1224,29 @@ func TestStatesRetryScheduling(t *testing.T) {
 	}
 }
 
+func TestStatesCatchValidation(t *testing.T) {
+	valid := `{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Catch":[{"ErrorEquals":["Boom"],"Next":"Done"},{"ErrorEquals":["States.ALL"],"Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`
+	if diagnostics := validateDefinition(valid); len(diagnostics) != 0 {
+		t.Fatalf("valid Catch diagnostics %#v", diagnostics)
+	}
+	for _, definition := range []string{
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","Catch":[{"ErrorEquals":["Boom"],"Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":{},"End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":[],"End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":[1],"End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":[{"Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":[{"ErrorEquals":"Boom","Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":[{"ErrorEquals":[1],"Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":[{"ErrorEquals":["States.ALL","Boom"],"Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":[{"ErrorEquals":["States.ALL"],"Next":"Done"},{"ErrorEquals":["Boom"],"Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":[{"ErrorEquals":["Boom"]}],"End":true}}}`,
+	} {
+		if diagnostics := validateDefinition(definition); len(diagnostics) == 0 {
+			t.Fatalf("accepted invalid Catch %s", definition)
+		}
+	}
+}
+
 func TestStatesExecutionTimeout(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

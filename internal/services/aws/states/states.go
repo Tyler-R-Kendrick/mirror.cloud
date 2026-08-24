@@ -4825,20 +4825,45 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 		if next, exists := state["Next"]; exists {
 			checkTarget(next, "/Next")
 		}
-		for i, raw := range asSlice(state["Catch"]) {
-			catcher, _ := raw.(map[string]any)
-			for field, value := range catcher {
-				if jsonataReferences(value, "$states.errorOutput") && field != "Assign" && field != "Output" {
-					add("SCHEMA_VALIDATION_FAILED", "$states.errorOutput is only available in Catch Assign or Output.", fmt.Sprintf("/States/%s/Catch/%d/%s", name, i, field))
+		if rawCatch, exists := state["Catch"]; exists {
+			catchers, valid := rawCatch.([]any)
+			if !valid || len(catchers) == 0 || typ != "Task" && typ != "Parallel" && typ != "Map" {
+				add("SCHEMA_VALIDATION_FAILED", "Catch must be a non-empty array on a Task, Parallel, or Map state.", "/States/"+name+"/Catch")
+			}
+			for i, raw := range catchers {
+				path := fmt.Sprintf("/States/%s/Catch/%d", name, i)
+				catcher, object := raw.(map[string]any)
+				if !object {
+					add("SCHEMA_VALIDATION_FAILED", "Catch entries must be objects.", path)
+					continue
 				}
+				errors, errorsValid := catcher["ErrorEquals"].([]any)
+				if !errorsValid || len(errors) == 0 {
+					add("SCHEMA_VALIDATION_FAILED", "Catch ErrorEquals must be a non-empty array.", path+"/ErrorEquals")
+				} else {
+					for _, rawError := range errors {
+						if _, valid := rawError.(string); !valid {
+							add("SCHEMA_VALIDATION_FAILED", "Catch ErrorEquals entries must be strings.", path+"/ErrorEquals")
+							break
+						}
+					}
+					if slices.Contains(errors, any("States.ALL")) && (len(errors) != 1 || i != len(catchers)-1) {
+						add("SCHEMA_VALIDATION_FAILED", "States.ALL must appear alone in the last catcher.", path+"/ErrorEquals")
+					}
+				}
+				for field, value := range catcher {
+					if jsonataReferences(value, "$states.errorOutput") && field != "Assign" && field != "Output" {
+						add("SCHEMA_VALIDATION_FAILED", "$states.errorOutput is only available in Catch Assign or Output.", path+"/"+field)
+					}
+				}
+				if _, resultPath := catcher["ResultPath"]; resultPath && isJSONata {
+					add("SCHEMA_VALIDATION_FAILED", "Catch ResultPath is not supported with JSONata.", path+"/ResultPath")
+				}
+				if _, output := catcher["Output"]; output && !isJSONata {
+					add("SCHEMA_VALIDATION_FAILED", "Catch Output requires JSONata.", path+"/Output")
+				}
+				checkTarget(catcher["Next"], fmt.Sprintf("/Catch/%d/Next", i))
 			}
-			if _, resultPath := catcher["ResultPath"]; resultPath && isJSONata {
-				add("SCHEMA_VALIDATION_FAILED", "Catch ResultPath is not supported with JSONata.", fmt.Sprintf("/States/%s/Catch/%d/ResultPath", name, i))
-			}
-			if _, output := catcher["Output"]; output && !isJSONata {
-				add("SCHEMA_VALIDATION_FAILED", "Catch Output requires JSONata.", fmt.Sprintf("/States/%s/Catch/%d/Output", name, i))
-			}
-			checkTarget(catcher["Next"], fmt.Sprintf("/Catch/%d/Next", i))
 		}
 		if typ == "Choice" {
 			choices := asSlice(state["Choices"])

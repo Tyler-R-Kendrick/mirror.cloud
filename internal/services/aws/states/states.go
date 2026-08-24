@@ -2155,6 +2155,11 @@ walkLoop:
 			for {
 				setJSONataRetryCount(stateContext, retries[cur])
 				dataset, source, itemsOK := p.mapItems(ctx, req, st, data, mapScope, mapVariables)
+				if _, hasReader := st["ItemReader"]; !isJSONata && hasReader {
+					if path := first(st, "ItemsPath"); path != "" {
+						dataset = jsonPath(dataset, path, mapVariables)
+					}
+				}
 				var failed *walkResult
 				if isJSONata {
 					items := any(data)

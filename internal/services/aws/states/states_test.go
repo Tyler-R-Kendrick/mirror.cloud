@@ -356,11 +356,12 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	}
 	invoke(storage, "CreateBucket", map[string]any{"Bucket": "items"}, nil)
 	objects := map[string]string{
-		"items.json":   `[{"id":1},{"id":2}]`,
-		"items.jsonl":  "{\"id\":3}\n{\"id\":4}\n",
-		"items.csv":    "id,name\n5\n6,Lin,ignored\n",
-		"nested.json":  `{"data":{"a/b":{"~key":[{"id":9},{"id":10}]}}}`,
-		"objects.json": `{"b":{"id":12},"a":{"id":11}}`,
+		"items.json":      `[{"id":1},{"id":2}]`,
+		"items.jsonl":     "{\"id\":3}\n{\"id\":4}\n",
+		"items.csv":       "id,name\n5\n6,Lin,ignored\n",
+		"items-path.json": `{"data":{"items":[{"id":13},{"id":14}]}}`,
+		"nested.json":     `{"data":{"a/b":{"~key":[{"id":9},{"id":10}]}}}`,
+		"objects.json":    `{"b":{"id":12},"a":{"id":11}}`,
 	}
 	for key, body := range objects {
 		invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": key}, []byte(body))
@@ -378,9 +379,9 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": "broken.parquet"}, []byte("not parquet"))
 	processor := map[string]any{"StartAt": "Done", "ProcessorConfig": map[string]any{"Mode": "DISTRIBUTED"}, "States": map[string]any{"Done": map[string]any{"Type": "Succeed"}}}
 	for _, test := range []struct {
-		key, inputType, pointer string
-		limit                   int
-	}{{"items.json", "JSON", "", 0}, {"items.jsonl", "JSONL", "", 0}, {"items.csv", "CSV", "", 0}, {"items.parquet", "PARQUET", "", 0}, {"nested.json", "JSON", "/data/a~1b/~0key", 0}, {"objects.json", "JSON", "", 1}} {
+		key, inputType, pointer, itemsPath string
+		limit                              int
+	}{{"items.json", "JSON", "", "", 0}, {"items.jsonl", "JSONL", "", "", 0}, {"items.csv", "CSV", "", "", 0}, {"items.parquet", "PARQUET", "", "", 0}, {"nested.json", "JSON", "/data/a~1b/~0key", "", 0}, {"objects.json", "JSON", "", "", 1}, {"items-path.json", "JSON", "", "$.data.items", 0}} {
 		readerConfig := map[string]any{"InputType": test.inputType, "CSVHeaderLocation": "FIRST_ROW"}
 		if test.pointer != "" {
 			readerConfig["ItemsPointer"] = test.pointer
@@ -392,6 +393,9 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 			"Type": "Map", "ItemProcessor": processor, "ItemSelector": map[string]any{"value.$": "$$.Map.Item.Value", "source.$": "$$.Map.Item.Source"}, "End": true,
 			"ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": test.key}, "ReaderConfig": readerConfig},
 		}
+		if test.itemsPath != "" {
+			state["ItemsPath"] = test.itemsPath
+		}
 		definition, _ := json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": state}})
 		machine := invoke(p, "CreateStateMachine", map[string]any{"name": "reader-" + strings.ReplaceAll(test.key, ".", "-"), "definition": string(definition), "roleArn": testRoleARN}, nil)
 		started := invoke(p, "StartExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"]}, nil)
@@ -401,7 +405,7 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		if test.limit != 0 {
 			expected = test.limit
 		}
-		if execution["status"] != "SUCCEEDED" || strings.Count(output, `"source":"`+test.inputType+`"`) != expected || test.inputType == "PARQUET" && !strings.Contains(output, `"name":"Ada"`) || test.inputType == "CSV" && (!strings.Contains(output, `"name":""`) || strings.Contains(output, "ignored")) || test.pointer != "" && !strings.Contains(output, `"id":9`) {
+		if execution["status"] != "SUCCEEDED" || strings.Count(output, `"source":"`+test.inputType+`"`) != expected || test.inputType == "PARQUET" && !strings.Contains(output, `"name":"Ada"`) || test.inputType == "CSV" && (!strings.Contains(output, `"name":""`) || strings.Contains(output, "ignored")) || test.pointer != "" && !strings.Contains(output, `"id":9`) || test.itemsPath != "" && !strings.Contains(output, `"id":13`) {
 			t.Fatalf("%s ItemReader execution %#v", test.inputType, execution)
 		}
 	}

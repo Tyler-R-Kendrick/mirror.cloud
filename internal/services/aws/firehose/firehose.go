@@ -984,7 +984,7 @@ func (p *Pack) storeOne(ctx context.Context, req *spi.Request, name string, rec 
 }
 
 func copyDest(rec, in map[string]any, suffix string) {
-	for _, base := range []string{"S3Destination", "ExtendedS3Destination", "HttpEndpointDestination", "ElasticsearchDestination", "RedshiftDestination", "SplunkDestination", "SnowflakeDestination", "IcebergDestination"} {
+	for _, base := range []string{"S3Destination", "ExtendedS3Destination", "HttpEndpointDestination", "ElasticsearchDestination", "AmazonOpenSearchServerlessDestination", "RedshiftDestination", "SplunkDestination", "SnowflakeDestination", "IcebergDestination"} {
 		patch, _ := in[base+suffix].(map[string]any)
 		if patch == nil {
 			continue
@@ -1115,6 +1115,28 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 		}
 		destination["ElasticsearchDestinationDescription"] = configuration
 		delete(description, "ElasticsearchDestinationConfiguration")
+	}
+	if configuration, ok := description["AmazonOpenSearchServerlessDestinationConfiguration"].(map[string]any); ok {
+		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
+			describeS3Configuration(s3)
+			configuration["S3DestinationDescription"] = s3
+			delete(configuration, "S3Configuration")
+		}
+		if vpc, ok := configuration["VpcConfiguration"].(map[string]any); ok {
+			configuration["VpcConfigurationDescription"] = vpc
+			delete(configuration, "VpcConfiguration")
+		}
+		if configuration["BufferingHints"] == nil {
+			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}
+		}
+		if configuration["RetryOptions"] == nil {
+			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 300}
+		}
+		if first(configuration, "S3BackupMode") == "" {
+			configuration["S3BackupMode"] = "FailedDocumentsOnly"
+		}
+		destination["AmazonOpenSearchServerlessDestinationDescription"] = configuration
+		delete(description, "AmazonOpenSearchServerlessDestinationConfiguration")
 	}
 	if configuration, ok := description["RedshiftDestinationConfiguration"].(map[string]any); ok {
 		configuration = maps.Clone(configuration)
@@ -1434,7 +1456,7 @@ func validateDestination(rec map[string]any, region string) error {
 	count := 0
 	var destination map[string]any
 	destinationType := ""
-	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration", "SnowflakeDestinationConfiguration", "IcebergDestinationConfiguration"} {
+	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "AmazonOpenSearchServerlessDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration", "SnowflakeDestinationConfiguration", "IcebergDestinationConfiguration"} {
 		if value, exists := rec[key]; exists {
 			var ok bool
 			destination, ok = value.(map[string]any)
@@ -1453,6 +1475,9 @@ func validateDestination(rec map[string]any, region string) error {
 	}
 	if destinationType == "ElasticsearchDestinationConfiguration" {
 		return validateElasticsearchDestination(destination, region)
+	}
+	if destinationType == "AmazonOpenSearchServerlessDestinationConfiguration" {
+		return validateOpenSearchServerlessDestination(destination, region)
 	}
 	if destinationType == "RedshiftDestinationConfiguration" {
 		return validateRedshiftDestination(destination, region)
@@ -1599,6 +1624,67 @@ func validateElasticsearchDestination(destination map[string]any, region string)
 		return validateProcessingConfiguration(raw)
 	}
 	return nil
+}
+
+func validateOpenSearchServerlessDestination(destination map[string]any, region string) error {
+	index, endpoint := first(destination, "IndexName"), first(destination, "CollectionEndpoint")
+	if len(index) < 1 || len(index) > 80 || !validRoleARN(first(destination, "RoleARN")) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if endpoint != "" {
+		parsed, err := url.Parse(endpoint)
+		if len(endpoint) > 512 || err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	if hints, ok := destination["BufferingHints"].(map[string]any); destination["BufferingHints"] != nil && (!ok || !optionalInteger(hints, "IntervalInSeconds", 0, 900) || !optionalInteger(hints, "SizeInMBs", 1, 100)) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if retry, ok := destination["RetryOptions"].(map[string]any); destination["RetryOptions"] != nil && (!ok || !optionalInteger(retry, "DurationInSeconds", 0, 7200)) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if mode := first(destination, "S3BackupMode"); mode != "" && mode != "FailedDocumentsOnly" && mode != "AllDocuments" {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	s3, ok := destination["S3Configuration"].(map[string]any)
+	if !ok {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if err := validateS3Configuration(s3, region, false); err != nil {
+		return err
+	}
+	if err := validateVPCConfiguration(destination["VpcConfiguration"]); err != nil {
+		return err
+	}
+	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
+		return err
+	}
+	return validateProcessingConfiguration(destination["ProcessingConfiguration"])
+}
+
+func validateVPCConfiguration(raw any) error {
+	if raw == nil {
+		return nil
+	}
+	vpc, ok := raw.(map[string]any)
+	if !ok || !validRoleARN(first(vpc, "RoleARN")) || !validVPCList(vpc["SecurityGroupIds"], 5) || !validVPCList(vpc["SubnetIds"], 16) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	return nil
+}
+
+func validVPCList(raw any, maximum int) bool {
+	values, ok := raw.([]any)
+	if !ok || len(values) < 1 || len(values) > maximum {
+		return false
+	}
+	for _, rawValue := range values {
+		value, ok := rawValue.(string)
+		if !ok || len(value) < 1 || len(value) > 1024 || strings.IndexFunc(value, unicode.IsSpace) >= 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func validateRedshiftDestination(destination map[string]any, region string) error {
@@ -2286,7 +2372,7 @@ func validateCreateDestination(input map[string]any) error {
 		}
 	}
 	switch destination {
-	case "S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration", "SnowflakeDestinationConfiguration", "IcebergDestinationConfiguration":
+	case "S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "AmazonOpenSearchServerlessDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration", "SnowflakeDestinationConfiguration", "IcebergDestinationConfiguration":
 		return nil
 	case "":
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}

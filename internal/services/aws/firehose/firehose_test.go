@@ -86,6 +86,13 @@ func testSnowflakeDestination() map[string]any {
 	}
 }
 
+func testOpenSearchServerlessDestination() map[string]any {
+	return map[string]any{
+		"CollectionEndpoint": "https://collection.us-east-1.aoss.amazonaws.com", "IndexName": "events", "RoleARN": testRoleARN,
+		"S3Configuration": testS3Destination(),
+	}
+}
+
 func testDatabaseSource() map[string]any {
 	return map[string]any{
 		"Type": "PostgreSQL", "Endpoint": "database.internal", "Port": float64(5432), "SSLMode": "Enabled",
@@ -865,6 +872,58 @@ func TestOpenSearchHelpers(t *testing.T) {
 	}
 	if interval, size := searchBufferingHints(nil); interval != 300*time.Second || size != 5*1024*1024 {
 		t.Fatalf("default buffering hints %v %d", interval, size)
+	}
+}
+
+func TestOpenSearchServerlessDestinationValidationAndDescription(t *testing.T) {
+	destination := testOpenSearchServerlessDestination()
+	destination["VpcConfiguration"] = map[string]any{
+		"RoleARN": testRoleARN, "SecurityGroupIds": []any{"sg-123"}, "SubnetIds": []any{"subnet-123"},
+	}
+	if err := validateOpenSearchServerlessDestination(destination, "us-east-1"); err != nil {
+		t.Fatal(err)
+	}
+	for index, change := range []func(map[string]any){
+		func(value map[string]any) { value["IndexName"] = "" },
+		func(value map[string]any) { value["CollectionEndpoint"] = "http://collection.example" },
+		func(value map[string]any) { value["S3BackupMode"] = "Enabled" },
+		func(value map[string]any) { value["BufferingHints"] = map[string]any{"SizeInMBs": 101} },
+		func(value map[string]any) {
+			value["VpcConfiguration"] = map[string]any{"RoleARN": testRoleARN, "SecurityGroupIds": []any{}, "SubnetIds": []any{"subnet-123"}}
+		},
+	} {
+		candidate := maps.Clone(destination)
+		change(candidate)
+		if err := validateOpenSearchServerlessDestination(candidate, "us-east-1"); err == nil {
+			t.Fatalf("accepted invalid OpenSearch Serverless destination %d: %#v", index, candidate)
+		}
+	}
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "serverless", "AmazonOpenSearchServerlessDestinationConfiguration": destination}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "serverless"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	description := response.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["AmazonOpenSearchServerlessDestinationDescription"].(map[string]any)
+	if description["S3Configuration"] != nil || description["S3DestinationDescription"] == nil || description["VpcConfiguration"] != nil || description["VpcConfigurationDescription"] == nil || first(description, "S3BackupMode") != "FailedDocumentsOnly" || !reflect.DeepEqual(description["BufferingHints"], map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}) {
+		t.Fatalf("OpenSearch Serverless description %#v", description)
+	}
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "serverless", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
+		"AmazonOpenSearchServerlessDestinationUpdate": map[string]any{"IndexName": "events-v2"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	response, _ = call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "serverless"})
+	description = response.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["AmazonOpenSearchServerlessDestinationDescription"].(map[string]any)
+	if first(description, "IndexName") != "events-v2" {
+		t.Fatalf("updated OpenSearch Serverless description %#v", description)
 	}
 }
 

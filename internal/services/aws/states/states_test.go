@@ -1752,6 +1752,10 @@ func TestStatesMapValidation(t *testing.T) {
 			t.Fatalf("Map diagnostics = %#v for %s", diagnostics, fields)
 		}
 	}
+	duplicateLabels := `{"StartAt":"First","States":{"First":{"Type":"Map","Label":"duplicate",` + processor + `,"Next":"Second"},"Second":{"Type":"Map","Label":"duplicate",` + processor + `,"End":true}}}`
+	if diagnostics := validateDefinition(duplicateLabels); len(diagnostics) != 1 {
+		t.Fatalf("duplicate Map label diagnostics %#v", diagnostics)
+	}
 	jsonata := `{"QueryLanguage":"JSONata","StartAt":"Map","States":{"Map":{"Type":"Map","Items":[],"ItemReader":{"Resource":"reader","Arguments":[]},` + processor + `,"End":true}}}`
 	if diagnostics := validateDefinition(jsonata); len(diagnostics) != 1 {
 		t.Fatalf("JSONata Map diagnostics %#v", diagnostics)

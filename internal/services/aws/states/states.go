@@ -4961,11 +4961,11 @@ func validateDefinition(definition string, machineType ...string) []map[string]a
 	if len(machineType) != 0 {
 		typeName = machineType[0]
 	}
-	validateMachine(machine, "", typeName, &diagnostics)
+	validateMachine(machine, "", typeName, &diagnostics, map[string]struct{}{})
 	return diagnostics
 }
 
-func validateMachine(machine map[string]any, location, machineType string, diagnostics *[]map[string]any, inheritedVariables ...map[string]struct{}) {
+func validateMachine(machine map[string]any, location, machineType string, diagnostics *[]map[string]any, labels map[string]struct{}, inheritedVariables ...map[string]struct{}) {
 	start, _ := machine["StartAt"].(string)
 	states, ok := machine["States"].(map[string]any)
 	add := func(code, message, path string) {
@@ -5512,7 +5512,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 					branch = maps.Clone(branch)
 					branch["QueryLanguage"] = queryLanguage
 				}
-				validateMachine(branch, fmt.Sprintf("%s/States/%s/Branches/%d", location, name, i), machineType, diagnostics, visibleVariables)
+				validateMachine(branch, fmt.Sprintf("%s/States/%s/Branches/%d", location, name, i), machineType, diagnostics, labels, visibleVariables)
 			}
 		}
 		if typ == "Map" {
@@ -5737,6 +5737,10 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 					})
 					if !valid || utf8.RuneCountInString(label) < 1 || utf8.RuneCountInString(label) > 40 || invalidCharacter {
 						add("SCHEMA_VALIDATION_FAILED", "Label contains invalid characters or length.", "/States/"+name+"/Label")
+					} else if _, duplicate := labels[label]; duplicate && mode == "DISTRIBUTED" {
+						add("SCHEMA_VALIDATION_FAILED", "Label must be unique within the state machine definition.", "/States/"+name+"/Label")
+					} else if mode == "DISTRIBUTED" {
+						labels[label] = struct{}{}
 					}
 					if mode != "DISTRIBUTED" {
 						add("SCHEMA_VALIDATION_FAILED", "Label requires a Distributed Map.", "/States/"+name+"/Label")
@@ -5749,7 +5753,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 					processor = maps.Clone(processor)
 					processor["QueryLanguage"] = queryLanguage
 				}
-				validateMachine(processor, location+"/States/"+name+"/ItemProcessor", machineType, diagnostics, visibleVariables)
+				validateMachine(processor, location+"/States/"+name+"/ItemProcessor", machineType, diagnostics, labels, visibleVariables)
 			} else {
 				add("MISSING_REQUIRED_FIELD", "Map must have ItemProcessor.", "/States/"+name+"/ItemProcessor")
 			}

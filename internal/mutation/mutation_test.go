@@ -1496,8 +1496,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-parallel-branch-failure",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  "wr := p.walk(ctx, req, string(bdef), \"\", branchInput, nil, maps.Clone(variables))\n\t\t\t\t\tmapRuns = append(mapRuns, wr.mapRuns...)\n\t\t\t\t\tif wr.status != \"SUCCEEDED\" {",
-			new:  "wr := p.walk(ctx, req, string(bdef), \"\", branchInput, nil, maps.Clone(variables))\n\t\t\t\t\tmapRuns = append(mapRuns, wr.mapRuns...)\n\t\t\t\t\tif false {",
+			old:  "mapRuns = append(mapRuns, wr.mapRuns...)\n\t\t\t\t\tif wr.status != \"SUCCEEDED\" {\n\t\t\t\t\t\tif failed == nil {",
+			new:  "mapRuns = append(mapRuns, wr.mapRuns...)\n\t\t\t\t\tif false {\n\t\t\t\t\t\tif failed == nil {",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
@@ -1952,8 +1952,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-drop-map-child-execution",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `p.storeMapItemExecution(ctx, req, mapRunARN, string(idef), executionType, itemResult)`,
-			new:  `_ = itemResult`,
+			old:  `p.storeMapItemExecution(iterationCtx, req, mapRunARN, string(idef), executionType, run.item)`,
+			new:  `_ = run.item`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestDistributedMapRuns",
 		},

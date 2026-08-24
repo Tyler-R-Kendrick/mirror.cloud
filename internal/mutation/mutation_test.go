@@ -1104,7 +1104,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-athena-data-manifest",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if first(config, "ManifestType") == "ATHENA_DATA" {`,
+			old:  `if manifestType == "ATHENA_DATA" {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestDistributedMapS3ItemReader",

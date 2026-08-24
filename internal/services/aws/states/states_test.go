@@ -1100,8 +1100,11 @@ func TestStatesRetryScheduling(t *testing.T) {
 		}
 	}
 	jitter := map[string]any{"Retry": []any{map[string]any{"ErrorEquals": []any{"Boom"}, "IntervalSeconds": 2.0, "JitterStrategy": "FULL"}}}
-	if delay, retry := retryTask(jitter, "Boom", map[int]int{}, p.deps.Rand); !retry || delay < 0 || delay > 2*time.Second {
+	if delay, retry := retryTask(jitter, "Boom", map[int]int{}, p.deps.Rand); !retry || delay < 0 || delay >= 2*time.Second {
 		t.Fatalf("jitter delay %s, %v", delay, retry)
+	}
+	if delay, retry := retryTask(map[string]any{"Retry": []any{map[string]any{"ErrorEquals": []any{"Boom"}}}}, "Boom", map[int]int{}, p.deps.Rand); !retry || delay != time.Second {
+		t.Fatalf("default retry delay %s, %v", delay, retry)
 	}
 
 	invalid := `{"StartAt":"Send","States":{"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Retry":[{"ErrorEquals":["States.ALL","Boom"],"IntervalSeconds":0,"MaxAttempts":-1,"BackoffRate":0.5,"MaxDelaySeconds":31622401,"JitterStrategy":"SOME"}],"End":true}}}`

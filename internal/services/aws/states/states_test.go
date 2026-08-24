@@ -324,7 +324,13 @@ func TestDistributedMapRuns(t *testing.T) {
 	}
 	objectRuns := must("ListMapRuns", map[string]any{"executionArn": objectExecution})["mapRuns"].([]any)
 	objectChildren := must("ListExecutions", map[string]any{"mapRunArn": objectRuns[0].(map[string]any)["mapRunArn"]})["executions"].([]any)
-	fault("DescribeStateMachineForExecution", map[string]any{"executionArn": objectChildren[0].(map[string]any)["executionArn"]}, "StateMachineTypeNotSupported")
+	objectChildARN := objectChildren[0].(map[string]any)["executionArn"].(string)
+	if child := must("DescribeExecution", map[string]any{"executionArn": objectChildARN}); child["status"] != "SUCCEEDED" || child["mapRunArn"] != objectRuns[0].(map[string]any)["mapRunArn"] {
+		t.Fatalf("Express map child execution %#v", child)
+	}
+	fault("DescribeStateMachineForExecution", map[string]any{"executionArn": objectChildARN}, "StateMachineTypeNotSupported")
+	fault("GetExecutionHistory", map[string]any{"executionArn": objectChildARN}, "StateMachineTypeNotSupported")
+	fault("StopExecution", map[string]any{"executionArn": objectChildARN}, "StateMachineTypeNotSupported")
 	if originalRuns := must("ListMapRuns", map[string]any{"executionArn": executionARN})["mapRuns"].([]any); len(originalRuns) != 2 {
 		t.Fatalf("cross-execution map runs %#v", originalRuns)
 	}
@@ -630,7 +636,9 @@ func TestStateListsAndHistoryPagination(t *testing.T) {
 		t.Fatalf("reversed history %#v", reversed)
 	}
 	expressExecution := must("StartExecution", map[string]any{"stateMachineArn": expressARN})["executionArn"].(string)
+	fault("DescribeExecution", map[string]any{"executionArn": expressExecution}, "StateMachineTypeNotSupported")
 	fault("GetExecutionHistory", map[string]any{"executionArn": expressExecution}, "StateMachineTypeNotSupported")
+	fault("StopExecution", map[string]any{"executionArn": expressExecution}, "StateMachineTypeNotSupported")
 
 	for _, name := range []string{"first", "second"} {
 		must("CreateActivity", map[string]any{"name": name})
@@ -2152,14 +2160,11 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	}
 	started := must("StartExecution", map[string]any{"StateMachineArn": arn, "Input": `{"n":1}`})
 	executionARN := started.Output["executionArn"].(string)
-	if execution := must("DescribeExecution", map[string]any{"ExecutionArn": executionARN}).Output; execution["status"] != "SUCCEEDED" || execution["history"] != nil {
-		t.Fatalf("execution %#v", execution)
-	}
 	if executions, _, _ := p.col(&spi.Request{Identity: id}, "ex").List(ctx, "", "", 0); len(executions) != 1 {
 		t.Fatalf("executions %#v", executions)
 	}
 	storedExecution, _ := getRecord(ctx, p.col(&spi.Request{Identity: id}, "ex"), executionARN)
-	if events := asSlice(storedExecution["history"]); len(events) != 2 {
+	if events := asSlice(storedExecution["history"]); storedExecution["status"] != "SUCCEEDED" || len(events) != 2 {
 		t.Fatalf("history %#v", events)
 	}
 	if sync := must("StartSyncExecution", map[string]any{"StateMachineArn": arn, "Input": `{"n":2}`}).Output; sync["status"] != "SUCCEEDED" || sync["stopDate"] == nil {
@@ -2529,13 +2534,6 @@ func TestBootedServerStatesPassSucceed(t *testing.T) {
 	ex, _ := started["executionArn"].(string)
 	if ex == "" {
 		t.Fatalf("start %v", started)
-	}
-	desc := call("DescribeExecution", `{"executionArn":"`+ex+`"}`)
-	if desc["status"] != "SUCCEEDED" {
-		t.Fatalf("exec %v", desc)
-	}
-	if !strings.Contains(fmtString(desc["output"]), `"ok":true`) && !strings.Contains(fmtString(desc["output"]), `"ok": true`) {
-		t.Fatalf("output %v", desc["output"])
 	}
 	sync := call("StartSyncExecution", `{"stateMachineArn":"`+arn+`","input":"{\"n\":2}"}`)
 	if sync["status"] != "SUCCEEDED" || !strings.Contains(fmtString(sync["output"]), `"ok":true`) {

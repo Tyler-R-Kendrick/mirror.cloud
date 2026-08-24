@@ -750,6 +750,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
+		if first(rec, "type") == "EXPRESS" {
+			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
+		}
 		if token := first(rec, "pendingToken"); token != "" {
 			if pendingRecord, found, _ := p.col(req, "pending").Get(ctx, token); found {
 				var pending pending
@@ -772,6 +775,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
+		if first(rec, "type") == "EXPRESS" && first(rec, "mapRunArn") == "" {
+			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
+		}
 		delete(rec, "history")
 		for _, internal := range []string{"definition", "roleArn", "revisionId", "stateMachineName", "type", "redriveState", "redriveInput", "redriveTokens", "pendingToken"} {
 			delete(rec, internal)

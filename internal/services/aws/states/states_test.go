@@ -375,6 +375,7 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		"nested.json":                 `{"data":{"a/b":{"~key":[{"id":9},{"id":10}]}}}`,
 		"objects.json":                `{"b":{"id":12},"a":{"id":11}}`,
 	}
+	objects["late-items.json"] = `{"padding":"` + strings.Repeat("x", 16*1024*1024) + `","items":[{"id":40}]}`
 	for key, body := range objects {
 		invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": key}, []byte(body))
 	}
@@ -521,8 +522,12 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		t.Fatalf("flatten array ItemReader execution %#v", flattenExecution)
 	}
 
-	for _, test := range []struct{ key, inputType string }{{"missing", "PARQUET"}, {"broken.parquet", "PARQUET"}, {"broken.json.gz", "JSON"}} {
-		missingState := map[string]any{"Type": "Map", "ItemProcessor": processor, "ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": test.key}, "ReaderConfig": map[string]any{"InputType": test.inputType}}, "End": true}
+	for _, test := range []struct{ key, inputType, pointer string }{{"missing", "PARQUET", ""}, {"broken.parquet", "PARQUET", ""}, {"broken.json.gz", "JSON", ""}, {"late-items.json", "JSON", "/items"}} {
+		readerConfig := map[string]any{"InputType": test.inputType}
+		if test.pointer != "" {
+			readerConfig["ItemsPointer"] = test.pointer
+		}
+		missingState := map[string]any{"Type": "Map", "ItemProcessor": processor, "ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": test.key}, "ReaderConfig": readerConfig}, "End": true}
 		missingDefinition, _ := json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": missingState}})
 		missingMachine := invoke(p, "CreateStateMachine", map[string]any{"name": strings.ReplaceAll(test.key, ".", "-") + "-reader", "definition": string(missingDefinition), "roleArn": testRoleARN}, nil)
 		missingExecution := invoke(p, "StartExecution", map[string]any{"stateMachineArn": missingMachine["stateMachineArn"]}, nil)

@@ -3335,6 +3335,11 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			return nil, "", false
 		}
 		if pointer, configured := config["ItemsPointer"].(string); configured {
+			tokens, pointerValid := jsonPointerTokens(pointer)
+			offset, found := jsonPointerOffset(body, tokens)
+			if !pointerValid || !found || offset >= 16*1024*1024 {
+				return nil, "", false
+			}
 			var valid bool
 			items, valid = resolveJSONPointer(items, pointer)
 			if !valid {
@@ -3471,6 +3476,62 @@ func s3Source(input map[string]any) string {
 		source += "/" + key
 	}
 	return source
+}
+
+func jsonPointerOffset(body []byte, tokens []string) (int64, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	var scan func([]string) (int64, bool)
+	scan = func(path []string) (int64, bool) {
+		start := decoder.InputOffset()
+		for start < int64(len(body)) && (body[start] == ' ' || body[start] == '\n' || body[start] == '\r' || body[start] == '\t') {
+			start++
+		}
+		if len(path) == 0 {
+			return start, true
+		}
+		token, err := decoder.Token()
+		if err != nil {
+			return 0, false
+		}
+		delimiter, composite := token.(json.Delim)
+		if !composite {
+			return 0, false
+		}
+		skip := func() bool {
+			var value json.RawMessage
+			return decoder.Decode(&value) == nil
+		}
+		switch delimiter {
+		case '{':
+			for decoder.More() {
+				key, err := decoder.Token()
+				if err != nil {
+					return 0, false
+				}
+				if key == path[0] {
+					return scan(path[1:])
+				}
+				if !skip() {
+					return 0, false
+				}
+			}
+		case '[':
+			index, err := strconv.Atoi(path[0])
+			if err != nil || index < 0 || len(path[0]) > 1 && path[0][0] == '0' {
+				return 0, false
+			}
+			for current := 0; decoder.More(); current++ {
+				if current == index {
+					return scan(path[1:])
+				}
+				if !skip() {
+					return 0, false
+				}
+			}
+		}
+		return 0, false
+	}
+	return scan(tokens)
 }
 
 func resolveJSONPointer(value any, pointer string) (any, bool) {

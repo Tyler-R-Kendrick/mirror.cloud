@@ -1555,6 +1555,7 @@ func TestStatesMapValidation(t *testing.T) {
 		`"ItemBatcher":{"MaxInputBytesPerBatch":262145},` + processor,
 		`"ItemBatcher":{"MaxInputBytesPerBatch":1,"MaxInputBytesPerBatchPath":"$.bytes"},` + processor,
 		`"ItemBatcher":{"MaxInputBytesPerBatchPath":"bytes"},` + processor,
+		`"ItemBatcher":{"MaxItemsPerBatch":1,"BatchInput":[]},` + processor,
 		`"ResultWriter":{},` + processor,
 		`"ResultWriter":{"Resource":1},` + processor,
 		`"ResultWriter":{"Resource":"arn:aws:states:::s3:putObject","Parameters":[]},` + processor,
@@ -2477,6 +2478,27 @@ func TestDistributedMapItemBatcher(t *testing.T) {
 	}
 	if _, ok := batchMapItems(map[string]any{"ItemBatcher": map[string]any{"MaxInputBytesPerBatch": 1}}, nil, []any{"too large"}, p.deps.Rand, nil); ok {
 		t.Fatal("oversized batch item accepted")
+	}
+	scope := jsonataScope{input: map[string]any{"tag": "jsonata"}, context: map[string]any{}, variables: map[string]any{}, random: p.deps.Rand}
+	jsonataBatches, ok := batchMapItems(map[string]any{"ItemBatcher": map[string]any{"MaxItemsPerBatch": "{% 2 %}", "BatchInput": "{% [$states.input.tag, 2] %}"}}, scope.input, []any{1.0, 2.0}, p.deps.Rand, &scope)
+	if !ok || len(jsonataBatches) != 1 {
+		t.Fatalf("JSONata array BatchInput %#v", jsonataBatches)
+	}
+	arrayInput, _ := jsonataBatches[0].(map[string]any)["BatchInput"].([]any)
+	if len(arrayInput) != 2 || arrayInput[0] != "jsonata" {
+		t.Fatalf("JSONata array BatchInput %#v", jsonataBatches)
+	}
+	number, numeric := exactNumber(arrayInput[1])
+	if !numeric || number != 2 {
+		t.Fatalf("JSONata array BatchInput %#v", jsonataBatches)
+	}
+	nullBatches, ok := batchMapItems(map[string]any{"ItemBatcher": map[string]any{"MaxItemsPerBatch": 1, "BatchInput": "{% null %}"}}, scope.input, []any{1.0}, p.deps.Rand, &scope)
+	if !ok || len(nullBatches) != 1 {
+		t.Fatalf("JSONata null BatchInput %#v", nullBatches)
+	}
+	batchInput, exists := nullBatches[0].(map[string]any)["BatchInput"]
+	if !exists || batchInput != nil {
+		t.Fatalf("JSONata null BatchInput %#v", nullBatches)
 	}
 }
 

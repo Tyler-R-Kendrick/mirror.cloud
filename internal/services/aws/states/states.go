@@ -3285,17 +3285,17 @@ func batchMapItems(state map[string]any, data any, items []any, random spi.Rand,
 	if !hasMaxItems && !hasMaxBytes {
 		return nil, false
 	}
-	var batchInput map[string]any
-	if raw, configured := batcher["BatchInput"]; configured {
+	var batchInput any
+	rawBatchInput, hasBatchInput := batcher["BatchInput"]
+	if hasBatchInput {
 		if scope != nil {
-			resolved, valid := evalJSONataValue(raw, *scope)
-			var ok bool
-			batchInput, ok = resolved.(map[string]any)
-			if !valid || !ok {
+			var valid bool
+			batchInput, valid = evalJSONataValue(rawBatchInput, *scope)
+			if !valid {
 				return nil, false
 			}
 		} else {
-			input, ok := raw.(map[string]any)
+			input, ok := rawBatchInput.(map[string]any)
 			if !ok {
 				return nil, false
 			}
@@ -3308,7 +3308,7 @@ func batchMapItems(state map[string]any, data any, items []any, random spi.Rand,
 	}
 	makeBatch := func(values []any) map[string]any {
 		batch := map[string]any{"Items": append([]any(nil), values...)}
-		if batchInput != nil {
+		if hasBatchInput {
 			batch["BatchInput"] = batchInput
 		}
 		return batch
@@ -5315,6 +5315,11 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				}
 				validateInteger(batcher, path, "MaxItemsPerBatch", 1, 0)
 				validateInteger(batcher, path, "MaxInputBytesPerBatch", 1, 262144)
+				if value, exists := batcher["BatchInput"]; exists && !isJSONata {
+					if _, valid := value.(map[string]any); !valid {
+						add("SCHEMA_VALIDATION_FAILED", "BatchInput must be an object.", path+"/BatchInput")
+					}
+				}
 				if isJSONata {
 					for _, field := range []string{"MaxItemsPerBatchPath", "MaxInputBytesPerBatchPath"} {
 						if _, exists := batcher[field]; exists {

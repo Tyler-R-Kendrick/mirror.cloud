@@ -256,7 +256,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-drop-parallel-results",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `data, ok = applyStateResult(st, stateInput, results, p.deps.Rand)`,
+			old:  `data, ok = applyStateResult(st, stateInput, results, stateContext, p.deps.Rand, variables)`,
 			new:  `data, ok = nil, true`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
@@ -472,8 +472,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-jsonata-ignore-task-timeout-expression",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `stateInteger(st, "TimeoutSeconds", rawInput, numericScope, 1, 99999999)`,
-			new:  `stateInteger(st, "Missing", rawInput, numericScope, 1, 99999999)`,
+			old:  `stateInteger(st, "TimeoutSeconds", rawInput, numericScope, 1, 99999999, variables)`,
+			new:  `stateInteger(st, "Missing", rawInput, numericScope, 1, 99999999, variables)`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesJSONataErrorsAndFields",
 		},
@@ -504,7 +504,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-map-tolerance-path",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `value = jsonPath(input, path)`,
+			old:  `value = jsonPath(input, path, variables...)`,
 			new:  `value = input`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestDistributedMapRuns",
@@ -568,7 +568,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-expose-outer-variables-to-distributed-map",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `mapScope.variables = map[string]any{}`,
+			old:  `mapScope.variables = mapVariables`,
 			new:  `mapScope.variables = variables`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesJSONataErrorsAndFields",
@@ -588,6 +588,38 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  `p.deps.Rand, variables)`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesJSONataErrorsAndFields",
+		},
+		{
+			name: "states-ignore-jsonpath-assignment-suffix",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `name := strings.TrimSuffix(rawName, ".$")`,
+			new:  `name := rawName`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesJSONPathVariables",
+		},
+		{
+			name: "states-truncate-jsonpath-variable-reference",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `data, ok = variables[0][path[1:end]]`,
+			new:  `data, ok = variables[0][path[1:]]`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesJSONPathVariables",
+		},
+		{
+			name: "states-alias-jsonpath-variable-value",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  "variables[name] = cloneJSON(value)\n\t}\n\treturn true\n}\n\nfunc cloneJSON",
+			new:  "variables[name] = value\n\t}\n\treturn true\n}\n\nfunc cloneJSON",
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesJSONPathVariables",
+		},
+		{
+			name: "states-expose-jsonpath-variables-to-distributed-map",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `mapVariables = map[string]any{}`,
+			new:  `mapVariables = variables`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesJSONPathVariables",
 		},
 		{
 			name: "states-disable-sync-integration",
@@ -696,7 +728,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-dynamic-task-role",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `resolved := applyParams(credentials, data, nil, random)`,
+			old:  `resolved := applyParams(credentials, data, context, random, variables)`,
 			new:  `resolved := credentials`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesTaskCredentials",
@@ -720,7 +752,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-drop-map-reader-parameters",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `resolved := any(applyParams(parameters, data, nil, p.deps.Rand))`,
+			old:  `resolved := any(applyParams(parameters, data, nil, p.deps.Rand, variables...))`,
 			new:  `resolved := any(map[string]any{})`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestDistributedMapS3ItemReader",
@@ -784,7 +816,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-map-batch-limit-path",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `value = jsonPath(data, path)`,
+			old:  `value = jsonPath(data, path, variables...)`,
 			new:  `value = 1.0`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestDistributedMapItemBatcher",
@@ -824,7 +856,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-map-result-parameters",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `resolved := applyParams(parameters, data, nil, p.deps.Rand)`,
+			old:  `resolved := applyParams(parameters, data, nil, p.deps.Rand, variables...)`,
 			new:  `resolved := parameters`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestDistributedMapResultWriter",
@@ -968,7 +1000,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-activity-result-path",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `out, valid := applyStateResult(st, pend.StateInput, result, p.deps.Rand)`,
+			old:  `out, valid := applyStateResult(st, pend.StateInput, result, stateContext, p.deps.Rand, pend.Variables)`,
 			new:  `out, valid := result, true`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
@@ -1040,7 +1072,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-parallel-parameters",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `branchInput = applyParams(params, data, nil, p.deps.Rand)`,
+			old:  `branchInput = applyParams(params, data, stateContext, p.deps.Rand, variables)`,
 			new:  `branchInput = data`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
@@ -1048,7 +1080,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-result-selector",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `result = applyParams(selector, result, nil, random)`,
+			old:  `result = applyParams(selector, result, context, random, variables...)`,
 			new:  `result = result`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
@@ -1072,7 +1104,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-input-path",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `data, ok = applyDataPath(st, "InputPath", data)`,
+			old:  `data, ok = applyDataPath(st, "InputPath", data, variables)`,
 			new:  `data, ok = data, true`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
@@ -1080,8 +1112,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-return-unfiltered-output",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `selected := jsonPath(input, path)`,
-			new:  `selected := input`,
+			old:  `return jsonPathLookup(input, path, variables...)`,
+			new:  `return input, true`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
@@ -1472,7 +1504,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-choice-and-failure",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if !matchChoice(rule, data) {`,
+			old:  `if !matchChoice(rule, data, variables...) {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestChoiceRules",
@@ -1480,7 +1512,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-choice-or-match",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if matchChoice(rule, data) {`,
+			old:  `if matchChoice(rule, data, variables...) {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestChoiceRules",
@@ -1488,8 +1520,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-choice-not",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `return !matchChoice(raw, data)`,
-			new:  `return matchChoice(raw, data)`,
+			old:  `return !matchChoice(raw, data, variables...)`,
+			new:  `return matchChoice(raw, data, variables...)`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestChoiceRules",
 		},
@@ -1512,7 +1544,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-choice-comparison-path",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `value, found := jsonPathLookup(data, path)`,
+			old:  `value, found := jsonPathLookup(data, path, variables...)`,
 			new:  `value, found := path, true`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestChoiceRules",

@@ -1405,6 +1405,48 @@ func TestMutantsAreKilled(t *testing.T) {
 			run: "TestRedshiftCopyDataPlane",
 		},
 		{
+			name: "firehose-skip-opensearch-serverless-delivery",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `[]string{"ElasticsearchDestinationConfiguration", "AmazonOpenSearchServerlessDestinationConfiguration"}`,
+			new:  `[]string{"ElasticsearchDestinationConfiguration"}`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseOpenSearchServerlessDestination",
+		},
+		{
+			name: "firehose-drop-persisted-opensearch-serverless-destination",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `searchWork{Stream: stream, Destination: destinationKey, DataKey: dataKey, State: "buffer", Size: size, Order: order + 1, Next: next}`,
+			new:  `searchWork{Stream: stream, DataKey: dataKey, State: "buffer", Size: size, Order: order + 1, Next: next}`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseOpenSearchServerlessPersistentBuffer",
+		},
+		{
+			name: "firehose-use-wrong-opensearch-serverless-namespace",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `return collection + "/" + first(destination, "IndexName")`,
+			new:  `return first(destination, "IndexName")`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseOpenSearchServerlessDestination",
+		},
+		{
+			name: "firehose-rotate-opensearch-serverless-failure-index",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old: `if first(destination, "DomainARN") == "" && first(destination, "ClusterEndpoint") == "" {
+		return first(destination, "IndexName")`,
+			new: `if false {
+		return first(destination, "IndexName")`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseOpenSearchServerlessDestination",
+		},
+		{
+			name: "firehose-ignore-opensearch-serverless-security-groups",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `!validVPCList(vpc["SecurityGroupIds"], 5)`,
+			new:  `false`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestOpenSearchServerlessDestinationValidationAndDescription",
+		},
+		{
 			name: "firehose-skip-snowflake-delivery",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 			old:  `p.deliverSnowflakeRecords(ctx, req, rec, destination, stream, version, recIDs, data, now)`,

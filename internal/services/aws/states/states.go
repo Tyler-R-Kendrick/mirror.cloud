@@ -8,10 +8,12 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/base64"
+	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"reflect"
 	"slices"
@@ -26,6 +28,7 @@ import (
 	internalrand "github.com/tyler-r-kendrick/mirror.cloud/internal/rand"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -1450,16 +1453,13 @@ walkLoop:
 			}
 		case "Map":
 			stateInput := rawInput
-			path := first(st, "ItemsPath")
-			var items any
-			if path == "" {
-				items = data
-			} else {
-				items = jsonPath(data, path)
-			}
-			arr, ok := items.([]any)
+			arr, source, ok := p.mapItems(ctx, req, st, data)
 			if !ok {
-				return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
+				failure := "States.Runtime"
+				if _, hasReader := st["ItemReader"]; hasReader {
+					failure = "States.ItemReaderFailed"
+				}
+				return walkResult{out: data, status: "FAILED", cause: failure, errorName: failure, hist: hist}
 			}
 			iter, _ := st["Iterator"].(map[string]any)
 			if iter == nil {
@@ -1483,7 +1483,7 @@ walkLoop:
 					iterationInput := item
 					if selector != nil {
 						iterationInput = applyParams(selector, data, map[string]any{"Map": map[string]any{"Item": map[string]any{
-							"Index": float64(index), "Value": item, "Source": "STATE_DATA",
+							"Index": float64(index), "Value": item, "Source": source,
 						}}}, p.deps.Rand)
 					}
 					wr := p.walk(ctx, req, string(idef), "", iterationInput, nil)
@@ -1723,6 +1723,91 @@ func taskPayload(st map[string]any, data any, context map[string]any, random spi
 	}
 	p := applyParams(params, data, context, random)
 	return p
+}
+
+func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]any, data any) ([]any, string, bool) {
+	reader, hasReader := state["ItemReader"].(map[string]any)
+	if !hasReader {
+		items := data
+		if path := first(state, "ItemsPath"); path != "" {
+			items = jsonPath(data, path)
+		}
+		array, ok := items.([]any)
+		return array, "STATE_DATA", ok
+	}
+	if first(reader, "Resource") != "arn:aws:states:::s3:getObject" {
+		return nil, "", false
+	}
+	parameters, _ := reader["Parameters"].(map[string]any)
+	response, err := s3.New(p.deps).Invoke(ctx, &spi.Request{
+		Identity: req.Identity, Operation: "GetObject", Input: applyParams(parameters, data, nil, p.deps.Rand),
+	})
+	if err != nil || response == nil || response.Stream == nil {
+		return nil, "", false
+	}
+	body, readErr := io.ReadAll(response.Stream)
+	closeErr := response.Stream.Close()
+	if readErr != nil || closeErr != nil {
+		return nil, "", false
+	}
+	config, _ := reader["ReaderConfig"].(map[string]any)
+	inputType := first(config, "InputType")
+	if inputType == "" {
+		inputType = "JSON"
+	}
+	switch inputType {
+	case "JSON":
+		var items []any
+		return items, inputType, json.Unmarshal(body, &items) == nil
+	case "JSONL":
+		decoder := json.NewDecoder(strings.NewReader(string(body)))
+		items := []any{}
+		for {
+			var item any
+			if err := decoder.Decode(&item); errors.Is(err, io.EOF) {
+				return items, inputType, true
+			} else if err != nil {
+				return nil, "", false
+			}
+			items = append(items, item)
+		}
+	case "CSV":
+		parser := csv.NewReader(strings.NewReader(string(body)))
+		delimiters := map[string]rune{"COMMA": ',', "PIPE": '|', "SEMICOLON": ';', "SPACE": ' ', "TAB": '\t'}
+		if delimiter := first(config, "CSVDelimiter"); delimiter != "" {
+			parser.Comma = delimiters[delimiter]
+			if parser.Comma == 0 {
+				return nil, "", false
+			}
+		}
+		records, err := parser.ReadAll()
+		if err != nil || len(records) == 0 {
+			return nil, "", false
+		}
+		headers := records[0]
+		if first(config, "CSVHeaderLocation") == "GIVEN" {
+			headers = nil
+			for _, header := range asSlice(config["CSVHeaders"]) {
+				headers = append(headers, fmt.Sprint(header))
+			}
+		} else {
+			records = records[1:]
+		}
+		items := make([]any, 0, len(records))
+		for _, record := range records {
+			if len(record) != len(headers) {
+				return nil, "", false
+			}
+			item := map[string]any{}
+			for index, header := range headers {
+				item[header] = record[index]
+			}
+			items = append(items, item)
+		}
+		return items, inputType, true
+	default:
+		return nil, "", false
+	}
 }
 
 func taskIdentity(st map[string]any, data any, identity spi.Identity, random spi.Rand) (spi.Identity, bool) {

@@ -1,6 +1,7 @@
 package states
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -19,6 +20,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/emr"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/glue"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -217,7 +219,8 @@ func TestDescribeForExecutionAndRedrive(t *testing.T) {
 }
 
 func TestDistributedMapRuns(t *testing.T) {
-	p := New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -285,6 +288,57 @@ func TestDistributedMapRuns(t *testing.T) {
 	}
 	if originalRuns := must("ListMapRuns", map[string]any{"executionArn": executionARN})["mapRuns"].([]any); len(originalRuns) != 2 {
 		t.Fatalf("cross-execution map runs %#v", originalRuns)
+	}
+}
+
+func TestDistributedMapS3ItemReader(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	storage := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(handler spi.Handler, operation string, input map[string]any, body []byte) map[string]any {
+		t.Helper()
+		request := &spi.Request{Identity: id, Operation: operation, Input: input}
+		if body != nil {
+			request.Body = io.NopCloser(bytes.NewReader(body))
+		}
+		response, err := handler.Invoke(ctx, request)
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	invoke(storage, "CreateBucket", map[string]any{"Bucket": "items"}, nil)
+	objects := map[string]string{
+		"items.json":  `[{"id":1},{"id":2}]`,
+		"items.jsonl": "{\"id\":3}\n{\"id\":4}\n",
+		"items.csv":   "id,name\n5,Ada\n6,Lin\n",
+	}
+	for key, body := range objects {
+		invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": key}, []byte(body))
+	}
+	processor := map[string]any{"StartAt": "Done", "ProcessorConfig": map[string]any{"Mode": "DISTRIBUTED"}, "States": map[string]any{"Done": map[string]any{"Type": "Succeed"}}}
+	for _, test := range []struct{ key, inputType string }{{"items.json", "JSON"}, {"items.jsonl", "JSONL"}, {"items.csv", "CSV"}} {
+		state := map[string]any{
+			"Type": "Map", "ItemProcessor": processor, "ItemSelector": map[string]any{"value.$": "$$.Map.Item.Value", "source.$": "$$.Map.Item.Source"}, "End": true,
+			"ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": test.key}, "ReaderConfig": map[string]any{"InputType": test.inputType, "CSVHeaderLocation": "FIRST_ROW"}},
+		}
+		definition, _ := json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": state}})
+		machine := invoke(p, "CreateStateMachine", map[string]any{"name": "reader-" + strings.ToLower(test.inputType), "definition": string(definition), "roleArn": testRoleARN}, nil)
+		started := invoke(p, "StartExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"]}, nil)
+		execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": started["executionArn"]}, nil)
+		if execution["status"] != "SUCCEEDED" || strings.Count(execution["output"].(string), `"source":"`+test.inputType+`"`) != 2 {
+			t.Fatalf("%s ItemReader execution %#v", test.inputType, execution)
+		}
+	}
+
+	missingState := map[string]any{"Type": "Map", "ItemProcessor": processor, "ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": "missing"}}, "End": true}
+	missingDefinition, _ := json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": missingState}})
+	missingMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "missing-reader", "definition": string(missingDefinition), "roleArn": testRoleARN}, nil)
+	missingExecution := invoke(p, "StartExecution", map[string]any{"stateMachineArn": missingMachine["stateMachineArn"]}, nil)
+	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": missingExecution["executionArn"]}, nil); execution["status"] != "FAILED" || execution["error"] != "States.ItemReaderFailed" {
+		t.Fatalf("missing ItemReader execution %#v", execution)
 	}
 }
 

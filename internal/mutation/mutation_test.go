@@ -1179,10 +1179,15 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-discard-splunk-failure-arrival-time",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `arrival = payload.Arrivals[index]`,
-			new:  `arrival = now`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseSplunkAcknowledgmentTimeout",
+			old: `arrival := now
+		if len(payload.Arrivals) == len(payload.BackupData) {
+			arrival = payload.Arrivals[index]
+		}
+		fields := map[string]any{`,
+			new: `arrival := now
+		fields := map[string]any{`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseSplunkAcknowledgmentTimeout",
 		},
 		{
 			name: "firehose-drop-default-splunk-failure-prefix",
@@ -1517,10 +1522,10 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-drop-permanent-endpoint-backup",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old: `if backupFailures && !delivered && (permanent || !retrying) {
-		payload := httpRetryPayload{BackupRecordIDs: recIDs, BackupData: data, Arrivals: repeatTime(now, len(data))}`,
-			new: `if backupFailures && !delivered && !permanent && !retrying {
-		payload := httpRetryPayload{BackupRecordIDs: recIDs, BackupData: data, Arrivals: repeatTime(now, len(data))}`,
+			old: `if !delivered && (permanent || !retrying) {
+		p.backupEndpointPayload(ctx, req, stream, destination, destinationKey, name, payload, 0, code, message, now)`,
+			new: `if !delivered && !permanent && !retrying {
+		p.backupEndpointPayload(ctx, req, stream, destination, destinationKey, name, payload, 0, code, message, now)`,
 			pkg: "./internal/services/aws/firehose",
 			run: "TestFirehoseHTTPEndpointDestination",
 		},

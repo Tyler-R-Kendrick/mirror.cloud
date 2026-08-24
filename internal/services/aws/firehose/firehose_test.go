@@ -4643,18 +4643,16 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 
 	for _, failure := range []struct {
 		name, path, prefix string
-		backedUp           bool
+		retrySeconds       int
 	}{
-		{name: "retryable", path: "/failure", prefix: "failed/", backedUp: true},
-		{name: "redirect", path: "/redirect", prefix: "redirect/", backedUp: true},
-		{name: "permanent", path: "/permanent", prefix: "permanent/", backedUp: true},
+		{name: "retryable", path: "/failure", prefix: "failed/"},
+		{name: "redirect", path: "/redirect", prefix: "redirect/"},
+		{name: "permanent", path: "/permanent", prefix: "permanent/", retrySeconds: 10},
 	} {
 		destination := immediateDestination("https://example.test" + failure.path)
 		destination["S3Configuration"].(map[string]any)["Prefix"] = failure.prefix
 		destination["S3BackupMode"] = "FailedDataOnly"
-		if failure.backedUp {
-			destination["RetryOptions"] = map[string]any{"DurationInSeconds": 0}
-		}
+		destination["RetryOptions"] = map[string]any{"DurationInSeconds": failure.retrySeconds}
 		if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": failure.name, "HttpEndpointDestinationConfiguration": destination}); err != nil {
 			t.Fatal(err)
 		}
@@ -4664,11 +4662,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		}
 		<-captured
 		key := id.Account + "/" + id.Region + "/out/" + failure.prefix + "1970/01/01/00/" + failure.name + "-1-1970-01-01-00-00-00-" + put.Output["RecordId"].(string)
-		if failure.backedUp {
-			waitBlob(key)
-		} else if _, _, err := deps.Blobs.Get(context.Background(), key); err == nil {
-			t.Errorf("%s was backed up", failure.name)
-		}
+		waitBlob(key)
 	}
 	if retries, _, _ := deps.Store.Scope(id.Account, id.Region).Collection("fh-http-retries").List(context.Background(), "", "", 0); len(retries) != 0 {
 		t.Fatalf("scheduled permanent HTTP failure retry %#v", retries)

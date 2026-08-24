@@ -664,8 +664,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-jsonata-ignore-reader-max-items",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  "if limit < len(items) {\n\t\titems = items[:limit]",
-			new:  "if false {\n\t\titems = items[:limit]",
+			old:  "case []any:\n\t\tif limit < len(collection) {\n\t\t\titems = collection[:limit]",
+			new:  "case []any:\n\t\tif false {\n\t\t\titems = collection[:limit]",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesJSONataErrorsAndFields",
 		},

@@ -406,6 +406,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesJSONataErrorsAndFields",
 		},
 		{
+			name: "states-complete-wait-immediately",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `if waitUntil.After(p.deps.Clock.Now()) {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesDurableWait",
+		},
+		{
+			name: "states-ignore-due-wait",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `p.resumeWait(ctx, request, kv.Key, wait)`,
+			new:  `_ = wait`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesDurableWait",
+		},
+		{
 			name: "states-jsonata-ignore-reader-arguments",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `resolvedValue, valid = evalJSONataValue(reader["Arguments"], *scope)`,

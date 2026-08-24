@@ -254,6 +254,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		newName := first(req.Input, "newName", "NewName")
 		newKey := strings.TrimSuffix(key, name) + newName
+		var rec map[string]any
+		_ = json.Unmarshal(b, &rec)
+		rec["name"] = newName
+		b, _ = json.Marshal(rec)
 		_ = p.col(req, "s3tt").Put(ctx, newKey, b)
 		_ = p.col(req, "s3tt").Delete(ctx, key)
 		if rows, found, _ := p.col(req, "s3trows").Get(ctx, key); found {

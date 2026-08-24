@@ -60,6 +60,52 @@ func TestS3TablesRowMutations(t *testing.T) {
 	}
 }
 
+func TestS3TablesControlPlaneLifecycle(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	if p.ServiceID() != "aws.s3tables" {
+		t.Fatalf("service ID %q", p.ServiceID())
+	}
+	created := call("CreateTableBucket", map[string]any{"name": "warehouse"})
+	arn := created.Output["arn"].(string)
+	call("CreateNamespace", map[string]any{"tableBucketARN": arn, "namespace": "analytics"})
+	if namespaces := call("ListNamespaces", map[string]any{}).Output["namespaces"].([]any); len(namespaces) != 1 {
+		t.Fatalf("namespaces %#v", namespaces)
+	}
+	call("CreateTable", map[string]any{
+		"tableBucketARN": arn, "namespace": "analytics", "name": "events", "format": "ICEBERG", "metadataLocation": "s3://warehouse/v1.metadata.json",
+	})
+	if tables := call("ListTables", map[string]any{"tableBucketARN": arn, "namespace": "analytics"}).Output["tables"].([]any); len(tables) != 1 {
+		t.Fatalf("tables %#v", tables)
+	}
+	call("UpdateTableMetadataLocation", map[string]any{
+		"tableBucketARN": arn, "namespace": "analytics", "name": "events", "metadataLocation": "s3://warehouse/v2.metadata.json",
+	})
+	metadata := call("GetTableMetadataLocation", map[string]any{"tableBucketARN": arn, "namespace": "analytics", "name": "events"})
+	if metadata.Output["metadataLocation"] != "s3://warehouse/v2.metadata.json" {
+		t.Fatalf("metadata %#v", metadata.Output)
+	}
+	call("RenameTable", map[string]any{"tableBucketARN": arn, "namespace": "analytics", "name": "events", "newName": "renamed"})
+	renamed := call("GetTable", map[string]any{"tableBucketARN": arn, "namespace": []any{"analytics"}, "name": "renamed"})
+	if renamed.Output["name"] != "renamed" {
+		t.Fatalf("renamed table %#v", renamed.Output)
+	}
+	call("DeleteTable", map[string]any{"tableBucketARN": arn, "namespace": "analytics", "name": "renamed"})
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetTable", Input: map[string]any{"tableBucketARN": arn, "namespace": "analytics", "name": "renamed"}}); err == nil {
+		t.Fatal("deleted S3 table remained readable")
+	}
+	call("DeleteTableBucket", map[string]any{"name": "warehouse"})
+}
+
 func TestBootedServerS3TablesCreateGetDelete(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []string{"aws.s3tables"}

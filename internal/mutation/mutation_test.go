@@ -1523,6 +1523,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run: "TestS3TablesRowMutations",
 		},
 		{
+			name: "s3tables-keep-old-renamed-name",
+			file: filepath.Join("internal", "services", "aws", "s3tables", "s3tables.go"),
+			old:  `rec["name"] = newName`,
+			new:  `rec["name"] = name`,
+			pkg:  "./internal/services/aws/s3tables",
+			run:  "TestS3TablesControlPlaneLifecycle",
+		},
+		{
 			name: "firehose-drop-direct-put-source",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 			old:  `if directPutSource != nil {`,

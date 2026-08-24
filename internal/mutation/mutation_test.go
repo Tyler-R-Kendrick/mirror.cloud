@@ -1038,6 +1038,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestDistributedMapS3ItemReader",
 		},
 		{
+			name: "states-ignore-reader-items-path",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `if _, hasReader := st["ItemReader"]; !isJSONata && hasReader {`,
+			new:  `if _, hasReader := st["ItemReader"]; !isJSONata && hasReader && false {`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestDistributedMapS3ItemReader",
+		},
+		{
+			name: "states-apply-reader-items-path-to-state-input",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `dataset = jsonPath(dataset, path, mapVariables)`,
+			new:  `dataset = jsonPath(data, path, mapVariables)`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestDistributedMapS3ItemReader",
+		},
+		{
 			name: "states-reject-json-object-items",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `var items any`,

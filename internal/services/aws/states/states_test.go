@@ -43,6 +43,30 @@ func TestStartSyncRejectsStandardWorkflow(t *testing.T) {
 	}
 }
 
+func TestStatesTagLifecycle(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	arn := "arn:aws:states:us-east-1:1:stateMachine:tagged"
+	must := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response
+	}
+	must("TagResource", map[string]any{"resourceArn": arn, "tags": []any{
+		map[string]any{"key": "env", "value": "dev"}, map[string]any{"key": "team", "value": "platform"},
+	}})
+	must("TagResource", map[string]any{"resourceArn": arn, "tags": []any{map[string]any{"key": "env", "value": "prod"}}})
+	must("UntagResource", map[string]any{"resourceArn": arn, "tagKeys": []any{"team"}})
+	tags := must("ListTagsForResource", map[string]any{"resourceArn": arn}).Output["tags"].([]any)
+	if len(tags) != 1 || tags[0].(map[string]any)["key"] != "env" || tags[0].(map[string]any)["value"] != "prod" {
+		t.Fatalf("tags %#v", tags)
+	}
+}
+
 func TestBootedServerStatesPassSucceed(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []string{"aws.states"}

@@ -414,6 +414,119 @@ func TestStartExecutionAdmission(t *testing.T) {
 	fault("StartExecution", input, "ExecutionAlreadyExists")
 }
 
+func TestStateListsAndHistoryPagination(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	must := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := call(operation, input)
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	fault := func(operation string, input map[string]any, code string) {
+		t.Helper()
+		_, err := call(operation, input)
+		if got, ok := err.(*spi.Fault); !ok || got.Code != code {
+			t.Fatalf("%s fault %#v want %s", operation, err, code)
+		}
+	}
+	definition := `{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","Next":"Done"},"Done":{"Type":"Succeed"}}}`
+	arns := map[string]string{}
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		arns[name] = must("CreateStateMachine", map[string]any{"name": name, "definition": definition})["stateMachineArn"].(string)
+	}
+	machines1 := must("ListStateMachines", map[string]any{"maxResults": 2.0})
+	if listed := machines1["stateMachines"].([]any); len(listed) != 2 || listed[0].(map[string]any)["definition"] != nil || machines1["nextToken"] == nil {
+		t.Fatalf("state machine page %#v", machines1)
+	}
+	if machines2 := must("ListStateMachines", map[string]any{"nextToken": machines1["nextToken"]}); len(machines2["stateMachines"].([]any)) != 1 {
+		t.Fatalf("state machine second page %#v", machines2)
+	}
+	fault("ListStateMachines", map[string]any{"nextToken": "bad"}, "InvalidToken")
+	fault("ListStateMachines", map[string]any{"maxResults": 1.5}, "ValidationException")
+
+	version1 := must("PublishStateMachineVersion", map[string]any{"stateMachineArn": arns["alpha"]})["stateMachineVersionArn"].(string)
+	must("UpdateStateMachine", map[string]any{"stateMachineArn": arns["alpha"], "roleArn": "second"})
+	version2 := must("PublishStateMachineVersion", map[string]any{"stateMachineArn": arns["alpha"]})["stateMachineVersionArn"].(string)
+	must("UpdateStateMachine", map[string]any{"stateMachineArn": arns["alpha"], "roleArn": "third"})
+	version3 := must("PublishStateMachineVersion", map[string]any{"stateMachineArn": arns["alpha"]})["stateMachineVersionArn"].(string)
+	versions1 := must("ListStateMachineVersions", map[string]any{"stateMachineArn": arns["alpha"], "maxResults": 2.0})
+	listedVersions := versions1["stateMachineVersions"].([]any)
+	if len(listedVersions) != 2 || listedVersions[0].(map[string]any)["stateMachineVersionArn"] != version3 || listedVersions[1].(map[string]any)["stateMachineVersionArn"] != version2 {
+		t.Fatalf("version page %#v", versions1)
+	}
+	if versions2 := must("ListStateMachineVersions", map[string]any{"stateMachineArn": arns["alpha"], "nextToken": versions1["nextToken"]}); len(versions2["stateMachineVersions"].([]any)) != 1 || versions2["stateMachineVersions"].([]any)[0].(map[string]any)["stateMachineVersionArn"] != version1 {
+		t.Fatalf("version second page %#v", versions2)
+	}
+
+	alias1 := must("CreateStateMachineAlias", map[string]any{"name": "one", "routingConfiguration": []any{map[string]any{"stateMachineVersionArn": version3, "weight": 100.0}}})["stateMachineAliasArn"].(string)
+	must("CreateStateMachineAlias", map[string]any{"name": "two", "routingConfiguration": []any{map[string]any{"stateMachineVersionArn": version3, "weight": 100.0}}})
+	must("CreateStateMachineAlias", map[string]any{"name": "old", "routingConfiguration": []any{map[string]any{"stateMachineVersionArn": version1, "weight": 100.0}}})
+	aliasPage := must("ListStateMachineAliases", map[string]any{"stateMachineArn": version3, "maxResults": 1.0})
+	if len(aliasPage["stateMachineAliases"].([]any)) != 1 || aliasPage["nextToken"] == nil {
+		t.Fatalf("alias page %#v", aliasPage)
+	}
+	if next := must("ListStateMachineAliases", map[string]any{"stateMachineArn": version3, "nextToken": aliasPage["nextToken"]}); len(next["stateMachineAliases"].([]any)) != 1 {
+		t.Fatalf("alias second page %#v", next)
+	}
+
+	var executionARN string
+	for _, name := range []string{"first", "second", "third"} {
+		executionARN = must("StartExecution", map[string]any{"stateMachineArn": arns["alpha"], "name": name})["executionArn"].(string)
+	}
+	must("StartExecution", map[string]any{"stateMachineArn": version3, "name": "version"})
+	must("StartExecution", map[string]any{"stateMachineArn": alias1, "name": "alias"})
+	must("UpdateStateMachine", map[string]any{"stateMachineArn": arns["alpha"], "definition": `{"StartAt":"Fail","States":{"Fail":{"Type":"Fail"}}}`})
+	must("StartExecution", map[string]any{"stateMachineArn": arns["alpha"], "name": "failed"})
+	executions1 := must("ListExecutions", map[string]any{"stateMachineArn": arns["alpha"], "statusFilter": "SUCCEEDED", "maxResults": 2.0})
+	if listed := executions1["executions"].([]any); len(listed) != 2 || listed[0].(map[string]any)["input"] != nil || executions1["nextToken"] == nil {
+		t.Fatalf("execution page %#v", executions1)
+	}
+	if executions2 := must("ListExecutions", map[string]any{"stateMachineArn": arns["alpha"], "statusFilter": "SUCCEEDED", "nextToken": executions1["nextToken"]}); len(executions2["executions"].([]any)) != 3 {
+		t.Fatalf("execution second page %#v", executions2)
+	}
+	if versions := must("ListExecutions", map[string]any{"stateMachineArn": version3})["executions"].([]any); len(versions) != 2 {
+		t.Fatalf("version executions %#v", versions)
+	}
+	if aliases := must("ListExecutions", map[string]any{"stateMachineArn": alias1})["executions"].([]any); len(aliases) != 1 {
+		t.Fatalf("alias executions %#v", aliases)
+	}
+	fault("ListExecutions", map[string]any{"stateMachineArn": arns["alpha"], "redriveFilter": "REDRIVEN"}, "ValidationException")
+	fault("ListExecutions", map[string]any{}, "ValidationException")
+	expressARN := must("CreateStateMachine", map[string]any{"name": "express-list", "definition": definition, "type": "EXPRESS"})["stateMachineArn"].(string)
+	fault("ListExecutions", map[string]any{"stateMachineArn": expressARN}, "StateMachineTypeNotSupported")
+
+	history1 := must("GetExecutionHistory", map[string]any{"executionArn": executionARN, "maxResults": 1.0})
+	if len(history1["events"].([]any)) != 1 || history1["nextToken"] == nil {
+		t.Fatalf("history page %#v", history1)
+	}
+	history2 := must("GetExecutionHistory", map[string]any{"executionArn": executionARN, "nextToken": history1["nextToken"]})
+	if len(history2["events"].([]any)) != 1 {
+		t.Fatalf("history second page %#v", history2)
+	}
+	reversed := must("GetExecutionHistory", map[string]any{"executionArn": executionARN, "reverseOrder": true, "maxResults": 1.0})["events"].([]any)
+	if reversed[0].(map[string]any)["type"] != "SucceedStateEntered" {
+		t.Fatalf("reversed history %#v", reversed)
+	}
+	expressExecution := must("StartExecution", map[string]any{"stateMachineArn": expressARN})["executionArn"].(string)
+	fault("GetExecutionHistory", map[string]any{"executionArn": expressExecution}, "StateMachineTypeNotSupported")
+
+	for _, name := range []string{"first", "second"} {
+		must("CreateActivity", map[string]any{"name": name})
+	}
+	activities := must("ListActivities", map[string]any{"maxResults": 1.0})
+	if len(activities["activities"].([]any)) != 1 || activities["nextToken"] == nil {
+		t.Fatalf("activity page %#v", activities)
+	}
+}
+
 func TestStatesTagLifecycle(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -484,10 +597,11 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if execution := must("DescribeExecution", map[string]any{"ExecutionArn": executionARN}).Output; execution["status"] != "SUCCEEDED" || execution["history"] != nil {
 		t.Fatalf("execution %#v", execution)
 	}
-	if executions := must("ListExecutions", nil).Output["executions"].([]any); len(executions) != 1 {
+	if executions, _, _ := p.col(&spi.Request{Identity: id}, "ex").List(ctx, "", "", 0); len(executions) != 1 {
 		t.Fatalf("executions %#v", executions)
 	}
-	if events := must("GetExecutionHistory", map[string]any{"ExecutionArn": executionARN}).Output["events"].([]any); len(events) != 2 {
+	storedExecution, _ := getRecord(ctx, p.col(&spi.Request{Identity: id}, "ex"), executionARN)
+	if events := asSlice(storedExecution["history"]); len(events) != 2 {
 		t.Fatalf("history %#v", events)
 	}
 	if sync := must("StartSyncExecution", map[string]any{"StateMachineArn": arn, "Input": `{"n":2}`}).Output; sync["status"] != "SUCCEEDED" || sync["stopDate"] == nil {

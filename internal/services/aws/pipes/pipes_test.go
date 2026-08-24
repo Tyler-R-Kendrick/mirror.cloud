@@ -447,8 +447,8 @@ func TestPipesStepFunctionsTarget(t *testing.T) {
 	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "states-source", "MessageBody": `{"value":1}`})
 	invoke(t, p, id, "StartPipe", map[string]any{"Name": "states"})
 	eventually(t, func() bool { return len(storedMessages(t, deps, id, "states-source")) == 0 })
-	executions := invoke(t, machine, id, "ListExecutions", map[string]any{}).Output["executions"].([]any)
-	if len(executions) != 1 || !strings.Contains(stringValue(executions[0].(map[string]any)["input"]), `"value":1`) {
+	executions := storedStateExecutions(t, deps, id)
+	if len(executions) != 1 || !strings.Contains(stringValue(executions[0]["input"]), `"value":1`) {
 		t.Fatalf("state executions %#v", executions)
 	}
 	standard := invoke(t, machine, id, "CreateStateMachine", map[string]any{
@@ -515,8 +515,8 @@ func TestPipesStepFunctionsEnrichment(t *testing.T) {
 	if enriched["value"] != float64(6) || enriched["id"] != "enriched" {
 		t.Fatalf("enriched output %#v", enriched)
 	}
-	executions := invoke(t, machine, id, "ListExecutions", map[string]any{}).Output["executions"].([]any)
-	if len(executions) != 1 || !strings.Contains(stringValue(executions[0].(map[string]any)["input"]), `"value":3`) {
+	executions := storedStateExecutions(t, deps, id)
+	if len(executions) != 1 || !strings.Contains(stringValue(executions[0]["input"]), `"value":3`) {
 		t.Fatalf("enrichment input %#v", executions)
 	}
 
@@ -944,6 +944,23 @@ func storedMessages(t *testing.T, deps spi.Deps, id spi.Identity, queue string) 
 		messages = append(messages, message)
 	}
 	return messages
+}
+
+func storedStateExecutions(t *testing.T, deps spi.Deps, id spi.Identity) []map[string]any {
+	t.Helper()
+	kvs, _, err := deps.Store.Scope(id.Account, id.Region).Collection("ex").List(context.Background(), "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executions := make([]map[string]any, 0, len(kvs))
+	for _, kv := range kvs {
+		var execution map[string]any
+		if err := json.Unmarshal(kv.Value, &execution); err != nil {
+			t.Fatal(err)
+		}
+		executions = append(executions, execution)
+	}
+	return executions
 }
 
 func eventually(t *testing.T, condition func() bool) {

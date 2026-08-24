@@ -97,6 +97,8 @@ func TestStateMachineVersionsAndAliases(t *testing.T) {
 	}
 	fault("DeleteStateMachineVersion", map[string]any{"stateMachineVersionArn": v1}, "ConflictException")
 	must("UpdateStateMachineAlias", map[string]any{"StateMachineAliasArn": alias, "Description": "second", "RoutingConfiguration": []any{map[string]any{"StateMachineVersionArn": v2, "Weight": 100.0}}})
+	definition3 := `{"StartAt":"Version","States":{"Version":{"Type":"Pass","Result":{"version":3},"End":true}}}`
+	must("UpdateStateMachine", map[string]any{"stateMachineArn": arn, "definition": definition3})
 	if sync := must("StartSyncExecution", map[string]any{"stateMachineArn": alias, "name": "alias"}).Output; !strings.Contains(fmtString(sync["output"]), `"version":2`) {
 		t.Fatalf("alias output %#v", sync)
 	}

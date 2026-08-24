@@ -2505,6 +2505,10 @@ func (p *Pack) invokeTask(ctx context.Context, req *spi.Request, resource string
 		}
 		return response.Output, err, prefix, sdk, true
 	}
+	if service == "ecs" {
+		input = maps.Clone(input)
+		input["cluster"], input["taskDefinition"] = first(input, "cluster", "Cluster"), first(input, "taskDefinition", "TaskDefinition")
+	}
 	for _, factory := range registry.Factories() {
 		if !matchesTaskService(factory.ServiceID, service) {
 			continue
@@ -2521,6 +2525,27 @@ func (p *Pack) invokeTask(ctx context.Context, req *spi.Request, resource string
 			return nil, spi.NotImplemented(factory.ServiceID, operation, "emulate"), prefix, sdk, true
 		}
 		response, invokeErr := handler.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: operation, Input: input})
+		if invokeErr == nil && response != nil && service == "ecs" && syncJob {
+			if len(asSlice(response.Output["failures"])) != 0 {
+				invokeErr = &spi.Fault{Code: "Unknown", HTTPStatus: 400, Fault: "server"}
+			} else {
+				stopped := []any{}
+				for _, task := range asSlice(response.Output["tasks"]) {
+					taskRecord, _ := task.(map[string]any)
+					stop, err := handler.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "StopTask", Input: map[string]any{"cluster": input["cluster"], "task": first(taskRecord, "taskArn")}})
+					if err != nil {
+						invokeErr = errors.Join(invokeErr, err)
+						break
+					}
+					if stop == nil {
+						invokeErr = errors.New("ECS StopTask returned no result")
+						break
+					}
+					stopped = append(stopped, stop.Output["task"])
+				}
+				response.Output["tasks"] = stopped
+			}
+		}
 		if closer, ok := handler.(interface{ Close() error }); ok {
 			invokeErr = errors.Join(invokeErr, closer.Close())
 		}
@@ -2546,7 +2571,8 @@ func syncIntegration(resource string) bool {
 	switch resource {
 	case "arn:aws:states:::batch:submitJob", "arn:aws:states:::codebuild:startBuild",
 		"arn:aws:states:::glue:startJobRun", "arn:aws:states:::elasticmapreduce:addStep",
-		"arn:aws:states:::elasticmapreduce:createCluster", "arn:aws:states:::states:startExecution":
+		"arn:aws:states:::elasticmapreduce:createCluster", "arn:aws:states:::states:startExecution",
+		"arn:aws:states:::ecs:runTask":
 		return true
 	default:
 		return false
@@ -2585,6 +2611,7 @@ func taskIntegration(resource string) (service, operation, prefix string, sdk, o
 		"arn:aws:states:::dynamodb:putItem":               {"dynamodb", "PutItem", "DynamoDB"},
 		"arn:aws:states:::dynamodb:updateItem":            {"dynamodb", "UpdateItem", "DynamoDB"},
 		"arn:aws:states:::dynamodb:deleteItem":            {"dynamodb", "DeleteItem", "DynamoDB"},
+		"arn:aws:states:::ecs:runTask":                    {"ecs", "RunTask", "AmazonECS"},
 		"arn:aws:states:::elasticmapreduce:addStep":       {"elasticmapreduce", "AddJobFlowSteps", "ElasticMapReduce"},
 		"arn:aws:states:::elasticmapreduce:createCluster": {"elasticmapreduce", "RunJobFlow", "ElasticMapReduce"},
 		"arn:aws:states:::glue:startJobRun":               {"glue", "StartJobRun", "Glue"},

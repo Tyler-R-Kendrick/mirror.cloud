@@ -18,6 +18,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/batch"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/codebuild"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ecs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/emr"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/glue"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
@@ -969,6 +970,17 @@ func TestStatesSyncServiceIntegrations(t *testing.T) {
 	stringResult, jsonResult := nested["string"].(map[string]any), nested["json"].(map[string]any)
 	if parentExecution["status"] != "SUCCEEDED" || stringResult["Output"] != `{"ok":true}` || stringResult["Input"] != `{"value":1}` || jsonResult["Output"].(map[string]any)["ok"] != true {
 		t.Fatalf("nested sync execution %#v %#v", parentExecution, nested)
+	}
+	ecsDefinition := `{"StartAt":"Run","States":{"Run":{"Type":"Task","Resource":"arn:aws:states:::ecs:runTask.sync","Parameters":{"Cluster":"default","TaskDefinition":"web"},"End":true}}}`
+	ecsMachine := must(p, "CreateStateMachine", map[string]any{"name": "sync-ecs", "definition": ecsDefinition, "roleArn": testRoleARN})
+	ecsExecutionARN := must(p, "StartExecution", map[string]any{"stateMachineArn": ecsMachine["stateMachineArn"]})["executionArn"].(string)
+	ecsExecution := must(p, "DescribeExecution", map[string]any{"executionArn": ecsExecutionARN})
+	var ecsOutput map[string]any
+	_ = json.Unmarshal([]byte(ecsExecution["output"].(string)), &ecsOutput)
+	task := ecsOutput["tasks"].([]any)[0].(map[string]any)
+	storedTasks := must(ecs.New(deps), "DescribeTasks", map[string]any{"cluster": "default", "tasks": []any{task["taskArn"]}})["tasks"].([]any)
+	if ecsExecution["status"] != "SUCCEEDED" || task["lastStatus"] != "STOPPED" || task["taskDefinitionArn"] != "web" || len(storedTasks) != 1 || storedTasks[0].(map[string]any)["lastStatus"] != "STOPPED" {
+		t.Fatalf("ECS sync execution %#v stored=%#v", ecsExecution, storedTasks)
 	}
 	if _, err := call(p, "CreateStateMachine", map[string]any{"name": "express-sync", "definition": definition, "roleArn": testRoleARN, "type": "EXPRESS"}); err == nil {
 		t.Fatal("Express .sync integration accepted")

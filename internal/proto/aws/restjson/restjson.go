@@ -159,7 +159,7 @@ func apigatewayOp(svc *model.Service, r *http.Request) *model.Operation {
 		name = "GetResources"
 	case len(parts) == 4 && parts[2] == "resources" && m == http.MethodPost:
 		name = "CreateResource"
-	case strings.Contains(path, "/integrationresponses"):
+	case strings.Contains(path, "/integration/responses/"):
 		switch m {
 		case http.MethodPut:
 			name = "PutIntegrationResponse"
@@ -168,7 +168,7 @@ func apigatewayOp(svc *model.Service, r *http.Request) *model.Operation {
 		default:
 			name = "GetIntegrationResponse"
 		}
-	case strings.Contains(path, "/methodresponses"):
+	case strings.Contains(path, "/responses/"):
 		switch m {
 		case http.MethodPut:
 			name = "PutMethodResponse"

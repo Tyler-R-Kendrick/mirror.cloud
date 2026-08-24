@@ -168,11 +168,28 @@ func TestRedshiftCopyDataPlane(t *testing.T) {
 		"row": func(input *CopyInput) {
 			input.Options, input.Data = "delimiter '|'", [][]byte{[]byte("only-one-column\n")}
 		},
+		"json": func(input *CopyInput) {
+			input.Options, input.Data = "JSON 'auto'", [][]byte{[]byte("not-json\n")}
+		},
+		"delimiter": func(input *CopyInput) {
+			input.Options, input.Data = "delimiter '||'", [][]byte{[]byte("1||one\n")}
+		},
 	} {
 		candidate := input
 		mutate(&candidate)
-		if err := p.Copy(ctx, identity, candidate); err == nil {
-			t.Errorf("accepted invalid Redshift COPY %s", name)
+		err := p.Copy(ctx, identity, candidate)
+		expected := map[string]string{
+			"credentials": "credentials are invalid", "database": "database does not exist", "table": "table not found", "columns": "column does not exist",
+			"row": "wrong column count", "json": "JSON row is invalid", "delimiter": "delimiter must be one byte",
+		}[name]
+		if err == nil || !strings.Contains(err.Error(), expected) {
+			t.Errorf("invalid Redshift COPY %s returned %v", name, err)
 		}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: identity, Operation: "DeleteCluster", Input: map[string]any{"ClusterIdentifier": "warehouse"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.TableRows(ctx, identity, "warehouse", "analytics", "events"); err == nil {
+		t.Fatal("deleted Redshift cluster retained table data")
 	}
 }

@@ -1003,6 +1003,84 @@ func TestFirehoseRedshiftPersistentRetry(t *testing.T) {
 	t.Fatal("persisted Redshift COPY did not retry")
 }
 
+func TestFirehoseRedshiftRetryExpiryAndDelete(t *testing.T) {
+	deps := spitest.Deps(t)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	redshift := redshiftservice.New(deps)
+	if _, err := redshift.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateCluster", Input: map[string]any{
+		"ClusterIdentifier": "failed-warehouse", "DBName": "analytics", "MasterUsername": "firehose", "MasterUserPassword": "secret-password",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := redshift.CreateTable(context.Background(), id, "failed-warehouse", "analytics", "events", []string{"id"}); err != nil {
+		t.Fatal(err)
+	}
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	destination := func(table string, duration int) map[string]any {
+		return map[string]any{
+			"ClusterJDBCURL": "jdbc:redshift://failed-warehouse.abc.us-east-1.redshift.amazonaws.com:5439/analytics", "RoleARN": testRoleARN,
+			"CopyCommand": map[string]any{"DataTableName": table}, "Username": "firehose", "Password": "wrong-password",
+			"RetryOptions": map[string]any{"DurationInSeconds": duration}, "S3Configuration": testS3Destination(),
+		}
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "redshift-expiry", "RedshiftDestinationConfiguration": destination("events", 300)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutRecord", map[string]any{"DeliveryStreamName": "redshift-expiry", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("1\n"))}}); err != nil {
+		t.Fatal(err)
+	}
+	collection := deps.Store.Scope(id.Account, id.Region).Collection("fh-redshift-work")
+	items, _, _ := collection.List(context.Background(), "redshift-expiry/", "", 0)
+	var expired redshiftWork
+	if len(items) != 1 || json.Unmarshal(items[0].Value, &expired) != nil {
+		t.Fatalf("Redshift expiry work %#v", items)
+	}
+	if err := deps.Clock.Advance(5 * time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 2000; attempt++ {
+		if work, _, _ := collection.List(context.Background(), "redshift-expiry/", "", 0); len(work) == 0 {
+			break
+		}
+		if attempt == 1999 {
+			t.Fatal("expired Redshift retry remained persisted")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if _, _, err := deps.Blobs.Get(context.Background(), expired.DataKey); err == nil {
+		t.Fatal("expired Redshift retry payload remained persisted")
+	}
+	rows, _ := redshift.TableRows(context.Background(), id, "failed-warehouse", "analytics", "events")
+	if len(rows) != 0 {
+		t.Fatalf("expired Redshift retry loaded rows %#v", rows)
+	}
+
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "redshift-delete", "RedshiftDestinationConfiguration": destination("missing", 600)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutRecord", map[string]any{"DeliveryStreamName": "redshift-delete", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("2\n"))}}); err != nil {
+		t.Fatal(err)
+	}
+	items, _, _ = collection.List(context.Background(), "redshift-delete/", "", 0)
+	var deleted redshiftWork
+	if len(items) != 1 || json.Unmarshal(items[0].Value, &deleted) != nil {
+		t.Fatalf("Redshift deletion work %#v", items)
+	}
+	if _, err := call("DeleteDeliveryStream", map[string]any{"DeliveryStreamName": "redshift-delete"}); err != nil {
+		t.Fatal(err)
+	}
+	if work, _, _ := collection.List(context.Background(), "redshift-delete/", "", 0); len(work) != 0 {
+		t.Fatalf("deleted stream retained Redshift work %#v", work)
+	}
+	if _, _, err := deps.Blobs.Get(context.Background(), deleted.DataKey); err == nil {
+		t.Fatal("deleted stream retained Redshift retry payload")
+	}
+}
+
 func TestSplunkDestinationValidationAndDescription(t *testing.T) {
 	valid := map[string]any{
 		"HECEndpoint": "https://splunk.example.com:8088", "HECEndpointType": "Raw", "HECToken": "token",

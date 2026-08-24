@@ -3223,6 +3223,38 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 	if inputType == "" {
 		inputType = "JSON"
 	}
+	if first(config, "ManifestType") == "ATHENA_DATA" {
+		records, err := csv.NewReader(bytes.NewReader(body)).ReadAll()
+		if err != nil {
+			return nil, "", false
+		}
+		items := []any{}
+		for _, record := range records {
+			if len(record) != 1 {
+				return nil, "", false
+			}
+			bucket, key, valid := s3URI(record[0])
+			if !valid {
+				return nil, "", false
+			}
+			nestedConfig := maps.Clone(config)
+			delete(nestedConfig, "ManifestType")
+			delete(nestedConfig, "MaxItems")
+			delete(nestedConfig, "MaxItemsPath")
+			payload := map[string]any{"Bucket": bucket, "Key": key}
+			nestedReader := map[string]any{"Resource": "arn:aws:states:::s3:getObject", "ReaderConfig": nestedConfig, "Parameters": payload}
+			if scope != nil {
+				nestedReader["Arguments"] = payload
+			}
+			dataset, _, valid := p.mapItems(ctx, req, map[string]any{"ItemReader": nestedReader}, data, scope, variables...)
+			values, array := dataset.([]any)
+			if !valid || !array {
+				return nil, "", false
+			}
+			items = append(items, values...)
+		}
+		return limitReaderItems(items, inputType, config, data, scope, variables...)
+	}
 	switch inputType {
 	case "JSON":
 		var items any
@@ -3353,6 +3385,11 @@ func jsonPointerTokens(pointer string) ([]string, bool) {
 		tokens = append(tokens, strings.ReplaceAll(strings.ReplaceAll(raw, "~1", "/"), "~0", "~"))
 	}
 	return tokens, true
+}
+
+func s3URI(value string) (string, string, bool) {
+	bucket, key, valid := strings.Cut(strings.TrimPrefix(value, "s3://"), "/")
+	return bucket, key, strings.HasPrefix(value, "s3://") && valid && bucket != "" && key != ""
 }
 
 func resolveJSONPointer(value any, pointer string) (any, bool) {

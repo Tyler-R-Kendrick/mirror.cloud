@@ -358,16 +358,20 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	}
 	invoke(storage, "CreateBucket", map[string]any{"Bucket": "items"}, nil)
 	objects := map[string]string{
-		"items.json":      `[{"id":1},{"id":2}]`,
-		"items.jsonl":     "{\"id\":3}\n{\"id\":4}\n",
-		"items.csv":       "id,name,path,note\n5\n6,Lin,C:\\\\Program Files\\\\App.exe,say \\\"hi\\\",ignored\n",
-		"items-path.json": `{"data":{"items":[{"id":13},{"id":14}]}}`,
-		"listed/a":        `{"alpha":{"id":21}}`,
-		"listed/b":        `{"beta":{"id":22}}`,
-		"flat-array/a":    `[{"id":23}]`,
-		"broken.json.gz":  "not gzip",
-		"nested.json":     `{"data":{"a/b":{"~key":[{"id":9},{"id":10}]}}}`,
-		"objects.json":    `{"b":{"id":12},"a":{"id":11}}`,
+		"items.json":       `[{"id":1},{"id":2}]`,
+		"items.jsonl":      "{\"id\":3}\n{\"id\":4}\n",
+		"items.csv":        "id,name,path,note\n5\n6,Lin,C:\\\\Program Files\\\\App.exe,say \\\"hi\\\",ignored\n",
+		"items-path.json":  `{"data":{"items":[{"id":13},{"id":14}]}}`,
+		"listed/a":         `{"alpha":{"id":21}}`,
+		"listed/b":         `{"beta":{"id":22}}`,
+		"flat-array/a":     `[{"id":23}]`,
+		"broken.json.gz":   "not gzip",
+		"athena/a.jsonl":   "{\"id\":31}\n",
+		"athena/b.jsonl":   "{\"id\":32}\n{\"id\":33}\n",
+		"manifest.csv":     "s3://items/athena/a.jsonl\ns3://items/athena/b.jsonl\n",
+		"bad-manifest.csv": "https://items/athena/a.jsonl\n",
+		"nested.json":      `{"data":{"a/b":{"~key":[{"id":9},{"id":10}]}}}`,
+		"objects.json":     `{"b":{"id":12},"a":{"id":11}}`,
 	}
 	for key, body := range objects {
 		invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": key}, []byte(body))
@@ -433,6 +437,25 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		if execution["status"] != "SUCCEEDED" || strings.Count(output, `"source":"`+test.inputType+`"`) != expected || test.inputType == "PARQUET" && !strings.Contains(output, `"name":"Ada"`) || test.inputType == "CSV" && (!strings.Contains(output, `"name":""`) || !strings.Contains(output, `"path":"C:\\Program Files\\App.exe"`) || !strings.Contains(output, `"note":"say \"hi\""`) || strings.Contains(output, "ignored")) || test.pointer != "" && !strings.Contains(output, `"id":9`) || test.itemsPath != "" && !strings.Contains(output, `"id":13`) {
 			t.Fatalf("%s ItemReader execution %#v", test.inputType, execution)
 		}
+	}
+	manifestState := map[string]any{
+		"Type": "Map", "ItemProcessor": processor, "ItemSelector": map[string]any{"value.$": "$$.Map.Item.Value", "source.$": "$$.Map.Item.Source"}, "End": true,
+		"ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": "manifest.csv"}, "ReaderConfig": map[string]any{"ManifestType": "ATHENA_DATA", "InputType": "JSONL", "MaxItems": 2}},
+	}
+	manifestDefinition, _ := json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": manifestState}})
+	manifestMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "reader-athena-manifest", "definition": string(manifestDefinition), "roleArn": testRoleARN}, nil)
+	manifestStarted := invoke(p, "StartExecution", map[string]any{"stateMachineArn": manifestMachine["stateMachineArn"]}, nil)
+	manifestExecution := invoke(p, "DescribeExecution", map[string]any{"executionArn": manifestStarted["executionArn"]}, nil)
+	manifestOutput := manifestExecution["output"].(string)
+	if manifestExecution["status"] != "SUCCEEDED" || strings.Count(manifestOutput, `"source":"JSONL"`) != 2 || !strings.Contains(manifestOutput, `"id":31`) || !strings.Contains(manifestOutput, `"id":32`) || strings.Contains(manifestOutput, `"id":33`) {
+		t.Fatalf("Athena manifest ItemReader execution %#v", manifestExecution)
+	}
+	manifestState["ItemReader"].(map[string]any)["Parameters"] = map[string]any{"Bucket": "items", "Key": "bad-manifest.csv"}
+	manifestDefinition, _ = json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": manifestState}})
+	manifestMachine = invoke(p, "CreateStateMachine", map[string]any{"name": "reader-bad-athena-manifest", "definition": string(manifestDefinition), "roleArn": testRoleARN}, nil)
+	manifestStarted = invoke(p, "StartExecution", map[string]any{"stateMachineArn": manifestMachine["stateMachineArn"]}, nil)
+	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": manifestStarted["executionArn"]}, nil); execution["status"] != "FAILED" || execution["error"] != "States.ItemReaderFailed" {
+		t.Fatalf("bad Athena manifest ItemReader execution %#v", execution)
 	}
 	listState := map[string]any{
 		"Type": "Map", "ItemProcessor": processor, "ItemSelector": map[string]any{"value.$": "$$.Map.Item.Value", "source.$": "$$.Map.Item.Source"}, "End": true,

@@ -535,6 +535,17 @@ func TestKPLDeaggregation(t *testing.T) {
 	if records := deaggregateKPL(corrupt); len(records) != 1 || !bytes.Equal(records[0], corrupt) {
 		t.Fatalf("corrupt aggregate changed %#v", records)
 	}
+	invalidIndex := bytes.Clone(aggregate)
+	index := bytes.Index(invalidIndex, []byte{0x08, 0x00})
+	if index < 0 {
+		t.Fatal("aggregate lacks partition index")
+	}
+	invalidIndex[index+1] = 1
+	digest := md5.Sum(invalidIndex[len(kplMagic) : len(invalidIndex)-md5.Size])
+	copy(invalidIndex[len(invalidIndex)-md5.Size:], digest[:])
+	if records := deaggregateKPL(invalidIndex); len(records) != 1 || !bytes.Equal(records[0], invalidIndex) {
+		t.Fatalf("invalid partition index changed %#v", records)
+	}
 }
 
 func FuzzKPLDeaggregation(f *testing.F) {

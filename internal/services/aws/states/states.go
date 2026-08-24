@@ -4719,6 +4719,24 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			}
 			return number, true
 		}
+		if typ == "Wait" {
+			validateIntegerField("Seconds", 0, 99999999)
+			if value, exists := state["Timestamp"]; exists {
+				expression, stringValue := value.(string)
+				if !(isJSONata && stringValue && strings.HasPrefix(expression, "{%") && strings.HasSuffix(expression, "%}")) {
+					_, validTimestamp := parseTimestamp(value)
+					if !validTimestamp || !stringValue || !strings.Contains(expression, "T") || !strings.HasSuffix(expression, "Z") {
+						add("SCHEMA_VALIDATION_FAILED", "Timestamp must be an RFC3339 UTC timestamp.", "/States/"+name+"/Timestamp")
+					}
+				}
+			}
+			if value, exists := state["TimestampPath"]; exists {
+				reference, valid := value.(string)
+				if !valid || !strings.HasPrefix(reference, "$") {
+					add("SCHEMA_VALIDATION_FAILED", "TimestampPath must be a reference path.", "/States/"+name+"/TimestampPath")
+				}
+			}
+		}
 		if typ == "Task" {
 			timeout, hasTimeout := validateIntegerField("TimeoutSeconds", 1, 99999999)
 			heartbeat, hasHeartbeat := validateIntegerField("HeartbeatSeconds", 1, 99999999)

@@ -779,6 +779,79 @@ func TestOpenSearchHelpers(t *testing.T) {
 	}
 }
 
+func TestSplunkDestinationValidationAndDescription(t *testing.T) {
+	valid := map[string]any{
+		"HECEndpoint": "https://splunk.example.com:8088", "HECEndpointType": "Raw", "HECToken": "token",
+		"S3Configuration": testS3Destination(),
+	}
+	if err := validateSplunkDestination(valid, "us-east-1"); err != nil {
+		t.Fatal(err)
+	}
+	secret := maps.Clone(valid)
+	delete(secret, "HECToken")
+	secret["SecretsManagerConfiguration"] = map[string]any{
+		"Enabled": true, "RoleARN": testRoleARN, "SecretARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:splunk",
+	}
+	if err := validateSplunkDestination(secret, "us-east-1"); err != nil {
+		t.Fatal(err)
+	}
+	invalid := []map[string]any{}
+	add := func(key string, value any) {
+		candidate := maps.Clone(valid)
+		if value == nil {
+			delete(candidate, key)
+		} else {
+			candidate[key] = value
+		}
+		invalid = append(invalid, candidate)
+	}
+	add("HECEndpoint", "http://splunk.example.com")
+	add("HECEndpointType", "Other")
+	add("HECToken", "bad\ntoken")
+	add("HECToken", nil)
+	add("BufferingHints", map[string]any{"IntervalInSeconds": 61, "SizeInMBs": 5})
+	add("BufferingHints", map[string]any{"IntervalInSeconds": 60, "SizeInMBs": 6})
+	add("RetryOptions", map[string]any{"DurationInSeconds": 7201})
+	add("HECAcknowledgmentTimeoutInSeconds", 179)
+	add("S3BackupMode", "Everything")
+	add("S3Configuration", nil)
+	for index, candidate := range invalid {
+		if err := validateSplunkDestination(candidate, "us-east-1"); err == nil {
+			t.Fatalf("accepted invalid Splunk destination %d: %#v", index, candidate)
+		}
+	}
+
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "splunk", "SplunkDestinationConfiguration": valid}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "splunk"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	description := response.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["SplunkDestinationDescription"].(map[string]any)
+	if description["HECToken"] != nil || first(description, "S3BackupMode") != "FailedEventsOnly" || description["HECAcknowledgmentTimeoutInSeconds"] != 300 {
+		t.Fatalf("Splunk description %#v", description)
+	}
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "splunk", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
+		"SplunkDestinationUpdate": map[string]any{"S3BackupMode": "AllEvents"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "splunk", "CurrentDeliveryStreamVersionId": "2", "DestinationId": destinationID,
+		"SplunkDestinationUpdate": map[string]any{"S3BackupMode": "FailedEventsOnly"},
+	}); err == nil {
+		t.Fatal("disabled Splunk AllEvents backup")
+	}
+}
+
 func TestOpenSearchDestinationValidation(t *testing.T) {
 	valid := map[string]any{
 		"DomainARN": "arn:aws:es:us-east-1:123456789012:domain/logs", "IndexName": "events", "RoleARN": testRoleARN,

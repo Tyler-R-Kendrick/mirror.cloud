@@ -582,12 +582,18 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			extended, _ := rec["ExtendedS3DestinationConfiguration"].(map[string]any)
 			backupEnabled := first(extended, "S3BackupMode") == "Enabled"
 			dynamicEnabled := dynamicPartitioningEnabled(extended)
+			splunk, _ := rec["SplunkDestinationConfiguration"].(map[string]any)
+			splunkAllEvents := first(splunk, "S3BackupMode") == "AllEvents"
 			copyDest(rec, req.Input, "Update")
 			extended, _ = rec["ExtendedS3DestinationConfiguration"].(map[string]any)
 			if backupEnabled && first(extended, "S3BackupMode") != "Enabled" {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			if dynamicEnabled != dynamicPartitioningEnabled(extended) {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			splunk, _ = rec["SplunkDestinationConfiguration"].(map[string]any)
+			if splunkAllEvents && first(splunk, "S3BackupMode") != "AllEvents" {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			if err := validateDestination(rec, req.Identity.Region); err != nil {
@@ -902,7 +908,7 @@ func (p *Pack) storeOne(ctx context.Context, req *spi.Request, name string, rec 
 }
 
 func copyDest(rec, in map[string]any, suffix string) {
-	for _, base := range []string{"S3Destination", "ExtendedS3Destination", "HttpEndpointDestination", "ElasticsearchDestination"} {
+	for _, base := range []string{"S3Destination", "ExtendedS3Destination", "HttpEndpointDestination", "ElasticsearchDestination", "SplunkDestination"} {
 		patch, _ := in[base+suffix].(map[string]any)
 		if patch == nil {
 			continue
@@ -1033,6 +1039,29 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 		}
 		destination["ElasticsearchDestinationDescription"] = configuration
 		delete(description, "ElasticsearchDestinationConfiguration")
+	}
+	if configuration, ok := description["SplunkDestinationConfiguration"].(map[string]any); ok {
+		configuration = maps.Clone(configuration)
+		delete(configuration, "HECToken")
+		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
+			describeS3Configuration(s3)
+			configuration["S3DestinationDescription"] = s3
+			delete(configuration, "S3Configuration")
+		}
+		if configuration["BufferingHints"] == nil {
+			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 60, "SizeInMBs": 5}
+		}
+		if configuration["RetryOptions"] == nil {
+			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 300}
+		}
+		if configuration["HECAcknowledgmentTimeoutInSeconds"] == nil {
+			configuration["HECAcknowledgmentTimeoutInSeconds"] = 300
+		}
+		if first(configuration, "S3BackupMode") == "" {
+			configuration["S3BackupMode"] = "FailedEventsOnly"
+		}
+		destination["SplunkDestinationDescription"] = configuration
+		delete(description, "SplunkDestinationConfiguration")
 	}
 	destinations := []any{}
 	if destinationID > after {
@@ -1264,7 +1293,7 @@ func validateDestination(rec map[string]any, region string) error {
 	count := 0
 	var destination map[string]any
 	destinationType := ""
-	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration"} {
+	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "SplunkDestinationConfiguration"} {
 		if value, exists := rec[key]; exists {
 			var ok bool
 			destination, ok = value.(map[string]any)
@@ -1283,6 +1312,9 @@ func validateDestination(rec map[string]any, region string) error {
 	}
 	if destinationType == "ElasticsearchDestinationConfiguration" {
 		return validateElasticsearchDestination(destination, region)
+	}
+	if destinationType == "SplunkDestinationConfiguration" {
+		return validateSplunkDestination(destination, region)
 	}
 	if err := validateS3Configuration(destination, region, destinationType == "ExtendedS3DestinationConfiguration"); err != nil {
 		return err
@@ -1341,6 +1373,54 @@ func validateElasticsearchDestination(destination map[string]any, region string)
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if options, ok := destination["DocumentIdOptions"].(map[string]any); destination["DocumentIdOptions"] != nil && (!ok || (first(options, "DefaultDocumentIdFormat") != "FIREHOSE_DEFAULT" && first(options, "DefaultDocumentIdFormat") != "NO_DOCUMENT_ID")) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	s3, ok := destination["S3Configuration"].(map[string]any)
+	if !ok {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if err := validateS3Configuration(s3, region, false); err != nil {
+		return err
+	}
+	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
+		return err
+	}
+	if raw := destination["ProcessingConfiguration"]; raw != nil {
+		return validateProcessingConfiguration(raw)
+	}
+	return nil
+}
+
+func validateSplunkDestination(destination map[string]any, region string) error {
+	endpoint := first(destination, "HECEndpoint")
+	parsed, err := url.Parse(endpoint)
+	if len(endpoint) > 2048 || err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || (first(destination, "HECEndpointType") != "Raw" && first(destination, "HECEndpointType") != "Event") {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	token, hasToken := destination["HECToken"].(string)
+	if (destination["HECToken"] != nil && !hasToken) || len(token) > 2048 || strings.ContainsAny(token, "\r\n") {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if hints, ok := destination["BufferingHints"].(map[string]any); destination["BufferingHints"] != nil && (!ok || !optionalInteger(hints, "IntervalInSeconds", 0, 60) || !optionalInteger(hints, "SizeInMBs", 1, 5)) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if retry, ok := destination["RetryOptions"].(map[string]any); destination["RetryOptions"] != nil && (!ok || !optionalInteger(retry, "DurationInSeconds", 0, 7200)) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if timeout, exists := destination["HECAcknowledgmentTimeoutInSeconds"]; exists {
+		if _, valid := inputInteger(timeout, 180, 600); !valid {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	if mode := first(destination, "S3BackupMode"); mode != "" && mode != "FailedEventsOnly" && mode != "AllEvents" {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	secrets, hasSecrets := destination["SecretsManagerConfiguration"].(map[string]any)
+	enabled, enabledOK := secrets["Enabled"].(bool)
+	if destination["SecretsManagerConfiguration"] != nil && (!hasSecrets || !enabledOK || (first(secrets, "RoleARN") != "" && !validRoleARN(first(secrets, "RoleARN"))) || (enabled && (!validRoleARN(first(secrets, "RoleARN")) || !firehoseSecretARN.MatchString(first(secrets, "SecretARN"))))) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if !enabled && token == "" {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	s3, ok := destination["S3Configuration"].(map[string]any)
@@ -1830,7 +1910,7 @@ func validateCreateDestination(input map[string]any) error {
 		}
 	}
 	switch destination {
-	case "S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration":
+	case "S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "SplunkDestinationConfiguration":
 		return nil
 	case "":
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}

@@ -1,15 +1,18 @@
 package s3tables
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
@@ -17,6 +20,43 @@ func TestS3TablesHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
 	if n := len(p.Operations()); n != 13 {
 		t.Fatalf("s3tables Operations() %d want 13", n)
+	}
+}
+
+func TestS3TablesRowMutations(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	identity := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateTableBucket", Input: map[string]any{"name": "warehouse"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.CreateTable(ctx, identity, "warehouse", "analytics", "events", []string{"id", "name"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ApplyRows(ctx, identity, "warehouse", "analytics", "events", []RowMutation{
+		{Values: map[string]any{"id": "1", "name": "alice"}},
+		{Values: map[string]any{"id": "2", "name": "bob"}},
+		{Operation: "update", Values: map[string]any{"id": "2", "name": "robert"}, UniqueKeys: []string{"id"}},
+		{Operation: "update", Values: map[string]any{"id": "3", "name": "carol"}, UniqueKeys: []string{"id"}},
+		{Operation: "delete", Values: map[string]any{"id": "1"}, UniqueKeys: []string{"id"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := p.TableRows(ctx, identity, "warehouse", "analytics", "events")
+	want := []map[string]any{{"id": "2", "name": "robert"}, {"id": "3", "name": "carol"}}
+	if err != nil || !reflect.DeepEqual(rows, want) {
+		t.Fatalf("S3 table rows %#v, %v", rows, err)
+	}
+	for name, mutation := range map[string]RowMutation{
+		"operation": {Operation: "merge", Values: map[string]any{"id": "4"}},
+		"column":    {Values: map[string]any{"missing": true}},
+		"keys":      {Operation: "update", Values: map[string]any{"id": "4"}},
+		"key":       {Operation: "delete", Values: map[string]any{"id": "4"}, UniqueKeys: []string{"missing"}},
+	} {
+		if err := p.ApplyRows(ctx, identity, "warehouse", "analytics", "events", []RowMutation{mutation}); err == nil {
+			t.Errorf("accepted invalid S3 table mutation %s", name)
+		}
 	}
 }
 

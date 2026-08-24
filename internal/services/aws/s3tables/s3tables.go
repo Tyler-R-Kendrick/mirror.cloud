@@ -4,6 +4,8 @@ package s3tables
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"reflect"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -20,6 +22,13 @@ func init() {
 // Pack implements S3 Tables-lite.
 type Pack struct{ deps spi.Deps }
 
+// RowMutation applies one Iceberg-style row operation.
+type RowMutation struct {
+	Operation  string
+	Values     map[string]any
+	UniqueKeys []string
+}
+
 // New constructs the pack.
 func New(d spi.Deps) *Pack { return &Pack{deps: d} }
 
@@ -31,6 +40,154 @@ func (p *Pack) Operations() []string {
 		"CreateNamespace", "ListNamespaces",
 		"CreateTable", "GetTable", "ListTables", "DeleteTable", "RenameTable", "GetTableMetadataLocation", "UpdateTableMetadataLocation",
 	}
+}
+
+// CreateTable creates a local Iceberg table with an explicit row schema.
+func (p *Pack) CreateTable(ctx context.Context, identity spi.Identity, bucket, namespace, table string, columns []string) error {
+	req := &spi.Request{Identity: identity}
+	if _, ok, _ := p.col(req, "s3tb").Get(ctx, bucket); !ok || bucket == "" || namespace == "" || table == "" || len(columns) == 0 {
+		return errors.New("S3 table configuration is invalid")
+	}
+	record := map[string]any{
+		"name": table, "namespace": namespace, "tableBucketARN": "arn:aws:s3tables:" + identity.Region + ":" + identity.Account + ":bucket/" + bucket,
+		"format": "ICEBERG", "columns": columns,
+	}
+	encoded, _ := json.Marshal(record)
+	return p.col(req, "s3tt").Put(ctx, bucket+"/"+namespace+"/"+table, encoded)
+}
+
+// ApplyRows commits insert, update, and delete mutations to a local table.
+func (p *Pack) ApplyRows(ctx context.Context, identity spi.Identity, bucket, namespace, table string, mutations []RowMutation) error {
+	req := &spi.Request{Identity: identity}
+	key := bucket + "/" + namespace + "/" + table
+	encoded, ok, _ := p.col(req, "s3tt").Get(ctx, key)
+	if !ok {
+		return errors.New("S3 table not found")
+	}
+	var description map[string]any
+	_ = json.Unmarshal(encoded, &description)
+	columns := stringsFrom(description["columns"])
+	if len(columns) == 0 {
+		return errors.New("S3 table schema is unavailable")
+	}
+	columnIndex := make(map[string]int, len(columns))
+	for index, column := range columns {
+		columnIndex[column] = index
+	}
+	return p.col(req, "s3trows").Txn(ctx, func(tx spi.Tx) error {
+		stored, _, err := tx.Get(key)
+		if err != nil {
+			return err
+		}
+		var rows [][]any
+		_ = json.Unmarshal(stored, &rows)
+		for _, mutation := range mutations {
+			for column := range mutation.Values {
+				if _, exists := columnIndex[column]; !exists {
+					return errors.New("S3 table column does not exist")
+				}
+			}
+			row := make([]any, len(columns))
+			for column, value := range mutation.Values {
+				row[columnIndex[column]] = value
+			}
+			switch strings.ToLower(mutation.Operation) {
+			case "", "insert":
+				rows = append(rows, row)
+			case "update", "delete":
+				indexes, err := uniqueIndexes(columnIndex, mutation.UniqueKeys)
+				if err != nil {
+					return err
+				}
+				matched := -1
+				for index, existing := range rows {
+					if sameKeys(existing, row, indexes) {
+						matched = index
+						break
+					}
+				}
+				if strings.EqualFold(mutation.Operation, "delete") {
+					if matched >= 0 {
+						rows = append(rows[:matched], rows[matched+1:]...)
+					}
+				} else if matched >= 0 {
+					rows[matched] = row
+				} else {
+					rows = append(rows, row)
+				}
+			default:
+				return errors.New("S3 table operation is invalid")
+			}
+		}
+		// ponytail: whole-table JSON rewrite; replace with Iceberg manifests when a file engine exists.
+		stored, _ = json.Marshal(rows)
+		return tx.Put(key, stored)
+	})
+}
+
+// TableRows returns rows using table column names.
+func (p *Pack) TableRows(ctx context.Context, identity spi.Identity, bucket, namespace, table string) ([]map[string]any, error) {
+	req := &spi.Request{Identity: identity}
+	key := bucket + "/" + namespace + "/" + table
+	descriptionBody, ok, _ := p.col(req, "s3tt").Get(ctx, key)
+	if !ok {
+		return nil, errors.New("S3 table not found")
+	}
+	var description map[string]any
+	_ = json.Unmarshal(descriptionBody, &description)
+	columns := stringsFrom(description["columns"])
+	rowsBody, _, _ := p.col(req, "s3trows").Get(ctx, key)
+	var stored [][]any
+	_ = json.Unmarshal(rowsBody, &stored)
+	rows := make([]map[string]any, 0, len(stored))
+	for _, storedRow := range stored {
+		row := map[string]any{}
+		for index, column := range columns {
+			if index < len(storedRow) {
+				row[column] = storedRow[index]
+			}
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+func stringsFrom(value any) []string {
+	values, _ := value.([]any)
+	if strings, ok := value.([]string); ok {
+		return strings
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if stringValue, ok := value.(string); ok {
+			result = append(result, stringValue)
+		}
+	}
+	return result
+}
+
+func uniqueIndexes(columns map[string]int, keys []string) ([]int, error) {
+	if len(keys) == 0 {
+		return nil, errors.New("S3 table unique keys are required")
+	}
+	indexes := make([]int, 0, len(keys))
+	for _, key := range keys {
+		index, ok := columns[key]
+		if !ok {
+			return nil, errors.New("S3 table unique key does not exist")
+		}
+		indexes = append(indexes, index)
+	}
+	return indexes, nil
+}
+
+func sameKeys(left, right []any, indexes []int) bool {
+	for _, index := range indexes {
+		if index >= len(left) || index >= len(right) || !reflect.DeepEqual(left[index], right[index]) {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *Pack) col(req *spi.Request, n string) spi.Collection {

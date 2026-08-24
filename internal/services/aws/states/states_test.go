@@ -206,6 +206,32 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if params.(map[string]any)["value"] != 2.0 || jsonPath(data, "$.missing.value") != nil || parseJSON("plain") != "plain" || toFloat(json.Number("3")) != 3 || !toBool("true") {
 		t.Fatal("data helpers")
 	}
+
+	recovery := walk(`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"arn:aws:lambda:us-east-1:1:function:missing","Retry":[{"ErrorEquals":["States.TaskFailed"],"MaxAttempts":2}],"Catch":[{"ErrorEquals":["ResourceNotFoundException"],"ResultPath":"$.error","Next":"Recovered"}]},"Recovered":{"Type":"Succeed"}}}`, map[string]any{"original": true})
+	got, _ := recovery.out.(map[string]any)
+	failure, _ := got["error"].(map[string]any)
+	if recovery.status != "SUCCEEDED" || got["original"] != true || failure["Error"] != "ResourceNotFoundException" {
+		t.Fatalf("task recovery %#v", recovery)
+	}
+	if unsupported := walk(`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}}}`, nil); unsupported.status != "FAILED" || unsupported.cause != "States.Runtime" {
+		t.Fatalf("unsupported task %#v", unsupported)
+	}
+	retrier := map[string]any{"Retry": []any{map[string]any{"ErrorEquals": []any{"Nope"}}, map[string]any{"ErrorEquals": []any{"States.ALL"}, "MaxAttempts": 2.0}}}
+	attempts := map[int]int{}
+	if !retryTask(retrier, "Boom", attempts) || !retryTask(retrier, "Boom", attempts) || retryTask(retrier, "Boom", attempts) || attempts[1] != 2 {
+		t.Fatalf("retry attempts %#v", attempts)
+	}
+	if matchesError([]any{"States.ALL"}, "States.Runtime") || matchesError([]any{"States.TaskFailed"}, "States.Timeout") || !matchesError([]any{"States.TaskFailed"}, "Boom") {
+		t.Fatal("error wildcard matching")
+	}
+	preserved := map[string]any{"keep": true}
+	if out, ok := applyResultPath(map[string]any{"ResultPath": nil}, preserved, "ignored"); !ok || out.(map[string]any)["keep"] != true {
+		t.Fatalf("null ResultPath %#v", out)
+	}
+	nested := map[string]any{"result": map[string]any{}}
+	if out, ok := applyResultPath(map[string]any{"ResultPath": "$.result.value"}, nested, 3); !ok || jsonPath(out, "$.result.value") != 3 {
+		t.Fatalf("nested ResultPath %#v", out)
+	}
 }
 
 func TestBootedServerStatesPassSucceed(t *testing.T) {

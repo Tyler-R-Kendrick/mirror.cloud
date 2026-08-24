@@ -4,6 +4,7 @@ package states
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -363,6 +364,8 @@ func (p *Pack) walk(ctx context.Context, req *spi.Request, def, from string, inp
 		cur = next
 	}
 	var hist []any
+	retries := map[string]map[int]int{}
+walkLoop:
 	for hop := 0; hop < 64; hop++ {
 		st, ok := states[cur].(map[string]any)
 		if !ok {
@@ -389,16 +392,42 @@ func (p *Pack) walk(ctx context.Context, req *spi.Request, def, from string, inp
 			payload := taskPayload(st, data)
 			switch {
 			case strings.Contains(res, ":function:") || strings.Contains(res, "lambda:invoke"):
-				out, err := p.invokeLambda(ctx, req, res, st, payload)
-				if err != nil {
-					return walkResult{out: data, status: "FAILED", cause: err.Error(), hist: hist}
+				if retries[cur] == nil {
+					retries[cur] = map[int]int{}
 				}
-				data = out
+				for {
+					out, err := p.invokeLambda(ctx, req, res, st, payload)
+					if err == nil {
+						var valid bool
+						data, valid = applyResultPath(st, data, out)
+						if !valid {
+							return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
+						}
+						break
+					}
+					failure := taskFailure(err)
+					// ponytail: retry delays are instant like Wait states; add virtual scheduling when timing fidelity is required.
+					if retryTask(st, failure.name, retries[cur]) {
+						continue
+					}
+					next, out, caught := catchTask(st, failure, data)
+					if !caught {
+						return walkResult{out: data, status: "FAILED", cause: failure.cause, hist: hist}
+					}
+					if next == "" {
+						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
+					}
+					data = out
+					cur = next
+					continue walkLoop
+				}
 			case strings.Contains(res, ":activity:"):
 				tok := p.deps.Rand.Hex(16)
 				return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
 					Token: tok, ActivityARN: res, StateName: cur, Input: payload,
 				}}
+			default:
+				return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 			}
 		case "Choice":
 			next := choiceNext(st, data)
@@ -464,6 +493,97 @@ func (p *Pack) walk(ctx context.Context, req *spi.Request, def, from string, inp
 		cur = next
 	}
 	return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
+}
+
+type stateFailure struct{ name, cause string }
+
+func taskFailure(err error) stateFailure {
+	var fault *spi.Fault
+	if errors.As(err, &fault) {
+		return stateFailure{name: fault.Code, cause: fault.Error()}
+	}
+	return stateFailure{name: "States.TaskFailed", cause: err.Error()}
+}
+
+func retryTask(st map[string]any, name string, attempts map[int]int) bool {
+	for i, raw := range asSlice(st["Retry"]) {
+		retrier, _ := raw.(map[string]any)
+		if !matchesError(retrier["ErrorEquals"], name) {
+			continue
+		}
+		maxAttempts := 3
+		if raw, ok := retrier["MaxAttempts"]; ok {
+			maxAttempts = int(toFloat(raw))
+		}
+		if attempts[i] >= maxAttempts {
+			return false
+		}
+		attempts[i]++
+		return true
+	}
+	return false
+}
+
+func catchTask(st map[string]any, failure stateFailure, input any) (string, any, bool) {
+	for _, raw := range asSlice(st["Catch"]) {
+		catcher, _ := raw.(map[string]any)
+		if !matchesError(catcher["ErrorEquals"], failure.name) {
+			continue
+		}
+		out, valid := applyResultPath(catcher, input, map[string]any{"Error": failure.name, "Cause": failure.cause})
+		if !valid {
+			return "", input, true
+		}
+		return first(catcher, "Next"), out, true
+	}
+	return "", input, false
+}
+
+func matchesError(raw any, name string) bool {
+	for _, candidate := range asSlice(raw) {
+		switch fmt.Sprint(candidate) {
+		case name:
+			return true
+		case "States.TaskFailed":
+			if name != "States.Timeout" {
+				return true
+			}
+		case "States.ALL":
+			if name != "States.Runtime" && name != "States.DataLimitExceeded" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func applyResultPath(state map[string]any, input, result any) (any, bool) {
+	raw, exists := state["ResultPath"]
+	if !exists || raw == "$" {
+		return result, true
+	}
+	if raw == nil {
+		return input, true
+	}
+	path, ok := raw.(string)
+	root, object := input.(map[string]any)
+	if !ok || !object || !strings.HasPrefix(path, "$.") {
+		return input, false
+	}
+	parts := strings.Split(strings.TrimPrefix(path, "$."), ".")
+	cur := root
+	for _, part := range parts[:len(parts)-1] {
+		next, ok := cur[part].(map[string]any)
+		if !ok {
+			return input, false
+		}
+		cur = next
+	}
+	if parts[len(parts)-1] == "" {
+		return input, false
+	}
+	cur[parts[len(parts)-1]] = result
+	return input, true
 }
 
 func taskPayload(st map[string]any, data any) any {

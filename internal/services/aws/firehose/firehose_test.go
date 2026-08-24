@@ -31,6 +31,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/opensearch"
+	redshiftservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/redshift"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -856,6 +857,63 @@ func TestRedshiftDestinationValidationAndDescription(t *testing.T) {
 		"RedshiftDestinationUpdate": map[string]any{"S3BackupMode": "Disabled"},
 	}); err == nil {
 		t.Fatal("disabled Redshift S3 backup")
+	}
+}
+
+func TestFirehoseRedshiftDestination(t *testing.T) {
+	deps := spitest.Deps(t)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	redshift := redshiftservice.New(deps)
+	if _, err := redshift.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateCluster", Input: map[string]any{
+		"ClusterIdentifier": "warehouse", "DBName": "analytics", "MasterUsername": "firehose", "MasterUserPassword": "secret-password",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := redshift.CreateTable(context.Background(), id, "warehouse", "analytics", "events", []string{"id", "payload"}); err != nil {
+		t.Fatal(err)
+	}
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	destination := map[string]any{
+		"ClusterJDBCURL": "jdbc:redshift://warehouse.abc.us-east-1.redshift.amazonaws.com:5439/analytics", "RoleARN": testRoleARN,
+		"CopyCommand": map[string]any{"DataTableName": "events", "DataTableColumns": "id,payload", "CopyOptions": "delimiter '|'"},
+		"Username":    "firehose", "Password": "secret-password", "S3BackupMode": "Enabled",
+		"S3Configuration":         map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "staging/"},
+		"S3BackupConfiguration":   map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "source/"},
+		"ProcessingConfiguration": map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "AppendDelimiterToRecord"}}},
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "redshift-delivery", "RedshiftDestinationConfiguration": destination}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := call("PutRecordBatch", map[string]any{"DeliveryStreamName": "redshift-delivery", "Records": []any{
+		map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("1|one"))},
+		map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("2|two"))},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := redshift.TableRows(context.Background(), id, "warehouse", "analytics", "events")
+	if err != nil || !reflect.DeepEqual(rows, []map[string]any{{"id": "1", "payload": "one"}, {"id": "2", "payload": "two"}}) {
+		t.Fatalf("Firehose Redshift rows %#v, %v", rows, err)
+	}
+	for index, rawResponse := range response.Output["RequestResponses"].([]any) {
+		recordID := first(rawResponse.(map[string]any), "RecordId")
+		for prefix, expected := range map[string]string{"staging": []string{"1|one\n", "2|two\n"}[index], "source": []string{"1|one", "2|two"}[index]} {
+			key := id.Account + "/" + id.Region + "/out/" + prefix + "/1970/01/01/00/redshift-delivery-1-1970-01-01-00-00-00-" + recordID
+			reader, _, err := deps.Blobs.Get(context.Background(), key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(reader)
+			_ = reader.Close()
+			if string(body) != expected {
+				t.Fatalf("Redshift %s object %q", prefix, body)
+			}
+		}
 	}
 }
 

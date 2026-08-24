@@ -35,6 +35,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/opensearch"
+	redshiftservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/redshift"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -2103,6 +2104,10 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 			return
 		}
 	}
+	if destination, ok := rec["RedshiftDestinationConfiguration"].(map[string]any); ok {
+		p.deliverRedshiftRecords(ctx, req, destination, stream, version, recIDs, data, now)
+		return
+	}
 	if destination, ok := rec["ElasticsearchDestinationConfiguration"].(map[string]any); ok {
 		backup, _ := destination["S3Configuration"].(map[string]any)
 		bucket, _, errorPrefix, _, _, _, kmsARN := s3Configuration(backup)
@@ -2141,6 +2146,79 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 			p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)
 		}
 	}
+}
+
+func (p *Pack) deliverRedshiftRecords(ctx context.Context, req *spi.Request, destination map[string]any, stream, version string, recIDs []string, data [][]byte, now time.Time) {
+	staging, _ := destination["S3Configuration"].(map[string]any)
+	failureConfiguration := staging
+	backup, _ := destination["S3BackupConfiguration"].(map[string]any)
+	backupEnabled := first(destination, "S3BackupMode") == "Enabled"
+	if backupEnabled {
+		failureConfiguration = backup
+	}
+	bucket, _, errorPrefix, _, _, _, kmsARN := s3Configuration(failureConfiguration)
+	var copied [][]byte
+	for index := range data {
+		if backupEnabled {
+			p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[index], data[index], now)
+		}
+		records, failures := p.processData(ctx, req, destination, stream, recIDs[index], data[index], now)
+		for _, failure := range failures {
+			p.logDeliveryError(ctx, req, destination, stream, failure.message, now)
+			p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)
+		}
+		for _, record := range records {
+			p.deliverS3Configuration(ctx, req, staging, stream, version, record.recID, record.data, now)
+			copied = append(copied, record.data)
+		}
+	}
+	if len(copied) == 0 {
+		return
+	}
+	username, password, err := p.redshiftCredentials(ctx, req, destination)
+	if err != nil {
+		p.logDeliveryError(ctx, req, destination, stream, err.Error(), now)
+		return
+	}
+	cluster, database := redshiftTarget(first(destination, "ClusterJDBCURL"))
+	command, _ := destination["CopyCommand"].(map[string]any)
+	err = redshiftservice.New(p.deps).Copy(ctx, req.Identity, redshiftservice.CopyInput{
+		Cluster: cluster, Database: database, Table: first(command, "DataTableName"), Username: username, Password: password,
+		Columns: first(command, "DataTableColumns"), Options: first(command, "CopyOptions"), Data: copied,
+	})
+	if err != nil {
+		p.logDeliveryError(ctx, req, destination, stream, err.Error(), now)
+	}
+}
+
+func (p *Pack) redshiftCredentials(ctx context.Context, req *spi.Request, destination map[string]any) (string, string, error) {
+	username, password := first(destination, "Username"), first(destination, "Password")
+	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {
+		response, err := secretsmanager.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": first(secrets, "SecretARN")}})
+		var secret string
+		var ok bool
+		if response != nil {
+			secret, ok = response.Output["SecretString"].(string)
+		}
+		value := map[string]any{}
+		if err != nil || !ok || json.Unmarshal([]byte(secret), &value) != nil {
+			return "", "", errors.New("unable to retrieve Redshift credentials")
+		}
+		username, ok = value["username"].(string)
+		if !ok {
+			return "", "", errors.New("Redshift secret must contain username and password")
+		}
+		password, ok = value["password"].(string)
+		if !ok || username == "" || len(password) < 6 {
+			return "", "", errors.New("Redshift secret must contain username and password")
+		}
+	}
+	return username, password, nil
+}
+
+func redshiftTarget(jdbc string) (string, string) {
+	parsed, _ := url.Parse(strings.TrimPrefix(jdbc, "jdbc:"))
+	return strings.SplitN(parsed.Hostname(), ".", 2)[0], strings.TrimPrefix(parsed.Path, "/")
 }
 
 func (p *Pack) deliverEndpointRecords(ctx context.Context, req *spi.Request, streamRecord, destination map[string]any, destinationKey, allMode, stream, version string, recIDs []string, data [][]byte, now time.Time) {

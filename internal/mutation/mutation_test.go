@@ -3699,8 +3699,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-lose-opensearch-arrival-time",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `arrival: payload.Arrivals[index], searchIndex: elasticsearchIndex(destination, payload.Arrivals[index]), searchType: first(destination, "TypeName"),`,
-			new:  `arrival: now, searchIndex: elasticsearchIndex(destination, payload.Arrivals[index]), searchType: first(destination, "TypeName"),`,
+			old:  `arrival: payload.Arrivals[index], searchIndex: searchFailureIndex(destination, payload.Arrivals[index]), searchType: first(destination, "TypeName"),`,
+			new:  `arrival: now, searchIndex: searchFailureIndex(destination, payload.Arrivals[index]), searchType: first(destination, "TypeName"),`,
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestOpenSearchBufferRetryPersistence",
 		},

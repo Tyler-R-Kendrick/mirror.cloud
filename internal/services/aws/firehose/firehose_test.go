@@ -2115,10 +2115,14 @@ func TestFirehoseEncryptionState(t *testing.T) {
 	} {
 		if _, err := call("CreateDeliveryStream", input); err == nil {
 			t.Fatalf("accepted invalid create input %#v", input)
+		} else if fault, ok := err.(*spi.Fault); !ok || fault.Code != "InvalidArgumentException" {
+			t.Fatalf("invalid create fault %#v for %#v", err, input)
 		}
 	}
 	if _, err := call("StartDeliveryStreamEncryption", map[string]any{"DeliveryStreamName": "source"}); err == nil {
 		t.Fatal("encrypted non-DirectPut stream")
+	} else if fault, ok := err.(*spi.Fault); !ok || fault.Code != "InvalidArgumentException" {
+		t.Fatalf("source encryption fault %#v", err)
 	}
 	for _, input := range []any{
 		map[string]any{},
@@ -2132,6 +2136,8 @@ func TestFirehoseEncryptionState(t *testing.T) {
 			"DeliveryStreamName": "plain", "DeliveryStreamEncryptionConfigurationInput": input,
 		}); err == nil {
 			t.Fatalf("accepted invalid encryption input %#v", input)
+		} else if fault, ok := err.(*spi.Fault); !ok || fault.Code != "InvalidArgumentException" {
+			t.Fatalf("invalid encryption fault %#v for %#v", err, input)
 		}
 	}
 	for _, operation := range []string{"StartDeliveryStreamEncryption", "StopDeliveryStreamEncryption"} {

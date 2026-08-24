@@ -1327,7 +1327,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-allow-source-stream-encryption-start",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `if first(rec, "DeliveryStreamType") != "DirectPut" {`,
+			old:  `if first(current, "DeliveryStreamType") != "DirectPut" {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseEncryptionState",

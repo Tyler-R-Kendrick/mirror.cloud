@@ -531,9 +531,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			var rec map[string]any
 			_ = json.Unmarshal(b, &rec)
-			if first(rec, "DeliveryStreamType") != "DirectPut" {
-				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-			}
 			rec["DeliveryStreamEncryptionConfiguration"] = encryption
 			rec["LastUpdateTimestamp"] = float64(p.deps.Clock.Now().UnixNano()) / float64(time.Second)
 			nb, _ := json.Marshal(rec)

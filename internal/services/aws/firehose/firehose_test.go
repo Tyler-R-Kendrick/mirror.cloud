@@ -780,6 +780,85 @@ func TestOpenSearchHelpers(t *testing.T) {
 	}
 }
 
+func TestRedshiftDestinationValidationAndDescription(t *testing.T) {
+	valid := map[string]any{
+		"ClusterJDBCURL": "jdbc:redshift://cluster.abc.us-east-1.redshift.amazonaws.com:5439/dev", "RoleARN": testRoleARN,
+		"CopyCommand": map[string]any{"DataTableName": "events", "DataTableColumns": "id,payload", "CopyOptions": "JSON 'auto'"},
+		"Username":    "firehose", "Password": "secret-password", "S3Configuration": testS3Destination(),
+	}
+	if err := validateRedshiftDestination(valid, "us-east-1"); err != nil {
+		t.Fatal(err)
+	}
+	secret := maps.Clone(valid)
+	delete(secret, "Username")
+	delete(secret, "Password")
+	secret["SecretsManagerConfiguration"] = map[string]any{
+		"Enabled": true, "RoleARN": testRoleARN, "SecretARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:redshift",
+	}
+	if err := validateRedshiftDestination(secret, "us-east-1"); err != nil {
+		t.Fatal(err)
+	}
+	invalid := []map[string]any{}
+	add := func(key string, value any) {
+		candidate := maps.Clone(valid)
+		if value == nil {
+			delete(candidate, key)
+		} else {
+			candidate[key] = value
+		}
+		invalid = append(invalid, candidate)
+	}
+	add("ClusterJDBCURL", "jdbc:redshift://localhost:5439/dev")
+	add("RoleARN", "role")
+	add("CopyCommand", map[string]any{})
+	add("CopyCommand", map[string]any{"DataTableName": "events", "DataTableColumns": 1})
+	add("Username", nil)
+	add("Password", "short")
+	add("RetryOptions", map[string]any{"DurationInSeconds": 7201})
+	add("S3BackupMode", "Everything")
+	add("S3BackupMode", "Enabled")
+	for _, compression := range []string{"ZIP", "Snappy", "HADOOP_SNAPPY"} {
+		s3 := testS3Destination()
+		s3["CompressionFormat"] = compression
+		add("S3Configuration", s3)
+	}
+	for index, candidate := range invalid {
+		if err := validateRedshiftDestination(candidate, "us-east-1"); err == nil {
+			t.Fatalf("accepted invalid Redshift destination %d: %#v", index, candidate)
+		}
+	}
+
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "redshift", "RedshiftDestinationConfiguration": valid}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "redshift"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	description := response.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["RedshiftDestinationDescription"].(map[string]any)
+	if description["Password"] != nil || description["Username"] != "firehose" || description["RetryOptions"].(map[string]any)["DurationInSeconds"] != 3600 || first(description, "S3BackupMode") != "Disabled" || description["S3DestinationDescription"] == nil {
+		t.Fatalf("Redshift description %#v", description)
+	}
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "redshift", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
+		"RedshiftDestinationUpdate": map[string]any{"S3BackupMode": "Enabled", "S3BackupUpdate": testS3Destination()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "redshift", "CurrentDeliveryStreamVersionId": "2", "DestinationId": destinationID,
+		"RedshiftDestinationUpdate": map[string]any{"S3BackupMode": "Disabled"},
+	}); err == nil {
+		t.Fatal("disabled Redshift S3 backup")
+	}
+}
+
 func TestSplunkDestinationValidationAndDescription(t *testing.T) {
 	valid := map[string]any{
 		"HECEndpoint": "https://splunk.example.com:8088", "HECEndpointType": "Raw", "HECToken": "token",
@@ -3067,7 +3146,7 @@ func TestFirehoseCreateConfiguration(t *testing.T) {
 		{"missing role ARN", map[string]any{"DeliveryStreamName": "no-role", "S3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::out"}}, "InvalidArgumentException"},
 		{"malformed role ARN", map[string]any{"DeliveryStreamName": "bad-role", "S3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": "role"}}, "InvalidArgumentException"},
 		{"long role ARN", map[string]any{"DeliveryStreamName": "long-role", "S3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": "arn:aws:iam::123456789012:role/" + strings.Repeat("a", 500)}}, "InvalidArgumentException"},
-		{"unsupported destination", map[string]any{"DeliveryStreamName": "redshift", "RedshiftDestinationConfiguration": map[string]any{}}, "MirrorNotImplemented"},
+		{"unsupported destination", map[string]any{"DeliveryStreamName": "snowflake", "SnowflakeDestinationConfiguration": map[string]any{}}, "MirrorNotImplemented"},
 		{"direct put with Kinesis source", map[string]any{"DeliveryStreamName": "direct-source", "KinesisStreamSourceConfiguration": testKinesisSource(), "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
 		{"missing Kinesis source", map[string]any{"DeliveryStreamName": "no-source", "DeliveryStreamType": "KinesisStreamAsSource", "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
 		{"malformed Kinesis ARN", map[string]any{"DeliveryStreamName": "bad-source", "DeliveryStreamType": "KinesisStreamAsSource", "KinesisStreamSourceConfiguration": map[string]any{"KinesisStreamARN": "stream", "RoleARN": testRoleARN}, "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},

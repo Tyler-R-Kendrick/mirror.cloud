@@ -587,6 +587,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			extended, _ := rec["ExtendedS3DestinationConfiguration"].(map[string]any)
 			backupEnabled := first(extended, "S3BackupMode") == "Enabled"
 			dynamicEnabled := dynamicPartitioningEnabled(extended)
+			redshift, _ := rec["RedshiftDestinationConfiguration"].(map[string]any)
+			redshiftBackupEnabled := first(redshift, "S3BackupMode") == "Enabled"
 			splunk, _ := rec["SplunkDestinationConfiguration"].(map[string]any)
 			splunkAllEvents := first(splunk, "S3BackupMode") == "AllEvents"
 			copyDest(rec, req.Input, "Update")
@@ -595,6 +597,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			if dynamicEnabled != dynamicPartitioningEnabled(extended) {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			redshift, _ = rec["RedshiftDestinationConfiguration"].(map[string]any)
+			if redshiftBackupEnabled && first(redshift, "S3BackupMode") != "Enabled" {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			splunk, _ = rec["SplunkDestinationConfiguration"].(map[string]any)
@@ -913,7 +919,7 @@ func (p *Pack) storeOne(ctx context.Context, req *spi.Request, name string, rec 
 }
 
 func copyDest(rec, in map[string]any, suffix string) {
-	for _, base := range []string{"S3Destination", "ExtendedS3Destination", "HttpEndpointDestination", "ElasticsearchDestination", "SplunkDestination"} {
+	for _, base := range []string{"S3Destination", "ExtendedS3Destination", "HttpEndpointDestination", "ElasticsearchDestination", "RedshiftDestination", "SplunkDestination"} {
 		patch, _ := in[base+suffix].(map[string]any)
 		if patch == nil {
 			continue
@@ -1044,6 +1050,28 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 		}
 		destination["ElasticsearchDestinationDescription"] = configuration
 		delete(description, "ElasticsearchDestinationConfiguration")
+	}
+	if configuration, ok := description["RedshiftDestinationConfiguration"].(map[string]any); ok {
+		configuration = maps.Clone(configuration)
+		delete(configuration, "Password")
+		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
+			describeS3Configuration(s3)
+			configuration["S3DestinationDescription"] = s3
+			delete(configuration, "S3Configuration")
+		}
+		if backup, ok := configuration["S3BackupConfiguration"].(map[string]any); ok {
+			describeS3Configuration(backup)
+			configuration["S3BackupDescription"] = backup
+			delete(configuration, "S3BackupConfiguration")
+		}
+		if configuration["RetryOptions"] == nil {
+			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 3600}
+		}
+		if first(configuration, "S3BackupMode") == "" {
+			configuration["S3BackupMode"] = "Disabled"
+		}
+		destination["RedshiftDestinationDescription"] = configuration
+		delete(description, "RedshiftDestinationConfiguration")
 	}
 	if configuration, ok := description["SplunkDestinationConfiguration"].(map[string]any); ok {
 		configuration = maps.Clone(configuration)
@@ -1298,7 +1326,7 @@ func validateDestination(rec map[string]any, region string) error {
 	count := 0
 	var destination map[string]any
 	destinationType := ""
-	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "SplunkDestinationConfiguration"} {
+	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration"} {
 		if value, exists := rec[key]; exists {
 			var ok bool
 			destination, ok = value.(map[string]any)
@@ -1317,6 +1345,9 @@ func validateDestination(rec map[string]any, region string) error {
 	}
 	if destinationType == "ElasticsearchDestinationConfiguration" {
 		return validateElasticsearchDestination(destination, region)
+	}
+	if destinationType == "RedshiftDestinationConfiguration" {
+		return validateRedshiftDestination(destination, region)
 	}
 	if destinationType == "SplunkDestinationConfiguration" {
 		return validateSplunkDestination(destination, region)
@@ -1386,6 +1417,76 @@ func validateElasticsearchDestination(destination map[string]any, region string)
 	}
 	if err := validateS3Configuration(s3, region, false); err != nil {
 		return err
+	}
+	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
+		return err
+	}
+	if raw := destination["ProcessingConfiguration"]; raw != nil {
+		return validateProcessingConfiguration(raw)
+	}
+	return nil
+}
+
+func validateRedshiftDestination(destination map[string]any, region string) error {
+	jdbc := first(destination, "ClusterJDBCURL")
+	if len(jdbc) < 1 || len(jdbc) > 512 || !firehoseRedshiftJDBC.MatchString(jdbc) || !validRoleARN(first(destination, "RoleARN")) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	copyCommand, ok := destination["CopyCommand"].(map[string]any)
+	table := first(copyCommand, "DataTableName")
+	if !ok || len(table) < 1 || len(table) > 512 {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	for _, key := range []string{"DataTableColumns", "CopyOptions"} {
+		if raw := copyCommand[key]; raw != nil {
+			value, ok := raw.(string)
+			if !ok || len(value) > 10240 {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+	}
+	username, usernameOK := destination["Username"].(string)
+	password, passwordOK := destination["Password"].(string)
+	if (destination["Username"] != nil && (!usernameOK || len(username) < 1 || len(username) > 512)) || (destination["Password"] != nil && (!passwordOK || len(password) < 6 || len(password) > 512)) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	secrets, hasSecrets := destination["SecretsManagerConfiguration"].(map[string]any)
+	enabled, enabledOK := secrets["Enabled"].(bool)
+	if destination["SecretsManagerConfiguration"] != nil && (!hasSecrets || !enabledOK || (first(secrets, "RoleARN") != "" && !validRoleARN(first(secrets, "RoleARN"))) || (enabled && (!validRoleARN(first(secrets, "RoleARN")) || !firehoseSecretARN.MatchString(first(secrets, "SecretARN"))))) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if !enabled && (!usernameOK || !passwordOK) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if retry, ok := destination["RetryOptions"].(map[string]any); destination["RetryOptions"] != nil && (!ok || !optionalInteger(retry, "DurationInSeconds", 0, 7200)) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	mode := first(destination, "S3BackupMode")
+	if mode != "" && mode != "Disabled" && mode != "Enabled" {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	s3, ok := destination["S3Configuration"].(map[string]any)
+	if !ok {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if err := validateS3Configuration(s3, region, false); err != nil {
+		return err
+	}
+	if compression := first(s3, "CompressionFormat"); compression != "" && compression != "UNCOMPRESSED" && compression != "GZIP" {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	backupRaw, backupExists := destination["S3BackupConfiguration"]
+	if mode == "Enabled" && !backupExists {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if backupExists {
+		backup, ok := backupRaw.(map[string]any)
+		if !ok {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if err := validateS3Configuration(backup, region, false); err != nil {
+			return err
+		}
 	}
 	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
 		return err
@@ -1915,7 +2016,7 @@ func validateCreateDestination(input map[string]any) error {
 		}
 	}
 	switch destination {
-	case "S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "SplunkDestinationConfiguration":
+	case "S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration":
 		return nil
 	case "":
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
@@ -3622,6 +3723,7 @@ var (
 	firehoseTimeZone           = regexp.MustCompile(`^[a-zA-Z/_]+$`)
 	firehoseBucketARN          = regexp.MustCompile(`^arn:.*:s3:::[\w.\-]{1,255}$`)
 	firehoseRoleARN            = regexp.MustCompile(`^arn:.*:iam::\d{12}:role/[a-zA-Z_0-9+=,.@\-_/]+$`)
+	firehoseRedshiftJDBC       = regexp.MustCompile(`^jdbc:(redshift|postgresql)://([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+redshift(-serverless)?\.[A-Za-z0-9.-]+:[0-9]{1,5}/[A-Za-z0-9_$-]+$`)
 	firehoseKinesisStreamARN   = regexp.MustCompile(`^arn:.*:kinesis:[a-zA-Z0-9\-]+:\d{12}:stream/[a-zA-Z0-9_.-]+$`)
 	firehoseDomainARN          = regexp.MustCompile(`^arn:.*:es:[a-zA-Z0-9\-]+:\d{12}:domain/[a-z][-0-9a-z]{2,27}$`)
 	firehoseMSKClusterARN      = regexp.MustCompile(`^arn:.*:kafka:[a-zA-Z0-9\-]+:\d{12}:cluster/[^/]+/.+$`)

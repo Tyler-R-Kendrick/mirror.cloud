@@ -4744,6 +4744,26 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				}
 			}
 		}
+		for _, group := range []struct {
+			owner  string
+			fields []string
+		}{
+			{"Choice", []string{"Choices", "Default"}},
+			{"Fail", []string{"Cause", "CausePath", "Error", "ErrorPath"}},
+			{"Map", []string{"ItemBatcher", "ItemProcessor", "ItemReader", "Items", "ItemsPath", "ItemSelector", "Iterator", "Label", "MaxConcurrency", "MaxConcurrencyPath", "ResultWriter", "ToleratedFailureCount", "ToleratedFailureCountPath", "ToleratedFailurePercentage", "ToleratedFailurePercentagePath"}},
+			{"Parallel", []string{"Branches"}},
+			{"Pass", []string{"Result"}},
+			{"Wait", []string{"Seconds", "SecondsPath", "Timestamp", "TimestampPath"}},
+		} {
+			if typ == group.owner {
+				continue
+			}
+			for _, field := range group.fields {
+				if _, exists := state[field]; exists {
+					add("SCHEMA_VALIDATION_FAILED", field+" is only supported by "+group.owner+" states.", "/States/"+name+"/"+field)
+				}
+			}
+		}
 		if typ == "Wait" {
 			configured := 0
 			for _, field := range []string{"Seconds", "Timestamp", "SecondsPath", "TimestampPath"} {

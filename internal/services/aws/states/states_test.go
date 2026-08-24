@@ -1358,6 +1358,41 @@ func TestStatesWaitValidation(t *testing.T) {
 	}
 }
 
+func TestStatesFailValidation(t *testing.T) {
+	definition := func(queryLanguage, fields string) string {
+		if fields != "" {
+			fields = "," + fields
+		}
+		return fmt.Sprintf(`{"QueryLanguage":%q,"StartAt":"Fail","States":{"Fail":{"Type":"Fail"%s}}}`, queryLanguage, fields)
+	}
+	for _, test := range []struct{ queryLanguage, fields string }{
+		{"JSONPath", ""},
+		{"JSONPath", `"Error":"Boom","Cause":"failed"`},
+		{"JSONPath", `"ErrorPath":"$.error","CausePath":"$cause"`},
+		{"JSONPath", `"ErrorPath":"States.Format('{}', $.error)","CausePath":"States.UUID()"`},
+		{"JSONata", `"Error":"Boom","Cause":"failed"`},
+		{"JSONata", `"Error":"{% $states.input.error %}","Cause":"{% $states.input.cause %}"`},
+	} {
+		if diagnostics := validateDefinition(definition(test.queryLanguage, test.fields)); len(diagnostics) != 0 {
+			t.Fatalf("valid Fail diagnostics %#v for %s", diagnostics, test.fields)
+		}
+	}
+	for _, test := range []struct{ queryLanguage, fields string }{
+		{"JSONPath", `"Error":1`},
+		{"JSONPath", `"Cause":false`},
+		{"JSONPath", `"ErrorPath":1`},
+		{"JSONPath", `"CausePath":"cause"`},
+		{"JSONPath", `"ErrorPath":"States.ArrayLength($.errors)"`},
+		{"JSONPath", `"Error":"Boom","ErrorPath":"$.error"`},
+		{"JSONPath", `"Cause":"failed","CausePath":"$.cause"`},
+		{"JSONata", `"ErrorPath":"$.error"`},
+	} {
+		if diagnostics := validateDefinition(definition(test.queryLanguage, test.fields)); len(diagnostics) != 1 {
+			t.Fatalf("Fail diagnostics = %#v for %s", diagnostics, test.fields)
+		}
+	}
+}
+
 func TestStatesExecutionTimeout(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

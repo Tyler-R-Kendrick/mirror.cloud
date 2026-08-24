@@ -295,9 +295,9 @@ func TestDistributedMapRuns(t *testing.T) {
 	fault("ListMapRuns", map[string]any{"executionArn": executionARN, "nextToken": "bad"}, "InvalidToken")
 
 	failingProcessor := `{"StartAt":"Fail","ProcessorConfig":{"Mode":"DISTRIBUTED"},"States":{"Fail":{"Type":"Fail","Error":"ItemFailed"}}}`
-	toleratedDefinition := `{"StartAt":"Map","States":{"Map":{"Type":"Map","ItemsPath":"$.items","ToleratedFailureCount":2,"ItemProcessor":` + failingProcessor + `,"End":true}}}`
+	toleratedDefinition := `{"StartAt":"Map","States":{"Map":{"Type":"Map","ItemsPath":"$.items","ToleratedFailureCountPath":"$.limit","ItemProcessor":` + failingProcessor + `,"End":true}}}`
 	toleratedARN := must("CreateStateMachine", map[string]any{"name": "tolerated", "definition": toleratedDefinition, "roleArn": testRoleARN})["stateMachineArn"].(string)
-	toleratedExecution := must("StartExecution", map[string]any{"stateMachineArn": toleratedARN, "input": `{"items":[1,2]}`})["executionArn"].(string)
+	toleratedExecution := must("StartExecution", map[string]any{"stateMachineArn": toleratedARN, "input": `{"items":[1,2],"limit":2}`})["executionArn"].(string)
 	if execution := must("DescribeExecution", map[string]any{"executionArn": toleratedExecution}); execution["status"] != "SUCCEEDED" {
 		t.Fatalf("tolerated distributed map %#v", execution)
 	}
@@ -778,6 +778,9 @@ func TestStatesJSONataBehavior(t *testing.T) {
 		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Succeed","Output":"{% $eval('1') %}"}}}`,
 		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
 		`{"QueryLanguage":"JSONata","StartAt":"Outer","States":{"Outer":{"Type":"Pass","Assign":{"value":"{% 1 %}"},"Next":"Map"},"Map":{"Type":"Map","Items":"{% [] %}","ItemProcessor":{"StartAt":"Inner","States":{"Inner":{"Type":"Pass","Assign":{"value":"{% 2 %}"},"End":true}}},"End":true}}}`,
+		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","TimeoutSeconds":"later","End":true}}}`,
+		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Map","Items":"{% [] %}","ToleratedFailurePercentage":101,"ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Map","ItemsPath":"$.items","MaxConcurrency":1,"MaxConcurrencyPath":"$.limit","ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`,
 	}
 	for _, invalid := range invalidDefinitions {
 		if diagnostics := validateDefinition(invalid); len(diagnostics) == 0 {
@@ -877,6 +880,22 @@ func TestStatesJSONataErrorsAndFields(t *testing.T) {
 	credentialRetry := `{"QueryLanguage":"JSONata","StartAt":"Send","States":{"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Credentials":{"RoleArn":"{% $states.context.State.RetryCount > 0 ? '` + testRoleARN + `' : $states.input.missing %}"},"Arguments":{"QueueUrl":"` + queueURL + `","MessageBody":"credentials"},"Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"MaxAttempts":1}],"End":true}}}`
 	if execution := start("jsonata-credential-retry", credentialRetry, `{}`); execution["status"] != "SUCCEEDED" {
 		t.Fatalf("JSONata credential retry %#v", execution)
+	}
+	timeoutRetry := `{"QueryLanguage":"JSONata","StartAt":"Send","States":{"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","TimeoutSeconds":"{% $states.context.State.RetryCount > 0 ? 2 : 'later' %}","HeartbeatSeconds":"{% 1 %}","Arguments":{"QueueUrl":"` + queueURL + `","MessageBody":"timeout"},"Output":{"retry":"{% $states.context.State.RetryCount %}"},"Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"MaxAttempts":1}],"End":true}}}`
+	if execution := start("jsonata-timeout-retry", timeoutRetry, `{}`); execution["status"] != "SUCCEEDED" || execution["output"] != `{"retry":1}` {
+		t.Fatalf("JSONata timeout retry %#v", execution)
+	}
+	numericMap := `{"QueryLanguage":"JSONata","StartAt":"Map","States":{"Map":{"Type":"Map","Items":"{% $states.context.State.RetryCount > 0 ? [1,2] : $states.input.missing %}","MaxConcurrency":"{% 2 %}","ToleratedFailureCount":"{% 1 %}","ToleratedFailurePercentage":"{% 50 %}","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Choose","States":{"Choose":{"Type":"Choice","Choices":[{"Condition":"{% $states.input = 1 %}","Next":"Bad"}],"Default":"Done"},"Bad":{"Type":"Fail","Error":"Expected"},"Done":{"Type":"Succeed"}}},"Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"MaxAttempts":1}],"End":true}}}`
+	numericMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonata-numeric-map", "definition": numericMap, "roleArn": testRoleARN})
+	numericARN := invoke(p, "StartExecution", map[string]any{"stateMachineArn": numericMachine["stateMachineArn"]})["executionArn"].(string)
+	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": numericARN}); execution["status"] != "SUCCEEDED" || execution["output"] != `[2]` {
+		t.Fatalf("JSONata numeric Map %#v", execution)
+	}
+	writerRetry := `{"QueryLanguage":"JSONata","StartAt":"Map","States":{"Map":{"Type":"Map","Items":"{% [1] %}","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"ResultWriter":{"Resource":"arn:aws:states:::s3:putObject","Arguments":{"Bucket":"{% $states.context.State.RetryCount > 0 ? 'jsonata-items' : $states.input.missing %}","Prefix":"results"}},"Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"MaxAttempts":1}],"End":true}}}`
+	writerMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonata-writer-retry", "definition": writerRetry, "roleArn": testRoleARN})
+	writerARN := invoke(p, "StartExecution", map[string]any{"stateMachineArn": writerMachine["stateMachineArn"]})["executionArn"].(string)
+	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": writerARN}); execution["status"] != "SUCCEEDED" || !strings.Contains(execution["output"].(string), "ResultWriterDetails") {
+		t.Fatalf("JSONata ResultWriter retry %#v", execution)
 	}
 	variablesDefinition := `{"StartAt":"Store","States":{"Store":{"Type":"Pass","Assign":{"saved":"{% $states.input.value %}"},"Next":"Choose"},"Choose":{"Type":"Choice","Choices":[{"Variable":"$.value","NumericEquals":7,"Assign":{"chosen":"yes"},"Next":"Send"}]},"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Parameters":{"QueueUrl":"` + queueURL + `","MessageBody":"x"},"Assign":{"messageId":"{% $states.result.MessageId %}"},"ResultPath":null,"Next":"Done"},"Done":{"Type":"Succeed","QueryLanguage":"JSONata","Output":{"saved":"{% $saved %}","chosen":"{% $chosen %}","messageId":"{% $messageId %}"}}}}`
 	if execution := start("jsonpath-variables", variablesDefinition, `{"value":7}`); execution["status"] != "SUCCEEDED" || !strings.Contains(execution["output"].(string), `"saved":7`) || !strings.Contains(execution["output"].(string), `"chosen":"yes"`) {

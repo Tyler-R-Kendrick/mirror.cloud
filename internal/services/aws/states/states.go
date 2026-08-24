@@ -1527,6 +1527,23 @@ walkLoop:
 						failure = stateFailure{name: "States.QueryEvaluationError", cause: "States.QueryEvaluationError"}
 					}
 				}
+				var numericScope *jsonataScope
+				if isJSONata {
+					numericScope = &jsonataScope{input: rawInput, context: stateContext, variables: variables, random: p.deps.Rand}
+				}
+				timeout, hasTimeout, timeoutValid := stateInteger(st, "TimeoutSeconds", rawInput, numericScope, 1, 99999999)
+				heartbeat, hasHeartbeat, heartbeatValid := stateInteger(st, "HeartbeatSeconds", rawInput, numericScope, 1, 99999999)
+				maximumHeartbeat := 99999999.0
+				if hasTimeout {
+					maximumHeartbeat = timeout
+				}
+				if !timeoutValid || !heartbeatValid || hasHeartbeat && heartbeat >= maximumHeartbeat {
+					name := "States.Runtime"
+					if isJSONata {
+						name = "States.QueryEvaluationError"
+					}
+					failure = stateFailure{name: name, cause: name}
+				}
 				if failure.name == "" && strings.Contains(res, ":activity:") {
 					tok := p.deps.Rand.Hex(16)
 					return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
@@ -1716,32 +1733,12 @@ walkLoop:
 			if isJSONata {
 				mapScope = &jsonataScope{input: rawInput, context: stateContext, variables: variables, random: p.deps.Rand}
 			}
-			arr, source, ok := p.mapItems(ctx, req, st, data, mapScope)
-			if isJSONata {
-				items := any(data)
-				if _, hasReader := st["ItemReader"]; hasReader {
-					items = arr
-				}
-				if configured, exists := st["Items"]; exists {
-					items, ok = evalJSONataValue(configured, jsonataScope{input: rawInput, context: stateContext, variables: variables, random: p.deps.Rand})
-				}
-				arr, ok = items.([]any)
-				source = "STATE_DATA"
-			}
-			if !ok {
-				failure := "States.Runtime"
-				if _, hasReader := st["ItemReader"]; hasReader {
-					failure = "States.ItemReaderFailed"
-				}
-				return walkResult{out: data, status: "FAILED", cause: failure, errorName: failure, hist: hist}
-			}
-			arr, ok = batchMapItems(st, data, arr, p.deps.Rand, mapScope)
-			if !ok {
-				return walkResult{out: data, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
-			}
 			iter, _ := st["Iterator"].(map[string]any)
 			if iter == nil {
 				iter, _ = st["ItemProcessor"].(map[string]any)
+			}
+			if iter == nil {
+				return walkResult{out: data, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
 			}
 			if iter["QueryLanguage"] == nil {
 				iter = maps.Clone(iter)
@@ -1763,9 +1760,55 @@ walkLoop:
 			}
 			for {
 				setJSONataRetryCount(stateContext, retries[cur])
+				arr, source, itemsOK := p.mapItems(ctx, req, st, data, mapScope)
+				var failed *walkResult
+				if isJSONata {
+					items := any(data)
+					_, hasReader := st["ItemReader"]
+					if hasReader {
+						items = arr
+					} else {
+						source = "STATE_DATA"
+					}
+					if configured, exists := st["Items"]; exists {
+						items, itemsOK = evalJSONataValue(configured, *mapScope)
+					}
+					arr, itemsOK = items.([]any)
+				}
+				if !itemsOK {
+					name := "States.Runtime"
+					if strings.HasPrefix(source, "States.") {
+						name = source
+					} else if _, hasReader := st["ItemReader"]; hasReader {
+						name = "States.ItemReaderFailed"
+					} else if isJSONata {
+						name = "States.QueryEvaluationError"
+					}
+					failed = &walkResult{out: stateInput, status: "FAILED", cause: name, errorName: name}
+				}
+				if failed == nil {
+					var batchOK bool
+					arr, batchOK = batchMapItems(st, data, arr, p.deps.Rand, mapScope)
+					if !batchOK {
+						name := "States.Runtime"
+						if isJSONata {
+							name = "States.QueryEvaluationError"
+						}
+						failed = &walkResult{out: stateInput, status: "FAILED", cause: name, errorName: name}
+					}
+				}
+				maxConcurrency, _, concurrencyOK := stateInteger(st, "MaxConcurrency", rawInput, mapScope, 0, math.MaxInt32)
+				failureCount, hasFailureCount, failureCountOK := stateInteger(st, "ToleratedFailureCount", rawInput, mapScope, 0, math.MaxInt32)
+				failurePercentage, hasFailurePercentage, failurePercentageOK := stateInteger(st, "ToleratedFailurePercentage", rawInput, mapScope, 0, 100)
+				if failed == nil && (!concurrencyOK || !failureCountOK || !failurePercentageOK) {
+					name := "States.Runtime"
+					if isJSONata {
+						name = "States.QueryEvaluationError"
+					}
+					failed = &walkResult{out: stateInput, status: "FAILED", cause: name, errorName: name}
+				}
 				var results []any
 				var itemResults []mapItemResult
-				var failed *walkResult
 				failedCount := 0
 				label, mapRunARN := first(st, "Label"), ""
 				if label == "" {
@@ -1774,50 +1817,51 @@ walkLoop:
 				if distributed {
 					mapRunARN = p.mapRunARN(req, mapStateMachineName(req), label)
 				}
-				for index, item := range arr {
-					iterationInput := item
-					itemContext := map[string]any{"Map": map[string]any{"Item": map[string]any{
-						"Index": float64(index), "Value": item, "Source": source,
-					}}}
-					if selected, valid := selector.(map[string]any); valid && !isJSONata {
-						iterationInput = applyParams(selected, data, itemContext, p.deps.Rand)
-					} else if selector != nil {
-						iterationInput, ok = evalJSONataValue(selector, jsonataScope{
-							input: rawInput, context: mergeJSONataContext(stateContext, itemContext), variables: variables, random: p.deps.Rand,
-						})
-						if !ok {
-							return walkResult{out: data, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
+				if failed == nil {
+					for index, item := range arr {
+						iterationInput := item
+						itemContext := map[string]any{"Map": map[string]any{"Item": map[string]any{
+							"Index": float64(index), "Value": item, "Source": source,
+						}}}
+						if selected, valid := selector.(map[string]any); valid && !isJSONata {
+							iterationInput = applyParams(selected, data, itemContext, p.deps.Rand)
+						} else if selector != nil {
+							iterationInput, ok = evalJSONataValue(selector, jsonataScope{
+								input: rawInput, context: mergeJSONataContext(stateContext, itemContext), variables: variables, random: p.deps.Rand,
+							})
+							if !ok {
+								failed = &walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError"}
+								break
+							}
 						}
+						wr := p.walk(ctx, req, string(idef), "", iterationInput, nil, maps.Clone(variables))
+						mapRuns = append(mapRuns, wr.mapRuns...)
+						if distributed {
+							itemResult := p.mapItemResult(req, cur, iterationInput, wr)
+							p.storeMapItemExecution(ctx, req, mapRunARN, string(idef), itemResult)
+							if hasResultWriter {
+								itemResults = append(itemResults, itemResult)
+							}
+						}
+						if wr.status != "SUCCEEDED" {
+							failedCount++
+							if failed == nil {
+								failed = &wr
+							}
+							if !distributed {
+								break
+							}
+							continue
+						}
+						results = append(results, wr.out)
 					}
-					wr := p.walk(ctx, req, string(idef), "", iterationInput, nil, maps.Clone(variables))
-					mapRuns = append(mapRuns, wr.mapRuns...)
-					if distributed {
-						itemResult := p.mapItemResult(req, cur, iterationInput, wr)
-						p.storeMapItemExecution(ctx, req, mapRunARN, string(idef), itemResult)
-						if hasResultWriter {
-							itemResults = append(itemResults, itemResult)
-						}
-					}
-					if wr.status != "SUCCEEDED" {
-						failedCount++
-						if failed == nil {
-							failed = &wr
-						}
-						if !distributed {
-							break
-						}
-						continue
-					}
-					results = append(results, wr.out)
 				}
 				mapOutput := any(results)
-				if distributed {
+				if distributed && (failed == nil || failedCount > 0) {
 					allowed := failedCount == 0
-					failureCount, hasFailureCount := st["ToleratedFailureCount"]
-					failurePercentage, hasFailurePercentage := st["ToleratedFailurePercentage"]
 					if failedCount > 0 && (hasFailureCount || hasFailurePercentage) {
-						allowed = (!hasFailureCount || float64(failedCount) <= toFloat(failureCount)) &&
-							(!hasFailurePercentage || float64(failedCount)*100/float64(len(arr)) <= toFloat(failurePercentage))
+						allowed = (!hasFailureCount || float64(failedCount) <= failureCount) &&
+							(!hasFailurePercentage || float64(failedCount)*100/float64(len(arr)) <= failurePercentage)
 					}
 					status := "FAILED"
 					if allowed {
@@ -1829,17 +1873,21 @@ walkLoop:
 					}
 					if hasResultWriter {
 						var written int
-						var writerOK bool
-						mapOutput, written, writerOK = p.writeMapResults(ctx, req, st, data, itemResults, mapRunARN, mapScope)
+						var writerOK, evaluationError bool
+						mapOutput, written, writerOK, evaluationError = p.writeMapResults(ctx, req, st, data, itemResults, mapRunARN, mapScope)
 						counts["resultsWritten"] = float64(written)
 						if !writerOK {
 							status = "FAILED"
-							failed = &walkResult{out: data, status: "FAILED", cause: "States.ResultWriterFailed", errorName: "States.ResultWriterFailed"}
+							name := "States.ResultWriterFailed"
+							if evaluationError {
+								name = "States.QueryEvaluationError"
+							}
+							failed = &walkResult{out: data, status: "FAILED", cause: name, errorName: name}
 						}
 					}
 					mapRuns = append(mapRuns, mapRunDraft{arn: mapRunARN, label: label, record: map[string]any{
 						"status": status, "executionCounts": counts, "itemCounts": counts, "redriveCount": 0.0,
-						"maxConcurrency": toFloat(st["MaxConcurrency"]), "toleratedFailureCount": toFloat(failureCount), "toleratedFailurePercentage": toFloat(failurePercentage),
+						"maxConcurrency": maxConcurrency, "toleratedFailureCount": failureCount, "toleratedFailurePercentage": failurePercentage,
 					}})
 				}
 				if failed == nil {
@@ -2390,14 +2438,17 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 		var valid bool
 		resolved, valid = evalJSONataValue(reader["Arguments"], *scope)
 		if _, configured := reader["Arguments"]; !configured {
-			return nil, "", false
+			return nil, "States.QueryEvaluationError", false
 		}
 		if !valid {
-			return nil, "", false
+			return nil, "States.QueryEvaluationError", false
 		}
 	}
 	input, valid := resolved.(map[string]any)
 	if !valid {
+		if scope != nil {
+			return nil, "States.QueryEvaluationError", false
+		}
 		return nil, "", false
 	}
 	response, err := s3.New(p.deps).Invoke(ctx, &spi.Request{
@@ -2508,7 +2559,7 @@ func limitReaderItems(items []any, source string, config map[string]any, data an
 		var valid bool
 		value, valid = evalJSONataValue(value, *scope)
 		if !valid || hasPath {
-			return nil, "", false
+			return nil, "States.QueryEvaluationError", false
 		}
 	} else if hasValue == hasPath {
 		return nil, "", false
@@ -2518,6 +2569,9 @@ func limitReaderItems(items []any, source string, config map[string]any, data an
 	maximum, numeric := exactNumber(value)
 	limit := int(maximum)
 	if !numeric || maximum != math.Trunc(maximum) || limit < 1 {
+		if scope != nil {
+			return nil, "States.QueryEvaluationError", false
+		}
 		return nil, "", false
 	}
 	if limit < len(items) {
@@ -2672,10 +2726,10 @@ func (p *Pack) storeMapItemExecution(ctx context.Context, req *spi.Request, mapR
 	_ = p.col(req, "ex").Put(ctx, first(metadata, "ExecutionArn"), encoded)
 }
 
-func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[string]any, data any, items []mapItemResult, mapRunARN string, scope *jsonataScope) (any, int, bool) {
+func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[string]any, data any, items []mapItemResult, mapRunARN string, scope *jsonataScope) (any, int, bool, bool) {
 	writer, ok := state["ResultWriter"].(map[string]any)
 	if !ok || len(writer) == 0 {
-		return nil, 0, false
+		return nil, 0, false, false
 	}
 	config, hasConfig := writer["WriterConfig"].(map[string]any)
 	resource := first(writer, "Resource")
@@ -2684,7 +2738,7 @@ func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[
 		parameters, hasParameters = writer["Arguments"].(map[string]any)
 	}
 	if resource == "" && !hasConfig || resource != "" && (resource != "arn:aws:states:::s3:putObject" || !hasParameters) {
-		return nil, 0, false
+		return nil, 0, false, false
 	}
 	transformation := first(config, "Transformation")
 	if transformation == "" {
@@ -2698,7 +2752,7 @@ func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[
 		outputType = "JSON"
 	}
 	if transformation != "NONE" && transformation != "COMPACT" && transformation != "FLATTEN" || outputType != "JSON" && outputType != "JSONL" {
-		return nil, 0, false
+		return nil, 0, false, false
 	}
 	transform := func(selected []mapItemResult) []any {
 		out := []any{}
@@ -2730,25 +2784,25 @@ func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[
 	formatted := transform(items)
 	if resource == "" {
 		if outputType == "JSON" {
-			return formatted, 0, true
+			return formatted, 0, true, false
 		}
 		encoded, valid := encode(formatted)
-		return string(encoded), 0, valid
+		return string(encoded), 0, valid, false
 	}
 	resolved := applyParams(parameters, data, nil, p.deps.Rand)
 	if scope != nil {
 		value, valid := evalJSONataValue(writer["Arguments"], *scope)
 		if !valid {
-			return nil, 0, false
+			return nil, 0, false, true
 		}
 		resolved, valid = value.(map[string]any)
 		if !valid {
-			return nil, 0, false
+			return nil, 0, false, true
 		}
 	}
 	bucket, prefix := first(resolved, "Bucket"), strings.Trim(first(resolved, "Prefix"), "/")
 	if bucket == "" {
-		return nil, 0, false
+		return nil, 0, false, false
 	}
 	if prefix != "" {
 		prefix += "/"
@@ -2773,16 +2827,16 @@ func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[
 		body, valid := encode(transform(selected))
 		key := prefix + "/" + status + "_0.json"
 		if !valid || !put(key, body) {
-			return nil, 0, false
+			return nil, 0, false, false
 		}
 		resultFiles[status] = []any{map[string]any{"Key": key, "Size": len(body)}}
 	}
 	manifestKey := prefix + "/manifest.json"
 	manifest, _ := json.Marshal(map[string]any{"DestinationBucket": bucket, "MapRunArn": mapRunARN, "ResultFiles": resultFiles})
 	if !put(manifestKey, manifest) {
-		return nil, 0, false
+		return nil, 0, false, false
 	}
-	return map[string]any{"MapRunArn": mapRunARN, "ResultWriterDetails": map[string]any{"Bucket": bucket, "Key": manifestKey}}, len(items), true
+	return map[string]any{"MapRunArn": mapRunARN, "ResultWriterDetails": map[string]any{"Bucket": bucket, "Key": manifestKey}}, len(items), true, false
 }
 
 func taskIdentity(st map[string]any, data any, identity spi.Identity, random spi.Rand, scope *jsonataScope) (spi.Identity, bool) {
@@ -3997,6 +4051,44 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				add("SCHEMA_VALIDATION_FAILED", "Cause and CausePath are mutually exclusive.", "/States/"+name)
 			}
 		}
+		validateIntegerField := func(field string, minimum, maximum float64) (float64, bool) {
+			value, direct := state[field]
+			pathValue, path := state[field+"Path"]
+			if direct && path {
+				add("SCHEMA_VALIDATION_FAILED", field+" and "+field+"Path are mutually exclusive.", "/States/"+name+"/"+field)
+			}
+			if reference, valid := pathValue.(string); path && (!valid || !strings.HasPrefix(reference, "$")) {
+				add("SCHEMA_VALIDATION_FAILED", field+"Path must be a reference path.", "/States/"+name+"/"+field+"Path")
+			}
+			if !direct {
+				return 0, false
+			}
+			if expression, stringValue := value.(string); isJSONata && stringValue && strings.HasPrefix(expression, "{%") && strings.HasSuffix(expression, "%}") {
+				return 0, false
+			}
+			number, numeric := exactNumber(value)
+			if !numeric || number != math.Trunc(number) || number < minimum || number > maximum {
+				add("SCHEMA_VALIDATION_FAILED", field+" must be an integer in range.", "/States/"+name+"/"+field)
+				return 0, false
+			}
+			return number, true
+		}
+		if typ == "Task" {
+			timeout, hasTimeout := validateIntegerField("TimeoutSeconds", 1, 99999999)
+			heartbeat, hasHeartbeat := validateIntegerField("HeartbeatSeconds", 1, 99999999)
+			maximumHeartbeat := 99999999.0
+			if hasTimeout {
+				maximumHeartbeat = timeout
+			}
+			if hasHeartbeat && heartbeat >= maximumHeartbeat {
+				add("SCHEMA_VALIDATION_FAILED", "HeartbeatSeconds must be less than TimeoutSeconds.", "/States/"+name+"/HeartbeatSeconds")
+			}
+		}
+		if typ == "Map" {
+			validateIntegerField("MaxConcurrency", 0, math.MaxInt32)
+			validateIntegerField("ToleratedFailureCount", 0, math.MaxInt32)
+			validateIntegerField("ToleratedFailurePercentage", 0, 100)
+		}
 		if !supportedStateType(typ) {
 			add("SCHEMA_VALIDATION_FAILED", "Unsupported state Type.", "/States/"+name+"/Type")
 		}
@@ -4379,6 +4471,28 @@ func exactNumber(value any) (float64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func stateInteger(state map[string]any, field string, input any, scope *jsonataScope, minimum, maximum float64) (float64, bool, bool) {
+	value, configured := state[field]
+	path, hasPath := state[field+"Path"].(string)
+	if !configured && !hasPath {
+		return 0, false, true
+	}
+	if configured == hasPath {
+		return 0, true, false
+	}
+	if scope != nil {
+		var valid bool
+		value, valid = evalJSONataValue(value, *scope)
+		if !valid || hasPath {
+			return 0, true, false
+		}
+	} else if hasPath {
+		value = jsonPath(input, path)
+	}
+	number, numeric := exactNumber(value)
+	return number, true, numeric && number == math.Trunc(number) && number >= minimum && number <= maximum
 }
 
 func asciiString(value string) bool {

@@ -4658,6 +4658,14 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			add("SCHEMA_VALIDATION_FAILED", "State QueryLanguage is not compatible with the state machine.", "/States/"+name+"/QueryLanguage")
 		}
 		isJSONata := stateQueryLanguage == "JSONata"
+		validateAssign := func(owner map[string]any, path string) {
+			if value, exists := owner["Assign"]; exists {
+				if _, valid := value.(map[string]any); !valid {
+					add("SCHEMA_VALIDATION_FAILED", "Assign must be an object.", path+"/Assign")
+				}
+			}
+		}
+		validateAssign(state, "/States/"+name)
 		jsonataOnly := []string{"Arguments", "Output", "Items"}
 		jsonPathOnly := []string{
 			"InputPath", "Parameters", "ResultSelector", "ResultPath", "OutputPath", "ItemsPath", "SecondsPath", "TimestampPath", "ErrorPath", "CausePath",
@@ -4938,6 +4946,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 					add("SCHEMA_VALIDATION_FAILED", "Catch entries must be objects.", path)
 					continue
 				}
+				validateAssign(catcher, path)
 				errors, errorsValid := catcher["ErrorEquals"].([]any)
 				if !errorsValid || len(errors) == 0 {
 					add("SCHEMA_VALIDATION_FAILED", "Catch ErrorEquals must be a non-empty array.", path+"/ErrorEquals")
@@ -4984,6 +4993,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 					add("SCHEMA_VALIDATION_FAILED", "Choice rule must be an object.", path)
 					return
 				}
+				validateAssign(choice, path)
 				if !topLevel {
 					if _, exists := choice["Next"]; exists {
 						add("SCHEMA_VALIDATION_FAILED", "Next is only supported by top-level Choice rules.", path+"/Next")

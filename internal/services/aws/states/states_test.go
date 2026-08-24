@@ -1393,6 +1393,30 @@ func TestStatesFailValidation(t *testing.T) {
 	}
 }
 
+func TestStatesPassValidation(t *testing.T) {
+	definition := func(queryLanguage, fields string) string {
+		return fmt.Sprintf(`{"QueryLanguage":%q,"StartAt":"Pass","States":{"Pass":{"Type":"Pass",%s,"End":true}}}`, queryLanguage, fields)
+	}
+	for _, test := range []struct{ queryLanguage, fields string }{
+		{"JSONPath", `"Result":{"ok":true},"ResultPath":"$.result"`},
+		{"JSONPath", `"Parameters":{"value.$":"$.value"}`},
+		{"JSONata", `"Assign":{"value":1},"Output":"{% $value %}"`},
+	} {
+		if diagnostics := validateDefinition(definition(test.queryLanguage, test.fields)); len(diagnostics) != 0 {
+			t.Fatalf("valid Pass diagnostics %#v for %s", diagnostics, test.fields)
+		}
+	}
+	for _, test := range []struct{ queryLanguage, fields string }{
+		{"JSONata", `"Result":{"ok":true}`},
+		{"JSONata", `"Arguments":{"value":1}`},
+		{"JSONPath", `"ResultSelector":{"value.$":"$.value"}`},
+	} {
+		if diagnostics := validateDefinition(definition(test.queryLanguage, test.fields)); len(diagnostics) != 1 {
+			t.Fatalf("Pass diagnostics = %#v for %s", diagnostics, test.fields)
+		}
+	}
+}
+
 func TestStatesExecutionTimeout(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

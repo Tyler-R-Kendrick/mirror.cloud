@@ -1382,6 +1382,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesFailValidation",
 		},
 		{
+			name: "states-accept-invalid-jsonata-pass-field",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  "if _, exists := state[field]; exists {\n\t\t\t\t\t\tadd(\"SCHEMA_VALIDATION_FAILED\", field+\" is not supported by a JSONata Pass state.\"",
+			new:  "if false {\n\t\t\t\t\t\tadd(\"SCHEMA_VALIDATION_FAILED\", field+\" is not supported by a JSONata Pass state.\"",
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesPassValidation",
+		},
+		{
+			name: "states-accept-pass-result-selector",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `} else if _, exists := state["ResultSelector"]; exists {`,
+			new:  `} else if false {`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesPassValidation",
+		},
+		{
 			name: "states-ignore-map-iteration-failure",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `if wr.status != "SUCCEEDED" {`,

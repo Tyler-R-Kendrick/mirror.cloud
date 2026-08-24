@@ -917,6 +917,92 @@ func TestFirehoseRedshiftDestination(t *testing.T) {
 	}
 }
 
+func TestFirehoseRedshiftPersistentRetry(t *testing.T) {
+	deps := spitest.Deps(t)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	redshift := redshiftservice.New(deps)
+	if _, err := redshift.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateCluster", Input: map[string]any{
+		"ClusterIdentifier": "retry-warehouse", "DBName": "analytics", "MasterUsername": "firehose", "MasterUserPassword": "secret-password",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := redshift.CreateTable(context.Background(), id, "retry-warehouse", "analytics", "events", []string{"id", "payload"}); err != nil {
+		t.Fatal(err)
+	}
+	secretPack := secretsmanager.New(deps)
+	secret, err := secretPack.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateSecret", Input: map[string]any{
+		"Name": "redshift-credentials", "SecretString": `{"username":"firehose","password":"wrong-password"}`,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := New(deps)
+	destination := map[string]any{
+		"ClusterJDBCURL": "jdbc:redshift://retry-warehouse.abc.us-east-1.redshift.amazonaws.com:5439/analytics", "RoleARN": testRoleARN,
+		"CopyCommand":  map[string]any{"DataTableName": "events", "DataTableColumns": "id,payload", "CopyOptions": "delimiter '|'"},
+		"RetryOptions": map[string]any{"DurationInSeconds": 600}, "S3Configuration": testS3Destination(),
+		"ProcessingConfiguration":     map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "AppendDelimiterToRecord"}}},
+		"SecretsManagerConfiguration": map[string]any{"Enabled": true, "RoleARN": testRoleARN, "SecretARN": secret.Output["ARN"]},
+	}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "redshift-retry", "RedshiftDestinationConfiguration": destination,
+		"DeliveryStreamEncryptionConfigurationInput": map[string]any{"KeyType": "AWS_OWNED_CMK"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutRecord", map[string]any{"DeliveryStreamName": "redshift-retry", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("3|three"))}}); err != nil {
+		t.Fatal(err)
+	}
+	collection := deps.Store.Scope(id.Account, id.Region).Collection("fh-redshift-work")
+	items, _, _ := collection.List(context.Background(), "redshift-retry/", "", 0)
+	var work redshiftWork
+	if len(items) != 1 || json.Unmarshal(items[0].Value, &work) != nil || work.Next != time.Unix(300, 0).UTC() || work.Expires != time.Unix(600, 0).UTC() || work.ErrorMessage == "" {
+		t.Fatalf("persisted Redshift retry %#v", items)
+	}
+	reader, _, err := deps.Blobs.Get(context.Background(), work.DataKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	if !bytes.HasPrefix(body, firehoseEncryptedPrefix) || bytes.Contains(body, []byte("three")) {
+		t.Fatalf("unencrypted Redshift retry payload %q", body)
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := secretPack.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "PutSecretValue", Input: map[string]any{
+		"SecretId": secret.Output["ARN"], "SecretString": `{"username":"firehose","password":"secret-password"}`,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	p = New(deps)
+	defer func() { _ = p.Close() }()
+	if err := deps.Clock.Advance(5 * time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 2000; attempt++ {
+		rows, _ := redshift.TableRows(context.Background(), id, "retry-warehouse", "analytics", "events")
+		if len(rows) == 1 {
+			if !reflect.DeepEqual(rows[0], map[string]any{"id": "3", "payload": "three"}) {
+				t.Fatalf("retried Redshift row %#v", rows)
+			}
+			if workItems, _, _ := collection.List(context.Background(), "redshift-retry/", "", 0); len(workItems) != 0 {
+				t.Fatalf("successful Redshift retry remained persisted %#v", workItems)
+			}
+			if _, _, err := deps.Blobs.Get(context.Background(), work.DataKey); err == nil {
+				t.Fatal("successful Redshift retry payload remained persisted")
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("persisted Redshift COPY did not retry")
+}
+
 func TestSplunkDestinationValidationAndDescription(t *testing.T) {
 	valid := map[string]any{
 		"HECEndpoint": "https://splunk.example.com:8088", "HECEndpointType": "Raw", "HECToken": "token",

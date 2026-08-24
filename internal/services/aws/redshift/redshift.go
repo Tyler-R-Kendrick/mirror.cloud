@@ -1,4 +1,4 @@
-// Package redshift emulates cluster control-plane records (not a SQL engine).
+// Package redshift emulates cluster control-plane records and a Firehose COPY row store (not a SQL engine).
 package redshift
 
 import (

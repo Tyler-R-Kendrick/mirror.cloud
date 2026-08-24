@@ -105,6 +105,15 @@ type searchWork struct {
 	ErrorMessage string
 }
 
+type redshiftWork struct {
+	Stream       string
+	DataKey      string
+	Next         time.Time
+	Expires      time.Time
+	Retries      int
+	ErrorMessage string
+}
+
 type searchPayload struct {
 	RecordIDs []string
 	RawData   [][]byte
@@ -2188,6 +2197,7 @@ func (p *Pack) deliverRedshiftRecords(ctx context.Context, req *spi.Request, des
 	})
 	if err != nil {
 		p.logDeliveryError(ctx, req, destination, stream, err.Error(), now)
+		p.scheduleRedshiftRetry(ctx, req, stream, copied, err.Error(), now, redshiftRetryDuration(destination))
 	}
 }
 
@@ -2219,6 +2229,134 @@ func (p *Pack) redshiftCredentials(ctx context.Context, req *spi.Request, destin
 func redshiftTarget(jdbc string) (string, string) {
 	parsed, _ := url.Parse(strings.TrimPrefix(jdbc, "jdbc:"))
 	return strings.SplitN(parsed.Hostname(), ".", 2)[0], strings.TrimPrefix(parsed.Path, "/")
+}
+
+func (p *Pack) scheduleRedshiftRetry(ctx context.Context, req *spi.Request, stream string, data [][]byte, message string, now time.Time, duration time.Duration) bool {
+	if duration <= 0 || p.deps.Blobs == nil {
+		return false
+	}
+	key := p.deps.Rand.UUID()
+	dataKey := req.Identity.Account + "/" + req.Identity.Region + "/_mirror/firehose-redshift-work/" + key
+	body, err := json.Marshal(data)
+	if err == nil {
+		body, err = p.protectStreamData(ctx, req, stream, body)
+	}
+	if err != nil {
+		return false
+	}
+	if _, err := p.deps.Blobs.Put(ctx, dataKey, bytes.NewReader(body)); err != nil {
+		return false
+	}
+	expires := now.Add(duration)
+	next := minTime(now.Add(5*time.Minute), expires)
+	work := redshiftWork{Stream: stream, DataKey: dataKey, Next: next, Expires: expires, ErrorMessage: message}
+	stored, err := json.Marshal(work)
+	if err != nil || p.col(req, "fh-redshift-work").Put(ctx, stream+"/"+key, stored) != nil {
+		_ = p.deps.Blobs.Delete(ctx, dataKey)
+		return false
+	}
+	p.startRetryLoop()
+	p.notifyRetryLoop()
+	return true
+}
+
+func minTime(left, right time.Time) time.Time {
+	if left.Before(right) {
+		return left
+	}
+	return right
+}
+
+func (p *Pack) runRedshiftRetries(ctx context.Context) time.Time {
+	if p.deps.Store == nil || p.deps.Clock == nil {
+		return time.Time{}
+	}
+	now := p.deps.Clock.Now().UTC()
+	var earliest time.Time
+	scopes, _ := p.deps.Store.Scopes(ctx)
+	for _, identity := range scopes {
+		collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("fh-redshift-work")
+		items, _, _ := collection.List(ctx, "", "", 0)
+		for _, item := range items {
+			var work redshiftWork
+			if json.Unmarshal(item.Value, &work) != nil {
+				continue
+			}
+			next := work.Next
+			if !next.After(now) {
+				next = p.runRedshiftRetry(ctx, identity, collection, item.Key, &work, now)
+			}
+			if !next.IsZero() && (earliest.IsZero() || next.Before(earliest)) {
+				earliest = next
+			}
+		}
+	}
+	return earliest
+}
+
+func (p *Pack) deleteRedshiftWork(ctx context.Context, collection spi.Collection, key, dataKey string) {
+	_ = collection.Delete(ctx, key)
+	if p.deps.Blobs != nil {
+		_ = p.deps.Blobs.Delete(ctx, dataKey)
+	}
+}
+
+func (p *Pack) runRedshiftRetry(ctx context.Context, identity spi.Identity, collection spi.Collection, key string, work *redshiftWork, now time.Time) time.Time {
+	req := &spi.Request{Identity: identity}
+	raw, ok, _ := p.col(req, "fh").Get(ctx, work.Stream)
+	if !ok {
+		p.deleteRedshiftWork(ctx, collection, key, work.DataKey)
+		return time.Time{}
+	}
+	var stream map[string]any
+	_ = json.Unmarshal(raw, &stream)
+	destination, ok := stream["RedshiftDestinationConfiguration"].(map[string]any)
+	if !ok {
+		p.deleteRedshiftWork(ctx, collection, key, work.DataKey)
+		return time.Time{}
+	}
+	var data [][]byte
+	payloadOK := false
+	if p.deps.Blobs != nil {
+		if reader, _, err := p.deps.Blobs.Get(ctx, work.DataKey); err == nil {
+			body, readErr := io.ReadAll(reader)
+			_ = reader.Close()
+			if readErr == nil {
+				body, readErr = p.decryptAtRest(ctx, req, body)
+			}
+			payloadOK = readErr == nil && json.Unmarshal(body, &data) == nil && len(data) != 0
+		}
+	}
+	if !payloadOK {
+		work.Next = now.Add(time.Second)
+		stored, _ := json.Marshal(work)
+		_ = collection.Put(ctx, key, stored)
+		return work.Next
+	}
+	if !now.Before(work.Expires) {
+		p.deleteRedshiftWork(ctx, collection, key, work.DataKey)
+		return time.Time{}
+	}
+	username, password, err := p.redshiftCredentials(ctx, req, destination)
+	cluster, database := redshiftTarget(first(destination, "ClusterJDBCURL"))
+	command, _ := destination["CopyCommand"].(map[string]any)
+	if err == nil {
+		err = redshiftservice.New(p.deps).Copy(ctx, identity, redshiftservice.CopyInput{
+			Cluster: cluster, Database: database, Table: first(command, "DataTableName"), Username: username, Password: password,
+			Columns: first(command, "DataTableColumns"), Options: first(command, "CopyOptions"), Data: data,
+		})
+	}
+	if err == nil {
+		p.deleteRedshiftWork(ctx, collection, key, work.DataKey)
+		return time.Time{}
+	}
+	p.logDeliveryError(ctx, req, destination, work.Stream, err.Error(), now)
+	work.Retries++
+	work.ErrorMessage = err.Error()
+	work.Next = minTime(now.Add(5*time.Minute), work.Expires)
+	stored, _ := json.Marshal(work)
+	_ = collection.Put(ctx, key, stored)
+	return work.Next
 }
 
 func (p *Pack) deliverEndpointRecords(ctx context.Context, req *spi.Request, streamRecord, destination map[string]any, destinationKey, allMode, stream, version string, recIDs []string, data [][]byte, now time.Time) {
@@ -2303,6 +2441,15 @@ func httpRetryDuration(destination map[string]any) time.Duration {
 	seconds, ok := inputInteger(retry["DurationInSeconds"], 0, 7200)
 	if !ok {
 		seconds = 300
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func redshiftRetryDuration(destination map[string]any) time.Duration {
+	retry, _ := destination["RetryOptions"].(map[string]any)
+	seconds, ok := inputInteger(retry["DurationInSeconds"], 0, 7200)
+	if !ok {
+		seconds = 3600
 	}
 	return time.Duration(seconds) * time.Second
 }
@@ -2765,7 +2912,7 @@ func (p *Pack) hasHTTPWork(ctx context.Context) bool {
 		return false
 	}
 	for _, identity := range scopes {
-		for _, name := range []string{"fh-http-buffers", "fh-http-retries", "fh-search-work"} {
+		for _, name := range []string{"fh-http-buffers", "fh-http-retries", "fh-search-work", "fh-redshift-work"} {
 			if work, _, _ := p.deps.Store.Scope(identity.Account, identity.Region).Collection(name).List(ctx, "", "", 1); len(work) != 0 {
 				return true
 			}
@@ -2848,6 +2995,9 @@ func (p *Pack) httpRetryLoop() {
 		}
 		if searchNext := p.runSearchWork(context.Background()); !searchNext.IsZero() && (next.IsZero() || searchNext.Before(next)) {
 			next = searchNext
+		}
+		if redshiftNext := p.runRedshiftRetries(context.Background()); !redshiftNext.IsZero() && (next.IsZero() || redshiftNext.Before(next)) {
+			next = redshiftNext
 		}
 		if next.IsZero() {
 			select {
@@ -2940,6 +3090,13 @@ func (p *Pack) deleteHTTPStreamWork(ctx context.Context, req *spi.Request, strea
 		var work searchWork
 		_ = json.Unmarshal(item.Value, &work)
 		p.deleteSearchWork(ctx, search, item.Key, work.DataKey)
+	}
+	redshift := p.col(req, "fh-redshift-work")
+	items, _, _ = redshift.List(ctx, stream+"/", "", 0)
+	for _, item := range items {
+		var work redshiftWork
+		_ = json.Unmarshal(item.Value, &work)
+		p.deleteRedshiftWork(ctx, redshift, item.Key, work.DataKey)
 	}
 }
 

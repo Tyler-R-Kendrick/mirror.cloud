@@ -2394,6 +2394,12 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		payload map[string]any
 	}
 	captured := make(chan capturedRequest, 8)
+	releaseBlocked := make(chan struct{}, 2)
+	immediateDestination := func(endpoint string) map[string]any {
+		destination := testHTTPEndpointDestination(endpoint)
+		destination["BufferingHints"] = map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 1}
+		return destination
+	}
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		body, _ := io.ReadAll(request.Body)
 		if request.Header.Get("Content-Encoding") == "gzip" {
@@ -2411,6 +2417,9 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 			t.Error(err)
 		}
 		captured <- capturedRequest{path: request.URL.RequestURI(), header: request.Header.Clone(), payload: payload}
+		if request.URL.Path == "/blocked" {
+			<-releaseBlocked
+		}
 		if request.URL.Path == "/redirect" {
 			writer.Header().Set("Location", "https://example.test/ok")
 			writer.WriteHeader(http.StatusFound)
@@ -2438,6 +2447,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
 	defer func() { _ = p.Close() }()
+	defer close(releaseBlocked)
 	checkRedirect := p.httpClient.CheckRedirect
 	httpClient := &http.Client{
 		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -2455,8 +2465,19 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		t.Helper()
 		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
 	}
+	waitBlob := func(key string) {
+		t.Helper()
+		for attempt := 0; attempt < 2000; attempt++ {
+			if reader, _, err := deps.Blobs.Get(context.Background(), key); err == nil {
+				_ = reader.Close()
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Fatalf("blob not found: %s", key)
+	}
 
-	destination := testHTTPEndpointDestination("https://example.test/ok?tenant=1")
+	destination := immediateDestination("https://example.test/ok?tenant=1")
 	destination["EndpointConfiguration"] = map[string]any{"Url": "https://example.test/ok?tenant=1", "Name": "collector", "AccessKey": "secret"}
 	destination["S3Configuration"].(map[string]any)["Prefix"] = "all/"
 	destination["S3BackupMode"] = "AllData"
@@ -2499,7 +2520,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	endpoint := description["EndpointConfiguration"].(map[string]any)
 	hints := description["BufferingHints"].(map[string]any)
 	retry := description["RetryOptions"].(map[string]any)
-	if endpoint["Name"] != "collector" || endpoint["Url"] != "https://example.test/ok?tenant=1" || endpoint["AccessKey"] != nil || description["S3Configuration"] != nil || description["S3DestinationDescription"].(map[string]any)["Prefix"] != "all/" || hints["IntervalInSeconds"] != 300 || hints["SizeInMBs"] != 5 || retry["DurationInSeconds"] != 300 {
+	if endpoint["Name"] != "collector" || endpoint["Url"] != "https://example.test/ok?tenant=1" || endpoint["AccessKey"] != nil || description["S3Configuration"] != nil || description["S3DestinationDescription"].(map[string]any)["Prefix"] != "all/" || hints["IntervalInSeconds"] != float64(0) || hints["SizeInMBs"] != float64(1) || retry["DurationInSeconds"] != 300 {
 		t.Fatalf("HTTP description %#v", description)
 	}
 
@@ -2558,7 +2579,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	}
 
 	processing := map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "AppendDelimiterToRecord"}}}
-	processedDestination := testHTTPEndpointDestination("https://example.test/ok")
+	processedDestination := immediateDestination("https://example.test/ok")
 	processedDestination["ProcessingConfiguration"] = processing
 	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-processed", "HttpEndpointDestinationConfiguration": processedDestination}); err != nil {
 		t.Fatal(err)
@@ -2592,7 +2613,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	}
 
 	failureProcessing := map[string]any{"Enabled": true, "Processors": []any{map[string]any{"Type": "Decompression"}}}
-	processingFailureDestination := testHTTPEndpointDestination("https://example.test/ok")
+	processingFailureDestination := immediateDestination("https://example.test/ok")
 	processingFailureDestination["ProcessingConfiguration"] = failureProcessing
 	processingFailureDestination["S3BackupMode"] = "AllData"
 	processingFailureDestination["S3Configuration"].(map[string]any)["Prefix"] = "all-failed/"
@@ -2635,7 +2656,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	secretDestination := testHTTPEndpointDestination("https://example.test/ok")
+	secretDestination := immediateDestination("https://example.test/ok")
 	secretDestination["EndpointConfiguration"].(map[string]any)["AccessKey"] = "ignored"
 	secretDestination["SecretsManagerConfiguration"] = map[string]any{"Enabled": true, "RoleARN": testRoleARN, "SecretARN": createdSecret.Output["ARN"]}
 	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-secret", "HttpEndpointDestinationConfiguration": secretDestination}); err != nil {
@@ -2644,10 +2665,11 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	if _, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-secret", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("secret"))}}); err != nil {
 		t.Fatal(err)
 	}
-	if len(captured) != 1 {
-		t.Fatalf("HTTP secret request count %d", len(captured))
+	select {
+	case request = <-captured:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP secret request did not run")
 	}
-	request = <-captured
 	if request.header.Get("X-Amz-Firehose-Access-Key") != "from-secret" {
 		t.Fatalf("HTTP secret access key %q", request.header.Get("X-Amz-Firehose-Access-Key"))
 	}
@@ -2665,7 +2687,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	badSecretDestination := testHTTPEndpointDestination("https://example.test/ok")
+	badSecretDestination := immediateDestination("https://example.test/ok")
 	badSecretDestination["S3Configuration"].(map[string]any)["Prefix"] = "secret-failed/"
 	badSecretDestination["RetryOptions"] = map[string]any{"DurationInSeconds": 0}
 	badSecretDestination["SecretsManagerConfiguration"] = map[string]any{"Enabled": true, "RoleARN": testRoleARN, "SecretARN": badSecret.Output["ARN"]}
@@ -2680,11 +2702,9 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		t.Fatal("sent HTTP request with malformed secret")
 	}
 	badSecretBackupKey := id.Account + "/" + id.Region + "/out/secret-failed/1970/01/01/00/http-bad-secret-1-1970-01-01-00-00-00-" + badSecretPut.Output["RecordId"].(string)
-	if _, _, err := deps.Blobs.Get(context.Background(), badSecretBackupKey); err != nil {
-		t.Fatal(err)
-	}
+	waitBlob(badSecretBackupKey)
 
-	missingSecretDestination := testHTTPEndpointDestination("https://example.test/ok")
+	missingSecretDestination := immediateDestination("https://example.test/ok")
 	missingSecretDestination["S3Configuration"].(map[string]any)["Prefix"] = "missing-secret/"
 	missingSecretDestination["RetryOptions"] = map[string]any{"DurationInSeconds": 0}
 	missingSecretDestination["SecretsManagerConfiguration"] = map[string]any{"Enabled": true, "RoleARN": testRoleARN, "SecretARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:missing-http-key"}
@@ -2699,9 +2719,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		t.Fatal("sent HTTP request with missing secret")
 	}
 	missingSecretBackupKey := id.Account + "/" + id.Region + "/out/missing-secret/1970/01/01/00/http-missing-secret-1-1970-01-01-00-00-00-" + missingSecretPut.Output["RecordId"].(string)
-	if _, _, err := deps.Blobs.Get(context.Background(), missingSecretBackupKey); err != nil {
-		t.Fatal(err)
-	}
+	waitBlob(missingSecretBackupKey)
 
 	for _, failure := range []struct {
 		name, path, prefix string
@@ -2711,7 +2729,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		{name: "redirect", path: "/redirect", prefix: "redirect/", backedUp: true},
 		{name: "permanent", path: "/permanent", prefix: "permanent/", backedUp: false},
 	} {
-		destination := testHTTPEndpointDestination("https://example.test" + failure.path)
+		destination := immediateDestination("https://example.test" + failure.path)
 		destination["S3Configuration"].(map[string]any)["Prefix"] = failure.prefix
 		destination["S3BackupMode"] = "FailedDataOnly"
 		if failure.backedUp {
@@ -2726,16 +2744,17 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		}
 		<-captured
 		key := id.Account + "/" + id.Region + "/out/" + failure.prefix + "1970/01/01/00/" + failure.name + "-1-1970-01-01-00-00-00-" + put.Output["RecordId"].(string)
-		_, _, err = deps.Blobs.Get(context.Background(), key)
-		if (err == nil) != failure.backedUp {
-			t.Errorf("%s backup err %v", failure.name, err)
+		if failure.backedUp {
+			waitBlob(key)
+		} else if _, _, err := deps.Blobs.Get(context.Background(), key); err == nil {
+			t.Errorf("%s was backed up", failure.name)
 		}
 	}
 	if retries, _, _ := deps.Store.Scope(id.Account, id.Region).Collection("fh-http-retries").List(context.Background(), "", "", 0); len(retries) != 0 {
 		t.Fatalf("scheduled permanent HTTP failure retry %#v", retries)
 	}
 
-	retryDestination := testHTTPEndpointDestination("https://example.test/retry")
+	retryDestination := immediateDestination("https://example.test/retry")
 	retryDestination["EndpointConfiguration"].(map[string]any)["AccessKey"] = "retry-initial"
 	retryDestination["S3Configuration"].(map[string]any)["Prefix"] = "retry-failed/"
 	retryDestination["RetryOptions"] = map[string]any{"DurationInSeconds": 10}
@@ -2748,7 +2767,14 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	}
 	initialRetry := <-captured
 	retryCollection := deps.Store.Scope(id.Account, id.Region).Collection("fh-http-retries")
-	storedRetries, _, _ := retryCollection.List(context.Background(), "", "", 0)
+	var storedRetries []spi.KV
+	for attempt := 0; attempt < 2000; attempt++ {
+		storedRetries, _, _ = retryCollection.List(context.Background(), "", "", 0)
+		if len(storedRetries) == 1 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
 	var storedRetry httpRetry
 	if len(storedRetries) != 1 || json.Unmarshal(storedRetries[0].Value, &storedRetry) != nil || bytes.Contains(storedRetries[0].Value, []byte(base64.StdEncoding.EncodeToString([]byte("retry")))) {
 		t.Fatalf("persisted HTTP retry metadata %#v", storedRetries)
@@ -2799,7 +2825,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		t.Fatal("backed up successfully retried HTTP record")
 	}
 
-	exhaustedDestination := testHTTPEndpointDestination("https://example.test/exhaust")
+	exhaustedDestination := immediateDestination("https://example.test/exhaust")
 	exhaustedDestination["S3Configuration"].(map[string]any)["Prefix"] = "exhausted/"
 	exhaustedDestination["RetryOptions"] = map[string]any{"DurationInSeconds": 4}
 	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-exhaust", "HttpEndpointDestinationConfiguration": exhaustedDestination}); err != nil {
@@ -2845,14 +2871,188 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	case <-time.After(10 * time.Millisecond):
 	}
 	exhaustedBackupKey := id.Account + "/" + id.Region + "/out/exhausted/1970/01/01/00/http-exhaust-1-1970-01-01-00-00-06-" + exhaustedPut.Output["RecordId"].(string)
+	waitBlob(exhaustedBackupKey)
+
+	bufferedDestination := testHTTPEndpointDestination("https://example.test/ok")
+	bufferedDestination["BufferingHints"] = map[string]any{"IntervalInSeconds": 10, "SizeInMBs": 64}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-buffered", "HttpEndpointDestinationConfiguration": bufferedDestination}); err != nil {
+		t.Fatal(err)
+	}
+	bufferedFirst, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-buffered", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("buffer-one"))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-buffered", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("buffer-two"))}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(captured) != 0 {
+		t.Fatal("flushed HTTP records before the buffering interval")
+	}
+	bufferCollection := deps.Store.Scope(id.Account, id.Region).Collection("fh-http-buffers")
+	bufferItems, _, _ := bufferCollection.List(context.Background(), "http-buffered/", "", 0)
+	if len(bufferItems) != 2 {
+		t.Fatalf("persisted HTTP buffer %#v", bufferItems)
+	}
+	bufferDataKeys := make([]string, len(bufferItems))
+	for i, item := range bufferItems {
+		var buffer httpBuffer
+		_ = json.Unmarshal(item.Value, &buffer)
+		bufferDataKeys[i] = buffer.DataKey
+	}
+	if !p.hasHTTPWork(context.Background()) {
+		t.Fatal("persisted HTTP buffer was not discoverable for restart")
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p = New(deps)
+	p.httpClient = httpClient
+	if err := deps.Clock.Advance(10 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	var bufferedRequest capturedRequest
+	select {
+	case bufferedRequest = <-captured:
+	case <-time.After(2 * time.Second):
+		t.Fatal("persisted HTTP buffer did not flush")
+	}
+	bufferedRecords := bufferedRequest.payload["records"].([]any)
+	if first(bufferedRequest.payload, "requestId") != bufferedFirst.Output["RecordId"] || len(bufferedRecords) != 2 || first(bufferedRecords[0].(map[string]any), "data") != base64.StdEncoding.EncodeToString([]byte("buffer-one")) || first(bufferedRecords[1].(map[string]any), "data") != base64.StdEncoding.EncodeToString([]byte("buffer-two")) {
+		t.Fatalf("buffered HTTP request %#v", bufferedRequest.payload)
+	}
 	for attempt := 0; ; attempt++ {
-		if _, _, err := deps.Blobs.Get(context.Background(), exhaustedBackupKey); err == nil {
+		items, _, _ := bufferCollection.List(context.Background(), "http-buffered/", "", 0)
+		if len(items) == 0 {
 			break
 		}
 		if attempt == 1999 {
-			t.Fatal("exhausted HTTP retry was not backed up")
+			t.Fatal("delivered HTTP buffer remained persisted")
 		}
 		time.Sleep(time.Millisecond)
+	}
+	for _, dataKey := range bufferDataKeys {
+		if _, _, err := deps.Blobs.Get(context.Background(), dataKey); err == nil {
+			t.Fatalf("delivered HTTP buffer payload remained persisted: %s", dataKey)
+		}
+	}
+
+	sizeDestination := testHTTPEndpointDestination("https://example.test/ok")
+	sizeDestination["BufferingHints"] = map[string]any{"IntervalInSeconds": 900, "SizeInMBs": 1}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-size-buffered", "HttpEndpointDestinationConfiguration": sizeDestination}); err != nil {
+		t.Fatal(err)
+	}
+	largeA, largeB := bytes.Repeat([]byte("a"), 600*1024), bytes.Repeat([]byte("b"), 600*1024)
+	sizeFirst, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-size-buffered", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString(largeA)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(captured) != 0 {
+		t.Fatal("flushed HTTP records below the size hint")
+	}
+	if _, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-size-buffered", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString(largeB)}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case bufferedRequest = <-captured:
+	case <-time.After(2 * time.Second):
+		t.Fatal("size-threshold HTTP buffer did not flush")
+	}
+	bufferedRecords = bufferedRequest.payload["records"].([]any)
+	if first(bufferedRequest.payload, "requestId") != sizeFirst.Output["RecordId"] || len(bufferedRecords) != 2 || first(bufferedRecords[0].(map[string]any), "data") != base64.StdEncoding.EncodeToString(largeA) || first(bufferedRecords[1].(map[string]any), "data") != base64.StdEncoding.EncodeToString(largeB) {
+		t.Fatal("size-threshold HTTP buffer changed record order or data")
+	}
+
+	concurrentDestination := immediateDestination("https://example.test/blocked")
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-concurrent-buffer", "HttpEndpointDestinationConfiguration": concurrentDestination}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-concurrent-buffer", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("in-flight"))}}); err != nil {
+		t.Fatal(err)
+	}
+	firstInFlight := <-captured
+	if _, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-concurrent-buffer", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("queued"))}}); err != nil {
+		t.Fatal(err)
+	}
+	queued, _, _ := bufferCollection.List(context.Background(), "http-concurrent-buffer/", "", 0)
+	if len(queued) != 2 {
+		t.Fatalf("concurrent HTTP buffer %#v", queued)
+	}
+	releaseBlocked <- struct{}{}
+	var secondInFlight capturedRequest
+	select {
+	case secondInFlight = <-captured:
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent HTTP buffer was erased")
+	}
+	releaseBlocked <- struct{}{}
+	firstData := firstInFlight.payload["records"].([]any)[0].(map[string]any)
+	secondData := secondInFlight.payload["records"].([]any)[0].(map[string]any)
+	if first(firstData, "data") != base64.StdEncoding.EncodeToString([]byte("in-flight")) || first(secondData, "data") != base64.StdEncoding.EncodeToString([]byte("queued")) {
+		t.Fatalf("concurrent HTTP requests %#v %#v", firstInFlight.payload, secondInFlight.payload)
+	}
+
+	deleteDestination := testHTTPEndpointDestination("https://example.test/ok")
+	deleteDestination["BufferingHints"] = map[string]any{"IntervalInSeconds": 900, "SizeInMBs": 64}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-delete-buffer", "HttpEndpointDestinationConfiguration": deleteDestination}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-delete-buffer", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("delete"))}}); err != nil {
+		t.Fatal(err)
+	}
+	deleteItems, _, _ := bufferCollection.List(context.Background(), "http-delete-buffer/", "", 0)
+	var deleteBuffer httpBuffer
+	if len(deleteItems) != 1 || json.Unmarshal(deleteItems[0].Value, &deleteBuffer) != nil {
+		t.Fatalf("delete HTTP buffer %#v", deleteItems)
+	}
+	if _, err := call("DeleteDeliveryStream", map[string]any{"DeliveryStreamName": "http-delete-buffer"}); err != nil {
+		t.Fatal(err)
+	}
+	deleteItems, _, _ = bufferCollection.List(context.Background(), "http-delete-buffer/", "", 0)
+	if len(deleteItems) != 0 {
+		t.Fatalf("deleted stream retained HTTP buffer %#v", deleteItems)
+	}
+	if _, _, err := deps.Blobs.Get(context.Background(), deleteBuffer.DataKey); err == nil {
+		t.Fatal("deleted stream retained HTTP buffer payload")
+	}
+
+	deleteRetryDestination := immediateDestination("https://example.test/failure")
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-delete-retry", "HttpEndpointDestinationConfiguration": deleteRetryDestination}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-delete-retry", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("delete-retry"))}}); err != nil {
+		t.Fatal(err)
+	}
+	<-captured
+	var deleteRetry httpRetry
+	for attempt := 0; ; attempt++ {
+		retries, _, _ := retryCollection.List(context.Background(), "", "", 0)
+		for _, item := range retries {
+			_ = json.Unmarshal(item.Value, &deleteRetry)
+			if deleteRetry.Stream == "http-delete-retry" {
+				break
+			}
+		}
+		if deleteRetry.Stream == "http-delete-retry" {
+			break
+		}
+		if attempt == 1999 {
+			t.Fatal("delete HTTP retry was not persisted")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := call("DeleteDeliveryStream", map[string]any{"DeliveryStreamName": "http-delete-retry"}); err != nil {
+		t.Fatal(err)
+	}
+	remainingRetries, _, _ := retryCollection.List(context.Background(), "", "", 0)
+	for _, item := range remainingRetries {
+		var retry httpRetry
+		_ = json.Unmarshal(item.Value, &retry)
+		if retry.Stream == "http-delete-retry" {
+			t.Fatalf("deleted stream retained HTTP retry %#v", retry)
+		}
+	}
+	if _, _, err := deps.Blobs.Get(context.Background(), deleteRetry.DataKey); err == nil {
+		t.Fatal("deleted stream retained HTTP retry payload")
 	}
 }
 
@@ -2896,6 +3096,19 @@ func TestFirehoseHTTPEndpointValidation(t *testing.T) {
 		if err == nil {
 			t.Errorf("accepted invalid HTTP option %#v", patch)
 		}
+	}
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+		"DeliveryStreamName": "default-http-buffer", "HttpEndpointDestinationConfiguration": testHTTPEndpointDestination("https://example.test"),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	described, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "DescribeDeliveryStream", Input: map[string]any{"DeliveryStreamName": "default-http-buffer"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	description := described.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["HttpEndpointDestinationDescription"].(map[string]any)
+	if hints := description["BufferingHints"].(map[string]any); hints["IntervalInSeconds"] != 300 || hints["SizeInMBs"] != 5 {
+		t.Fatalf("default HTTP buffering hints %#v", hints)
 	}
 }
 

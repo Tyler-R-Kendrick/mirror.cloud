@@ -60,13 +60,26 @@ type httpRetry struct {
 	Next      time.Time
 	Expires   time.Time
 	Retries   int
-	Backup    bool
 }
 
 type httpRetryPayload struct {
-	RecordIDs     []string
-	RawData       [][]byte
-	ProcessedData [][]byte
+	BackupRecordIDs []string
+	BackupData      [][]byte
+	ProcessedData   [][]byte
+}
+
+type httpBuffer struct {
+	Stream    string
+	RequestID string
+	DataKey   string
+	Size      int
+	Order     int
+	Next      time.Time
+}
+
+type httpBufferItem struct {
+	Key    string
+	Buffer httpBuffer
 }
 
 const destinationID = "destinationId-000000000001"
@@ -84,7 +97,7 @@ func New(d spi.Deps) *Pack {
 			return http.ErrUseLastResponse
 		},
 	}}
-	if p.hasHTTPRetries(context.Background()) {
+	if p.hasHTTPWork(context.Background()) {
 		p.startRetryLoop()
 	}
 	return p
@@ -235,6 +248,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if _, ok, _ := p.col(req, "fh").Get(ctx, name); !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
+		p.deleteHTTPStreamWork(ctx, req, name)
 		_ = p.col(req, "fh").Delete(ctx, name)
 		_ = p.col(req, "fhtag").Delete(ctx, name)
 		kvs, _, _ := p.col(req, "fhrec:"+name).List(ctx, "", "", 0)
@@ -1511,6 +1525,9 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 		if len(processedData) == 0 {
 			return
 		}
+		if p.bufferHTTP(ctx, req, stream, processedIDs[0], recIDs, data, processedData, backupMode != "AllData", destination, now) {
+			return
+		}
 		delivered, permanent, message := p.deliverHTTP(ctx, req, rec, destination, processedIDs[0], processedData, now)
 		if !delivered {
 			p.logDeliveryError(ctx, req, destination, stream, message, now)
@@ -1543,7 +1560,81 @@ func httpRetryDuration(destination map[string]any) time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-func (p *Pack) hasHTTPRetries(ctx context.Context) bool {
+func httpBufferingHints(destination map[string]any) (time.Duration, int) {
+	hints, _ := destination["BufferingHints"].(map[string]any)
+	interval, intervalOK := inputInteger(hints["IntervalInSeconds"], 0, 900)
+	size, sizeOK := inputInteger(hints["SizeInMBs"], 1, 64)
+	if !intervalOK || !sizeOK {
+		return 300 * time.Second, 5 * 1024 * 1024
+	}
+	return time.Duration(interval) * time.Second, size * 1024 * 1024
+}
+
+func (p *Pack) bufferHTTP(ctx context.Context, req *spi.Request, stream, requestID string, recordIDs []string, rawData, processedData [][]byte, backup bool, destination map[string]any, now time.Time) bool {
+	if p.deps.Blobs == nil {
+		return false
+	}
+	key := p.deps.Rand.UUID()
+	dataKey := req.Identity.Account + "/" + req.Identity.Region + "/_mirror/firehose-http-buffers/" + key
+	payload := httpRetryPayload{ProcessedData: processedData}
+	if backup {
+		payload.BackupRecordIDs, payload.BackupData = recordIDs, rawData
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return false
+	}
+	if _, err := p.deps.Blobs.Put(ctx, dataKey, bytes.NewReader(body)); err != nil {
+		return false
+	}
+	interval, sizeLimit := httpBufferingHints(destination)
+	size := 0
+	for _, data := range rawData {
+		size += len(data)
+	}
+	collection := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection("fh-http-buffers")
+	err = collection.Txn(ctx, func(tx spi.Tx) error {
+		items, _, err := tx.List(stream+"/", "", 0)
+		if err != nil {
+			return err
+		}
+		next, total, order := now.Add(interval), size, 0
+		for _, item := range items {
+			var buffer httpBuffer
+			if json.Unmarshal(item.Value, &buffer) != nil {
+				return errors.New("invalid persisted HTTP buffer")
+			}
+			total += buffer.Size
+			order = max(order, buffer.Order)
+			if buffer.Next.Before(next) {
+				next = buffer.Next
+			}
+		}
+		if total >= sizeLimit {
+			next = now
+			for _, item := range items {
+				var buffer httpBuffer
+				_ = json.Unmarshal(item.Value, &buffer)
+				buffer.Next = now
+				stored, _ := json.Marshal(buffer)
+				if err := tx.Put(item.Key, stored); err != nil {
+					return err
+				}
+			}
+		}
+		stored, _ := json.Marshal(httpBuffer{Stream: stream, RequestID: requestID, DataKey: dataKey, Size: size, Order: order + 1, Next: next})
+		return tx.Put(stream+"/"+key, stored)
+	})
+	if err != nil {
+		_ = p.deps.Blobs.Delete(ctx, dataKey)
+		return false
+	}
+	p.startRetryLoop()
+	p.notifyRetryLoop()
+	return true
+}
+
+func (p *Pack) hasHTTPWork(ctx context.Context) bool {
 	if p.deps.Store == nil || p.deps.Clock == nil {
 		return false
 	}
@@ -1552,8 +1643,10 @@ func (p *Pack) hasHTTPRetries(ctx context.Context) bool {
 		return false
 	}
 	for _, identity := range scopes {
-		if retries, _, _ := p.deps.Store.Scope(identity.Account, identity.Region).Collection("fh-http-retries").List(ctx, "", "", 1); len(retries) != 0 {
-			return true
+		for _, name := range []string{"fh-http-buffers", "fh-http-retries"} {
+			if work, _, _ := p.deps.Store.Scope(identity.Account, identity.Region).Collection(name).List(ctx, "", "", 1); len(work) != 0 {
+				return true
+			}
 		}
 	}
 	return false
@@ -1571,9 +1664,17 @@ func (p *Pack) notifyRetryLoop() {
 }
 
 func (p *Pack) scheduleHTTPRetry(ctx context.Context, req *spi.Request, stream, requestID string, recordIDs []string, rawData, processedData [][]byte, backup bool, now time.Time, duration time.Duration) bool {
+	retryPayload := httpRetryPayload{ProcessedData: processedData}
+	if backup {
+		retryPayload.BackupRecordIDs, retryPayload.BackupData = recordIDs, rawData
+	}
+	return p.scheduleHTTPRetryPayload(ctx, req, stream, requestID, retryPayload, now, duration)
+}
+
+func (p *Pack) scheduleHTTPRetryPayload(ctx context.Context, req *spi.Request, stream, requestID string, retryPayload httpRetryPayload, now time.Time, duration time.Duration) bool {
 	key := p.deps.Rand.UUID()
 	dataKey := req.Identity.Account + "/" + req.Identity.Region + "/_mirror/firehose-http-retries/" + key
-	payload, err := json.Marshal(httpRetryPayload{RecordIDs: recordIDs, RawData: rawData, ProcessedData: processedData})
+	payload, err := json.Marshal(retryPayload)
 	if err != nil || p.deps.Blobs == nil {
 		return false
 	}
@@ -1582,7 +1683,7 @@ func (p *Pack) scheduleHTTPRetry(ctx context.Context, req *spi.Request, stream, 
 	}
 	retry := httpRetry{
 		Stream: stream, RequestID: requestID, DataKey: dataKey,
-		Next: now.Add(p.httpRetryDelay(key, 0)), Backup: backup,
+		Next: now.Add(p.httpRetryDelay(key, 0)),
 	}
 	retry.Expires = now.Add(duration)
 	if retry.Next.After(retry.Expires) {
@@ -1614,7 +1715,10 @@ func (p *Pack) httpRetryDelay(key string, retry int) time.Duration {
 func (p *Pack) httpRetryLoop() {
 	defer close(p.done)
 	for {
-		next := p.runHTTPRetries(context.Background())
+		next := p.runHTTPBuffers(context.Background())
+		if retryNext := p.runHTTPRetries(context.Background()); !retryNext.IsZero() && (next.IsZero() || retryNext.Before(next)) {
+			next = retryNext
+		}
 		if next.IsZero() {
 			select {
 			case <-p.wake:
@@ -1634,6 +1738,142 @@ func (p *Pack) httpRetryLoop() {
 			return
 		}
 	}
+}
+
+func (p *Pack) runHTTPBuffers(ctx context.Context) time.Time {
+	if p.deps.Store == nil || p.deps.Clock == nil {
+		return time.Time{}
+	}
+	now := p.deps.Clock.Now().UTC()
+	var earliest time.Time
+	scopes, _ := p.deps.Store.Scopes(ctx)
+	for _, identity := range scopes {
+		collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("fh-http-buffers")
+		buffers, _, _ := collection.List(ctx, "", "", 0)
+		streams := map[string][]httpBufferItem{}
+		for _, item := range buffers {
+			var buffer httpBuffer
+			if json.Unmarshal(item.Value, &buffer) != nil {
+				continue
+			}
+			streams[buffer.Stream] = append(streams[buffer.Stream], httpBufferItem{Key: item.Key, Buffer: buffer})
+		}
+		for stream, items := range streams {
+			sort.Slice(items, func(i, j int) bool { return items[i].Buffer.Order < items[j].Buffer.Order })
+			next := items[0].Buffer.Next
+			for _, item := range items[1:] {
+				if item.Buffer.Next.Before(next) {
+					next = item.Buffer.Next
+				}
+			}
+			if !next.After(now) {
+				next = p.flushHTTPBuffer(ctx, identity, collection, stream, items, now)
+			}
+			if !next.IsZero() && (earliest.IsZero() || next.Before(earliest)) {
+				earliest = next
+			}
+		}
+	}
+	return earliest
+}
+
+func (p *Pack) deleteHTTPBuffer(ctx context.Context, collection spi.Collection, items []httpBufferItem) {
+	for _, item := range items {
+		_ = collection.Delete(ctx, item.Key)
+	}
+	if p.deps.Blobs != nil {
+		for _, item := range items {
+			_ = p.deps.Blobs.Delete(ctx, item.Buffer.DataKey)
+		}
+	}
+}
+
+func (p *Pack) deleteHTTPStreamWork(ctx context.Context, req *spi.Request, stream string) {
+	buffers := p.col(req, "fh-http-buffers")
+	items, _, _ := buffers.List(ctx, stream+"/", "", 0)
+	for _, item := range items {
+		var buffer httpBuffer
+		_ = json.Unmarshal(item.Value, &buffer)
+		p.deleteHTTPBuffer(ctx, buffers, []httpBufferItem{{Key: item.Key, Buffer: buffer}})
+	}
+	retries := p.col(req, "fh-http-retries")
+	items, _, _ = retries.List(ctx, "", "", 0)
+	for _, item := range items {
+		var retry httpRetry
+		if json.Unmarshal(item.Value, &retry) == nil && retry.Stream == stream {
+			p.deleteHTTPRetry(ctx, retries, item.Key, retry.DataKey)
+		}
+	}
+}
+
+func (p *Pack) backupHTTPPayload(ctx context.Context, req *spi.Request, stream map[string]any, destination map[string]any, name string, payload httpRetryPayload, now time.Time) {
+	backup, _ := destination["S3Configuration"].(map[string]any)
+	version := first(stream, "VersionId")
+	if version == "" {
+		version = "1"
+	}
+	for i := range payload.BackupData {
+		p.deliverS3Configuration(ctx, req, backup, name, version, payload.BackupRecordIDs[i], payload.BackupData[i], now)
+	}
+}
+
+func (p *Pack) flushHTTPBuffer(ctx context.Context, identity spi.Identity, collection spi.Collection, name string, items []httpBufferItem, now time.Time) time.Time {
+	req := &spi.Request{Identity: identity}
+	raw, ok, _ := p.col(req, "fh").Get(ctx, name)
+	if !ok {
+		p.deleteHTTPBuffer(ctx, collection, items)
+		return time.Time{}
+	}
+	var stream map[string]any
+	_ = json.Unmarshal(raw, &stream)
+	destination, ok := stream["HttpEndpointDestinationConfiguration"].(map[string]any)
+	if !ok {
+		p.deleteHTTPBuffer(ctx, collection, items)
+		return time.Time{}
+	}
+	var payload httpRetryPayload
+	payloadOK := p.deps.Blobs != nil && len(items) != 0
+	for _, item := range items {
+		if !payloadOK {
+			break
+		}
+		reader, _, err := p.deps.Blobs.Get(ctx, item.Buffer.DataKey)
+		if err != nil {
+			payloadOK = false
+			break
+		}
+		body, readErr := io.ReadAll(reader)
+		_ = reader.Close()
+		var entry httpRetryPayload
+		if readErr != nil || json.Unmarshal(body, &entry) != nil || len(entry.BackupRecordIDs) != len(entry.BackupData) || len(entry.ProcessedData) == 0 {
+			payloadOK = false
+			break
+		}
+		payload.BackupRecordIDs = append(payload.BackupRecordIDs, entry.BackupRecordIDs...)
+		payload.BackupData = append(payload.BackupData, entry.BackupData...)
+		payload.ProcessedData = append(payload.ProcessedData, entry.ProcessedData...)
+	}
+	if !payloadOK {
+		next := now.Add(time.Second)
+		for _, item := range items {
+			item.Buffer.Next = next
+			body, _ := json.Marshal(item.Buffer)
+			_ = collection.Put(ctx, item.Key, body)
+		}
+		return next
+	}
+	requestID := items[0].Buffer.RequestID
+	delivered, permanent, message := p.deliverHTTP(ctx, req, stream, destination, requestID, payload.ProcessedData, now)
+	if !delivered {
+		p.logDeliveryError(ctx, req, destination, name, message, now)
+	}
+	retryDuration := httpRetryDuration(destination)
+	retrying := !delivered && !permanent && retryDuration > 0 && p.scheduleHTTPRetryPayload(ctx, req, name, requestID, payload, now, retryDuration)
+	if !delivered && !permanent && !retrying {
+		p.backupHTTPPayload(ctx, req, stream, destination, name, payload, now)
+	}
+	p.deleteHTTPBuffer(ctx, collection, items)
+	return time.Time{}
 }
 
 func (p *Pack) runHTTPRetries(ctx context.Context) time.Time {
@@ -1690,7 +1930,7 @@ func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collecti
 		if reader, _, err := p.deps.Blobs.Get(ctx, retry.DataKey); err == nil {
 			payloadBody, readErr := io.ReadAll(reader)
 			_ = reader.Close()
-			payloadOK = readErr == nil && json.Unmarshal(payloadBody, &payload) == nil && len(payload.RecordIDs) == len(payload.RawData) && len(payload.ProcessedData) != 0
+			payloadOK = readErr == nil && json.Unmarshal(payloadBody, &payload) == nil && len(payload.BackupRecordIDs) == len(payload.BackupData) && len(payload.ProcessedData) != 0
 		}
 	}
 	if !payloadOK {
@@ -1699,21 +1939,9 @@ func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collecti
 		_ = collection.Put(ctx, key, body)
 		return retry.Next
 	}
-	finish := func() {
-		if retry.Backup {
-			backup, _ := destination["S3Configuration"].(map[string]any)
-			version := first(stream, "VersionId")
-			if version == "" {
-				version = "1"
-			}
-			for i := range payload.RawData {
-				p.deliverS3Configuration(ctx, req, backup, retry.Stream, version, payload.RecordIDs[i], payload.RawData[i], now)
-			}
-		}
-		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
-	}
 	if !now.Before(retry.Expires) {
-		finish()
+		p.backupHTTPPayload(ctx, req, stream, destination, retry.Stream, payload, now)
+		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
 		return time.Time{}
 	}
 	delivered, permanent, message := p.deliverHTTP(ctx, req, stream, destination, retry.RequestID, payload.ProcessedData, now)

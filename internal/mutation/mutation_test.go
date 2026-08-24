@@ -1405,6 +1405,76 @@ func TestMutantsAreKilled(t *testing.T) {
 			run: "TestRedshiftCopyDataPlane",
 		},
 		{
+			name: "firehose-skip-snowflake-delivery",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `p.deliverSnowflakeRecords(ctx, req, rec, destination, stream, version, recIDs, data, now)`,
+			new:  `_ = destination`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseSnowflakeDestination",
+		},
+		{
+			name: "firehose-skip-snowflake-all-data-backup",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old: `if first(destination, "S3BackupMode") == "AllData" {
+			p.deliverS3Configuration(ctx, req, s3, stream, version, recIDs[index], data[index], now)`,
+			new: `if false {
+			p.deliverS3Configuration(ctx, req, s3, stream, version, recIDs[index], data[index], now)`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseSnowflakeDestination",
+		},
+		{
+			name: "firehose-accept-invalid-snowflake-json",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `if json.Unmarshal(data, &content) != nil || content == nil {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseSnowflakeDestination",
+		},
+		{
+			name: "firehose-drop-snowflake-metadata",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `first(destination, "MetaDataColumnName"): map[string]any{"firehoseDeliveryStreamName": stream, "IngestionTime": now.UTC().Format(time.RFC3339Nano)},`,
+			new:  `first(destination, "MetaDataColumnName"): map[string]any{},`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseSnowflakeDestination",
+		},
+		{
+			name: "firehose-drop-snowflake-row-commit",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `existing = append(existing, rows...)`,
+			new:  `existing = existing`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseSnowflakeDestination",
+		},
+		{
+			name: "firehose-ignore-snowflake-secret",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old: `func (p *Pack) validateSnowflakeCredentials(ctx context.Context, req *spi.Request, destination map[string]any) error {
+	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {`,
+			new: `func (p *Pack) validateSnowflakeCredentials(ctx context.Context, req *spi.Request, destination map[string]any) error {
+	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); false {`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseSnowflakeSecretAndPersistentBuffer",
+		},
+		{
+			name: "firehose-change-snowflake-retry-default",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `seconds = 60`,
+			new:  `seconds = 300`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestSnowflakeDestinationValidationAndDescription",
+		},
+		{
+			name: "firehose-drop-permanent-endpoint-backup",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old: `if backupFailures && !delivered && (permanent || !retrying) {
+		payload := httpRetryPayload{BackupRecordIDs: recIDs, BackupData: data, Arrivals: repeatTime(now, len(data))}`,
+			new: `if backupFailures && !delivered && !permanent && !retrying {
+		payload := httpRetryPayload{BackupRecordIDs: recIDs, BackupData: data, Arrivals: repeatTime(now, len(data))}`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseHTTPEndpointDestination",
+		},
+		{
 			name: "firehose-skip-iceberg-delivery",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 			old:  `p.deliverIcebergRecords(ctx, req, destination, stream, version, recIDs, data, now)`,

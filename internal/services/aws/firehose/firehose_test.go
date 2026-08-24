@@ -1319,6 +1319,9 @@ func TestSnowflakeDestinationValidationAndDescription(t *testing.T) {
 	if err := validateSnowflakeDestination(destination, "us-east-1"); err != nil {
 		t.Fatal(err)
 	}
+	if interval, size := endpointBufferingHints("SnowflakeDestinationConfiguration", destination); interval != 0 || size != 128*1024*1024 || endpointRetryDuration("SnowflakeDestinationConfiguration", destination) != 60*time.Second {
+		t.Fatalf("Snowflake delivery defaults %s %d %s", interval, size, endpointRetryDuration("SnowflakeDestinationConfiguration", destination))
+	}
 	secret := maps.Clone(destination)
 	delete(secret, "User")
 	delete(secret, "PrivateKey")
@@ -1358,7 +1361,7 @@ func TestSnowflakeDestinationValidationAndDescription(t *testing.T) {
 		t.Fatal(err)
 	}
 	description := response.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["SnowflakeDestinationDescription"].(map[string]any)
-	if description["PrivateKey"] != nil || description["KeyPassphrase"] != nil || description["S3Configuration"] != nil || description["S3DestinationDescription"] == nil || first(description, "DataLoadingOption") != "JSON_MAPPING" || first(description, "S3BackupMode") != "FailedDataOnly" {
+	if description["PrivateKey"] != nil || description["KeyPassphrase"] != nil || description["S3Configuration"] != nil || description["S3DestinationDescription"] == nil || first(description, "DataLoadingOption") != "JSON_MAPPING" || first(description, "S3BackupMode") != "FailedDataOnly" || !reflect.DeepEqual(description["BufferingHints"], map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 128}) || !reflect.DeepEqual(description["RetryOptions"], map[string]any{"DurationInSeconds": 60}) {
 		t.Fatalf("Snowflake description %#v", description)
 	}
 	if _, err := call("UpdateDestination", map[string]any{

@@ -720,6 +720,7 @@ func Bundle() *model.Bundle {
 		"PublishStateMachineVersion", "ListStateMachineVersions", "DeleteStateMachineVersion",
 		"CreateStateMachineAlias", "DescribeStateMachineAlias", "ListStateMachineAliases", "UpdateStateMachineAlias", "DeleteStateMachineAlias",
 		"StartExecution", "StartSyncExecution", "StopExecution", "DescribeExecution", "ListExecutions", "GetExecutionHistory",
+		"DescribeStateMachineForExecution", "RedriveExecution",
 		"CreateActivity", "DeleteActivity", "DescribeActivity", "ListActivities", "GetActivityTask",
 		"SendTaskSuccess", "SendTaskFailure", "SendTaskHeartbeat",
 		"TestState", "ValidateStateMachineDefinition",

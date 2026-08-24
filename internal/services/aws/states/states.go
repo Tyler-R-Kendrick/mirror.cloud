@@ -45,6 +45,7 @@ func (p *Pack) Operations() []string {
 		"PublishStateMachineVersion", "ListStateMachineVersions", "DeleteStateMachineVersion",
 		"CreateStateMachineAlias", "DescribeStateMachineAlias", "ListStateMachineAliases", "UpdateStateMachineAlias", "DeleteStateMachineAlias",
 		"StartExecution", "StartSyncExecution", "StopExecution", "DescribeExecution", "ListExecutions", "GetExecutionHistory",
+		"DescribeStateMachineForExecution", "RedriveExecution",
 		"CreateActivity", "DeleteActivity", "DescribeActivity", "ListActivities", "GetActivityTask",
 		"SendTaskSuccess", "SendTaskFailure", "SendTaskHeartbeat",
 		"TestState", "ValidateStateMachineDefinition",
@@ -257,6 +258,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			"executionArn": execARN, "stateMachineArn": arn, "name": exName, "status": wr.status,
 			"startDate": float64(now), "input": first(req.Input, "input", "Input"),
 			"output": string(ob), "cause": wr.cause, "history": wr.hist, "definition": def,
+			"roleArn": sm["roleArn"], "revisionId": sm["revisionId"], "stateMachineName": name, "type": sm["type"],
+		}
+		if wr.failedState != "" {
+			rec["redriveState"], rec["redriveInput"] = wr.failedState, wr.failedInput
 		}
 		if wr.errorName != "" {
 			rec["error"] = wr.errorName
@@ -309,9 +314,27 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
 		delete(rec, "history")
+		for _, internal := range []string{"definition", "roleArn", "revisionId", "stateMachineName", "type", "redriveState", "redriveInput", "redriveTokens", "pendingToken"} {
+			delete(rec, internal)
+		}
 		return &spi.Response{Output: rec}, nil
 	case "ListExecutions":
 		return listCol(ctx, p.col(req, "ex"), "executions")
+	case "DescribeStateMachineForExecution":
+		executionARN := first(req.Input, "executionArn", "ExecutionArn")
+		record, ok := getRecord(ctx, p.col(req, "ex"), executionARN)
+		if !ok {
+			return nil, &spi.Fault{Code: "ExecutionDoesNotExist", HTTPStatus: 400, Fault: "client"}
+		}
+		if first(record, "type") == "EXPRESS" {
+			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
+		}
+		return &spi.Response{Output: map[string]any{
+			"definition": record["definition"], "name": record["stateMachineName"], "revisionId": record["revisionId"],
+			"roleArn": record["roleArn"], "stateMachineArn": record["stateMachineArn"], "updateDate": record["startDate"],
+		}}, nil
+	case "RedriveExecution":
+		return p.redriveExecution(ctx, req, now)
 	case "GetExecutionHistory":
 		ex := first(req.Input, "executionArn", "ExecutionArn")
 		b, ok, _ := p.col(req, "ex").Get(ctx, ex)
@@ -542,6 +565,86 @@ type walkResult struct {
 	errorName     string
 	hist          []any
 	pending       *pending
+	failedState   string
+	failedInput   any
+}
+
+func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64) (*spi.Response, error) {
+	arn := first(req.Input, "executionArn", "ExecutionArn")
+	record, ok := getRecord(ctx, p.col(req, "ex"), arn)
+	if !ok {
+		return nil, &spi.Fault{Code: "ExecutionDoesNotExist", HTTPStatus: 400, Fault: "client"}
+	}
+	token := first(req.Input, "clientToken", "ClientToken")
+	if len(token) > 64 {
+		return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+	}
+	tokens, _ := record["redriveTokens"].(map[string]any)
+	if redriveDate, exists := tokens[token]; token != "" && exists {
+		return &spi.Response{Output: map[string]any{"redriveDate": redriveDate}}, nil
+	}
+	if first(record, "type") == "EXPRESS" || first(record, "status") == "RUNNING" || first(record, "status") == "SUCCEEDED" {
+		return nil, &spi.Fault{Code: "ExecutionNotRedrivable", HTTPStatus: 400, Fault: "client"}
+	}
+	state, input := first(record, "redriveState"), record["redriveInput"]
+	if state == "" {
+		if pendingToken := first(record, "pendingToken"); pendingToken != "" {
+			if pendingRecord, found, _ := p.col(req, "pending").Get(ctx, pendingToken); found {
+				var pending pending
+				_ = json.Unmarshal(pendingRecord, &pending)
+				state, input = pending.StateName, pending.StateInput
+				_ = p.col(req, "pending").Delete(ctx, pendingToken)
+			}
+		}
+	}
+	if state == "" {
+		return nil, &spi.Fault{Code: "ExecutionNotRedrivable", HTTPStatus: 400, Fault: "client"}
+	}
+	var machine map[string]any
+	if json.Unmarshal([]byte(first(record, "definition")), &machine) != nil {
+		return nil, &spi.Fault{Code: "ExecutionNotRedrivable", HTTPStatus: 400, Fault: "client"}
+	}
+	machine["StartAt"] = state
+	redriveDefinition, _ := json.Marshal(machine)
+	result := p.walk(ctx, req, string(redriveDefinition), "", input)
+	output, _ := json.Marshal(result.out)
+	record["status"], record["output"], record["cause"] = result.status, string(output), result.cause
+	delete(record, "error")
+	delete(record, "pendingToken")
+	delete(record, "redriveState")
+	delete(record, "redriveInput")
+	if result.errorName != "" {
+		record["error"] = result.errorName
+	}
+	if result.failedState != "" {
+		record["redriveState"], record["redriveInput"] = result.failedState, result.failedInput
+	}
+	record["redriveCount"] = toFloat(record["redriveCount"]) + 1
+	record["redriveDate"] = float64(now)
+	history := asSlice(record["history"])
+	history = append(history, map[string]any{"type": "ExecutionRedriven", "id": len(history) + 1, "redriveCount": record["redriveCount"]})
+	record["history"] = append(history, result.hist...)
+	if result.status == "RUNNING" {
+		delete(record, "stopDate")
+	} else {
+		record["stopDate"] = float64(now)
+	}
+	if result.pending != nil {
+		result.pending.ExecARN, result.pending.Definition = arn, string(redriveDefinition)
+		encoded, _ := json.Marshal(result.pending)
+		_ = p.col(req, "pending").Put(ctx, result.pending.Token, encoded)
+		record["pendingToken"] = result.pending.Token
+	}
+	if token != "" {
+		if tokens == nil {
+			tokens = map[string]any{}
+		}
+		tokens[token] = float64(now)
+		record["redriveTokens"] = tokens
+	}
+	encoded, _ := json.Marshal(record)
+	_ = p.col(req, "ex").Put(ctx, arn, encoded)
+	return &spi.Response{Output: map[string]any{"redriveDate": float64(now)}}, nil
 }
 
 func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok bool) (*spi.Response, error) {
@@ -619,7 +722,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	rec["status"] = wr.status
 	rec["output"] = string(ob)
 	rec["cause"] = wr.cause
-	rec["history"] = wr.hist
+	rec["history"] = append(asSlice(rec["history"]), wr.hist...)
 	if wr.errorName != "" {
 		rec["error"] = wr.errorName
 	} else {
@@ -642,7 +745,13 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	return &spi.Response{Output: map[string]any{}}, nil
 }
 
-func (p *Pack) walk(ctx context.Context, req *spi.Request, def, from string, input any) walkResult {
+func (p *Pack) walk(ctx context.Context, req *spi.Request, def, from string, input any) (result walkResult) {
+	currentState, currentInput := "", input
+	defer func() {
+		if result.status == "FAILED" && result.failedState == "" {
+			result.failedState, result.failedInput = currentState, currentInput
+		}
+	}()
 	var sm map[string]any
 	if err := json.Unmarshal([]byte(def), &sm); err != nil {
 		return walkResult{out: input, status: "FAILED", cause: "InvalidDefinition"}
@@ -671,6 +780,7 @@ walkLoop:
 			return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 		}
 		rawInput := data
+		currentState, currentInput = cur, rawInput
 		data, ok = applyDataPath(st, "InputPath", data)
 		if !ok {
 			return walkResult{out: rawInput, status: "FAILED", cause: "States.Runtime", hist: hist}
@@ -809,7 +919,7 @@ walkLoop:
 					cur = next
 					continue walkLoop
 				}
-				failed.hist = hist
+				failed.hist, failed.failedState, failed.failedInput = hist, cur, stateInput
 				return *failed
 			}
 		case "Map":
@@ -880,7 +990,7 @@ walkLoop:
 					cur = next
 					continue walkLoop
 				}
-				failed.hist = hist
+				failed.hist, failed.failedState, failed.failedInput = hist, cur, stateInput
 				return *failed
 			}
 		default:

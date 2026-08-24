@@ -2402,6 +2402,8 @@
       "DescribeExecution",
       "ListExecutions",
       "GetExecutionHistory",
+      "DescribeStateMachineForExecution",
+      "RedriveExecution",
       "CreateActivity",
       "DeleteActivity",
       "DescribeActivity",

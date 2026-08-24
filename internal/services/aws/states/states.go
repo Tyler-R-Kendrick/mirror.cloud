@@ -172,7 +172,20 @@ func (p *Pack) resumeWait(ctx context.Context, req *spi.Request, token string, w
 		"_executionInput": parseJSON(first(record, "input")), "_executionStartTime": time.Unix(int64(toFloat(record["startDate"])), 0).UTC().Format(time.RFC3339),
 		"_executionRoleArn": record["roleArn"], "_executionType": record["type"], "_executionRedriveCount": record["redriveCount"],
 	}
-	result := p.walk(ctx, &walkRequest, wait.Definition, wait.StateName, wait.StateInput, nil, wait.Variables)
+	definition, from := wait.Definition, wait.StateName
+	var retries map[string]map[int]int
+	if wait.Retry {
+		var machine map[string]any
+		if json.Unmarshal([]byte(definition), &machine) != nil {
+			_ = p.col(req, "pending").Delete(ctx, token)
+			return
+		}
+		machine["StartAt"] = wait.StateName
+		encoded, _ := json.Marshal(machine)
+		definition, from = string(encoded), ""
+		retries = map[string]map[int]int{wait.StateName: wait.Retries}
+	}
+	result := p.walk(ctx, &walkRequest, definition, from, wait.StateInput, retries, wait.Variables)
 	now := p.deps.Clock.Now().Unix()
 	output, _ := json.Marshal(result.out)
 	record["status"], record["output"], record["cause"] = result.status, string(output), result.cause
@@ -1179,7 +1192,7 @@ type pending struct {
 	Input, StateInput                                  any
 	Retries                                            map[int]int
 	Variables                                          map[string]any
-	Callback                                           bool
+	Callback, Retry                                    bool
 }
 
 type walkResult struct {
@@ -1357,6 +1370,20 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	walkRequest.Input["_executionRoleArn"] = rec["roleArn"]
 	walkRequest.Input["_executionType"] = rec["type"]
 	walkRequest.Input["_executionRedriveCount"] = rec["redriveCount"]
+	persistRetry := func(delay time.Duration) bool {
+		scheduled := p.scheduleRetry(ctx, &walkRequest, pend.StateName, pend.StateInput, pend.Retries, pend.Variables, delay, nil)
+		if scheduled == nil {
+			return false
+		}
+		scheduled.pending.ExecARN, scheduled.pending.Definition = pend.ExecARN, pend.Definition
+		pb, _ := json.Marshal(scheduled.pending)
+		_ = p.col(req, "pending").Put(ctx, scheduled.pending.Token, pb)
+		rec["pendingToken"] = scheduled.pending.Token
+		nb, _ := json.Marshal(rec)
+		_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
+		p.signalWaits()
+		return true
+	}
 	retrying := false
 	if !ok {
 		failure := stateFailure{name: first(req.Input, "error", "Error"), cause: first(req.Input, "cause", "Cause")}
@@ -1369,7 +1396,10 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 		if pend.Retries == nil {
 			pend.Retries = map[int]int{}
 		}
-		if retryTask(st, failure.name, pend.Retries) {
+		if delay, retry := retryTask(st, failure.name, pend.Retries, p.deps.Rand); retry {
+			if persistRetry(delay) {
+				return &spi.Response{Output: map[string]any{}}, nil
+			}
 			if !pend.Callback {
 				pend.Token = p.deps.Rand.Hex(16)
 				pb, _ := json.Marshal(pend)
@@ -1421,7 +1451,10 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 			if pend.Retries == nil {
 				pend.Retries = map[int]int{}
 			}
-			if retryTask(st, failure.name, pend.Retries) {
+			if delay, retry := retryTask(st, failure.name, pend.Retries, p.deps.Rand); retry {
+				if persistRetry(delay) {
+					return &spi.Response{Output: map[string]any{}}, nil
+				}
 				sm["StartAt"] = pend.StateName
 				def, _ := json.Marshal(sm)
 				definition, from, data, retrying = string(def), "", pend.StateInput, true
@@ -1774,8 +1807,10 @@ walkLoop:
 						failure = stateFailure{name: "States.Runtime", cause: "States.Runtime"}
 					}
 				}
-				// ponytail: retry delays are instant like Wait states; add virtual scheduling when timing fidelity is required.
-				if retryTask(st, failure.name, retries[cur]) {
+				if delay, retry := retryTask(st, failure.name, retries[cur], p.deps.Rand); retry {
+					if scheduled := p.scheduleRetry(ctx, req, cur, rawInput, retries[cur], variables, delay, hist); scheduled != nil {
+						return *scheduled
+					}
 					continue
 				}
 				var next string
@@ -1886,16 +1921,20 @@ walkLoop:
 				}
 				var next string
 				var out any
+				var delay time.Duration
 				var retry, caught, valid bool
 				if isJSONata {
-					next, out, retry, caught, valid = recoverJSONata(st, *failed, stateInput, stateContext, variables, p.deps.Rand, retries[cur])
+					next, out, delay, retry, caught, valid = recoverJSONata(st, *failed, stateInput, stateContext, variables, p.deps.Rand, retries[cur])
 					if !valid {
 						return walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
 					}
 				} else {
-					next, out, retry, caught = recoverState(st, *failed, stateInput, retries[cur])
+					next, out, delay, retry, caught = recoverState(st, *failed, stateInput, retries[cur], p.deps.Rand)
 				}
 				if retry {
+					if scheduled := p.scheduleRetry(ctx, req, cur, stateInput, retries[cur], variables, delay, hist); scheduled != nil {
+						return *scheduled
+					}
 					continue
 				}
 				if caught {
@@ -2168,16 +2207,20 @@ walkLoop:
 				}
 				var next string
 				var out any
+				var delay time.Duration
 				var retry, caught, valid bool
 				if isJSONata {
-					next, out, retry, caught, valid = recoverJSONata(st, *failed, stateInput, stateContext, variables, p.deps.Rand, retries[cur])
+					next, out, delay, retry, caught, valid = recoverJSONata(st, *failed, stateInput, stateContext, variables, p.deps.Rand, retries[cur])
 					if !valid {
 						return walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
 					}
 				} else {
-					next, out, retry, caught = recoverState(st, *failed, stateInput, retries[cur])
+					next, out, delay, retry, caught = recoverState(st, *failed, stateInput, retries[cur], p.deps.Rand)
 				}
 				if retry {
+					if scheduled := p.scheduleRetry(ctx, req, cur, stateInput, retries[cur], variables, delay, hist); scheduled != nil {
+						return *scheduled
+					}
 					continue
 				}
 				if caught {
@@ -2276,7 +2319,7 @@ func taskFailure(prefix string, sdk bool, err error) stateFailure {
 	return stateFailure{name: "States.TaskFailed", cause: err.Error()}
 }
 
-func retryTask(st map[string]any, name string, attempts map[int]int) bool {
+func retryTask(st map[string]any, name string, attempts map[int]int, random spi.Rand) (time.Duration, bool) {
 	for i, raw := range asSlice(st["Retry"]) {
 		retrier, _ := raw.(map[string]any)
 		if !matchesError(retrier["ErrorEquals"], name) {
@@ -2287,12 +2330,51 @@ func retryTask(st map[string]any, name string, attempts map[int]int) bool {
 			maxAttempts = int(toFloat(raw))
 		}
 		if attempts[i] >= maxAttempts {
-			return false
+			return 0, false
 		}
+		interval, backoff := 1.0, 2.0
+		if raw, ok := retrier["IntervalSeconds"]; ok {
+			interval = toFloat(raw)
+		}
+		if raw, ok := retrier["BackoffRate"]; ok {
+			backoff = toFloat(raw)
+		}
+		delay := interval * math.Pow(backoff, float64(attempts[i]))
+		if raw, ok := retrier["MaxDelaySeconds"]; ok {
+			delay = min(delay, toFloat(raw))
+		}
+		delay = min(delay, float64(math.MaxInt64)/float64(time.Second))
 		attempts[i]++
-		return true
+		duration := time.Duration(delay * float64(time.Second))
+		if first(retrier, "JitterStrategy") == "FULL" && duration > 0 {
+			// ponytail: millisecond jitter is deterministic and sufficient for workflow scheduling; use finer entropy if sub-ms ASL retry fields are introduced.
+			duration = time.Duration(random.Intn(int(duration/time.Millisecond)+1)) * time.Millisecond
+		}
+		return duration, true
 	}
-	return false
+	return 0, false
+}
+
+func (p *Pack) scheduleRetry(ctx context.Context, req *spi.Request, state string, input any, attempts map[int]int, variables map[string]any, delay time.Duration, hist []any) *walkResult {
+	if delay <= 0 {
+		return nil
+	}
+	switch first(req.Input, "_executionType") {
+	case "EXPRESS":
+		select {
+		case <-p.deps.Clock.After(delay):
+			return nil
+		case <-ctx.Done():
+			return &walkResult{out: input, status: "FAILED", cause: "States.Timeout", errorName: "States.Timeout", hist: hist}
+		}
+	case "STANDARD":
+		return &walkResult{out: input, status: "RUNNING", hist: hist, pending: &pending{
+			Token: p.deps.Rand.Hex(16), StateName: state, StateInput: input, Retries: attempts, Variables: variables, Retry: true,
+			WaitUntil: p.deps.Clock.Now().Add(delay).UTC().Format(time.RFC3339Nano),
+		}}
+	default:
+		return nil
+	}
 }
 
 func catchTask(st map[string]any, failure stateFailure, input any) (string, any, bool) {
@@ -2347,30 +2429,30 @@ func applyCatchAssignments(state map[string]any, failure stateFailure, _ any, co
 	return true
 }
 
-func recoverState(st map[string]any, failed walkResult, input any, attempts map[int]int) (string, any, bool, bool) {
+func recoverState(st map[string]any, failed walkResult, input any, attempts map[int]int, random spi.Rand) (string, any, time.Duration, bool, bool) {
 	name := failed.errorName
 	if name == "" {
 		name = "States.TaskFailed"
 	}
 	failure := stateFailure{name: name, cause: failed.cause}
-	if retryTask(st, name, attempts) {
-		return "", input, true, false
+	if delay, retry := retryTask(st, name, attempts, random); retry {
+		return "", input, delay, true, false
 	}
 	next, out, caught := catchTask(st, failure, input)
-	return next, out, false, caught
+	return next, out, 0, false, caught
 }
 
-func recoverJSONata(state map[string]any, failed walkResult, input any, context map[string]any, variables map[string]any, random spi.Rand, attempts map[int]int) (string, any, bool, bool, bool) {
+func recoverJSONata(state map[string]any, failed walkResult, input any, context map[string]any, variables map[string]any, random spi.Rand, attempts map[int]int) (string, any, time.Duration, bool, bool, bool) {
 	name := failed.errorName
 	if name == "" {
 		name = "States.TaskFailed"
 	}
 	failure := stateFailure{name: name, cause: failed.cause}
-	if retryTask(state, name, attempts) {
-		return "", input, true, false, true
+	if delay, retry := retryTask(state, name, attempts, random); retry {
+		return "", input, delay, true, false, true
 	}
 	next, out, caught, valid := catchJSONata(state, failure, input, context, variables, random)
-	return next, out, false, caught, valid
+	return next, out, 0, false, caught, valid
 }
 
 func matchesError(raw any, name string) bool {
@@ -4482,6 +4564,54 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			validateIntegerField("MaxConcurrency", 0, math.MaxInt32)
 			validateIntegerField("ToleratedFailureCount", 0, math.MaxInt32)
 			validateIntegerField("ToleratedFailurePercentage", 0, 100)
+		}
+		if rawRetry, exists := state["Retry"]; exists {
+			retriers, valid := rawRetry.([]any)
+			if !valid || len(retriers) == 0 || typ != "Task" && typ != "Parallel" && typ != "Map" {
+				add("SCHEMA_VALIDATION_FAILED", "Retry must be an array on a Task, Parallel, or Map state.", "/States/"+name+"/Retry")
+			} else {
+				for i, raw := range retriers {
+					path := fmt.Sprintf("/States/%s/Retry/%d", name, i)
+					retrier, object := raw.(map[string]any)
+					errors, errorsValid := retrier["ErrorEquals"].([]any)
+					if !object || !errorsValid || len(errors) == 0 {
+						add("SCHEMA_VALIDATION_FAILED", "Retry ErrorEquals must be a non-empty array.", path+"/ErrorEquals")
+						continue
+					}
+					for _, rawError := range errors {
+						if _, valid := rawError.(string); !valid {
+							add("SCHEMA_VALIDATION_FAILED", "Retry ErrorEquals entries must be strings.", path+"/ErrorEquals")
+							break
+						}
+					}
+					if slices.Contains(errors, any("States.ALL")) && (len(errors) != 1 || i != len(retriers)-1) {
+						add("SCHEMA_VALIDATION_FAILED", "States.ALL must appear alone in the last retrier.", path+"/ErrorEquals")
+					}
+					for _, field := range []struct {
+						name         string
+						minimum, max float64
+					}{{"IntervalSeconds", 1, 99999999}, {"MaxAttempts", 0, 99999999}, {"MaxDelaySeconds", 1, 31622400}} {
+						if value, exists := retrier[field.name]; exists {
+							number, numeric := exactNumber(value)
+							if !numeric || number != math.Trunc(number) || number < field.minimum || number > field.max {
+								add("SCHEMA_VALIDATION_FAILED", field.name+" must be an integer in range.", path+"/"+field.name)
+							}
+						}
+					}
+					if value, exists := retrier["BackoffRate"]; exists {
+						backoff, numeric := exactNumber(value)
+						if !numeric || backoff < 1 {
+							add("SCHEMA_VALIDATION_FAILED", "BackoffRate must be at least 1.", path+"/BackoffRate")
+						}
+					}
+					if raw, exists := retrier["JitterStrategy"]; exists {
+						jitter, valid := raw.(string)
+						if !valid || jitter != "FULL" && jitter != "NONE" {
+							add("SCHEMA_VALIDATION_FAILED", "JitterStrategy must be FULL or NONE.", path+"/JitterStrategy")
+						}
+					}
+				}
+			}
 		}
 		if !supportedStateType(typ) {
 			add("SCHEMA_VALIDATION_FAILED", "Unsupported state Type.", "/States/"+name+"/Type")

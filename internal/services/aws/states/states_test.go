@@ -1023,6 +1023,93 @@ func TestStatesDurableWait(t *testing.T) {
 	}
 }
 
+func TestStatesRetryScheduling(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	queue := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(handler spi.Handler, operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := handler.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	queueURL := invoke(queue, "CreateQueue", map[string]any{"QueueName": "retry-scheduling"})["QueueUrl"].(string)
+	definition := `{"QueryLanguage":"JSONata","StartAt":"Send","States":{"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Arguments":{"QueueUrl":"{% $states.context.State.RetryCount > 0 ? '` + queueURL + `' : $states.input.missing %}","MessageBody":"retry"},"Output":{"retry":"{% $states.context.State.RetryCount %}"},"Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"IntervalSeconds":5,"MaxDelaySeconds":2,"BackoffRate":3,"MaxAttempts":1}],"End":true}}}`
+	machine := invoke(p, "CreateStateMachine", map[string]any{"name": "durable-retry", "definition": definition, "roleArn": testRoleARN})
+	executionARN := invoke(p, "StartExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"]})["executionArn"].(string)
+	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": executionARN}); execution["status"] != "RUNNING" {
+		t.Fatalf("Retry completed early %#v", execution)
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p = New(deps)
+	if err := deps.Clock.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": executionARN}); execution["status"] != "RUNNING" {
+		t.Fatalf("restored Retry completed early %#v", execution)
+	}
+	if err := deps.Clock.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	var execution map[string]any
+	for range 100 {
+		execution = invoke(p, "DescribeExecution", map[string]any{"executionArn": executionARN})
+		if execution["status"] == "SUCCEEDED" {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if execution["status"] != "SUCCEEDED" || execution["output"] != `{"retry":1}` {
+		t.Fatalf("restored Retry did not resume %#v", execution)
+	}
+
+	express := invoke(p, "CreateStateMachine", map[string]any{"name": "sync-retry", "definition": definition, "roleArn": testRoleARN, "type": "EXPRESS"})
+	result := make(chan map[string]any, 1)
+	go func() {
+		result <- invoke(p, "StartSyncExecution", map[string]any{"stateMachineArn": express["stateMachineArn"]})
+	}()
+	select {
+	case early := <-result:
+		t.Fatalf("Express Retry completed early %#v", early)
+	case <-time.After(10 * time.Millisecond):
+	}
+	if err := deps.Clock.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case finished := <-result:
+		if finished["status"] != "SUCCEEDED" || finished["output"] != `{"retry":1}` {
+			t.Fatalf("Express Retry %#v", finished)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Express Retry did not resume")
+	}
+
+	retrier := map[string]any{"Retry": []any{map[string]any{"ErrorEquals": []any{"Boom"}, "IntervalSeconds": 3.0, "BackoffRate": 2.0, "MaxDelaySeconds": 5.0}}}
+	attempts := map[int]int{}
+	for i, want := range []time.Duration{3 * time.Second, 5 * time.Second, 5 * time.Second} {
+		if got, retry := retryTask(retrier, "Boom", attempts, p.deps.Rand); !retry || got != want {
+			t.Fatalf("retry delay %d = %s, %v want %s", i, got, retry, want)
+		}
+	}
+	jitter := map[string]any{"Retry": []any{map[string]any{"ErrorEquals": []any{"Boom"}, "IntervalSeconds": 2.0, "JitterStrategy": "FULL"}}}
+	if delay, retry := retryTask(jitter, "Boom", map[int]int{}, p.deps.Rand); !retry || delay < 0 || delay > 2*time.Second {
+		t.Fatalf("jitter delay %s, %v", delay, retry)
+	}
+
+	invalid := `{"StartAt":"Send","States":{"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Retry":[{"ErrorEquals":["States.ALL","Boom"],"IntervalSeconds":0,"MaxAttempts":-1,"BackoffRate":0.5,"MaxDelaySeconds":31622401,"JitterStrategy":"SOME"}],"End":true}}}`
+	if diagnostics := validateDefinition(invalid); len(diagnostics) != 6 {
+		t.Fatalf("retry diagnostics %#v", diagnostics)
+	}
+}
+
 func TestStatesJSONataErrorsAndFields(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
@@ -1359,7 +1446,14 @@ func TestStatesCallbackServiceIntegration(t *testing.T) {
 	arn := machine["stateMachineArn"].(string)
 	task := func() (string, string) {
 		t.Helper()
-		messages := must(queue, "ReceiveMessage", map[string]any{"QueueUrl": queueURL, "VisibilityTimeout": 0})["Messages"].([]any)
+		var messages []any
+		for range 100 {
+			messages = must(queue, "ReceiveMessage", map[string]any{"QueueUrl": queueURL, "VisibilityTimeout": 0})["Messages"].([]any)
+			if len(messages) != 0 {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
 		if len(messages) != 1 {
 			t.Fatalf("callback messages %#v", messages)
 		}
@@ -1375,6 +1469,9 @@ func TestStatesCallbackServiceIntegration(t *testing.T) {
 	firstToken, firstHandle := task()
 	must(queue, "DeleteMessage", map[string]any{"QueueUrl": queueURL, "ReceiptHandle": firstHandle})
 	must(p, "SendTaskFailure", map[string]any{"taskToken": firstToken, "error": "Retryable"})
+	if err := deps.Clock.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
 	secondToken, secondHandle := task()
 	if secondToken == firstToken {
 		t.Fatal("callback retry reused task token")
@@ -1748,7 +1845,20 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if retrying := must("DescribeExecution", map[string]any{"ExecutionArn": recoveryARN}).Output; retrying["status"] != "RUNNING" {
 		t.Fatalf("activity retry %#v", retrying)
 	}
-	secondToken := must("GetActivityTask", map[string]any{"ActivityArn": activityARN}).Output["taskToken"].(string)
+	if err := p.deps.Clock.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	secondToken := ""
+	for range 100 {
+		if token, ok := must("GetActivityTask", map[string]any{"ActivityArn": activityARN}).Output["taskToken"].(string); ok {
+			secondToken = token
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if secondToken == "" {
+		t.Fatal("activity retry did not become available")
+	}
 	if secondToken == firstToken {
 		t.Fatal("activity retry reused task token")
 	}
@@ -1955,12 +2065,16 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	}
 	retrier := map[string]any{"Retry": []any{map[string]any{"ErrorEquals": []any{"Nope"}}, map[string]any{"ErrorEquals": []any{"States.ALL"}, "MaxAttempts": 2.0}}}
 	attempts := map[int]int{}
-	if !retryTask(retrier, "Boom", attempts) || !retryTask(retrier, "Boom", attempts) || retryTask(retrier, "Boom", attempts) || attempts[1] != 2 {
+	retry := func(state map[string]any, attempts map[int]int) bool {
+		_, ok := retryTask(state, "Boom", attempts, p.deps.Rand)
+		return ok
+	}
+	if !retry(retrier, attempts) || !retry(retrier, attempts) || retry(retrier, attempts) || attempts[1] != 2 {
 		t.Fatalf("retry attempts %#v", attempts)
 	}
 	defaults := map[int]int{}
 	defaultRetrier := map[string]any{"Retry": []any{map[string]any{"ErrorEquals": []any{"Boom"}}}}
-	if !retryTask(defaultRetrier, "Boom", defaults) || !retryTask(defaultRetrier, "Boom", defaults) || !retryTask(defaultRetrier, "Boom", defaults) || retryTask(defaultRetrier, "Boom", defaults) {
+	if !retry(defaultRetrier, defaults) || !retry(defaultRetrier, defaults) || !retry(defaultRetrier, defaults) || retry(defaultRetrier, defaults) {
 		t.Fatalf("default retry attempts %#v", defaults)
 	}
 	if matchesError([]any{"States.ALL"}, "States.Runtime") || matchesError([]any{"States.TaskFailed"}, "States.Timeout") || !matchesError([]any{"States.TaskFailed"}, "Boom") {
@@ -1987,10 +2101,10 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	}
 	composite := map[string]any{"Retry": []any{map[string]any{"ErrorEquals": []any{"Boom"}, "MaxAttempts": 1.0}}, "Catch": []any{map[string]any{"ErrorEquals": []any{"States.ALL"}, "Next": "Recovered"}}}
 	compositeAttempts := map[int]int{}
-	if _, _, retry, caught := recoverState(composite, walkResult{cause: "failed", errorName: "Boom"}, nil, compositeAttempts); !retry || caught {
+	if _, _, _, retry, caught := recoverState(composite, walkResult{cause: "failed", errorName: "Boom"}, nil, compositeAttempts, p.deps.Rand); !retry || caught {
 		t.Fatal("composite did not retry")
 	}
-	if next, _, retry, caught := recoverState(composite, walkResult{cause: "failed", errorName: "Boom"}, nil, compositeAttempts); retry || !caught || next != "Recovered" {
+	if next, _, _, retry, caught := recoverState(composite, walkResult{cause: "failed", errorName: "Boom"}, nil, compositeAttempts, p.deps.Rand); retry || !caught || next != "Recovered" {
 		t.Fatal("composite did not catch exhausted retry")
 	}
 }

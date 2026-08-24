@@ -545,6 +545,14 @@ func TestFlattenedMapDatasetLimit(t *testing.T) {
 	}
 }
 
+func TestJSONPointerOffset(t *testing.T) {
+	body := []byte(`[0,{"items": []}]`)
+	offset, valid := jsonPointerOffset(body, []string{"1", "items"})
+	if !valid || !bytes.HasPrefix(body[offset:], []byte("[]")) {
+		t.Fatalf("JSON pointer offset %d valid %t", offset, valid)
+	}
+}
+
 func TestStateMachineControlPlaneParity(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

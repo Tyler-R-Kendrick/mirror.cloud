@@ -3483,7 +3483,7 @@ func jsonPointerOffset(body []byte, tokens []string) (int64, bool) {
 	var scan func([]string) (int64, bool)
 	scan = func(path []string) (int64, bool) {
 		start := decoder.InputOffset()
-		for start < int64(len(body)) && (body[start] == ' ' || body[start] == '\n' || body[start] == '\r' || body[start] == '\t') {
+		for start < int64(len(body)) && (body[start] == ' ' || body[start] == '\n' || body[start] == '\r' || body[start] == '\t' || body[start] == ':' || body[start] == ',') {
 			start++
 		}
 		if len(path) == 0 {

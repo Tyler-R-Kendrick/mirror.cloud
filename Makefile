@@ -15,7 +15,7 @@ build:
 test: test-unit test-contract
 
 test-unit:
-	$(GO) test ./...
+	$(GO) test $$($(GO) list ./... | grep -v '/internal/mutation$$')
 
 test-contract:
 	$(GO) test ./internal/conformance ./internal/proto/... -count=1

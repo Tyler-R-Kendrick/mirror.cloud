@@ -250,6 +250,44 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if params.(map[string]any)["value"] != 2.0 || jsonPath(data, "$.missing.value") != nil || parseJSON("plain") != "plain" || toFloat(json.Number("3")) != 3 || !toBool("true") {
 		t.Fatal("data helpers")
 	}
+	intrinsicData := map[string]any{
+		"s": "world", "arr": []any{1.0, 2.0, 2.0, 3.0},
+		"left": map[string]any{"a": 1.0, "same": "old"}, "right": map[string]any{"b": 2.0, "same": "new"},
+	}
+	for _, tc := range []struct {
+		expression, want string
+	}{
+		{`States.Array($.s, 2)`, `["world",2]`},
+		{`States.ArrayPartition($.arr, 3)`, `[[1,2,2],[3]]`},
+		{`States.ArrayContains($.arr, 3)`, `true`},
+		{`States.ArrayRange(1, 5, 2)`, `[1,3,5]`},
+		{`States.ArrayGetItem($.arr, 1)`, `2`},
+		{`States.ArrayLength($.arr)`, `4`},
+		{`States.ArrayUnique($.arr)`, `[1,2,3]`},
+		{`States.Base64Encode('hello')`, `aGVsbG8=`},
+		{`States.Base64Decode('aGVsbG8=')`, `hello`},
+		{`States.Hash('input data', 'SHA-1')`, `aaff4a450a104cd177d28d18d74485e8cae074b7`},
+		{`States.JsonMerge($.left, $.right, false)`, `{"a":1,"b":2,"same":"new"}`},
+		{`States.StringToJson('{"a":1}')`, `{"a":1}`},
+		{`States.JsonToString($.left)`, `{"a":1,"same":"old"}`},
+		{`States.MathAdd(1.4, 2.6)`, `4`},
+		{`States.StringSplit('a.b+c', '.+')`, `["a","b","c"]`},
+		{`States.Format('Hello, {} {}', $.s, States.ArrayGetItem($.arr, 0))`, `Hello, world 1`},
+	} {
+		got, ok := evalIntrinsic(tc.expression, intrinsicData, nil)
+		if !ok || fmtString(got) != tc.want {
+			t.Fatalf("%s = %#v, %v want %s", tc.expression, got, ok, tc.want)
+		}
+	}
+	for _, invalid := range []string{`States.ArrayGetItem($.arr, 99)`, `States.ArrayPartition($.arr, 0)`, `States.ArrayRange(1, 1001, 1)`, `States.Base64Decode('!')`, `States.JsonMerge($.left, $.right, true)`, `States.MathAdd('1', 2)`, `States.Format('{} {}', 1)`, `States.Format('open\')`} {
+		if got, ok := evalIntrinsic(invalid, intrinsicData, nil); ok {
+			t.Fatalf("invalid intrinsic %s = %#v", invalid, got)
+		}
+	}
+	intrinsicPass := walk(`{"StartAt":"Build","States":{"Build":{"Type":"Pass","Parameters":{"message.$":"States.Format('Hello, {}', $.name)","parts.$":"States.StringSplit($.path, '/')"},"End":true}}}`, map[string]any{"name": "Ada", "path": "a/b"})
+	if intrinsicPass.status != "SUCCEEDED" || jsonPath(intrinsicPass.out, "$.message") != "Hello, Ada" || len(jsonPath(intrinsicPass.out, "$.parts").([]any)) != 2 {
+		t.Fatalf("intrinsic pass %#v", intrinsicPass)
+	}
 
 	recovery := walk(`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"arn:aws:lambda:us-east-1:1:function:missing","Retry":[{"ErrorEquals":["States.TaskFailed"],"MaxAttempts":2}],"Catch":[{"ErrorEquals":["ResourceNotFoundException"],"ResultPath":"$.error","Next":"Recovered"}]},"Recovered":{"Type":"Succeed"}}}`, map[string]any{"original": true})
 	got, _ := recovery.out.(map[string]any)

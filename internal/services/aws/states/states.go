@@ -3,9 +3,17 @@ package states
 
 import (
 	"context"
+	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"reflect"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -429,8 +437,16 @@ walkLoop:
 		hist = append(hist, map[string]any{"type": typ + "StateEntered", "id": hop + 1, "name": cur})
 		switch typ {
 		case "Pass":
-			if r, ok := st["Result"]; ok {
-				data = r
+			result := data
+			if params, ok := st["Parameters"].(map[string]any); ok {
+				result = applyParams(params, data, nil)
+			} else if value, ok := st["Result"]; ok {
+				result = value
+			}
+			var valid bool
+			data, valid = applyResultPath(st, data, result)
+			if !valid {
+				return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 			}
 		case "Succeed":
 			return walkResult{out: data, status: "SUCCEEDED", hist: hist}
@@ -728,6 +744,10 @@ func applyParams(params map[string]any, data any, context map[string]any) map[st
 	for k, v := range params {
 		if strings.HasSuffix(k, ".$") {
 			path := fmt.Sprint(v)
+			if strings.HasPrefix(path, "States.") {
+				out[strings.TrimSuffix(k, ".$")], _ = evalIntrinsic(path, data, context)
+				continue
+			}
 			source := data
 			if strings.HasPrefix(path, "$$.") {
 				source, path = context, strings.TrimPrefix(path, "$")
@@ -742,6 +762,309 @@ func applyParams(params map[string]any, data any, context map[string]any) map[st
 		out[k] = v
 	}
 	return out
+}
+
+func evalIntrinsic(expression string, data any, context map[string]any) (any, bool) {
+	open := strings.IndexByte(expression, '(')
+	if open < len("States.") || !strings.HasSuffix(expression, ")") {
+		return nil, false
+	}
+	name := expression[len("States."):open]
+	rawArgs := splitIntrinsicArgs(expression[open+1 : len(expression)-1])
+	args := make([]any, len(rawArgs))
+	for i, raw := range rawArgs {
+		var ok bool
+		args[i], ok = evalIntrinsicArg(raw, data, context)
+		if !ok {
+			return nil, false
+		}
+	}
+	switch name {
+	case "Array":
+		return args, true
+	case "ArrayPartition":
+		if len(args) != 2 {
+			break
+		}
+		array, ok := args[0].([]any)
+		number, numeric := intrinsicNumber(args[1])
+		size := int(math.Round(number))
+		if !ok || !numeric || size <= 0 {
+			break
+		}
+		parts := []any{}
+		for len(array) > 0 {
+			n := min(size, len(array))
+			parts = append(parts, append([]any(nil), array[:n]...))
+			array = array[n:]
+		}
+		return parts, true
+	case "ArrayContains":
+		if len(args) != 2 {
+			break
+		}
+		array, ok := args[0].([]any)
+		if !ok {
+			break
+		}
+		for _, item := range array {
+			if reflect.DeepEqual(item, args[1]) {
+				return true, true
+			}
+		}
+		return false, true
+	case "ArrayRange":
+		if len(args) != 3 {
+			break
+		}
+		startValue, startOK := intrinsicNumber(args[0])
+		endValue, endOK := intrinsicNumber(args[1])
+		stepValue, stepOK := intrinsicNumber(args[2])
+		start, end, step := int(math.Round(startValue)), int(math.Round(endValue)), int(math.Round(stepValue))
+		if !startOK || !endOK || !stepOK || step == 0 {
+			break
+		}
+		values := []any{}
+		for n := start; len(values) < 1000 && (step > 0 && n <= end || step < 0 && n >= end); n += step {
+			values = append(values, float64(n))
+		}
+		if len(values) == 1000 {
+			last := int(values[len(values)-1].(float64))
+			if step > 0 && last+step <= end || step < 0 && last+step >= end {
+				break
+			}
+		}
+		return values, true
+	case "ArrayGetItem":
+		if len(args) != 2 {
+			break
+		}
+		array, ok := args[0].([]any)
+		number, numeric := intrinsicNumber(args[1])
+		index := int(math.Round(number))
+		if !ok || !numeric || index < 0 || index >= len(array) {
+			break
+		}
+		return array[index], true
+	case "ArrayLength":
+		if len(args) == 1 {
+			if array, ok := args[0].([]any); ok {
+				return float64(len(array)), true
+			}
+		}
+	case "ArrayUnique":
+		if len(args) != 1 {
+			break
+		}
+		array, ok := args[0].([]any)
+		if !ok {
+			break
+		}
+		unique := []any{}
+		for _, item := range array {
+			found := false
+			for _, existing := range unique {
+				found = found || reflect.DeepEqual(existing, item)
+			}
+			if !found {
+				unique = append(unique, item)
+			}
+		}
+		return unique, true
+	case "Base64Encode":
+		if len(args) == 1 {
+			return base64.StdEncoding.EncodeToString([]byte(fmt.Sprint(args[0]))), true
+		}
+	case "Base64Decode":
+		if len(args) == 1 {
+			decoded, err := base64.StdEncoding.DecodeString(fmt.Sprint(args[0]))
+			return string(decoded), err == nil
+		}
+	case "Hash":
+		if len(args) == 2 {
+			return intrinsicHash(fmt.Sprint(args[0]), fmt.Sprint(args[1]))
+		}
+	case "JsonMerge":
+		if len(args) != 3 || toBool(args[2]) {
+			break
+		}
+		left, lok := args[0].(map[string]any)
+		right, rok := args[1].(map[string]any)
+		if !lok || !rok {
+			break
+		}
+		merged := map[string]any{}
+		for k, v := range left {
+			merged[k] = v
+		}
+		for k, v := range right {
+			merged[k] = v
+		}
+		return merged, true
+	case "StringToJson":
+		if len(args) == 1 {
+			var value any
+			err := json.Unmarshal([]byte(fmt.Sprint(args[0])), &value)
+			return value, err == nil
+		}
+	case "JsonToString":
+		if len(args) == 1 {
+			encoded, err := json.Marshal(args[0])
+			return string(encoded), err == nil
+		}
+	case "MathAdd":
+		if len(args) == 2 {
+			left, lok := intrinsicNumber(args[0])
+			right, rok := intrinsicNumber(args[1])
+			if lok && rok {
+				return math.Round(left) + math.Round(right), true
+			}
+		}
+	case "StringSplit":
+		if len(args) == 2 {
+			separators := fmt.Sprint(args[1])
+			parts := strings.FieldsFunc(fmt.Sprint(args[0]), func(r rune) bool { return strings.ContainsRune(separators, r) })
+			out := make([]any, len(parts))
+			for i, part := range parts {
+				out[i] = part
+			}
+			return out, true
+		}
+	case "Format":
+		if len(args) > 0 {
+			formatted := fmt.Sprint(args[0])
+			if strings.Count(formatted, "{}") != len(args)-1 {
+				break
+			}
+			for _, arg := range args[1:] {
+				formatted = strings.Replace(formatted, "{}", fmt.Sprint(arg), 1)
+			}
+			return formatted, true
+		}
+	}
+	return nil, false
+}
+
+func evalIntrinsicArg(raw string, data any, context map[string]any) (any, bool) {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "States.") {
+		return evalIntrinsic(raw, data, context)
+	}
+	if strings.HasPrefix(raw, "$$.") {
+		return jsonPath(context, strings.TrimPrefix(raw, "$")), true
+	}
+	if strings.HasPrefix(raw, "$") {
+		return jsonPath(data, raw), true
+	}
+	if len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\'' {
+		return unescapeIntrinsic(raw[1 : len(raw)-1])
+	}
+	var value any
+	if json.Unmarshal([]byte(raw), &value) == nil {
+		return value, true
+	}
+	return nil, false
+}
+
+func splitIntrinsicArgs(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var args []string
+	start, depth := 0, 0
+	quoted, escaped := false, false
+	for i, r := range raw {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if r == '\\' && quoted {
+			escaped = true
+			continue
+		}
+		if r == '\'' {
+			quoted = !quoted
+			continue
+		}
+		if quoted {
+			continue
+		}
+		switch r {
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			depth--
+		case ',':
+			if depth == 0 {
+				args = append(args, raw[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(args, raw[start:])
+}
+
+func unescapeIntrinsic(raw string) (string, bool) {
+	var out strings.Builder
+	escaped := false
+	for _, r := range raw {
+		if escaped {
+			if !strings.ContainsRune("'{}\\", r) {
+				return "", false
+			}
+			out.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			continue
+		}
+		out.WriteRune(r)
+	}
+	return out.String(), !escaped
+}
+
+func intrinsicHash(data, algorithm string) (any, bool) {
+	var sum []byte
+	switch algorithm {
+	case "MD5":
+		value := md5.Sum([]byte(data))
+		sum = value[:]
+	case "SHA-1":
+		value := sha1.Sum([]byte(data))
+		sum = value[:]
+	case "SHA-256":
+		value := sha256.Sum256([]byte(data))
+		sum = value[:]
+	case "SHA-384":
+		value := sha512.Sum384([]byte(data))
+		sum = value[:]
+	case "SHA-512":
+		value := sha512.Sum512([]byte(data))
+		sum = value[:]
+	default:
+		return nil, false
+	}
+	return hex.EncodeToString(sum), true
+}
+
+func intrinsicNumber(value any) (float64, bool) {
+	switch number := value.(type) {
+	case float64:
+		return number, true
+	case float32:
+		return float64(number), true
+	case int:
+		return float64(number), true
+	case int64:
+		return float64(number), true
+	case json.Number:
+		parsed, err := number.Float64()
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func (p *Pack) invokeLambda(ctx context.Context, req *spi.Request, resource string, st map[string]any, payload any) (any, error) {

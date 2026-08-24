@@ -63,6 +63,12 @@ func New(d spi.Deps) *Pack {
 	return p
 }
 
+func (p *Pack) derived(key string) *Pack {
+	child := &Pack{deps: p.deps, wake: p.wake, stop: p.stop, done: p.done}
+	child.deps.Rand = p.deps.Rand.Derive(key)
+	return child
+}
+
 // Close stops the durable Wait worker.
 func (p *Pack) Close() error {
 	p.closeOnce.Do(func() { close(p.stop) })
@@ -2001,20 +2007,42 @@ walkLoop:
 			for {
 				setJSONataRetryCount(stateContext, retries[cur])
 				branches, _ := st["Branches"].([]any)
-				var results []any
-				var failed *walkResult
-				for _, br := range branches {
+				branchDefs := make([]string, len(branches))
+				for index, br := range branches {
 					bm, _ := br.(map[string]any)
 					if bm["QueryLanguage"] == nil {
 						bm = maps.Clone(bm)
 						bm["QueryLanguage"] = machineQueryLanguage
 					}
 					bdef, _ := json.Marshal(bm)
-					wr := p.walk(ctx, req, string(bdef), "", branchInput, nil, maps.Clone(variables))
+					branchDefs[index] = string(bdef)
+				}
+				branchWalks := make([]walkResult, len(branches))
+				branchCtx, cancelBranches := context.WithCancel(ctx)
+				var branchWG sync.WaitGroup
+				for index := range branchDefs {
+					branchWG.Add(1)
+					go func() {
+						defer branchWG.Done()
+						child := p.derived(fmt.Sprintf("%s/parallel/%s/%d", first(req.Input, "_executionArn"), cur, index))
+						branchWalks[index] = child.walk(branchCtx, req, branchDefs[index], "", cloneJSON(branchInput), nil, maps.Clone(variables))
+						if branchWalks[index].status != "SUCCEEDED" {
+							cancelBranches()
+						}
+					}()
+				}
+				branchWG.Wait()
+				cancelBranches()
+				results := make([]any, 0, len(branches))
+				var failed *walkResult
+				for index := range branchWalks {
+					wr := branchWalks[index]
 					mapRuns = append(mapRuns, wr.mapRuns...)
 					if wr.status != "SUCCEEDED" {
-						failed = &wr
-						break
+						if failed == nil {
+							failed = &wr
+						}
+						continue
 					}
 					results = append(results, wr.out)
 				}
@@ -2225,50 +2253,102 @@ walkLoop:
 					mapRunARN = p.mapRunARN(req, mapStateMachineName(req), label)
 				}
 				if failed == nil {
-					for _, item := range arr {
-						iterationInput := item
-						walkRequest := req
-						childName, childStartTime := "", ""
-						if distributed {
-							childName = p.deps.Rand.UUID()
-							childStartTime = p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)
-							machine := mapStateMachineName(req) + "/" + cur
-							copy := *req
-							copy.Input = maps.Clone(req.Input)
-							copy.Input["_stateMachineArn"] = p.smARN(req, machine)
-							copy.Input["_executionArn"] = "arn:aws:states:" + req.Identity.Region + ":" + req.Identity.Account + ":execution:" + machine + ":" + childName
-							copy.Input["_executionName"], copy.Input["_executionInput"] = childName, iterationInput
-							copy.Input["_executionStartTime"] = childStartTime
-							copy.Input["_executionRoleArn"] = req.Input["_executionRoleArn"]
-							copy.Input["_executionType"] = executionType
-							copy.Input["_executionRedriveCount"] = 0.0
-							copy.Input["_executionDeadline"] = executionDeadline(string(idef), executionType, p.deps.Clock.Now())
-							walkRequest = &copy
+					type iterationRun struct {
+						processed bool
+						walk      walkResult
+						item      mapItemResult
+					}
+					runs := make([]iterationRun, len(arr))
+					limit, ceiling := int(maxConcurrency), 40
+					if distributed {
+						ceiling = 10000
+					}
+					if limit == 0 || limit > ceiling {
+						limit = ceiling
+					}
+					limit = min(limit, len(arr))
+					if limit > 0 {
+						iterationCtx, cancelIterations := context.WithCancel(ctx)
+						jobs := make(chan int)
+						var iterationWG sync.WaitGroup
+						for range limit {
+							iterationWG.Add(1)
+							go func() {
+								defer iterationWG.Done()
+								for index := range jobs {
+									if !distributed && iterationCtx.Err() != nil {
+										return
+									}
+									iterationInput := cloneJSON(arr[index])
+									child := p.derived(fmt.Sprintf("%s/map/%s/%d", first(req.Input, "_executionArn"), cur, index))
+									walkRequest := req
+									childName, childStartTime := "", ""
+									if distributed {
+										childName = child.deps.Rand.UUID()
+										childStartTime = p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)
+										machine := mapStateMachineName(req) + "/" + cur
+										copy := *req
+										copy.Input = maps.Clone(req.Input)
+										copy.Input["_stateMachineArn"] = p.smARN(req, machine)
+										copy.Input["_executionArn"] = "arn:aws:states:" + req.Identity.Region + ":" + req.Identity.Account + ":execution:" + machine + ":" + childName
+										copy.Input["_executionName"], copy.Input["_executionInput"] = childName, iterationInput
+										copy.Input["_executionStartTime"] = childStartTime
+										copy.Input["_executionRoleArn"] = req.Input["_executionRoleArn"]
+										copy.Input["_executionType"] = executionType
+										copy.Input["_executionRedriveCount"] = 0.0
+										copy.Input["_executionDeadline"] = executionDeadline(string(idef), executionType, p.deps.Clock.Now())
+										walkRequest = &copy
+									}
+									childVariables := maps.Clone(variables)
+									if distributed {
+										childVariables = map[string]any{}
+									}
+									wr := child.walk(iterationCtx, walkRequest, string(idef), "", iterationInput, nil, childVariables)
+									run := iterationRun{processed: true, walk: wr}
+									if distributed {
+										run.item = p.mapItemResult(req, cur, childName, childStartTime, iterationInput, wr)
+										p.storeMapItemExecution(iterationCtx, req, mapRunARN, string(idef), executionType, run.item)
+									}
+									runs[index] = run
+									if wr.status != "SUCCEEDED" && !distributed {
+										cancelIterations()
+									}
+								}
+							}()
 						}
-						childVariables := maps.Clone(variables)
-						if distributed {
-							childVariables = map[string]any{}
-						}
-						wr := p.walk(ctx, walkRequest, string(idef), "", iterationInput, nil, childVariables)
-						mapRuns = append(mapRuns, wr.mapRuns...)
-						if distributed {
-							itemResult := p.mapItemResult(req, cur, childName, childStartTime, iterationInput, wr)
-							p.storeMapItemExecution(ctx, req, mapRunARN, string(idef), executionType, itemResult)
-							if hasResultWriter {
-								itemResults = append(itemResults, itemResult)
+					sendItems:
+						for index := range arr {
+							if !distributed && iterationCtx.Err() != nil {
+								break
+							}
+							select {
+							case jobs <- index:
+							case <-iterationCtx.Done():
+								break sendItems
 							}
 						}
-						if wr.status != "SUCCEEDED" {
+						close(jobs)
+						iterationWG.Wait()
+						cancelIterations()
+					}
+					for index := range runs {
+						run := runs[index]
+						if !run.processed {
+							continue
+						}
+						mapRuns = append(mapRuns, run.walk.mapRuns...)
+						if distributed && hasResultWriter {
+							itemResults = append(itemResults, run.item)
+						}
+						if run.walk.status != "SUCCEEDED" {
 							failedCount++
 							if failed == nil {
-								failed = &wr
-							}
-							if !distributed {
-								break
+								failure := run.walk
+								failed = &failure
 							}
 							continue
 						}
-						results = append(results, wr.out)
+						results = append(results, run.walk.out)
 					}
 				}
 				mapOutput := any(results)

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -24,13 +25,12 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ecs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/emr"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/glue"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
-
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 )
 
 const testRoleARN = "arn:aws:iam::1:role/states"
@@ -3022,6 +3022,89 @@ func TestBootedServerStatesMapLambdaActivity(t *testing.T) {
 func mustJSON(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+func TestStatesCompositeConcurrency(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	t.Cleanup(func() { _ = p.Close() })
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+
+	isolation := p.walk(ctx, &spi.Request{Identity: id, Input: map[string]any{"_executionArn": "parallel-isolation"}}, `{"StartAt":"P","States":{"P":{"Type":"Parallel","Branches":[{"StartAt":"A","States":{"A":{"Type":"Pass","Result":1,"ResultPath":"$.branch","End":true}}},{"StartAt":"B","States":{"B":{"Type":"Pass","Result":2,"ResultPath":"$.branch","End":true}}}],"End":true}}}`, "", map[string]any{"shared": true}, nil)
+	if isolation.status != "SUCCEEDED" {
+		t.Fatalf("parallel isolation %#v", isolation)
+	}
+	isolated := isolation.out.([]any)
+	if jsonPath(isolated[0], "$.branch") != 1.0 || jsonPath(isolated[1], "$.branch") != 2.0 {
+		t.Fatalf("branches shared mutable input %#v", isolated)
+	}
+
+	if _, err := exec.LookPath("python3"); err != nil {
+		return
+	}
+	src := `import fcntl,json,time
+def change(path, delta):
+    with open(path, "a+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.seek(0)
+        raw = f.read()
+        state = json.loads(raw) if raw else {"active": 0, "maximum": 0}
+        state["active"] += delta
+        state["maximum"] = max(state["maximum"], state["active"])
+        f.seek(0)
+        f.truncate()
+        json.dump(state, f)
+        f.flush()
+        fcntl.flock(f, fcntl.LOCK_UN)
+def lambda_handler(event, context):
+    change(event["path"], 1)
+    time.sleep(event["delay"])
+    change(event["path"], -1)
+    return event
+`
+	if _, err := lambda.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+		"FunctionName": "concurrency-worker", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
+		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(src))},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	maximum := func(path string) int {
+		t.Helper()
+		encoded, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var state struct {
+			Maximum int `json:"maximum"`
+		}
+		if err := json.Unmarshal(encoded, &state); err != nil {
+			t.Fatal(err)
+		}
+		return state.Maximum
+	}
+	task := `{"Type":"Task","Resource":"arn:aws:lambda:us-east-1:1:function:concurrency-worker","End":true}`
+	parallelPath := t.TempDir() + "/parallel.json"
+	parallel := p.walk(ctx, &spi.Request{Identity: id, Input: map[string]any{"_executionArn": "parallel-concurrency"}}, `{"StartAt":"P","States":{"P":{"Type":"Parallel","Branches":[{"StartAt":"T","States":{"T":`+task+`}},{"StartAt":"T","States":{"T":`+task+`}}],"End":true}}}`, "", map[string]any{"path": parallelPath, "delay": 0.2}, nil)
+	if parallel.status != "SUCCEEDED" || len(parallel.out.([]any)) != 2 || maximum(parallelPath) != 2 {
+		t.Fatalf("parallel did not overlap %#v maximum=%d", parallel, maximum(parallelPath))
+	}
+
+	mapPath := t.TempDir() + "/map.json"
+	items := make([]any, 4)
+	for index := range items {
+		items[index] = map[string]any{"path": mapPath, "delay": 0.2, "index": float64(index)}
+	}
+	mapped := p.walk(ctx, &spi.Request{Identity: id, Input: map[string]any{"_executionArn": "map-concurrency"}}, `{"StartAt":"M","States":{"M":{"Type":"Map","ItemsPath":"$.items","MaxConcurrency":2,"ItemProcessor":{"StartAt":"T","States":{"T":`+task+`}},"End":true}}}`, "", map[string]any{"items": items}, nil)
+	outputs, ok := mapped.out.([]any)
+	if mapped.status != "SUCCEEDED" || !ok || len(outputs) != len(items) || maximum(mapPath) != 2 {
+		t.Fatalf("map concurrency %#v maximum=%d", mapped, maximum(mapPath))
+	}
+	for index := range outputs {
+		if jsonPath(outputs[index], "$.index") != float64(index) {
+			t.Fatalf("map output order %#v", outputs)
+		}
+	}
 }
 
 func fmtString(v any) string {

@@ -1485,10 +1485,14 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-skip-iceberg-all-data-backup",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `if first(destination, "S3BackupMode") == "AllData" {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseIcebergDestination",
+			old: `tableBucket := icebergTableBucket(first(catalog, "CatalogARN"))
+	for index := range data {
+		if first(destination, "S3BackupMode") == "AllData" {`,
+			new: `tableBucket := icebergTableBucket(first(catalog, "CatalogARN"))
+	for index := range data {
+		if false {`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseIcebergDestination",
 		},
 		{
 			name: "firehose-ignore-iceberg-operation",

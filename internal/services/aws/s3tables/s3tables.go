@@ -1,4 +1,4 @@
-// Package s3tables stores table-bucket records (no Iceberg engine).
+// Package s3tables stores table-bucket records and local row mutations (no Iceberg file or manifest engine).
 package s3tables
 
 import (

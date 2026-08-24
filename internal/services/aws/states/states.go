@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	mathrand "math/rand"
 	"reflect"
 	"strings"
 
@@ -439,7 +440,7 @@ walkLoop:
 		case "Pass":
 			result := data
 			if params, ok := st["Parameters"].(map[string]any); ok {
-				result = applyParams(params, data, nil)
+				result = applyParams(params, data, nil, p.deps.Rand)
 			} else if value, ok := st["Result"]; ok {
 				result = value
 			}
@@ -463,7 +464,7 @@ walkLoop:
 		case "Wait":
 		case "Task":
 			res := first(st, "Resource")
-			payload := taskPayload(st, data)
+			payload := taskPayload(st, data, p.deps.Rand)
 			switch {
 			case strings.Contains(res, ":function:") || strings.Contains(res, "lambda:invoke"):
 				if retries[cur] == nil {
@@ -578,7 +579,7 @@ walkLoop:
 					if selector != nil {
 						iterationInput = applyParams(selector, data, map[string]any{"Map": map[string]any{"Item": map[string]any{
 							"Index": float64(index), "Value": item, "Source": "STATE_DATA",
-						}}})
+						}}}, p.deps.Rand)
 					}
 					wr := p.walk(ctx, req, string(idef), "", iterationInput)
 					if wr.status != "SUCCEEDED" {
@@ -727,25 +728,25 @@ func applyResultPath(state map[string]any, input, result any) (any, bool) {
 	return input, true
 }
 
-func taskPayload(st map[string]any, data any) any {
+func taskPayload(st map[string]any, data any, random spi.Rand) any {
 	params, ok := st["Parameters"].(map[string]any)
 	if !ok {
 		return data
 	}
-	p := applyParams(params, data, nil)
+	p := applyParams(params, data, nil, random)
 	if pl, ok := p["Payload"]; ok {
 		return pl
 	}
 	return p
 }
 
-func applyParams(params map[string]any, data any, context map[string]any) map[string]any {
+func applyParams(params map[string]any, data any, context map[string]any, random spi.Rand) map[string]any {
 	out := map[string]any{}
 	for k, v := range params {
 		if strings.HasSuffix(k, ".$") {
 			path := fmt.Sprint(v)
 			if strings.HasPrefix(path, "States.") {
-				out[strings.TrimSuffix(k, ".$")], _ = evalIntrinsic(path, data, context)
+				out[strings.TrimSuffix(k, ".$")], _ = evalIntrinsic(path, data, context, random)
 				continue
 			}
 			source := data
@@ -756,7 +757,7 @@ func applyParams(params map[string]any, data any, context map[string]any) map[st
 			continue
 		}
 		if m, ok := v.(map[string]any); ok {
-			out[k] = applyParams(m, data, context)
+			out[k] = applyParams(m, data, context, random)
 			continue
 		}
 		out[k] = v
@@ -764,7 +765,7 @@ func applyParams(params map[string]any, data any, context map[string]any) map[st
 	return out
 }
 
-func evalIntrinsic(expression string, data any, context map[string]any) (any, bool) {
+func evalIntrinsic(expression string, data any, context map[string]any, random spi.Rand) (any, bool) {
 	open := strings.IndexByte(expression, '(')
 	if open < len("States.") || !strings.HasSuffix(expression, ")") {
 		return nil, false
@@ -774,7 +775,7 @@ func evalIntrinsic(expression string, data any, context map[string]any) (any, bo
 	args := make([]any, len(rawArgs))
 	for i, raw := range rawArgs {
 		var ok bool
-		args[i], ok = evalIntrinsicArg(raw, data, context)
+		args[i], ok = evalIntrinsicArg(raw, data, context, random)
 		if !ok {
 			return nil, false
 		}
@@ -920,6 +921,25 @@ func evalIntrinsic(expression string, data any, context map[string]any) (any, bo
 				return math.Round(left) + math.Round(right), true
 			}
 		}
+	case "MathRandom":
+		if len(args) == 2 || len(args) == 3 {
+			startValue, startOK := intrinsicNumber(args[0])
+			endValue, endOK := intrinsicNumber(args[1])
+			start, end := int(math.Round(startValue)), int(math.Round(endValue))
+			if !startOK || !endOK || start >= end {
+				break
+			}
+			if len(args) == 3 {
+				seed, ok := intrinsicNumber(args[2])
+				if !ok {
+					break
+				}
+				return float64(start + mathrand.New(mathrand.NewSource(int64(math.Round(seed)))).Intn(end-start)), true
+			}
+			if random != nil {
+				return float64(start + random.Intn(end-start)), true
+			}
+		}
 	case "StringSplit":
 		if len(args) == 2 {
 			separators := fmt.Sprint(args[1])
@@ -941,14 +961,18 @@ func evalIntrinsic(expression string, data any, context map[string]any) (any, bo
 			}
 			return formatted, true
 		}
+	case "UUID":
+		if len(args) == 0 && random != nil {
+			return random.UUID(), true
+		}
 	}
 	return nil, false
 }
 
-func evalIntrinsicArg(raw string, data any, context map[string]any) (any, bool) {
+func evalIntrinsicArg(raw string, data any, context map[string]any, random spi.Rand) (any, bool) {
 	raw = strings.TrimSpace(raw)
 	if strings.HasPrefix(raw, "States.") {
-		return evalIntrinsic(raw, data, context)
+		return evalIntrinsic(raw, data, context, random)
 	}
 	if strings.HasPrefix(raw, "$$.") {
 		return jsonPath(context, strings.TrimPrefix(raw, "$")), true
@@ -1070,7 +1094,7 @@ func intrinsicNumber(value any) (float64, bool) {
 func (p *Pack) invokeLambda(ctx context.Context, req *spi.Request, resource string, st map[string]any, payload any) (any, error) {
 	name := ""
 	if params, ok := st["Parameters"].(map[string]any); ok {
-		ap := applyParams(params, payload, nil)
+		ap := applyParams(params, payload, nil, p.deps.Rand)
 		name, _ = ap["FunctionName"].(string)
 		if pl, ok := ap["Payload"]; ok {
 			payload = pl

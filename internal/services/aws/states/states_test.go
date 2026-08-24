@@ -246,7 +246,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if choiceNext(choice, data) != "Default" {
 		t.Fatal("choice default")
 	}
-	params := taskPayload(map[string]any{"Parameters": map[string]any{"Payload": map[string]any{"value.$": "$.n"}, "nested": map[string]any{"value.$": "$.s"}}}, data)
+	params := taskPayload(map[string]any{"Parameters": map[string]any{"Payload": map[string]any{"value.$": "$.n"}, "nested": map[string]any{"value.$": "$.s"}}}, data, p.deps.Rand)
 	if params.(map[string]any)["value"] != 2.0 || jsonPath(data, "$.missing.value") != nil || parseJSON("plain") != "plain" || toFloat(json.Number("3")) != 3 || !toBool("true") {
 		t.Fatal("data helpers")
 	}
@@ -274,15 +274,21 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		{`States.StringSplit('a.b+c', '.+')`, `["a","b","c"]`},
 		{`States.Format('Hello, {} {}', $.s, States.ArrayGetItem($.arr, 0))`, `Hello, world 1`},
 	} {
-		got, ok := evalIntrinsic(tc.expression, intrinsicData, nil)
+		got, ok := evalIntrinsic(tc.expression, intrinsicData, nil, p.deps.Rand)
 		if !ok || fmtString(got) != tc.want {
 			t.Fatalf("%s = %#v, %v want %s", tc.expression, got, ok, tc.want)
 		}
 	}
 	for _, invalid := range []string{`States.ArrayGetItem($.arr, 99)`, `States.ArrayPartition($.arr, 0)`, `States.ArrayRange(1, 1001, 1)`, `States.Base64Decode('!')`, `States.JsonMerge($.left, $.right, true)`, `States.MathAdd('1', 2)`, `States.Format('{} {}', 1)`, `States.Format('open\')`} {
-		if got, ok := evalIntrinsic(invalid, intrinsicData, nil); ok {
+		if got, ok := evalIntrinsic(invalid, intrinsicData, nil, p.deps.Rand); ok {
 			t.Fatalf("invalid intrinsic %s = %#v", invalid, got)
 		}
+	}
+	seeded1, ok1 := evalIntrinsic(`States.MathRandom(10, 20, 42)`, intrinsicData, nil, p.deps.Rand)
+	seeded2, ok2 := evalIntrinsic(`States.MathRandom(10, 20, 42)`, intrinsicData, nil, p.deps.Rand)
+	uuid, uuidOK := evalIntrinsic(`States.UUID()`, intrinsicData, nil, p.deps.Rand)
+	if !ok1 || !ok2 || seeded1 != seeded2 || seeded1.(float64) < 10 || seeded1.(float64) >= 20 || !uuidOK || len(uuid.(string)) != 36 || uuid.(string)[14] != '4' {
+		t.Fatalf("random intrinsics %#v %#v %#v", seeded1, seeded2, uuid)
 	}
 	intrinsicPass := walk(`{"StartAt":"Build","States":{"Build":{"Type":"Pass","Parameters":{"message.$":"States.Format('Hello, {}', $.name)","parts.$":"States.StringSplit($.path, '/')"},"End":true}}}`, map[string]any{"name": "Ada", "path": "a/b"})
 	if intrinsicPass.status != "SUCCEEDED" || jsonPath(intrinsicPass.out, "$.message") != "Hello, Ada" || len(jsonPath(intrinsicPass.out, "$.parts").([]any)) != 2 {

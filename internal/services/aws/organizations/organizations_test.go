@@ -229,10 +229,10 @@ func TestOrganizationsControlPlaneLifecycle(t *testing.T) {
 	if units := must("ListOrganizationalUnitsForParent", map[string]any{"ParentId": rootID}).Output["OrganizationalUnits"].([]any); len(units) != 1 {
 		t.Fatalf("OUs %#v", units)
 	}
-	if children := must("ListChildren", map[string]any{"ParentId": rootID, "ChildType": "ORGANIZATIONAL_UNIT"}).Output["Children"].([]any); len(children) != 1 {
+	if children := must("ListChildren", map[string]any{"ParentId": rootID, "ChildType": "ORGANIZATIONAL_UNIT"}).Output["Children"].([]any); len(children) != 1 || children[0].(map[string]any)["Id"] != ouID || children[0].(map[string]any)["Type"] != "ORGANIZATIONAL_UNIT" {
 		t.Fatalf("OU children %#v", children)
 	}
-	if children := must("ListChildren", map[string]any{"ParentId": rootID, "ChildType": "ACCOUNT"}).Output["Children"].([]any); len(children) != 1 {
+	if children := must("ListChildren", map[string]any{"ParentId": rootID, "ChildType": "ACCOUNT"}).Output["Children"].([]any); len(children) != 1 || children[0].(map[string]any)["Id"] != accountID || children[0].(map[string]any)["Type"] != "ACCOUNT" {
 		t.Fatalf("account children %#v", children)
 	}
 	if parents := must("ListParents", map[string]any{"ChildId": "missing"}).Output["Parents"].([]any); len(parents) != 0 {

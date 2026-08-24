@@ -36,7 +36,7 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 }
 
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	name := first(req.Input, "name", "Name")
+	name := first(req.Input, "name", "Name", "projectName", "ProjectName")
 	switch req.Operation {
 	case "CreateProject", "UpdateProject":
 		if name == "" {

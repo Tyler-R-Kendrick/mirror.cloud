@@ -14,7 +14,11 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/batch"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/codebuild"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/emr"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/glue"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -839,6 +843,51 @@ func TestStatesCallbackServiceIntegration(t *testing.T) {
 	}
 	if execution := describe(stopped); execution["status"] != "ABORTED" {
 		t.Fatalf("stopped callback execution %#v", execution)
+	}
+}
+
+func TestStatesSyncServiceIntegrations(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	call := func(handler spi.Handler, operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return handler.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	must := func(handler spi.Handler, operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := call(handler, operation, input)
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+
+	definition := `{"StartAt":"Batch","States":{"Batch":{"Type":"Task","Resource":"arn:aws:states:::batch:submitJob.sync","Parameters":{"JobName":"job","JobQueue":"queue"},"ResultPath":null,"Next":"Build"},"Build":{"Type":"Task","Resource":"arn:aws:states:::codebuild:startBuild.sync","Parameters":{"ProjectName":"project"},"ResultPath":null,"Next":"Glue"},"Glue":{"Type":"Task","Resource":"arn:aws:states:::glue:startJobRun.sync","Parameters":{"JobName":"job"},"ResultPath":null,"Next":"Cluster"},"Cluster":{"Type":"Task","Resource":"arn:aws:states:::elasticmapreduce:createCluster.sync","Parameters":{"Name":"cluster"},"ResultPath":null,"Next":"Step"},"Step":{"Type":"Task","Resource":"arn:aws:states:::elasticmapreduce:addStep.sync","Parameters":{"JobFlowId":"j-test"},"End":true}}}`
+	machine := must(p, "CreateStateMachine", map[string]any{"name": "sync-jobs", "definition": definition, "roleArn": testRoleARN})
+	executionARN := must(p, "StartExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"]})["executionArn"].(string)
+	if execution := must(p, "DescribeExecution", map[string]any{"executionArn": executionARN}); execution["status"] != "SUCCEEDED" || !strings.Contains(execution["output"].(string), "StepIds") {
+		t.Fatalf("sync execution %#v", execution)
+	}
+	if jobs := must(batch.New(deps), "DescribeJobs", nil)["jobs"].([]any); len(jobs) != 1 || jobs[0].(map[string]any)["jobName"] != "job" || jobs[0].(map[string]any)["status"] != "SUCCEEDED" {
+		t.Fatalf("batch sync jobs %#v", jobs)
+	}
+	if builds := must(codebuild.New(deps), "ListBuilds", nil)["ids"].([]any); len(builds) != 1 || !strings.HasPrefix(builds[0].(string), "project:") {
+		t.Fatalf("codebuild sync builds %#v", builds)
+	}
+	if runs := must(glue.New(deps), "GetJobRuns", map[string]any{"JobName": "job"})["JobRuns"].([]any); len(runs) != 1 || runs[0].(map[string]any)["JobRunState"] != "SUCCEEDED" {
+		t.Fatalf("glue sync runs %#v", runs)
+	}
+	if steps := must(emr.New(deps), "ListSteps", map[string]any{"ClusterId": "j-test"})["Steps"].([]any); len(steps) != 1 {
+		t.Fatalf("emr sync steps %#v", steps)
+	}
+	if _, err := call(p, "CreateStateMachine", map[string]any{"name": "express-sync", "definition": definition, "roleArn": testRoleARN, "type": "EXPRESS"}); err == nil {
+		t.Fatal("Express .sync integration accepted")
+	}
+	invalid := `{"StartAt":"Queue","States":{"Queue":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage.sync","End":true}}}`
+	if _, err := call(p, "CreateStateMachine", map[string]any{"name": "invalid-sync", "definition": invalid, "roleArn": testRoleARN}); err == nil {
+		t.Fatal("unsupported .sync integration accepted")
 	}
 }
 

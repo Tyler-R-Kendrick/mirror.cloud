@@ -2068,8 +2068,13 @@ func intrinsicNumber(value any) (float64, bool) {
 
 func (p *Pack) invokeTask(ctx context.Context, req *spi.Request, resource string, payload any) (any, error, string, bool, bool) {
 	callback := strings.HasSuffix(resource, ".waitForTaskToken")
+	syncJob := strings.HasSuffix(resource, ".sync")
 	resource = strings.TrimSuffix(resource, ".waitForTaskToken")
+	resource = strings.TrimSuffix(resource, ".sync")
 	if callback && !callbackIntegration(resource) {
+		return nil, nil, "", false, false
+	}
+	if syncJob && !syncIntegration(resource) {
 		return nil, nil, "", false, false
 	}
 	if strings.Contains(resource, ":function:") || strings.Contains(resource, "lambda:invoke") {
@@ -2128,15 +2133,31 @@ func callbackIntegration(resource string) bool {
 	}
 }
 
+func syncIntegration(resource string) bool {
+	switch resource {
+	case "arn:aws:states:::batch:submitJob", "arn:aws:states:::codebuild:startBuild",
+		"arn:aws:states:::glue:startJobRun", "arn:aws:states:::elasticmapreduce:addStep",
+		"arn:aws:states:::elasticmapreduce:createCluster":
+		return true
+	default:
+		return false
+	}
+}
+
 func taskIntegration(resource string) (service, operation, prefix string, sdk, ok bool) {
 	optimized := map[string][3]string{
-		"arn:aws:states:::sqs:sendMessage":       {"sqs", "SendMessage", "SQS"},
-		"arn:aws:states:::sns:publish":           {"sns", "Publish", "SNS"},
-		"arn:aws:states:::dynamodb:getItem":      {"dynamodb", "GetItem", "DynamoDB"},
-		"arn:aws:states:::dynamodb:putItem":      {"dynamodb", "PutItem", "DynamoDB"},
-		"arn:aws:states:::dynamodb:updateItem":   {"dynamodb", "UpdateItem", "DynamoDB"},
-		"arn:aws:states:::dynamodb:deleteItem":   {"dynamodb", "DeleteItem", "DynamoDB"},
-		"arn:aws:states:::states:startExecution": {"states", "StartExecution", "StepFunctions"},
+		"arn:aws:states:::batch:submitJob":                {"batch", "SubmitJob", "Batch"},
+		"arn:aws:states:::codebuild:startBuild":           {"codebuild", "StartBuild", "CodeBuild"},
+		"arn:aws:states:::sqs:sendMessage":                {"sqs", "SendMessage", "SQS"},
+		"arn:aws:states:::sns:publish":                    {"sns", "Publish", "SNS"},
+		"arn:aws:states:::dynamodb:getItem":               {"dynamodb", "GetItem", "DynamoDB"},
+		"arn:aws:states:::dynamodb:putItem":               {"dynamodb", "PutItem", "DynamoDB"},
+		"arn:aws:states:::dynamodb:updateItem":            {"dynamodb", "UpdateItem", "DynamoDB"},
+		"arn:aws:states:::dynamodb:deleteItem":            {"dynamodb", "DeleteItem", "DynamoDB"},
+		"arn:aws:states:::elasticmapreduce:addStep":       {"elasticmapreduce", "AddJobFlowSteps", "ElasticMapReduce"},
+		"arn:aws:states:::elasticmapreduce:createCluster": {"elasticmapreduce", "RunJobFlow", "ElasticMapReduce"},
+		"arn:aws:states:::glue:startJobRun":               {"glue", "StartJobRun", "Glue"},
+		"arn:aws:states:::states:startExecution":          {"states", "StartExecution", "StepFunctions"},
 	}
 	if integration, found := optimized[resource]; found {
 		return integration[0], integration[1], integration[2], false, true
@@ -2693,6 +2714,13 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 		}
 		if resource := first(state, "Resource"); machineType == "EXPRESS" && strings.HasSuffix(resource, ".waitForTaskToken") {
 			add("SCHEMA_VALIDATION_FAILED", "Express workflows do not support the callback integration pattern.", "/States/"+name+"/Resource")
+		}
+		if resource := first(state, "Resource"); typ == "Task" && strings.HasSuffix(resource, ".sync") &&
+			!syncIntegration(strings.TrimSuffix(resource, ".sync")) {
+			add("SCHEMA_VALIDATION_FAILED", "Resource does not support the Run a Job integration pattern.", "/States/"+name+"/Resource")
+		}
+		if resource := first(state, "Resource"); machineType == "EXPRESS" && strings.HasSuffix(resource, ".sync") {
+			add("SCHEMA_VALIDATION_FAILED", "Express workflows do not support the Run a Job integration pattern.", "/States/"+name+"/Resource")
 		}
 		checkTarget := func(raw any, path string) {
 			target, _ := raw.(string)

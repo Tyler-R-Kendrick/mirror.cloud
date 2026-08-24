@@ -3258,7 +3258,7 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			}
 			configuredHeaders[index] = header
 		}
-		items := mapDataset{}
+		inventoryItems := mapDataset{}
 		for _, file := range manifest.Files {
 			if file.Key == "" {
 				return nil, "", false
@@ -3280,13 +3280,13 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			if !valid || !array {
 				return nil, "", false
 			}
-			items.values = append(items.values, values...)
-			items.keys = append(items.keys, make([]any, len(values))...)
+			inventoryItems.values = append(inventoryItems.values, values...)
+			inventoryItems.keys = append(inventoryItems.keys, make([]any, len(values))...)
 			for range values {
-				items.sources = append(items.sources, nestedSource)
+				inventoryItems.sources = append(inventoryItems.sources, nestedSource)
 			}
 		}
-		return limitReaderItems(items, "", config, data, scope, variables...)
+		return limitReaderItems(inventoryItems, "", config, data, scope, variables...)
 	}
 	if inputType == "" {
 		inputType = "JSON"

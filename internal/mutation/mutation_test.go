@@ -1405,6 +1405,124 @@ func TestMutantsAreKilled(t *testing.T) {
 			run: "TestRedshiftCopyDataPlane",
 		},
 		{
+			name: "firehose-skip-iceberg-delivery",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `p.deliverIcebergRecords(ctx, req, destination, stream, version, recIDs, data, now)`,
+			new:  `_ = destination`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseIcebergDestination",
+		},
+		{
+			name: "firehose-skip-iceberg-all-data-backup",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `if first(destination, "S3BackupMode") == "AllData" {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseIcebergDestination",
+		},
+		{
+			name: "firehose-ignore-iceberg-operation",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `operation := metadata["operation"]`,
+			new:  `operation := ""`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseIcebergDestination",
+		},
+		{
+			name: "firehose-ignore-iceberg-append-only",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `if destination["AppendOnly"] == true && operation != "insert" {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseIcebergDestination",
+		},
+		{
+			name: "firehose-use-wrong-iceberg-table-bucket",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `tableBucket := icebergTableBucket(first(catalog, "CatalogARN"))`,
+			new:  `tableBucket := "mutated"`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseIcebergDestination",
+		},
+		{
+			name: "firehose-drop-iceberg-failure-envelope",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old: `failure := &processingFailure{typeName: "iceberg-failed", code: "Iceberg.DeliveryFailed", message: message, attempts: 1, recID: record.recID, data: record.raw}
+	p.logDeliveryError(ctx, req, s3, stream, message, now)
+	p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)`,
+			new: `failure := &processingFailure{typeName: "iceberg-failed", code: "Iceberg.DeliveryFailed", message: message, attempts: 1, recID: record.recID, data: record.raw}
+	p.logDeliveryError(ctx, req, s3, stream, message, now)
+	_ = failure`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseIcebergDestination",
+		},
+		{
+			name: "s3tables-accept-unknown-row-column",
+			file: filepath.Join("internal", "services", "aws", "s3tables", "s3tables.go"),
+			old:  `if _, exists := columnIndex[column]; !exists {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/s3tables",
+			run:  "TestS3TablesRowMutations",
+		},
+		{
+			name: "s3tables-reject-row-inserts",
+			file: filepath.Join("internal", "services", "aws", "s3tables", "s3tables.go"),
+			old:  `case "", "insert":`,
+			new:  `case "mutated":`,
+			pkg:  "./internal/services/aws/s3tables",
+			run:  "TestS3TablesRowMutations",
+		},
+		{
+			name: "s3tables-treat-row-delete-as-update",
+			file: filepath.Join("internal", "services", "aws", "s3tables", "s3tables.go"),
+			old:  `if strings.EqualFold(mutation.Operation, "delete") {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/s3tables",
+			run:  "TestS3TablesRowMutations",
+		},
+		{
+			name: "s3tables-skip-row-update",
+			file: filepath.Join("internal", "services", "aws", "s3tables", "s3tables.go"),
+			old:  `rows[matched] = row`,
+			new:  `_ = row`,
+			pkg:  "./internal/services/aws/s3tables",
+			run:  "TestS3TablesRowMutations",
+		},
+		{
+			name: "s3tables-skip-row-upsert",
+			file: filepath.Join("internal", "services", "aws", "s3tables", "s3tables.go"),
+			old: `} else {
+					rows = append(rows, row)
+				}
+			default:`,
+			new: `} else {
+					_ = row
+				}
+			default:`,
+			pkg: "./internal/services/aws/s3tables",
+			run: "TestS3TablesRowMutations",
+		},
+		{
+			name: "s3tables-allow-missing-unique-keys",
+			file: filepath.Join("internal", "services", "aws", "s3tables", "s3tables.go"),
+			old:  `if len(keys) == 0 {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/s3tables",
+			run:  "TestS3TablesRowMutations",
+		},
+		{
+			name: "s3tables-drop-row-commit",
+			file: filepath.Join("internal", "services", "aws", "s3tables", "s3tables.go"),
+			old: `// ponytail: whole-table JSON rewrite; replace with Iceberg manifests when a file engine exists.
+		stored, _ = json.Marshal(rows)
+		return tx.Put(key, stored)`,
+			new: `// ponytail: whole-table JSON rewrite; replace with Iceberg manifests when a file engine exists.
+		stored, _ = json.Marshal(rows)
+		return nil`,
+			pkg: "./internal/services/aws/s3tables",
+			run: "TestS3TablesRowMutations",
+		},
+		{
 			name: "firehose-drop-direct-put-source",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 			old:  `if directPutSource != nil {`,

@@ -1301,6 +1301,10 @@ func TestFirehoseIcebergDestination(t *testing.T) {
 	if !bytes.Contains(body, []byte("append-only")) {
 		t.Fatalf("Iceberg failure envelope %q", body)
 	}
+	rows, err = tables.TableRows(ctx, id, "warehouse", "analytics", "events")
+	if err != nil || !reflect.DeepEqual(rows, want) {
+		t.Fatalf("append-only Iceberg mutation changed rows %#v, %v", rows, err)
+	}
 }
 
 func TestSplunkDestinationValidationAndDescription(t *testing.T) {

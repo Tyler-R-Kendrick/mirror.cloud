@@ -2402,6 +2402,8 @@
       "SendTaskSuccess",
       "SendTaskFailure",
       "SendTaskHeartbeat",
+      "TestState",
+      "ValidateStateMachineDefinition",
       "TagResource",
       "UntagResource",
       "ListTagsForResource"

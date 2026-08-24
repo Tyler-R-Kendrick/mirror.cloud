@@ -720,6 +720,7 @@ func Bundle() *model.Bundle {
 		"StartExecution", "StartSyncExecution", "StopExecution", "DescribeExecution", "ListExecutions", "GetExecutionHistory",
 		"CreateActivity", "DeleteActivity", "DescribeActivity", "ListActivities", "GetActivityTask",
 		"SendTaskSuccess", "SendTaskFailure", "SendTaskHeartbeat",
+		"TestState", "ValidateStateMachineDefinition",
 		"TagResource", "UntagResource", "ListTagsForResource",
 	}
 	firehose := []string{

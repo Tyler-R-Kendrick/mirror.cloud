@@ -21,8 +21,8 @@ import (
 
 func TestStatesHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 22 {
-		t.Fatalf("states Operations() %d want 22", n)
+	if n := len(p.Operations()); n != 24 {
+		t.Fatalf("states Operations() %d want 24", n)
 	}
 }
 
@@ -83,7 +83,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		}
 		return response
 	}
-	if p.ServiceID() != "aws.states" || len(p.Operations()) != 22 {
+	if p.ServiceID() != "aws.states" || len(p.Operations()) != 24 {
 		t.Fatalf("metadata %s %d", p.ServiceID(), len(p.Operations()))
 	}
 	if _, err := call("CreateStateMachine", map[string]any{}); err == nil {
@@ -190,6 +190,38 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	must("DeleteStateMachine", map[string]any{"StateMachineArn": arn})
 	if _, err := call("Unknown", nil); err == nil {
 		t.Fatal("unknown operation succeeded")
+	}
+	valid := must("ValidateStateMachineDefinition", map[string]any{"definition": definition}).Output
+	if valid["result"] != "OK" || len(valid["diagnostics"].([]any)) != 0 || valid["truncated"] != false {
+		t.Fatalf("valid definition %#v", valid)
+	}
+	invalid := must("ValidateStateMachineDefinition", map[string]any{"definition": `{"StartAt":"Missing","States":{"One":{"Type":"Unknown","Next":"Gone"}}}`, "maxResults": 1.0}).Output
+	if invalid["result"] != "FAIL" || len(invalid["diagnostics"].([]any)) != 1 || invalid["truncated"] != true {
+		t.Fatalf("invalid definition %#v", invalid)
+	}
+	if _, err := call("ValidateStateMachineDefinition", map[string]any{"definition": definition, "maxResults": 101.0}); err == nil {
+		t.Fatal("accepted excessive validation results")
+	}
+	if _, err := call("CreateStateMachine", map[string]any{"Name": "invalid", "Definition": `{`}); err == nil {
+		t.Fatal("created invalid state machine")
+	}
+	tested := must("TestState", map[string]any{"definition": `{"Type":"Pass","Parameters":{"message.$":"States.Format('Hi {}', $.name)"},"Next":"After"}`, "input": `{"name":"Ada"}`}).Output
+	if tested["status"] != "SUCCEEDED" || tested["nextState"] != "After" || !strings.Contains(tested["output"].(string), `"message":"Hi Ada"`) {
+		t.Fatalf("tested pass %#v", tested)
+	}
+	testedFail := must("TestState", map[string]any{"definition": `{"Type":"Fail","Error":"Nope","Cause":"failed"}`}).Output
+	if testedFail["status"] != "FAILED" || testedFail["error"] != "Nope" || testedFail["cause"] != "failed" {
+		t.Fatalf("tested fail %#v", testedFail)
+	}
+	choiceDefinition := `{"StartAt":"Pick","States":{"Pick":{"Type":"Choice","Choices":[{"Variable":"$.yes","BooleanEquals":true,"Next":"Yes"}],"Default":"No"},"Yes":{"Type":"Succeed"},"No":{"Type":"Fail"}}}`
+	testedChoice := must("TestState", map[string]any{"definition": choiceDefinition, "stateName": "Pick", "input": `{"yes":true}`}).Output
+	if testedChoice["status"] != "SUCCEEDED" || testedChoice["nextState"] != "Yes" {
+		t.Fatalf("tested choice %#v", testedChoice)
+	}
+	for _, input := range []map[string]any{{"definition": `{`}, {"definition": `{"Type":"Pass"}`, "input": `{`}} {
+		if _, err := call("TestState", input); err == nil {
+			t.Fatalf("accepted invalid TestState %#v", input)
+		}
 	}
 
 	walk := func(def string, input any) walkResult {

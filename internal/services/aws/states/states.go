@@ -44,6 +44,7 @@ func (p *Pack) Operations() []string {
 		"StartExecution", "StartSyncExecution", "StopExecution", "DescribeExecution", "ListExecutions", "GetExecutionHistory",
 		"CreateActivity", "DeleteActivity", "DescribeActivity", "ListActivities", "GetActivityTask",
 		"SendTaskSuccess", "SendTaskFailure", "SendTaskHeartbeat",
+		"TestState", "ValidateStateMachineDefinition",
 		"TagResource", "UntagResource", "ListTagsForResource",
 	}
 }
@@ -60,9 +61,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if name == "" {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
+		definition := first(req.Input, "definition", "Definition")
+		if len(validateDefinition(definition)) > 0 {
+			return nil, &spi.Fault{Code: "InvalidDefinition", HTTPStatus: 400, Fault: "client"}
+		}
 		arn := p.smARN(req, name)
 		rec := map[string]any{
-			"stateMachineArn": arn, "name": name, "definition": first(req.Input, "definition", "Definition"),
+			"stateMachineArn": arn, "name": name, "definition": definition,
 			"roleArn": first(req.Input, "roleArn", "RoleArn"), "type": first(req.Input, "type", "Type"),
 			"status": "ACTIVE", "creationDate": float64(now),
 		}
@@ -81,6 +86,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
 		if d := first(req.Input, "definition", "Definition"); d != "" {
+			if len(validateDefinition(d)) > 0 {
+				return nil, &spi.Fault{Code: "InvalidDefinition", HTTPStatus: 400, Fault: "client"}
+			}
 			rec["definition"] = d
 		}
 		if r := first(req.Input, "roleArn", "RoleArn"); r != "" {
@@ -239,6 +247,52 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
+	case "ValidateStateMachineDefinition":
+		diagnostics := validateDefinition(first(req.Input, "definition", "Definition"))
+		maxResults := int(toFloat(req.Input["maxResults"]))
+		if maxResults == 0 {
+			maxResults = 100
+		}
+		if maxResults < 0 || maxResults > 100 {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
+		truncated := len(diagnostics) > maxResults
+		if truncated {
+			diagnostics = diagnostics[:maxResults]
+		}
+		result := "OK"
+		if len(diagnostics) > 0 {
+			result = "FAIL"
+		}
+		items := make([]any, len(diagnostics))
+		for i := range diagnostics {
+			items[i] = diagnostics[i]
+		}
+		return &spi.Response{Output: map[string]any{"result": result, "diagnostics": items, "truncated": truncated}}, nil
+	case "TestState":
+		definition := first(req.Input, "definition", "Definition")
+		input := first(req.Input, "input", "Input")
+		var data any = map[string]any{}
+		if input != "" && json.Unmarshal([]byte(input), &data) != nil {
+			return nil, &spi.Fault{Code: "InvalidExecutionInput", HTTPStatus: 400, Fault: "client"}
+		}
+		wrapped, next, err := testDefinition(definition, first(req.Input, "stateName", "StateName"), data)
+		if err != nil {
+			return nil, &spi.Fault{Code: "InvalidDefinition", Message: err.Error(), HTTPStatus: 400, Fault: "client"}
+		}
+		wr := p.walk(ctx, req, wrapped, "", data)
+		output, _ := json.Marshal(wr.out)
+		response := map[string]any{"status": wr.status, "output": string(output)}
+		if next != "" && wr.status == "SUCCEEDED" {
+			response["nextState"] = next
+		}
+		if wr.errorName != "" {
+			response["error"] = wr.errorName
+		}
+		if wr.cause != "" {
+			response["cause"] = wr.cause
+		}
+		return &spi.Response{Output: response}, nil
 	case "TagResource":
 		arn := first(req.Input, "resourceArn", "ResourceArn")
 		var tags []any
@@ -1369,6 +1423,126 @@ func parseJSON(s string) any {
 		return v
 	}
 	return s
+}
+
+func validateDefinition(definition string) []map[string]any {
+	var machine map[string]any
+	if json.Unmarshal([]byte(definition), &machine) != nil {
+		return []map[string]any{{"severity": "ERROR", "code": "INVALID_JSON_DESCRIPTION", "message": "The definition is not valid JSON.", "location": "/"}}
+	}
+	var diagnostics []map[string]any
+	validateMachine(machine, "", &diagnostics)
+	return diagnostics
+}
+
+func validateMachine(machine map[string]any, location string, diagnostics *[]map[string]any) {
+	start, _ := machine["StartAt"].(string)
+	states, ok := machine["States"].(map[string]any)
+	add := func(code, message, path string) {
+		*diagnostics = append(*diagnostics, map[string]any{"severity": "ERROR", "code": code, "message": message, "location": location + path})
+	}
+	if !ok || len(states) == 0 {
+		add("MISSING_REQUIRED_FIELD", "States must contain at least one state.", "/States")
+		return
+	}
+	if _, exists := states[start]; start == "" || !exists {
+		add("MISSING_TRANSITION_TARGET", "StartAt must name a state.", "/StartAt")
+	}
+	for name, raw := range states {
+		state, ok := raw.(map[string]any)
+		if !ok {
+			add("SCHEMA_VALIDATION_FAILED", "State must be an object.", "/States/"+name)
+			continue
+		}
+		typ, _ := state["Type"].(string)
+		if !supportedStateType(typ) {
+			add("SCHEMA_VALIDATION_FAILED", "Unsupported state Type.", "/States/"+name+"/Type")
+		}
+		checkTarget := func(raw any, path string) {
+			target, _ := raw.(string)
+			if _, exists := states[target]; target == "" || !exists {
+				add("MISSING_TRANSITION_TARGET", "Transition target does not exist.", "/States/"+name+path)
+			}
+		}
+		if next, exists := state["Next"]; exists {
+			checkTarget(next, "/Next")
+		}
+		for i, raw := range asSlice(state["Catch"]) {
+			catcher, _ := raw.(map[string]any)
+			checkTarget(catcher["Next"], fmt.Sprintf("/Catch/%d/Next", i))
+		}
+		if typ == "Choice" {
+			for i, raw := range asSlice(state["Choices"]) {
+				choice, _ := raw.(map[string]any)
+				checkTarget(choice["Next"], fmt.Sprintf("/Choices/%d/Next", i))
+			}
+			if fallback, exists := state["Default"]; exists {
+				checkTarget(fallback, "/Default")
+			}
+		}
+		if typ == "Parallel" {
+			for i, raw := range asSlice(state["Branches"]) {
+				branch, _ := raw.(map[string]any)
+				validateMachine(branch, fmt.Sprintf("%s/States/%s/Branches/%d", location, name, i), diagnostics)
+			}
+		}
+		if typ == "Map" {
+			processor, _ := state["ItemProcessor"].(map[string]any)
+			if processor == nil {
+				processor, _ = state["Iterator"].(map[string]any)
+			}
+			if processor != nil {
+				validateMachine(processor, location+"/States/"+name+"/ItemProcessor", diagnostics)
+			}
+		}
+	}
+}
+
+func supportedStateType(typ string) bool {
+	switch typ {
+	case "Pass", "Succeed", "Fail", "Wait", "Task", "Choice", "Parallel", "Map":
+		return true
+	default:
+		return false
+	}
+}
+
+func testDefinition(definition, stateName string, input any) (string, string, error) {
+	var parsed map[string]any
+	if json.Unmarshal([]byte(definition), &parsed) != nil {
+		return "", "", fmt.Errorf("definition is not valid JSON")
+	}
+	state := parsed
+	if states, ok := parsed["States"].(map[string]any); ok {
+		if stateName == "" {
+			stateName, _ = parsed["StartAt"].(string)
+		}
+		state, _ = states[stateName].(map[string]any)
+	}
+	if !supportedStateType(first(state, "Type")) {
+		return "", "", fmt.Errorf("state does not have a supported Type")
+	}
+	if typ := first(state, "Type"); typ == "Parallel" || typ == "Map" || typ == "Task" && strings.Contains(first(state, "Resource"), ":activity:") {
+		return "", "", fmt.Errorf("state requires a mock")
+	}
+	next := first(state, "Next")
+	copy := map[string]any{}
+	for key, value := range state {
+		copy[key] = value
+	}
+	if first(copy, "Type") == "Choice" {
+		next = choiceNext(copy, input)
+		copy["Type"] = "Pass"
+		delete(copy, "Choices")
+		delete(copy, "Default")
+	}
+	delete(copy, "Next")
+	if typ := first(copy, "Type"); typ != "Succeed" && typ != "Fail" {
+		copy["End"] = true
+	}
+	machine := map[string]any{"StartAt": "TestState", "States": map[string]any{"TestState": copy}}
+	encoded, _ := json.Marshal(machine)
+	return string(encoded), next, nil
 }
 
 func smName(arn string) string {

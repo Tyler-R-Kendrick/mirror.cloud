@@ -765,6 +765,83 @@ func TestStatesServiceIntegrations(t *testing.T) {
 	}
 }
 
+func TestStatesCallbackServiceIntegration(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	queue := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	call := func(handler spi.Handler, operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return handler.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	must := func(handler spi.Handler, operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := call(handler, operation, input)
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+
+	queueURL := must(queue, "CreateQueue", map[string]any{"QueueName": "callbacks"})["QueueUrl"].(string)
+	definition := `{"StartAt":"Callback","States":{"Callback":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage.waitForTaskToken","Parameters":{"QueueUrl":"` + queueURL + `","MessageBody.$":"$$.Task.Token"},"Retry":[{"ErrorEquals":["Retryable"],"MaxAttempts":1}],"ResultPath":"$.callback","End":true}}}`
+	machine := must(p, "CreateStateMachine", map[string]any{"name": "callbacks", "definition": definition, "roleArn": testRoleARN})
+	invalidDefinition := `{"StartAt":"Callback","States":{"Callback":{"Type":"Task","Resource":"arn:aws:states:::dynamodb:putItem.waitForTaskToken","End":true}}}`
+	if _, err := call(p, "CreateStateMachine", map[string]any{"name": "invalid-callback", "definition": invalidDefinition, "roleArn": testRoleARN}); err == nil {
+		t.Fatal("unsupported callback integration accepted")
+	}
+	if _, err := call(p, "CreateStateMachine", map[string]any{"name": "express-callback", "definition": definition, "roleArn": testRoleARN, "type": "EXPRESS"}); err == nil {
+		t.Fatal("Express callback integration accepted")
+	}
+	arn := machine["stateMachineArn"].(string)
+	task := func() (string, string) {
+		t.Helper()
+		messages := must(queue, "ReceiveMessage", map[string]any{"QueueUrl": queueURL, "VisibilityTimeout": 0})["Messages"].([]any)
+		if len(messages) != 1 {
+			t.Fatalf("callback messages %#v", messages)
+		}
+		message := messages[0].(map[string]any)
+		return message["Body"].(string), message["ReceiptHandle"].(string)
+	}
+	describe := func(executionARN string) map[string]any {
+		t.Helper()
+		return must(p, "DescribeExecution", map[string]any{"executionArn": executionARN})
+	}
+
+	retrying := must(p, "StartExecution", map[string]any{"stateMachineArn": arn, "name": "retry"})["executionArn"].(string)
+	firstToken, firstHandle := task()
+	must(queue, "DeleteMessage", map[string]any{"QueueUrl": queueURL, "ReceiptHandle": firstHandle})
+	must(p, "SendTaskFailure", map[string]any{"taskToken": firstToken, "error": "Retryable"})
+	secondToken, secondHandle := task()
+	if secondToken == firstToken {
+		t.Fatal("callback retry reused task token")
+	}
+	must(queue, "DeleteMessage", map[string]any{"QueueUrl": queueURL, "ReceiptHandle": secondHandle})
+	must(p, "SendTaskFailure", map[string]any{"taskToken": secondToken, "error": "Retryable"})
+	if execution := describe(retrying); execution["status"] != "FAILED" || execution["error"] != "Retryable" {
+		t.Fatalf("callback retry exhaustion %#v", execution)
+	}
+
+	succeeding := must(p, "StartExecution", map[string]any{"stateMachineArn": arn, "name": "success"})["executionArn"].(string)
+	successToken, successHandle := task()
+	must(queue, "DeleteMessage", map[string]any{"QueueUrl": queueURL, "ReceiptHandle": successHandle})
+	must(p, "SendTaskSuccess", map[string]any{"taskToken": successToken, "output": `{"done":true}`})
+	if execution := describe(succeeding); execution["status"] != "SUCCEEDED" || !strings.Contains(execution["output"].(string), `"done":true`) {
+		t.Fatalf("callback success %#v", execution)
+	}
+
+	stopped := must(p, "StartExecution", map[string]any{"stateMachineArn": arn, "name": "stop"})["executionArn"].(string)
+	stopToken, _ := task()
+	must(p, "StopExecution", map[string]any{"executionArn": stopped})
+	if _, err := call(p, "SendTaskHeartbeat", map[string]any{"taskToken": stopToken}); err == nil {
+		t.Fatal("stopped callback token remained valid")
+	}
+	if execution := describe(stopped); execution["status"] != "ABORTED" {
+		t.Fatalf("stopped callback execution %#v", execution)
+	}
+}
+
 func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -929,7 +1006,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 
 	walk := func(def string, input any) walkResult {
 		t.Helper()
-		return p.walk(ctx, &spi.Request{Identity: id}, def, "", input)
+		return p.walk(ctx, &spi.Request{Identity: id}, def, "", input, nil)
 	}
 	for _, tc := range []struct {
 		definition, status, cause string
@@ -993,7 +1070,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if choiceNext(choice, data) != "Default" {
 		t.Fatal("choice default")
 	}
-	params := taskPayload(map[string]any{"Parameters": map[string]any{"Payload": map[string]any{"value.$": "$.n"}, "nested": map[string]any{"value.$": "$.s"}}}, data, p.deps.Rand)
+	params := taskPayload(map[string]any{"Parameters": map[string]any{"Payload": map[string]any{"value.$": "$.n"}, "nested": map[string]any{"value.$": "$.s"}}}, data, nil, p.deps.Rand)
 	if jsonPath(params, "$.Payload.value") != 2.0 || jsonPath(params, "$.nested.value") != "yes" || jsonPath(data, "$.missing.value") != nil || parseJSON("plain") != "plain" || toFloat(json.Number("3")) != 3 || !toBool("true") {
 		t.Fatal("data helpers")
 	}

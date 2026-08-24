@@ -70,8 +70,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !validResourceName(name) {
 			return nil, &spi.Fault{Code: "InvalidName", HTTPStatus: 400, Fault: "client"}
 		}
+		machineType := first(req.Input, "type", "Type")
+		if machineType == "" {
+			machineType = "STANDARD"
+		}
 		definition := first(req.Input, "definition", "Definition")
-		if len(definition) < 1 || len(definition) > 1048576 || len(validateDefinition(definition)) > 0 {
+		if len(definition) < 1 || len(definition) > 1048576 || len(validateDefinition(definition, machineType)) > 0 {
 			return nil, &spi.Fault{Code: "InvalidDefinition", HTTPStatus: 400, Fault: "client"}
 		}
 		roleARN := first(req.Input, "roleArn", "RoleArn")
@@ -84,10 +88,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
 		arn := p.smARN(req, name)
-		machineType := first(req.Input, "type", "Type")
-		if machineType == "" {
-			machineType = "STANDARD"
-		}
 		if machineType != "STANDARD" && machineType != "EXPRESS" {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
@@ -162,7 +162,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		changed := false
 		if d := first(req.Input, "definition", "Definition"); d != "" {
-			if len(d) > 1048576 || len(validateDefinition(d)) > 0 {
+			if len(d) > 1048576 || len(validateDefinition(d, first(rec, "type"))) > 0 {
 				return nil, &spi.Fault{Code: "InvalidDefinition", HTTPStatus: 400, Fault: "client"}
 			}
 			rec["definition"] = d
@@ -454,7 +454,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		in := parseJSON(inputJSON)
 		def, _ := sm["definition"].(string)
-		wr := p.walk(ctx, req, def, "", in)
+		wr := p.walk(ctx, req, def, "", in, nil)
 		baseARN := p.smARN(req, name)
 		for _, run := range wr.mapRuns {
 			mapRunARN := p.mapRunARN(req, name, run.label)
@@ -519,6 +519,15 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
+		if token := first(rec, "pendingToken"); token != "" {
+			if pendingRecord, found, _ := p.col(req, "pending").Get(ctx, token); found {
+				var pending pending
+				_ = json.Unmarshal(pendingRecord, &pending)
+				rec["redriveState"], rec["redriveInput"] = pending.StateName, pending.StateInput
+			}
+			_ = p.col(req, "pending").Delete(ctx, token)
+			delete(rec, "pendingToken")
+		}
 		rec["status"] = "ABORTED"
 		rec["stopDate"] = float64(now)
 		nb, _ := json.Marshal(rec)
@@ -794,7 +803,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "ValidateStateMachineDefinition":
-		diagnostics := validateDefinition(first(req.Input, "definition", "Definition"))
+		diagnostics := validateDefinition(first(req.Input, "definition", "Definition"), first(req.Input, "type", "Type"))
 		maxResults := int(toFloat(req.Input["maxResults"]))
 		if maxResults == 0 {
 			maxResults = 100
@@ -826,7 +835,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if err != nil {
 			return nil, &spi.Fault{Code: "InvalidDefinition", Message: err.Error(), HTTPStatus: 400, Fault: "client"}
 		}
-		wr := p.walk(ctx, req, wrapped, "", data)
+		wr := p.walk(ctx, req, wrapped, "", data, nil)
 		output, _ := json.Marshal(wr.out)
 		response := map[string]any{"status": wr.status, "output": string(output)}
 		if next != "" && wr.status == "SUCCEEDED" {
@@ -1003,6 +1012,7 @@ type pending struct {
 	Token, ActivityARN, StateName, ExecARN, Definition string
 	Input, StateInput                                  any
 	Retries                                            map[int]int
+	Callback                                           bool
 }
 
 type walkResult struct {
@@ -1058,7 +1068,7 @@ func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64
 	}
 	machine["StartAt"] = state
 	redriveDefinition, _ := json.Marshal(machine)
-	result := p.walk(ctx, req, string(redriveDefinition), "", input)
+	result := p.walk(ctx, req, string(redriveDefinition), "", input, nil)
 	output, _ := json.Marshal(result.out)
 	record["status"], record["output"], record["cause"] = result.status, string(output), result.cause
 	delete(record, "error")
@@ -1144,6 +1154,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	_ = json.Unmarshal([]byte(pend.Definition), &sm)
 	states, _ := sm["States"].(map[string]any)
 	st, _ := states[pend.StateName].(map[string]any)
+	retrying := false
 	if !ok {
 		failure := stateFailure{name: first(req.Input, "error", "Error"), cause: first(req.Input, "cause", "Cause")}
 		if failure.name == "" {
@@ -1156,27 +1167,34 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 			pend.Retries = map[int]int{}
 		}
 		if retryTask(st, failure.name, pend.Retries) {
-			pend.Token = p.deps.Rand.Hex(16)
-			pb, _ := json.Marshal(pend)
-			_ = p.col(req, "pending").Put(ctx, pend.Token, pb)
-			rec["pendingToken"] = pend.Token
-			nb, _ := json.Marshal(rec)
-			_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
-			return &spi.Response{Output: map[string]any{}}, nil
+			if !pend.Callback {
+				pend.Token = p.deps.Rand.Hex(16)
+				pb, _ := json.Marshal(pend)
+				_ = p.col(req, "pending").Put(ctx, pend.Token, pb)
+				rec["pendingToken"] = pend.Token
+				nb, _ := json.Marshal(rec)
+				_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
+				return &spi.Response{Output: map[string]any{}}, nil
+			}
+			sm["StartAt"] = pend.StateName
+			def, _ := json.Marshal(sm)
+			definition, from, data, retrying = string(def), "", pend.StateInput, true
 		}
-		next, out, caught := catchTask(st, failure, pend.StateInput)
-		if caught && next == "" {
-			failure = stateFailure{name: "States.Runtime", cause: "States.Runtime"}
+		if !retrying {
+			next, out, caught := catchTask(st, failure, pend.StateInput)
+			if caught && next == "" {
+				failure = stateFailure{name: "States.Runtime", cause: "States.Runtime"}
+			}
+			if !caught || next == "" {
+				rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", failure.name, failure.cause, float64(now)
+				nb, _ := json.Marshal(rec)
+				_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
+				return &spi.Response{Output: map[string]any{}}, nil
+			}
+			sm["StartAt"] = next
+			def, _ := json.Marshal(sm)
+			definition, from, data = string(def), "", out
 		}
-		if !caught || next == "" {
-			rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", failure.name, failure.cause, float64(now)
-			nb, _ := json.Marshal(rec)
-			_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
-			return &spi.Response{Output: map[string]any{}}, nil
-		}
-		sm["StartAt"] = next
-		def, _ := json.Marshal(sm)
-		definition, from, data = string(def), "", out
 	} else if out, valid := applyStateResult(st, pend.StateInput, data, p.deps.Rand); valid {
 		data = out
 	} else {
@@ -1185,15 +1203,21 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 		_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
 		return &spi.Response{Output: map[string]any{}}, nil
 	}
-	if output, valid := applyDataPath(st, "OutputPath", data); valid {
-		data = output
-	} else {
-		rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", "States.Runtime", "States.Runtime", float64(now)
-		nb, _ := json.Marshal(rec)
-		_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
-		return &spi.Response{Output: map[string]any{}}, nil
+	if !retrying {
+		if output, valid := applyDataPath(st, "OutputPath", data); valid {
+			data = output
+		} else {
+			rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", "States.Runtime", "States.Runtime", float64(now)
+			nb, _ := json.Marshal(rec)
+			_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
+			return &spi.Response{Output: map[string]any{}}, nil
+		}
 	}
-	wr := p.walk(ctx, req, definition, from, data)
+	var retries map[string]map[int]int
+	if retrying {
+		retries = map[string]map[int]int{pend.StateName: pend.Retries}
+	}
+	wr := p.walk(ctx, req, definition, from, data, retries)
 	ob, _ := json.Marshal(wr.out)
 	rec["status"] = wr.status
 	rec["output"] = string(ob)
@@ -1221,7 +1245,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	return &spi.Response{Output: map[string]any{}}, nil
 }
 
-func (p *Pack) walk(ctx context.Context, req *spi.Request, def, from string, input any) (result walkResult) {
+func (p *Pack) walk(ctx context.Context, req *spi.Request, def, from string, input any, retries map[string]map[int]int) (result walkResult) {
 	currentState, currentInput := "", input
 	var mapRuns []mapRunDraft
 	defer func() {
@@ -1250,7 +1274,9 @@ func (p *Pack) walk(ctx context.Context, req *spi.Request, def, from string, inp
 		cur = next
 	}
 	var hist []any
-	retries := map[string]map[int]int{}
+	if retries == nil {
+		retries = map[string]map[int]int{}
+	}
 walkLoop:
 	for hop := 0; hop < 64; hop++ {
 		st, ok := states[cur].(map[string]any)
@@ -1297,7 +1323,14 @@ walkLoop:
 		case "Wait":
 		case "Task":
 			res := first(st, "Resource")
-			payload := taskPayload(st, data, p.deps.Rand)
+			callback := strings.HasSuffix(res, ".waitForTaskToken")
+			token := ""
+			var taskContext map[string]any
+			if callback {
+				token = p.deps.Rand.Hex(16)
+				taskContext = map[string]any{"Task": map[string]any{"Token": token}}
+			}
+			payload := taskPayload(st, data, taskContext, p.deps.Rand)
 			if strings.Contains(res, ":activity:") {
 				tok := p.deps.Rand.Hex(16)
 				return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
@@ -1313,6 +1346,11 @@ walkLoop:
 					return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 				}
 				if err == nil {
+					if callback {
+						return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
+							Token: token, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Callback: true,
+						}}
+					}
 					var valid bool
 					data, valid = applyStateResult(st, rawInput, out, p.deps.Rand)
 					if !valid {
@@ -1366,7 +1404,7 @@ walkLoop:
 				for _, br := range branches {
 					bm, _ := br.(map[string]any)
 					bdef, _ := json.Marshal(bm)
-					wr := p.walk(ctx, req, string(bdef), "", branchInput)
+					wr := p.walk(ctx, req, string(bdef), "", branchInput, nil)
 					mapRuns = append(mapRuns, wr.mapRuns...)
 					if wr.status != "SUCCEEDED" {
 						failed = &wr
@@ -1438,7 +1476,7 @@ walkLoop:
 							"Index": float64(index), "Value": item, "Source": "STATE_DATA",
 						}}}, p.deps.Rand)
 					}
-					wr := p.walk(ctx, req, string(idef), "", iterationInput)
+					wr := p.walk(ctx, req, string(idef), "", iterationInput, nil)
 					mapRuns = append(mapRuns, wr.mapRuns...)
 					if wr.status != "SUCCEEDED" {
 						failedCount++
@@ -1668,12 +1706,12 @@ func applyDataPath(state map[string]any, key string, input any) (any, bool) {
 	return selected, selected != nil
 }
 
-func taskPayload(st map[string]any, data any, random spi.Rand) any {
+func taskPayload(st map[string]any, data any, context map[string]any, random spi.Rand) any {
 	params, ok := st["Parameters"].(map[string]any)
 	if !ok {
 		return data
 	}
-	p := applyParams(params, data, nil, random)
+	p := applyParams(params, data, context, random)
 	return p
 }
 
@@ -2029,6 +2067,11 @@ func intrinsicNumber(value any) (float64, bool) {
 }
 
 func (p *Pack) invokeTask(ctx context.Context, req *spi.Request, resource string, payload any) (any, error, string, bool, bool) {
+	callback := strings.HasSuffix(resource, ".waitForTaskToken")
+	resource = strings.TrimSuffix(resource, ".waitForTaskToken")
+	if callback && !callbackIntegration(resource) {
+		return nil, nil, "", false, false
+	}
 	if strings.Contains(resource, ":function:") || strings.Contains(resource, "lambda:invoke") {
 		output, err := p.invokeLambda(ctx, req, resource, payload)
 		return output, err, "Lambda", false, true
@@ -2073,6 +2116,16 @@ func (p *Pack) invokeTask(ctx context.Context, req *spi.Request, resource string
 		return response.Output, invokeErr, prefix, sdk, true
 	}
 	return nil, spi.NotImplemented("aws."+service, operation, "emulate"), prefix, sdk, true
+}
+
+func callbackIntegration(resource string) bool {
+	switch resource {
+	case "arn:aws:states:::sqs:sendMessage", "arn:aws:states:::sns:publish",
+		"arn:aws:states:::states:startExecution", "arn:aws:states:::lambda:invoke":
+		return true
+	default:
+		return false
+	}
 }
 
 func taskIntegration(resource string) (service, operation, prefix string, sdk, ok bool) {
@@ -2589,17 +2642,21 @@ func parseJSON(s string) any {
 	return s
 }
 
-func validateDefinition(definition string) []map[string]any {
+func validateDefinition(definition string, machineType ...string) []map[string]any {
 	var machine map[string]any
 	if json.Unmarshal([]byte(definition), &machine) != nil {
 		return []map[string]any{{"severity": "ERROR", "code": "INVALID_JSON_DESCRIPTION", "message": "The definition is not valid JSON.", "location": "/"}}
 	}
 	var diagnostics []map[string]any
-	validateMachine(machine, "", &diagnostics)
+	typeName := ""
+	if len(machineType) != 0 {
+		typeName = machineType[0]
+	}
+	validateMachine(machine, "", typeName, &diagnostics)
 	return diagnostics
 }
 
-func validateMachine(machine map[string]any, location string, diagnostics *[]map[string]any) {
+func validateMachine(machine map[string]any, location, machineType string, diagnostics *[]map[string]any) {
 	start, _ := machine["StartAt"].(string)
 	states, ok := machine["States"].(map[string]any)
 	add := func(code, message, path string) {
@@ -2629,6 +2686,13 @@ func validateMachine(machine map[string]any, location string, diagnostics *[]map
 		}
 		if typ == "Task" && first(state, "Resource") == "" {
 			add("MISSING_REQUIRED_FIELD", "Task must have Resource.", "/States/"+name+"/Resource")
+		}
+		if resource := first(state, "Resource"); typ == "Task" && strings.HasSuffix(resource, ".waitForTaskToken") &&
+			!callbackIntegration(strings.TrimSuffix(resource, ".waitForTaskToken")) {
+			add("SCHEMA_VALIDATION_FAILED", "Resource does not support the callback integration pattern.", "/States/"+name+"/Resource")
+		}
+		if resource := first(state, "Resource"); machineType == "EXPRESS" && strings.HasSuffix(resource, ".waitForTaskToken") {
+			add("SCHEMA_VALIDATION_FAILED", "Express workflows do not support the callback integration pattern.", "/States/"+name+"/Resource")
 		}
 		checkTarget := func(raw any, path string) {
 			target, _ := raw.(string)
@@ -2663,7 +2727,7 @@ func validateMachine(machine map[string]any, location string, diagnostics *[]map
 			}
 			for i, raw := range branches {
 				branch, _ := raw.(map[string]any)
-				validateMachine(branch, fmt.Sprintf("%s/States/%s/Branches/%d", location, name, i), diagnostics)
+				validateMachine(branch, fmt.Sprintf("%s/States/%s/Branches/%d", location, name, i), machineType, diagnostics)
 			}
 		}
 		if typ == "Map" {
@@ -2672,7 +2736,7 @@ func validateMachine(machine map[string]any, location string, diagnostics *[]map
 				processor, _ = state["Iterator"].(map[string]any)
 			}
 			if processor != nil {
-				validateMachine(processor, location+"/States/"+name+"/ItemProcessor", diagnostics)
+				validateMachine(processor, location+"/States/"+name+"/ItemProcessor", machineType, diagnostics)
 			} else {
 				add("MISSING_REQUIRED_FIELD", "Map must have ItemProcessor.", "/States/"+name+"/ItemProcessor")
 			}

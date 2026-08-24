@@ -152,7 +152,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 			t.Fatalf("%s accepted missing token", operation)
 		}
 	}
-	recoveryDefinition := `{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"` + activityARN + `","Retry":[{"ErrorEquals":["Retryable"],"MaxAttempts":1}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.failure","Next":"Recovered"}]},"Recovered":{"Type":"Succeed"}}}`
+	recoveryDefinition := `{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"` + activityARN + `","Retry":[{"ErrorEquals":["Retryable"],"MaxAttempts":1}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.failure","Next":"Recovered"}],"End":true},"Recovered":{"Type":"Succeed"}}}`
 	recoveryMachine := must("CreateStateMachine", map[string]any{"Name": "activity-recovery", "Definition": recoveryDefinition}).Output["stateMachineArn"].(string)
 	recoveryARN := must("StartExecution", map[string]any{"StateMachineArn": recoveryMachine, "Name": "recovery", "Input": `{"keep":true}`}).Output["executionArn"].(string)
 	firstToken := must("GetActivityTask", map[string]any{"ActivityArn": activityARN}).Output["taskToken"].(string)
@@ -198,6 +198,9 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	invalid := must("ValidateStateMachineDefinition", map[string]any{"definition": `{"StartAt":"Missing","States":{"One":{"Type":"Unknown","Next":"Gone"}}}`, "maxResults": 1.0}).Output
 	if invalid["result"] != "FAIL" || len(invalid["diagnostics"].([]any)) != 1 || invalid["truncated"] != true {
 		t.Fatalf("invalid definition %#v", invalid)
+	}
+	if missingTransition := must("ValidateStateMachineDefinition", map[string]any{"definition": `{"StartAt":"One","States":{"One":{"Type":"Pass"}}}`}).Output; missingTransition["result"] != "FAIL" {
+		t.Fatalf("accepted missing transition %#v", missingTransition)
 	}
 	if _, err := call("ValidateStateMachineDefinition", map[string]any{"definition": definition, "maxResults": 101.0}); err == nil {
 		t.Fatal("accepted excessive validation results")

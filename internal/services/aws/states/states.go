@@ -1458,6 +1458,14 @@ func validateMachine(machine map[string]any, location string, diagnostics *[]map
 		if !supportedStateType(typ) {
 			add("SCHEMA_VALIDATION_FAILED", "Unsupported state Type.", "/States/"+name+"/Type")
 		}
+		end, _ := state["End"].(bool)
+		_, hasNext := state["Next"]
+		if typ != "Succeed" && typ != "Fail" && typ != "Choice" && !end && !hasNext {
+			add("MISSING_REQUIRED_FIELD", "State must have Next or End.", "/States/"+name)
+		}
+		if typ == "Task" && first(state, "Resource") == "" {
+			add("MISSING_REQUIRED_FIELD", "Task must have Resource.", "/States/"+name+"/Resource")
+		}
 		checkTarget := func(raw any, path string) {
 			target, _ := raw.(string)
 			if _, exists := states[target]; target == "" || !exists {
@@ -1472,7 +1480,11 @@ func validateMachine(machine map[string]any, location string, diagnostics *[]map
 			checkTarget(catcher["Next"], fmt.Sprintf("/Catch/%d/Next", i))
 		}
 		if typ == "Choice" {
-			for i, raw := range asSlice(state["Choices"]) {
+			choices := asSlice(state["Choices"])
+			if len(choices) == 0 {
+				add("MISSING_REQUIRED_FIELD", "Choice must have Choices.", "/States/"+name+"/Choices")
+			}
+			for i, raw := range choices {
 				choice, _ := raw.(map[string]any)
 				checkTarget(choice["Next"], fmt.Sprintf("/Choices/%d/Next", i))
 			}
@@ -1481,7 +1493,11 @@ func validateMachine(machine map[string]any, location string, diagnostics *[]map
 			}
 		}
 		if typ == "Parallel" {
-			for i, raw := range asSlice(state["Branches"]) {
+			branches := asSlice(state["Branches"])
+			if len(branches) == 0 {
+				add("MISSING_REQUIRED_FIELD", "Parallel must have Branches.", "/States/"+name+"/Branches")
+			}
+			for i, raw := range branches {
 				branch, _ := raw.(map[string]any)
 				validateMachine(branch, fmt.Sprintf("%s/States/%s/Branches/%d", location, name, i), diagnostics)
 			}
@@ -1493,6 +1509,8 @@ func validateMachine(machine map[string]any, location string, diagnostics *[]map
 			}
 			if processor != nil {
 				validateMachine(processor, location+"/States/"+name+"/ItemProcessor", diagnostics)
+			} else {
+				add("MISSING_REQUIRED_FIELD", "Map must have ItemProcessor.", "/States/"+name+"/ItemProcessor")
 			}
 		}
 	}

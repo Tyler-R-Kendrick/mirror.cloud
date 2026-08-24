@@ -1258,6 +1258,12 @@ func TestStatesTaskTimeoutAndHeartbeat(t *testing.T) {
 		t.Fatal(err)
 	}
 	invoke("SendTaskHeartbeat", map[string]any{"taskToken": heartbeatToken})
+	heartbeatBody, found, _ := p.col(&spi.Request{Identity: id}, "pending").Get(ctx, heartbeatToken)
+	var heartbeatPending pending
+	_ = json.Unmarshal(heartbeatBody, &heartbeatPending)
+	if !found || heartbeatPending.HeartbeatDeadline != deps.Clock.Now().Add(2*time.Second).Format(time.RFC3339Nano) {
+		t.Fatalf("heartbeat deadline was not reset %#v", heartbeatPending)
+	}
 	if err := deps.Clock.Advance(time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -1283,6 +1289,9 @@ func TestStatesTaskTimeoutAndHeartbeat(t *testing.T) {
 		t.Fatalf("unclaimed activity timed out %#v", execution)
 	}
 	firstToken := pollTask(timeoutActivity)
+	if task := invoke("GetActivityTask", map[string]any{"activityArn": timeoutActivity}); task["taskToken"] != nil {
+		t.Fatalf("claimed activity was delivered twice %#v", task)
+	}
 	if err := deps.Clock.Advance(2 * time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -1326,10 +1335,10 @@ func TestStatesTaskTimeoutAndHeartbeat(t *testing.T) {
 		t.Fatal(err)
 	}
 	queueURL := queueResponse.Output["QueueUrl"].(string)
-	callbackDefinition := `{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage.waitForTaskToken","Parameters":{"QueueUrl":"` + queueURL + `","MessageBody.$":"$$.Task.Token"},"TimeoutSeconds":2,"Catch":[{"ErrorEquals":["States.Timeout"],"ResultPath":"$.failure","Next":"Recovered"}],"End":true},"Recovered":{"Type":"Succeed"}}}`
+	callbackDefinition := `{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage.waitForTaskToken","Parameters":{"QueueUrl":"` + queueURL + `","MessageBody.$":"$$.Task.Token"},"TimeoutSeconds":5,"HeartbeatSeconds":1,"Catch":[{"ErrorEquals":["States.Timeout"],"ResultPath":"$.failure","Next":"Recovered"}],"End":true},"Recovered":{"Type":"Succeed"}}}`
 	callbackMachine := invoke("CreateStateMachine", map[string]any{"name": "callback-timeout", "definition": callbackDefinition, "roleArn": testRoleARN})
 	callbackExecution := invoke("StartExecution", map[string]any{"stateMachineArn": callbackMachine["stateMachineArn"], "input": `{}`})["executionArn"].(string)
-	if err := deps.Clock.Advance(2 * time.Second); err != nil {
+	if err := deps.Clock.Advance(time.Second); err != nil {
 		t.Fatal(err)
 	}
 	callbackResult := waitStatus(callbackExecution, "SUCCEEDED")

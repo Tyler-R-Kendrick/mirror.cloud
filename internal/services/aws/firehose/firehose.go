@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/md5"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -140,6 +141,7 @@ func (p *Pack) consumeKinesis(ctx context.Context, payload []byte) {
 	if !valid {
 		return
 	}
+	records := deaggregateKPL(data)
 	for _, stream := range streams {
 		var configuration map[string]any
 		if json.Unmarshal(stream.Value, &configuration) != nil || first(configuration, "DeliveryStreamType") != "KinesisStreamAsSource" {
@@ -150,8 +152,117 @@ func (p *Pack) consumeKinesis(ctx context.Context, payload []byte) {
 		if len(parts) != 6 || parts[3] != event.Region || parts[4] != event.Account || parts[5] != "stream/"+event.StreamName {
 			continue
 		}
-		_, _ = p.putOne(ctx, req, stream.Key, map[string]any{"Data": event.Record["Data"]}, data, "")
+		for _, data := range records {
+			_, _ = p.putOne(ctx, req, stream.Key, map[string]any{"Data": base64.StdEncoding.EncodeToString(data)}, data, "")
+		}
 	}
+}
+
+var kplMagic = []byte{0xf3, 0x89, 0x9a, 0xc2}
+
+type kplRecord struct {
+	data                               []byte
+	partition, explicit                uint64
+	hasPartition, hasExplicit, hasData bool
+}
+
+func deaggregateKPL(data []byte) [][]byte {
+	if len(data) < len(kplMagic)+md5.Size || !bytes.HasPrefix(data, kplMagic) {
+		return [][]byte{data}
+	}
+	message := data[len(kplMagic) : len(data)-md5.Size]
+	digest := md5.Sum(message)
+	if !bytes.Equal(digest[:], data[len(data)-md5.Size:]) {
+		return [][]byte{data}
+	}
+	partitionKeys, explicitKeys := 0, 0
+	var records []kplRecord
+	valid := eachProtoField(message, func(field, wire int, value []byte) bool {
+		switch {
+		case field == 1 && wire == 2:
+			partitionKeys++
+		case field == 2 && wire == 2:
+			explicitKeys++
+		case field == 3 && wire == 2:
+			record, ok := parseKPLRecord(value)
+			if !ok {
+				return false
+			}
+			records = append(records, record)
+		}
+		return true
+	})
+	result := make([][]byte, 0, len(records))
+	for _, record := range records {
+		if !valid || !record.hasPartition || !record.hasData || record.partition >= uint64(partitionKeys) || (record.hasExplicit && record.explicit >= uint64(explicitKeys)) {
+			return [][]byte{data}
+		}
+		result = append(result, record.data)
+	}
+	if len(result) == 0 {
+		return [][]byte{data}
+	}
+	return result
+}
+
+func parseKPLRecord(message []byte) (record kplRecord, valid bool) {
+	valid = eachProtoField(message, func(field, wire int, value []byte) bool {
+		switch {
+		case field == 1 && wire == 0:
+			record.partition, _ = binary.Uvarint(value)
+			record.hasPartition = true
+		case field == 2 && wire == 0:
+			record.explicit, _ = binary.Uvarint(value)
+			record.hasExplicit = true
+		case field == 3 && wire == 2:
+			record.data, record.hasData = value, true
+		}
+		return true
+	})
+	return
+}
+
+func eachProtoField(message []byte, visit func(field, wire int, value []byte) bool) bool {
+	for len(message) > 0 {
+		key, n := binary.Uvarint(message)
+		if n <= 0 || key>>3 == 0 {
+			return false
+		}
+		message = message[n:]
+		wire := int(key & 7)
+		var value []byte
+		switch wire {
+		case 0:
+			_, n = binary.Uvarint(message)
+			if n <= 0 {
+				return false
+			}
+			value, message = message[:n], message[n:]
+		case 1:
+			if len(message) < 8 {
+				return false
+			}
+			value, message = message[:8], message[8:]
+		case 2:
+			size, sizeBytes := binary.Uvarint(message)
+			if sizeBytes <= 0 || size > uint64(len(message)-sizeBytes) {
+				return false
+			}
+			message = message[sizeBytes:]
+			value, message = message[:int(size)], message[int(size):]
+		case 5:
+			if len(message) < 4 {
+				return false
+			}
+			value, message = message[:4], message[4:]
+		default:
+			return false
+		}
+		if !visit(int(key>>3), wire, value) {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *Pack) ServiceID() string { return "aws.firehose" }

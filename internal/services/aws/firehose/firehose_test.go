@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/md5"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -474,25 +475,77 @@ func TestFirehoseConsumesFutureKinesisRecords(t *testing.T) {
 		"KinesisStreamSourceConfiguration": testKinesisSource(), "S3DestinationConfiguration": testS3Destination(),
 	})
 	invoke(kinesis, "PutRecord", map[string]any{"StreamName": "source", "PartitionKey": "after", "Data": []byte("after")})
+	invoke(kinesis, "PutRecord", map[string]any{"StreamName": "source", "PartitionKey": "aggregate", "Data": kplAggregate([]byte("one"), []byte("two"))})
 
 	records, _, err := firehose.col(&spi.Request{Identity: id}, "fhrec:from-kinesis").List(context.Background(), "", "", 0)
-	if err != nil || len(records) != 1 {
+	if err != nil || len(records) != 3 {
 		t.Fatalf("retained records=%d err=%v", len(records), err)
 	}
-	key := id.Account + "/" + id.Region + "/out/1970/01/01/00/from-kinesis-1-1970-01-01-00-00-00-" + records[0].Key
-	reader, _, err := deps.Blobs.Get(context.Background(), key)
-	if err != nil {
-		t.Fatal(err)
+	seen := map[string]bool{}
+	for _, record := range records {
+		var retained map[string]any
+		if json.Unmarshal(record.Value, &retained) != nil {
+			t.Fatalf("invalid retained record %q", record.Value)
+		}
+		decoded := first(retained, "Decoded")
+		key := id.Account + "/" + id.Region + "/out/1970/01/01/00/from-kinesis-1-1970-01-01-00-00-00-" + record.Key
+		reader, _, err := deps.Blobs.Get(context.Background(), key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(reader)
+		_ = reader.Close()
+		if string(body) != decoded {
+			t.Fatalf("S3 object body %q want %q", body, decoded)
+		}
+		seen[decoded] = true
 	}
-	body, _ := io.ReadAll(reader)
-	_ = reader.Close()
-	if string(body) != "after" {
-		t.Fatalf("S3 object body %q", body)
+	if !seen["after"] || !seen["one"] || !seen["two"] {
+		t.Fatalf("delivered records %#v", seen)
 	}
 	unmatched, _, _ := firehose.col(&spi.Request{Identity: id}, "fhrec:from-other").List(context.Background(), "", "", 0)
 	if len(unmatched) != 0 {
 		t.Fatalf("unmatched source retained %d records", len(unmatched))
 	}
+}
+
+func kplAggregate(records ...[]byte) []byte {
+	message := appendProtoBytes(nil, 1, []byte("partition"))
+	for _, data := range records {
+		record := appendProtoBytes([]byte{0x08, 0x00}, 3, data)
+		message = appendProtoBytes(message, 3, record)
+	}
+	digest := md5.Sum(message)
+	return append(append(append([]byte{}, kplMagic...), message...), digest[:]...)
+}
+
+func appendProtoBytes(message []byte, field byte, value []byte) []byte {
+	message = append(message, field<<3|2)
+	message = binary.AppendUvarint(message, uint64(len(value)))
+	return append(message, value...)
+}
+
+func TestKPLDeaggregation(t *testing.T) {
+	aggregate := kplAggregate([]byte("one"), []byte("two"))
+	if records := deaggregateKPL(aggregate); len(records) != 2 || string(records[0]) != "one" || string(records[1]) != "two" {
+		t.Fatalf("deaggregated records %#v", records)
+	}
+	corrupt := bytes.Clone(aggregate)
+	corrupt[len(corrupt)-1] ^= 1
+	if records := deaggregateKPL(corrupt); len(records) != 1 || !bytes.Equal(records[0], corrupt) {
+		t.Fatalf("corrupt aggregate changed %#v", records)
+	}
+}
+
+func FuzzKPLDeaggregation(f *testing.F) {
+	f.Add([]byte("plain"))
+	f.Add(kplAggregate([]byte("one"), []byte("two")))
+	f.Add([]byte{0xf3, 0x89, 0x9a, 0xc2})
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if records := deaggregateKPL(data); len(records) == 0 {
+			t.Fatal("deaggregation returned no records")
+		}
+	})
 }
 
 func TestFirehoseS3ObjectNameFormat(t *testing.T) {

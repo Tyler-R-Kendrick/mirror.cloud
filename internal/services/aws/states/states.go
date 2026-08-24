@@ -4973,8 +4973,15 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 						add("SCHEMA_VALIDATION_FAILED", "$states.errorOutput is only available in Catch Assign or Output.", path+"/"+field)
 					}
 				}
-				if _, resultPath := catcher["ResultPath"]; resultPath && isJSONata {
-					add("SCHEMA_VALIDATION_FAILED", "Catch ResultPath is not supported with JSONata.", path+"/ResultPath")
+				if value, resultPath := catcher["ResultPath"]; resultPath {
+					if isJSONata {
+						add("SCHEMA_VALIDATION_FAILED", "Catch ResultPath is not supported with JSONata.", path+"/ResultPath")
+					} else if value != nil {
+						reference, valid := value.(string)
+						if !valid || !strings.HasPrefix(reference, "$") {
+							add("SCHEMA_VALIDATION_FAILED", "Catch ResultPath must be null or a path.", path+"/ResultPath")
+						}
+					}
 				}
 				if _, output := catcher["Output"]; output && !isJSONata {
 					add("SCHEMA_VALIDATION_FAILED", "Catch Output requires JSONata.", path+"/Output")

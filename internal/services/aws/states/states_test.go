@@ -1443,6 +1443,27 @@ func TestStatesDataFlowValidation(t *testing.T) {
 	}
 }
 
+func TestStatesAssignValidation(t *testing.T) {
+	for _, definition := range []string{
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","Assign":{"value":1},"End":true}}}`,
+		`{"QueryLanguage":"JSONata","StartAt":"Choose","States":{"Choose":{"Type":"Choice","Choices":[{"Condition":true,"Assign":{"value":1},"Next":"Done"}]},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","Catch":[{"ErrorEquals":["States.ALL"],"Assign":{"value":1},"Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
+	} {
+		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
+			t.Fatalf("valid Assign diagnostics %#v", diagnostics)
+		}
+	}
+	for _, definition := range []string{
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","Assign":[],"End":true}}}`,
+		`{"QueryLanguage":"JSONata","StartAt":"Choose","States":{"Choose":{"Type":"Choice","Choices":[{"Condition":true,"Assign":[],"Next":"Done"}]},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","Catch":[{"ErrorEquals":["States.ALL"],"Assign":[],"Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
+	} {
+		if diagnostics := validateDefinition(definition); len(diagnostics) != 1 {
+			t.Fatalf("Assign diagnostics = %#v for %s", diagnostics, definition)
+		}
+	}
+}
+
 func TestStatesStructuralMetadataValidation(t *testing.T) {
 	validName := strings.Repeat("é", 80)
 	valid := fmt.Sprintf(`{"Comment":"machine","Version":"1.0","StartAt":%q,"States":{%q:{"Type":"Succeed","Comment":"state"}}}`, validName, validName)

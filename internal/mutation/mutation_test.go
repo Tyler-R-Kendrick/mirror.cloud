@@ -1414,6 +1414,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesDataFlowValidation|TestStatesPassValidation",
 		},
 		{
+			name: "states-accept-invalid-assign",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  "if _, valid := value.(map[string]any); !valid {\n\t\t\t\t\tadd(\"SCHEMA_VALIDATION_FAILED\", \"Assign must be an object.\"",
+			new:  "if false {\n\t\t\t\t\tadd(\"SCHEMA_VALIDATION_FAILED\", \"Assign must be an object.\"",
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesAssignValidation",
+		},
+		{
 			name: "states-accept-non-string-machine-comment",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `if _, valid := comment.(string); !valid {`,

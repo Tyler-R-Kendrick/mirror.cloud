@@ -691,6 +691,116 @@ func TestChoiceRules(t *testing.T) {
 	}
 }
 
+func TestStatesJSONataBehavior(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(handler spi.Handler, operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := handler.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	queue := sqs.New(deps)
+	queueURL := invoke(queue, "CreateQueue", map[string]any{"QueueName": "jsonata"})["QueueUrl"].(string)
+	scope := jsonataScope{input: map[string]any{"values": []any{1.0, 2.0, 3.0}, "encoded": `{"n":3}`}, context: map[string]any{}, variables: map[string]any{}, random: deps.Rand}
+	for _, expression := range []string{
+		"{% $partition($states.input.values, 2) %}", "{% $parse($states.input.encoded).n %}", "{% $hash('mirror', 'SHA-256') %}", "{% $random(7) %}", "{% $uuid() %}",
+	} {
+		if value, ok := evalJSONataValue(expression, scope); !ok || value == nil {
+			t.Fatalf("jsonata expression %s: %#v %v", expression, value, ok)
+		}
+	}
+	itemScope := jsonataScope{input: map[string]any{"batch": []any{1.0, 2.0}, "index": 0.0}, context: map[string]any{}, variables: map[string]any{"prefix": "v"}, random: deps.Rand}
+	for expression, expected := range map[string]any{
+		"{% $prefix %}": "v", "{% $string($states.input.index) %}": "0", "{% $join($map($states.input.batch, function($v){$string($v)}), ',') %}": "1,2",
+	} {
+		if value, ok := evalJSONataValue(expression, itemScope); !ok || value != expected {
+			t.Fatalf("jsonata item subexpression %s: %#v %v", expression, value, ok)
+		}
+	}
+	if value, ok := evalJSONataValue("{% $prefix & $string($states.input.index) & ':' & $join($map($states.input.batch, function($v){$string($v)}), ',') %}", itemScope); !ok || value != "v0:1,2" {
+		t.Fatalf("jsonata item expression %#v %v", value, ok)
+	}
+	definition, _ := json.Marshal(map[string]any{
+		"QueryLanguage": "JSONata", "StartAt": "Prepare", "States": map[string]any{
+			"Prepare": map[string]any{
+				"Type": "Pass", "Assign": map[string]any{"prefix": "v", "threshold": "{% 2 %}"},
+				"Output": map[string]any{
+					"values": "{% $partition($states.input.values, 2) %}", "parsed": "{% $parse($states.input.encoded).n %}",
+					"hash": "{% $hash('mirror', 'SHA-256') %}", "seeded": "{% $random(7) %}", "uuid": "{% $uuid() %}",
+				}, "Next": "Choose",
+			},
+			"Choose": map[string]any{
+				"Type": "Choice", "Assign": map[string]any{"chosen": "{% true %}"},
+				"Choices": []any{map[string]any{"Condition": "{% $threshold = 2 and $states.input.parsed = 3 %}", "Next": "Map"}}, "Default": "Wrong",
+			},
+			"Map": map[string]any{
+				"Type": "Map", "Items": "{% $states.input.values %}",
+				"ItemSelector": map[string]any{
+					"batch": "{% $states.context.Map.Item.Value %}", "index": "{% $states.context.Map.Item.Index %}", "prefix": "{% $prefix %}",
+				},
+				"ItemProcessor": map[string]any{"StartAt": "Format", "States": map[string]any{
+					"Format": map[string]any{"Type": "Pass", "Output": "{% $prefix & $string($states.input.index) & ':' & $join($map($states.input.batch, function($v){$string($v)}), ',') %}", "End": true},
+				}},
+				"Assign": map[string]any{"mapped": "{% $count($states.result) %}"}, "Next": "Parallel",
+			},
+			"Parallel": map[string]any{
+				"Type": "Parallel", "Branches": []any{
+					map[string]any{"StartAt": "Left", "States": map[string]any{"Left": map[string]any{"Type": "Pass", "Output": map[string]any{"left": "L"}, "End": true}}},
+					map[string]any{"StartAt": "Right", "States": map[string]any{"Right": map[string]any{"Type": "Pass", "Output": map[string]any{"right": "R"}, "End": true}}},
+				}, "Output": "{% $merge($states.result) %}", "Next": "Send",
+			},
+			"Send": map[string]any{
+				"Type": "Task", "Resource": "arn:aws:states:::sqs:sendMessage",
+				"Arguments": map[string]any{"QueueUrl": queueURL, "MessageBody": "{% $states.input.left & $states.input.right & ':' & $string($mapped) %}"},
+				"Assign":    map[string]any{"sentId": "{% $states.result.MessageId %}"},
+				"Output":    map[string]any{"body": "{% $states.input.left & $states.input.right %}", "count": "{% $mapped %}"}, "Next": "Done",
+			},
+			"Done":  map[string]any{"Type": "Succeed", "Output": map[string]any{"body": "{% $states.input.body %}", "count": "{% $states.input.count %}", "sent": "{% $sentId %}"}},
+			"Wrong": map[string]any{"Type": "Fail"},
+		},
+	})
+	if diagnostics := validateDefinition(string(definition), "EXPRESS"); len(diagnostics) != 0 {
+		t.Fatalf("jsonata diagnostics %#v", diagnostics)
+	}
+	invalidDefinitions := []string{
+		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Pass","Parameters":{},"End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","Output":"{% 1 %}","End":true}}}`,
+		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Choice","Choices":[{"Variable":"$.x","NumericEquals":1,"Next":"Done"}]},"Done":{"Type":"Succeed"}}}`,
+		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"QueryLanguage":"JSONPath","Type":"Succeed"}}}`,
+		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Succeed","Output":" {% 1 %}"}}}`,
+	}
+	for _, invalid := range invalidDefinitions {
+		if diagnostics := validateDefinition(invalid); len(diagnostics) == 0 {
+			t.Fatalf("invalid JSONata definition accepted %s", invalid)
+		}
+	}
+	machine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonata", "definition": string(definition), "roleArn": testRoleARN, "type": "EXPRESS"})
+	execution := invoke(p, "StartSyncExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"], "input": `{"values":[1,2,3],"encoded":"{\"n\":3}"}`})
+	if execution["status"] != "SUCCEEDED" {
+		t.Fatalf("jsonata execution %#v", execution)
+	}
+	var output map[string]any
+	if json.Unmarshal([]byte(execution["output"].(string)), &output) != nil || output["body"] != "LR" || output["count"] != 2.0 || output["sent"] == "" {
+		t.Fatalf("jsonata output %#v", execution)
+	}
+	messages := invoke(queue, "ReceiveMessage", map[string]any{"QueueUrl": queueURL})["Messages"].([]any)
+	if len(messages) != 1 || messages[0].(map[string]any)["Body"] != "LR:2" {
+		t.Fatalf("jsonata task arguments %#v", messages)
+	}
+
+	bad := `{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Pass","Output":"{% $states.input.missing %}","End":true}}}`
+	badMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonata-error", "definition": bad, "roleArn": testRoleARN, "type": "EXPRESS"})
+	failed := invoke(p, "StartSyncExecution", map[string]any{"stateMachineArn": badMachine["stateMachineArn"]})
+	if failed["status"] != "FAILED" || failed["error"] != "States.QueryEvaluationError" {
+		t.Fatalf("jsonata error %#v", failed)
+	}
+}
+
 func TestStatesTagLifecycle(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -934,6 +1044,16 @@ func TestStatesCallbackServiceIntegration(t *testing.T) {
 	}
 	if execution := describe(stopped); execution["status"] != "ABORTED" {
 		t.Fatalf("stopped callback execution %#v", execution)
+	}
+
+	jsonataQueueURL := must(queue, "CreateQueue", map[string]any{"QueueName": "callbacks-jsonata"})["QueueUrl"].(string)
+	jsonataDefinition := `{"QueryLanguage":"JSONata","StartAt":"Prepare","States":{"Prepare":{"Type":"Pass","Assign":{"prefix":"ready"},"Next":"Callback"},"Callback":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage.waitForTaskToken","Arguments":{"QueueUrl":"` + jsonataQueueURL + `","MessageBody":"{% $states.context.Task.Token %}"},"Assign":{"done":"{% $states.result.done %}"},"Output":{"done":"{% $states.result.done %}","prefix":"{% $prefix %}"},"End":true}}}`
+	jsonataMachine := must(p, "CreateStateMachine", map[string]any{"name": "callbacks-jsonata", "definition": jsonataDefinition, "roleArn": testRoleARN})
+	jsonataExecution := must(p, "StartExecution", map[string]any{"stateMachineArn": jsonataMachine["stateMachineArn"]})["executionArn"].(string)
+	jsonataMessage := must(queue, "ReceiveMessage", map[string]any{"QueueUrl": jsonataQueueURL})["Messages"].([]any)[0].(map[string]any)
+	must(p, "SendTaskSuccess", map[string]any{"taskToken": jsonataMessage["Body"], "output": `{"done":true}`})
+	if execution := describe(jsonataExecution); execution["status"] != "SUCCEEDED" || execution["output"] != `{"done":true,"prefix":"ready"}` {
+		t.Fatalf("jsonata callback %#v", execution)
 	}
 }
 

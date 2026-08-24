@@ -21,8 +21,8 @@ import (
 
 func TestStatesHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 34 {
-		t.Fatalf("states Operations() %d want 34", n)
+	if n := len(p.Operations()); n != 37 {
+		t.Fatalf("states Operations() %d want 37", n)
 	}
 }
 
@@ -203,6 +203,78 @@ func TestDescribeForExecutionAndRedrive(t *testing.T) {
 	fault("RedriveExecution", map[string]any{"executionArn": expressExecutionARN}, "ExecutionNotRedrivable")
 }
 
+func TestDistributedMapRuns(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	must := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := call(operation, input)
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	fault := func(operation string, input map[string]any, code string) {
+		t.Helper()
+		_, err := call(operation, input)
+		if got, ok := err.(*spi.Fault); !ok || got.Code != code {
+			t.Fatalf("%s fault %#v want %s", operation, err, code)
+		}
+	}
+
+	processor := `{"StartAt":"Done","ProcessorConfig":{"Mode":"DISTRIBUTED","ExecutionType":"STANDARD"},"States":{"Done":{"Type":"Succeed"}}}`
+	definition := `{"StartAt":"First","States":{"First":{"Type":"Map","Label":"first","ItemsPath":"$.items","ItemProcessor":` + processor + `,"ResultPath":null,"Next":"Second"},"Second":{"Type":"Map","Label":"second","ItemsPath":"$.items","ItemProcessor":` + processor + `,"End":true}}}`
+	machineARN := must("CreateStateMachine", map[string]any{"name": "distributed", "definition": definition})["stateMachineArn"].(string)
+	executionARN := must("StartExecution", map[string]any{"stateMachineArn": machineARN, "input": `{"items":[1,2,3]}`})["executionArn"].(string)
+	firstPage := must("ListMapRuns", map[string]any{"executionArn": executionARN, "maxResults": 1.0})
+	if len(firstPage["mapRuns"].([]any)) != 1 || firstPage["nextToken"] == nil {
+		t.Fatalf("first map run page %#v", firstPage)
+	}
+	secondPage := must("ListMapRuns", map[string]any{"executionArn": executionARN, "maxResults": 1.0, "nextToken": firstPage["nextToken"]})
+	if len(secondPage["mapRuns"].([]any)) != 1 || secondPage["nextToken"] != nil {
+		t.Fatalf("second map run page %#v", secondPage)
+	}
+	mapRunARN := firstPage["mapRuns"].([]any)[0].(map[string]any)["mapRunArn"].(string)
+	described := must("DescribeMapRun", map[string]any{"mapRunArn": mapRunARN})
+	if described["status"] != "SUCCEEDED" || described["executionCounts"].(map[string]any)["total"] != 3.0 || described["itemCounts"].(map[string]any)["succeeded"] != 3.0 {
+		t.Fatalf("map run %#v", described)
+	}
+	fault("UpdateMapRun", map[string]any{"mapRunArn": mapRunARN, "maxConcurrency": 2.0}, "ValidationException")
+	described["status"] = "RUNNING"
+	encoded, _ := json.Marshal(described)
+	_ = p.col(&spi.Request{Identity: id}, "maprun").Put(ctx, mapRunARN, encoded)
+	must("UpdateMapRun", map[string]any{"MapRunArn": mapRunARN, "MaxConcurrency": 2.0, "ToleratedFailureCount": 1.0, "ToleratedFailurePercentage": 50.0})
+	updated := must("DescribeMapRun", map[string]any{"mapRunArn": mapRunARN})
+	if updated["maxConcurrency"] != 2.0 || updated["toleratedFailureCount"] != 1.0 || updated["toleratedFailurePercentage"] != 50.0 {
+		t.Fatalf("updated map run %#v", updated)
+	}
+	fault("DescribeMapRun", map[string]any{"mapRunArn": "missing"}, "ResourceNotFound")
+	fault("UpdateMapRun", map[string]any{"mapRunArn": "missing"}, "ResourceNotFound")
+	fault("ListMapRuns", map[string]any{"executionArn": "missing"}, "ExecutionDoesNotExist")
+	fault("ListMapRuns", map[string]any{"executionArn": executionARN, "nextToken": "bad"}, "InvalidToken")
+
+	failingProcessor := `{"StartAt":"Fail","ProcessorConfig":{"Mode":"DISTRIBUTED"},"States":{"Fail":{"Type":"Fail","Error":"ItemFailed"}}}`
+	toleratedDefinition := `{"StartAt":"Map","States":{"Map":{"Type":"Map","ItemsPath":"$.items","ToleratedFailureCount":2,"ItemProcessor":` + failingProcessor + `,"End":true}}}`
+	toleratedARN := must("CreateStateMachine", map[string]any{"name": "tolerated", "definition": toleratedDefinition})["stateMachineArn"].(string)
+	toleratedExecution := must("StartExecution", map[string]any{"stateMachineArn": toleratedARN, "input": `{"items":[1,2]}`})["executionArn"].(string)
+	if execution := must("DescribeExecution", map[string]any{"executionArn": toleratedExecution}); execution["status"] != "SUCCEEDED" {
+		t.Fatalf("tolerated distributed map %#v", execution)
+	}
+	toleratedRuns := must("ListMapRuns", map[string]any{"executionArn": toleratedExecution})["mapRuns"].([]any)
+	toleratedRun := must("DescribeMapRun", map[string]any{"mapRunArn": toleratedRuns[0].(map[string]any)["mapRunArn"]})
+	if toleratedRun["status"] != "SUCCEEDED" || toleratedRun["itemCounts"].(map[string]any)["failed"] != 2.0 {
+		t.Fatalf("tolerated map run %#v", toleratedRun)
+	}
+	if originalRuns := must("ListMapRuns", map[string]any{"executionArn": executionARN})["mapRuns"].([]any); len(originalRuns) != 2 {
+		t.Fatalf("cross-execution map runs %#v", originalRuns)
+	}
+}
+
 func TestStatesTagLifecycle(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -243,7 +315,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		}
 		return response
 	}
-	if p.ServiceID() != "aws.states" || len(p.Operations()) != 34 {
+	if p.ServiceID() != "aws.states" || len(p.Operations()) != 37 {
 		t.Fatalf("metadata %s %d", p.ServiceID(), len(p.Operations()))
 	}
 	if _, err := call("CreateStateMachine", map[string]any{}); err == nil {

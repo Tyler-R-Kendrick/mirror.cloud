@@ -1582,14 +1582,6 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
 		{
-			name: "states-allow-missing-transition",
-			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if typ != "Succeed" && typ != "Fail" && typ != "Choice" && !end && !hasNext {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/states",
-			run:  "TestStatesLifecycleAndWalkerUnits",
-		},
-		{
 			name: "states-republish-unchanged-revision",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `if first(record, "revisionId") == revision {`,

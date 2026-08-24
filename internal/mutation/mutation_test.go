@@ -152,8 +152,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-drop-parallel-results",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `data = results`,
-			new:  `data = nil`,
+			old:  `data, valid = applyStateResult(st, stateInput, results, p.deps.Rand)`,
+			new:  `data, valid = nil, true`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
@@ -248,8 +248,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-parallel-branch-failure",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  "wr := p.walk(ctx, req, string(bdef), \"\", data)\n\t\t\t\t\tif wr.status != \"SUCCEEDED\" {",
-			new:  "wr := p.walk(ctx, req, string(bdef), \"\", data)\n\t\t\t\t\tif false {",
+			old:  "wr := p.walk(ctx, req, string(bdef), \"\", branchInput)\n\t\t\t\t\tif wr.status != \"SUCCEEDED\" {",
+			new:  "wr := p.walk(ctx, req, string(bdef), \"\", branchInput)\n\t\t\t\t\tif false {",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},

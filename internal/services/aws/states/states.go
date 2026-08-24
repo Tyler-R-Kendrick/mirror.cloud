@@ -4786,10 +4786,20 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 		if !supportedStateType(typ) {
 			add("SCHEMA_VALIDATION_FAILED", "Unsupported state Type.", "/States/"+name+"/Type")
 		}
-		end, _ := state["End"].(bool)
+		end, endValid := state["End"].(bool)
+		_, hasEnd := state["End"]
 		_, hasNext := state["Next"]
-		if typ != "Succeed" && typ != "Fail" && typ != "Choice" && !end && !hasNext {
-			add("MISSING_REQUIRED_FIELD", "State must have Next or End.", "/States/"+name)
+		if typ == "Succeed" || typ == "Fail" || typ == "Choice" {
+			if hasEnd || hasNext {
+				add("SCHEMA_VALIDATION_FAILED", "State type does not support Next or End.", "/States/"+name)
+			}
+		} else {
+			if hasEnd == hasNext {
+				add("SCHEMA_VALIDATION_FAILED", "State must have exactly one of Next or End.", "/States/"+name)
+			}
+			if hasEnd && (!endValid || !end) {
+				add("SCHEMA_VALIDATION_FAILED", "End must be true.", "/States/"+name+"/End")
+			}
 		}
 		if typ == "Task" && first(state, "Resource") == "" {
 			add("MISSING_REQUIRED_FIELD", "Task must have Resource.", "/States/"+name+"/Resource")

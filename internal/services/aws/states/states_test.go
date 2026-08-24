@@ -1513,7 +1513,8 @@ func TestStatesDataFlowValidation(t *testing.T) {
 }
 
 func TestStatesMapValidation(t *testing.T) {
-	processor := `"ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`
+	inlineProcessor := `"ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`
+	processor := `"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`
 	for _, fields := range []string{
 		`"ItemsPath":"$.items","ItemSelector":{"value.$":"$$.Map.Item.Value"},` + processor,
 		`"Iterator":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"Parameters":{"value.$":"$$.Map.Item.Value"}`,
@@ -1553,7 +1554,11 @@ func TestStatesMapValidation(t *testing.T) {
 		`"Label":1,"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
 		`"Label":"` + strings.Repeat("x", 41) + `","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
 		`"Label":"invalid label","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
-		`"Label":"inline",` + processor,
+		`"Label":"inline",` + inlineProcessor,
+		`"ItemReader":{"Resource":"reader"},` + inlineProcessor,
+		`"ItemBatcher":{},` + inlineProcessor,
+		`"ResultWriter":{"WriterConfig":{}},` + inlineProcessor,
+		`"ToleratedFailureCount":1,` + inlineProcessor,
 	} {
 		definition := `{"StartAt":"Map","States":{"Map":{"Type":"Map",` + fields + `,"End":true}}}`
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 1 {
@@ -1923,11 +1928,13 @@ func TestStatesJSONataErrorsAndFields(t *testing.T) {
 
 	invoke(storage, "CreateBucket", map[string]any{"Bucket": "jsonata-items"})
 	invoke(storage, "PutObject", map[string]any{"Bucket": "jsonata-items", "Key": "items.json"}, []byte(`[1,2,3,4]`))
-	mapDefinition := `{"QueryLanguage":"JSONata","StartAt":"Read","States":{"Read":{"Type":"Map","ItemReader":{"Resource":"arn:aws:states:::s3:getObject","Arguments":{"Bucket":"{% $states.input.bucket %}","Key":"{% $states.input.key %}"},"ReaderConfig":{"InputType":"JSON","MaxItems":"{% 3 %}"}},"ItemBatcher":{"MaxItemsPerBatch":"{% 2 %}","BatchInput":{"tag":"{% $states.input.tag %}"}},"ItemProcessor":{"StartAt":"Echo","States":{"Echo":{"Type":"Pass","Output":"{% $states.input %}","End":true}}},"Next":"Transform"},"Transform":{"Type":"Parallel","Branches":[{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}],"Output":"{% $states.result.missing %}","Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"MaxAttempts":1}],"Catch":[{"ErrorEquals":["States.QueryEvaluationError"],"Assign":{"caught":"{% $states.errorOutput.Error %}"},"Output":{"map":"{% $states.input %}"},"Next":"Recovered"}],"End":true},"Recovered":{"Type":"Succeed","Output":{"error":"{% $caught %}","batches":"{% $states.input.map %}"}}}}`
-	if diagnostics := validateDefinition(mapDefinition, "EXPRESS"); len(diagnostics) != 0 {
+	mapDefinition := `{"QueryLanguage":"JSONata","StartAt":"Read","States":{"Read":{"Type":"Map","ItemReader":{"Resource":"arn:aws:states:::s3:getObject","Arguments":{"Bucket":"{% $states.input.bucket %}","Key":"{% $states.input.key %}"},"ReaderConfig":{"InputType":"JSON","MaxItems":"{% 3 %}"}},"ItemBatcher":{"MaxItemsPerBatch":"{% 2 %}","BatchInput":{"tag":"{% $states.input.tag %}"}},"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Echo","States":{"Echo":{"Type":"Pass","Output":"{% $states.input %}","End":true}}},"Next":"Transform"},"Transform":{"Type":"Parallel","Branches":[{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}],"Output":"{% $states.result.missing %}","Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"MaxAttempts":1}],"Catch":[{"ErrorEquals":["States.QueryEvaluationError"],"Assign":{"caught":"{% $states.errorOutput.Error %}"},"Output":{"map":"{% $states.input %}"},"Next":"Recovered"}],"End":true},"Recovered":{"Type":"Succeed","Output":{"error":"{% $caught %}","batches":"{% $states.input.map %}"}}}}`
+	if diagnostics := validateDefinition(mapDefinition, "STANDARD"); len(diagnostics) != 0 {
 		t.Fatalf("jsonata field diagnostics %#v", diagnostics)
 	}
-	mapExecution := startAfterRetry("jsonata-fields", mapDefinition, `{"bucket":"jsonata-items","key":"items.json","tag":"t"}`)
+	mapMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonata-fields", "definition": mapDefinition, "roleArn": testRoleARN})
+	mapARN := invoke(p, "StartExecution", map[string]any{"stateMachineArn": mapMachine["stateMachineArn"], "input": `{"bucket":"jsonata-items","key":"items.json","tag":"t"}`})["executionArn"].(string)
+	mapExecution := resumeRetry(mapARN)
 	if mapExecution["status"] != "SUCCEEDED" {
 		t.Fatalf("jsonata map fields %#v", mapExecution)
 	}

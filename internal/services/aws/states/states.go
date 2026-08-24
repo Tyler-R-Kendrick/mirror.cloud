@@ -5336,6 +5336,13 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				if mode == "DISTRIBUTED" && machineType == "EXPRESS" {
 					add("SCHEMA_VALIDATION_FAILED", "Express workflows do not support Distributed Map.", "/States/"+name+"/ItemProcessor/ProcessorConfig/Mode")
 				}
+				if mode != "DISTRIBUTED" {
+					for _, field := range []string{"ItemBatcher", "ItemReader", "ResultWriter", "ToleratedFailureCount", "ToleratedFailureCountPath", "ToleratedFailurePercentage", "ToleratedFailurePercentagePath"} {
+						if _, exists := state[field]; exists {
+							add("SCHEMA_VALIDATION_FAILED", field+" requires a Distributed Map.", "/States/"+name+"/"+field)
+						}
+					}
+				}
 				if rawLabel, exists := state["Label"]; exists {
 					label, valid := rawLabel.(string)
 					invalidCharacter := strings.ContainsAny(label, `?*<>{}[]:;,\|^~$#%&`+"`\"") || slices.ContainsFunc([]rune(label), func(character rune) bool {

@@ -3140,6 +3140,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestRouteNameQueryOps",
 		},
 		{
+			name: "restjson-drop-api-gateway-integration-response-route",
+			file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+			old:  `case strings.Contains(path, "/integration/responses/"):`,
+			new:  `case strings.Contains(path, "/integrationresponses"):`,
+			pkg:  "./internal/proto/aws/restjson",
+			run:  "TestRESTJSONServiceRoutes",
+		},
+		{
+			name: "restjson-drop-api-gateway-method-response-route",
+			file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+			old:  `case strings.Contains(path, "/responses/"):`,
+			new:  `case strings.Contains(path, "/methodresponses"):`,
+			pkg:  "./internal/proto/aws/restjson",
+			run:  "TestRESTJSONServiceRoutes",
+		},
+		{
 			name: "s3-copy-replace-to-copy",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `strings.EqualFold(directive, "REPLACE")`,

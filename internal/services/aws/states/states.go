@@ -1461,6 +1461,10 @@ walkLoop:
 				}
 				return walkResult{out: data, status: "FAILED", cause: failure, errorName: failure, hist: hist}
 			}
+			arr, ok = batchMapItems(st, data, arr, p.deps.Rand)
+			if !ok {
+				return walkResult{out: data, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
+			}
 			iter, _ := st["Iterator"].(map[string]any)
 			if iter == nil {
 				iter, _ = st["ItemProcessor"].(map[string]any)
@@ -1808,6 +1812,78 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 	default:
 		return nil, "", false
 	}
+}
+
+func batchMapItems(state map[string]any, data any, items []any, random spi.Rand) ([]any, bool) {
+	batcher, exists := state["ItemBatcher"].(map[string]any)
+	if !exists {
+		return items, true
+	}
+	resolveLimit := func(valueKey, pathKey string) (int, bool) {
+		value, hasValue := batcher[valueKey]
+		path, hasPath := batcher[pathKey].(string)
+		if hasValue == hasPath {
+			return 0, false
+		}
+		if hasPath {
+			value = jsonPath(data, path)
+		}
+		number, ok := exactNumber(value)
+		return int(number), ok && number == math.Trunc(number) && number > 0
+	}
+	maxItems, hasMaxItems := 0, false
+	if _, direct := batcher["MaxItemsPerBatch"]; direct || batcher["MaxItemsPerBatchPath"] != nil {
+		maxItems, hasMaxItems = resolveLimit("MaxItemsPerBatch", "MaxItemsPerBatchPath")
+		if !hasMaxItems {
+			return nil, false
+		}
+	}
+	maxBytes, hasMaxBytes := 262144, false
+	if _, direct := batcher["MaxInputBytesPerBatch"]; direct || batcher["MaxInputBytesPerBatchPath"] != nil {
+		maxBytes, hasMaxBytes = resolveLimit("MaxInputBytesPerBatch", "MaxInputBytesPerBatchPath")
+		if !hasMaxBytes || maxBytes > 262144 {
+			return nil, false
+		}
+	}
+	if !hasMaxItems && !hasMaxBytes {
+		return nil, false
+	}
+	var batchInput map[string]any
+	if raw, configured := batcher["BatchInput"]; configured {
+		input, ok := raw.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		batchInput = applyParams(input, data, nil, random)
+	}
+	makeBatch := func(values []any) map[string]any {
+		batch := map[string]any{"Items": append([]any(nil), values...)}
+		if batchInput != nil {
+			batch["BatchInput"] = batchInput
+		}
+		return batch
+	}
+	batched, current := []any{}, []any{}
+	for _, item := range items {
+		candidate := append(append([]any(nil), current...), item)
+		encoded, _ := json.Marshal(makeBatch(candidate))
+		if len(current) != 0 && (hasMaxItems && len(candidate) > maxItems || len(encoded) > maxBytes) {
+			batched = append(batched, makeBatch(current))
+			candidate = []any{item}
+			encoded, _ = json.Marshal(makeBatch(candidate))
+		}
+		if len(encoded) > maxBytes {
+			return nil, false
+		}
+		current = candidate
+		if hasMaxItems && len(current) == maxItems {
+			batched, current = append(batched, makeBatch(current)), nil
+		}
+	}
+	if len(current) != 0 {
+		batched = append(batched, makeBatch(current))
+	}
+	return batched, true
 }
 
 func taskIdentity(st map[string]any, data any, identity spi.Identity, random spi.Rand) (spi.Identity, bool) {

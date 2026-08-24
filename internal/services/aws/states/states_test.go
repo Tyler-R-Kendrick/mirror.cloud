@@ -984,6 +984,41 @@ func TestStatesTaskCredentials(t *testing.T) {
 	}
 }
 
+func TestDistributedMapItemBatcher(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	processor := map[string]any{"StartAt": "Done", "ProcessorConfig": map[string]any{"Mode": "DISTRIBUTED"}, "States": map[string]any{"Done": map[string]any{"Type": "Succeed"}}}
+	state := map[string]any{
+		"Type": "Map", "ItemsPath": "$.items", "ItemProcessor": processor, "End": true,
+		"ItemBatcher": map[string]any{"MaxItemsPerBatchPath": "$.size", "BatchInput": map[string]any{"factor.$": "$.factor"}},
+	}
+	definition, _ := json.Marshal(map[string]any{"StartAt": "Batch", "States": map[string]any{"Batch": state}})
+	machine := invoke("CreateStateMachine", map[string]any{"name": "batches", "definition": string(definition), "roleArn": testRoleARN})
+	started := invoke("StartExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"], "input": `{"items":[1,2,3,4,5],"size":2,"factor":7}`})
+	execution := invoke("DescribeExecution", map[string]any{"executionArn": started["executionArn"]})
+	var batches []any
+	_ = json.Unmarshal([]byte(execution["output"].(string)), &batches)
+	if execution["status"] != "SUCCEEDED" || len(batches) != 3 || len(batches[0].(map[string]any)["Items"].([]any)) != 2 ||
+		batches[0].(map[string]any)["BatchInput"].(map[string]any)["factor"] != 7.0 || len(batches[2].(map[string]any)["Items"].([]any)) != 1 {
+		t.Fatalf("batched execution %#v %#v", execution, batches)
+	}
+	if _, ok := batchMapItems(map[string]any{"ItemBatcher": map[string]any{"MaxItemsPerBatch": 1, "MaxItemsPerBatchPath": "$.size"}}, map[string]any{"size": 2.0}, []any{1.0}, p.deps.Rand); ok {
+		t.Fatal("conflicting batch limits accepted")
+	}
+	if _, ok := batchMapItems(map[string]any{"ItemBatcher": map[string]any{"MaxInputBytesPerBatch": 1}}, nil, []any{"too large"}, p.deps.Rand); ok {
+		t.Fatal("oversized batch item accepted")
+	}
+}
+
 func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

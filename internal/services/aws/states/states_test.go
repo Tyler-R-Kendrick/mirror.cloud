@@ -1318,6 +1318,46 @@ func TestStatesChoiceValidation(t *testing.T) {
 	}
 }
 
+func TestStatesWaitValidation(t *testing.T) {
+	definition := func(queryLanguage, fields string) string {
+		return fmt.Sprintf(`{"QueryLanguage":%q,"StartAt":"Wait","States":{"Wait":{"Type":"Wait",%s,"End":true}}}`, queryLanguage, fields)
+	}
+	for _, test := range []struct{ queryLanguage, fields string }{
+		{"JSONPath", `"Seconds":0`},
+		{"JSONPath", `"Seconds":99999999`},
+		{"JSONPath", `"Timestamp":"2026-08-24T12:00:00Z"`},
+		{"JSONPath", `"SecondsPath":"$.delay"`},
+		{"JSONPath", `"TimestampPath":"$.time"`},
+		{"JSONata", `"Seconds":"{% $states.input.delay %}"`},
+		{"JSONata", `"Timestamp":"{% $states.input.time %}"`},
+		{"JSONata", `"Timestamp":"2026-08-24T12:00:00Z"`},
+	} {
+		if diagnostics := validateDefinition(definition(test.queryLanguage, test.fields)); len(diagnostics) != 0 {
+			t.Fatalf("valid Wait diagnostics %#v for %s", diagnostics, test.fields)
+		}
+	}
+	for _, test := range []struct{ queryLanguage, fields string }{
+		{"JSONPath", `"Comment":"missing"`},
+		{"JSONPath", `"Seconds":1,"Timestamp":"2026-08-24T12:00:00Z"`},
+		{"JSONPath", `"Seconds":-1`},
+		{"JSONPath", `"Seconds":100000000`},
+		{"JSONPath", `"Seconds":1.5`},
+		{"JSONPath", `"Seconds":"1"`},
+		{"JSONPath", `"SecondsPath":"delay"`},
+		{"JSONPath", `"SecondsPath":1`},
+		{"JSONPath", `"Timestamp":"later"`},
+		{"JSONPath", `"Timestamp":"2026-08-24T12:00:00+01:00"`},
+		{"JSONPath", `"Timestamp":1`},
+		{"JSONPath", `"TimestampPath":"time"`},
+		{"JSONPath", `"TimestampPath":1`},
+		{"JSONata", `"Seconds":"1"`},
+	} {
+		if diagnostics := validateDefinition(definition(test.queryLanguage, test.fields)); len(diagnostics) != 1 {
+			t.Fatalf("Wait diagnostics = %#v for %s", diagnostics, test.fields)
+		}
+	}
+}
+
 func TestStatesExecutionTimeout(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

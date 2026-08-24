@@ -5265,6 +5265,31 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 						}
 					}
 				}
+				if field == "ResultWriter" {
+					writerConfig, configValid := configuration["WriterConfig"].(map[string]any)
+					if hasWriterConfig && !configValid {
+						add("SCHEMA_VALIDATION_FAILED", "WriterConfig must be an object.", "/States/"+name+"/ResultWriter/WriterConfig")
+					}
+					for option, allowed := range map[string][]string{"Transformation": {"NONE", "COMPACT", "FLATTEN"}, "OutputType": {"JSON", "JSONL"}} {
+						if value, exists := writerConfig[option]; exists {
+							configured, valid := value.(string)
+							if !valid || !slices.Contains(allowed, configured) {
+								add("SCHEMA_VALIDATION_FAILED", "WriterConfig "+option+" is invalid.", "/States/"+name+"/ResultWriter/WriterConfig/"+option)
+							}
+						}
+					}
+					if validResource && resourceName != "" {
+						payload := "Parameters"
+						if isJSONata {
+							payload = "Arguments"
+						}
+						if resourceName != "arn:aws:states:::s3:putObject" {
+							add("SCHEMA_VALIDATION_FAILED", "ResultWriter Resource is not supported.", "/States/"+name+"/ResultWriter/Resource")
+						} else if _, exists := configuration[payload]; !exists {
+							add("MISSING_REQUIRED_FIELD", "ResultWriter export requires "+payload+".", "/States/"+name+"/ResultWriter/"+payload)
+						}
+					}
+				}
 			}
 			if reader, _ := state["ItemReader"].(map[string]any); reader != nil {
 				config, valid := reader["ReaderConfig"].(map[string]any)

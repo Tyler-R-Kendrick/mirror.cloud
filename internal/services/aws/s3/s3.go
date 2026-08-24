@@ -478,14 +478,18 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	etag := `"` + info.MD5 + `"`
 	mtime := p.deps.Clock.Now().UTC().Format(http.TimeFormat)
+	storageClass := str(req.Input["StorageClass"])
+	if storageClass == "" {
+		storageClass = "STANDARD"
+	}
 	vid := ""
 	if p.versioningEnabled(ctx, req, b) {
 		vid = p.deps.Rand.Hex(8)
 		_, _ = p.deps.Blobs.Put(ctx, blobKey(req, b, key)+"@"+vid, bytes.NewReader(body))
-		vm, _ := json.Marshal(map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "mtime": mtime, "key": key})
+		vm, _ := json.Marshal(map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "mtime": mtime, "key": key, "storageClass": storageClass})
 		_ = p.col(req, "versions").Put(ctx, b+"/"+key+"/"+vid, vm)
 	}
-	metaDoc := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "versionId": vid, "deleteMarker": false}
+	metaDoc := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "versionId": vid, "deleteMarker": false, "storageClass": storageClass}
 	meta, _ := json.Marshal(metaDoc)
 	_ = p.col(req, "objects").Put(ctx, b+"/"+key, meta)
 	if tags := requestTags(req); len(tags) > 0 {
@@ -685,7 +689,7 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 		}
 		var meta map[string]any
 		_ = json.Unmarshal(kv.Value, &meta)
-		contents = append(contents, map[string]any{"Key": key, "Size": meta["size"], "ETag": meta["etag"]})
+		contents = append(contents, map[string]any{"Key": key, "Size": meta["size"], "ETag": meta["etag"], "LastModified": meta["mtime"], "StorageClass": meta["storageClass"]})
 	}
 	var prefixes []any
 	for pfx := range common {

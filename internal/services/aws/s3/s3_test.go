@@ -108,7 +108,7 @@ func TestCopyObjectTaggingDirective(t *testing.T) {
 func TestListObjectsV2Prefix(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
-	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "a/1"}, []byte("1"))
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "a/1", "StorageClass": "STANDARD_IA"}, []byte("1"))
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "a/2"}, []byte("2"))
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "z/9"}, []byte("9"))
 	resp := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "b", "Prefix": "a/"}, nil)
@@ -117,6 +117,9 @@ func TestListObjectsV2Prefix(t *testing.T) {
 	for _, item := range contents {
 		m, _ := item.(map[string]any)
 		keys[m["Key"].(string)] = true
+		if m["LastModified"] == "" || m["StorageClass"] == "" || m["Key"] == "a/1" && m["StorageClass"] != "STANDARD_IA" {
+			t.Fatalf("object metadata: %#v", m)
+		}
 	}
 	if !keys["a/1"] || !keys["a/2"] || keys["z/9"] || len(keys) != 2 {
 		t.Fatalf("prefix list: %v", keys)

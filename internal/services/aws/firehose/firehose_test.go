@@ -927,6 +927,131 @@ func TestOpenSearchServerlessDestinationValidationAndDescription(t *testing.T) {
 	}
 }
 
+func TestFirehoseOpenSearchServerlessDestination(t *testing.T) {
+	ctx := context.Background()
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	search := opensearch.New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	destination := testOpenSearchServerlessDestination()
+	destination["BufferingHints"] = map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 5}
+	destination["S3BackupMode"] = "AllDocuments"
+	destination["S3Configuration"] = map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "backup/"}
+	call := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := pack.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	call(p, "CreateDeliveryStream", map[string]any{"DeliveryStreamName": "serverless-delivery", "AmazonOpenSearchServerlessDestinationConfiguration": destination})
+	records := []string{`{"id":"1","name":"alice"}`, `["invalid"]`}
+	response := call(p, "PutRecordBatch", map[string]any{"DeliveryStreamName": "serverless-delivery", "Records": []any{
+		map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(records[0]))},
+		map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(records[1]))},
+	}})
+	var hits []any
+	for attempt := 0; attempt < 2000; attempt++ {
+		result := call(search, "Search", map[string]any{"Index": "collection/events", "query": map[string]any{"match_all": map[string]any{}}})
+		hits = result.Output["hits"].(map[string]any)["hits"].([]any)
+		if len(hits) == 1 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if len(hits) != 1 || hits[0].(map[string]any)["_source"].(map[string]any)["name"] != "alice" {
+		t.Fatalf("OpenSearch Serverless hits %#v", hits)
+	}
+	responses := response.Output["RequestResponses"].([]any)
+	for index := range records {
+		recordID := first(responses[index].(map[string]any), "RecordId")
+		key := id.Account + "/" + id.Region + "/out/backup/1970/01/01/00/serverless-delivery-1-1970-01-01-00-00-00-" + recordID
+		reader, _, err := deps.Blobs.Get(ctx, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(reader)
+		_ = reader.Close()
+		if string(body) != records[index] {
+			t.Fatalf("OpenSearch Serverless backup %q", body)
+		}
+	}
+	failedID := first(responses[1].(map[string]any), "RecordId")
+	failureKey := id.Account + "/" + id.Region + "/out/backup/AmazonOpenSearchService-failed/1970/01/01/00/serverless-delivery-1-1970-01-01-00-00-00-" + failedID
+	var failureBody []byte
+	for attempt := 0; attempt < 2000; attempt++ {
+		reader, _, err := deps.Blobs.Get(ctx, failureKey)
+		if err == nil {
+			failureBody, _ = io.ReadAll(reader)
+			_ = reader.Close()
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	failure := map[string]any{}
+	if json.Unmarshal(failureBody, &failure) != nil || first(failure, "esDocumentId") != failedID || first(failure, "esIndexName") != "events" || first(failure, "rawData") != base64.StdEncoding.EncodeToString([]byte(records[1])) {
+		t.Fatalf("OpenSearch Serverless failure envelope %s", failureBody)
+	}
+}
+
+func TestFirehoseOpenSearchServerlessPersistentBuffer(t *testing.T) {
+	ctx := context.Background()
+	deps := spitest.Deps(t)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	destination := testOpenSearchServerlessDestination()
+	destination["BufferingHints"] = map[string]any{"IntervalInSeconds": 5, "SizeInMBs": 5}
+	p := New(deps)
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+		"DeliveryStreamName": "serverless-buffer", "AmazonOpenSearchServerlessDestinationConfiguration": destination,
+		"DeliveryStreamEncryptionConfigurationInput": map[string]any{"KeyType": "AWS_OWNED_CMK"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutRecord", Input: map[string]any{
+		"DeliveryStreamName": "serverless-buffer", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"id":"persisted"}`))},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	work := deps.Store.Scope(id.Account, id.Region).Collection("fh-search-work")
+	items, _, _ := work.List(ctx, "serverless-buffer/buffer/", "", 0)
+	if len(items) != 1 {
+		t.Fatalf("OpenSearch Serverless buffer %#v", items)
+	}
+	var buffered searchWork
+	_ = json.Unmarshal(items[0].Value, &buffered)
+	if buffered.Destination != "AmazonOpenSearchServerlessDestinationConfiguration" {
+		t.Fatalf("OpenSearch Serverless persisted destination %#v", buffered)
+	}
+	reader, _, err := deps.Blobs.Get(ctx, buffered.DataKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	if !bytes.HasPrefix(body, firehoseEncryptedPrefix) || bytes.Contains(body, []byte("persisted")) {
+		t.Fatalf("OpenSearch Serverless buffer was not encrypted %q", body)
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p = New(deps)
+	defer func() { _ = p.Close() }()
+	if err := deps.Clock.Advance(5 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	search := opensearch.New(deps)
+	for attempt := 0; attempt < 2000; attempt++ {
+		result, err := search.Invoke(ctx, &spi.Request{Identity: id, Operation: "Search", Input: map[string]any{"Index": "collection/events", "query": map[string]any{"match_all": map[string]any{}}}})
+		if err == nil && len(result.Output["hits"].(map[string]any)["hits"].([]any)) == 1 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("persisted OpenSearch Serverless buffer did not resume")
+}
+
 func TestRedshiftDestinationValidationAndDescription(t *testing.T) {
 	valid := map[string]any{
 		"ClusterJDBCURL": "jdbc:redshift://cluster.abc.us-east-1.redshift.amazonaws.com:5439/dev", "RoleARN": testRoleARN,

@@ -5496,6 +5496,13 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 						add("SCHEMA_VALIDATION_FAILED", "InputType is invalid.", readerPath+"/InputType")
 					}
 				}
+				if value, exists := config["ManifestType"]; exists {
+					manifestType, valid := value.(string)
+					resource := first(reader, "Resource")
+					if !valid || resource != "arn:aws:states:::s3:getObject" || manifestType == "ATHENA_DATA" && !slices.Contains([]string{"CSV", "JSONL", "PARQUET"}, inputType) || manifestType == "S3_INVENTORY" && inputType != "" || manifestType != "ATHENA_DATA" && manifestType != "S3_INVENTORY" {
+						add("SCHEMA_VALIDATION_FAILED", "ManifestType is invalid for this ItemReader.", readerPath+"/ManifestType")
+					}
+				}
 				if value, exists := config["Transformation"]; exists {
 					transformation, valid := value.(string)
 					resource := first(reader, "Resource")

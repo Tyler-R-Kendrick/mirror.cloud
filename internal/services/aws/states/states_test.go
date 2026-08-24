@@ -382,7 +382,10 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		key, inputType, pointer, itemsPath string
 		limit                              int
 	}{{"items.json", "JSON", "", "", 0}, {"items.jsonl", "JSONL", "", "", 0}, {"items.csv", "CSV", "", "", 0}, {"items.parquet", "PARQUET", "", "", 0}, {"nested.json", "JSON", "/data/a~1b/~0key", "", 0}, {"objects.json", "JSON", "", "", 1}, {"items-path.json", "JSON", "", "$.data.items", 0}} {
-		readerConfig := map[string]any{"InputType": test.inputType, "CSVHeaderLocation": "FIRST_ROW"}
+		readerConfig := map[string]any{"InputType": test.inputType}
+		if test.inputType == "CSV" {
+			readerConfig["CSVHeaderLocation"] = "FIRST_ROW"
+		}
 		if test.pointer != "" {
 			readerConfig["ItemsPointer"] = test.pointer
 		}
@@ -1542,6 +1545,9 @@ func TestStatesMapValidation(t *testing.T) {
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"MaxItems":100000000}},"ItemBatcher":{"MaxItemsPerBatch":1,"MaxInputBytesPerBatch":262144},` + processor,
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"MaxItemsPath":"$.limit"}},"ItemBatcher":{"MaxItemsPerBatchPath":"$.batch"},` + processor,
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"JSON","ItemsPointer":"/data/a~1b/~0key"}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"CSV","CSVDelimiter":"PIPE","CSVHeaderLocation":"FIRST_ROW"}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"CSV","CSVHeaderLocation":"GIVEN","CSVHeaders":["id","name"]}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"MANIFEST","CSVHeaderLocation":"FIRST_ROW"}},` + processor,
 		`"ResultWriter":{"WriterConfig":{"Transformation":"COMPACT","OutputType":"JSONL"}},` + processor,
 		`"ResultWriter":{"Resource":"arn:aws:states:::s3:putObject","Parameters":{"Bucket":"bucket"}},` + processor,
 		`"Label":"valid-label","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
@@ -1573,6 +1579,16 @@ func TestStatesMapValidation(t *testing.T) {
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"JSON","ItemsPointer":"/bad~2escape"}},` + processor,
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"JSON","ItemsPointer":"/` + strings.Repeat("x", 1999) + `"}},` + processor,
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"CSV","ItemsPointer":"/data"}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":1}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"INVALID"}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"CSV","CSVDelimiter":"INVALID"}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"CSV","CSVHeaderLocation":"INVALID"}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"CSV","CSVHeaderLocation":"GIVEN"}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"CSV","CSVHeaderLocation":"GIVEN","CSVHeaders":[]}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"CSV","CSVHeaderLocation":"GIVEN","CSVHeaders":[1]}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"CSV","CSVHeaderLocation":"GIVEN","CSVHeaders":["` + strings.Repeat("x", 10*1024+1) + `"]}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"CSV","CSVHeaderLocation":"FIRST_ROW","CSVHeaders":["id"]}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"JSON","CSVDelimiter":"COMMA"}},` + processor,
 		`"ItemReader":{"Resource":"reader","Parameters":[]},` + processor,
 		`"ItemBatcher":{},` + processor,
 		`"ItemBatcher":{"MaxItemsPerBatch":0},` + processor,

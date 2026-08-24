@@ -5379,6 +5379,42 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				if _, exists := reader["ReaderConfig"]; exists && !valid {
 					add("SCHEMA_VALIDATION_FAILED", "ReaderConfig must be an object.", "/States/"+name+"/ItemReader/ReaderConfig")
 				}
+				readerPath := "/States/" + name + "/ItemReader/ReaderConfig"
+				inputType := first(config, "InputType")
+				if value, exists := config["InputType"]; exists {
+					configured, valid := value.(string)
+					if !valid || !slices.Contains([]string{"CSV", "JSON", "JSONL", "PARQUET", "MANIFEST"}, configured) {
+						add("SCHEMA_VALIDATION_FAILED", "InputType is invalid.", readerPath+"/InputType")
+					}
+				}
+				csvConfigured := false
+				for field, allowed := range map[string][]string{"CSVDelimiter": {"COMMA", "PIPE", "SEMICOLON", "SPACE", "TAB"}, "CSVHeaderLocation": {"FIRST_ROW", "GIVEN"}} {
+					if value, exists := config[field]; exists {
+						csvConfigured = true
+						configured, valid := value.(string)
+						if !valid || !slices.Contains(allowed, configured) {
+							add("SCHEMA_VALIDATION_FAILED", field+" is invalid.", readerPath+"/"+field)
+						}
+					}
+				}
+				if rawHeaders, exists := config["CSVHeaders"]; exists {
+					csvConfigured = true
+					headers, valid := rawHeaders.([]any)
+					size := len(headers) - 1
+					for _, rawHeader := range headers {
+						header, stringHeader := rawHeader.(string)
+						valid = valid && stringHeader
+						size += len(header)
+					}
+					if !valid || len(headers) == 0 || size > 10*1024 || first(config, "CSVHeaderLocation") != "GIVEN" {
+						add("SCHEMA_VALIDATION_FAILED", "CSVHeaders requires non-empty string headers up to 10 KiB and CSVHeaderLocation GIVEN.", readerPath+"/CSVHeaders")
+					}
+				} else if first(config, "CSVHeaderLocation") == "GIVEN" {
+					add("MISSING_REQUIRED_FIELD", "CSVHeaderLocation GIVEN requires CSVHeaders.", readerPath+"/CSVHeaders")
+				}
+				if csvConfigured && inputType != "CSV" && inputType != "MANIFEST" {
+					add("SCHEMA_VALIDATION_FAILED", "CSV fields require CSV or MANIFEST input.", readerPath)
+				}
 				validateInteger(config, "/States/"+name+"/ItemReader/ReaderConfig", "MaxItems", 1, 100000000)
 				if value, exists := config["ItemsPointer"]; exists {
 					pointer, valid := value.(string)

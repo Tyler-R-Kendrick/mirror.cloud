@@ -79,6 +79,13 @@ func testIcebergDestination() map[string]any {
 	}
 }
 
+func testSnowflakeDestination() map[string]any {
+	return map[string]any{
+		"AccountUrl": "account.us-east-1.snowflakecomputing.com", "Database": "ANALYTICS", "Schema": "PUBLIC", "Table": "EVENTS",
+		"RoleARN": testRoleARN, "User": "firehose", "PrivateKey": base64.StdEncoding.EncodeToString(make([]byte, 192)), "S3Configuration": testS3Destination(),
+	}
+}
+
 func testDatabaseSource() map[string]any {
 	return map[string]any{
 		"Type": "PostgreSQL", "Endpoint": "database.internal", "Port": float64(5432), "SSLMode": "Enabled",
@@ -1304,6 +1311,66 @@ func TestFirehoseIcebergDestination(t *testing.T) {
 	rows, err = tables.TableRows(ctx, id, "warehouse", "analytics", "events")
 	if err != nil || !reflect.DeepEqual(rows, want) {
 		t.Fatalf("append-only Iceberg mutation changed rows %#v, %v", rows, err)
+	}
+}
+
+func TestSnowflakeDestinationValidationAndDescription(t *testing.T) {
+	destination := testSnowflakeDestination()
+	if err := validateSnowflakeDestination(destination, "us-east-1"); err != nil {
+		t.Fatal(err)
+	}
+	secret := maps.Clone(destination)
+	delete(secret, "User")
+	delete(secret, "PrivateKey")
+	secret["SecretsManagerConfiguration"] = map[string]any{
+		"Enabled": true, "SecretARN": "arn:aws:secretsmanager:us-east-1:123456789012:secret:snowflake",
+	}
+	if err := validateSnowflakeDestination(secret, "us-east-1"); err != nil {
+		t.Fatal(err)
+	}
+	for index, change := range []func(map[string]any){
+		func(value map[string]any) { value["AccountUrl"] = "https://example.com" },
+		func(value map[string]any) { value["Database"] = "" },
+		func(value map[string]any) { value["DataLoadingOption"] = "CSV" },
+		func(value map[string]any) { value["DataLoadingOption"] = "VARIANT_CONTENT_MAPPING" },
+		func(value map[string]any) { value["PrivateKey"] = "not-base64" },
+		func(value map[string]any) { value["KeyPassphrase"] = "short" },
+		func(value map[string]any) { value["S3BackupMode"] = "Enabled" },
+	} {
+		candidate := maps.Clone(destination)
+		change(candidate)
+		if err := validateSnowflakeDestination(candidate, "us-east-1"); err == nil {
+			t.Fatalf("accepted invalid Snowflake destination %d: %#v", index, candidate)
+		}
+	}
+
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "snowflake", "SnowflakeDestinationConfiguration": destination}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "snowflake"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	description := response.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["SnowflakeDestinationDescription"].(map[string]any)
+	if description["PrivateKey"] != nil || description["KeyPassphrase"] != nil || description["S3Configuration"] != nil || description["S3DestinationDescription"] == nil || first(description, "DataLoadingOption") != "JSON_MAPPING" || first(description, "S3BackupMode") != "FailedDataOnly" {
+		t.Fatalf("Snowflake description %#v", description)
+	}
+	if _, err := call("UpdateDestination", map[string]any{
+		"DeliveryStreamName": "snowflake", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
+		"SnowflakeDestinationUpdate": map[string]any{"Table": "EVENTS_V2", "RetryOptions": map[string]any{"DurationInSeconds": 30}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	response, _ = call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "snowflake"})
+	description = response.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["SnowflakeDestinationDescription"].(map[string]any)
+	if first(description, "Table") != "EVENTS_V2" || description["RetryOptions"].(map[string]any)["DurationInSeconds"] != float64(30) {
+		t.Fatalf("updated Snowflake description %#v", description)
 	}
 }
 
@@ -3594,7 +3661,7 @@ func TestFirehoseCreateConfiguration(t *testing.T) {
 		{"missing role ARN", map[string]any{"DeliveryStreamName": "no-role", "S3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::out"}}, "InvalidArgumentException"},
 		{"malformed role ARN", map[string]any{"DeliveryStreamName": "bad-role", "S3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": "role"}}, "InvalidArgumentException"},
 		{"long role ARN", map[string]any{"DeliveryStreamName": "long-role", "S3DestinationConfiguration": map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": "arn:aws:iam::123456789012:role/" + strings.Repeat("a", 500)}}, "InvalidArgumentException"},
-		{"unsupported destination", map[string]any{"DeliveryStreamName": "snowflake", "SnowflakeDestinationConfiguration": map[string]any{}}, "MirrorNotImplemented"},
+		{"invalid Snowflake destination", map[string]any{"DeliveryStreamName": "snowflake", "SnowflakeDestinationConfiguration": map[string]any{}}, "InvalidArgumentException"},
 		{"direct put with Kinesis source", map[string]any{"DeliveryStreamName": "direct-source", "KinesisStreamSourceConfiguration": testKinesisSource(), "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
 		{"missing Kinesis source", map[string]any{"DeliveryStreamName": "no-source", "DeliveryStreamType": "KinesisStreamAsSource", "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},
 		{"malformed Kinesis ARN", map[string]any{"DeliveryStreamName": "bad-source", "DeliveryStreamType": "KinesisStreamAsSource", "KinesisStreamSourceConfiguration": map[string]any{"KinesisStreamARN": "stream", "RoleARN": testRoleARN}, "S3DestinationConfiguration": testS3Destination()}, "InvalidArgumentException"},

@@ -1,4 +1,4 @@
-// Package firehose stores delivery streams and delivers direct puts or local Kinesis and MSK source records to S3, HTTP, OpenSearch, Splunk, Redshift, or Iceberg destinations.
+// Package firehose stores delivery streams and delivers direct puts or local Kinesis and MSK source records to S3, HTTP, OpenSearch, Splunk, Redshift, Snowflake, or Iceberg destinations.
 package firehose
 
 import (
@@ -984,7 +984,7 @@ func (p *Pack) storeOne(ctx context.Context, req *spi.Request, name string, rec 
 }
 
 func copyDest(rec, in map[string]any, suffix string) {
-	for _, base := range []string{"S3Destination", "ExtendedS3Destination", "HttpEndpointDestination", "ElasticsearchDestination", "RedshiftDestination", "SplunkDestination", "IcebergDestination"} {
+	for _, base := range []string{"S3Destination", "ExtendedS3Destination", "HttpEndpointDestination", "ElasticsearchDestination", "RedshiftDestination", "SplunkDestination", "SnowflakeDestination", "IcebergDestination"} {
 		patch, _ := in[base+suffix].(map[string]any)
 		if patch == nil {
 			continue
@@ -1160,6 +1160,30 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 		}
 		destination["SplunkDestinationDescription"] = configuration
 		delete(description, "SplunkDestinationConfiguration")
+	}
+	if configuration, ok := description["SnowflakeDestinationConfiguration"].(map[string]any); ok {
+		configuration = maps.Clone(configuration)
+		delete(configuration, "PrivateKey")
+		delete(configuration, "KeyPassphrase")
+		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
+			describeS3Configuration(s3)
+			configuration["S3DestinationDescription"] = s3
+			delete(configuration, "S3Configuration")
+		}
+		if configuration["BufferingHints"] == nil {
+			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 128}
+		}
+		if configuration["RetryOptions"] == nil {
+			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 60}
+		}
+		if first(configuration, "DataLoadingOption") == "" {
+			configuration["DataLoadingOption"] = "JSON_MAPPING"
+		}
+		if first(configuration, "S3BackupMode") == "" {
+			configuration["S3BackupMode"] = "FailedDataOnly"
+		}
+		destination["SnowflakeDestinationDescription"] = configuration
+		delete(description, "SnowflakeDestinationConfiguration")
 	}
 	if configuration, ok := description["IcebergDestinationConfiguration"].(map[string]any); ok {
 		configuration = maps.Clone(configuration)
@@ -1410,7 +1434,7 @@ func validateDestination(rec map[string]any, region string) error {
 	count := 0
 	var destination map[string]any
 	destinationType := ""
-	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration", "IcebergDestinationConfiguration"} {
+	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration", "SnowflakeDestinationConfiguration", "IcebergDestinationConfiguration"} {
 		if value, exists := rec[key]; exists {
 			var ok bool
 			destination, ok = value.(map[string]any)
@@ -1435,6 +1459,9 @@ func validateDestination(rec map[string]any, region string) error {
 	}
 	if destinationType == "SplunkDestinationConfiguration" {
 		return validateSplunkDestination(destination, region)
+	}
+	if destinationType == "SnowflakeDestinationConfiguration" {
+		return validateSnowflakeDestination(destination, region)
 	}
 	if destinationType == "IcebergDestinationConfiguration" {
 		return validateIcebergDestination(destination, region)
@@ -1690,6 +1717,102 @@ func validateSplunkDestination(destination map[string]any, region string) error 
 		return validateProcessingConfiguration(raw)
 	}
 	return nil
+}
+
+func validateSnowflakeDestination(destination map[string]any, region string) error {
+	accountURL := first(destination, "AccountUrl")
+	parsed, err := url.Parse(accountURL)
+	if parsed.Scheme == "" {
+		parsed, err = url.Parse("https://" + accountURL)
+	}
+	host := parsed.Hostname()
+	if len(accountURL) < 24 || len(accountURL) > 2048 || err != nil || parsed.Scheme != "https" || host == "" || !strings.HasSuffix(host, ".snowflakecomputing.com") || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || !validRoleARN(first(destination, "RoleARN")) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	for _, key := range []string{"Database", "Schema", "Table"} {
+		value, ok := destination[key].(string)
+		if !ok || len(value) < 1 || len(value) > 255 {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	mode := first(destination, "DataLoadingOption")
+	switch mode {
+	case "", "JSON_MAPPING":
+	case "VARIANT_CONTENT_MAPPING":
+		if !validSnowflakeColumn(destination["ContentColumnName"]) {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	case "VARIANT_CONTENT_AND_METADATA_MAPPING":
+		if !validSnowflakeColumn(destination["ContentColumnName"]) || !validSnowflakeColumn(destination["MetaDataColumnName"]) {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	default:
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	for _, key := range []string{"ContentColumnName", "MetaDataColumnName"} {
+		if destination[key] != nil && !validSnowflakeColumn(destination[key]) {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	user, userOK := destination["User"].(string)
+	privateKey, privateKeyOK := destination["PrivateKey"].(string)
+	if destination["User"] != nil && (!userOK || len(user) < 1 || len(user) > 255) || destination["PrivateKey"] != nil && (!privateKeyOK || !validSnowflakePrivateKey(privateKey)) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if passphrase := destination["KeyPassphrase"]; passphrase != nil {
+		value, ok := passphrase.(string)
+		if !ok || len(value) < 7 || len(value) > 255 {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	secrets, hasSecrets := destination["SecretsManagerConfiguration"].(map[string]any)
+	enabled, enabledOK := secrets["Enabled"].(bool)
+	if destination["SecretsManagerConfiguration"] != nil && (!hasSecrets || !enabledOK || (first(secrets, "RoleARN") != "" && !validRoleARN(first(secrets, "RoleARN"))) || (enabled && !firehoseSecretARN.MatchString(first(secrets, "SecretARN")))) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if !enabled && (!userOK || !privateKeyOK) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if hints, ok := destination["BufferingHints"].(map[string]any); destination["BufferingHints"] != nil && (!ok || !optionalInteger(hints, "IntervalInSeconds", 0, 900) || !optionalInteger(hints, "SizeInMBs", 1, 128)) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if retry, ok := destination["RetryOptions"].(map[string]any); destination["RetryOptions"] != nil && (!ok || !optionalInteger(retry, "DurationInSeconds", 0, 7200)) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if mode := first(destination, "S3BackupMode"); mode != "" && mode != "FailedDataOnly" && mode != "AllData" {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if role, ok := destination["SnowflakeRoleConfiguration"].(map[string]any); destination["SnowflakeRoleConfiguration"] != nil {
+		enabled, enabledOK := role["Enabled"].(bool)
+		name := first(role, "SnowflakeRole")
+		if !ok || !enabledOK || len(name) > 255 || (enabled && name == "") {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	if vpc, ok := destination["SnowflakeVpcConfiguration"].(map[string]any); destination["SnowflakeVpcConfiguration"] != nil && (!ok || len(first(vpc, "PrivateLinkVpceId")) < 47 || len(first(vpc, "PrivateLinkVpceId")) > 255 || !firehoseVPCEndpointService.MatchString(first(vpc, "PrivateLinkVpceId"))) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	s3, ok := destination["S3Configuration"].(map[string]any)
+	if !ok {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if err := validateS3Configuration(s3, region, false); err != nil {
+		return err
+	}
+	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
+		return err
+	}
+	return validateProcessingConfiguration(destination["ProcessingConfiguration"])
+}
+
+func validSnowflakeColumn(value any) bool {
+	column, ok := value.(string)
+	return ok && len(column) >= 1 && len(column) <= 255
+}
+
+func validSnowflakePrivateKey(value string) bool {
+	_, err := base64.StdEncoding.Strict().DecodeString(value)
+	return len(value) >= 256 && len(value) <= 4096 && err == nil
 }
 
 func optionalInteger(values map[string]any, key string, minimum, maximum int) bool {
@@ -2163,7 +2286,7 @@ func validateCreateDestination(input map[string]any) error {
 		}
 	}
 	switch destination {
-	case "S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration", "IcebergDestinationConfiguration":
+	case "S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration", "SnowflakeDestinationConfiguration", "IcebergDestinationConfiguration":
 		return nil
 	case "":
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}

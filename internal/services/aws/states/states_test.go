@@ -885,11 +885,18 @@ func TestStatesJSONataErrorsAndFields(t *testing.T) {
 	if execution := start("jsonata-timeout-retry", timeoutRetry, `{}`); execution["status"] != "SUCCEEDED" || execution["output"] != `{"retry":1}` {
 		t.Fatalf("JSONata timeout retry %#v", execution)
 	}
-	numericMap := `{"QueryLanguage":"JSONata","StartAt":"Map","States":{"Map":{"Type":"Map","Items":"{% $states.context.State.RetryCount > 0 ? [1,2] : $states.input.missing %}","MaxConcurrency":"{% 2 %}","ToleratedFailureCount":"{% 1 %}","ToleratedFailurePercentage":"{% 50 %}","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Choose","States":{"Choose":{"Type":"Choice","Choices":[{"Condition":"{% $states.input = 1 %}","Next":"Bad"}],"Default":"Done"},"Bad":{"Type":"Fail","Error":"Expected"},"Done":{"Type":"Succeed"}}},"Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"MaxAttempts":1}],"End":true}}}`
+	numericMap := `{"QueryLanguage":"JSONata","StartAt":"Map","States":{"Map":{"Type":"Map","Items":"{% $states.context.State.RetryCount > 0 ? [1,2] : $states.input.missing %}","MaxConcurrency":"{% 2 %}","ToleratedFailureCount":"{% 1 %}","ToleratedFailurePercentage":"{% 50 %}","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Choose","States":{"Choose":{"Type":"Choice","Choices":[{"Condition":"{% $states.input = 1 %}","Next":"Bad"}],"Default":"Done"},"Bad":{"Type":"Fail","Error":"Expected"},"Done":{"Type":"Succeed","Output":{"value":"{% $states.input %}","execution":"{% $states.context.Execution.Id %}","machine":"{% $states.context.StateMachine.Id %}","input":"{% $states.context.Execution.Input %}"}}}},"Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"MaxAttempts":1}],"End":true}}}`
 	numericMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonata-numeric-map", "definition": numericMap, "roleArn": testRoleARN})
 	numericARN := invoke(p, "StartExecution", map[string]any{"stateMachineArn": numericMachine["stateMachineArn"]})["executionArn"].(string)
-	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": numericARN}); execution["status"] != "SUCCEEDED" || execution["output"] != `[2]` {
-		t.Fatalf("JSONata numeric Map %#v", execution)
+	numericExecution := invoke(p, "DescribeExecution", map[string]any{"executionArn": numericARN})
+	var numericOutput []map[string]any
+	if numericExecution["status"] != "SUCCEEDED" || json.Unmarshal([]byte(numericExecution["output"].(string)), &numericOutput) != nil || len(numericOutput) != 1 || numericOutput[0]["value"] != 2.0 || numericOutput[0]["input"] != 2.0 || numericOutput[0]["execution"] == numericARN || !strings.Contains(numericOutput[0]["execution"].(string), ":execution:jsonata-numeric-map/Map:") || !strings.HasSuffix(numericOutput[0]["machine"].(string), ":stateMachine:jsonata-numeric-map/Map") {
+		t.Fatalf("JSONata numeric Map %#v", numericExecution)
+	}
+	numericRuns := invoke(p, "ListMapRuns", map[string]any{"executionArn": numericARN})["mapRuns"].([]any)
+	numericChildren := invoke(p, "ListExecutions", map[string]any{"mapRunArn": numericRuns[0].(map[string]any)["mapRunArn"]})["executions"].([]any)
+	if len(numericChildren) != 2 || numericChildren[0].(map[string]any)["executionArn"] != numericOutput[0]["execution"] && numericChildren[1].(map[string]any)["executionArn"] != numericOutput[0]["execution"] {
+		t.Fatalf("JSONata child context %#v %#v", numericOutput, numericChildren)
 	}
 	writerRetry := `{"QueryLanguage":"JSONata","StartAt":"Map","States":{"Map":{"Type":"Map","Items":"{% [1] %}","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"ResultWriter":{"Resource":"arn:aws:states:::s3:putObject","Arguments":{"Bucket":"{% $states.context.State.RetryCount > 0 ? 'jsonata-items' : $states.input.missing %}","Prefix":"results"}},"Retry":[{"ErrorEquals":["States.QueryEvaluationError"],"MaxAttempts":1}],"End":true}}}`
 	writerMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonata-writer-retry", "definition": writerRetry, "roleArn": testRoleARN})

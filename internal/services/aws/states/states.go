@@ -1834,10 +1834,26 @@ walkLoop:
 								break
 							}
 						}
-						wr := p.walk(ctx, req, string(idef), "", iterationInput, nil, maps.Clone(variables))
+						walkRequest := req
+						childName, childStartTime := "", ""
+						if distributed {
+							childName = p.deps.Rand.UUID()
+							childStartTime = p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)
+							machine := mapStateMachineName(req) + "/" + cur
+							copy := *req
+							copy.Input = maps.Clone(req.Input)
+							copy.Input["_stateMachineArn"] = p.smARN(req, machine)
+							copy.Input["_executionArn"] = "arn:aws:states:" + req.Identity.Region + ":" + req.Identity.Account + ":execution:" + machine + ":" + childName
+							copy.Input["_executionName"], copy.Input["_executionInput"] = childName, iterationInput
+							copy.Input["_executionStartTime"] = childStartTime
+							copy.Input["_executionRoleArn"] = req.Input["_executionRoleArn"]
+							copy.Input["_executionRedriveCount"] = 0.0
+							walkRequest = &copy
+						}
+						wr := p.walk(ctx, walkRequest, string(idef), "", iterationInput, nil, maps.Clone(variables))
 						mapRuns = append(mapRuns, wr.mapRuns...)
 						if distributed {
-							itemResult := p.mapItemResult(req, cur, iterationInput, wr)
+							itemResult := p.mapItemResult(req, cur, childName, childStartTime, iterationInput, wr)
 							p.storeMapItemExecution(ctx, req, mapRunARN, string(idef), itemResult)
 							if hasResultWriter {
 								itemResults = append(itemResults, itemResult)
@@ -2680,14 +2696,13 @@ func mapStateMachineName(req *spi.Request) string {
 	return "stateMachine"
 }
 
-func (p *Pack) mapItemResult(req *spi.Request, state string, input any, result walkResult) mapItemResult {
-	name := p.deps.Rand.UUID()
+func (p *Pack) mapItemResult(req *spi.Request, state, name, startTime string, input any, result walkResult) mapItemResult {
 	machine := mapStateMachineName(req) + "/" + state
 	inputJSON, _ := json.Marshal(input)
 	metadata := map[string]any{
 		"ExecutionArn": "arn:aws:states:" + req.Identity.Region + ":" + req.Identity.Account + ":execution:" + machine + ":" + name,
 		"Input":        string(inputJSON), "InputDetails": map[string]any{"Included": true}, "Name": name,
-		"StartDate": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), "StateMachineArn": p.smARN(req, machine), "Status": result.status,
+		"StartDate": startTime, "StateMachineArn": p.smARN(req, machine), "Status": result.status,
 		"StopDate": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if result.status == "SUCCEEDED" {

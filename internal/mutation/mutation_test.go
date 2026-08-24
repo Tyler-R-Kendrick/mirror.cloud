@@ -1072,8 +1072,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-flattened-object-keys",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `arr, itemKeys = items.values, items.keys`,
-			new:  `arr = items.values`,
+			old:  `arr, itemKeys, itemSources = items.values, items.keys, items.sources`,
+			new:  `arr, itemSources = items.values, items.sources`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestDistributedMapS3ItemReader",
 		},
@@ -1240,7 +1240,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-hide-map-reader-source",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `"Index": float64(index), "Value": item, "Source": source}`,
+			old:  `"Index": float64(index), "Value": item, "Source": itemSource}`,
 			new:  `"Index": float64(index), "Value": item, "Source": "STATE_DATA"}`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestDistributedMapS3ItemReader",
@@ -1440,8 +1440,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-shift-map-item-index",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `"Index": float64(index), "Value": item, "Source": source}`,
-			new:  `"Index": float64(index + 1), "Value": item, "Source": source}`,
+			old:  `"Index": float64(index), "Value": item, "Source": itemSource}`,
+			new:  `"Index": float64(index + 1), "Value": item, "Source": itemSource}`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},

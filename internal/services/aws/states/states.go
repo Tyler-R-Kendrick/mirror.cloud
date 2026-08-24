@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -1913,29 +1914,197 @@ func choiceNext(st map[string]any, data any) string {
 }
 
 func matchChoice(cm map[string]any, data any) bool {
-	got := jsonPath(data, first(cm, "Variable"))
-	if eq, ok := cm["StringEquals"]; ok {
-		return fmt.Sprint(got) == fmt.Sprint(eq)
+	if rules := asSlice(cm["And"]); rules != nil {
+		for _, raw := range rules {
+			rule, _ := raw.(map[string]any)
+			if !matchChoice(rule, data) {
+				return false
+			}
+		}
+		return len(rules) > 0
 	}
-	if eq, ok := cm["NumericEquals"]; ok {
-		return toFloat(got) == toFloat(eq)
+	if rules := asSlice(cm["Or"]); rules != nil {
+		for _, raw := range rules {
+			rule, _ := raw.(map[string]any)
+			if matchChoice(rule, data) {
+				return true
+			}
+		}
+		return false
 	}
-	if eq, ok := cm["BooleanEquals"]; ok {
-		return toBool(got) == toBool(eq)
+	if raw, ok := cm["Not"].(map[string]any); ok {
+		return !matchChoice(raw, data)
 	}
-	if _, ok := cm["IsPresent"]; ok {
-		return got != nil
+	got, present := jsonPathLookup(data, first(cm, "Variable"))
+	if expected, ok := cm["IsPresent"]; ok {
+		return present == toBool(expected)
+	}
+	if !present {
+		return false
+	}
+	for key, actual := range map[string]bool{
+		"IsNull": got == nil, "IsString": isString(got), "IsNumeric": isNumber(got), "IsBoolean": isBool(got), "IsTimestamp": isTimestamp(got),
+	} {
+		if expected, ok := cm[key]; ok {
+			return actual == toBool(expected)
+		}
+	}
+	if pattern, ok := cm["StringMatches"].(string); ok {
+		value, valid := got.(string)
+		return valid && wildcardMatch(pattern, value)
+	}
+	if op, want, ok := choiceComparison(cm, "String", data); ok {
+		left, leftOK := got.(string)
+		right, rightOK := want.(string)
+		return leftOK && rightOK && compareResult(strings.Compare(left, right), op)
+	}
+	if op, want, ok := choiceComparison(cm, "Numeric", data); ok {
+		left, leftOK := choiceNumber(got)
+		right, rightOK := choiceNumber(want)
+		return leftOK && rightOK && numericComparison(left, right, op)
+	}
+	if op, want, ok := choiceComparison(cm, "Boolean", data); ok {
+		left, leftOK := got.(bool)
+		right, rightOK := want.(bool)
+		return op == "Equals" && leftOK && rightOK && left == right
+	}
+	if op, want, ok := choiceComparison(cm, "Timestamp", data); ok {
+		left, leftOK := parseTimestamp(got)
+		right, rightOK := parseTimestamp(want)
+		if !leftOK || !rightOK {
+			return false
+		}
+		cmp := 0
+		if left.Before(right) {
+			cmp = -1
+		} else if left.After(right) {
+			cmp = 1
+		}
+		return compareResult(cmp, op)
 	}
 	return false
 }
 
+func choiceComparison(rule map[string]any, prefix string, data any) (string, any, bool) {
+	for _, op := range []string{"Equals", "LessThan", "LessThanEquals", "GreaterThan", "GreaterThanEquals"} {
+		if value, exists := rule[prefix+op]; exists {
+			return op, value, true
+		}
+		if path, exists := rule[prefix+op+"Path"].(string); exists {
+			value, found := jsonPathLookup(data, path)
+			return op, value, found
+		}
+	}
+	return "", nil, false
+}
+
+func compareResult(comparison int, op string) bool {
+	switch op {
+	case "Equals":
+		return comparison == 0
+	case "LessThan":
+		return comparison < 0
+	case "LessThanEquals":
+		return comparison <= 0
+	case "GreaterThan":
+		return comparison > 0
+	case "GreaterThanEquals":
+		return comparison >= 0
+	}
+	return false
+}
+
+func numericComparison(left, right float64, op string) bool {
+	switch op {
+	case "Equals":
+		return left == right
+	case "LessThan":
+		return left < right
+	case "LessThanEquals":
+		return left <= right
+	case "GreaterThan":
+		return left > right
+	case "GreaterThanEquals":
+		return left >= right
+	}
+	return false
+}
+
+func choiceNumber(value any) (float64, bool) {
+	switch number := value.(type) {
+	case float64:
+		return number, true
+	case float32:
+		return float64(number), true
+	case int:
+		return float64(number), true
+	case int64:
+		return float64(number), true
+	case json.Number:
+		parsed, err := number.Float64()
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func isString(value any) bool { _, ok := value.(string); return ok }
+func isNumber(value any) bool { _, ok := choiceNumber(value); return ok }
+func isBool(value any) bool   { _, ok := value.(bool); return ok }
+func isTimestamp(value any) bool {
+	_, ok := parseTimestamp(value)
+	return ok
+}
+
+func parseTimestamp(value any) (time.Time, bool) {
+	raw, ok := value.(string)
+	if !ok {
+		return time.Time{}, false
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, raw)
+	return parsed, err == nil
+}
+
+func wildcardMatch(pattern, value string) bool {
+	p, v := []rune(pattern), []rune(value)
+	memo := map[[2]int]bool{}
+	seen := map[[2]int]bool{}
+	var match func(int, int) bool
+	match = func(pi, vi int) bool {
+		key := [2]int{pi, vi}
+		if seen[key] {
+			return memo[key]
+		}
+		seen[key] = true
+		var result bool
+		switch {
+		case pi == len(p):
+			result = vi == len(v)
+		case p[pi] == '\\' && pi+1 < len(p):
+			result = vi < len(v) && p[pi+1] == v[vi] && match(pi+2, vi+1)
+		case p[pi] == '*':
+			result = match(pi+1, vi) || vi < len(v) && match(pi, vi+1)
+		default:
+			result = vi < len(v) && p[pi] == v[vi] && match(pi+1, vi+1)
+		}
+		memo[key] = result
+		return result
+	}
+	return match(0, 0)
+}
+
 func jsonPath(data any, path string) any {
+	value, _ := jsonPathLookup(data, path)
+	return value
+}
+
+func jsonPathLookup(data any, path string) (any, bool) {
 	if path == "$" || path == "" {
-		return data
+		return data, true
 	}
 	tokens, ok := jsonPathTokens(strings.TrimPrefix(path, "$"))
 	if !ok {
-		return nil
+		return nil, false
 	}
 	nodes := []any{data}
 	multiple := false
@@ -1972,12 +2141,12 @@ func jsonPath(data any, path string) any {
 		nodes = next
 	}
 	if multiple {
-		return nodes
+		return nodes, len(nodes) > 0
 	}
 	if len(nodes) == 0 {
-		return nil
+		return nil, false
 	}
-	return nodes[0]
+	return nodes[0], true
 }
 
 type pathToken struct {

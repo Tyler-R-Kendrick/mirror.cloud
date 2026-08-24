@@ -1,4 +1,4 @@
-// Package firehose stores delivery streams and delivers direct puts or local Kinesis source records to S3, HTTP, OpenSearch, or Splunk destinations (no Redshift).
+// Package firehose stores delivery streams and delivers direct puts or local Kinesis source records to S3, HTTP, OpenSearch, Splunk, or Redshift destinations.
 package firehose
 
 import (

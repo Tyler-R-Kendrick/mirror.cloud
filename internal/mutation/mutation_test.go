@@ -30,6 +30,14 @@ func TestMutantsAreKilled(t *testing.T) {
 	}
 	mutants := []mutant{
 		{
+			name: "kms-reuse-gcm-nonce",
+			file: filepath.Join("internal", "services", "aws", "kms", "kms.go"),
+			old:  `rand.Read(nonce)`,
+			new:  `rand.Read(nonce[:0])`,
+			pkg:  "./internal/services/aws/kms",
+			run:  "TestEncryptDecryptRoundTrip",
+		},
+		{
 			name: "secretsmanager-reject-secret-arn",
 			file: filepath.Join("internal", "services", "aws", "secretsmanager", "secrets.go"),
 			old:  `if i := strings.LastIndex(name, ":secret:"); i >= 0 {`,

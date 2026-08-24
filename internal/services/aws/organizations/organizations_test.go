@@ -180,3 +180,103 @@ func TestBootedServerOrganizationsCreateGetDelete(t *testing.T) {
 		t.Fatalf("unexpected %s", raw)
 	}
 }
+
+func TestOrganizationsControlPlaneLifecycle(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	must := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := call(operation, input)
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response
+	}
+	if p.ServiceID() != "aws.organizations" || len(p.Operations()) != 24 {
+		t.Fatalf("metadata %s %d", p.ServiceID(), len(p.Operations()))
+	}
+	if _, err := call("DescribeOrganization", nil); err == nil {
+		t.Fatal("described missing organization")
+	}
+	organization := must("CreateOrganization", nil).Output["Organization"].(map[string]any)
+	rootID := organization["RootId"].(string)
+	if organization["FeatureSet"] != "ALL" || len(must("ListRoots", nil).Output["Roots"].([]any)) != 1 {
+		t.Fatalf("organization %#v", organization)
+	}
+	if _, err := call("EnablePolicyType", map[string]any{"RootId": "missing", "PolicyType": "SERVICE_CONTROL_POLICY"}); err == nil {
+		t.Fatal("enabled policy on missing root")
+	}
+	if root := must("DisablePolicyType", map[string]any{"RootId": rootID, "PolicyType": "SERVICE_CONTROL_POLICY"}).Output["Root"].(map[string]any); root["PolicyTypes"].([]any)[0].(map[string]any)["Status"] != "PENDING_DISABLE" {
+		t.Fatalf("disabled root %#v", root)
+	}
+	must("EnablePolicyType", map[string]any{"RootId": rootID, "PolicyType": "SERVICE_CONTROL_POLICY"})
+	accountID := must("CreateAccount", map[string]any{"Email": "member@example.com", "AccountName": "member"}).Output["CreateAccountStatus"].(map[string]any)["AccountId"].(string)
+	if _, err := call("MoveAccount", map[string]any{"AccountId": "missing", "DestinationParentId": rootID}); err == nil {
+		t.Fatal("moved missing account")
+	}
+	ouID := must("CreateOrganizationalUnit", map[string]any{"Name": "team", "ParentId": rootID, "Tags": []any{map[string]any{"Key": "env", "Value": "test"}}}).Output["OrganizationalUnit"].(map[string]any)["Id"].(string)
+	if described := must("DescribeOrganizationalUnit", map[string]any{"OrganizationalUnitId": ouID}).Output["OrganizationalUnit"].(map[string]any); described["Name"] != "team" {
+		t.Fatalf("OU %#v", described)
+	}
+	if _, err := call("DescribeOrganizationalUnit", map[string]any{"OrganizationalUnitId": "missing"}); err == nil {
+		t.Fatal("described missing OU")
+	}
+	if units := must("ListOrganizationalUnitsForParent", map[string]any{"ParentId": rootID}).Output["OrganizationalUnits"].([]any); len(units) != 1 {
+		t.Fatalf("OUs %#v", units)
+	}
+	if children := must("ListChildren", map[string]any{"ParentId": rootID, "ChildType": "ORGANIZATIONAL_UNIT"}).Output["Children"].([]any); len(children) != 1 {
+		t.Fatalf("OU children %#v", children)
+	}
+	if children := must("ListChildren", map[string]any{"ParentId": rootID, "ChildType": "ACCOUNT"}).Output["Children"].([]any); len(children) != 1 {
+		t.Fatalf("account children %#v", children)
+	}
+	if parents := must("ListParents", map[string]any{"ChildId": "missing"}).Output["Parents"].([]any); len(parents) != 0 {
+		t.Fatalf("missing parents %#v", parents)
+	}
+	must("MoveAccount", map[string]any{"AccountId": accountID, "SourceParentId": rootID, "DestinationParentId": ouID})
+	if parents := must("ListParents", map[string]any{"ChildId": ouID}).Output["Parents"].([]any); parents[0].(map[string]any)["Type"] != "ROOT" {
+		t.Fatalf("OU parents %#v", parents)
+	}
+
+	policy := must("CreatePolicy", map[string]any{"Name": "custom", "Content": `{}`}).Output["Policy"].(map[string]any)
+	policyID := policy["PolicySummary"].(map[string]any)["Id"].(string)
+	if must("DescribePolicy", map[string]any{"PolicyId": policyID}).Output["Policy"] == nil {
+		t.Fatal("missing policy description")
+	}
+	if policies := must("ListPolicies", map[string]any{"Filter": "SERVICE_CONTROL_POLICY"}).Output["Policies"].([]any); len(policies) != 2 {
+		t.Fatalf("policies %#v", policies)
+	}
+	if _, err := call("DescribePolicy", map[string]any{"PolicyId": "missing"}); err == nil {
+		t.Fatal("described missing policy")
+	}
+	if _, err := call("AttachPolicy", map[string]any{"TargetId": ouID, "PolicyId": "missing"}); err == nil {
+		t.Fatal("attached missing policy")
+	}
+	must("AttachPolicy", map[string]any{"TargetId": ouID, "PolicyId": policyID})
+	if targets := must("ListTargetsForPolicy", map[string]any{"PolicyId": policyID}).Output["Targets"].([]any); len(targets) != 1 {
+		t.Fatalf("policy targets %#v", targets)
+	}
+	if policies := must("ListPoliciesForTarget", map[string]any{"TargetId": ouID, "Filter": "TAG_POLICY"}).Output["Policies"].([]any); len(policies) != 0 {
+		t.Fatalf("filtered attached policies %#v", policies)
+	}
+	must("DetachPolicy", map[string]any{"TargetId": ouID, "PolicyId": policyID})
+	if targets := must("ListTargetsForPolicy", map[string]any{"PolicyId": policyID}).Output["Targets"].([]any); len(targets) != 0 {
+		t.Fatalf("detached targets %#v", targets)
+	}
+	if _, err := call("DeletePolicy", map[string]any{"PolicyId": "p-FullAWSAccess"}); err == nil {
+		t.Fatal("deleted AWS-managed policy")
+	}
+	must("DeletePolicy", map[string]any{"PolicyId": policyID})
+	must("DeleteOrganizationalUnit", map[string]any{"OrganizationalUnitId": ouID})
+	if units := must("ListOrganizationalUnitsForParent", map[string]any{"ParentId": rootID}).Output["OrganizationalUnits"].([]any); len(units) != 0 {
+		t.Fatalf("deleted OUs %#v", units)
+	}
+	if _, err := call("Unknown", nil); err == nil {
+		t.Fatal("unknown operation succeeded")
+	}
+}

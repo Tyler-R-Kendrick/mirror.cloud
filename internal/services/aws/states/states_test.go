@@ -360,8 +360,8 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		"items.jsonl":     "{\"id\":3}\n{\"id\":4}\n",
 		"items.csv":       "id,name,path,note\n5\n6,Lin,C:\\\\Program Files\\\\App.exe,say \\\"hi\\\",ignored\n",
 		"items-path.json": `{"data":{"items":[{"id":13},{"id":14}]}}`,
-		"listed/a":        `[{"id":21}]`,
-		"listed/b":        `[{"id":22}]`,
+		"listed/a":        `{"alpha":{"id":21}}`,
+		"listed/b":        `{"beta":{"id":22}}`,
 		"nested.json":     `{"data":{"a/b":{"~key":[{"id":9},{"id":10}]}}}`,
 		"objects.json":    `{"b":{"id":12},"a":{"id":11}}`,
 	}
@@ -428,7 +428,7 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		t.Fatalf("list ItemReader execution %#v", listExecution)
 	}
 	flattenState := map[string]any{
-		"Type": "Map", "ItemProcessor": processor, "ItemSelector": map[string]any{"value.$": "$$.Map.Item.Value", "source.$": "$$.Map.Item.Source"}, "End": true,
+		"Type": "Map", "ItemProcessor": processor, "ItemSelector": map[string]any{"value.$": "$$.Map.Item.Value", "source.$": "$$.Map.Item.Source", "key.$": "$$.Map.Item.Key"}, "End": true,
 		"ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:listObjectsV2", "Parameters": map[string]any{"Bucket": "items", "Prefix": "listed/", "MaxKeys": 1}, "ReaderConfig": map[string]any{"InputType": "JSON", "Transformation": "LOAD_AND_FLATTEN"}},
 	}
 	flattenDefinition, _ := json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": flattenState}})
@@ -436,7 +436,7 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	flattenStarted := invoke(p, "StartExecution", map[string]any{"stateMachineArn": flattenMachine["stateMachineArn"]}, nil)
 	flattenExecution := invoke(p, "DescribeExecution", map[string]any{"executionArn": flattenStarted["executionArn"]}, nil)
 	flattenOutput := flattenExecution["output"].(string)
-	if flattenExecution["status"] != "SUCCEEDED" || strings.Count(flattenOutput, `"source":"JSON"`) != 2 || !strings.Contains(flattenOutput, `"id":21`) || !strings.Contains(flattenOutput, `"id":22`) {
+	if flattenExecution["status"] != "SUCCEEDED" || strings.Count(flattenOutput, `"source":"JSON"`) != 2 || !strings.Contains(flattenOutput, `"key":"alpha"`) || !strings.Contains(flattenOutput, `"key":"beta"`) || !strings.Contains(flattenOutput, `"id":21`) || !strings.Contains(flattenOutput, `"id":22`) {
 		t.Fatalf("flatten ItemReader execution %#v", flattenExecution)
 	}
 

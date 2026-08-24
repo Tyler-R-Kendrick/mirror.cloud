@@ -2175,22 +2175,25 @@ walkLoop:
 					dataset = items
 				}
 				arr := []any{}
-				var itemKeys []string
+				var itemKeys []any
 				switch items := dataset.(type) {
 				case []any:
 					arr = items
 				case map[string]any:
 					itemsOK = distributed
 					if distributed {
-						itemKeys = make([]string, 0, len(items))
+						keys := make([]string, 0, len(items))
 						for key := range items {
+							keys = append(keys, key)
+						}
+						sort.Strings(keys)
+						for _, key := range keys {
+							arr = append(arr, items[key])
 							itemKeys = append(itemKeys, key)
 						}
-						sort.Strings(itemKeys)
-						for _, key := range itemKeys {
-							arr = append(arr, items[key])
-						}
 					}
+				case mapDataset:
+					arr, itemKeys = items.values, items.keys
 				default:
 					itemsOK = false
 				}
@@ -2208,8 +2211,10 @@ walkLoop:
 				if failed == nil {
 					for index, item := range arr {
 						itemDetails := map[string]any{"Index": float64(index), "Value": item, "Source": source}
-						if itemKeys != nil {
-							itemDetails["Key"] = itemKeys[index]
+						if index < len(itemKeys) {
+							if key, keyed := itemKeys[index].(string); keyed {
+								itemDetails["Key"] = key
+							}
 						}
 						itemContext := map[string]any{"Map": map[string]any{"Item": itemDetails}}
 						if selected, valid := selector.(map[string]any); valid && !isJSONata {
@@ -3079,6 +3084,11 @@ func taskPayload(st map[string]any, data any, context map[string]any, random spi
 	return applyParamsValidated(params, data, context, random, variables...)
 }
 
+type mapDataset struct {
+	values []any
+	keys   []any
+}
+
 func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]any, data any, scope *jsonataScope, variables ...map[string]any) (any, string, bool) {
 	reader, hasReader := state["ItemReader"].(map[string]any)
 	if !hasReader {
@@ -3143,7 +3153,7 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 		if first(config, "Transformation") != "LOAD_AND_FLATTEN" {
 			return limitReaderItems(items, "S3_OBJECT_LIST", config, data, scope, variables...)
 		}
-		flattened := []any{}
+		flattened := mapDataset{}
 		for _, rawItem := range items {
 			item, _ := rawItem.(map[string]any)
 			payload := map[string]any{"Bucket": input["Bucket"], "Key": item["Key"]}
@@ -3161,10 +3171,12 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			}
 			switch values := dataset.(type) {
 			case []any:
-				flattened = append(flattened, values...)
+				flattened.values = append(flattened.values, values...)
+				flattened.keys = append(flattened.keys, make([]any, len(values))...)
 			case map[string]any:
 				for _, key := range slices.Sorted(maps.Keys(values)) {
-					flattened = append(flattened, values[key])
+					flattened.values = append(flattened.values, values[key])
+					flattened.keys = append(flattened.keys, key)
 				}
 			default:
 				return nil, "", false
@@ -3374,6 +3386,12 @@ func limitReaderItems(items any, source string, config map[string]any, data any,
 	case []any:
 		if limit < len(collection) {
 			items = collection[:limit]
+		}
+	case mapDataset:
+		if limit < len(collection.values) {
+			collection.values = collection.values[:limit]
+			collection.keys = collection.keys[:limit]
+			items = collection
 		}
 	case map[string]any:
 		if limit < len(collection) {

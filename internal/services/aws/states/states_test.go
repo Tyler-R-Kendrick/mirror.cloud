@@ -310,12 +310,15 @@ func TestDistributedMapRuns(t *testing.T) {
 	if len(failedChildren) != 2 {
 		t.Fatalf("failed map child executions %#v", failedChildren)
 	}
-	objectDefinition := `{"StartAt":"Map","States":{"Map":{"Type":"Map","ItemsPath":"$.items","ItemSelector":{"key.$":"$$.Map.Item.Key","value.$":"$$.Map.Item.Value","index.$":"$$.Map.Item.Index"},"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`
+	objectDefinition := `{"StartAt":"Map","States":{"Map":{"Type":"Map","ItemsPath":"$.items","ItemSelector":{"key.$":"$$.Map.Item.Key","value.$":"$$.Map.Item.Value","index.$":"$$.Map.Item.Index"},"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED","ExecutionType":"EXPRESS"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`
 	objectARN := must("CreateStateMachine", map[string]any{"name": "object-items", "definition": objectDefinition, "roleArn": testRoleARN})["stateMachineArn"].(string)
 	objectExecution := must("StartExecution", map[string]any{"stateMachineArn": objectARN, "input": `{"items":{"b":2,"a":1}}`})["executionArn"].(string)
 	if execution := must("DescribeExecution", map[string]any{"executionArn": objectExecution}); execution["status"] != "SUCCEEDED" || execution["output"] != `[{"index":0,"key":"a","value":1},{"index":1,"key":"b","value":2}]` {
 		t.Fatalf("JSONPath object Map %#v", execution)
 	}
+	objectRuns := must("ListMapRuns", map[string]any{"executionArn": objectExecution})["mapRuns"].([]any)
+	objectChildren := must("ListExecutions", map[string]any{"mapRunArn": objectRuns[0].(map[string]any)["mapRunArn"]})["executions"].([]any)
+	fault("DescribeStateMachineForExecution", map[string]any{"executionArn": objectChildren[0].(map[string]any)["executionArn"]}, "StateMachineTypeNotSupported")
 	if originalRuns := must("ListMapRuns", map[string]any{"executionArn": executionARN})["mapRuns"].([]any); len(originalRuns) != 2 {
 		t.Fatalf("cross-execution map runs %#v", originalRuns)
 	}
@@ -788,11 +791,16 @@ func TestStatesJSONataBehavior(t *testing.T) {
 		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Map","Items":"{% [] %}","ToleratedFailurePercentage":101,"ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Map","ItemsPath":"$.items","MaxConcurrency":1,"MaxConcurrencyPath":"$.limit","ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`,
 		`{"QueryLanguage":"JSONata","StartAt":"Bad","States":{"Bad":{"Type":"Map","Items":{"a":1},"ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Map","ItemsPath":"$.items","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED","ExecutionType":"INVALID"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`,
 	}
 	for _, invalid := range invalidDefinitions {
 		if diagnostics := validateDefinition(invalid); len(diagnostics) == 0 {
 			t.Fatalf("invalid JSONata definition accepted %s", invalid)
 		}
+	}
+	expressDistributed := `{"StartAt":"Bad","States":{"Bad":{"Type":"Map","ItemsPath":"$.items","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`
+	if diagnostics := validateDefinition(expressDistributed, "EXPRESS"); len(diagnostics) == 0 {
+		t.Fatal("Express Distributed Map accepted")
 	}
 	machine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonata", "definition": string(definition), "roleArn": testRoleARN, "type": "EXPRESS"})
 	execution := invoke(p, "StartSyncExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"], "input": `{"values":[1,2,3],"encoded":"{\"n\":3}"}`})

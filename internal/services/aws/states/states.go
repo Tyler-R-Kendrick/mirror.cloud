@@ -1747,6 +1747,10 @@ walkLoop:
 			idef, _ := json.Marshal(iter)
 			processorConfig, _ := iter["ProcessorConfig"].(map[string]any)
 			distributed := first(processorConfig, "Mode") == "DISTRIBUTED"
+			executionType := first(processorConfig, "ExecutionType")
+			if executionType == "" {
+				executionType = "STANDARD"
+			}
 			_, hasResultWriter := st["ResultWriter"]
 			if hasResultWriter && !distributed {
 				return walkResult{out: data, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
@@ -1880,7 +1884,7 @@ walkLoop:
 						mapRuns = append(mapRuns, wr.mapRuns...)
 						if distributed {
 							itemResult := p.mapItemResult(req, cur, childName, childStartTime, iterationInput, wr)
-							p.storeMapItemExecution(ctx, req, mapRunARN, string(idef), itemResult)
+							p.storeMapItemExecution(ctx, req, mapRunARN, string(idef), executionType, itemResult)
 							if hasResultWriter {
 								itemResults = append(itemResults, itemResult)
 							}
@@ -2750,13 +2754,13 @@ func (p *Pack) mapItemResult(req *spi.Request, state, name, startTime string, in
 	return mapItemResult{metadata: metadata, output: result.out, succeeded: result.status == "SUCCEEDED", itemCount: itemCount, history: result.hist}
 }
 
-func (p *Pack) storeMapItemExecution(ctx context.Context, req *spi.Request, mapRunARN, definition string, item mapItemResult) {
+func (p *Pack) storeMapItemExecution(ctx context.Context, req *spi.Request, mapRunARN, definition, executionType string, item mapItemResult) {
 	metadata := item.metadata
 	now := float64(p.deps.Clock.Now().Unix())
 	record := map[string]any{
 		"executionArn": metadata["ExecutionArn"], "stateMachineArn": metadata["StateMachineArn"], "name": metadata["Name"],
 		"status": metadata["Status"], "startDate": now, "stopDate": now, "input": metadata["Input"], "mapRunArn": mapRunARN,
-		"itemCount": float64(item.itemCount), "type": "STANDARD", "definition": definition, "history": item.history,
+		"itemCount": float64(item.itemCount), "type": executionType, "definition": definition, "history": item.history,
 		"stateMachineName": lastSeg(first(metadata, "StateMachineArn"), ":"),
 	}
 	if machine, found := p.resolveStateMachine(ctx, req, first(req.Input, "stateMachineArn", "StateMachineArn")); found {
@@ -4254,7 +4258,17 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			}
 			if processor != nil {
 				processorConfig, _ := processor["ProcessorConfig"].(map[string]any)
-				if _, objectItems := state["Items"].(map[string]any); isJSONata && objectItems && first(processorConfig, "Mode") != "DISTRIBUTED" {
+				mode, executionType := first(processorConfig, "Mode"), first(processorConfig, "ExecutionType")
+				if mode != "" && mode != "INLINE" && mode != "DISTRIBUTED" {
+					add("SCHEMA_VALIDATION_FAILED", "ProcessorConfig Mode must be INLINE or DISTRIBUTED.", "/States/"+name+"/ItemProcessor/ProcessorConfig/Mode")
+				}
+				if executionType != "" && (mode != "DISTRIBUTED" || executionType != "STANDARD" && executionType != "EXPRESS") {
+					add("SCHEMA_VALIDATION_FAILED", "ExecutionType must be STANDARD or EXPRESS for a Distributed Map.", "/States/"+name+"/ItemProcessor/ProcessorConfig/ExecutionType")
+				}
+				if mode == "DISTRIBUTED" && machineType == "EXPRESS" {
+					add("SCHEMA_VALIDATION_FAILED", "Express workflows do not support Distributed Map.", "/States/"+name+"/ItemProcessor/ProcessorConfig/Mode")
+				}
+				if _, objectItems := state["Items"].(map[string]any); isJSONata && objectItems && mode != "DISTRIBUTED" {
 					add("SCHEMA_VALIDATION_FAILED", "Inline Map Items must be an array.", "/States/"+name+"/Items")
 				}
 				if processor["QueryLanguage"] == nil {

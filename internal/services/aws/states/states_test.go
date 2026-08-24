@@ -891,6 +891,45 @@ func TestStatesSyncServiceIntegrations(t *testing.T) {
 	}
 }
 
+func TestStatesTaskCredentials(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	queue := sqs.New(deps)
+	ctx := context.Background()
+	owner := spi.Identity{Account: "2", Region: "us-east-1"}
+	caller := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(handler spi.Handler, identity spi.Identity, operation string, input map[string]any) (map[string]any, error) {
+		response, err := handler.Invoke(ctx, &spi.Request{Identity: identity, Operation: operation, Input: input})
+		if response == nil {
+			return nil, err
+		}
+		return response.Output, err
+	}
+	queueOutput, _ := invoke(queue, owner, "CreateQueue", map[string]any{"QueueName": "assumed"})
+	queueURL := queueOutput["QueueUrl"].(string)
+	definition := `{"StartAt":"Send","States":{"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Credentials":{"RoleArn.$":"$.role"},"Parameters":{"QueueUrl":"` + queueURL + `","MessageBody":"assumed"},"End":true}}}`
+	machine, err := invoke(p, caller, "CreateStateMachine", map[string]any{"name": "credentials", "definition": definition, "roleArn": testRoleARN})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := invoke(p, caller, "StartExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"], "input": `{"role":"arn:aws:iam::2:role/target"}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, _ := invoke(p, caller, "DescribeExecution", map[string]any{"executionArn": started["executionArn"]})
+	if execution["status"] != "SUCCEEDED" {
+		t.Fatalf("credentialed execution %#v", execution)
+	}
+	received, _ := invoke(queue, owner, "ReceiveMessage", map[string]any{"QueueUrl": queueURL})
+	if messages := received["Messages"].([]any); len(messages) != 1 || messages[0].(map[string]any)["Body"] != "assumed" {
+		t.Fatalf("credentialed queue messages %#v", messages)
+	}
+	invalid := `{"StartAt":"Send","States":{"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Credentials":{"RoleArn":"invalid"},"End":true}}}`
+	if _, err := invoke(p, caller, "CreateStateMachine", map[string]any{"name": "invalid-credentials", "definition": invalid, "roleArn": testRoleARN}); err == nil {
+		t.Fatal("invalid Task Credentials accepted")
+	}
+}
+
 func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

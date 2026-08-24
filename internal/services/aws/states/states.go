@@ -1323,6 +1323,16 @@ walkLoop:
 		case "Wait":
 		case "Task":
 			res := first(st, "Resource")
+			taskReq := req
+			if _, exists := st["Credentials"]; exists {
+				identity, valid := taskIdentity(st, data, req.Identity, p.deps.Rand)
+				if !valid {
+					return walkResult{out: data, status: "FAILED", cause: "States.Permissions", errorName: "States.Permissions", hist: hist}
+				}
+				copy := *req
+				copy.Identity = identity
+				taskReq = &copy
+			}
 			callback := strings.HasSuffix(res, ".waitForTaskToken")
 			token := ""
 			var taskContext map[string]any
@@ -1341,7 +1351,7 @@ walkLoop:
 				retries[cur] = map[int]int{}
 			}
 			for {
-				out, err, errorPrefix, sdk, supported := p.invokeTask(ctx, req, res, payload)
+				out, err, errorPrefix, sdk, supported := p.invokeTask(ctx, taskReq, res, payload)
 				if !supported {
 					return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 				}
@@ -1713,6 +1723,21 @@ func taskPayload(st map[string]any, data any, context map[string]any, random spi
 	}
 	p := applyParams(params, data, context, random)
 	return p
+}
+
+func taskIdentity(st map[string]any, data any, identity spi.Identity, random spi.Rand) (spi.Identity, bool) {
+	credentials, ok := st["Credentials"].(map[string]any)
+	if !ok {
+		return identity, false
+	}
+	resolved := applyParams(credentials, data, nil, random)
+	roleARN := first(resolved, "RoleArn")
+	parts := strings.Split(roleARN, ":")
+	if !validRoleARN(roleARN) || len(parts) < 6 || parts[4] == "" {
+		return identity, false
+	}
+	identity.Account, identity.ARN, identity.AccessKeyID = parts[4], roleARN, ""
+	return identity, true
 }
 
 func applyParams(params map[string]any, data any, context map[string]any, random spi.Rand) map[string]any {
@@ -2707,6 +2732,14 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 		}
 		if typ == "Task" && first(state, "Resource") == "" {
 			add("MISSING_REQUIRED_FIELD", "Task must have Resource.", "/States/"+name+"/Resource")
+		}
+		if raw, exists := state["Credentials"]; exists {
+			credentials, valid := raw.(map[string]any)
+			roleARN, static := credentials["RoleArn"].(string)
+			_, dynamic := credentials["RoleArn.$"].(string)
+			if !valid || static == dynamic || static && !validRoleARN(roleARN) {
+				add("SCHEMA_VALIDATION_FAILED", "Credentials must contain one valid RoleArn or RoleArn.$.", "/States/"+name+"/Credentials")
+			}
 		}
 		if resource := first(state, "Resource"); typ == "Task" && strings.HasSuffix(resource, ".waitForTaskToken") &&
 			!callbackIntegration(strings.TrimSuffix(resource, ".waitForTaskToken")) {

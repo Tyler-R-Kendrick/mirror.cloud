@@ -2212,7 +2212,18 @@ walkLoop:
 					failed = &walkResult{out: stateInput, status: "FAILED", cause: name, errorName: name}
 				}
 				if failed == nil {
+					reader, hasReader := st["ItemReader"].(map[string]any)
+					readerConfig, _ := reader["ReaderConfig"].(map[string]any)
+					inputType := first(readerConfig, "InputType")
+					textReader := hasReader && (first(reader, "Resource") == "arn:aws:states:::s3:getObject" || first(readerConfig, "Transformation") == "LOAD_AND_FLATTEN") && (inputType == "" || slices.Contains([]string{"CSV", "JSON", "JSONL"}, inputType))
 					for index, item := range arr {
+						if textReader {
+							encoded, err := json.Marshal(item)
+							if err != nil || len(encoded) > 8*1024*1024 {
+								failed = &walkResult{out: stateInput, status: "FAILED", cause: "States.ItemReaderFailed", errorName: "States.ItemReaderFailed"}
+								break
+							}
+						}
 						itemSource := source
 						if index < len(itemSources) {
 							itemSource = itemSources[index]

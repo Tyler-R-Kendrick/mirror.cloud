@@ -376,6 +376,8 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		"objects.json":                `{"b":{"id":12},"a":{"id":11}}`,
 	}
 	objects["late-items.json"] = `{"padding":"` + strings.Repeat("x", 16*1024*1024) + `","items":[{"id":40}]}`
+	objects["large-item.json"] = `["` + strings.Repeat("x", 8*1024*1024) + `"]`
+	objects["selectable-item.json"] = `["` + strings.Repeat("x", 512*1024) + `"]`
 	for key, body := range objects {
 		invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": key}, []byte(body))
 	}
@@ -534,6 +536,23 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": missingExecution["executionArn"]}, nil); execution["status"] != "FAILED" || execution["error"] != "States.ItemReaderFailed" {
 			t.Fatalf("%s ItemReader execution %#v", test.key, execution)
 		}
+	}
+	largeState := map[string]any{
+		"Type": "Map", "ItemProcessor": processor, "ItemSelector": map[string]any{"small": true}, "End": true,
+		"ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": "large-item.json"}, "ReaderConfig": map[string]any{"InputType": "JSON"}},
+	}
+	largeDefinition, _ := json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": largeState}})
+	largeMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "reader-large-item", "definition": string(largeDefinition), "roleArn": testRoleARN}, nil)
+	largeStarted := invoke(p, "StartExecution", map[string]any{"stateMachineArn": largeMachine["stateMachineArn"]}, nil)
+	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": largeStarted["executionArn"]}, nil); execution["status"] != "FAILED" || execution["error"] != "States.ItemReaderFailed" {
+		t.Fatalf("large ItemReader item execution %#v", execution)
+	}
+	largeState["ItemReader"].(map[string]any)["Parameters"] = map[string]any{"Bucket": "items", "Key": "selectable-item.json"}
+	largeDefinition, _ = json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": largeState}})
+	largeMachine = invoke(p, "CreateStateMachine", map[string]any{"name": "reader-selectable-item", "definition": string(largeDefinition), "roleArn": testRoleARN}, nil)
+	largeStarted = invoke(p, "StartExecution", map[string]any{"stateMachineArn": largeMachine["stateMachineArn"]}, nil)
+	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": largeStarted["executionArn"]}, nil); execution["status"] != "SUCCEEDED" || !strings.Contains(execution["output"].(string), `"small":true`) {
+		t.Fatalf("selectable ItemReader item execution %#v", execution)
 	}
 }
 

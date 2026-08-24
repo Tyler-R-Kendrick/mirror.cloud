@@ -1,12 +1,14 @@
 package restxml
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
 func TestRouteNameQueryOps(t *testing.T) {
@@ -15,21 +17,76 @@ func TestRouteNameQueryOps(t *testing.T) {
 	}{
 		{http.MethodPut, "/b?tagging", "", "PutBucketTagging"},
 		{http.MethodGet, "/b?tagging", "", "GetBucketTagging"},
+		{http.MethodDelete, "/b?tagging", "", "DeleteBucketTagging"},
 		{http.MethodPut, "/b/k?tagging", "", "PutObjectTagging"},
 		{http.MethodGet, "/b/k?tagging", "", "GetObjectTagging"},
+		{http.MethodDelete, "/b/k?tagging", "", "DeleteObjectTagging"},
 		{http.MethodPut, "/b?notification", "", "PutBucketNotificationConfiguration"},
+		{http.MethodGet, "/b?notification", "", "GetBucketNotificationConfiguration"},
+		{http.MethodPut, "/b?versioning", "", "PutBucketVersioning"},
+		{http.MethodGet, "/b?versioning", "", "GetBucketVersioning"},
+		{http.MethodPut, "/b?acl", "", "PutBucketAcl"},
+		{http.MethodGet, "/b/k?acl", "", "GetObjectAcl"},
+		{http.MethodDelete, "/b?policy", "", "DeleteBucketPolicy"},
+		{http.MethodGet, "/b?policy", "", "GetBucketPolicy"},
 		{http.MethodPut, "/b?encryption", "", "PutBucketEncryption"},
+		{http.MethodDelete, "/b?encryption", "", "DeleteBucketEncryption"},
 		{http.MethodPut, "/b?cors", "", "PutBucketCors"},
+		{http.MethodDelete, "/b?cors", "", "DeleteBucketCors"},
+		{http.MethodDelete, "/b?website", "", "DeleteBucketWebsite"},
+		{http.MethodGet, "/b?logging", "", "GetBucketLogging"},
+		{http.MethodDelete, "/b?lifecycle", "", "DeleteBucketLifecycle"},
+		{http.MethodDelete, "/b?replication", "", "DeleteBucketReplication"},
+		{http.MethodPost, "/b?session", "", "CreateSession"},
+		{http.MethodPost, "/b/k?select", "", "SelectObjectContent"},
+		{http.MethodGet, "/b/k?torrent", "", "GetObjectTorrent"},
+		{http.MethodPut, "/b?abac", "", "PutBucketAbac"},
+		{http.MethodPut, "/b?metadataTable", "", "CreateBucketMetadataTableConfiguration"},
+		{http.MethodPost, "/b?metadataConfiguration&inventory", "", "UpdateBucketMetadataInventoryTableConfiguration"},
+		{http.MethodPost, "/b?metadataConfiguration&journal", "", "UpdateBucketMetadataJournalTableConfiguration"},
+		{http.MethodPost, "/b?metadataConfiguration", "", "UpdateBucketMetadataAnnotationTableConfiguration"},
+		{http.MethodDelete, "/b?metadata", "", "DeleteBucketMetadataConfiguration"},
+		{http.MethodGet, "/b?annotation", "", "ListObjectAnnotations"},
+		{http.MethodPut, "/b/k?annotation", "", "PutObjectAnnotation"},
+		{http.MethodPost, "/b/k?rename", "", "RenameObject"},
+		{http.MethodPut, "/b?object-lock", "", "PutObjectLockConfiguration"},
+		{http.MethodGet, "/b?requestPayment", "", "GetBucketRequestPayment"},
+		{http.MethodPut, "/b?accelerate", "", "PutBucketAccelerateConfiguration"},
+		{http.MethodDelete, "/b?publicAccessBlock", "", "DeletePublicAccessBlock"},
+		{http.MethodGet, "/b?ownershipControls", "", "GetBucketOwnershipControls"},
+		{http.MethodGet, "/b?policyStatus", "", "GetBucketPolicyStatus"},
+		{http.MethodGet, "/b/k?attributes", "", "GetObjectAttributes"},
+		{http.MethodPut, "/b/k?legal-hold", "", "PutObjectLegalHold"},
+		{http.MethodGet, "/b/k?retention", "", "GetObjectRetention"},
+		{http.MethodPost, "/b/k?restore", "", "RestoreObject"},
+		{http.MethodPut, "/b?analytics&id=a", "", "PutBucketAnalyticsConfiguration"},
+		{http.MethodGet, "/b?analytics", "", "ListBucketAnalyticsConfigurations"},
+		{http.MethodDelete, "/b?inventory&id=a", "", "DeleteBucketInventoryConfiguration"},
+		{http.MethodGet, "/b?inventory", "", "ListBucketInventoryConfigurations"},
+		{http.MethodGet, "/b?metrics&id=a", "", "GetBucketMetricsConfiguration"},
+		{http.MethodGet, "/b?metrics", "", "ListBucketMetricsConfigurations"},
+		{http.MethodPut, "/b?intelligent-tiering&id=a", "", "PutBucketIntelligentTieringConfiguration"},
+		{http.MethodGet, "/b?intelligent-tiering", "", "ListBucketIntelligentTieringConfigurations"},
+		{http.MethodGet, "/b?location", "", "GetBucketLocation"},
 		{http.MethodPost, "/b?delete", "", "DeleteObjects"},
 		{http.MethodPost, "/b/k?uploads", "", "CreateMultipartUpload"},
 		{http.MethodGet, "/b?uploads", "", "ListMultipartUploads"},
 		{http.MethodGet, "/b/k?uploadId=abc", "", "ListParts"},
+		{http.MethodPost, "/b/k?uploadId=abc", "", "CompleteMultipartUpload"},
+		{http.MethodDelete, "/b/k?uploadId=abc", "", "AbortMultipartUpload"},
 		{http.MethodPut, "/b/k?partNumber=1&uploadId=abc", "", "UploadPart"},
 		{http.MethodPut, "/b/k?partNumber=2&uploadId=abc", "b/src", "UploadPartCopy"},
 		{http.MethodPut, "/b/k", "b/src", "CopyObject"},
 		{http.MethodPut, "/b", "", "CreateBucket"},
 		{http.MethodPut, "/b/k", "", "PutObject"},
 		{http.MethodGet, "/b/k", "", "GetObject"},
+		{http.MethodHead, "/b/k", "", "HeadObject"},
+		{http.MethodDelete, "/b/k", "", "DeleteObject"},
+		{http.MethodHead, "/b", "", "HeadBucket"},
+		{http.MethodDelete, "/b", "", "DeleteBucket"},
+		{http.MethodGet, "/", "", "ListBuckets"},
+		{http.MethodGet, "/b?list-type=1", "", "ListObjects"},
+		{http.MethodGet, "/b", "", "ListObjectsV2"},
 		{http.MethodGet, "/b?versions", "", "ListObjectVersions"},
 	}
 	for _, tc := range cases {
@@ -71,6 +128,147 @@ func TestDecodeTaggingXML(t *testing.T) {
 	tags, _ := req.Input["TagSet"].([]any)
 	if len(tags) != 1 || str(tags[0].(map[string]any)["Key"]) != "a" {
 		t.Fatalf("TagSet %v", req.Input)
+	}
+}
+
+func TestRESTXMLServiceRoutes(t *testing.T) {
+	codec := Codec{}
+	if codec.Protocol() != model.ProtoRESTXML {
+		t.Fatal(codec.Protocol())
+	}
+	for _, test := range []struct{ service, method, path, want string }{
+		{"aws.route53", http.MethodPost, "/2013-04-01/hostedzone/Z/rrset", "ChangeResourceRecordSets"},
+		{"aws.route53", http.MethodGet, "/2013-04-01/hostedzone/Z/rrset", "ListResourceRecordSets"},
+		{"aws.route53", http.MethodPost, "/2013-04-01/hostedzone", "CreateHostedZone"},
+		{"aws.route53", http.MethodGet, "/2013-04-01/hostedzone", "ListHostedZones"},
+		{"aws.route53", http.MethodDelete, "/2013-04-01/hostedzone/Z", "DeleteHostedZone"},
+		{"aws.route53", http.MethodGet, "/2013-04-01/hostedzone/Z", "GetHostedZone"},
+		{"aws.cloudfront", http.MethodPost, "/2020-05-31/distribution/D/invalidation", "CreateInvalidation"},
+		{"aws.cloudfront", http.MethodGet, "/2020-05-31/distribution/D/invalidation", "ListInvalidations"},
+		{"aws.cloudfront", http.MethodGet, "/2020-05-31/distribution/D/invalidation/I", "GetInvalidation"},
+		{"aws.cloudfront", http.MethodPut, "/2020-05-31/distribution/D/config", "UpdateDistribution"},
+		{"aws.cloudfront", http.MethodGet, "/2020-05-31/distribution/D/config", "GetDistributionConfig"},
+		{"aws.cloudfront", http.MethodPost, "/2020-05-31/distribution", "CreateDistribution"},
+		{"aws.cloudfront", http.MethodGet, "/2020-05-31/distribution", "ListDistributions"},
+		{"aws.cloudfront", http.MethodDelete, "/2020-05-31/distribution/D", "DeleteDistribution"},
+		{"aws.cloudfront", http.MethodGet, "/2020-05-31/distribution/D", "GetDistribution"},
+	} {
+		op, err := codec.Route(&model.Service{ID: test.service}, httptest.NewRequest(test.method, test.path, nil))
+		if err != nil || op.Name != test.want {
+			t.Errorf("%s %s %s: %#v %v, want %s", test.service, test.method, test.path, op, err, test.want)
+		}
+	}
+	svc := &model.Service{ID: "aws.s3", Operations: []model.Operation{{Name: "Modeled"}, {Name: "Fallback"}}}
+	for _, test := range []struct {
+		request *http.Request
+		want    string
+	}{
+		{httptest.NewRequest(http.MethodPost, "/?Action=Modeled", nil), "Modeled"},
+		{httptest.NewRequest(http.MethodPost, "/?Action=Synthetic", nil), "Synthetic"},
+		{func() *http.Request {
+			r := httptest.NewRequest(http.MethodOptions, "/unknown", nil)
+			r.Header.Set("X-Mirror-Operation", "Modeled")
+			return r
+		}(), "Modeled"},
+		{httptest.NewRequest(http.MethodOptions, "/unknown", nil), "Modeled"},
+	} {
+		op, err := codec.Route(svc, test.request)
+		if err != nil || op.Name != test.want {
+			t.Fatalf("generic route %#v %v, want %s", op, err, test.want)
+		}
+	}
+	if _, err := codec.Route(&model.Service{ID: "aws.empty"}, httptest.NewRequest(http.MethodOptions, "/unknown", nil)); err == nil {
+		t.Fatal("routed empty unknown service")
+	}
+	virtual := httptest.NewRequest(http.MethodGet, "https://bucket.s3.us-east-1.amazonaws.com/key", nil)
+	if got := RouteName(virtual); got != "GetObject" {
+		t.Fatalf("virtual-host route %q", got)
+	}
+}
+
+func TestRESTXMLServiceDecodeContracts(t *testing.T) {
+	codec := Codec{}
+	route53 := &model.Service{ID: "aws.route53"}
+	request := httptest.NewRequest(http.MethodPost, "/2013-04-01/hostedzone/Z1/rrset", strings.NewReader("<Change/>"))
+	decoded, err := codec.Decode(route53, &model.Operation{Name: "ChangeResourceRecordSets"}, request)
+	if err != nil || decoded.Input["Id"] != "Z1" || decoded.Input["_body"] != "<Change/>" {
+		t.Fatalf("Route53 decode %#v %v", decoded, err)
+	}
+	cloudfront := &model.Service{ID: "aws.cloudfront"}
+	request = httptest.NewRequest(http.MethodGet, "/2020-05-31/distribution/D/invalidation/I?Marker=m", strings.NewReader("<Invalidation/>"))
+	decoded, err = codec.Decode(cloudfront, &model.Operation{Name: "GetInvalidation"}, request)
+	if err != nil || decoded.Input["Id"] != "D" || decoded.Input["InvalidationId"] != "I" || decoded.Input["Marker"] != "m" || decoded.Input["_body"] != "<Invalidation/>" {
+		t.Fatalf("CloudFront decode %#v %v", decoded, err)
+	}
+
+	s3 := &model.Service{ID: "aws.s3"}
+	request = httptest.NewRequest(http.MethodPut, "https://bucket.s3.us-east-1.amazonaws.com/key?partNumber=1", strings.NewReader("payload"))
+	request.Header.Set("x-amz-copy-source", "/source/object")
+	decoded, err = codec.Decode(s3, &model.Operation{Name: "PutObject"}, request)
+	if err != nil || decoded.Input["Bucket"] != "bucket" || decoded.Input["Key"] != "key" || decoded.Input["CopySource"] != "source/object" || decoded.Input["partNumber"] != "1" {
+		t.Fatalf("S3 stream decode %#v %v", decoded, err)
+	}
+	body, _ := io.ReadAll(decoded.Body)
+	if string(body) != "payload" {
+		t.Fatalf("stream body %q", body)
+	}
+	for _, test := range []struct{ operation, body, key, want string }{
+		{"PutBucketPolicy", `{"allow":true}`, "Policy", `{"allow":true}`},
+		{"PutBucketCors", `<Cors/>`, "Document", `<Cors/>`},
+		{"PutBucketVersioning", `<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`, "Status", "Enabled"},
+		{"PutBucketVersioning", `<broken`, "_body", `<broken`},
+		{"Unknown", `<Other/>`, "_body", `<Other/>`},
+	} {
+		request = httptest.NewRequest(http.MethodPut, "/bucket", strings.NewReader(test.body))
+		decoded, err = codec.Decode(s3, &model.Operation{Name: test.operation}, request)
+		if err != nil || decoded.Input[test.key] != test.want {
+			t.Errorf("%s decode %#v %v", test.operation, decoded, err)
+		}
+	}
+	notification := `<NotificationConfiguration><QueueConfiguration><Queue>arn:q</Queue><Event>s3:ObjectCreated:*</Event></QueueConfiguration><TopicConfiguration><Topic>arn:t</Topic><Event>s3:ObjectRemoved:*</Event></TopicConfiguration></NotificationConfiguration>`
+	decoded, err = codec.Decode(s3, &model.Operation{Name: "PutBucketNotificationConfiguration"}, httptest.NewRequest(http.MethodPut, "/bucket?notification", strings.NewReader(notification)))
+	if err != nil || len(decoded.Input["QueueConfigurations"].([]any)) != 1 || len(decoded.Input["TopicConfigurations"].([]any)) != 1 {
+		t.Fatalf("notification decode %#v %v", decoded, err)
+	}
+}
+
+func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
+	codec := Codec{}
+	svc := &model.Service{ID: "aws.s3"}
+	w := httptest.NewRecorder()
+	if err := codec.Encode(svc, &model.Operation{Name: "GetObject"}, w, &spi.Response{Status: http.StatusPartialContent, Headers: http.Header{"ETag": {"one"}}, Stream: io.NopCloser(strings.NewReader("object"))}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusPartialContent || w.Header().Get("ETag") != "one" || w.Body.String() != "object" {
+		t.Fatalf("stream response %d %#v %q", w.Code, w.Header(), w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(svc, &model.Operation{Name: "HeadBucket"}, w, &spi.Response{}); err != nil || w.Body.Len() != 0 {
+		t.Fatalf("head response %v %q", err, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(svc, &model.Operation{Name: "PutObject"}, w, &spi.Response{}); err != nil || w.Body.Len() != 0 || w.Header().Get("Content-Type") != "application/xml" {
+		t.Fatalf("empty response %v %#v %q", err, w.Header(), w.Body.String())
+	}
+	for _, test := range []struct{ operation, root string }{
+		{"ListBuckets", "ListAllMyBucketsResult"},
+		{"ListObjectsV2", "ListBucketResult"},
+		{"Custom", "CustomResult"},
+	} {
+		w = httptest.NewRecorder()
+		err := codec.Encode(svc, &model.Operation{Name: test.operation}, w, &spi.Response{Output: map[string]any{
+			"Name": "a&<b>", "Items": []any{map[string]any{"Key": "one"}}, "Empty": nil,
+		}})
+		if err != nil || !strings.Contains(w.Body.String(), "<"+test.root+">") || !strings.Contains(w.Body.String(), "a&amp;&lt;b&gt;") || !strings.Contains(w.Body.String(), "<member><Key>one</Key></member>") {
+			t.Errorf("%s response %v %s", test.operation, err, w.Body.String())
+		}
+	}
+	w = httptest.NewRecorder()
+	if err := codec.EncodeFault(svc, &model.Operation{Name: "Missing"}, w, spi.NotImplemented(svc.ID, "Missing", "emulate"), "r<&"); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusNotImplemented || w.Header().Get("x-mirror-not-implemented") != "aws.s3.Missing" || !strings.Contains(w.Body.String(), "r&lt;&amp;") {
+		t.Fatalf("fault %d %#v %s", w.Code, w.Header(), w.Body.String())
 	}
 }
 

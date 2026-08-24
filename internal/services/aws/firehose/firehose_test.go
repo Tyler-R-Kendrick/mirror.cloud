@@ -1448,6 +1448,111 @@ func TestFirehoseSnowflakeDestination(t *testing.T) {
 	}
 }
 
+func TestFirehoseSnowflakeSecretAndPersistentBuffer(t *testing.T) {
+	ctx := context.Background()
+	deps := spitest.Deps(t)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	secretBody := fmt.Sprintf(`{"user":"firehose","private_key":%q}`, base64.StdEncoding.EncodeToString(make([]byte, 192)))
+	secretPack := secretsmanager.New(deps)
+	secret, err := secretPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSecret", Input: map[string]any{"Name": "snowflake-key", "SecretString": secretBody}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := testSnowflakeDestination()
+	delete(destination, "User")
+	delete(destination, "PrivateKey")
+	destination["BufferingHints"] = map[string]any{"IntervalInSeconds": 5, "SizeInMBs": 128}
+	destination["RetryOptions"] = map[string]any{"DurationInSeconds": 0}
+	destination["S3Configuration"] = map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/"}
+	destination["SecretsManagerConfiguration"] = map[string]any{"Enabled": true, "SecretARN": secret.Output["ARN"]}
+	p := New(deps)
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+		"DeliveryStreamName": "snowflake-buffer", "SnowflakeDestinationConfiguration": destination,
+		"DeliveryStreamEncryptionConfigurationInput": map[string]any{"KeyType": "AWS_OWNED_CMK"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutRecord", Input: map[string]any{
+		"DeliveryStreamName": "snowflake-buffer", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"id":"buffered"}`))},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	buffers := deps.Store.Scope(id.Account, id.Region).Collection("fh-http-buffers")
+	items, _, _ := buffers.List(ctx, "snowflake-buffer/", "", 0)
+	if len(items) != 1 {
+		t.Fatalf("persisted Snowflake buffers %#v", items)
+	}
+	var buffered httpBuffer
+	_ = json.Unmarshal(items[0].Value, &buffered)
+	reader, _, err := deps.Blobs.Get(ctx, buffered.DataKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encrypted, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	if !bytes.HasPrefix(encrypted, firehoseEncryptedPrefix) || bytes.Contains(encrypted, []byte("buffered")) {
+		t.Fatalf("Snowflake buffer was not encrypted at rest: %q", encrypted)
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := secretPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutSecretValue", Input: map[string]any{"SecretId": secret.Output["ARN"], "SecretString": secretBody}}); err != nil {
+		t.Fatal(err)
+	}
+	p = New(deps)
+	defer func() { _ = p.Close() }()
+	if err := deps.Clock.Advance(5 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]any
+	for attempt := 0; attempt < 2000; attempt++ {
+		rows, err = p.SnowflakeRows(ctx, id, first(destination, "AccountUrl"), "ANALYTICS", "PUBLIC", "EVENTS")
+		if err == nil && len(rows) == 1 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err != nil || !reflect.DeepEqual(rows, []map[string]any{{"id": "buffered"}}) {
+		t.Fatalf("restarted Snowflake buffer rows %#v, %v", rows, err)
+	}
+	if remaining, _, _ := buffers.List(ctx, "snowflake-buffer/", "", 0); len(remaining) != 0 {
+		t.Fatalf("successful Snowflake buffer remained %#v", remaining)
+	}
+	if _, _, err := deps.Blobs.Get(ctx, buffered.DataKey); err == nil {
+		t.Fatal("successful Snowflake buffer payload remained")
+	}
+
+	if _, err := secretPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutSecretValue", Input: map[string]any{"SecretId": secret.Output["ARN"], "SecretString": `{}`}}); err != nil {
+		t.Fatal(err)
+	}
+	immediate := maps.Clone(destination)
+	immediate["BufferingHints"] = map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 128}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{"DeliveryStreamName": "snowflake-rotated", "SnowflakeDestinationConfiguration": immediate}}); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutRecord", Input: map[string]any{"DeliveryStreamName": "snowflake-rotated", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"id":"failed"}`))}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failureKey := id.Account + "/" + id.Region + "/out/errors/snowflake-failed/1970/01/01/00/snowflake-rotated-1-1970-01-01-00-00-05-" + first(failed.Output, "RecordId")
+	for attempt := 0; attempt < 2000; attempt++ {
+		reader, _, err = deps.Blobs.Get(ctx, failureKey)
+		if err == nil {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	failureBody, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	if !bytes.Contains(failureBody, []byte("Snowflake.InvalidPrivateKeyOrPassphrase")) {
+		t.Fatalf("rotated Snowflake secret failure %s", failureBody)
+	}
+}
+
 func TestSplunkDestinationValidationAndDescription(t *testing.T) {
 	valid := map[string]any{
 		"HECEndpoint": "https://splunk.example.com:8088", "HECEndpointType": "Raw", "HECToken": "token",

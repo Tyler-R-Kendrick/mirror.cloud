@@ -4862,7 +4862,11 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 	for len(path) > 0 {
 		if path[0] == '.' {
 			path = path[1:]
-			continue
+			if len(path) == 0 || path[0] == '.' || path[0] == '[' {
+				return nil, false
+			}
+		} else if path[0] != '[' {
+			return nil, false
 		}
 		if path[0] != '[' {
 			end := strings.IndexAny(path, ".[")
@@ -4904,6 +4908,39 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 		}
 	}
 	return tokens, true
+}
+
+func validJSONPath(path string, reference bool) bool {
+	if !strings.HasPrefix(path, "$") || reference && strings.HasPrefix(path, "$$") {
+		return false
+	}
+	root := 1
+	if strings.HasPrefix(path, "$$") {
+		root = 2
+	} else if len(path) > 1 && path[1] != '.' && path[1] != '[' {
+		root = strings.IndexAny(path, ".[")
+		if root < 0 {
+			root = len(path)
+		}
+		if reference || !validVariableName(path[1:root]) {
+			return false
+		}
+	}
+	if root == len(path) {
+		return true
+	}
+	tokens, valid := jsonPathTokens(path[root:])
+	if !valid || len(tokens) == 0 {
+		return false
+	}
+	if reference {
+		for _, token := range tokens {
+			if token.kind != 'f' && token.kind != 'i' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func asSlice(v any) []any {
@@ -5168,7 +5205,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			for _, field := range []string{"InputPath", "OutputPath", "ResultPath"} {
 				if value, exists := state[field]; exists && value != nil {
 					path, valid := value.(string)
-					if !valid || !strings.HasPrefix(path, "$") {
+					if !valid || !validJSONPath(path, field == "ResultPath") {
 						add("SCHEMA_VALIDATION_FAILED", field+" must be null or a path.", "/States/"+name+"/"+field)
 					}
 				}

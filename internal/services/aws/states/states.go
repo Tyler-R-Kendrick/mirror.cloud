@@ -4674,6 +4674,17 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 		if _, output := state["Output"]; output && typ == "Fail" {
 			add("SCHEMA_VALIDATION_FAILED", "Fail does not support Output.", "/States/"+name+"/Output")
 		}
+		if typ == "Pass" {
+			if isJSONata {
+				for _, field := range []string{"Arguments", "Result"} {
+					if _, exists := state[field]; exists {
+						add("SCHEMA_VALIDATION_FAILED", field+" is not supported by a JSONata Pass state.", "/States/"+name+"/"+field)
+					}
+				}
+			} else if _, exists := state["ResultSelector"]; exists {
+				add("SCHEMA_VALIDATION_FAILED", "Pass does not support ResultSelector.", "/States/"+name+"/ResultSelector")
+			}
+		}
 		if typ == "Wait" {
 			configured := 0
 			for _, field := range []string{"Seconds", "Timestamp", "SecondsPath", "TimestampPath"} {

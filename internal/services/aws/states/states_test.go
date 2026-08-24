@@ -221,6 +221,11 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if !retryTask(retrier, "Boom", attempts) || !retryTask(retrier, "Boom", attempts) || retryTask(retrier, "Boom", attempts) || attempts[1] != 2 {
 		t.Fatalf("retry attempts %#v", attempts)
 	}
+	defaults := map[int]int{}
+	defaultRetrier := map[string]any{"Retry": []any{map[string]any{"ErrorEquals": []any{"Boom"}}}}
+	if !retryTask(defaultRetrier, "Boom", defaults) || !retryTask(defaultRetrier, "Boom", defaults) || !retryTask(defaultRetrier, "Boom", defaults) || retryTask(defaultRetrier, "Boom", defaults) {
+		t.Fatalf("default retry attempts %#v", defaults)
+	}
 	if matchesError([]any{"States.ALL"}, "States.Runtime") || matchesError([]any{"States.TaskFailed"}, "States.Timeout") || !matchesError([]any{"States.TaskFailed"}, "Boom") {
 		t.Fatal("error wildcard matching")
 	}
@@ -231,6 +236,9 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	nested := map[string]any{"result": map[string]any{}}
 	if out, ok := applyResultPath(map[string]any{"ResultPath": "$.result.value"}, nested, 3); !ok || jsonPath(out, "$.result.value") != 3 {
 		t.Fatalf("nested ResultPath %#v", out)
+	}
+	if out, ok := applyResultPath(map[string]any{"ResultPath": "$"}, nested, 4); !ok || out != 4 {
+		t.Fatalf("root ResultPath %#v", out)
 	}
 }
 

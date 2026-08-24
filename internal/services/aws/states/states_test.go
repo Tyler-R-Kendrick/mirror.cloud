@@ -1512,6 +1512,34 @@ func TestStatesDataFlowValidation(t *testing.T) {
 	}
 }
 
+func TestStatesMapValidation(t *testing.T) {
+	processor := `"ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`
+	for _, fields := range []string{
+		`"ItemsPath":"$.items","ItemSelector":{"value.$":"$$.Map.Item.Value"},` + processor,
+		`"Iterator":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"Parameters":{"value.$":"$$.Map.Item.Value"}`,
+	} {
+		definition := `{"StartAt":"Map","States":{"Map":{"Type":"Map",` + fields + `,"End":true}}}`
+		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
+			t.Fatalf("valid Map diagnostics %#v for %s", diagnostics, fields)
+		}
+	}
+	for _, fields := range []string{
+		`"ItemsPath":1,` + processor,
+		`"ItemSelector":[],` + processor,
+		processor + `,"Iterator":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
+		`"ItemSelector":{},"Parameters":{},` + processor,
+		`"ItemReader":[],` + processor,
+		`"ItemBatcher":[],` + processor,
+		`"ResultWriter":[],` + processor,
+		`"ItemProcessor":{"ProcessorConfig":[],"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
+	} {
+		definition := `{"StartAt":"Map","States":{"Map":{"Type":"Map",` + fields + `,"End":true}}}`
+		if diagnostics := validateDefinition(definition); len(diagnostics) != 1 {
+			t.Fatalf("Map diagnostics = %#v for %s", diagnostics, fields)
+		}
+	}
+}
+
 func TestStatesAssignValidation(t *testing.T) {
 	for _, definition := range []string{
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","Assign":{"value":1},"End":true}}}`,

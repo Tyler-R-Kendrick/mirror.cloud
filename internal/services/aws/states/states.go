@@ -5205,6 +5205,34 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			}
 		}
 		if typ == "Map" {
+			for _, field := range []string{"ItemBatcher", "ItemReader", "ResultWriter"} {
+				if value, exists := state[field]; exists {
+					if _, valid := value.(map[string]any); !valid {
+						add("SCHEMA_VALIDATION_FAILED", field+" must be an object.", "/States/"+name+"/"+field)
+					}
+				}
+			}
+			if value, exists := state["ItemsPath"]; exists {
+				reference, valid := value.(string)
+				if !valid || !strings.HasPrefix(reference, "$") {
+					add("SCHEMA_VALIDATION_FAILED", "ItemsPath must be a reference path.", "/States/"+name+"/ItemsPath")
+				}
+			}
+			if value, exists := state["ItemSelector"]; exists && !isJSONata {
+				if _, valid := value.(map[string]any); !valid {
+					add("SCHEMA_VALIDATION_FAILED", "ItemSelector must be an object.", "/States/"+name+"/ItemSelector")
+				}
+			}
+			_, hasProcessor := state["ItemProcessor"]
+			_, hasIterator := state["Iterator"]
+			if hasProcessor && hasIterator {
+				add("SCHEMA_VALIDATION_FAILED", "ItemProcessor and Iterator are mutually exclusive.", "/States/"+name)
+			}
+			if _, hasSelector := state["ItemSelector"]; hasSelector {
+				if _, hasParameters := state["Parameters"]; hasParameters {
+					add("SCHEMA_VALIDATION_FAILED", "ItemSelector and Parameters are mutually exclusive.", "/States/"+name)
+				}
+			}
 			for _, field := range []string{"ItemReader", "ResultWriter"} {
 				configuration, _ := state[field].(map[string]any)
 				if configuration == nil {
@@ -5235,7 +5263,10 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				processor, _ = state["Iterator"].(map[string]any)
 			}
 			if processor != nil {
-				processorConfig, _ := processor["ProcessorConfig"].(map[string]any)
+				processorConfig, configValid := processor["ProcessorConfig"].(map[string]any)
+				if _, exists := processor["ProcessorConfig"]; exists && !configValid {
+					add("SCHEMA_VALIDATION_FAILED", "ProcessorConfig must be an object.", "/States/"+name+"/ItemProcessor/ProcessorConfig")
+				}
 				mode, executionType := first(processorConfig, "Mode"), first(processorConfig, "ExecutionType")
 				if mode != "" && mode != "INLINE" && mode != "DISTRIBUTED" {
 					add("SCHEMA_VALIDATION_FAILED", "ProcessorConfig Mode must be INLINE or DISTRIBUTED.", "/States/"+name+"/ItemProcessor/ProcessorConfig/Mode")

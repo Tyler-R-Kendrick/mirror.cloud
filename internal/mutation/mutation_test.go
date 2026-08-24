@@ -3140,6 +3140,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestRouteNameQueryOps",
 		},
 		{
+			name: "restxml-drop-route53-change-route",
+			file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
+			old:  `case strings.Contains(path, "/rrset") && m == http.MethodPost:`,
+			new:  `case strings.Contains(path, "/rrset") && false:`,
+			pkg:  "./internal/proto/aws/restxml",
+			run:  "TestRESTXMLServiceRoutes",
+		},
+		{
+			name: "restxml-drop-cloudfront-invalidation-route",
+			file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
+			old:  `case strings.Contains(path, "/invalidation") && m == http.MethodPost:`,
+			new:  `case strings.Contains(path, "/invalidation") && false:`,
+			pkg:  "./internal/proto/aws/restxml",
+			run:  "TestRESTXMLServiceRoutes",
+		},
+		{
 			name: "restjson-drop-api-gateway-integration-response-route",
 			file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
 			old:  `case strings.Contains(path, "/integration/responses/"):`,

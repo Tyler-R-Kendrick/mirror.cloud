@@ -2468,10 +2468,7 @@ func applyJSONataAssignments(scope jsonataScope, variables map[string]any, owner
 			assignments[name] = value
 		}
 	}
-	for name, value := range assignments {
-		variables[name] = cloneJSON(value)
-	}
-	return true
+	return commitAssignments(variables, assignments)
 }
 
 func applyJSONPathAssignments(data any, context map[string]any, visibleVariables, variables map[string]any, random spi.Rand, owners ...map[string]any) bool {
@@ -2489,6 +2486,26 @@ func applyJSONPathAssignments(data any, context map[string]any, visibleVariables
 			}
 			assignments[name] = resolved[name]
 		}
+	}
+	return commitAssignments(variables, assignments)
+}
+
+func commitAssignments(variables, assignments map[string]any) bool {
+	encoded, err := json.Marshal(assignments)
+	if err != nil || len(encoded) > 256*1024 {
+		return false
+	}
+	updated := maps.Clone(variables)
+	for name, value := range assignments {
+		encoded, err := json.Marshal(value)
+		if err != nil || len(encoded) > 256*1024 {
+			return false
+		}
+		updated[name] = value
+	}
+	encoded, err = json.Marshal(updated)
+	if err != nil || len(encoded) > 10*1024*1024 {
+		return false
 	}
 	for name, value := range assignments {
 		variables[name] = cloneJSON(value)

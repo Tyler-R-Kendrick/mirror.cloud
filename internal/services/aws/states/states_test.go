@@ -934,6 +934,26 @@ func TestStatesJSONPathVariables(t *testing.T) {
 	}
 }
 
+func TestVariableAssignmentLimits(t *testing.T) {
+	variables := map[string]any{}
+	if !commitAssignments(variables, map[string]any{"ok": "value"}) || variables["ok"] != "value" {
+		t.Fatalf("small assignment rejected %#v", variables)
+	}
+	if commitAssignments(variables, map[string]any{"oversized": strings.Repeat("x", 256*1024)}) {
+		t.Fatal("oversized variable accepted")
+	}
+	if commitAssignments(variables, map[string]any{"left": strings.Repeat("x", 128*1024), "right": strings.Repeat("x", 128*1024)}) {
+		t.Fatal("oversized Assign accepted")
+	}
+	large := map[string]any{}
+	for index := range 40 {
+		large[string(rune('A'+index))] = strings.Repeat("x", 250*1024)
+	}
+	if commitAssignments(large, map[string]any{"more": strings.Repeat("x", 250*1024)}) {
+		t.Fatal("execution variable limit exceeded")
+	}
+}
+
 func TestStatesJSONataErrorsAndFields(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

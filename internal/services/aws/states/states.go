@@ -4911,7 +4911,7 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 }
 
 func validJSONPath(path string, reference bool) bool {
-	if !strings.HasPrefix(path, "$") || reference && strings.HasPrefix(path, "$$") {
+	if !strings.HasPrefix(path, "$") {
 		return false
 	}
 	root := 1
@@ -4922,7 +4922,7 @@ func validJSONPath(path string, reference bool) bool {
 		if root < 0 {
 			root = len(path)
 		}
-		if reference || !validVariableName(path[1:root]) {
+		if !validVariableName(path[1:root]) {
 			return false
 		}
 	}
@@ -4941,6 +4941,10 @@ func validJSONPath(path string, reference bool) bool {
 		}
 	}
 	return true
+}
+
+func validResultPath(path string) bool {
+	return validJSONPath(path, true) && !strings.HasPrefix(path, "$$") && (len(path) == 1 || path[1] == '.' || path[1] == '[')
 }
 
 func asSlice(v any) []any {
@@ -5205,7 +5209,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			for _, field := range []string{"InputPath", "OutputPath", "ResultPath"} {
 				if value, exists := state[field]; exists && value != nil {
 					path, valid := value.(string)
-					if !valid || !validJSONPath(path, field == "ResultPath") {
+					if !valid || field == "ResultPath" && !validResultPath(path) || field != "ResultPath" && !validJSONPath(path, false) {
 						add("SCHEMA_VALIDATION_FAILED", field+" must be null or a path.", "/States/"+name+"/"+field)
 					}
 				}
@@ -5295,7 +5299,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 					return false
 				}
 				if strings.HasPrefix(path, "$") {
-					return true
+					return validJSONPath(path, true)
 				}
 				for _, intrinsic := range []string{"ArrayGetItem", "Base64Decode", "Base64Encode", "Format", "Hash", "JsonToString", "UUID"} {
 					if strings.HasPrefix(path, "States."+intrinsic+"(") && strings.HasSuffix(path, ")") {
@@ -5331,7 +5335,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			if direct && path {
 				add("SCHEMA_VALIDATION_FAILED", field+" and "+field+"Path are mutually exclusive.", location+"/"+field)
 			}
-			if reference, valid := pathValue.(string); path && (!valid || !strings.HasPrefix(reference, "$")) {
+			if reference, valid := pathValue.(string); path && (!valid || !validJSONPath(reference, true)) {
 				add("SCHEMA_VALIDATION_FAILED", field+"Path must be a reference path.", location+"/"+field+"Path")
 			}
 			if !direct {
@@ -5363,7 +5367,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			}
 			if value, exists := state["TimestampPath"]; exists {
 				reference, valid := value.(string)
-				if !valid || !strings.HasPrefix(reference, "$") {
+				if !valid || !validJSONPath(reference, true) {
 					add("SCHEMA_VALIDATION_FAILED", "TimestampPath must be a reference path.", "/States/"+name+"/TimestampPath")
 				}
 			}
@@ -5521,7 +5525,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 						add("SCHEMA_VALIDATION_FAILED", "Catch ResultPath is not supported with JSONata.", path+"/ResultPath")
 					} else if value != nil {
 						reference, valid := value.(string)
-						if !valid || !strings.HasPrefix(reference, "$") {
+						if !valid || !validResultPath(reference) {
 							add("SCHEMA_VALIDATION_FAILED", "Catch ResultPath must be null or a path.", path+"/ResultPath")
 						}
 					}
@@ -5596,7 +5600,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				switch {
 				case strings.HasSuffix(operator, "Path"):
 					reference, valid := operand.(string)
-					validOperand = valid && strings.HasPrefix(reference, "$")
+					validOperand = valid && validJSONPath(reference, false)
 				case strings.HasPrefix(operator, "Numeric"):
 					_, validOperand = exactNumber(operand)
 				case strings.HasPrefix(operator, "Boolean"), strings.HasPrefix(operator, "Is"):
@@ -5608,7 +5612,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				default:
 					_, validOperand = operand.(string)
 				}
-				if !validVariable || !strings.HasPrefix(variable, "$") || !validOperand {
+				if !validVariable || !validJSONPath(variable, true) || !validOperand {
 					add("SCHEMA_VALIDATION_FAILED", "Choice comparison has an invalid Variable or operand.", path)
 				}
 			}
@@ -5645,7 +5649,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			}
 			if value, exists := state["ItemsPath"]; exists {
 				reference, valid := value.(string)
-				if !valid || !strings.HasPrefix(reference, "$") {
+				if !valid || !validJSONPath(reference, true) {
 					add("SCHEMA_VALIDATION_FAILED", "ItemsPath must be a reference path.", "/States/"+name+"/ItemsPath")
 				}
 			}

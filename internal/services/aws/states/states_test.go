@@ -215,6 +215,10 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if parallel.status != "SUCCEEDED" || len(parallel.out.([]any)) != 2 {
 		t.Fatalf("parallel %#v", parallel)
 	}
+	parallelData := walk(`{"StartAt":"Parallel","States":{"Parallel":{"Type":"Parallel","Parameters":{"value.$":"$.shared"},"Branches":[{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}],"ResultSelector":{"first.$":"$[0].value"},"ResultPath":"$.parallel","End":true}}}`, map[string]any{"shared": "x", "keep": true})
+	if parallelData.status != "SUCCEEDED" || jsonPath(parallelData.out, "$.keep") != true || jsonPath(parallelData.out, "$.parallel.first") != "x" {
+		t.Fatalf("parallel data flow %#v", parallelData)
+	}
 	parallelRecovery := walk(`{"StartAt":"Parallel","States":{"Parallel":{"Type":"Parallel","Branches":[{"StartAt":"Fail","States":{"Fail":{"Type":"Fail","Error":"ParallelBoom","Cause":"branch failed"}}}],"Retry":[{"ErrorEquals":["ParallelBoom"],"MaxAttempts":1}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.failure","Next":"Recovered"}]},"Recovered":{"Type":"Succeed"}}}`, map[string]any{"keep": true})
 	parallelOutput := parallelRecovery.out.(map[string]any)
 	if parallelRecovery.status != "SUCCEEDED" || parallelOutput["keep"] != true || jsonPath(parallelOutput, "$.failure.Error") != "ParallelBoom" || jsonPath(parallelOutput, "$.failure.Cause") != "branch failed" {
@@ -233,6 +237,10 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	mapRecovery := walk(`{"StartAt":"Map","States":{"Map":{"Type":"Map","ItemsPath":"$.items","ItemProcessor":{"StartAt":"Fail","States":{"Fail":{"Type":"Fail","Error":"MapBoom"}}},"Catch":[{"ErrorEquals":["States.TaskFailed"],"ResultPath":null,"Next":"Recovered"}]},"Recovered":{"Type":"Succeed"}}}`, map[string]any{"items": []any{1.0}, "keep": true})
 	if output := mapRecovery.out.(map[string]any); mapRecovery.status != "SUCCEEDED" || output["keep"] != true {
 		t.Fatalf("map recovery %#v", mapRecovery)
+	}
+	mapData := walk(`{"StartAt":"Map","States":{"Map":{"Type":"Map","ItemsPath":"$.items","ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"ResultSelector":{"flat.$":"$[*][*]"},"ResultPath":"$.mapped","End":true}}}`, map[string]any{"items": []any{[]any{1.0, 2.0}, []any{3.0}}, "keep": true})
+	if mapData.status != "SUCCEEDED" || jsonPath(mapData.out, "$.keep") != true || fmtString(jsonPath(mapData.out, "$.mapped.flat")) != `[1,2,3]` {
+		t.Fatalf("map data flow %#v", mapData)
 	}
 	data := map[string]any{"s": "yes", "n": 2.0, "b": true, "present": 1}
 	if !matchChoice(map[string]any{"Variable": "$.s", "StringEquals": "yes"}, data) ||
@@ -327,6 +335,14 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	}
 	if out, ok := applyResultPath(map[string]any{"ResultPath": "$"}, nested, 4); !ok || out != 4 {
 		t.Fatalf("root ResultPath %#v", out)
+	}
+	selectedResult, selectedOK := applyStateResult(map[string]any{"ResultSelector": map[string]any{"picked.$": "$.value"}, "ResultPath": "$.task"}, map[string]any{"keep": true}, map[string]any{"value": 5.0, "drop": true}, p.deps.Rand)
+	if !selectedOK || jsonPath(selectedResult, "$.keep") != true || jsonPath(selectedResult, "$.task.picked") != 5.0 {
+		t.Fatalf("selected result %#v", selectedResult)
+	}
+	paths := map[string]any{"a": []any{map[string]any{"v": 1.0}, map[string]any{"v": 2.0}, map[string]any{"v": 3.0}}}
+	if jsonPath(paths, "$.a[1].v") != 2.0 || fmtString(jsonPath(paths, "$.a[0:2].v")) != `[1,2]` || jsonPath(paths, "$.['a'][2].v") != 3.0 || jsonPath(paths, "$.a[9]") != nil {
+		t.Fatal("json path arrays")
 	}
 	composite := map[string]any{"Retry": []any{map[string]any{"ErrorEquals": []any{"Boom"}, "MaxAttempts": 1.0}}, "Catch": []any{map[string]any{"ErrorEquals": []any{"States.ALL"}, "Next": "Recovered"}}}
 	compositeAttempts := map[int]int{}

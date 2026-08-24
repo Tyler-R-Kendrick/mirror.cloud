@@ -15,6 +15,7 @@ import (
 	"math"
 	mathrand "math/rand"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -370,7 +371,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 		sm["StartAt"] = next
 		def, _ := json.Marshal(sm)
 		definition, from, data = string(def), "", out
-	} else if out, valid := applyResultPath(st, pend.StateInput, data); valid {
+	} else if out, valid := applyStateResult(st, pend.StateInput, data, p.deps.Rand); valid {
 		data = out
 	} else {
 		rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", "States.Runtime", "States.Runtime", float64(now)
@@ -474,7 +475,7 @@ walkLoop:
 					out, err := p.invokeLambda(ctx, req, res, st, payload)
 					if err == nil {
 						var valid bool
-						data, valid = applyResultPath(st, data, out)
+						data, valid = applyStateResult(st, data, out, p.deps.Rand)
 						if !valid {
 							return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 						}
@@ -512,6 +513,11 @@ walkLoop:
 			cur = next
 			continue
 		case "Parallel":
+			stateInput := data
+			branchInput := data
+			if params, ok := st["Parameters"].(map[string]any); ok {
+				branchInput = applyParams(params, data, nil, p.deps.Rand)
+			}
 			if retries[cur] == nil {
 				retries[cur] = map[int]int{}
 			}
@@ -522,7 +528,7 @@ walkLoop:
 				for _, br := range branches {
 					bm, _ := br.(map[string]any)
 					bdef, _ := json.Marshal(bm)
-					wr := p.walk(ctx, req, string(bdef), "", data)
+					wr := p.walk(ctx, req, string(bdef), "", branchInput)
 					if wr.status != "SUCCEEDED" {
 						failed = &wr
 						break
@@ -530,7 +536,11 @@ walkLoop:
 					results = append(results, wr.out)
 				}
 				if failed == nil {
-					data = results
+					var valid bool
+					data, valid = applyStateResult(st, stateInput, results, p.deps.Rand)
+					if !valid {
+						return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+					}
 					break
 				}
 				next, out, retry, caught := recoverState(st, *failed, data, retries[cur])
@@ -548,6 +558,7 @@ walkLoop:
 				return *failed
 			}
 		case "Map":
+			stateInput := data
 			path := first(st, "ItemsPath")
 			var items any
 			if path == "" {
@@ -592,7 +603,11 @@ walkLoop:
 					if results == nil {
 						results = []any{}
 					}
-					data = results
+					var valid bool
+					data, valid = applyStateResult(st, stateInput, results, p.deps.Rand)
+					if !valid {
+						return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+					}
 					break
 				}
 				next, out, retry, caught := recoverState(st, *failed, data, retries[cur])
@@ -726,6 +741,13 @@ func applyResultPath(state map[string]any, input, result any) (any, bool) {
 	}
 	cur[parts[len(parts)-1]] = result
 	return input, true
+}
+
+func applyStateResult(state map[string]any, input, result any, random spi.Rand) (any, bool) {
+	if selector, ok := state["ResultSelector"].(map[string]any); ok {
+		result = applyParams(selector, result, nil, random)
+	}
+	return applyResultPath(state, input, result)
 }
 
 func taskPayload(st map[string]any, data any, random spi.Rand) any {
@@ -1168,20 +1190,109 @@ func matchChoice(cm map[string]any, data any) bool {
 }
 
 func jsonPath(data any, path string) any {
-	path = strings.TrimPrefix(path, "$")
-	path = strings.TrimPrefix(path, ".")
-	if path == "" {
+	if path == "$" || path == "" {
 		return data
 	}
-	cur := data
-	for _, p := range strings.Split(path, ".") {
-		m, ok := cur.(map[string]any)
-		if !ok {
-			return nil
-		}
-		cur = m[p]
+	tokens, ok := jsonPathTokens(strings.TrimPrefix(path, "$"))
+	if !ok {
+		return nil
 	}
-	return cur
+	nodes := []any{data}
+	multiple := false
+	for _, token := range tokens {
+		var next []any
+		for _, node := range nodes {
+			switch token.kind {
+			case 'f':
+				if object, ok := node.(map[string]any); ok {
+					if value, exists := object[token.key]; exists {
+						next = append(next, value)
+					}
+				}
+			case 'i':
+				if array, ok := node.([]any); ok && token.start >= 0 && token.start < len(array) {
+					next = append(next, array[token.start])
+				}
+			case '*':
+				if array, ok := node.([]any); ok {
+					next = append(next, array...)
+				}
+			case 's':
+				if array, ok := node.([]any); ok {
+					start, end := max(0, token.start), min(len(array), token.end)
+					if start <= end {
+						next = append(next, array[start:end]...)
+					}
+				}
+			}
+		}
+		if token.kind == '*' || token.kind == 's' {
+			multiple = true
+		}
+		nodes = next
+	}
+	if multiple {
+		return nodes
+	}
+	if len(nodes) == 0 {
+		return nil
+	}
+	return nodes[0]
+}
+
+type pathToken struct {
+	kind       byte
+	key        string
+	start, end int
+}
+
+func jsonPathTokens(path string) ([]pathToken, bool) {
+	var tokens []pathToken
+	for len(path) > 0 {
+		if path[0] == '.' {
+			path = path[1:]
+			continue
+		}
+		if path[0] != '[' {
+			end := strings.IndexAny(path, ".[")
+			if end < 0 {
+				end = len(path)
+			}
+			if end == 0 {
+				return nil, false
+			}
+			tokens = append(tokens, pathToken{kind: 'f', key: path[:end]})
+			path = path[end:]
+			continue
+		}
+		close := strings.IndexByte(path, ']')
+		if close < 0 {
+			return nil, false
+		}
+		member := path[1:close]
+		path = path[close+1:]
+		switch {
+		case member == "*":
+			tokens = append(tokens, pathToken{kind: '*'})
+		case strings.Contains(member, ":"):
+			bounds := strings.SplitN(member, ":", 2)
+			start, startErr := strconv.Atoi(bounds[0])
+			end, endErr := strconv.Atoi(bounds[1])
+			if startErr != nil || endErr != nil {
+				return nil, false
+			}
+			tokens = append(tokens, pathToken{kind: 's', start: start, end: end})
+		case len(member) >= 2 && (member[0] == '\'' && member[len(member)-1] == '\'' || member[0] == '"' && member[len(member)-1] == '"'):
+			tokens = append(tokens, pathToken{kind: 'f', key: member[1 : len(member)-1]})
+		default:
+			index, err := strconv.Atoi(member)
+			if err != nil {
+				return nil, false
+			}
+			tokens = append(tokens, pathToken{kind: 'i', start: index})
+		}
+	}
+	return tokens, true
 }
 
 func asSlice(v any) []any {

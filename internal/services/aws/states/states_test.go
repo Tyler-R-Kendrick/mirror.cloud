@@ -21,8 +21,8 @@ import (
 
 func TestStatesHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 32 {
-		t.Fatalf("states Operations() %d want 32", n)
+	if n := len(p.Operations()); n != 34 {
+		t.Fatalf("states Operations() %d want 34", n)
 	}
 }
 
@@ -137,6 +137,72 @@ func TestExecutionNamesAreScopedToStateMachine(t *testing.T) {
 	}
 }
 
+func TestDescribeForExecutionAndRedrive(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	must := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := call(operation, input)
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	fault := func(operation string, input map[string]any, code string) {
+		t.Helper()
+		_, err := call(operation, input)
+		if got, ok := err.(*spi.Fault); !ok || got.Code != code {
+			t.Fatalf("%s fault %#v want %s", operation, err, code)
+		}
+	}
+
+	activityARN := must("CreateActivity", map[string]any{"name": "redrive"})["activityArn"].(string)
+	definition := `{"StartAt":"Before","States":{"Before":{"Type":"Pass","Next":"Work"},"Work":{"Type":"Task","Resource":"` + activityARN + `","End":true}}}`
+	machineARN := must("CreateStateMachine", map[string]any{"name": "redrive", "definition": definition, "roleArn": "role"})["stateMachineArn"].(string)
+	executionARN := must("StartExecution", map[string]any{"stateMachineArn": machineARN, "name": "attempt", "input": `{"job":1}`})["executionArn"].(string)
+	originalToken := must("GetActivityTask", map[string]any{"activityArn": activityARN})["taskToken"].(string)
+	described := must("DescribeStateMachineForExecution", map[string]any{"executionArn": executionARN})
+	if described["definition"] != definition || described["name"] != "redrive" || described["roleArn"] != "role" {
+		t.Fatalf("state machine for execution %#v", described)
+	}
+	must("StopExecution", map[string]any{"executionArn": executionARN})
+	redriveDate := must("RedriveExecution", map[string]any{"executionArn": executionARN, "clientToken": "same"})["redriveDate"]
+	if again := must("RedriveExecution", map[string]any{"executionArn": executionARN, "clientToken": "same"})["redriveDate"]; again != redriveDate {
+		t.Fatalf("idempotent redrive date %#v want %#v", again, redriveDate)
+	}
+	newToken := must("GetActivityTask", map[string]any{"activityArn": activityARN})["taskToken"].(string)
+	if newToken == originalToken {
+		t.Fatal("redrive reused activity token")
+	}
+	must("SendTaskSuccess", map[string]any{"taskToken": newToken, "output": `{"done":true}`})
+	redriven := must("DescribeExecution", map[string]any{"executionArn": executionARN})
+	if redriven["status"] != "SUCCEEDED" || redriven["redriveCount"] != 1.0 || !strings.Contains(fmtString(redriven["output"]), `"done":true`) {
+		t.Fatalf("redriven execution %#v", redriven)
+	}
+	passEntries := 0
+	for _, raw := range must("GetExecutionHistory", map[string]any{"executionArn": executionARN})["events"].([]any) {
+		if raw.(map[string]any)["type"] == "PassStateEntered" {
+			passEntries++
+		}
+	}
+	if passEntries != 1 {
+		t.Fatalf("redrive repeated successful state %d times", passEntries)
+	}
+	fault("RedriveExecution", map[string]any{"executionArn": executionARN, "clientToken": "different"}, "ExecutionNotRedrivable")
+	fault("RedriveExecution", map[string]any{"executionArn": "missing"}, "ExecutionDoesNotExist")
+	fault("DescribeStateMachineForExecution", map[string]any{"executionArn": "missing"}, "ExecutionDoesNotExist")
+
+	expressARN := must("CreateStateMachine", map[string]any{"name": "express-describe", "definition": `{"StartAt":"Fail","States":{"Fail":{"Type":"Fail"}}}`, "type": "EXPRESS"})["stateMachineArn"].(string)
+	expressExecutionARN := must("StartExecution", map[string]any{"stateMachineArn": expressARN})["executionArn"].(string)
+	fault("DescribeStateMachineForExecution", map[string]any{"executionArn": expressExecutionARN}, "StateMachineTypeNotSupported")
+	fault("RedriveExecution", map[string]any{"executionArn": expressExecutionARN}, "ExecutionNotRedrivable")
+}
+
 func TestStatesTagLifecycle(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -177,7 +243,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		}
 		return response
 	}
-	if p.ServiceID() != "aws.states" || len(p.Operations()) != 32 {
+	if p.ServiceID() != "aws.states" || len(p.Operations()) != 34 {
 		t.Fatalf("metadata %s %d", p.ServiceID(), len(p.Operations()))
 	}
 	if _, err := call("CreateStateMachine", map[string]any{}); err == nil {

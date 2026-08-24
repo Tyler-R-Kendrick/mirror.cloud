@@ -34,6 +34,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/opensearch"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -876,7 +877,7 @@ func (p *Pack) storeOne(ctx context.Context, req *spi.Request, name string, rec 
 }
 
 func copyDest(rec, in map[string]any, suffix string) {
-	for _, base := range []string{"S3Destination", "ExtendedS3Destination", "HttpEndpointDestination"} {
+	for _, base := range []string{"S3Destination", "ExtendedS3Destination", "HttpEndpointDestination", "ElasticsearchDestination"} {
 		patch, _ := in[base+suffix].(map[string]any)
 		if patch == nil {
 			continue
@@ -983,6 +984,30 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 		}
 		destination["HttpEndpointDestinationDescription"] = configuration
 		delete(description, "HttpEndpointDestinationConfiguration")
+	}
+	if configuration, ok := description["ElasticsearchDestinationConfiguration"].(map[string]any); ok {
+		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
+			describeS3Configuration(s3)
+			configuration["S3DestinationDescription"] = s3
+			delete(configuration, "S3Configuration")
+		}
+		if configuration["BufferingHints"] == nil {
+			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}
+		}
+		if configuration["RetryOptions"] == nil {
+			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 300}
+		}
+		if first(configuration, "IndexRotationPeriod") == "" {
+			configuration["IndexRotationPeriod"] = "OneDay"
+		}
+		if first(configuration, "S3BackupMode") == "" {
+			configuration["S3BackupMode"] = "FailedDocumentsOnly"
+		}
+		if configuration["DocumentIdOptions"] == nil {
+			configuration["DocumentIdOptions"] = map[string]any{"DefaultDocumentIdFormat": "FIREHOSE_DEFAULT"}
+		}
+		destination["ElasticsearchDestinationDescription"] = configuration
+		delete(description, "ElasticsearchDestinationConfiguration")
 	}
 	destinations := []any{}
 	if destinationID > after {
@@ -1214,7 +1239,7 @@ func validateDestination(rec map[string]any, region string) error {
 	count := 0
 	var destination map[string]any
 	destinationType := ""
-	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration"} {
+	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration"} {
 		if value, exists := rec[key]; exists {
 			var ok bool
 			destination, ok = value.(map[string]any)
@@ -1230,6 +1255,9 @@ func validateDestination(rec map[string]any, region string) error {
 	}
 	if destinationType == "HttpEndpointDestinationConfiguration" {
 		return validateHTTPEndpointDestination(destination, region)
+	}
+	if destinationType == "ElasticsearchDestinationConfiguration" {
+		return validateElasticsearchDestination(destination, region)
 	}
 	if err := validateS3Configuration(destination, region, destinationType == "ExtendedS3DestinationConfiguration"); err != nil {
 		return err
@@ -1254,6 +1282,64 @@ func validateDestination(rec map[string]any, region string) error {
 		return validateS3Configuration(backup, region, false)
 	}
 	return nil
+}
+
+func validateElasticsearchDestination(destination map[string]any, region string) error {
+	index, domainARN, endpoint := first(destination, "IndexName"), first(destination, "DomainARN"), first(destination, "ClusterEndpoint")
+	if len(index) < 1 || len(index) > 80 || !validRoleARN(first(destination, "RoleARN")) || (domainARN == "") == (endpoint == "") {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if domainARN != "" && (len(domainARN) > 512 || !firehoseDomainARN.MatchString(domainARN)) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if endpoint != "" {
+		parsed, err := url.Parse(endpoint)
+		if len(endpoint) > 512 || err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	if typeName := first(destination, "TypeName"); len(typeName) > 100 {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	switch first(destination, "IndexRotationPeriod") {
+	case "", "NoRotation", "OneHour", "OneDay", "OneWeek", "OneMonth":
+	default:
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if hints, ok := destination["BufferingHints"].(map[string]any); destination["BufferingHints"] != nil && (!ok || !optionalInteger(hints, "IntervalInSeconds", 0, 900) || !optionalInteger(hints, "SizeInMBs", 1, 100)) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if retry, ok := destination["RetryOptions"].(map[string]any); destination["RetryOptions"] != nil && (!ok || !optionalInteger(retry, "DurationInSeconds", 0, 7200)) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if mode := first(destination, "S3BackupMode"); mode != "" && mode != "FailedDocumentsOnly" && mode != "AllDocuments" {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if options, ok := destination["DocumentIdOptions"].(map[string]any); destination["DocumentIdOptions"] != nil && (!ok || (first(options, "DefaultDocumentIdFormat") != "FIREHOSE_DEFAULT" && first(options, "DefaultDocumentIdFormat") != "NO_DOCUMENT_ID")) {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	s3, ok := destination["S3Configuration"].(map[string]any)
+	if !ok {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if err := validateS3Configuration(s3, region, false); err != nil {
+		return err
+	}
+	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
+		return err
+	}
+	if raw := destination["ProcessingConfiguration"]; raw != nil {
+		return validateProcessingConfiguration(raw)
+	}
+	return nil
+}
+
+func optionalInteger(values map[string]any, key string, minimum, maximum int) bool {
+	if values[key] == nil {
+		return true
+	}
+	_, valid := inputInteger(values[key], minimum, maximum)
+	return valid
 }
 
 func validateHTTPEndpointDestination(destination map[string]any, region string) error {
@@ -1719,7 +1805,7 @@ func validateCreateDestination(input map[string]any) error {
 		}
 	}
 	switch destination {
-	case "S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration":
+	case "S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration":
 		return nil
 	case "":
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
@@ -1841,6 +1927,39 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 		}
 		return
 	}
+	if destination, ok := rec["ElasticsearchDestinationConfiguration"].(map[string]any); ok {
+		backup, _ := destination["S3Configuration"].(map[string]any)
+		bucket, _, errorPrefix, _, _, _, kmsARN := s3Configuration(backup)
+		for i := range data {
+			if first(destination, "S3BackupMode") == "AllDocuments" {
+				p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)
+			}
+			records, failures := p.processData(ctx, req, destination, stream, recIDs[i], data[i], now)
+			for _, failure := range failures {
+				p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)
+			}
+			for _, record := range records {
+				document := map[string]any{}
+				if json.Unmarshal(record.data, &document) != nil {
+					failure := &processingFailure{typeName: "AmazonOpenSearchService-failed", code: "400", message: "record is not a JSON object", attempts: 1, recID: record.recID, data: record.raw}
+					p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)
+					continue
+				}
+				input := map[string]any{
+					"DomainName": elasticsearchDomain(destination), "Index": elasticsearchIndex(destination, now), "Document": document,
+				}
+				options, _ := destination["DocumentIdOptions"].(map[string]any)
+				if first(options, "DefaultDocumentIdFormat") != "NO_DOCUMENT_ID" {
+					input["Id"] = record.recID
+				}
+				if _, err := opensearch.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "IndexDocument", Input: input}); err != nil {
+					failure := &processingFailure{typeName: "AmazonOpenSearchService-failed", code: "500", message: err.Error(), attempts: 1, recID: record.recID, data: record.raw}
+					p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)
+				}
+			}
+		}
+		return
+	}
 	for i := range data {
 		p.deliverS3Configuration(ctx, req, destination, stream, version, recIDs[i], data[i], now)
 		extended, _ := rec["ExtendedS3DestinationConfiguration"].(map[string]any)
@@ -1848,6 +1967,31 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 			backup, _ := extended["S3BackupConfiguration"].(map[string]any)
 			p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)
 		}
+	}
+}
+
+func elasticsearchDomain(destination map[string]any) string {
+	if arn := first(destination, "DomainARN"); arn != "" {
+		return arn[strings.LastIndex(arn, "/")+1:]
+	}
+	parsed, _ := url.Parse(first(destination, "ClusterEndpoint"))
+	return strings.SplitN(parsed.Hostname(), ".", 2)[0]
+}
+
+func elasticsearchIndex(destination map[string]any, now time.Time) string {
+	index := first(destination, "IndexName")
+	switch first(destination, "IndexRotationPeriod") {
+	case "", "OneDay":
+		return index + "-" + now.Format("2006-01-02")
+	case "OneHour":
+		return index + "-" + now.Format("2006-01-02-15")
+	case "OneWeek":
+		year, week := now.ISOWeek()
+		return fmt.Sprintf("%s-%04d-w%02d", index, year, week)
+	case "OneMonth":
+		return index + "-" + now.Format("2006-01")
+	default:
+		return index
 	}
 }
 
@@ -2773,6 +2917,7 @@ var (
 	firehoseBucketARN          = regexp.MustCompile(`^arn:.*:s3:::[\w.\-]{1,255}$`)
 	firehoseRoleARN            = regexp.MustCompile(`^arn:.*:iam::\d{12}:role/[a-zA-Z_0-9+=,.@\-_/]+$`)
 	firehoseKinesisStreamARN   = regexp.MustCompile(`^arn:.*:kinesis:[a-zA-Z0-9\-]+:\d{12}:stream/[a-zA-Z0-9_.-]+$`)
+	firehoseDomainARN          = regexp.MustCompile(`^arn:.*:es:[a-zA-Z0-9\-]+:\d{12}:domain/[a-z][-0-9a-z]{2,27}$`)
 	firehoseMSKClusterARN      = regexp.MustCompile(`^arn:.*:kafka:[a-zA-Z0-9\-]+:\d{12}:cluster/[^/]+/.+$`)
 	firehoseMSKTopic           = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 	firehoseVPCEndpointService = regexp.MustCompile(`^([a-zA-Z0-9\-_]+\.){2,3}vpce\.[a-zA-Z0-9\-]*\.vpce-svc-[a-zA-Z0-9\-]{17}$`)

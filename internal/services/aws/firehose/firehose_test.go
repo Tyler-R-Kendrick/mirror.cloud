@@ -29,6 +29,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/opensearch"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -506,6 +507,95 @@ func TestFirehoseConsumesFutureKinesisRecords(t *testing.T) {
 	unmatched, _, _ := firehose.col(&spi.Request{Identity: id}, "fhrec:from-other").List(context.Background(), "", "", 0)
 	if len(unmatched) != 0 {
 		t.Fatalf("unmatched source retained %d records", len(unmatched))
+	}
+}
+
+func TestFirehoseOpenSearchDestination(t *testing.T) {
+	deps := spitest.Deps(t)
+	firehose := New(deps)
+	search := opensearch.New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	invoke := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := pack.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	invoke(search, "CreateDomain", map[string]any{"DomainName": "logs"})
+	destination := map[string]any{
+		"DomainARN": "arn:aws:es:us-east-1:123456789012:domain/logs", "IndexName": "events", "RoleARN": testRoleARN,
+		"S3BackupMode": "AllDocuments", "S3Configuration": map[string]any{
+			"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "backup/",
+		},
+	}
+	invoke(firehose, "CreateDeliveryStream", map[string]any{"DeliveryStreamName": "search", "ElasticsearchDestinationConfiguration": destination})
+	put := invoke(firehose, "PutRecord", map[string]any{
+		"DeliveryStreamName": "search", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"city":"Austin"}`))},
+	})
+	recordID := first(put.Output, "RecordId")
+	result := invoke(search, "Search", map[string]any{"DomainName": "logs", "Index": "events-1970-01-01", "query": map[string]any{"match": map[string]any{"city": "austin"}}})
+	hits := result.Output["hits"].(map[string]any)["hits"].([]any)
+	if len(hits) != 1 || first(hits[0].(map[string]any), "_id") != recordID {
+		t.Fatalf("OpenSearch hits %#v", hits)
+	}
+	key := id.Account + "/" + id.Region + "/out/backup/1970/01/01/00/search-1-1970-01-01-00-00-00-" + recordID
+	reader, _, err := deps.Blobs.Get(context.Background(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(reader)
+	_ = reader.Close()
+	if string(body) != `{"city":"Austin"}` {
+		t.Fatalf("backup body %q", body)
+	}
+	description := invoke(firehose, "DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "search"}).Output["DeliveryStreamDescription"].(map[string]any)
+	described := description["Destinations"].([]any)[0].(map[string]any)["ElasticsearchDestinationDescription"].(map[string]any)
+	if first(described, "IndexRotationPeriod") != "OneDay" || first(described, "S3BackupMode") != "AllDocuments" {
+		t.Fatalf("OpenSearch description %#v", described)
+	}
+}
+
+func TestOpenSearchDestinationValidation(t *testing.T) {
+	valid := map[string]any{
+		"DomainARN": "arn:aws:es:us-east-1:123456789012:domain/logs", "IndexName": "events", "RoleARN": testRoleARN,
+		"S3Configuration": testS3Destination(),
+	}
+	if err := validateElasticsearchDestination(valid, "us-east-1"); err != nil {
+		t.Fatal(err)
+	}
+	endpoint := maps.Clone(valid)
+	delete(endpoint, "DomainARN")
+	endpoint["ClusterEndpoint"] = "https://logs.us-east-1.es.localhost.localstack.cloud"
+	if err := validateElasticsearchDestination(endpoint, "us-east-1"); err != nil {
+		t.Fatal(err)
+	}
+	invalid := []map[string]any{}
+	add := func(key string, value any) {
+		candidate := maps.Clone(valid)
+		if value == nil {
+			delete(candidate, key)
+		} else {
+			candidate[key] = value
+		}
+		invalid = append(invalid, candidate)
+	}
+	add("DomainARN", nil)
+	add("ClusterEndpoint", "https://also.example.com")
+	add("IndexName", "")
+	add("RoleARN", "invalid")
+	add("DomainARN", "arn:aws:es:us-east-1:123456789012:domain/INVALID")
+	add("IndexRotationPeriod", "EveryMinute")
+	add("BufferingHints", map[string]any{"SizeInMBs": float64(101)})
+	add("RetryOptions", map[string]any{"DurationInSeconds": float64(7201)})
+	add("S3BackupMode", "Everything")
+	add("DocumentIdOptions", map[string]any{"DefaultDocumentIdFormat": "RANDOM"})
+	add("S3Configuration", nil)
+	for i, candidate := range invalid {
+		if err := validateElasticsearchDestination(candidate, "us-east-1"); err == nil {
+			t.Fatalf("accepted invalid OpenSearch destination %d: %#v", i, candidate)
+		}
 	}
 }
 

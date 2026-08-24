@@ -211,12 +211,16 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 			t.Fatalf("walk %s: %#v", tc.definition, result)
 		}
 	}
+	activityInput := walk(`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"`+activityARN+`","InputPath":"$.task","End":true}}}`, map[string]any{"task": map[string]any{"value": 1.0}, "keep": true})
+	if activityInput.status != "RUNNING" || jsonPath(activityInput.pending.Input, "$.value") != 1.0 || jsonPath(activityInput.pending.StateInput, "$.keep") != true {
+		t.Fatalf("activity input path %#v", activityInput)
+	}
 	parallel := walk(`{"StartAt":"Parallel","States":{"Parallel":{"Type":"Parallel","Branches":[{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","Result":2,"End":true}}}],"End":true}}}`, map[string]any{})
 	if parallel.status != "SUCCEEDED" || len(parallel.out.([]any)) != 2 {
 		t.Fatalf("parallel %#v", parallel)
 	}
-	parallelData := walk(`{"StartAt":"Parallel","States":{"Parallel":{"Type":"Parallel","Parameters":{"value.$":"$.shared"},"Branches":[{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}],"ResultSelector":{"first.$":"$[0].value"},"ResultPath":"$.parallel","End":true}}}`, map[string]any{"shared": "x", "keep": true})
-	if parallelData.status != "SUCCEEDED" || jsonPath(parallelData.out, "$.keep") != true || jsonPath(parallelData.out, "$.parallel.first") != "x" {
+	parallelData := walk(`{"StartAt":"Parallel","States":{"Parallel":{"Type":"Parallel","Parameters":{"value.$":"$.shared"},"Branches":[{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}],"ResultSelector":{"first.$":"$[0].value"},"ResultPath":"$.parallel","OutputPath":"$.parallel","End":true}}}`, map[string]any{"shared": "x", "keep": true})
+	if parallelData.status != "SUCCEEDED" || jsonPath(parallelData.out, "$.first") != "x" {
 		t.Fatalf("parallel data flow %#v", parallelData)
 	}
 	parallelRecovery := walk(`{"StartAt":"Parallel","States":{"Parallel":{"Type":"Parallel","Branches":[{"StartAt":"Fail","States":{"Fail":{"Type":"Fail","Error":"ParallelBoom","Cause":"branch failed"}}}],"Retry":[{"ErrorEquals":["ParallelBoom"],"MaxAttempts":1}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.failure","Next":"Recovered"}]},"Recovered":{"Type":"Succeed"}}}`, map[string]any{"keep": true})
@@ -238,8 +242,8 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if output := mapRecovery.out.(map[string]any); mapRecovery.status != "SUCCEEDED" || output["keep"] != true {
 		t.Fatalf("map recovery %#v", mapRecovery)
 	}
-	mapData := walk(`{"StartAt":"Map","States":{"Map":{"Type":"Map","ItemsPath":"$.items","ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"ResultSelector":{"flat.$":"$[*][*]"},"ResultPath":"$.mapped","End":true}}}`, map[string]any{"items": []any{[]any{1.0, 2.0}, []any{3.0}}, "keep": true})
-	if mapData.status != "SUCCEEDED" || jsonPath(mapData.out, "$.keep") != true || fmtString(jsonPath(mapData.out, "$.mapped.flat")) != `[1,2,3]` {
+	mapData := walk(`{"StartAt":"Map","States":{"Map":{"Type":"Map","InputPath":"$.payload","ItemsPath":"$.items","ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"ResultSelector":{"flat.$":"$[*][*]"},"ResultPath":"$.mapped","OutputPath":"$.mapped","End":true}}}`, map[string]any{"payload": map[string]any{"items": []any{[]any{1.0, 2.0}, []any{3.0}}}, "keep": true})
+	if mapData.status != "SUCCEEDED" || fmtString(jsonPath(mapData.out, "$.flat")) != `[1,2,3]` {
 		t.Fatalf("map data flow %#v", mapData)
 	}
 	data := map[string]any{"s": "yes", "n": 2.0, "b": true, "present": 1}
@@ -255,7 +259,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		t.Fatal("choice default")
 	}
 	params := taskPayload(map[string]any{"Parameters": map[string]any{"Payload": map[string]any{"value.$": "$.n"}, "nested": map[string]any{"value.$": "$.s"}}}, data, p.deps.Rand)
-	if params.(map[string]any)["value"] != 2.0 || jsonPath(data, "$.missing.value") != nil || parseJSON("plain") != "plain" || toFloat(json.Number("3")) != 3 || !toBool("true") {
+	if jsonPath(params, "$.Payload.value") != 2.0 || jsonPath(params, "$.nested.value") != "yes" || jsonPath(data, "$.missing.value") != nil || parseJSON("plain") != "plain" || toFloat(json.Number("3")) != 3 || !toBool("true") {
 		t.Fatal("data helpers")
 	}
 	intrinsicData := map[string]any{
@@ -301,6 +305,16 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	intrinsicPass := walk(`{"StartAt":"Build","States":{"Build":{"Type":"Pass","Parameters":{"message.$":"States.Format('Hello, {}', $.name)","parts.$":"States.StringSplit($.path, '/')"},"End":true}}}`, map[string]any{"name": "Ada", "path": "a/b"})
 	if intrinsicPass.status != "SUCCEEDED" || jsonPath(intrinsicPass.out, "$.message") != "Hello, Ada" || len(jsonPath(intrinsicPass.out, "$.parts").([]any)) != 2 {
 		t.Fatalf("intrinsic pass %#v", intrinsicPass)
+	}
+	dataFlowPass := walk(`{"StartAt":"Build","States":{"Build":{"Type":"Pass","InputPath":"$.selected","Parameters":{"message.$":"States.Format('Hello, {}', $.name)"},"ResultPath":"$.keep.result","OutputPath":"$.keep","End":true}}}`, map[string]any{"selected": map[string]any{"name": "Ada"}, "keep": map[string]any{"original": true}})
+	if dataFlowPass.status != "SUCCEEDED" || jsonPath(dataFlowPass.out, "$.original") != true || jsonPath(dataFlowPass.out, "$.result.message") != "Hello, Ada" {
+		t.Fatalf("pass data flow %#v", dataFlowPass)
+	}
+	if invalidPath := walk(`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","InputPath":"$.missing","End":true}}}`, map[string]any{}); invalidPath.status != "FAILED" || invalidPath.cause != "States.Runtime" {
+		t.Fatalf("invalid input path %#v", invalidPath)
+	}
+	if discarded, ok := applyDataPath(map[string]any{"OutputPath": nil}, "OutputPath", map[string]any{"drop": true}); !ok || len(discarded.(map[string]any)) != 0 {
+		t.Fatalf("null output path %#v", discarded)
 	}
 
 	recovery := walk(`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"arn:aws:lambda:us-east-1:1:function:missing","Retry":[{"ErrorEquals":["States.TaskFailed"],"MaxAttempts":2}],"Catch":[{"ErrorEquals":["ResourceNotFoundException"],"ResultPath":"$.error","Next":"Recovered"}]},"Recovered":{"Type":"Succeed"}}}`, map[string]any{"original": true})

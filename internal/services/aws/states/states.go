@@ -379,6 +379,14 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 		_ = p.col(req, "ex").Put(ctx, pend.ExecName, nb)
 		return &spi.Response{Output: map[string]any{}}, nil
 	}
+	if output, valid := applyDataPath(st, "OutputPath", data); valid {
+		data = output
+	} else {
+		rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", "States.Runtime", "States.Runtime", float64(now)
+		nb, _ := json.Marshal(rec)
+		_ = p.col(req, "ex").Put(ctx, pend.ExecName, nb)
+		return &spi.Response{Output: map[string]any{}}, nil
+	}
 	wr := p.walk(ctx, req, definition, from, data)
 	ob, _ := json.Marshal(wr.out)
 	rec["status"] = wr.status
@@ -435,6 +443,11 @@ walkLoop:
 		if !ok {
 			return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 		}
+		rawInput := data
+		data, ok = applyDataPath(st, "InputPath", data)
+		if !ok {
+			return walkResult{out: rawInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+		}
 		typ, _ := st["Type"].(string)
 		hist = append(hist, map[string]any{"type": typ + "StateEntered", "id": hop + 1, "name": cur})
 		switch typ {
@@ -446,11 +459,15 @@ walkLoop:
 				result = value
 			}
 			var valid bool
-			data, valid = applyResultPath(st, data, result)
+			data, valid = applyResultPath(st, rawInput, result)
 			if !valid {
 				return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 			}
 		case "Succeed":
+			data, ok = applyDataPath(st, "OutputPath", data)
+			if !ok {
+				return walkResult{out: rawInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+			}
 			return walkResult{out: data, status: "SUCCEEDED", hist: hist}
 		case "Fail":
 			cause, _ := st["Cause"].(string)
@@ -472,10 +489,10 @@ walkLoop:
 					retries[cur] = map[int]int{}
 				}
 				for {
-					out, err := p.invokeLambda(ctx, req, res, st, payload)
+					out, err := p.invokeLambda(ctx, req, res, payload)
 					if err == nil {
 						var valid bool
-						data, valid = applyStateResult(st, data, out, p.deps.Rand)
+						data, valid = applyStateResult(st, rawInput, out, p.deps.Rand)
 						if !valid {
 							return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 						}
@@ -486,21 +503,24 @@ walkLoop:
 					if retryTask(st, failure.name, retries[cur]) {
 						continue
 					}
-					next, out, caught := catchTask(st, failure, data)
+					next, out, caught := catchTask(st, failure, rawInput)
 					if !caught {
 						return walkResult{out: data, status: "FAILED", cause: failure.cause, errorName: failure.name, hist: hist}
 					}
 					if next == "" {
 						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 					}
-					data = out
+					data, ok = applyDataPath(st, "OutputPath", out)
+					if !ok {
+						return walkResult{out: rawInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+					}
 					cur = next
 					continue walkLoop
 				}
 			case strings.Contains(res, ":activity:"):
 				tok := p.deps.Rand.Hex(16)
 				return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
-					Token: tok, ActivityARN: res, StateName: cur, Input: payload, StateInput: data, Retries: retries[cur],
+					Token: tok, ActivityARN: res, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur],
 				}}
 			default:
 				return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
@@ -510,10 +530,14 @@ walkLoop:
 			if next == "" {
 				return walkResult{out: data, status: "FAILED", cause: "States.NoChoiceMatched", hist: hist}
 			}
+			data, ok = applyDataPath(st, "OutputPath", data)
+			if !ok {
+				return walkResult{out: rawInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+			}
 			cur = next
 			continue
 		case "Parallel":
-			stateInput := data
+			stateInput := rawInput
 			branchInput := data
 			if params, ok := st["Parameters"].(map[string]any); ok {
 				branchInput = applyParams(params, data, nil, p.deps.Rand)
@@ -543,7 +567,7 @@ walkLoop:
 					}
 					break
 				}
-				next, out, retry, caught := recoverState(st, *failed, data, retries[cur])
+				next, out, retry, caught := recoverState(st, *failed, stateInput, retries[cur])
 				if retry {
 					continue
 				}
@@ -551,14 +575,18 @@ walkLoop:
 					if next == "" {
 						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 					}
-					data, cur = out, next
+					data, ok = applyDataPath(st, "OutputPath", out)
+					if !ok {
+						return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+					}
+					cur = next
 					continue walkLoop
 				}
 				failed.hist = hist
 				return *failed
 			}
 		case "Map":
-			stateInput := data
+			stateInput := rawInput
 			path := first(st, "ItemsPath")
 			var items any
 			if path == "" {
@@ -610,7 +638,7 @@ walkLoop:
 					}
 					break
 				}
-				next, out, retry, caught := recoverState(st, *failed, data, retries[cur])
+				next, out, retry, caught := recoverState(st, *failed, stateInput, retries[cur])
 				if retry {
 					continue
 				}
@@ -618,7 +646,11 @@ walkLoop:
 					if next == "" {
 						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 					}
-					data, cur = out, next
+					data, ok = applyDataPath(st, "OutputPath", out)
+					if !ok {
+						return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+					}
+					cur = next
 					continue walkLoop
 				}
 				failed.hist = hist
@@ -626,6 +658,10 @@ walkLoop:
 			}
 		default:
 			return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
+		}
+		data, ok = applyDataPath(st, "OutputPath", data)
+		if !ok {
+			return walkResult{out: rawInput, status: "FAILED", cause: "States.Runtime", hist: hist}
 		}
 		if end, _ := st["End"].(bool); end {
 			return walkResult{out: data, status: "SUCCEEDED", hist: hist}
@@ -750,15 +786,28 @@ func applyStateResult(state map[string]any, input, result any, random spi.Rand) 
 	return applyResultPath(state, input, result)
 }
 
+func applyDataPath(state map[string]any, key string, input any) (any, bool) {
+	raw, exists := state[key]
+	if !exists || raw == "$" {
+		return input, true
+	}
+	if raw == nil {
+		return map[string]any{}, true
+	}
+	path, ok := raw.(string)
+	if !ok || !strings.HasPrefix(path, "$") {
+		return input, false
+	}
+	selected := jsonPath(input, path)
+	return selected, selected != nil
+}
+
 func taskPayload(st map[string]any, data any, random spi.Rand) any {
 	params, ok := st["Parameters"].(map[string]any)
 	if !ok {
 		return data
 	}
 	p := applyParams(params, data, nil, random)
-	if pl, ok := p["Payload"]; ok {
-		return pl
-	}
 	return p
 }
 
@@ -1113,12 +1162,11 @@ func intrinsicNumber(value any) (float64, bool) {
 	}
 }
 
-func (p *Pack) invokeLambda(ctx context.Context, req *spi.Request, resource string, st map[string]any, payload any) (any, error) {
+func (p *Pack) invokeLambda(ctx context.Context, req *spi.Request, resource string, payload any) (any, error) {
 	name := ""
-	if params, ok := st["Parameters"].(map[string]any); ok {
-		ap := applyParams(params, payload, nil, p.deps.Rand)
-		name, _ = ap["FunctionName"].(string)
-		if pl, ok := ap["Payload"]; ok {
+	if params, ok := payload.(map[string]any); ok && strings.Contains(resource, "lambda:invoke") {
+		name, _ = params["FunctionName"].(string)
+		if pl, ok := params["Payload"]; ok {
 			payload = pl
 		}
 	}

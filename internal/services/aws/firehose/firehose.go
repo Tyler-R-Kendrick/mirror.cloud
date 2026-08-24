@@ -1,4 +1,4 @@
-// Package firehose stores delivery streams and delivers direct puts or local Kinesis source records to S3, HTTP, or OpenSearch destinations (no Redshift/Splunk).
+// Package firehose stores delivery streams and delivers direct puts or local Kinesis source records to S3, HTTP, OpenSearch, or Splunk destinations (no Redshift).
 package firehose
 
 import (
@@ -58,12 +58,13 @@ type Pack struct {
 }
 
 type httpRetry struct {
-	Stream    string
-	RequestID string
-	DataKey   string
-	Next      time.Time
-	Expires   time.Time
-	Retries   int
+	Stream      string
+	Destination string
+	RequestID   string
+	DataKey     string
+	Next        time.Time
+	Expires     time.Time
+	Retries     int
 }
 
 type httpRetryPayload struct {
@@ -73,12 +74,13 @@ type httpRetryPayload struct {
 }
 
 type httpBuffer struct {
-	Stream    string
-	RequestID string
-	DataKey   string
-	Size      int
-	Order     int
-	Next      time.Time
+	Stream      string
+	Destination string
+	RequestID   string
+	DataKey     string
+	Size        int
+	Order       int
+	Next        time.Time
 }
 
 type httpBufferItem struct {
@@ -1991,46 +1993,11 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 		version = "1"
 	}
 	now := p.deps.Clock.Now().UTC()
-	if destination, ok := rec["HttpEndpointDestinationConfiguration"].(map[string]any); ok {
-		processedIDs := make([]string, 0, len(recIDs))
-		processedData := make([][]byte, 0, len(data))
-		backup, _ := destination["S3Configuration"].(map[string]any)
-		bucket, _, errorPrefix, _, _, _, kmsARN := s3Configuration(backup)
-		for i := range data {
-			records, failures := p.processData(ctx, req, destination, stream, recIDs[i], data[i], now)
-			for _, failure := range failures {
-				p.logDeliveryError(ctx, req, destination, stream, failure.message, now)
-				p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)
-			}
-			for _, record := range records {
-				processedIDs = append(processedIDs, record.recID)
-				processedData = append(processedData, record.data)
-			}
-		}
-		backupMode := first(destination, "S3BackupMode")
-		if backupMode == "AllData" {
-			for i := range data {
-				p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)
-			}
-		}
-		if len(processedData) == 0 {
+	for _, endpoint := range []struct{ key, all string }{{"HttpEndpointDestinationConfiguration", "AllData"}, {"SplunkDestinationConfiguration", "AllEvents"}} {
+		if destination, ok := rec[endpoint.key].(map[string]any); ok {
+			p.deliverEndpointRecords(ctx, req, rec, destination, endpoint.key, endpoint.all, stream, version, recIDs, data, now)
 			return
 		}
-		if p.bufferHTTP(ctx, req, stream, processedIDs[0], recIDs, data, processedData, backupMode != "AllData", destination, now) {
-			return
-		}
-		delivered, permanent, message := p.deliverHTTP(ctx, req, rec, destination, processedIDs[0], processedData, now)
-		if !delivered {
-			p.logDeliveryError(ctx, req, destination, stream, message, now)
-		}
-		retryDuration := httpRetryDuration(destination)
-		retrying := !delivered && !permanent && retryDuration > 0 && p.scheduleHTTPRetry(ctx, req, stream, processedIDs[0], recIDs, data, processedData, backupMode != "AllData", now, retryDuration)
-		if backupMode != "AllData" && !delivered && !permanent && !retrying {
-			for i := range data {
-				p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)
-			}
-		}
-		return
 	}
 	if destination, ok := rec["ElasticsearchDestinationConfiguration"].(map[string]any); ok {
 		backup, _ := destination["S3Configuration"].(map[string]any)
@@ -2068,6 +2035,48 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 		if first(extended, "S3BackupMode") == "Enabled" {
 			backup, _ := extended["S3BackupConfiguration"].(map[string]any)
 			p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)
+		}
+	}
+}
+
+func (p *Pack) deliverEndpointRecords(ctx context.Context, req *spi.Request, streamRecord, destination map[string]any, destinationKey, allMode, stream, version string, recIDs []string, data [][]byte, now time.Time) {
+	processedIDs := make([]string, 0, len(recIDs))
+	processedData := make([][]byte, 0, len(data))
+	backup, _ := destination["S3Configuration"].(map[string]any)
+	bucket, _, errorPrefix, _, _, _, kmsARN := s3Configuration(backup)
+	for index := range data {
+		records, failures := p.processData(ctx, req, destination, stream, recIDs[index], data[index], now)
+		for _, failure := range failures {
+			p.logDeliveryError(ctx, req, destination, stream, failure.message, now)
+			p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)
+		}
+		for _, record := range records {
+			processedIDs = append(processedIDs, record.recID)
+			processedData = append(processedData, record.data)
+		}
+	}
+	backupMode := first(destination, "S3BackupMode")
+	if backupMode == allMode {
+		for index := range data {
+			p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[index], data[index], now)
+		}
+	}
+	if len(processedData) == 0 {
+		return
+	}
+	backupFailures := backupMode != allMode
+	if p.bufferEndpoint(ctx, req, stream, destinationKey, processedIDs[0], recIDs, data, processedData, backupFailures, destination, now) {
+		return
+	}
+	delivered, permanent, message := p.deliverEndpoint(ctx, req, streamRecord, destination, destinationKey, processedIDs[0], processedData, now)
+	if !delivered {
+		p.logDeliveryError(ctx, req, destination, stream, message, now)
+	}
+	retryDuration := httpRetryDuration(destination)
+	retrying := !delivered && !permanent && retryDuration > 0 && p.scheduleEndpointRetry(ctx, req, stream, destinationKey, processedIDs[0], recIDs, data, processedData, backupFailures, now, retryDuration)
+	if backupFailures && !delivered && !permanent && !retrying {
+		for index := range data {
+			p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[index], data[index], now)
 		}
 	}
 }
@@ -2112,6 +2121,19 @@ func httpBufferingHints(destination map[string]any) (time.Duration, int) {
 	size, sizeOK := inputInteger(hints["SizeInMBs"], 1, 64)
 	if !intervalOK || !sizeOK {
 		return 300 * time.Second, 5 * 1024 * 1024
+	}
+	return time.Duration(interval) * time.Second, size * 1024 * 1024
+}
+
+func endpointBufferingHints(destinationKey string, destination map[string]any) (time.Duration, int) {
+	if destinationKey != "SplunkDestinationConfiguration" {
+		return httpBufferingHints(destination)
+	}
+	hints, _ := destination["BufferingHints"].(map[string]any)
+	interval, intervalOK := inputInteger(hints["IntervalInSeconds"], 0, 60)
+	size, sizeOK := inputInteger(hints["SizeInMBs"], 1, 5)
+	if !intervalOK || !sizeOK {
+		return 60 * time.Second, 5 * 1024 * 1024
 	}
 	return time.Duration(interval) * time.Second, size * 1024 * 1024
 }
@@ -2473,7 +2495,7 @@ func (p *Pack) backupSearchFailures(ctx context.Context, req *spi.Request, strea
 	}
 }
 
-func (p *Pack) bufferHTTP(ctx context.Context, req *spi.Request, stream, requestID string, recordIDs []string, rawData, processedData [][]byte, backup bool, destination map[string]any, now time.Time) bool {
+func (p *Pack) bufferEndpoint(ctx context.Context, req *spi.Request, stream, destinationKey, requestID string, recordIDs []string, rawData, processedData [][]byte, backup bool, destination map[string]any, now time.Time) bool {
 	if p.deps.Blobs == nil {
 		return false
 	}
@@ -2494,7 +2516,7 @@ func (p *Pack) bufferHTTP(ctx context.Context, req *spi.Request, stream, request
 	if _, err := p.deps.Blobs.Put(ctx, dataKey, bytes.NewReader(body)); err != nil {
 		return false
 	}
-	interval, sizeLimit := httpBufferingHints(destination)
+	interval, sizeLimit := endpointBufferingHints(destinationKey, destination)
 	size := 0
 	for _, data := range rawData {
 		size += len(data)
@@ -2529,7 +2551,7 @@ func (p *Pack) bufferHTTP(ctx context.Context, req *spi.Request, stream, request
 				}
 			}
 		}
-		stored, _ := json.Marshal(httpBuffer{Stream: stream, RequestID: requestID, DataKey: dataKey, Size: size, Order: order + 1, Next: next})
+		stored, _ := json.Marshal(httpBuffer{Stream: stream, Destination: destinationKey, RequestID: requestID, DataKey: dataKey, Size: size, Order: order + 1, Next: next})
 		return tx.Put(stream+"/"+key, stored)
 	})
 	if err != nil {
@@ -2570,15 +2592,15 @@ func (p *Pack) notifyRetryLoop() {
 	}
 }
 
-func (p *Pack) scheduleHTTPRetry(ctx context.Context, req *spi.Request, stream, requestID string, recordIDs []string, rawData, processedData [][]byte, backup bool, now time.Time, duration time.Duration) bool {
+func (p *Pack) scheduleEndpointRetry(ctx context.Context, req *spi.Request, stream, destinationKey, requestID string, recordIDs []string, rawData, processedData [][]byte, backup bool, now time.Time, duration time.Duration) bool {
 	retryPayload := httpRetryPayload{ProcessedData: processedData}
 	if backup {
 		retryPayload.BackupRecordIDs, retryPayload.BackupData = recordIDs, rawData
 	}
-	return p.scheduleHTTPRetryPayload(ctx, req, stream, requestID, retryPayload, now, duration)
+	return p.scheduleEndpointRetryPayload(ctx, req, stream, destinationKey, requestID, retryPayload, now, duration)
 }
 
-func (p *Pack) scheduleHTTPRetryPayload(ctx context.Context, req *spi.Request, stream, requestID string, retryPayload httpRetryPayload, now time.Time, duration time.Duration) bool {
+func (p *Pack) scheduleEndpointRetryPayload(ctx context.Context, req *spi.Request, stream, destinationKey, requestID string, retryPayload httpRetryPayload, now time.Time, duration time.Duration) bool {
 	key := p.deps.Rand.UUID()
 	dataKey := req.Identity.Account + "/" + req.Identity.Region + "/_mirror/firehose-http-retries/" + key
 	payload, err := json.Marshal(retryPayload)
@@ -2593,7 +2615,7 @@ func (p *Pack) scheduleHTTPRetryPayload(ctx context.Context, req *spi.Request, s
 		return false
 	}
 	retry := httpRetry{
-		Stream: stream, RequestID: requestID, DataKey: dataKey,
+		Stream: stream, Destination: destinationKey, RequestID: requestID, DataKey: dataKey,
 		Next: now.Add(p.httpRetryDelay(key, 0)),
 	}
 	retry.Expires = now.Add(duration)
@@ -2747,7 +2769,8 @@ func (p *Pack) flushHTTPBuffer(ctx context.Context, identity spi.Identity, colle
 	}
 	var stream map[string]any
 	_ = json.Unmarshal(raw, &stream)
-	destination, ok := stream["HttpEndpointDestinationConfiguration"].(map[string]any)
+	destinationKey := endpointDestinationKey(items[0].Buffer.Destination)
+	destination, ok := stream[destinationKey].(map[string]any)
 	if !ok {
 		p.deleteHTTPBuffer(ctx, collection, items)
 		return time.Time{}
@@ -2787,12 +2810,12 @@ func (p *Pack) flushHTTPBuffer(ctx context.Context, identity spi.Identity, colle
 		return next
 	}
 	requestID := items[0].Buffer.RequestID
-	delivered, permanent, message := p.deliverHTTP(ctx, req, stream, destination, requestID, payload.ProcessedData, now)
+	delivered, permanent, message := p.deliverEndpoint(ctx, req, stream, destination, destinationKey, requestID, payload.ProcessedData, now)
 	if !delivered {
 		p.logDeliveryError(ctx, req, destination, name, message, now)
 	}
 	retryDuration := httpRetryDuration(destination)
-	retrying := !delivered && !permanent && retryDuration > 0 && p.scheduleHTTPRetryPayload(ctx, req, name, requestID, payload, now, retryDuration)
+	retrying := !delivered && !permanent && retryDuration > 0 && p.scheduleEndpointRetryPayload(ctx, req, name, destinationKey, requestID, payload, now, retryDuration)
 	if !delivered && !permanent && !retrying {
 		p.backupHTTPPayload(ctx, req, stream, destination, name, payload, now)
 	}
@@ -2843,7 +2866,8 @@ func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collecti
 	}
 	var stream map[string]any
 	_ = json.Unmarshal(raw, &stream)
-	destination, ok := stream["HttpEndpointDestinationConfiguration"].(map[string]any)
+	destinationKey := endpointDestinationKey(retry.Destination)
+	destination, ok := stream[destinationKey].(map[string]any)
 	if !ok {
 		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
 		return time.Time{}
@@ -2871,7 +2895,7 @@ func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collecti
 		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
 		return time.Time{}
 	}
-	delivered, permanent, message := p.deliverHTTP(ctx, req, stream, destination, retry.RequestID, payload.ProcessedData, now)
+	delivered, permanent, message := p.deliverEndpoint(ctx, req, stream, destination, destinationKey, retry.RequestID, payload.ProcessedData, now)
 	if delivered || permanent {
 		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
 		return time.Time{}
@@ -2885,6 +2909,137 @@ func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collecti
 	body, _ := json.Marshal(retry)
 	_ = collection.Put(ctx, key, body)
 	return retry.Next
+}
+
+func endpointDestinationKey(key string) string {
+	if key == "" {
+		return "HttpEndpointDestinationConfiguration"
+	}
+	return key
+}
+
+func (p *Pack) deliverEndpoint(ctx context.Context, req *spi.Request, stream, destination map[string]any, destinationKey, requestID string, data [][]byte, now time.Time) (bool, bool, string) {
+	if destinationKey == "SplunkDestinationConfiguration" {
+		return p.deliverSplunk(ctx, req, destination, requestID, data)
+	}
+	return p.deliverHTTP(ctx, req, stream, destination, requestID, data, now)
+}
+
+func (p *Pack) deliverSplunk(ctx context.Context, req *spi.Request, destination map[string]any, requestID string, data [][]byte) (bool, bool, string) {
+	token := first(destination, "HECToken")
+	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {
+		response, err := secretsmanager.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": first(secrets, "SecretARN")}})
+		var secret string
+		var ok bool
+		if response != nil {
+			secret, ok = response.Output["SecretString"].(string)
+		}
+		value := map[string]any{}
+		if err != nil || !ok || json.Unmarshal([]byte(secret), &value) != nil {
+			return false, false, "unable to retrieve Splunk HEC token"
+		}
+		token, ok = value["hec_token"].(string)
+		if !ok || token == "" || len(token) > 2048 || strings.ContainsAny(token, "\r\n") {
+			return false, false, "Splunk secret must contain a valid hec_token"
+		}
+	}
+
+	path := "/services/collector/event"
+	if first(destination, "HECEndpointType") == "Raw" {
+		path = "/services/collector/raw"
+	}
+	endpoint := strings.TrimRight(first(destination, "HECEndpoint"), "/")
+	body := bytes.Join(data, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+path, bytes.NewReader(body))
+	if err != nil {
+		return false, false, err.Error()
+	}
+	request.Header.Set("Authorization", "Splunk "+token)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Splunk-Request-Channel", requestID)
+	response, err := p.httpClient.Do(request)
+	if err != nil {
+		return false, false, err.Error()
+	}
+	responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return false, false, response.Status
+	}
+	if readErr != nil || len(responseBody) > 1<<20 {
+		return false, false, "invalid Splunk HEC acknowledgment body"
+	}
+	ackID, ackKey, ok := splunkAckID(responseBody)
+	if !ok {
+		return false, false, "invalid Splunk HEC acknowledgment ID"
+	}
+
+	timeout, ok := inputInteger(destination["HECAcknowledgmentTimeoutInSeconds"], 180, 600)
+	if !ok {
+		timeout = 300
+	}
+	deadline := p.deps.Clock.Now().Add(time.Duration(timeout) * time.Second)
+	ackBody, _ := json.Marshal(map[string]any{"acks": []any{ackID}})
+	for {
+		ackRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/services/collector/ack", bytes.NewReader(ackBody))
+		if err != nil {
+			return false, false, err.Error()
+		}
+		ackRequest.Header.Set("Authorization", "Splunk "+token)
+		ackRequest.Header.Set("Content-Type", "application/json")
+		ackRequest.Header.Set("X-Splunk-Request-Channel", requestID)
+		ackResponse, err := p.httpClient.Do(ackRequest)
+		if err != nil {
+			return false, false, err.Error()
+		}
+		ackResponseBody, readErr := io.ReadAll(io.LimitReader(ackResponse.Body, (1<<20)+1))
+		_ = ackResponse.Body.Close()
+		if ackResponse.StatusCode != http.StatusOK {
+			return false, false, ackResponse.Status
+		}
+		var acknowledgment struct {
+			Acks map[string]bool `json:"acks"`
+		}
+		if readErr != nil || len(ackResponseBody) > 1<<20 || json.Unmarshal(ackResponseBody, &acknowledgment) != nil {
+			return false, false, "invalid Splunk HEC acknowledgment status"
+		}
+		if acknowledgment.Acks[ackKey] {
+			return true, false, ""
+		}
+		if !p.deps.Clock.Now().Before(deadline) {
+			return false, false, "Splunk HEC acknowledgment timed out"
+		}
+		select {
+		case <-ctx.Done():
+			return false, false, ctx.Err().Error()
+		case <-p.deps.Clock.After(time.Second):
+		}
+	}
+}
+
+func splunkAckID(body []byte) (any, string, bool) {
+	var acknowledgment map[string]any
+	if json.Unmarshal(body, &acknowledgment) != nil {
+		return nil, "", false
+	}
+	value := acknowledgment["ackID"]
+	if value == nil {
+		value = acknowledgment["ackId"]
+	}
+	switch value := value.(type) {
+	case float64:
+		if value < 0 || value != math.Trunc(value) {
+			return nil, "", false
+		}
+		return int64(value), strconv.FormatInt(int64(value), 10), true
+	case string:
+		if _, err := strconv.ParseUint(value, 10, 64); err != nil {
+			return nil, "", false
+		}
+		return value, value, true
+	default:
+		return nil, "", false
+	}
 }
 
 func (p *Pack) deliverHTTP(ctx context.Context, req *spi.Request, stream, destination map[string]any, requestID string, data [][]byte, now time.Time) (bool, bool, string) {

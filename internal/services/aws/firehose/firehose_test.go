@@ -852,6 +852,78 @@ func TestSplunkDestinationValidationAndDescription(t *testing.T) {
 	}
 }
 
+func TestFirehoseSplunkDestination(t *testing.T) {
+	type capturedRequest struct {
+		path, authorization, channel, body string
+	}
+	captured := make(chan capturedRequest, 2)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		body, _ := io.ReadAll(request.Body)
+		captured <- capturedRequest{request.URL.Path, request.Header.Get("Authorization"), request.Header.Get("X-Splunk-Request-Channel"), string(body)}
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path == "/services/collector/ack" {
+			_, _ = writer.Write([]byte(`{"acks":{"7":true}}`))
+			return
+		}
+		_, _ = writer.Write([]byte(`{"ackID":7}`))
+	}))
+	defer server.Close()
+
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	p.httpClient = server.Client()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	destination := map[string]any{
+		"HECEndpoint": server.URL, "HECEndpointType": "Raw", "HECToken": "token",
+		"BufferingHints": map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 1}, "S3BackupMode": "AllEvents",
+		"S3Configuration": map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN, "Prefix": "all/"},
+	}
+	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "splunk-delivery", "SplunkDestinationConfiguration": destination}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := call("PutRecordBatch", map[string]any{"DeliveryStreamName": "splunk-delivery", "Records": []any{
+		map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("one"))},
+		map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("two"))},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordIDs := response.Output["RequestResponses"].([]any)
+	firstID := first(recordIDs[0].(map[string]any), "RecordId")
+	requests := make([]capturedRequest, 2)
+	for index := range requests {
+		select {
+		case requests[index] = <-captured:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Splunk HEC delivery timed out")
+		}
+	}
+	if requests[0].path != "/services/collector/raw" || requests[0].authorization != "Splunk token" || requests[0].channel != firstID || requests[0].body != "onetwo" {
+		t.Fatalf("Splunk HEC request %#v", requests[0])
+	}
+	if requests[1].path != "/services/collector/ack" || requests[1].authorization != "Splunk token" || requests[1].channel != firstID || requests[1].body != `{"acks":[7]}` {
+		t.Fatalf("Splunk HEC acknowledgment request %#v", requests[1])
+	}
+	for index, value := range []string{"one", "two"} {
+		recordID := first(recordIDs[index].(map[string]any), "RecordId")
+		key := id.Account + "/" + id.Region + "/out/all/1970/01/01/00/splunk-delivery-1-1970-01-01-00-00-00-" + recordID
+		reader, _, err := deps.Blobs.Get(context.Background(), key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(reader)
+		_ = reader.Close()
+		if string(body) != value {
+			t.Fatalf("Splunk backup %q", body)
+		}
+	}
+}
+
 func TestOpenSearchDestinationValidation(t *testing.T) {
 	valid := map[string]any{
 		"DomainARN": "arn:aws:es:us-east-1:123456789012:domain/logs", "IndexName": "events", "RoleARN": testRoleARN,

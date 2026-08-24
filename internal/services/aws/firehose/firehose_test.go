@@ -1120,7 +1120,7 @@ func TestFirehoseSplunkAcknowledgmentTimeout(t *testing.T) {
 			body, _ := io.ReadAll(reader)
 			_ = reader.Close()
 			failure := map[string]any{}
-			if json.Unmarshal(body, &failure) != nil || failure["errorCode"] != "Splunk.AckTimeout" || failure["attemptEndingTimestamp"] != float64(180000) {
+			if json.Unmarshal(body, &failure) != nil || failure["errorCode"] != "Splunk.AckTimeout" || failure["arrivalTimestamp"] != float64(0) || failure["attemptEndingTimestamp"] != float64(180000) {
 				t.Fatalf("Splunk acknowledgment timeout %s", body)
 			}
 			return
@@ -1128,6 +1128,42 @@ func TestFirehoseSplunkAcknowledgmentTimeout(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("Splunk acknowledgment timeout was not backed up")
+}
+
+func TestSplunkProtocolHelpers(t *testing.T) {
+	for _, test := range []struct {
+		body string
+		id   any
+		key  string
+		ok   bool
+	}{
+		{`{"ackID":7}`, int64(7), "7", true},
+		{`{"ackId":"8"}`, "8", "8", true},
+		{`{"ackID":-1}`, nil, "", false},
+		{`{"ackID":1.5}`, nil, "", false},
+		{`{"ackId":"bad"}`, nil, "", false},
+		{`{}`, nil, "", false},
+		{`not-json`, nil, "", false},
+	} {
+		id, key, ok := splunkAckID([]byte(test.body))
+		if !reflect.DeepEqual(id, test.id) || key != test.key || ok != test.ok {
+			t.Errorf("splunkAckID(%q) = %#v, %q, %v", test.body, id, key, ok)
+		}
+	}
+	for status, expected := range map[int]string{
+		http.StatusUnauthorized:          "Splunk.InvalidToken",
+		http.StatusForbidden:             "Splunk.InvalidToken",
+		http.StatusNotFound:              "Splunk.URLNotFound",
+		http.StatusRequestEntityTooLarge: "Splunk.ServerError.ContentTooLarge",
+		http.StatusInternalServerError:   "Splunk.ServerError",
+	} {
+		if code := splunkStatusError(status); code != expected {
+			t.Errorf("splunkStatusError(%d) = %q", status, code)
+		}
+	}
+	if endpointDestinationKey("") != "HttpEndpointDestinationConfiguration" || endpointDestinationKey("SplunkDestinationConfiguration") != "SplunkDestinationConfiguration" {
+		t.Fatal("endpoint destination compatibility mapping changed")
+	}
 }
 
 func TestOpenSearchDestinationValidation(t *testing.T) {

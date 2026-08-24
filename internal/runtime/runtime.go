@@ -651,6 +651,7 @@ func SupportMatrix() string {
 	sb.WriteString("Step Functions Task resources invoke optimized SQS SendMessage, SNS Publish, DynamoDB GetItem/PutItem/UpdateItem/DeleteItem, and nested StartExecution integrations, plus generic AWS SDK operations exposed by registered local behavior packs. Service faults use integration-specific AWS error prefixes. Standard workflows support .waitForTaskToken callbacks for optimized SQS, SNS, Lambda, and nested Step Functions with token injection, heartbeat, retry/catch, and stop invalidation. They also support .sync for locally terminal Batch SubmitJob, CodeBuild StartBuild, Glue StartJobRun, and EMR createCluster/addStep jobs; long-running .sync integrations such as ECS and nested Step Functions are not implemented.\n")
 	sb.WriteString("Step Functions Task Credentials accept static or JSONPath-selected IAM role ARNs and invoke local integrations in the selected role and account scope.\n")
 	sb.WriteString("Nested Step Functions StartExecution .sync and .sync:2 wait for local Standard child executions and return AWS string or JSON output envelopes.\n")
+	sb.WriteString("Step Functions ECS RunTask.sync returns a terminal local task and persists its STOPPED status.\n")
 	sb.WriteString("Distributed Map iterations persist Standard child execution output, history, and Map Run linkage for list and describe APIs.\n")
 	sb.WriteString("Distributed Map ItemBatcher supports direct or JSONPath-selected item-count and byte limits plus resolved BatchInput envelopes.\n")
 	sb.WriteString("Distributed Map ResultWriter supports NONE, COMPACT, and FLATTEN transformations in JSON or JSONL and exports status files plus a manifest to local S3.\n")
@@ -681,5 +682,6 @@ func SupportMatrix() string {
 	matrix = strings.Replace(matrix, "Parquet, ItemBatcher, ResultWriter, and child-execution fanout are not implemented.", "Parquet, ResultWriter, and child-execution fanout are not implemented.", 1)
 	matrix = strings.Replace(matrix, "Parquet, ResultWriter, and child-execution fanout are not implemented.", "Parquet and child-execution fanout are not implemented.", 1)
 	matrix = strings.Replace(matrix, "Parquet and child-execution fanout are not implemented.", "Parquet ItemReader is not implemented.", 1)
-	return strings.Replace(matrix, "long-running .sync integrations such as ECS and nested Step Functions are not implemented.", "long-running .sync integrations such as ECS are not implemented.", 1)
+	matrix = strings.Replace(matrix, "long-running .sync integrations such as ECS and nested Step Functions are not implemented.", "long-running .sync integrations such as ECS are not implemented.", 1)
+	return strings.Replace(matrix, "; long-running .sync integrations such as ECS are not implemented", "", 1)
 }

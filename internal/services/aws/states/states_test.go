@@ -1229,6 +1229,12 @@ func TestStatesCatchValidation(t *testing.T) {
 	if diagnostics := validateDefinition(valid); len(diagnostics) != 0 {
 		t.Fatalf("valid Catch diagnostics %#v", diagnostics)
 	}
+	for _, resultPath := range []string{"null", `"$.error"`} {
+		definition := fmt.Sprintf(`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","Catch":[{"ErrorEquals":["Boom"],"ResultPath":%s,"Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`, resultPath)
+		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
+			t.Fatalf("valid Catch ResultPath diagnostics %#v", diagnostics)
+		}
+	}
 	for _, definition := range []string{
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","Catch":[{"ErrorEquals":["Boom"],"Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":{},"End":true}}}`,
@@ -1240,6 +1246,8 @@ func TestStatesCatchValidation(t *testing.T) {
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":[{"ErrorEquals":["States.ALL","Boom"],"Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":[{"ErrorEquals":["States.ALL"],"Next":"Done"},{"ErrorEquals":["Boom"],"Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":[{"ErrorEquals":["Boom"]}],"End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":[{"ErrorEquals":["Boom"],"ResultPath":1,"Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":[{"ErrorEquals":["Boom"],"ResultPath":"error","Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
 	} {
 		if diagnostics := validateDefinition(definition); len(diagnostics) == 0 {
 			t.Fatalf("accepted invalid Catch %s", definition)

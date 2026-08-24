@@ -1246,6 +1246,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesCatchValidation",
 		},
 		{
+			name: "states-accept-invalid-catch-result-path",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  "if !valid || !strings.HasPrefix(reference, \"$\") {\n\t\t\t\t\t\t\tadd(\"SCHEMA_VALIDATION_FAILED\", \"Catch ResultPath must be null or a path.\"",
+			new:  "if false {\n\t\t\t\t\t\t\tadd(\"SCHEMA_VALIDATION_FAILED\", \"Catch ResultPath must be null or a path.\"",
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesCatchValidation",
+		},
+		{
 			name: "states-accept-terminal-transition",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `if hasEnd || hasNext {`,

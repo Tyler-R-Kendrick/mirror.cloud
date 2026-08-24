@@ -1247,6 +1247,35 @@ func TestStatesCatchValidation(t *testing.T) {
 	}
 }
 
+func TestStatesTransitionValidation(t *testing.T) {
+	for _, definition := range []string{
+		`{"StartAt":"First","States":{"First":{"Type":"Pass","Next":"Done"},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Done","States":{"Done":{"Type":"Pass","End":true}}}`,
+		`{"StartAt":"Choose","States":{"Choose":{"Type":"Choice","Choices":[{"Variable":"$.ready","IsPresent":true,"Next":"Done"}],"Default":"Done"},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Done","States":{"Done":{"Type":"Fail"}}}`,
+	} {
+		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
+			t.Fatalf("valid transition diagnostics %#v", diagnostics)
+		}
+	}
+	for _, definition := range []string{
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","Next":"Done","End":true},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","End":false}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","End":"true"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Succeed","Next":"Done"},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Succeed","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Fail","Next":"Done"},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Fail","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Choice","Choices":[{"Variable":"$.ready","IsPresent":true,"Next":"Done"}],"Default":"Done","Next":"Done"},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Choice","Choices":[{"Variable":"$.ready","IsPresent":true,"Next":"Done"}],"Default":"Done","End":true},"Done":{"Type":"Succeed"}}}`,
+	} {
+		if diagnostics := validateDefinition(definition); len(diagnostics) != 1 {
+			t.Fatalf("transition diagnostics = %#v for %s", diagnostics, definition)
+		}
+	}
+}
+
 func TestStatesExecutionTimeout(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

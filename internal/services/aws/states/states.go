@@ -119,6 +119,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			"startDate": float64(now), "input": first(req.Input, "input", "Input"),
 			"output": string(ob), "cause": wr.cause, "history": wr.hist, "definition": def,
 		}
+		if wr.errorName != "" {
+			rec["error"] = wr.errorName
+		}
 		if wr.status != "RUNNING" {
 			rec["stopDate"] = float64(now)
 		}
@@ -139,6 +142,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			if wr.cause != "" {
 				output["cause"] = wr.cause
+			}
+			if wr.errorName != "" {
+				output["error"] = wr.errorName
 			}
 		}
 		return &spi.Response{Output: output}, nil
@@ -219,6 +225,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "SendTaskFailure":
 		return p.finishTask(ctx, req, now, false)
 	case "SendTaskHeartbeat":
+		if _, found, _ := p.col(req, "pending").Get(ctx, first(req.Input, "taskToken", "TaskToken")); !found {
+			return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
+		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "TagResource":
 		arn := first(req.Input, "resourceArn", "ResourceArn")
@@ -286,7 +295,8 @@ func (p *Pack) execARN(req *spi.Request, sm, ex string) string {
 
 type pending struct {
 	Token, ActivityARN, StateName, ExecName, Definition string
-	Input                                               any
+	Input, StateInput                                   any
+	Retries                                             map[int]int
 }
 
 type walkResult struct {
@@ -301,7 +311,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	tok := first(req.Input, "taskToken", "TaskToken")
 	b, found, _ := p.col(req, "pending").Get(ctx, tok)
 	if !found {
-		return &spi.Response{Output: map[string]any{}}, nil
+		return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
 	}
 	var pend pending
 	_ = json.Unmarshal(b, &pend)
@@ -312,21 +322,64 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	}
 	var rec map[string]any
 	_ = json.Unmarshal(exb, &rec)
+	data := parseJSON(first(req.Input, "output", "Output"))
+	from, definition := pend.StateName, pend.Definition
+	var sm map[string]any
+	_ = json.Unmarshal([]byte(pend.Definition), &sm)
+	states, _ := sm["States"].(map[string]any)
+	st, _ := states[pend.StateName].(map[string]any)
 	if !ok {
-		rec["status"] = "FAILED"
-		rec["cause"] = first(req.Input, "error", "Error", "cause", "Cause")
-		rec["stopDate"] = float64(now)
+		failure := stateFailure{name: first(req.Input, "error", "Error"), cause: first(req.Input, "cause", "Cause")}
+		if failure.name == "" {
+			failure.name = "States.TaskFailed"
+		}
+		if failure.cause == "" {
+			failure.cause = failure.name
+		}
+		if pend.Retries == nil {
+			pend.Retries = map[int]int{}
+		}
+		if retryTask(st, failure.name, pend.Retries) {
+			pend.Token = p.deps.Rand.Hex(16)
+			pb, _ := json.Marshal(pend)
+			_ = p.col(req, "pending").Put(ctx, pend.Token, pb)
+			rec["pendingToken"] = pend.Token
+			nb, _ := json.Marshal(rec)
+			_ = p.col(req, "ex").Put(ctx, pend.ExecName, nb)
+			return &spi.Response{Output: map[string]any{}}, nil
+		}
+		next, out, caught := catchTask(st, failure, pend.StateInput)
+		if caught && next == "" {
+			failure = stateFailure{name: "States.Runtime", cause: "States.Runtime"}
+		}
+		if !caught || next == "" {
+			rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", failure.name, failure.cause, float64(now)
+			nb, _ := json.Marshal(rec)
+			_ = p.col(req, "ex").Put(ctx, pend.ExecName, nb)
+			return &spi.Response{Output: map[string]any{}}, nil
+		}
+		sm["StartAt"] = next
+		def, _ := json.Marshal(sm)
+		definition, from, data = string(def), "", out
+	} else if out, valid := applyResultPath(st, pend.StateInput, data); valid {
+		data = out
+	} else {
+		rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", "States.Runtime", "States.Runtime", float64(now)
 		nb, _ := json.Marshal(rec)
 		_ = p.col(req, "ex").Put(ctx, pend.ExecName, nb)
 		return &spi.Response{Output: map[string]any{}}, nil
 	}
-	data := parseJSON(first(req.Input, "output", "Output"))
-	wr := p.walk(ctx, req, pend.Definition, pend.StateName, data)
+	wr := p.walk(ctx, req, definition, from, data)
 	ob, _ := json.Marshal(wr.out)
 	rec["status"] = wr.status
 	rec["output"] = string(ob)
 	rec["cause"] = wr.cause
 	rec["history"] = wr.hist
+	if wr.errorName != "" {
+		rec["error"] = wr.errorName
+	} else {
+		delete(rec, "error")
+	}
 	if wr.status != "RUNNING" {
 		rec["stopDate"] = float64(now)
 	}
@@ -429,7 +482,7 @@ walkLoop:
 			case strings.Contains(res, ":activity:"):
 				tok := p.deps.Rand.Hex(16)
 				return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
-					Token: tok, ActivityARN: res, StateName: cur, Input: payload,
+					Token: tok, ActivityARN: res, StateName: cur, Input: payload, StateInput: data, Retries: retries[cur],
 				}}
 			default:
 				return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}

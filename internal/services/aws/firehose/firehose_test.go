@@ -2781,13 +2781,12 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	if first(retried.payload, "requestId") != first(initialRetry.payload, "requestId") || retried.header.Get("X-Amz-Firehose-Access-Key") != "retry-success" {
 		t.Fatalf("HTTP retry %#v initial %#v", retried, initialRetry)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for {
+	for attempt := 0; ; attempt++ {
 		retries, _, _ := retryCollection.List(context.Background(), "", "", 0)
 		if len(retries) == 0 {
 			break
 		}
-		if time.Now().After(deadline) {
+		if attempt == 1999 {
 			t.Fatal("successful HTTP retry remained persisted")
 		}
 		time.Sleep(time.Millisecond)
@@ -2823,8 +2822,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	if first(retriedExhausted.payload, "requestId") != first(initialExhausted.payload, "requestId") {
 		t.Fatalf("HTTP retry request IDs %#v %#v", initialExhausted.payload, retriedExhausted.payload)
 	}
-	deadline = time.Now().Add(2 * time.Second)
-	for {
+	for attempt := 0; ; attempt++ {
 		retries, _, _ := retryCollection.List(context.Background(), "", "", 0)
 		if len(retries) == 1 {
 			var retry httpRetry
@@ -2833,7 +2831,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 				break
 			}
 		}
-		if time.Now().After(deadline) {
+		if attempt == 1999 {
 			t.Fatal("HTTP retry state was not updated")
 		}
 		time.Sleep(time.Millisecond)
@@ -2847,12 +2845,11 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	case <-time.After(10 * time.Millisecond):
 	}
 	exhaustedBackupKey := id.Account + "/" + id.Region + "/out/exhausted/1970/01/01/00/http-exhaust-1-1970-01-01-00-00-06-" + exhaustedPut.Output["RecordId"].(string)
-	deadline = time.Now().Add(2 * time.Second)
-	for {
+	for attempt := 0; ; attempt++ {
 		if _, _, err := deps.Blobs.Get(context.Background(), exhaustedBackupKey); err == nil {
 			break
 		}
-		if time.Now().After(deadline) {
+		if attempt == 1999 {
 			t.Fatal("exhausted HTTP retry was not backed up")
 		}
 		time.Sleep(time.Millisecond)

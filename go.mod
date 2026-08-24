@@ -1,10 +1,11 @@
 module github.com/tyler-r-kendrick/mirror.cloud
 
-go 1.22
+go 1.23.0
 
 require (
 	github.com/golang/snappy v1.0.0
 	github.com/itchyny/gojq v0.12.17
+	github.com/jsonata-go/jsonata v0.0.0-20250709164031-599f35f32e5f
 	github.com/parquet-go/parquet-go v0.25.1
 )
 

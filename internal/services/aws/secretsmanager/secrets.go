@@ -91,14 +91,23 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if deleted, _ := m["Deleted"].(bool); deleted {
 			return nil, &spi.Fault{Code: "InvalidRequestException", Message: "secret scheduled for deletion", HTTPStatus: 400, Fault: "client"}
 		}
+		if req.Operation == "DescribeSecret" {
+			out := map[string]any{"ARN": m["ARN"], "Name": m["Name"], "VersionIdsToStages": stagesByID(m), "Tags": m["Tags"]}
+			if m["ReplicaRegions"] != nil {
+				out["ReplicationStatus"] = m["ReplicaRegions"]
+			}
+			for _, key := range []string{"RotationEnabled", "RotationLambdaARN", "RotationRules"} {
+				if m[key] != nil {
+					out[key] = m[key]
+				}
+			}
+			return &spi.Response{Output: out}, nil
+		}
 		picked := pickVer(m, first(req.Input, "VersionId"), first(req.Input, "VersionStage"))
 		out := map[string]any{
 			"ARN": m["ARN"], "Name": m["Name"],
 			"SecretString": picked["SecretString"], "VersionId": picked["VersionId"],
 			"VersionStages": picked["VersionStages"],
-		}
-		if req.Operation == "DescribeSecret" {
-			out["VersionIdsToStages"] = stagesByID(m)
 		}
 		return &spi.Response{Output: out}, nil
 	case "ListSecrets":
@@ -110,7 +119,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			var m map[string]any
 			_ = json.Unmarshal(kv.Value, &m)
-			ss = append(ss, map[string]any{"ARN": m["ARN"], "Name": m["Name"]})
+			if deleted, _ := m["Deleted"].(bool); deleted && !truthy(req.Input["IncludePlannedDeletion"]) {
+				continue
+			}
+			ss = append(ss, map[string]any{"ARN": m["ARN"], "Name": m["Name"], "Tags": m["Tags"], "SecretVersionsToStages": stagesByID(m)})
 		}
 		return &spi.Response{Output: map[string]any{"SecretList": ss}}, nil
 	case "DeleteSecret":
@@ -153,11 +165,56 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"Versions": vers, "Name": name}}, nil
 	case "TagResource":
-		b, _ := json.Marshal(req.Input["Tags"])
-		_ = p.col(req).Put(ctx, name+":tags", b)
+		b, ok, _ := p.col(req).Get(ctx, name)
+		if !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
+		}
+		var m map[string]any
+		_ = json.Unmarshal(b, &m)
+		tags := asSlice(m["Tags"])
+		if len(tags) == 0 {
+			if legacy, ok, _ := p.col(req).Get(ctx, name+":tags"); ok {
+				_ = json.Unmarshal(legacy, &tags)
+			}
+		}
+		indexes := map[string]int{}
+		for index, tag := range tags {
+			indexes[first(asMap(tag), "Key")] = index
+		}
+		for _, tag := range asSlice(req.Input["Tags"]) {
+			key := first(asMap(tag), "Key")
+			if index, exists := indexes[key]; exists {
+				tags[index] = tag
+			} else {
+				indexes[key] = len(tags)
+				tags = append(tags, tag)
+			}
+		}
+		m["Tags"] = tags
+		nb, _ := json.Marshal(m)
+		_ = p.col(req).Put(ctx, name, nb)
+		_ = p.col(req).Delete(ctx, name+":tags")
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "UntagResource":
-		_ = p.col(req).Delete(ctx, name+":tags")
+		b, ok, _ := p.col(req).Get(ctx, name)
+		if !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
+		}
+		var m map[string]any
+		_ = json.Unmarshal(b, &m)
+		drop := map[string]bool{}
+		for _, key := range asSlice(req.Input["TagKeys"]) {
+			drop[str(key)] = true
+		}
+		kept := []any{}
+		for _, tag := range asSlice(m["Tags"]) {
+			if !drop[first(asMap(tag), "Key")] {
+				kept = append(kept, tag)
+			}
+		}
+		m["Tags"] = kept
+		nb, _ := json.Marshal(m)
+		_ = p.col(req).Put(ctx, name, nb)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "GetRandomPassword":
 		return &spi.Response{Output: map[string]any{"RandomPassword": p.deps.Rand.Hex(32)}}, nil

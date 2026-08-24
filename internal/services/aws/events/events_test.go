@@ -282,8 +282,14 @@ func TestPutEventsRetriesAndDeadLettersTargets(t *testing.T) {
 	}}})
 	invoke(p, "PutEvents", map[string]any{"Entries": []any{map[string]any{"Source": "retry", "DetailType": "test", "Detail": `{}`}}})
 	retries := deps.Store.Scope(id.Account, id.Region).Collection("event-retries")
-	if stored, _, _ := retries.List(ctx, "", "", 0); len(stored) != 1 || calls.Load() != 1 {
+	stored, _, _ := retries.List(ctx, "", "", 0)
+	if len(stored) != 1 || calls.Load() != 1 {
 		t.Fatalf("persisted retries=%d calls=%d", len(stored), calls.Load())
+	}
+	var retry map[string]any
+	_ = json.Unmarshal(stored[0].Value, &retry)
+	if got, want := parsedTime(retry[eventRetryNext]), deps.Clock.Now().Add(3*time.Second); !got.Equal(want) {
+		t.Fatalf("Retry-After persisted at %v want %v", got, want)
 	}
 	if err := p.Close(); err != nil {
 		t.Fatal(err)

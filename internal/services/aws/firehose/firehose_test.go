@@ -24,6 +24,7 @@ import (
 	"github.com/golang/snappy"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
@@ -1979,7 +1980,8 @@ func TestFirehoseTagsMergeRemoveAndPaginate(t *testing.T) {
 }
 
 func TestFirehoseEncryptionState(t *testing.T) {
-	p := New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := New(deps)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
 		t.Helper()
@@ -1995,6 +1997,14 @@ func TestFirehoseEncryptionState(t *testing.T) {
 		return description["DeliveryStreamEncryptionConfiguration"].(map[string]any)
 	}
 	record := map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("encrypted"))}
+	storedRecord := func(name, recordID string) []byte {
+		t.Helper()
+		stored, ok, err := p.col(&spi.Request{Identity: id}, "fhrec:"+name).Get(context.Background(), recordID)
+		if err != nil || !ok {
+			t.Fatalf("stored record %q: %v", recordID, err)
+		}
+		return stored
+	}
 
 	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "plain", "S3DestinationConfiguration": testS3Destination()}); err != nil {
 		t.Fatal(err)
@@ -2006,6 +2016,9 @@ func TestFirehoseEncryptionState(t *testing.T) {
 	if err != nil || put.Output["Encrypted"] != false {
 		t.Fatalf("plain put %#v, %v", put, err)
 	}
+	if stored := storedRecord("plain", put.Output["RecordId"].(string)); !bytes.Contains(stored, []byte("encrypted")) || bytes.HasPrefix(stored, firehoseEncryptedPrefix) {
+		t.Fatalf("plain stored record %q", stored)
+	}
 	if _, err := call("StartDeliveryStreamEncryption", map[string]any{"DeliveryStreamName": "plain"}); err != nil {
 		t.Fatal(err)
 	}
@@ -2016,12 +2029,31 @@ func TestFirehoseEncryptionState(t *testing.T) {
 	if err != nil || put.Output["Encrypted"] != true {
 		t.Fatalf("encrypted put %#v, %v", put, err)
 	}
+	stored := storedRecord("plain", put.Output["RecordId"].(string))
+	if !bytes.HasPrefix(stored, firehoseEncryptedPrefix) || bytes.Contains(stored, []byte("encrypted")) {
+		t.Fatalf("unencrypted retained record %q", stored)
+	}
+	plaintext, err := p.decryptAtRest(context.Background(), &spi.Request{Identity: id}, stored)
+	if err != nil || !bytes.Contains(plaintext, []byte("encrypted")) {
+		t.Fatalf("retained record decrypt %q, %v", plaintext, err)
+	}
 	batch, err := call("PutRecordBatch", map[string]any{"DeliveryStreamName": "plain", "Records": []any{record}})
 	if err != nil || batch.Output["Encrypted"] != true {
 		t.Fatalf("encrypted batch %#v, %v", batch, err)
 	}
 
-	keyARN := "arn:aws:kms:us-east-1:123456789012:key/example_key-1"
+	missingConfiguration := map[string]any{"KeyType": "CUSTOMER_MANAGED_CMK", "KeyARN": "arn:aws:kms:us-east-1:123456789012:key/missing"}
+	if _, err := call("StartDeliveryStreamEncryption", map[string]any{"DeliveryStreamName": "plain", "DeliveryStreamEncryptionConfigurationInput": missingConfiguration}); err == nil {
+		t.Fatal("started encryption with a missing KMS key")
+	} else if fault, ok := err.(*spi.Fault); !ok || fault.Code != "InvalidKMSResourceException" {
+		t.Fatalf("missing KMS key fault %#v", err)
+	}
+	keyService := kms.New(deps)
+	createdKey, err := keyService.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateKey", Input: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyARN := first(createdKey.Output["KeyMetadata"].(map[string]any), "Arn")
 	configuration := map[string]any{"KeyType": "CUSTOMER_MANAGED_CMK", "KeyARN": keyARN}
 	if _, err := call("StartDeliveryStreamEncryption", map[string]any{
 		"DeliveryStreamName": "plain", "DeliveryStreamEncryptionConfigurationInput": configuration,
@@ -2037,6 +2069,17 @@ func TestFirehoseEncryptionState(t *testing.T) {
 	if encryption := describeEncryption("plain"); encryption["Status"] != "DISABLED" || encryption["KeyType"] != nil || encryption["KeyARN"] != nil {
 		t.Fatalf("stopped encryption %#v", encryption)
 	}
+	if _, err := keyService.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "DisableKey", Input: map[string]any{"KeyId": keyARN}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("StartDeliveryStreamEncryption", map[string]any{"DeliveryStreamName": "plain", "DeliveryStreamEncryptionConfigurationInput": configuration}); err == nil {
+		t.Fatal("started encryption with a disabled KMS key")
+	} else if fault, ok := err.(*spi.Fault); !ok || fault.Code != "InvalidKMSResourceException" {
+		t.Fatalf("disabled KMS key fault %#v", err)
+	}
+	if _, err := keyService.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "EnableKey", Input: map[string]any{"KeyId": keyARN}}); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := call("CreateDeliveryStream", map[string]any{
 		"DeliveryStreamName": "created-encrypted", "DeliveryStreamEncryptionConfigurationInput": configuration,
@@ -2046,6 +2089,19 @@ func TestFirehoseEncryptionState(t *testing.T) {
 	}
 	if encryption := describeEncryption("created-encrypted"); encryption["Status"] != "ENABLED" || encryption["KeyARN"] != keyARN {
 		t.Fatalf("create encryption %#v", encryption)
+	}
+	if _, err := keyService.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "DisableKey", Input: map[string]any{"KeyId": keyARN}}); err != nil {
+		t.Fatal(err)
+	}
+	storedBefore, _, _ := p.col(&spi.Request{Identity: id}, "fhrec:created-encrypted").List(context.Background(), "", "", 0)
+	if _, err := call("PutRecord", map[string]any{"DeliveryStreamName": "created-encrypted", "Record": record}); err == nil {
+		t.Fatal("stored data with a disabled KMS key")
+	} else if fault, ok := err.(*spi.Fault); !ok || fault.Code != "InvalidKMSResourceException" {
+		t.Fatalf("disabled KMS put fault %#v", err)
+	}
+	storedAfter, _, _ := p.col(&spi.Request{Identity: id}, "fhrec:created-encrypted").List(context.Background(), "", "", 0)
+	if len(storedAfter) != len(storedBefore) {
+		t.Fatal("disabled KMS put retained plaintext")
 	}
 	if _, err := call("CreateDeliveryStream", map[string]any{
 		"DeliveryStreamName": "source", "DeliveryStreamType": "KinesisStreamAsSource",
@@ -2790,7 +2846,10 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	retryDestination["EndpointConfiguration"].(map[string]any)["AccessKey"] = "retry-initial"
 	retryDestination["S3Configuration"].(map[string]any)["Prefix"] = "retry-failed/"
 	retryDestination["RetryOptions"] = map[string]any{"DurationInSeconds": 10}
-	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-retry", "HttpEndpointDestinationConfiguration": retryDestination}); err != nil {
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "http-retry", "HttpEndpointDestinationConfiguration": retryDestination,
+		"DeliveryStreamEncryptionConfigurationInput": map[string]any{"KeyType": "AWS_OWNED_CMK"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	retryPut, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-retry", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("retry"))}})
@@ -2815,7 +2874,11 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	retryPayload, _ := io.ReadAll(retryData)
 	_ = retryData.Close()
+	if !bytes.HasPrefix(retryPayload, firehoseEncryptedPrefix) || bytes.Contains(retryPayload, []byte(base64.StdEncoding.EncodeToString([]byte("retry")))) {
+		t.Fatalf("unencrypted HTTP retry payload %q", retryPayload)
+	}
 	if _, err := call("UpdateDestination", map[string]any{
 		"DeliveryStreamName": "http-retry", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
 		"HttpEndpointDestinationUpdate": map[string]any{"EndpointConfiguration": map[string]any{"Url": "https://example.test/retry", "AccessKey": "retry-success"}},
@@ -2907,7 +2970,10 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 
 	bufferedDestination := testHTTPEndpointDestination("https://example.test/ok")
 	bufferedDestination["BufferingHints"] = map[string]any{"IntervalInSeconds": 10, "SizeInMBs": 64}
-	if _, err := call("CreateDeliveryStream", map[string]any{"DeliveryStreamName": "http-buffered", "HttpEndpointDestinationConfiguration": bufferedDestination}); err != nil {
+	if _, err := call("CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "http-buffered", "HttpEndpointDestinationConfiguration": bufferedDestination,
+		"DeliveryStreamEncryptionConfigurationInput": map[string]any{"KeyType": "AWS_OWNED_CMK"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	bufferedFirst, err := call("PutRecord", map[string]any{"DeliveryStreamName": "http-buffered", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte("buffer-one"))}})
@@ -2930,6 +2996,15 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		var buffer httpBuffer
 		_ = json.Unmarshal(item.Value, &buffer)
 		bufferDataKeys[i] = buffer.DataKey
+		reader, _, err := deps.Blobs.Get(context.Background(), buffer.DataKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, _ := io.ReadAll(reader)
+		_ = reader.Close()
+		if !bytes.HasPrefix(payload, firehoseEncryptedPrefix) || bytes.Contains(payload, []byte(base64.StdEncoding.EncodeToString([]byte("buffer-one")))) || bytes.Contains(payload, []byte(base64.StdEncoding.EncodeToString([]byte("buffer-two")))) {
+			t.Fatalf("unencrypted HTTP buffer payload %q", payload)
+		}
 	}
 	if !p.hasHTTPWork(context.Background()) {
 		t.Fatal("persisted HTTP buffer was not discoverable for restart")

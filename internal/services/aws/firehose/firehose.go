@@ -30,6 +30,7 @@ import (
 	"github.com/itchyny/gojq"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
@@ -83,6 +84,8 @@ type httpBufferItem struct {
 }
 
 const destinationID = "destinationId-000000000001"
+
+var firehoseEncryptedPrefix = []byte("mirror-firehose-kms-v1:")
 
 const (
 	maxRecordBytes = 1000 * 1024
@@ -229,6 +232,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !valid {
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
+		if _, ok, _ := p.col(req, "fh").Get(ctx, name); ok {
+			return nil, &spi.Fault{Code: "ResourceInUseException", HTTPStatus: 400, Fault: "client"}
+		}
+		if _, err := p.ensureEncryptionKey(ctx, req, encryption); err != nil {
+			return nil, err
+		}
 		b, _ := json.Marshal(rec)
 		if err := p.col(req, "fh").Txn(ctx, func(tx spi.Tx) error {
 			if _, ok, err := tx.Get(name); err != nil {
@@ -326,7 +335,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !valid {
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
-		id := p.putOne(ctx, req, name, req.Input["Record"], decoded)
+		keyID, err := p.recordEncryptionKey(ctx, req, stream)
+		if err != nil {
+			return nil, err
+		}
+		id, err := p.putOne(ctx, req, name, req.Input["Record"], decoded, keyID)
+		if err != nil {
+			return nil, err
+		}
 		return &spi.Response{Output: map[string]any{"RecordId": id, "Encrypted": streamEncrypted(stream)}}, nil
 	case "PutRecordBatch":
 		stream, ok, _ := p.col(req, "fh").Get(ctx, name)
@@ -353,10 +369,17 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 		}
+		keyID, err := p.recordEncryptionKey(ctx, req, stream)
+		if err != nil {
+			return nil, err
+		}
 		resp := make([]any, 0, len(recs))
 		ids := make([]string, len(recs))
 		for i, rec := range recs {
-			ids[i] = p.storeOne(ctx, req, name, rec, decoded[i])
+			ids[i], err = p.storeOne(ctx, req, name, rec, decoded[i], keyID)
+			if err != nil {
+				return nil, err
+			}
 			resp = append(resp, map[string]any{"RecordId": ids[i]})
 		}
 		p.deliver(ctx, req, name, ids, decoded)
@@ -484,6 +507,20 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 		}
+		stored, ok, _ := p.col(req, "fh").Get(ctx, name)
+		if !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
+		}
+		var current map[string]any
+		_ = json.Unmarshal(stored, &current)
+		if first(current, "DeliveryStreamType") != "DirectPut" {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if req.Operation == "StartDeliveryStreamEncryption" {
+			if _, err := p.ensureEncryptionKey(ctx, req, encryption); err != nil {
+				return nil, err
+			}
+		}
 		if err := p.col(req, "fh").Txn(ctx, func(tx spi.Tx) error {
 			b, ok, err := tx.Get(name)
 			if err != nil {
@@ -554,6 +591,89 @@ func encryptionDescription(value any, defaultAWS bool) (map[string]any, bool) {
 	}
 }
 
+func (p *Pack) ensureEncryptionKey(ctx context.Context, req *spi.Request, encryption map[string]any) (string, error) {
+	if first(encryption, "Status") != "ENABLED" {
+		return "", nil
+	}
+	keyID := first(encryption, "KeyARN")
+	if first(encryption, "KeyType") == "AWS_OWNED_CMK" {
+		if stored, ok, _ := p.col(req, "fhkms").Get(ctx, "aws-owned"); ok {
+			keyID = string(stored)
+		} else {
+			created, err := kms.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "CreateKey", Input: map[string]any{}})
+			if err != nil {
+				return "", invalidKMSResource(err)
+			}
+			keyID = first(created.Output["KeyMetadata"].(map[string]any), "KeyId")
+			if err := p.col(req, "fhkms").Put(ctx, "aws-owned", []byte(keyID)); err != nil {
+				return "", err
+			}
+		}
+	}
+	described, err := kms.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "DescribeKey", Input: map[string]any{"KeyId": keyID}})
+	if err != nil {
+		return "", invalidKMSResource(err)
+	}
+	if first(described.Output["KeyMetadata"].(map[string]any), "KeyState") != "Enabled" {
+		return "", invalidKMSResource(errors.New("KMS key is not enabled"))
+	}
+	return keyID, nil
+}
+
+func (p *Pack) recordEncryptionKey(ctx context.Context, req *spi.Request, stream []byte) (string, error) {
+	var rec map[string]any
+	_ = json.Unmarshal(stream, &rec)
+	encryption, _ := rec["DeliveryStreamEncryptionConfiguration"].(map[string]any)
+	return p.ensureEncryptionKey(ctx, req, encryption)
+}
+
+func (p *Pack) encryptAtRest(ctx context.Context, req *spi.Request, keyID string, plaintext []byte) ([]byte, error) {
+	if keyID == "" {
+		return plaintext, nil
+	}
+	response, err := kms.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Encrypt", Input: map[string]any{"KeyId": keyID, "Plaintext": plaintext}})
+	if err != nil {
+		return nil, invalidKMSResource(err)
+	}
+	ciphertext, _ := response.Output["CiphertextBlob"].([]byte)
+	return append(bytes.Clone(firehoseEncryptedPrefix), ciphertext...), nil
+}
+
+func (p *Pack) protectStreamData(ctx context.Context, req *spi.Request, stream string, plaintext []byte) ([]byte, error) {
+	record, ok, err := p.col(req, "fh").Get(ctx, stream)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("delivery stream no longer exists")
+	}
+	keyID, err := p.recordEncryptionKey(ctx, req, record)
+	if err != nil {
+		return nil, err
+	}
+	return p.encryptAtRest(ctx, req, keyID, plaintext)
+}
+
+func (p *Pack) decryptAtRest(ctx context.Context, req *spi.Request, stored []byte) ([]byte, error) {
+	if !bytes.HasPrefix(stored, firehoseEncryptedPrefix) {
+		return stored, nil
+	}
+	response, err := kms.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Decrypt", Input: map[string]any{"CiphertextBlob": stored[len(firehoseEncryptedPrefix):]}})
+	if err != nil {
+		return nil, invalidKMSResource(err)
+	}
+	plaintext, _ := response.Output["Plaintext"].([]byte)
+	return plaintext, nil
+}
+
+func invalidKMSResource(err error) *spi.Fault {
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	return &spi.Fault{Code: "InvalidKMSResourceException", Message: message, HTTPStatus: 400, Fault: "client"}
+}
+
 func streamEncrypted(b []byte) bool {
 	var rec map[string]any
 	_ = json.Unmarshal(b, &rec)
@@ -587,18 +707,24 @@ func invalidSource(req *spi.Request, stream string) *spi.Fault {
 	}
 }
 
-func (p *Pack) putOne(ctx context.Context, req *spi.Request, name string, rec any, decoded []byte) string {
-	id := p.storeOne(ctx, req, name, rec, decoded)
+func (p *Pack) putOne(ctx context.Context, req *spi.Request, name string, rec any, decoded []byte, keyID string) (string, error) {
+	id, err := p.storeOne(ctx, req, name, rec, decoded, keyID)
+	if err != nil {
+		return "", err
+	}
 	p.deliver(ctx, req, name, []string{id}, [][]byte{decoded})
-	return id
+	return id, nil
 }
 
-func (p *Pack) storeOne(ctx context.Context, req *spi.Request, name string, rec any, decoded []byte) string {
+func (p *Pack) storeOne(ctx context.Context, req *spi.Request, name string, rec any, decoded []byte, keyID string) (string, error) {
 	id := p.deps.Rand.Hex(16)
 	payload := map[string]any{"Record": rec, "Decoded": string(decoded)}
 	b, _ := json.Marshal(payload)
-	_ = p.col(req, "fhrec:"+name).Put(ctx, id, b)
-	return id
+	b, err := p.encryptAtRest(ctx, req, keyID, b)
+	if err != nil {
+		return "", err
+	}
+	return id, p.col(req, "fhrec:"+name).Put(ctx, id, b)
 }
 
 func copyDest(rec, in map[string]any, suffix string) {
@@ -1610,6 +1736,10 @@ func (p *Pack) bufferHTTP(ctx context.Context, req *spi.Request, stream, request
 	if err != nil {
 		return false
 	}
+	body, err = p.protectStreamData(ctx, req, stream, body)
+	if err != nil {
+		return false
+	}
 	if _, err := p.deps.Blobs.Put(ctx, dataKey, bytes.NewReader(body)); err != nil {
 		return false
 	}
@@ -1702,6 +1832,10 @@ func (p *Pack) scheduleHTTPRetryPayload(ctx context.Context, req *spi.Request, s
 	dataKey := req.Identity.Account + "/" + req.Identity.Region + "/_mirror/firehose-http-retries/" + key
 	payload, err := json.Marshal(retryPayload)
 	if err != nil || p.deps.Blobs == nil {
+		return false
+	}
+	payload, err = p.protectStreamData(ctx, req, stream, payload)
+	if err != nil {
 		return false
 	}
 	if _, err := p.deps.Blobs.Put(ctx, dataKey, bytes.NewReader(payload)); err != nil {
@@ -1870,6 +2004,9 @@ func (p *Pack) flushHTTPBuffer(ctx context.Context, identity spi.Identity, colle
 		}
 		body, readErr := io.ReadAll(reader)
 		_ = reader.Close()
+		if readErr == nil {
+			body, readErr = p.decryptAtRest(ctx, req, body)
+		}
 		var entry httpRetryPayload
 		if readErr != nil || json.Unmarshal(body, &entry) != nil || len(entry.BackupRecordIDs) != len(entry.BackupData) || len(entry.ProcessedData) == 0 {
 			payloadOK = false
@@ -1956,6 +2093,9 @@ func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collecti
 		if reader, _, err := p.deps.Blobs.Get(ctx, retry.DataKey); err == nil {
 			payloadBody, readErr := io.ReadAll(reader)
 			_ = reader.Close()
+			if readErr == nil {
+				payloadBody, readErr = p.decryptAtRest(ctx, req, payloadBody)
+			}
 			payloadOK = readErr == nil && json.Unmarshal(payloadBody, &payload) == nil && len(payload.BackupRecordIDs) == len(payload.BackupData) && len(payload.ProcessedData) != 0
 		}
 	}

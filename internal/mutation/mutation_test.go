@@ -2943,8 +2943,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-drop-consumed-kinesis-record",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `p.putOne(ctx, req, stream.Key, map[string]any{"Data": event.Record["Data"]}, data, "")`,
-			new:  `p.putOne(ctx, req, "mutated", map[string]any{"Data": event.Record["Data"]}, data, "")`,
+			old:  `p.putOne(ctx, req, stream.Key, map[string]any{"Data": base64.StdEncoding.EncodeToString(data)}, data, "")`,
+			new:  `p.putOne(ctx, req, "mutated", map[string]any{"Data": base64.StdEncoding.EncodeToString(data)}, data, "")`,
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseConsumesFutureKinesisRecords",
 		},

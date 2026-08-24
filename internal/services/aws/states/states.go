@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
@@ -70,18 +71,55 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if len(validateDefinition(definition)) > 0 {
 			return nil, &spi.Fault{Code: "InvalidDefinition", HTTPStatus: 400, Fault: "client"}
 		}
+		publish := inputBool(req.Input, "publish", "Publish")
+		versionDescription := first(req.Input, "versionDescription", "VersionDescription")
+		if versionDescription != "" && !publish {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
 		arn := p.smARN(req, name)
+		machineType := first(req.Input, "type", "Type")
+		if machineType == "" {
+			machineType = "STANDARD"
+		}
+		logging, _ := inputValue(req.Input, "loggingConfiguration", "LoggingConfiguration")
+		tracing, _ := inputValue(req.Input, "tracingConfiguration", "TracingConfiguration")
+		encryption, _ := inputValue(req.Input, "encryptionConfiguration", "EncryptionConfiguration")
+		if existing, found := getRecord(ctx, p.col(req, "sm"), name); found {
+			if first(existing, "definition") != definition || first(existing, "type") != machineType ||
+				!reflect.DeepEqual(existing["_logging"], logging) || !reflect.DeepEqual(existing["_tracing"], tracing) ||
+				!reflect.DeepEqual(existing["_encryption"], encryption) || toBool(existing["_publish"]) != publish || first(existing, "_versionDescription") != versionDescription {
+				return nil, &spi.Fault{Code: "StateMachineAlreadyExists", HTTPStatus: 400, Fault: "client"}
+			}
+			output := map[string]any{"stateMachineArn": arn, "creationDate": existing["creationDate"]}
+			if versionARN := first(existing, "_publishedVersionArn"); versionARN != "" {
+				output["stateMachineVersionArn"] = versionARN
+			}
+			return &spi.Response{Output: output}, nil
+		}
 		rec := map[string]any{
 			"stateMachineArn": arn, "name": name, "definition": definition,
-			"roleArn": first(req.Input, "roleArn", "RoleArn"), "type": first(req.Input, "type", "Type"),
-			"status": "ACTIVE", "creationDate": float64(now), "revisionId": p.deps.Rand.UUID(),
-		}
-		if rec["type"] == "" {
-			rec["type"] = "STANDARD"
+			"roleArn": first(req.Input, "roleArn", "RoleArn"), "type": machineType,
+			"status": "ACTIVE", "creationDate": float64(now), "revisionId": p.deps.Rand.UUID(), "updateDate": float64(now),
+			"_logging": logging, "_tracing": tracing, "_encryption": encryption, "_publish": publish, "_versionDescription": versionDescription,
 		}
 		b, _ := json.Marshal(rec)
 		_ = p.col(req, "sm").Put(ctx, name, b)
-		return &spi.Response{Output: map[string]any{"stateMachineArn": arn, "creationDate": float64(now)}}, nil
+		if tags := inputSlice(req.Input, "tags", "Tags"); tags != nil {
+			tagsJSON, _ := json.Marshal(tags)
+			_ = p.col(req, "tag").Put(ctx, arn, tagsJSON)
+		}
+		output := map[string]any{"stateMachineArn": arn, "creationDate": float64(now)}
+		if publish {
+			published, err := p.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "PublishStateMachineVersion", Input: map[string]any{"stateMachineArn": arn, "description": versionDescription}})
+			if err != nil {
+				return nil, err
+			}
+			output["stateMachineVersionArn"] = published.Output["stateMachineVersionArn"]
+			rec["_publishedVersionArn"] = published.Output["stateMachineVersionArn"]
+			b, _ = json.Marshal(rec)
+			_ = p.col(req, "sm").Put(ctx, name, b)
+		}
+		return &spi.Response{Output: output}, nil
 	case "UpdateStateMachine":
 		name := smName(first(req.Input, "stateMachineArn", "StateMachineArn"))
 		b, ok, _ := p.col(req, "sm").Get(ctx, name)
@@ -90,36 +128,99 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
+		publish := inputBool(req.Input, "publish", "Publish")
+		versionDescription := first(req.Input, "versionDescription", "VersionDescription")
+		if versionDescription != "" && !publish {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
+		changed := false
 		if d := first(req.Input, "definition", "Definition"); d != "" {
 			if len(validateDefinition(d)) > 0 {
 				return nil, &spi.Fault{Code: "InvalidDefinition", HTTPStatus: 400, Fault: "client"}
 			}
 			rec["definition"] = d
+			changed = true
 		}
 		if r := first(req.Input, "roleArn", "RoleArn"); r != "" {
 			rec["roleArn"] = r
+			changed = true
 		}
-		rec["revisionId"] = p.deps.Rand.UUID()
+		for _, field := range []struct{ lower, upper, stored string }{
+			{"loggingConfiguration", "LoggingConfiguration", "_logging"},
+			{"tracingConfiguration", "TracingConfiguration", "_tracing"},
+			{"encryptionConfiguration", "EncryptionConfiguration", "_encryption"},
+		} {
+			if value, exists := inputValue(req.Input, field.lower, field.upper); exists {
+				rec[field.stored], changed = value, true
+			}
+		}
+		if changed {
+			rec["revisionId"] = p.deps.Rand.UUID()
+		}
+		rec["updateDate"] = float64(now)
 		nb, _ := json.Marshal(rec)
 		_ = p.col(req, "sm").Put(ctx, name, nb)
-		return &spi.Response{Output: map[string]any{"updateDate": float64(now)}}, nil
+		output := map[string]any{"updateDate": float64(now), "revisionId": rec["revisionId"]}
+		if publish {
+			published, err := p.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "PublishStateMachineVersion", Input: map[string]any{
+				"stateMachineArn": rec["stateMachineArn"], "revisionId": rec["revisionId"], "description": versionDescription,
+			}})
+			if err != nil {
+				return nil, err
+			}
+			output["stateMachineVersionArn"] = published.Output["stateMachineVersionArn"]
+		}
+		return &spi.Response{Output: output}, nil
 	case "DeleteStateMachine":
-		_ = p.col(req, "sm").Delete(ctx, smName(first(req.Input, "stateMachineArn", "StateMachineArn")))
+		arn := first(req.Input, "stateMachineArn", "StateMachineArn")
+		name := baseSMName(arn)
+		if smName(arn) != name {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
+		if _, found := getRecord(ctx, p.col(req, "sm"), name); !found {
+			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
+		}
+		_ = p.col(req, "sm").Delete(ctx, name)
+		for _, collection := range []string{"ver", "alias"} {
+			items, _, _ := p.col(req, collection).List(ctx, "", "", 0)
+			for _, item := range items {
+				if strings.HasPrefix(item.Key, name+":") || strings.HasPrefix(item.Key, arn+":") {
+					_ = p.col(req, collection).Delete(ctx, item.Key)
+				}
+			}
+		}
+		_ = p.col(req, "tag").Delete(ctx, arn)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "DescribeStateMachine":
-		name := smName(first(req.Input, "stateMachineArn", "StateMachineArn"))
-		b, ok, _ := p.col(req, "sm").Get(ctx, name)
+		arn := first(req.Input, "stateMachineArn", "StateMachineArn")
+		name := baseSMName(arn)
+		collection, key := "sm", name
+		if versionNumber(arn) > 0 {
+			collection, key = "ver", name+":"+strconv.Itoa(versionNumber(arn))
+		}
+		b, ok, _ := p.col(req, collection).Get(ctx, key)
 		if !ok {
 			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
+		if collection == "ver" {
+			rec["stateMachineArn"], rec["name"], rec["status"] = arn, name, "ACTIVE"
+		}
+		for key := range rec {
+			if strings.HasPrefix(key, "_") {
+				delete(rec, key)
+			}
+		}
 		return &spi.Response{Output: rec}, nil
 	case "ListStateMachines":
 		return listCol(ctx, p.col(req, "sm"), "stateMachines")
 	case "PublishStateMachineVersion":
 		arn := first(req.Input, "stateMachineArn", "StateMachineArn")
 		name := baseSMName(arn)
+		if smName(arn) != name || len(first(req.Input, "description", "Description")) > 256 {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
 		b, ok, _ := p.col(req, "sm").Get(ctx, name)
 		if !ok {
 			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
@@ -131,6 +232,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, &spi.Fault{Code: "ConflictException", HTTPStatus: 409, Fault: "client"}
 		}
 		versions, _, _ := p.col(req, "ver").List(ctx, name+":", "", 0)
+		if len(versions) >= 1000 {
+			return nil, &spi.Fault{Code: "ServiceQuotaExceededException", HTTPStatus: 400, Fault: "client"}
+		}
 		next := 1
 		for _, version := range versions {
 			var record map[string]any
@@ -153,6 +257,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"stateMachineVersionArn": versionARN, "creationDate": float64(now)}}, nil
 	case "ListStateMachineVersions":
 		name := baseSMName(first(req.Input, "stateMachineArn", "StateMachineArn"))
+		if _, found := getRecord(ctx, p.col(req, "sm"), name); !found {
+			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
+		}
 		versions, _, _ := p.col(req, "ver").List(ctx, name+":", "", 0)
 		items := make([]any, 0, len(versions))
 		for _, version := range versions {
@@ -166,19 +273,31 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"stateMachineVersions": items}}, nil
 	case "DeleteStateMachineVersion":
 		arn := first(req.Input, "stateMachineVersionArn", "StateMachineVersionArn")
+		versionKey := baseSMName(arn) + ":" + strconv.Itoa(versionNumber(arn))
+		if versionNumber(arn) < 1 {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
+		if _, found := getRecord(ctx, p.col(req, "ver"), versionKey); !found {
+			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
+		}
 		aliases, _, _ := p.col(req, "alias").List(ctx, "", "", 0)
 		for _, alias := range aliases {
-			if strings.Contains(string(alias.Value), arn) {
-				return nil, &spi.Fault{Code: "ConflictException", HTTPStatus: 409, Fault: "client"}
+			var record map[string]any
+			_ = json.Unmarshal(alias.Value, &record)
+			for _, raw := range asSlice(record["routingConfiguration"]) {
+				route, _ := raw.(map[string]any)
+				if first(route, "stateMachineVersionArn", "StateMachineVersionArn") == arn {
+					return nil, &spi.Fault{Code: "ConflictException", HTTPStatus: 409, Fault: "client"}
+				}
 			}
 		}
-		_ = p.col(req, "ver").Delete(ctx, baseSMName(arn)+":"+strconv.Itoa(versionNumber(arn)))
+		_ = p.col(req, "ver").Delete(ctx, versionKey)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "CreateStateMachineAlias":
 		name := first(req.Input, "name", "Name")
 		routes := aliasRoutes(req.Input)
 		baseARN, valid := p.validateAliasRoutes(ctx, req, routes)
-		if !validAliasName(name) || !valid {
+		if !validAliasName(name) || !valid || len(first(req.Input, "description", "Description")) > 256 {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
 		aliasARN := baseARN + ":" + name
@@ -219,14 +338,19 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		var record map[string]any
 		_ = json.Unmarshal(b, &record)
-		if routes := aliasRoutes(req.Input); routes != nil {
+		routesValue, hasRoutes := inputValue(req.Input, "routingConfiguration", "RoutingConfiguration")
+		description, hasDescription := inputValue(req.Input, "description", "Description")
+		if !hasRoutes && !hasDescription || hasDescription && len(fmt.Sprint(description)) > 256 {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
+		if routes := asSlice(routesValue); hasRoutes {
 			baseARN, valid := p.validateAliasRoutes(ctx, req, routes)
 			if !valid || baseARN != stateMachineBaseARN(arn) {
 				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 			}
 			record["routingConfiguration"] = routes
 		}
-		if description, exists := inputValue(req.Input, "description", "Description"); exists {
+		if description, exists := description, hasDescription; exists {
 			record["description"] = description
 		}
 		record["updateDate"] = float64(now)
@@ -234,7 +358,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = p.col(req, "alias").Put(ctx, arn, encoded)
 		return &spi.Response{Output: map[string]any{"updateDate": float64(now)}}, nil
 	case "DeleteStateMachineAlias":
-		_ = p.col(req, "alias").Delete(ctx, first(req.Input, "stateMachineAliasArn", "StateMachineAliasArn"))
+		arn := first(req.Input, "stateMachineAliasArn", "StateMachineAliasArn")
+		if _, found := getRecord(ctx, p.col(req, "alias"), arn); !found {
+			return nil, &spi.Fault{Code: "ResourceNotFound", HTTPStatus: 400, Fault: "client"}
+		}
+		_ = p.col(req, "alias").Delete(ctx, arn)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "StartExecution", "StartSyncExecution":
 		arn := first(req.Input, "stateMachineArn", "StateMachineArn")
@@ -248,10 +376,27 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		exName := first(req.Input, "name", "Name")
 		if exName == "" {
-			exName = p.deps.Rand.Hex(8)
+			exName = p.deps.Rand.UUID()
+		} else if !validExecutionName(exName) {
+			return nil, &spi.Fault{Code: "InvalidName", HTTPStatus: 400, Fault: "client"}
 		}
 		execARN := p.execARN(req, name, exName)
-		in := parseJSON(first(req.Input, "input", "Input"))
+		inputJSON := first(req.Input, "input", "Input")
+		if inputJSON == "" {
+			inputJSON = "{}"
+		}
+		if !json.Valid([]byte(inputJSON)) {
+			return nil, &spi.Fault{Code: "InvalidExecutionInput", HTTPStatus: 400, Fault: "client"}
+		}
+		if req.Operation == "StartExecution" && first(sm, "type") == "STANDARD" {
+			if existing, found := getRecord(ctx, p.col(req, "ex"), execARN); found {
+				if first(existing, "status") == "RUNNING" && first(existing, "input") == inputJSON {
+					return &spi.Response{Output: map[string]any{"executionArn": execARN, "startDate": existing["startDate"]}}, nil
+				}
+				return nil, &spi.Fault{Code: "ExecutionAlreadyExists", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+		in := parseJSON(inputJSON)
 		def, _ := sm["definition"].(string)
 		wr := p.walk(ctx, req, def, "", in)
 		for _, run := range wr.mapRuns {
@@ -264,9 +409,15 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		ob, _ := json.Marshal(wr.out)
 		rec := map[string]any{
 			"executionArn": execARN, "stateMachineArn": arn, "name": exName, "status": wr.status,
-			"startDate": float64(now), "input": first(req.Input, "input", "Input"),
+			"startDate": float64(now), "input": inputJSON,
 			"output": string(ob), "cause": wr.cause, "history": wr.hist, "definition": def,
 			"roleArn": sm["roleArn"], "revisionId": sm["revisionId"], "stateMachineName": name, "type": sm["type"],
+		}
+		if versionARN := first(sm, "_resolvedVersionArn"); versionARN != "" {
+			rec["stateMachineVersionArn"] = versionARN
+		}
+		if aliasARN := first(sm, "_resolvedAliasArn"); aliasARN != "" {
+			rec["stateMachineAliasArn"] = aliasARN
 		}
 		if wr.failedState != "" {
 			rec["redriveState"], rec["redriveInput"] = wr.failedState, wr.failedInput
@@ -602,7 +753,11 @@ func (p *Pack) resolveStateMachine(ctx context.Context, req *spi.Request, arn st
 	}
 	qualifier = strings.TrimPrefix(qualifier, ":")
 	if _, err := strconv.Atoi(qualifier); err == nil {
-		return getRecord(ctx, p.col(req, "ver"), name+":"+qualifier)
+		machine, ok := getRecord(ctx, p.col(req, "ver"), name+":"+qualifier)
+		if ok {
+			machine["_resolvedVersionArn"] = arn
+		}
+		return machine, ok
 	}
 	alias, ok := getRecord(ctx, p.col(req, "alias"), arn)
 	if !ok {
@@ -615,7 +770,11 @@ func (p *Pack) resolveStateMachine(ctx context.Context, req *spi.Request, arn st
 		total += int(inputNumber(route, "weight", "Weight"))
 		if pick < total {
 			versionARN := first(route, "stateMachineVersionArn", "StateMachineVersionArn")
-			return getRecord(ctx, p.col(req, "ver"), baseSMName(versionARN)+":"+strconv.Itoa(versionNumber(versionARN)))
+			machine, ok := getRecord(ctx, p.col(req, "ver"), baseSMName(versionARN)+":"+strconv.Itoa(versionNumber(versionARN)))
+			if ok {
+				machine["_resolvedVersionArn"], machine["_resolvedAliasArn"] = versionARN, arn
+			}
+			return machine, ok
 		}
 	}
 	return nil, false
@@ -1823,8 +1982,17 @@ func asSlice(v any) []any {
 }
 
 func aliasRoutes(input map[string]any) []any {
-	value, _ := inputValue(input, "routingConfiguration", "RoutingConfiguration")
+	return inputSlice(input, "routingConfiguration", "RoutingConfiguration")
+}
+
+func inputSlice(input map[string]any, keys ...string) []any {
+	value, _ := inputValue(input, keys...)
 	return asSlice(value)
+}
+
+func inputBool(input map[string]any, keys ...string) bool {
+	value, _ := inputValue(input, keys...)
+	return toBool(value)
 }
 
 func inputValue(input map[string]any, keys ...string) (any, bool) {
@@ -1860,6 +2028,11 @@ func listCol(ctx context.Context, c spi.Collection, key string) (*spi.Response, 
 		var rec map[string]any
 		_ = json.Unmarshal(kv.Value, &rec)
 		delete(rec, "history")
+		for field := range rec {
+			if strings.HasPrefix(field, "_") {
+				delete(rec, field)
+			}
+		}
 		items = append(items, rec)
 	}
 	return &spi.Response{Output: map[string]any{key: items}}, nil
@@ -2055,6 +2228,18 @@ func validAliasName(name string) bool {
 		}
 	}
 	return hasNonDigit
+}
+
+func validExecutionName(name string) bool {
+	if len(name) < 1 || len(name) > 80 || !utf8.ValidString(name) {
+		return false
+	}
+	for _, char := range name {
+		if char < ' ' || char >= 0x7f && char <= 0x9f || char == 0xfffe || char == 0xffff || strings.ContainsRune(" <>{}[]?*\"#%\\^|~`+$&,:/", char) {
+			return false
+		}
+	}
+	return true
 }
 
 func actName(arn string) string {

@@ -510,6 +510,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestDistributedMapRuns",
 		},
 		{
+			name: "states-reuse-parent-context-for-map-child",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `walkRequest = &copy`,
+			new:  `walkRequest = req`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesJSONataErrorsAndFields",
+		},
+		{
 			name: "states-disable-sync-integration",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `resource, syncJSON, syncJob := syncTaskResource(resource)`,

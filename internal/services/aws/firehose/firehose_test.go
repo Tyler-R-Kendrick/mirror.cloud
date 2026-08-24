@@ -650,7 +650,7 @@ func TestOpenSearchBufferRetryPersistence(t *testing.T) {
 		t.Fatal("delivered OpenSearch buffer blob remained persisted")
 	}
 
-	create("retrying", destination("retrying", 0, 4))
+	create("retrying", destination("retrying", 0, 10))
 	retryPut := call(p, "PutRecord", map[string]any{"DeliveryStreamName": "retrying", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"retry":true}`))}})
 	retryID := first(retryPut.Output, "RecordId")
 	items, _, _ = work.List(context.Background(), "retrying/retry/", "", 0)
@@ -659,12 +659,23 @@ func TestOpenSearchBufferRetryPersistence(t *testing.T) {
 	}
 	var retry searchWork
 	_ = json.Unmarshal(items[0].Value, &retry)
+	if err := deps.Clock.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	wait("failed OpenSearch retry state was not updated", func() bool {
+		items, _, _ := work.List(context.Background(), "retrying/retry/", "", 0)
+		if len(items) != 1 {
+			return false
+		}
+		var retry searchWork
+		return json.Unmarshal(items[0].Value, &retry) == nil && retry.Retries == 1
+	})
 	if err := p.Close(); err != nil {
 		t.Fatal(err)
 	}
 	call(search, "CreateDomain", map[string]any{"DomainName": "retrying"})
 	p = New(deps)
-	if err := deps.Clock.Advance(2 * time.Second); err != nil {
+	if err := deps.Clock.Advance(3 * time.Second); err != nil {
 		t.Fatal(err)
 	}
 	wait("persisted OpenSearch retry did not run", func() bool {
@@ -691,7 +702,7 @@ func TestOpenSearchBufferRetryPersistence(t *testing.T) {
 	if err := deps.Clock.Advance(2 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	expiredKey := id.Account + "/" + id.Region + "/out/backup/AmazonOpenSearchService-failed/1970/01/01/00/expired-1-1970-01-01-00-00-14-" + expiredID
+	expiredKey := id.Account + "/" + id.Region + "/out/backup/AmazonOpenSearchService-failed/1970/01/01/00/expired-1-1970-01-01-00-00-17-" + expiredID
 	wait("expired OpenSearch document was not backed up", func() bool {
 		_, _, err := deps.Blobs.Get(context.Background(), expiredKey)
 		return err == nil
@@ -704,7 +715,7 @@ func TestOpenSearchBufferRetryPersistence(t *testing.T) {
 	_ = reader.Close()
 	var failure map[string]any
 	_ = json.Unmarshal(body, &failure)
-	if first(failure, "errorCode") != "400" || first(failure, "esDocumentId") != expiredID || first(failure, "esIndexName") != "events-1970-01-01" || first(failure, "rawData") != base64.StdEncoding.EncodeToString([]byte(`{"expired":true}`)) || first(failure, "arrivalTimestamp") != "1970-01-01T00:00:12Z" {
+	if first(failure, "errorCode") != "400" || first(failure, "esDocumentId") != expiredID || first(failure, "esIndexName") != "events-1970-01-01" || first(failure, "rawData") != base64.StdEncoding.EncodeToString([]byte(`{"expired":true}`)) || first(failure, "arrivalTimestamp") != "1970-01-01T00:00:15Z" {
 		t.Fatalf("OpenSearch failure envelope %#v", failure)
 	}
 	wait("expired OpenSearch retry remained persisted", func() bool {
@@ -741,6 +752,30 @@ func TestOpenSearchBufferRetryPersistence(t *testing.T) {
 	}
 	if _, _, err := deps.Blobs.Get(context.Background(), deleted.DataKey); err == nil {
 		t.Fatal("deleted stream retained OpenSearch work blob")
+	}
+}
+
+func TestOpenSearchHelpers(t *testing.T) {
+	now := time.Date(2024, time.February, 29, 15, 4, 5, 0, time.UTC)
+	for _, test := range []struct {
+		rotation, expected string
+	}{
+		{"NoRotation", "events"},
+		{"OneHour", "events-2024-02-29-15"},
+		{"OneDay", "events-2024-02-29"},
+		{"OneWeek", "events-2024-w09"},
+		{"OneMonth", "events-2024-02"},
+	} {
+		if index := elasticsearchIndex(map[string]any{"IndexName": "events", "IndexRotationPeriod": test.rotation}, now); index != test.expected {
+			t.Errorf("%s index %q", test.rotation, index)
+		}
+	}
+	endpoint := map[string]any{"ClusterEndpoint": "https://logs.us-east-1.es.localhost.localstack.cloud"}
+	if domain := elasticsearchDomain(endpoint); domain != "logs" {
+		t.Fatalf("endpoint domain %q", domain)
+	}
+	if interval, size := searchBufferingHints(nil); interval != 300*time.Second || size != 5*1024*1024 {
+		t.Fatalf("default buffering hints %v %d", interval, size)
 	}
 }
 

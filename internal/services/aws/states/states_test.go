@@ -1113,6 +1113,95 @@ func TestStatesRetryScheduling(t *testing.T) {
 	}
 }
 
+func TestStatesExecutionTimeout(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	activityARN := invoke("CreateActivity", map[string]any{"name": "execution-timeout"})["activityArn"].(string)
+	definition := `{"TimeoutSeconds":2,"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"` + activityARN + `","End":true}}}`
+	machine := invoke("CreateStateMachine", map[string]any{"name": "execution-timeout", "definition": definition, "roleArn": testRoleARN})
+	executionARN := invoke("StartExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"]})["executionArn"].(string)
+	token := invoke("GetActivityTask", map[string]any{"activityArn": activityARN})["taskToken"].(string)
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p = New(deps)
+	if err := deps.Clock.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if execution := invoke("DescribeExecution", map[string]any{"executionArn": executionARN}); execution["status"] != "RUNNING" {
+		t.Fatalf("execution timed out early %#v", execution)
+	}
+	if err := deps.Clock.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	var execution map[string]any
+	for range 100 {
+		execution = invoke("DescribeExecution", map[string]any{"executionArn": executionARN})
+		if execution["status"] == "TIMED_OUT" {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if execution["status"] != "TIMED_OUT" || execution["error"] != "States.Timeout" || execution["cause"] != "States.Timeout" {
+		t.Fatalf("execution did not time out %#v", execution)
+	}
+	history := invoke("GetExecutionHistory", map[string]any{"executionArn": executionARN})["events"].([]any)
+	if history[len(history)-1].(map[string]any)["type"] != "ExecutionTimedOut" {
+		t.Fatalf("timeout history %#v", history)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendTaskSuccess", Input: map[string]any{"taskToken": token, "output": `{}`}}); err == nil {
+		t.Fatal("timed-out activity token remained valid")
+	}
+
+	expressDefinition := `{"TimeoutSeconds":2,"StartAt":"Wait","States":{"Wait":{"Type":"Wait","Seconds":10,"End":true}}}`
+	express := invoke("CreateStateMachine", map[string]any{"name": "sync-execution-timeout", "definition": expressDefinition, "roleArn": testRoleARN, "type": "EXPRESS"})
+	result := make(chan map[string]any, 1)
+	go func() {
+		result <- invoke("StartSyncExecution", map[string]any{"stateMachineArn": express["stateMachineArn"]})
+	}()
+	select {
+	case early := <-result:
+		t.Fatalf("Express execution timeout completed early %#v", early)
+	case <-time.After(10 * time.Millisecond):
+	}
+	if err := deps.Clock.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case finished := <-result:
+		if finished["status"] != "TIMED_OUT" || finished["error"] != "States.Timeout" {
+			t.Fatalf("Express execution timeout %#v", finished)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Express execution timeout did not fire")
+	}
+
+	start := time.Unix(0, 0).UTC()
+	if got := executionDeadline(`{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`, "STANDARD", start); got != start.Add(365*24*time.Hour).Format(time.RFC3339Nano) {
+		t.Fatalf("Standard quota deadline %s", got)
+	}
+	if got := executionDeadline(`{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`, "EXPRESS", start); got != start.Add(5*time.Minute).Format(time.RFC3339Nano) {
+		t.Fatalf("Express quota deadline %s", got)
+	}
+	for _, timeout := range []string{"0", "1.5", `"2"`, "100000000"} {
+		invalid := `{"TimeoutSeconds":` + timeout + `,"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`
+		if diagnostics := validateDefinition(invalid); len(diagnostics) != 1 {
+			t.Fatalf("TimeoutSeconds %s diagnostics %#v", timeout, diagnostics)
+		}
+	}
+}
+
 func TestStatesJSONataErrorsAndFields(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

@@ -136,23 +136,58 @@ func (p *Pack) runDueWaits(ctx context.Context) time.Time {
 		}
 		for _, kv := range kvs {
 			var wait pending
-			if json.Unmarshal(kv.Value, &wait) != nil || wait.WaitUntil == "" {
+			if json.Unmarshal(kv.Value, &wait) != nil || wait.WaitUntil == "" && wait.Deadline == "" {
 				continue
 			}
-			due, err := time.Parse(time.RFC3339Nano, wait.WaitUntil)
-			if err != nil {
+			var due, deadline time.Time
+			if wait.WaitUntil != "" {
+				due, _ = time.Parse(time.RFC3339Nano, wait.WaitUntil)
+			}
+			if wait.Deadline != "" {
+				deadline, _ = time.Parse(time.RFC3339Nano, wait.Deadline)
+			}
+			next := due
+			if next.IsZero() || !deadline.IsZero() && deadline.Before(next) {
+				next = deadline
+			}
+			if next.IsZero() {
 				continue
 			}
-			if due.After(now) {
-				if earliest.IsZero() || due.Before(earliest) {
-					earliest = due
+			if next.After(now) {
+				if earliest.IsZero() || next.Before(earliest) {
+					earliest = next
 				}
 				continue
 			}
-			p.resumeWait(ctx, request, kv.Key, wait)
+			if !deadline.IsZero() && (due.IsZero() || !due.Before(deadline)) {
+				p.timeoutExecution(ctx, request, kv.Key, wait)
+			} else {
+				p.resumeWait(ctx, request, kv.Key, wait)
+			}
 		}
 	}
 	return earliest
+}
+
+func (p *Pack) timeoutExecution(ctx context.Context, req *spi.Request, token string, wait pending) {
+	encoded, found, _ := p.col(req, "ex").Get(ctx, wait.ExecARN)
+	if !found {
+		_ = p.col(req, "pending").Delete(ctx, token)
+		return
+	}
+	var record map[string]any
+	if json.Unmarshal(encoded, &record) != nil || first(record, "status") != "RUNNING" || first(record, "pendingToken") != token {
+		_ = p.col(req, "pending").Delete(ctx, token)
+		return
+	}
+	record["status"], record["error"], record["cause"] = "TIMED_OUT", "States.Timeout", "States.Timeout"
+	record["stopDate"] = float64(p.deps.Clock.Now().Unix())
+	history := asSlice(record["history"])
+	record["history"] = append(history, map[string]any{"type": "ExecutionTimedOut", "id": len(history) + 1, "error": "States.Timeout", "cause": "States.Timeout"})
+	delete(record, "pendingToken")
+	body, _ := json.Marshal(record)
+	_ = p.col(req, "ex").Put(ctx, wait.ExecARN, body)
+	_ = p.col(req, "pending").Delete(ctx, token)
 }
 
 func (p *Pack) resumeWait(ctx context.Context, req *spi.Request, token string, wait pending) {
@@ -170,7 +205,7 @@ func (p *Pack) resumeWait(ctx context.Context, req *spi.Request, token string, w
 	walkRequest.Input = map[string]any{
 		"_stateMachineArn": record["stateMachineArn"], "_executionArn": wait.ExecARN, "_executionName": record["name"],
 		"_executionInput": parseJSON(first(record, "input")), "_executionStartTime": time.Unix(int64(toFloat(record["startDate"])), 0).UTC().Format(time.RFC3339),
-		"_executionRoleArn": record["roleArn"], "_executionType": record["type"], "_executionRedriveCount": record["redriveCount"],
+		"_executionRoleArn": record["roleArn"], "_executionType": record["type"], "_executionRedriveCount": record["redriveCount"], "_executionDeadline": wait.Deadline,
 	}
 	definition, from := wait.Definition, wait.StateName
 	var retries map[string]map[int]int
@@ -626,6 +661,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		walkRequest.Input["_executionRoleArn"] = sm["roleArn"]
 		walkRequest.Input["_executionType"] = sm["type"]
 		walkRequest.Input["_executionRedriveCount"] = 0.0
+		walkRequest.Input["_executionDeadline"] = executionDeadline(def, first(sm, "type"), p.deps.Clock.Now())
 		wr := p.walk(ctx, &walkRequest, def, "", in, nil)
 		baseARN := p.smARN(req, name)
 		for _, run := range wr.mapRuns {
@@ -1188,7 +1224,7 @@ func (p *Pack) validateAliasRoutes(ctx context.Context, req *spi.Request, routes
 
 type pending struct {
 	Token, ActivityARN, StateName, ExecARN, Definition string
-	WaitUntil                                          string
+	WaitUntil, Deadline                                string
 	Input, StateInput                                  any
 	Retries                                            map[int]int
 	Variables                                          map[string]any
@@ -1267,6 +1303,7 @@ func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64
 	walkRequest.Input["_executionType"] = record["type"]
 	walkRequest.Input["_executionRedriveCount"] = toFloat(record["redriveCount"]) + 1
 	walkRequest.Input["_executionRedriveTime"] = p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)
+	walkRequest.Input["_executionDeadline"] = executionDeadline(string(redriveDefinition), first(record, "type"), p.deps.Clock.Now())
 	result := p.walk(ctx, &walkRequest, string(redriveDefinition), "", input, nil)
 	output, _ := json.Marshal(result.out)
 	record["status"], record["output"], record["cause"] = result.status, string(output), result.cause
@@ -1370,6 +1407,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	walkRequest.Input["_executionRoleArn"] = rec["roleArn"]
 	walkRequest.Input["_executionType"] = rec["type"]
 	walkRequest.Input["_executionRedriveCount"] = rec["redriveCount"]
+	walkRequest.Input["_executionDeadline"] = pend.Deadline
 	persistRetry := func(delay time.Duration) bool {
 		scheduled := p.scheduleRetry(ctx, &walkRequest, pend.StateName, pend.StateInput, pend.Retries, pend.Variables, delay, nil)
 		if scheduled == nil {
@@ -1572,6 +1610,9 @@ func (p *Pack) walk(ctx context.Context, req *spi.Request, def, from string, inp
 	}
 walkLoop:
 	for hop := 0; hop < 64; hop++ {
+		if deadline, err := time.Parse(time.RFC3339Nano, first(req.Input, "_executionDeadline")); err == nil && !p.deps.Clock.Now().Before(deadline) {
+			return walkResult{out: data, status: "TIMED_OUT", cause: "States.Timeout", errorName: "States.Timeout", hist: hist}
+		}
 		st, ok := states[cur].(map[string]any)
 		if !ok {
 			return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
@@ -1775,7 +1816,7 @@ walkLoop:
 				if failure.name == "" && strings.Contains(res, ":activity:") {
 					tok := p.deps.Rand.Hex(16)
 					return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
-						Token: tok, ActivityARN: res, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Variables: variables,
+						Token: tok, ActivityARN: res, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Variables: variables, Deadline: first(req.Input, "_executionDeadline"),
 					}}
 				}
 				if failure.name == "" {
@@ -1787,7 +1828,7 @@ walkLoop:
 						failure = taskFailure(errorPrefix, sdk, err)
 					} else if callback {
 						return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
-							Token: token, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Variables: variables, Callback: true,
+							Token: token, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Variables: variables, Callback: true, Deadline: first(req.Input, "_executionDeadline"),
 						}}
 					} else if isJSONata {
 						data, ok = applyJSONataState(st, rawInput, out, stateContext, variables, p.deps.Rand)
@@ -2124,6 +2165,7 @@ walkLoop:
 							copy.Input["_executionRoleArn"] = req.Input["_executionRoleArn"]
 							copy.Input["_executionType"] = executionType
 							copy.Input["_executionRedriveCount"] = 0.0
+							copy.Input["_executionDeadline"] = executionDeadline(string(idef), executionType, p.deps.Clock.Now())
 							walkRequest = &copy
 						}
 						childVariables := maps.Clone(variables)
@@ -2269,14 +2311,18 @@ walkLoop:
 		}
 		if waitUntil.After(p.deps.Clock.Now()) {
 			if first(req.Input, "_executionType") == "EXPRESS" {
+				delay, timeout := p.executionDelay(req, waitUntil.Sub(p.deps.Clock.Now()))
 				select {
-				case <-p.deps.Clock.After(waitUntil.Sub(p.deps.Clock.Now())):
+				case <-p.deps.Clock.After(delay):
+					if timeout {
+						return walkResult{out: data, status: "TIMED_OUT", cause: "States.Timeout", errorName: "States.Timeout", hist: hist}
+					}
 				case <-ctx.Done():
 					return walkResult{out: data, status: "FAILED", cause: "States.Timeout", errorName: "States.Timeout", hist: hist}
 				}
 			} else {
 				return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
-					Token: p.deps.Rand.Hex(16), StateName: cur, StateInput: data, Variables: variables, WaitUntil: waitUntil.UTC().Format(time.RFC3339Nano),
+					Token: p.deps.Rand.Hex(16), StateName: cur, StateInput: data, Variables: variables, WaitUntil: waitUntil.UTC().Format(time.RFC3339Nano), Deadline: first(req.Input, "_executionDeadline"),
 				}}
 			}
 		}
@@ -2355,14 +2401,44 @@ func retryTask(st map[string]any, name string, attempts map[int]int, random spi.
 	return 0, false
 }
 
+func executionDeadline(definition, executionType string, start time.Time) string {
+	limit := 365 * 24 * time.Hour
+	if executionType == "EXPRESS" {
+		limit = 5 * time.Minute
+	}
+	var machine map[string]any
+	if json.Unmarshal([]byte(definition), &machine) == nil {
+		if seconds, ok := exactNumber(machine["TimeoutSeconds"]); ok {
+			limit = min(limit, time.Duration(seconds*float64(time.Second)))
+		}
+	}
+	return start.Add(limit).UTC().Format(time.RFC3339Nano)
+}
+
+func (p *Pack) executionDelay(req *spi.Request, delay time.Duration) (time.Duration, bool) {
+	deadline, err := time.Parse(time.RFC3339Nano, first(req.Input, "_executionDeadline"))
+	if err != nil {
+		return delay, false
+	}
+	remaining := deadline.Sub(p.deps.Clock.Now())
+	if remaining <= delay {
+		return max(time.Duration(0), remaining), true
+	}
+	return delay, false
+}
+
 func (p *Pack) scheduleRetry(ctx context.Context, req *spi.Request, state string, input any, attempts map[int]int, variables map[string]any, delay time.Duration, hist []any) *walkResult {
 	if delay <= 0 {
 		return nil
 	}
 	switch first(req.Input, "_executionType") {
 	case "EXPRESS":
+		delay, timeout := p.executionDelay(req, delay)
 		select {
 		case <-p.deps.Clock.After(delay):
+			if timeout {
+				return &walkResult{out: input, status: "TIMED_OUT", cause: "States.Timeout", errorName: "States.Timeout", hist: hist}
+			}
 			return nil
 		case <-ctx.Done():
 			return &walkResult{out: input, status: "FAILED", cause: "States.Timeout", errorName: "States.Timeout", hist: hist}
@@ -2370,7 +2446,7 @@ func (p *Pack) scheduleRetry(ctx context.Context, req *spi.Request, state string
 	case "STANDARD":
 		return &walkResult{out: input, status: "RUNNING", hist: hist, pending: &pending{
 			Token: p.deps.Rand.Hex(16), StateName: state, StateInput: input, Retries: attempts, Variables: variables, Retry: true,
-			WaitUntil: p.deps.Clock.Now().Add(delay).UTC().Format(time.RFC3339Nano),
+			WaitUntil: p.deps.Clock.Now().Add(delay).UTC().Format(time.RFC3339Nano), Deadline: first(req.Input, "_executionDeadline"),
 		}}
 	default:
 		return nil
@@ -4426,6 +4502,12 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 	}
 	if _, exists := states[start]; start == "" || !exists {
 		add("MISSING_TRANSITION_TARGET", "StartAt must name a state.", "/StartAt")
+	}
+	if value, exists := machine["TimeoutSeconds"]; location == "" && exists {
+		seconds, numeric := exactNumber(value)
+		if !numeric || seconds != math.Trunc(seconds) || seconds < 1 || seconds > 99999999 {
+			add("SCHEMA_VALIDATION_FAILED", "TimeoutSeconds must be a positive integer.", "/TimeoutSeconds")
+		}
 	}
 	outerVariables := map[string]struct{}{}
 	if len(inheritedVariables) != 0 {

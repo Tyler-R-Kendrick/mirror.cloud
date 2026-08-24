@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"reflect"
 	"slices"
@@ -2419,9 +2420,8 @@ func intrinsicNumber(value any) (float64, bool) {
 
 func (p *Pack) invokeTask(ctx context.Context, req *spi.Request, resource string, payload any) (any, error, string, bool, bool) {
 	callback := strings.HasSuffix(resource, ".waitForTaskToken")
-	syncJob := strings.HasSuffix(resource, ".sync")
+	resource, syncJSON, syncJob := syncTaskResource(resource)
 	resource = strings.TrimSuffix(resource, ".waitForTaskToken")
-	resource = strings.TrimSuffix(resource, ".sync")
 	if callback && !callbackIntegration(resource) {
 		return nil, nil, "", false, false
 	}
@@ -2441,9 +2441,32 @@ func (p *Pack) invokeTask(ctx context.Context, req *spi.Request, resource string
 		return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}, prefix, sdk, true
 	}
 	if service == "states" {
+		input = maps.Clone(input)
+		if nestedInput, exists := input["Input"]; exists {
+			if _, encoded := nestedInput.(string); !encoded {
+				body, err := json.Marshal(nestedInput)
+				if err != nil {
+					return nil, err, prefix, sdk, true
+				}
+				input["Input"] = string(body)
+			}
+		}
 		response, err := p.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: operation, Input: input})
 		if response == nil {
 			return nil, err, prefix, sdk, true
+		}
+		if err == nil && syncJob {
+			described, describeErr := p.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "DescribeExecution", Input: map[string]any{"executionArn": response.Output["executionArn"]}})
+			if describeErr != nil {
+				return nil, describeErr, prefix, sdk, true
+			}
+			if described == nil {
+				return nil, errors.New("nested execution returned no result"), prefix, sdk, true
+			}
+			if first(described.Output, "status") != "SUCCEEDED" {
+				return nil, errors.New(first(described.Output, "cause", "error", "status")), prefix, sdk, true
+			}
+			return nestedExecutionOutput(described.Output, syncJSON), nil, prefix, sdk, true
 		}
 		return response.Output, err, prefix, sdk, true
 	}
@@ -2488,11 +2511,33 @@ func syncIntegration(resource string) bool {
 	switch resource {
 	case "arn:aws:states:::batch:submitJob", "arn:aws:states:::codebuild:startBuild",
 		"arn:aws:states:::glue:startJobRun", "arn:aws:states:::elasticmapreduce:addStep",
-		"arn:aws:states:::elasticmapreduce:createCluster":
+		"arn:aws:states:::elasticmapreduce:createCluster", "arn:aws:states:::states:startExecution":
 		return true
 	default:
 		return false
 	}
+}
+
+func syncTaskResource(resource string) (string, bool, bool) {
+	if strings.HasSuffix(resource, ".sync:2") {
+		return strings.TrimSuffix(resource, ".sync:2"), true, true
+	}
+	if strings.HasSuffix(resource, ".sync") {
+		return strings.TrimSuffix(resource, ".sync"), false, true
+	}
+	return resource, false, false
+}
+
+func nestedExecutionOutput(execution map[string]any, jsonOutput bool) map[string]any {
+	output := map[string]any{
+		"ExecutionArn": execution["executionArn"], "Input": execution["input"], "InputDetails": map[string]any{"Included": true},
+		"Name": execution["name"], "Output": execution["output"], "OutputDetails": map[string]any{"Included": true},
+		"StartDate": execution["startDate"], "StateMachineArn": execution["stateMachineArn"], "Status": execution["status"], "StopDate": execution["stopDate"],
+	}
+	if jsonOutput {
+		output["Output"] = parseJSON(first(execution, "output"))
+	}
+	return output
 }
 
 func taskIntegration(resource string) (service, operation, prefix string, sdk, ok bool) {
@@ -3074,11 +3119,10 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 		if resource := first(state, "Resource"); machineType == "EXPRESS" && strings.HasSuffix(resource, ".waitForTaskToken") {
 			add("SCHEMA_VALIDATION_FAILED", "Express workflows do not support the callback integration pattern.", "/States/"+name+"/Resource")
 		}
-		if resource := first(state, "Resource"); typ == "Task" && strings.HasSuffix(resource, ".sync") &&
-			!syncIntegration(strings.TrimSuffix(resource, ".sync")) {
+		if resource, _, syncJob := syncTaskResource(first(state, "Resource")); typ == "Task" && syncJob && !syncIntegration(resource) {
 			add("SCHEMA_VALIDATION_FAILED", "Resource does not support the Run a Job integration pattern.", "/States/"+name+"/Resource")
 		}
-		if resource := first(state, "Resource"); machineType == "EXPRESS" && strings.HasSuffix(resource, ".sync") {
+		if _, _, syncJob := syncTaskResource(first(state, "Resource")); machineType == "EXPRESS" && syncJob {
 			add("SCHEMA_VALIDATION_FAILED", "Express workflows do not support the Run a Job integration pattern.", "/States/"+name+"/Resource")
 		}
 		checkTarget := func(raw any, path string) {

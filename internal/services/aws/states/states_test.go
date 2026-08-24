@@ -936,8 +936,23 @@ func TestStatesSyncServiceIntegrations(t *testing.T) {
 	if steps := must(emr.New(deps), "ListSteps", map[string]any{"ClusterId": "j-test"})["Steps"].([]any); len(steps) != 1 {
 		t.Fatalf("emr sync steps %#v", steps)
 	}
+	childDefinition := `{"StartAt":"Done","States":{"Done":{"Type":"Pass","Result":{"ok":true},"End":true}}}`
+	child := must(p, "CreateStateMachine", map[string]any{"name": "sync-child", "definition": childDefinition, "roleArn": testRoleARN})
+	parentDefinition := `{"StartAt":"String","States":{"String":{"Type":"Task","Resource":"arn:aws:states:::states:startExecution.sync","Parameters":{"StateMachineArn":"` + child["stateMachineArn"].(string) + `","Input":{"value":1}},"ResultPath":"$.string","Next":"JSON"},"JSON":{"Type":"Task","Resource":"arn:aws:states:::states:startExecution.sync:2","Parameters":{"StateMachineArn":"` + child["stateMachineArn"].(string) + `","Input":{"value":2}},"ResultPath":"$.json","End":true}}}`
+	parent := must(p, "CreateStateMachine", map[string]any{"name": "sync-parent", "definition": parentDefinition, "roleArn": testRoleARN})
+	parentExecutionARN := must(p, "StartExecution", map[string]any{"stateMachineArn": parent["stateMachineArn"]})["executionArn"].(string)
+	parentExecution := must(p, "DescribeExecution", map[string]any{"executionArn": parentExecutionARN})
+	var nested map[string]any
+	_ = json.Unmarshal([]byte(parentExecution["output"].(string)), &nested)
+	stringResult, jsonResult := nested["string"].(map[string]any), nested["json"].(map[string]any)
+	if parentExecution["status"] != "SUCCEEDED" || stringResult["Output"] != `{"ok":true}` || stringResult["Input"] != `{"value":1}` || jsonResult["Output"].(map[string]any)["ok"] != true {
+		t.Fatalf("nested sync execution %#v %#v", parentExecution, nested)
+	}
 	if _, err := call(p, "CreateStateMachine", map[string]any{"name": "express-sync", "definition": definition, "roleArn": testRoleARN, "type": "EXPRESS"}); err == nil {
 		t.Fatal("Express .sync integration accepted")
+	}
+	if _, err := call(p, "CreateStateMachine", map[string]any{"name": "express-sync-json", "definition": parentDefinition, "roleArn": testRoleARN, "type": "EXPRESS"}); err == nil {
+		t.Fatal("Express .sync:2 integration accepted")
 	}
 	invalid := `{"StartAt":"Queue","States":{"Queue":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage.sync","End":true}}}`
 	if _, err := call(p, "CreateStateMachine", map[string]any{"name": "invalid-sync", "definition": invalid, "roleArn": testRoleARN}); err == nil {

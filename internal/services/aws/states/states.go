@@ -4578,6 +4578,16 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 	add := func(code, message, path string) {
 		*diagnostics = append(*diagnostics, map[string]any{"severity": "ERROR", "code": code, "message": message, "location": location + path})
 	}
+	if comment, exists := machine["Comment"]; exists {
+		if _, valid := comment.(string); !valid {
+			add("SCHEMA_VALIDATION_FAILED", "Comment must be a string.", "/Comment")
+		}
+	}
+	if version, exists := machine["Version"]; exists {
+		if value, valid := version.(string); !valid || value != "1.0" {
+			add("SCHEMA_VALIDATION_FAILED", "Version must be 1.0.", "/Version")
+		}
+	}
 	queryLanguage := first(machine, "QueryLanguage")
 	if queryLanguage == "" {
 		queryLanguage = "JSONPath"
@@ -4631,6 +4641,14 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 		if !ok {
 			add("SCHEMA_VALIDATION_FAILED", "State must be an object.", "/States/"+name)
 			continue
+		}
+		if utf8.RuneCountInString(name) > 80 {
+			add("SCHEMA_VALIDATION_FAILED", "State name must not exceed 80 characters.", "/States/"+name)
+		}
+		if comment, exists := state["Comment"]; exists {
+			if _, valid := comment.(string); !valid {
+				add("SCHEMA_VALIDATION_FAILED", "Comment must be a string.", "/States/"+name+"/Comment")
+			}
 		}
 		typ, _ := state["Type"].(string)
 		stateQueryLanguage := first(state, "QueryLanguage")

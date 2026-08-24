@@ -1413,7 +1413,11 @@ walkLoop:
 			} else {
 				result := data
 				if params, ok := st["Parameters"].(map[string]any); ok {
-					result = applyParams(params, data, stateContext, p.deps.Rand, variables)
+					var valid bool
+					result, valid = applyParamsValidated(params, data, stateContext, p.deps.Rand, variables)
+					if !valid {
+						return walkResult{out: rawInput, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
+					}
 				} else if value, ok := st["Result"]; ok {
 					result = value
 				}
@@ -1509,8 +1513,11 @@ walkLoop:
 			}
 			for {
 				setJSONataRetryCount(stateContext, retries[cur])
-				payload := taskPayload(st, data, mergeJSONataContext(stateContext, taskContext), p.deps.Rand, variables)
+				payload, payloadOK := taskPayload(st, data, mergeJSONataContext(stateContext, taskContext), p.deps.Rand, variables)
 				failure := stateFailure{}
+				if !payloadOK {
+					failure = stateFailure{name: "States.Runtime", cause: "States.Runtime"}
+				}
 				taskReq := req
 				if _, exists := st["Credentials"]; exists {
 					var scope *jsonataScope
@@ -1657,7 +1664,11 @@ walkLoop:
 			stateInput := rawInput
 			branchInput := data
 			if params, ok := st["Parameters"].(map[string]any); ok && !isJSONata {
-				branchInput = applyParams(params, data, stateContext, p.deps.Rand, variables)
+				var valid bool
+				branchInput, valid = applyParamsValidated(params, data, stateContext, p.deps.Rand, variables)
+				if !valid {
+					return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
+				}
 			}
 			if retries[cur] == nil {
 				retries[cur] = map[int]int{}
@@ -1834,7 +1845,11 @@ walkLoop:
 						}
 						itemContext := map[string]any{"Map": map[string]any{"Item": itemDetails}}
 						if selected, valid := selector.(map[string]any); valid && !isJSONata {
-							arr[index] = applyParams(selected, data, mergeJSONataContext(stateContext, itemContext), p.deps.Rand, mapVariables)
+							arr[index], itemsOK = applyParamsValidated(selected, data, mergeJSONataContext(stateContext, itemContext), p.deps.Rand, mapVariables)
+							if !itemsOK {
+								failed = &walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime"}
+								break
+							}
 						} else if selector != nil {
 							arr[index], itemsOK = evalJSONataValue(selector, jsonataScope{
 								input: rawInput, context: mergeJSONataContext(stateContext, itemContext), variables: mapVariables, random: p.deps.Rand,
@@ -2218,7 +2233,11 @@ func applyResultPath(state map[string]any, input, result any) (any, bool) {
 
 func applyStateResult(state map[string]any, input, result any, context map[string]any, random spi.Rand, variables ...map[string]any) (any, bool) {
 	if selector, ok := state["ResultSelector"].(map[string]any); ok {
-		result = applyParams(selector, result, context, random, variables...)
+		var valid bool
+		result, valid = applyParamsValidated(selector, result, context, random, variables...)
+		if !valid {
+			return input, false
+		}
 	}
 	return applyResultPath(state, input, result)
 }
@@ -2532,13 +2551,12 @@ func cloneJSON(value any) any {
 	}
 }
 
-func taskPayload(st map[string]any, data any, context map[string]any, random spi.Rand, variables ...map[string]any) any {
+func taskPayload(st map[string]any, data any, context map[string]any, random spi.Rand, variables ...map[string]any) (any, bool) {
 	params, ok := st["Parameters"].(map[string]any)
 	if !ok {
-		return data
+		return data, true
 	}
-	p := applyParams(params, data, context, random, variables...)
-	return p
+	return applyParamsValidated(params, data, context, random, variables...)
 }
 
 func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]any, data any, scope *jsonataScope, variables ...map[string]any) (any, string, bool) {
@@ -2559,10 +2577,14 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 		return nil, "", false
 	}
 	parameters, _ := reader["Parameters"].(map[string]any)
-	resolved := any(applyParams(parameters, data, nil, p.deps.Rand, variables...))
+	resolved, readerParametersOK := applyParamsValidated(parameters, data, nil, p.deps.Rand, variables...)
+	if !readerParametersOK {
+		return nil, "", false
+	}
+	var resolvedValue any = resolved
 	if scope != nil {
 		var valid bool
-		resolved, valid = evalJSONataValue(reader["Arguments"], *scope)
+		resolvedValue, valid = evalJSONataValue(reader["Arguments"], *scope)
 		if _, configured := reader["Arguments"]; !configured {
 			return nil, "States.QueryEvaluationError", false
 		}
@@ -2570,7 +2592,7 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			return nil, "States.QueryEvaluationError", false
 		}
 	}
-	input, valid := resolved.(map[string]any)
+	input, valid := resolvedValue.(map[string]any)
 	if !valid {
 		if scope != nil {
 			return nil, "States.QueryEvaluationError", false
@@ -2762,7 +2784,11 @@ func batchMapItems(state map[string]any, data any, items []any, random spi.Rand,
 			if !ok {
 				return nil, false
 			}
-			batchInput = applyParams(input, data, nil, random, variables...)
+			var valid bool
+			batchInput, valid = applyParamsValidated(input, data, nil, random, variables...)
+			if !valid {
+				return nil, false
+			}
 		}
 	}
 	makeBatch := func(values []any) map[string]any {
@@ -2914,7 +2940,10 @@ func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[
 		encoded, valid := encode(formatted)
 		return string(encoded), 0, valid, false
 	}
-	resolved := applyParams(parameters, data, nil, p.deps.Rand, variables...)
+	resolved, writerParametersOK := applyParamsValidated(parameters, data, nil, p.deps.Rand, variables...)
+	if !writerParametersOK {
+		return nil, 0, false, false
+	}
 	if scope != nil {
 		value, valid := evalJSONataValue(writer["Arguments"], *scope)
 		if !valid {
@@ -2969,7 +2998,10 @@ func taskIdentity(st map[string]any, data any, context map[string]any, variables
 	if !ok {
 		return identity, false
 	}
-	resolved := applyParams(credentials, data, context, random, variables)
+	resolved, parametersOK := applyParamsValidated(credentials, data, context, random, variables)
+	if !parametersOK {
+		return identity, false
+	}
 	if scope != nil {
 		value, valid := evalJSONataValue(credentials, *scope)
 		if !valid {
@@ -3018,17 +3050,32 @@ func applyParamsValidated(params map[string]any, data any, context map[string]an
 			}
 			continue
 		}
-		if m, ok := v.(map[string]any); ok {
+		var valid bool
+		out[k], valid = applyParamValue(v, data, context, random, variables...)
+		if !valid {
+			return nil, false
+		}
+	}
+	return out, true
+}
+
+func applyParamValue(value, data any, context map[string]any, random spi.Rand, variables ...map[string]any) (any, bool) {
+	switch value := value.(type) {
+	case map[string]any:
+		return applyParamsValidated(value, data, context, random, variables...)
+	case []any:
+		out := make([]any, len(value))
+		for index, item := range value {
 			var valid bool
-			out[k], valid = applyParamsValidated(m, data, context, random, variables...)
+			out[index], valid = applyParamValue(item, data, context, random, variables...)
 			if !valid {
 				return nil, false
 			}
-			continue
 		}
-		out[k] = v
+		return out, true
+	default:
+		return value, true
 	}
-	return out, true
 }
 
 func evalIntrinsic(expression string, data any, context map[string]any, random spi.Rand, variables ...map[string]any) (any, bool) {

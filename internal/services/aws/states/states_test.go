@@ -1812,8 +1812,12 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if choiceNext(choice, data) != "Default" {
 		t.Fatal("choice default")
 	}
-	params := taskPayload(map[string]any{"Parameters": map[string]any{"Payload": map[string]any{"value.$": "$.n"}, "nested": map[string]any{"value.$": "$.s"}}}, data, nil, p.deps.Rand)
-	if jsonPath(params, "$.Payload.value") != 2.0 || jsonPath(params, "$.nested.value") != "yes" || jsonPath(data, "$.missing.value") != nil || parseJSON("plain") != "plain" || toFloat(json.Number("3")) != 3 || !toBool("true") {
+	params, paramsOK := taskPayload(map[string]any{"Parameters": map[string]any{
+		"Payload": map[string]any{"value.$": "$.n"}, "nested": map[string]any{"value.$": "$.s"},
+		"list": []any{map[string]any{"value.$": "$.n"}, []any{map[string]any{"value.$": "$.s"}}},
+	}}, data, nil, p.deps.Rand)
+	_, missingParamsOK := taskPayload(map[string]any{"Parameters": map[string]any{"missing.$": "$.missing"}}, data, nil, p.deps.Rand)
+	if !paramsOK || missingParamsOK || jsonPath(params, "$.Payload.value") != 2.0 || jsonPath(params, "$.nested.value") != "yes" || jsonPath(params, "$.list[0].value") != 2.0 || jsonPath(params, "$.list[1][0].value") != "yes" || jsonPath(data, "$.missing.value") != nil || parseJSON("plain") != "plain" || toFloat(json.Number("3")) != 3 || !toBool("true") {
 		t.Fatal("data helpers")
 	}
 	intrinsicData := map[string]any{

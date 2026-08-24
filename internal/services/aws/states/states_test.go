@@ -434,7 +434,7 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 		if test.limit != 0 {
 			expected = test.limit
 		}
-		if execution["status"] != "SUCCEEDED" || strings.Count(output, `"source":"`+test.inputType+`"`) != expected || test.inputType == "PARQUET" && !strings.Contains(output, `"name":"Ada"`) || test.inputType == "CSV" && (!strings.Contains(output, `"name":""`) || !strings.Contains(output, `"path":"C:\\Program Files\\App.exe"`) || !strings.Contains(output, `"note":"say \"hi\""`) || strings.Contains(output, "ignored")) || test.pointer != "" && !strings.Contains(output, `"id":9`) || test.itemsPath != "" && !strings.Contains(output, `"id":13`) {
+		if execution["status"] != "SUCCEEDED" || strings.Count(output, `"source":"S3://items/`+test.key+`"`) != expected || test.inputType == "PARQUET" && !strings.Contains(output, `"name":"Ada"`) || test.inputType == "CSV" && (!strings.Contains(output, `"name":""`) || !strings.Contains(output, `"path":"C:\\Program Files\\App.exe"`) || !strings.Contains(output, `"note":"say \"hi\""`) || strings.Contains(output, "ignored")) || test.pointer != "" && !strings.Contains(output, `"id":9`) || test.itemsPath != "" && !strings.Contains(output, `"id":13`) {
 			t.Fatalf("%s ItemReader execution %#v", test.inputType, execution)
 		}
 	}
@@ -447,7 +447,7 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	manifestStarted := invoke(p, "StartExecution", map[string]any{"stateMachineArn": manifestMachine["stateMachineArn"]}, nil)
 	manifestExecution := invoke(p, "DescribeExecution", map[string]any{"executionArn": manifestStarted["executionArn"]}, nil)
 	manifestOutput := manifestExecution["output"].(string)
-	if manifestExecution["status"] != "SUCCEEDED" || strings.Count(manifestOutput, `"source":"JSONL"`) != 2 || !strings.Contains(manifestOutput, `"id":31`) || !strings.Contains(manifestOutput, `"id":32`) || strings.Contains(manifestOutput, `"id":33`) {
+	if manifestExecution["status"] != "SUCCEEDED" || !strings.Contains(manifestOutput, `"source":"S3://items/athena/a.jsonl"`) || !strings.Contains(manifestOutput, `"source":"S3://items/athena/b.jsonl"`) || !strings.Contains(manifestOutput, `"id":31`) || !strings.Contains(manifestOutput, `"id":32`) || strings.Contains(manifestOutput, `"id":33`) {
 		t.Fatalf("Athena manifest ItemReader execution %#v", manifestExecution)
 	}
 	manifestState["ItemReader"].(map[string]any)["Parameters"] = map[string]any{"Bucket": "items", "Key": "bad-manifest.csv"}
@@ -466,7 +466,7 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	listStarted := invoke(p, "StartExecution", map[string]any{"stateMachineArn": listMachine["stateMachineArn"]}, nil)
 	listExecution := invoke(p, "DescribeExecution", map[string]any{"executionArn": listStarted["executionArn"]}, nil)
 	listOutput := listExecution["output"].(string)
-	if listExecution["status"] != "SUCCEEDED" || strings.Count(listOutput, `"source":"S3_OBJECT_LIST"`) != 2 || !strings.Contains(listOutput, `"Key":"listed/a"`) || !strings.Contains(listOutput, `"StorageClass":"STANDARD_IA"`) {
+	if listExecution["status"] != "SUCCEEDED" || strings.Count(listOutput, `"source":"S3://items"`) != 2 || !strings.Contains(listOutput, `"Key":"listed/a"`) || !strings.Contains(listOutput, `"StorageClass":"STANDARD_IA"`) {
 		t.Fatalf("list ItemReader execution %#v", listExecution)
 	}
 	flattenState := map[string]any{
@@ -478,7 +478,7 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	flattenStarted := invoke(p, "StartExecution", map[string]any{"stateMachineArn": flattenMachine["stateMachineArn"]}, nil)
 	flattenExecution := invoke(p, "DescribeExecution", map[string]any{"executionArn": flattenStarted["executionArn"]}, nil)
 	flattenOutput := flattenExecution["output"].(string)
-	if flattenExecution["status"] != "SUCCEEDED" || strings.Count(flattenOutput, `"source":"JSON"`) != 2 || !strings.Contains(flattenOutput, `"key":"alpha"`) || !strings.Contains(flattenOutput, `"key":"beta"`) || !strings.Contains(flattenOutput, `"id":21`) || !strings.Contains(flattenOutput, `"id":22`) {
+	if flattenExecution["status"] != "SUCCEEDED" || !strings.Contains(flattenOutput, `"source":"S3://items/listed/a"`) || !strings.Contains(flattenOutput, `"source":"S3://items/listed/b"`) || !strings.Contains(flattenOutput, `"key":"alpha"`) || !strings.Contains(flattenOutput, `"key":"beta"`) || !strings.Contains(flattenOutput, `"id":21`) || !strings.Contains(flattenOutput, `"id":22`) {
 		t.Fatalf("flatten ItemReader execution %#v", flattenExecution)
 	}
 	flattenState["ItemSelector"] = map[string]any{"value.$": "$$.Map.Item.Value", "source.$": "$$.Map.Item.Source"}
@@ -503,9 +503,9 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 }
 
 func TestFlattenedMapDatasetLimit(t *testing.T) {
-	limited, _, valid := limitReaderItems(mapDataset{values: []any{1, 2}, keys: []any{"a", "b"}}, "JSON", map[string]any{"MaxItems": 1}, nil, nil)
+	limited, _, valid := limitReaderItems(mapDataset{values: []any{1, 2}, keys: []any{"a", "b"}, sources: []string{"S3://items/a", "S3://items/b"}}, "", map[string]any{"MaxItems": 1}, nil, nil)
 	dataset, typed := limited.(mapDataset)
-	if !valid || !typed || len(dataset.values) != 1 || len(dataset.keys) != 1 || dataset.values[0] != 1 || dataset.keys[0] != "a" {
+	if !valid || !typed || len(dataset.values) != 1 || len(dataset.keys) != 1 || len(dataset.sources) != 1 || dataset.values[0] != 1 || dataset.keys[0] != "a" || dataset.sources[0] != "S3://items/a" {
 		t.Fatalf("limited flattened dataset %#v", limited)
 	}
 }

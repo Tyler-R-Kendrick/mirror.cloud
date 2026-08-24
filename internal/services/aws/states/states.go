@@ -2178,6 +2178,7 @@ walkLoop:
 				}
 				arr := []any{}
 				var itemKeys []any
+				var itemSources []string
 				switch items := dataset.(type) {
 				case []any:
 					arr = items
@@ -2195,7 +2196,7 @@ walkLoop:
 						}
 					}
 				case mapDataset:
-					arr, itemKeys = items.values, items.keys
+					arr, itemKeys, itemSources = items.values, items.keys, items.sources
 				default:
 					itemsOK = false
 				}
@@ -2212,7 +2213,11 @@ walkLoop:
 				}
 				if failed == nil {
 					for index, item := range arr {
-						itemDetails := map[string]any{"Index": float64(index), "Value": item, "Source": source}
+						itemSource := source
+						if index < len(itemSources) {
+							itemSource = itemSources[index]
+						}
+						itemDetails := map[string]any{"Index": float64(index), "Value": item, "Source": itemSource}
 						if index < len(itemKeys) {
 							if key, keyed := itemKeys[index].(string); keyed {
 								itemDetails["Key"] = key
@@ -3087,8 +3092,9 @@ func taskPayload(st map[string]any, data any, context map[string]any, random spi
 }
 
 type mapDataset struct {
-	values []any
-	keys   []any
+	values  []any
+	keys    []any
+	sources []string
 }
 
 func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]any, data any, scope *jsonataScope, variables ...map[string]any) (any, string, bool) {
@@ -3153,7 +3159,7 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			request["ContinuationToken"] = token
 		}
 		if first(config, "Transformation") != "LOAD_AND_FLATTEN" {
-			return limitReaderItems(items, "S3_OBJECT_LIST", config, data, scope, variables...)
+			return limitReaderItems(items, "S3://"+first(input, "Bucket"), config, data, scope, variables...)
 		}
 		flattened := mapDataset{}
 		for _, rawItem := range items {
@@ -3167,7 +3173,7 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			if scope != nil {
 				nestedReader["Arguments"] = payload
 			}
-			dataset, _, valid := p.mapItems(ctx, req, map[string]any{"ItemReader": nestedReader}, data, scope, variables...)
+			dataset, nestedSource, valid := p.mapItems(ctx, req, map[string]any{"ItemReader": nestedReader}, data, scope, variables...)
 			if !valid {
 				return nil, "", false
 			}
@@ -3175,16 +3181,20 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			case []any:
 				flattened.values = append(flattened.values, values...)
 				flattened.keys = append(flattened.keys, make([]any, len(values))...)
+				for range values {
+					flattened.sources = append(flattened.sources, nestedSource)
+				}
 			case map[string]any:
 				for _, key := range slices.Sorted(maps.Keys(values)) {
 					flattened.values = append(flattened.values, values[key])
 					flattened.keys = append(flattened.keys, key)
+					flattened.sources = append(flattened.sources, nestedSource)
 				}
 			default:
 				return nil, "", false
 			}
 		}
-		return limitReaderItems(flattened, first(config, "InputType"), config, data, scope, variables...)
+		return limitReaderItems(flattened, "", config, data, scope, variables...)
 	}
 	response, err := s3.New(p.deps).Invoke(ctx, &spi.Request{
 		Identity: req.Identity, Operation: "GetObject", Input: input,
@@ -3228,7 +3238,7 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 		if err != nil {
 			return nil, "", false
 		}
-		items := []any{}
+		items := mapDataset{}
 		for _, record := range records {
 			if len(record) != 1 {
 				return nil, "", false
@@ -3246,15 +3256,20 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			if scope != nil {
 				nestedReader["Arguments"] = payload
 			}
-			dataset, _, valid := p.mapItems(ctx, req, map[string]any{"ItemReader": nestedReader}, data, scope, variables...)
+			dataset, nestedSource, valid := p.mapItems(ctx, req, map[string]any{"ItemReader": nestedReader}, data, scope, variables...)
 			values, array := dataset.([]any)
 			if !valid || !array {
 				return nil, "", false
 			}
-			items = append(items, values...)
+			items.values = append(items.values, values...)
+			items.keys = append(items.keys, make([]any, len(values))...)
+			for range values {
+				items.sources = append(items.sources, nestedSource)
+			}
 		}
-		return limitReaderItems(items, inputType, config, data, scope, variables...)
+		return limitReaderItems(items, "", config, data, scope, variables...)
 	}
+	source := s3Source(input)
 	switch inputType {
 	case "JSON":
 		var items any
@@ -3273,14 +3288,14 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 		default:
 			return nil, "", false
 		}
-		return limitReaderItems(items, inputType, config, data, scope, variables...)
+		return limitReaderItems(items, source, config, data, scope, variables...)
 	case "JSONL":
 		decoder := json.NewDecoder(strings.NewReader(string(body)))
 		items := []any{}
 		for {
 			var item any
 			if err := decoder.Decode(&item); errors.Is(err, io.EOF) {
-				return limitReaderItems(items, inputType, config, data, scope, variables...)
+				return limitReaderItems(items, source, config, data, scope, variables...)
 			} else if err != nil {
 				return nil, "", false
 			}
@@ -3321,7 +3336,7 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			}
 			items = append(items, item)
 		}
-		return limitReaderItems(items, inputType, config, data, scope, variables...)
+		return limitReaderItems(items, source, config, data, scope, variables...)
 	case "PARQUET":
 		file, err := parquet.OpenFile(bytes.NewReader(body), int64(len(body)))
 		if err != nil {
@@ -3345,7 +3360,7 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 				items = append(items, item)
 			}
 		}
-		return limitReaderItems(items, inputType, config, data, scope, variables...)
+		return limitReaderItems(items, source, config, data, scope, variables...)
 	default:
 		return nil, "", false
 	}
@@ -3390,6 +3405,14 @@ func jsonPointerTokens(pointer string) ([]string, bool) {
 func s3URI(value string) (string, string, bool) {
 	bucket, key, valid := strings.Cut(strings.TrimPrefix(value, "s3://"), "/")
 	return bucket, key, strings.HasPrefix(value, "s3://") && valid && bucket != "" && key != ""
+}
+
+func s3Source(input map[string]any) string {
+	source := "S3://" + first(input, "Bucket")
+	if key := first(input, "Key"); key != "" {
+		source += "/" + key
+	}
+	return source
 }
 
 func resolveJSONPointer(value any, pointer string) (any, bool) {
@@ -3452,6 +3475,7 @@ func limitReaderItems(items any, source string, config map[string]any, data any,
 		if limit < len(collection.values) {
 			collection.values = collection.values[:limit]
 			collection.keys = collection.keys[:limit]
+			collection.sources = collection.sources[:limit]
 			items = collection
 		}
 	case map[string]any:

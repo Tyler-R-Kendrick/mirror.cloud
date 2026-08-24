@@ -3132,8 +3132,20 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 	}
 	switch inputType {
 	case "JSON":
-		var items []any
+		var items any
 		if json.Unmarshal(body, &items) != nil {
+			return nil, "", false
+		}
+		if pointer, configured := config["ItemsPointer"].(string); configured {
+			var valid bool
+			items, valid = resolveJSONPointer(items, pointer)
+			if !valid {
+				return nil, "", false
+			}
+		}
+		switch items.(type) {
+		case []any, map[string]any:
+		default:
 			return nil, "", false
 		}
 		return limitReaderItems(items, inputType, config, data, scope, variables...)
@@ -3213,7 +3225,55 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 	}
 }
 
-func limitReaderItems(items []any, source string, config map[string]any, data any, scope *jsonataScope, variables ...map[string]any) ([]any, string, bool) {
+func jsonPointerTokens(pointer string) ([]string, bool) {
+	if pointer == "" {
+		return nil, true
+	}
+	if !strings.HasPrefix(pointer, "/") {
+		return nil, false
+	}
+	tokens := make([]string, 0, strings.Count(pointer, "/"))
+	for _, raw := range strings.Split(pointer[1:], "/") {
+		for index := 0; index < len(raw); index++ {
+			if raw[index] == '~' && (index+1 == len(raw) || raw[index+1] != '0' && raw[index+1] != '1') {
+				return nil, false
+			}
+			if raw[index] == '~' {
+				index++
+			}
+		}
+		tokens = append(tokens, strings.ReplaceAll(strings.ReplaceAll(raw, "~1", "/"), "~0", "~"))
+	}
+	return tokens, true
+}
+
+func resolveJSONPointer(value any, pointer string) (any, bool) {
+	tokens, valid := jsonPointerTokens(pointer)
+	if !valid {
+		return nil, false
+	}
+	for _, token := range tokens {
+		switch current := value.(type) {
+		case map[string]any:
+			var exists bool
+			value, exists = current[token]
+			if !exists {
+				return nil, false
+			}
+		case []any:
+			index, err := strconv.Atoi(token)
+			if err != nil || index < 0 || index >= len(current) || len(token) > 1 && token[0] == '0' {
+				return nil, false
+			}
+			value = current[index]
+		default:
+			return nil, false
+		}
+	}
+	return value, true
+}
+
+func limitReaderItems(items any, source string, config map[string]any, data any, scope *jsonataScope, variables ...map[string]any) (any, string, bool) {
 	value, hasValue := config["MaxItems"]
 	path, hasPath := config["MaxItemsPath"].(string)
 	if !hasValue && !hasPath {
@@ -3238,8 +3298,22 @@ func limitReaderItems(items []any, source string, config map[string]any, data an
 		}
 		return nil, "", false
 	}
-	if limit < len(items) {
-		items = items[:limit]
+	switch collection := items.(type) {
+	case []any:
+		if limit < len(collection) {
+			items = collection[:limit]
+		}
+	case map[string]any:
+		if limit < len(collection) {
+			keys := slices.Sorted(maps.Keys(collection))
+			limited := make(map[string]any, limit)
+			for _, key := range keys[:limit] {
+				limited[key] = collection[key]
+			}
+			items = limited
+		}
+	default:
+		return nil, "", false
 	}
 	return items, source, true
 }
@@ -5301,6 +5375,14 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 					add("SCHEMA_VALIDATION_FAILED", "ReaderConfig must be an object.", "/States/"+name+"/ItemReader/ReaderConfig")
 				}
 				validateInteger(config, "/States/"+name+"/ItemReader/ReaderConfig", "MaxItems", 1, 100000000)
+				if value, exists := config["ItemsPointer"]; exists {
+					pointer, valid := value.(string)
+					inputType := first(config, "InputType")
+					_, validPointer := jsonPointerTokens(pointer)
+					if !valid || !validPointer || utf8.RuneCountInString(pointer) >= 2000 || inputType != "" && inputType != "JSON" {
+						add("SCHEMA_VALIDATION_FAILED", "ItemsPointer must be a JSON Pointer for JSON input.", "/States/"+name+"/ItemReader/ReaderConfig/ItemsPointer")
+					}
+				}
 				if _, path := config["MaxItemsPath"]; path && isJSONata {
 					add("SCHEMA_VALIDATION_FAILED", "MaxItemsPath is not supported with JSONata.", "/States/"+name+"/ItemReader/ReaderConfig/MaxItemsPath")
 				}

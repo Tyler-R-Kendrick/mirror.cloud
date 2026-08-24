@@ -356,9 +356,11 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	}
 	invoke(storage, "CreateBucket", map[string]any{"Bucket": "items"}, nil)
 	objects := map[string]string{
-		"items.json":  `[{"id":1},{"id":2}]`,
-		"items.jsonl": "{\"id\":3}\n{\"id\":4}\n",
-		"items.csv":   "id,name\n5\n6,Lin,ignored\n",
+		"items.json":   `[{"id":1},{"id":2}]`,
+		"items.jsonl":  "{\"id\":3}\n{\"id\":4}\n",
+		"items.csv":    "id,name\n5\n6,Lin,ignored\n",
+		"nested.json":  `{"data":{"a/b":{"~key":[{"id":9},{"id":10}]}}}`,
+		"objects.json": `{"b":{"id":12},"a":{"id":11}}`,
 	}
 	for key, body := range objects {
 		invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": key}, []byte(body))
@@ -375,17 +377,31 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": "items.parquet"}, parquetBody.Bytes())
 	invoke(storage, "PutObject", map[string]any{"Bucket": "items", "Key": "broken.parquet"}, []byte("not parquet"))
 	processor := map[string]any{"StartAt": "Done", "ProcessorConfig": map[string]any{"Mode": "DISTRIBUTED"}, "States": map[string]any{"Done": map[string]any{"Type": "Succeed"}}}
-	for _, test := range []struct{ key, inputType string }{{"items.json", "JSON"}, {"items.jsonl", "JSONL"}, {"items.csv", "CSV"}, {"items.parquet", "PARQUET"}} {
+	for _, test := range []struct {
+		key, inputType, pointer string
+		limit                   int
+	}{{"items.json", "JSON", "", 0}, {"items.jsonl", "JSONL", "", 0}, {"items.csv", "CSV", "", 0}, {"items.parquet", "PARQUET", "", 0}, {"nested.json", "JSON", "/data/a~1b/~0key", 0}, {"objects.json", "JSON", "", 1}} {
+		readerConfig := map[string]any{"InputType": test.inputType, "CSVHeaderLocation": "FIRST_ROW"}
+		if test.pointer != "" {
+			readerConfig["ItemsPointer"] = test.pointer
+		}
+		if test.limit != 0 {
+			readerConfig["MaxItems"] = test.limit
+		}
 		state := map[string]any{
 			"Type": "Map", "ItemProcessor": processor, "ItemSelector": map[string]any{"value.$": "$$.Map.Item.Value", "source.$": "$$.Map.Item.Source"}, "End": true,
-			"ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": test.key}, "ReaderConfig": map[string]any{"InputType": test.inputType, "CSVHeaderLocation": "FIRST_ROW"}},
+			"ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": test.key}, "ReaderConfig": readerConfig},
 		}
 		definition, _ := json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": state}})
-		machine := invoke(p, "CreateStateMachine", map[string]any{"name": "reader-" + strings.ToLower(test.inputType), "definition": string(definition), "roleArn": testRoleARN}, nil)
+		machine := invoke(p, "CreateStateMachine", map[string]any{"name": "reader-" + strings.ReplaceAll(test.key, ".", "-"), "definition": string(definition), "roleArn": testRoleARN}, nil)
 		started := invoke(p, "StartExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"]}, nil)
 		execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": started["executionArn"]}, nil)
 		output := execution["output"].(string)
-		if execution["status"] != "SUCCEEDED" || strings.Count(output, `"source":"`+test.inputType+`"`) != 2 || test.inputType == "PARQUET" && !strings.Contains(output, `"name":"Ada"`) || test.inputType == "CSV" && (!strings.Contains(output, `"name":""`) || strings.Contains(output, "ignored")) {
+		expected := 2
+		if test.limit != 0 {
+			expected = test.limit
+		}
+		if execution["status"] != "SUCCEEDED" || strings.Count(output, `"source":"`+test.inputType+`"`) != expected || test.inputType == "PARQUET" && !strings.Contains(output, `"name":"Ada"`) || test.inputType == "CSV" && (!strings.Contains(output, `"name":""`) || strings.Contains(output, "ignored")) || test.pointer != "" && !strings.Contains(output, `"id":9`) {
 			t.Fatalf("%s ItemReader execution %#v", test.inputType, execution)
 		}
 	}
@@ -1521,6 +1537,7 @@ func TestStatesMapValidation(t *testing.T) {
 		`"Iterator":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"Parameters":{"value.$":"$$.Map.Item.Value"}`,
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"MaxItems":100000000}},"ItemBatcher":{"MaxItemsPerBatch":1,"MaxInputBytesPerBatch":262144},` + processor,
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"MaxItemsPath":"$.limit"}},"ItemBatcher":{"MaxItemsPerBatchPath":"$.batch"},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"JSON","ItemsPointer":"/data/a~1b/~0key"}},` + processor,
 		`"ResultWriter":{"WriterConfig":{"Transformation":"COMPACT","OutputType":"JSONL"}},` + processor,
 		`"ResultWriter":{"Resource":"arn:aws:states:::s3:putObject","Parameters":{"Bucket":"bucket"}},` + processor,
 		`"Label":"valid-label","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`,
@@ -1547,6 +1564,11 @@ func TestStatesMapValidation(t *testing.T) {
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"MaxItems":100000001}},` + processor,
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"MaxItems":1,"MaxItemsPath":"$.limit"}},` + processor,
 		`"ItemReader":{"Resource":"reader","ReaderConfig":{"MaxItemsPath":"limit"}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"JSON","ItemsPointer":1}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"JSON","ItemsPointer":"data"}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"JSON","ItemsPointer":"/bad~2escape"}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"JSON","ItemsPointer":"/` + strings.Repeat("x", 1999) + `"}},` + processor,
+		`"ItemReader":{"Resource":"reader","ReaderConfig":{"InputType":"CSV","ItemsPointer":"/data"}},` + processor,
 		`"ItemReader":{"Resource":"reader","Parameters":[]},` + processor,
 		`"ItemBatcher":{},` + processor,
 		`"ItemBatcher":{"MaxItemsPerBatch":0},` + processor,

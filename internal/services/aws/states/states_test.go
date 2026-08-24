@@ -1690,6 +1690,8 @@ func TestStatesFieldOwnershipValidation(t *testing.T) {
 func TestStatesDataFlowValidation(t *testing.T) {
 	for _, definition := range []string{
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","InputPath":"$.input","Parameters":{"value.$":"$.value"},"ResultPath":null,"OutputPath":null,"End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","InputPath":"$$.Execution.Input","ResultPath":"$['result']","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","InputPath":"$input.value","OutputPath":"$[*]","End":true}}}`,
 		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","ResultSelector":{"value.$":"$.value"},"End":true}}}`,
 	} {
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
@@ -1703,6 +1705,12 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","InputPath":"input","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"output","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"result","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","InputPath":"$..input","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[0]output","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$[*]","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$[0:2]","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$$.Execution.Input","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$result","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","Parameters":[],"End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","ResultSelector":[],"End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultSelector":{},"End":true}}}`,

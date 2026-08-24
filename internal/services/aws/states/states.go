@@ -46,6 +46,7 @@ func (p *Pack) Operations() []string {
 		"CreateStateMachineAlias", "DescribeStateMachineAlias", "ListStateMachineAliases", "UpdateStateMachineAlias", "DeleteStateMachineAlias",
 		"StartExecution", "StartSyncExecution", "StopExecution", "DescribeExecution", "ListExecutions", "GetExecutionHistory",
 		"DescribeStateMachineForExecution", "RedriveExecution",
+		"DescribeMapRun", "ListMapRuns", "UpdateMapRun",
 		"CreateActivity", "DeleteActivity", "DescribeActivity", "ListActivities", "GetActivityTask",
 		"SendTaskSuccess", "SendTaskFailure", "SendTaskHeartbeat",
 		"TestState", "ValidateStateMachineDefinition",
@@ -249,10 +250,17 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if exName == "" {
 			exName = p.deps.Rand.Hex(8)
 		}
+		execARN := p.execARN(req, name, exName)
 		in := parseJSON(first(req.Input, "input", "Input"))
 		def, _ := sm["definition"].(string)
 		wr := p.walk(ctx, req, def, "", in)
-		execARN := p.execARN(req, name, exName)
+		for _, run := range wr.mapRuns {
+			mapRunARN := p.mapRunARN(req, name, run.label)
+			run.record["mapRunArn"], run.record["executionArn"], run.record["stateMachineArn"] = mapRunARN, execARN, arn
+			run.record["startDate"], run.record["stopDate"] = float64(now), float64(now)
+			encoded, _ := json.Marshal(run.record)
+			_ = p.col(req, "maprun").Put(ctx, mapRunARN, encoded)
+		}
 		ob, _ := json.Marshal(wr.out)
 		rec := map[string]any{
 			"executionArn": execARN, "stateMachineArn": arn, "name": exName, "status": wr.status,
@@ -320,6 +328,88 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: rec}, nil
 	case "ListExecutions":
 		return listCol(ctx, p.col(req, "ex"), "executions")
+	case "DescribeMapRun":
+		arn := first(req.Input, "mapRunArn", "MapRunArn")
+		record, ok := getRecord(ctx, p.col(req, "maprun"), arn)
+		if !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFound", HTTPStatus: 400, Fault: "client"}
+		}
+		return &spi.Response{Output: record}, nil
+	case "ListMapRuns":
+		executionARN := first(req.Input, "executionArn", "ExecutionArn")
+		if _, ok := getRecord(ctx, p.col(req, "ex"), executionARN); !ok {
+			return nil, &spi.Fault{Code: "ExecutionDoesNotExist", HTTPStatus: 400, Fault: "client"}
+		}
+		limit := int(inputNumber(req.Input, "maxResults", "MaxResults"))
+		if limit == 0 {
+			limit = 100
+		}
+		if limit < 0 || limit > 1000 {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
+		offset := 0
+		if token := first(req.Input, "nextToken", "NextToken"); token != "" {
+			var err error
+			offset, err = strconv.Atoi(token)
+			if err != nil || offset < 0 {
+				return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+		records, _, _ := p.col(req, "maprun").List(ctx, "", "", 0)
+		items := make([]any, 0)
+		for _, item := range records {
+			var record map[string]any
+			_ = json.Unmarshal(item.Value, &record)
+			if first(record, "executionArn") == executionARN {
+				items = append(items, map[string]any{
+					"executionArn": record["executionArn"], "mapRunArn": record["mapRunArn"], "startDate": record["startDate"],
+					"stateMachineArn": record["stateMachineArn"], "stopDate": record["stopDate"],
+				})
+			}
+		}
+		sort.Slice(items, func(i, j int) bool {
+			return toFloat(items[i].(map[string]any)["startDate"]) > toFloat(items[j].(map[string]any)["startDate"])
+		})
+		if offset > len(items) {
+			return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
+		}
+		output := map[string]any{"mapRuns": items[offset:min(offset+limit, len(items))]}
+		if offset+limit < len(items) {
+			output["nextToken"] = strconv.Itoa(offset + limit)
+		}
+		return &spi.Response{Output: output}, nil
+	case "UpdateMapRun":
+		arn := first(req.Input, "mapRunArn", "MapRunArn")
+		record, ok := getRecord(ctx, p.col(req, "maprun"), arn)
+		if !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFound", HTTPStatus: 400, Fault: "client"}
+		}
+		if first(record, "status") != "RUNNING" {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
+		updated := false
+		for _, field := range []struct {
+			lower, upper string
+			max          float64
+		}{
+			{"maxConcurrency", "MaxConcurrency", math.MaxFloat64},
+			{"toleratedFailureCount", "ToleratedFailureCount", math.MaxFloat64},
+			{"toleratedFailurePercentage", "ToleratedFailurePercentage", 100},
+		} {
+			if value, exists := inputValue(req.Input, field.lower, field.upper); exists {
+				number := toFloat(value)
+				if number < 0 || number > field.max || field.lower != "toleratedFailurePercentage" && number != math.Trunc(number) {
+					return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+				}
+				record[field.lower], updated = number, true
+			}
+		}
+		if !updated {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
+		encoded, _ := json.Marshal(record)
+		_ = p.col(req, "maprun").Put(ctx, arn, encoded)
+		return &spi.Response{Output: map[string]any{}}, nil
 	case "DescribeStateMachineForExecution":
 		executionARN := first(req.Input, "executionArn", "ExecutionArn")
 		record, ok := getRecord(ctx, p.col(req, "ex"), executionARN)
@@ -501,6 +591,10 @@ func (p *Pack) execARN(req *spi.Request, sm, ex string) string {
 	return "arn:aws:states:" + req.Identity.Region + ":" + req.Identity.Account + ":execution:" + sm + ":" + ex
 }
 
+func (p *Pack) mapRunARN(req *spi.Request, sm, label string) string {
+	return "arn:aws:states:" + req.Identity.Region + ":" + req.Identity.Account + ":mapRun:" + sm + "/" + label + ":" + p.deps.Rand.UUID()
+}
+
 func (p *Pack) resolveStateMachine(ctx context.Context, req *spi.Request, arn string) (map[string]any, bool) {
 	name, qualifier := baseSMName(arn), strings.TrimPrefix(smName(arn), baseSMName(arn))
 	if qualifier == "" {
@@ -567,6 +661,12 @@ type walkResult struct {
 	pending       *pending
 	failedState   string
 	failedInput   any
+	mapRuns       []mapRunDraft
+}
+
+type mapRunDraft struct {
+	label  string
+	record map[string]any
 }
 
 func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64) (*spi.Response, error) {
@@ -747,10 +847,12 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 
 func (p *Pack) walk(ctx context.Context, req *spi.Request, def, from string, input any) (result walkResult) {
 	currentState, currentInput := "", input
+	var mapRuns []mapRunDraft
 	defer func() {
 		if result.status == "FAILED" && result.failedState == "" {
 			result.failedState, result.failedInput = currentState, currentInput
 		}
+		result.mapRuns = append(result.mapRuns, mapRuns...)
 	}()
 	var sm map[string]any
 	if err := json.Unmarshal([]byte(def), &sm); err != nil {
@@ -890,6 +992,7 @@ walkLoop:
 					bm, _ := br.(map[string]any)
 					bdef, _ := json.Marshal(bm)
 					wr := p.walk(ctx, req, string(bdef), "", branchInput)
+					mapRuns = append(mapRuns, wr.mapRuns...)
 					if wr.status != "SUCCEEDED" {
 						failed = &wr
 						break
@@ -940,6 +1043,8 @@ walkLoop:
 				iter, _ = st["ItemProcessor"].(map[string]any)
 			}
 			idef, _ := json.Marshal(iter)
+			processorConfig, _ := iter["ProcessorConfig"].(map[string]any)
+			distributed := first(processorConfig, "Mode") == "DISTRIBUTED"
 			selector, _ := st["ItemSelector"].(map[string]any)
 			if selector == nil {
 				selector, _ = st["Parameters"].(map[string]any)
@@ -950,6 +1055,7 @@ walkLoop:
 			for {
 				var results []any
 				var failed *walkResult
+				failedCount := 0
 				for index, item := range arr {
 					iterationInput := item
 					if selector != nil {
@@ -958,11 +1064,42 @@ walkLoop:
 						}}}, p.deps.Rand)
 					}
 					wr := p.walk(ctx, req, string(idef), "", iterationInput)
+					mapRuns = append(mapRuns, wr.mapRuns...)
 					if wr.status != "SUCCEEDED" {
-						failed = &wr
-						break
+						failedCount++
+						if failed == nil {
+							failed = &wr
+						}
+						if !distributed {
+							break
+						}
+						continue
 					}
 					results = append(results, wr.out)
+				}
+				if distributed {
+					allowed := failedCount == 0
+					failureCount, hasFailureCount := st["ToleratedFailureCount"]
+					failurePercentage, hasFailurePercentage := st["ToleratedFailurePercentage"]
+					if failedCount > 0 && (hasFailureCount || hasFailurePercentage) {
+						allowed = (!hasFailureCount || float64(failedCount) <= toFloat(failureCount)) &&
+							(!hasFailurePercentage || float64(failedCount)*100/float64(len(arr)) <= toFloat(failurePercentage))
+					}
+					status := "FAILED"
+					if allowed {
+						status, failed = "SUCCEEDED", nil
+					}
+					counts := map[string]any{
+						"total": float64(len(arr)), "succeeded": float64(len(arr) - failedCount), "failed": float64(failedCount),
+						"aborted": 0.0, "timedOut": 0.0, "pending": 0.0, "pendingRedrive": 0.0, "failuresNotRedrivable": 0.0, "resultsWritten": 0.0, "running": 0.0,
+					}
+					mapRuns = append(mapRuns, mapRunDraft{label: first(st, "Label"), record: map[string]any{
+						"status": status, "executionCounts": counts, "itemCounts": counts, "redriveCount": 0.0,
+						"maxConcurrency": toFloat(st["MaxConcurrency"]), "toleratedFailureCount": toFloat(failureCount), "toleratedFailurePercentage": toFloat(failurePercentage),
+					}})
+					if mapRuns[len(mapRuns)-1].label == "" {
+						mapRuns[len(mapRuns)-1].label = cur
+					}
 				}
 				if failed == nil {
 					if results == nil {

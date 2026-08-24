@@ -985,7 +985,7 @@ func (p *Pack) storeOne(ctx context.Context, req *spi.Request, name string, rec 
 }
 
 func copyDest(rec, in map[string]any, suffix string) {
-	for _, base := range []string{"S3Destination", "ExtendedS3Destination", "HttpEndpointDestination", "ElasticsearchDestination", "AmazonOpenSearchServerlessDestination", "RedshiftDestination", "SplunkDestination", "SnowflakeDestination", "IcebergDestination"} {
+	for _, base := range []string{"S3Destination", "ExtendedS3Destination", "HttpEndpointDestination", "ElasticsearchDestination", "AmazonopensearchserviceDestination", "AmazonOpenSearchServerlessDestination", "RedshiftDestination", "SplunkDestination", "SnowflakeDestination", "IcebergDestination"} {
 		patch, _ := in[base+suffix].(map[string]any)
 		if patch == nil {
 			continue
@@ -1093,11 +1093,22 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 		destination["HttpEndpointDestinationDescription"] = configuration
 		delete(description, "HttpEndpointDestinationConfiguration")
 	}
-	if configuration, ok := description["ElasticsearchDestinationConfiguration"].(map[string]any); ok {
+	for _, search := range []struct{ configuration, described string }{
+		{"ElasticsearchDestinationConfiguration", "ElasticsearchDestinationDescription"},
+		{"AmazonopensearchserviceDestinationConfiguration", "AmazonopensearchserviceDestinationDescription"},
+	} {
+		configuration, ok := description[search.configuration].(map[string]any)
+		if !ok {
+			continue
+		}
 		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
 			describeS3Configuration(s3)
 			configuration["S3DestinationDescription"] = s3
 			delete(configuration, "S3Configuration")
+		}
+		if vpc, ok := configuration["VpcConfiguration"].(map[string]any); ok {
+			configuration["VpcConfigurationDescription"] = vpc
+			delete(configuration, "VpcConfiguration")
 		}
 		if configuration["BufferingHints"] == nil {
 			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}
@@ -1114,8 +1125,8 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 		if configuration["DocumentIdOptions"] == nil {
 			configuration["DocumentIdOptions"] = map[string]any{"DefaultDocumentIdFormat": "FIREHOSE_DEFAULT"}
 		}
-		destination["ElasticsearchDestinationDescription"] = configuration
-		delete(description, "ElasticsearchDestinationConfiguration")
+		destination[search.described] = configuration
+		delete(description, search.configuration)
 	}
 	if configuration, ok := description["AmazonOpenSearchServerlessDestinationConfiguration"].(map[string]any); ok {
 		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
@@ -1457,7 +1468,7 @@ func validateDestination(rec map[string]any, region string) error {
 	count := 0
 	var destination map[string]any
 	destinationType := ""
-	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "AmazonOpenSearchServerlessDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration", "SnowflakeDestinationConfiguration", "IcebergDestinationConfiguration"} {
+	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "AmazonopensearchserviceDestinationConfiguration", "AmazonOpenSearchServerlessDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration", "SnowflakeDestinationConfiguration", "IcebergDestinationConfiguration"} {
 		if value, exists := rec[key]; exists {
 			var ok bool
 			destination, ok = value.(map[string]any)
@@ -1474,7 +1485,7 @@ func validateDestination(rec map[string]any, region string) error {
 	if destinationType == "HttpEndpointDestinationConfiguration" {
 		return validateHTTPEndpointDestination(destination, region)
 	}
-	if destinationType == "ElasticsearchDestinationConfiguration" {
+	if destinationType == "ElasticsearchDestinationConfiguration" || destinationType == "AmazonopensearchserviceDestinationConfiguration" {
 		return validateElasticsearchDestination(destination, region)
 	}
 	if destinationType == "AmazonOpenSearchServerlessDestinationConfiguration" {
@@ -1619,6 +1630,9 @@ func validateElasticsearchDestination(destination map[string]any, region string)
 		return err
 	}
 	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
+		return err
+	}
+	if err := validateVPCConfiguration(destination["VpcConfiguration"]); err != nil {
 		return err
 	}
 	if raw := destination["ProcessingConfiguration"]; raw != nil {
@@ -2373,7 +2387,7 @@ func validateCreateDestination(input map[string]any) error {
 		}
 	}
 	switch destination {
-	case "S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "AmazonOpenSearchServerlessDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration", "SnowflakeDestinationConfiguration", "IcebergDestinationConfiguration":
+	case "S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration", "ElasticsearchDestinationConfiguration", "AmazonopensearchserviceDestinationConfiguration", "AmazonOpenSearchServerlessDestinationConfiguration", "RedshiftDestinationConfiguration", "SplunkDestinationConfiguration", "SnowflakeDestinationConfiguration", "IcebergDestinationConfiguration":
 		return nil
 	case "":
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
@@ -2472,7 +2486,7 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 		p.deliverIcebergRecords(ctx, req, destination, stream, version, recIDs, data, now)
 		return
 	}
-	for _, destinationKey := range []string{"ElasticsearchDestinationConfiguration", "AmazonOpenSearchServerlessDestinationConfiguration"} {
+	for _, destinationKey := range []string{"ElasticsearchDestinationConfiguration", "AmazonopensearchserviceDestinationConfiguration", "AmazonOpenSearchServerlessDestinationConfiguration"} {
 		destination, ok := rec[destinationKey].(map[string]any)
 		if !ok {
 			continue
@@ -3297,7 +3311,7 @@ func (p *Pack) deliverSearch(ctx context.Context, req *spi.Request, destinationK
 			continue
 		}
 		input := map[string]any{"Index": localSearchIndex(destinationKey, destination, payload.Arrivals[index]), "Document": document}
-		if destinationKey == "ElasticsearchDestinationConfiguration" {
+		if destinationKey == "ElasticsearchDestinationConfiguration" || destinationKey == "AmazonopensearchserviceDestinationConfiguration" {
 			input["DomainName"] = elasticsearchDomain(destination)
 		}
 		if useID {

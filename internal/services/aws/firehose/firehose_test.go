@@ -654,6 +654,60 @@ func TestFirehoseOpenSearchDestination(t *testing.T) {
 	}
 }
 
+func TestFirehoseAmazonOpenSearchServiceDestination(t *testing.T) {
+	ctx := context.Background()
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	search := opensearch.New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := pack.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	call(search, "CreateDomain", map[string]any{"DomainName": "modern"})
+	destination := map[string]any{
+		"DomainARN": "arn:aws:es:us-east-1:123456789012:domain/modern", "IndexName": "events", "RoleARN": testRoleARN,
+		"BufferingHints":  map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 1},
+		"S3Configuration": testS3Destination(),
+		"VpcConfiguration": map[string]any{
+			"RoleARN": testRoleARN, "SecurityGroupIds": []any{"sg-123"}, "SubnetIds": []any{"subnet-123"},
+		},
+	}
+	invalid := maps.Clone(destination)
+	invalid["VpcConfiguration"] = map[string]any{"RoleARN": testRoleARN, "SecurityGroupIds": []any{}, "SubnetIds": []any{"subnet-123"}}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateDeliveryStream", Input: map[string]any{
+		"DeliveryStreamName": "invalid-modern-search", "AmazonopensearchserviceDestinationConfiguration": invalid,
+	}}); err == nil {
+		t.Fatal("accepted invalid modern OpenSearch VPC configuration")
+	}
+	call(p, "CreateDeliveryStream", map[string]any{
+		"DeliveryStreamName": "modern-search", "AmazonopensearchserviceDestinationConfiguration": destination,
+	})
+	description := call(p, "DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "modern-search"}).Output["DeliveryStreamDescription"].(map[string]any)
+	described := description["Destinations"].([]any)[0].(map[string]any)["AmazonopensearchserviceDestinationDescription"].(map[string]any)
+	if described["VpcConfiguration"] != nil || described["VpcConfigurationDescription"] == nil || described["S3Configuration"] != nil || described["S3DestinationDescription"] == nil {
+		t.Fatalf("modern OpenSearch description %#v", described)
+	}
+	call(p, "UpdateDestination", map[string]any{
+		"DeliveryStreamName": "modern-search", "CurrentDeliveryStreamVersionId": "1", "DestinationId": destinationID,
+		"AmazonopensearchserviceDestinationUpdate": map[string]any{"IndexName": "events-v2"},
+	})
+	put := call(p, "PutRecord", map[string]any{
+		"DeliveryStreamName": "modern-search", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"city":"Austin"}`))},
+	})
+	result := call(search, "GetDocument", map[string]any{
+		"DomainName": "modern", "Index": "events-v2-1970-01-01", "Id": first(put.Output, "RecordId"),
+	})
+	if result.Output["found"] != true {
+		t.Fatalf("modern OpenSearch document %#v", result.Output)
+	}
+}
+
 func TestOpenSearchBufferRetryPersistence(t *testing.T) {
 	deps := spitest.Deps(t)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}

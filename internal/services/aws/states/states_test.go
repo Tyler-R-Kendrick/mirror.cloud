@@ -834,6 +834,106 @@ func TestStatesJSONataBehavior(t *testing.T) {
 	}
 }
 
+func TestStatesJSONPathVariables(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(handler spi.Handler, operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := handler.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	queue := sqs.New(deps)
+	queueURL := invoke(queue, "CreateQueue", map[string]any{"QueueName": "jsonpath-variables"})["QueueUrl"].(string)
+	definition, _ := json.Marshal(map[string]any{
+		"StartAt": "Seed", "States": map[string]any{
+			"Seed": map[string]any{
+				"Type": "Pass", "Result": map[string]any{"prefix": "p"}, "ResultPath": nil,
+				"Assign": map[string]any{"prefix.$": "$.prefix"}, "Next": "Prepare",
+			},
+			"Prepare": map[string]any{
+				"Type": "Pass", "Parameters": map[string]any{
+					"items.$": "$.seed.items", "wait": 0, "choice": "go", "expected": "go",
+				},
+				"Assign": map[string]any{
+					"items.$": "$.items", "delay.$": "$.wait", "choice.$": "$.choice", "expected.$": "$.expected",
+					"details":    map[string]any{"lineItems.$": "$.items", "start.$": "$$.Execution.StartTime"},
+					"prepared.$": "States.Format('{}:{}', $prefix, $.choice)",
+				}, "Next": "Wait",
+			},
+			"Wait": map[string]any{
+				"Type": "Wait", "SecondsPath": "$delay", "Assign": map[string]any{"waitSeen.$": "$choice"}, "Next": "Choose",
+			},
+			"Choose": map[string]any{
+				"Type": "Choice", "Choices": []any{map[string]any{
+					"Variable": "$choice", "StringEqualsPath": "$expected", "Assign": map[string]any{"matched.$": "$choice"}, "Next": "Map",
+				}}, "Default": "Wrong",
+			},
+			"Map": map[string]any{
+				"Type": "Map", "ItemsPath": "$items", "ItemSelector": map[string]any{
+					"value.$": "$$.Map.Item.Value", "label.$": "States.Format('{}{}', $prefix, $$.Map.Item.Value)",
+				}, "ItemProcessor": map[string]any{"StartAt": "Item", "States": map[string]any{
+					"Item": map[string]any{"Type": "Pass", "End": true},
+				}}, "Assign": map[string]any{"mapCount.$": "States.ArrayLength($)"}, "Next": "Parallel",
+			},
+			"Parallel": map[string]any{
+				"Type": "Parallel", "Branches": []any{
+					map[string]any{"StartAt": "Left", "States": map[string]any{"Left": map[string]any{"Type": "Pass", "Result": "L", "End": true}}},
+					map[string]any{"StartAt": "Right", "States": map[string]any{"Right": map[string]any{"Type": "Pass", "Result": "R", "End": true}}},
+				}, "Assign": map[string]any{"parallelCount.$": "States.ArrayLength($)"}, "Next": "Send",
+			},
+			"Send": map[string]any{
+				"Type": "Task", "Resource": "arn:aws:states:::sqs:sendMessage", "Parameters": map[string]any{
+					"QueueUrl": queueURL, "MessageBody.$": "States.Format('{}:{}:{}', $prefix, $mapCount, $parallelCount)",
+				}, "ResultSelector": map[string]any{"id.$": "$.MessageId", "prefix.$": "$prefix"},
+				"Assign": map[string]any{"messageId.$": "$.MessageId", "message.$": "States.Format('{}:{}:{}', $prefix, $mapCount, $parallelCount)"}, "Next": "Collect",
+			},
+			"Collect": map[string]any{
+				"Type": "Pass", "Parameters": map[string]any{
+					"details.$": "$details", "first.$": "$details.lineItems[0]", "prepared.$": "$prepared", "wait.$": "$waitSeen", "matched.$": "$matched", "message.$": "$message", "id.$": "$messageId",
+				}, "End": true,
+			},
+			"Wrong": map[string]any{"Type": "Fail"},
+		},
+	})
+	if diagnostics := validateDefinition(string(definition), "EXPRESS"); len(diagnostics) != 0 {
+		t.Fatalf("jsonpath variable diagnostics %#v", diagnostics)
+	}
+	machine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonpath-variables", "definition": string(definition), "roleArn": testRoleARN, "type": "EXPRESS"})
+	execution := invoke(p, "StartSyncExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"], "input": `{"seed":{"items":[1,2]}}`})
+	if execution["status"] != "SUCCEEDED" {
+		t.Fatalf("jsonpath variable execution %#v", execution)
+	}
+	var output map[string]any
+	if json.Unmarshal([]byte(execution["output"].(string)), &output) != nil || output["first"] != 1.0 || output["prepared"] != "p:go" || output["wait"] != "go" || output["matched"] != "go" || output["message"] != "p:2:2" || output["id"] == "" {
+		t.Fatalf("jsonpath variable output %#v", execution)
+	}
+	details, _ := output["details"].(map[string]any)
+	if fmtString(details["lineItems"]) != `[1,2]` || details["start"] == "" {
+		t.Fatalf("jsonpath nested assignment %#v", details)
+	}
+	messages := invoke(queue, "ReceiveMessage", map[string]any{"QueueUrl": queueURL})["Messages"].([]any)
+	if len(messages) != 1 || messages[0].(map[string]any)["Body"] != "p:2:2" {
+		t.Fatalf("jsonpath task variables %#v", messages)
+	}
+
+	isolationDefinition := `{"StartAt":"Store","States":{"Store":{"Type":"Pass","Assign":{"items.$":"$.items"},"Next":"Map"},"Map":{"Type":"Map","ItemsPath":"$items","ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}}}`
+	isolationMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonpath-variable-isolation", "definition": isolationDefinition, "roleArn": testRoleARN})
+	isolationARN := invoke(p, "StartExecution", map[string]any{"stateMachineArn": isolationMachine["stateMachineArn"], "input": `{"items":[1]}`})["executionArn"].(string)
+	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": isolationARN}); execution["status"] != "FAILED" || execution["cause"] != "States.Runtime" {
+		t.Fatalf("JSONPath Distributed Map variable isolation %#v", execution)
+	}
+	badDefinition := `{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","Assign":{"missing.$":"$.missing"},"End":true}}}`
+	badMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "jsonpath-variable-error", "definition": badDefinition, "roleArn": testRoleARN, "type": "EXPRESS"})
+	if execution := invoke(p, "StartSyncExecution", map[string]any{"stateMachineArn": badMachine["stateMachineArn"]}); execution["status"] != "FAILED" || execution["error"] != "States.Runtime" {
+		t.Fatalf("JSONPath missing variable assignment %#v", execution)
+	}
+}
+
 func TestStatesJSONataErrorsAndFields(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)
@@ -941,11 +1041,11 @@ func TestStatesJSONataErrorsAndFields(t *testing.T) {
 	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": writerARN}); execution["status"] != "SUCCEEDED" || !strings.Contains(execution["output"].(string), "ResultWriterDetails") {
 		t.Fatalf("JSONata ResultWriter retry %#v", execution)
 	}
-	variablesDefinition := `{"StartAt":"Store","States":{"Store":{"Type":"Pass","Assign":{"saved":"{% $states.input.value %}"},"Next":"Choose"},"Choose":{"Type":"Choice","Choices":[{"Variable":"$.value","NumericEquals":7,"Assign":{"chosen":"yes"},"Next":"Send"}]},"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Parameters":{"QueueUrl":"` + queueURL + `","MessageBody":"x"},"Assign":{"messageId":"{% $states.result.MessageId %}"},"ResultPath":null,"Next":"Done"},"Done":{"Type":"Succeed","QueryLanguage":"JSONata","Output":{"saved":"{% $saved %}","chosen":"{% $chosen %}","messageId":"{% $messageId %}"}}}}`
+	variablesDefinition := `{"StartAt":"Store","States":{"Store":{"Type":"Pass","Assign":{"saved.$":"$.value"},"Next":"Choose"},"Choose":{"Type":"Choice","Choices":[{"Variable":"$.value","NumericEquals":7,"Assign":{"chosen":"yes"},"Next":"Send"}]},"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Parameters":{"QueueUrl":"` + queueURL + `","MessageBody":"x"},"Assign":{"messageId.$":"$.MessageId"},"ResultPath":null,"Next":"Done"},"Done":{"Type":"Succeed","QueryLanguage":"JSONata","Output":{"saved":"{% $saved %}","chosen":"{% $chosen %}","messageId":"{% $messageId %}"}}}}`
 	if execution := start("jsonpath-variables", variablesDefinition, `{"value":7}`); execution["status"] != "SUCCEEDED" || !strings.Contains(execution["output"].(string), `"saved":7`) || !strings.Contains(execution["output"].(string), `"chosen":"yes"`) {
 		t.Fatalf("JSONPath variables %#v", execution)
 	}
-	catchVariables := `{"StartAt":"Send","States":{"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Parameters":{"QueueUrl":"http://localhost/1/missing","MessageBody":"x"},"Catch":[{"ErrorEquals":["SQS.AmazonSQSException"],"Assign":{"caught":"{% $states.errorOutput.Error %}"},"Next":"Done"}],"End":true},"Done":{"Type":"Succeed","QueryLanguage":"JSONata","Output":"{% $caught %}"}}}`
+	catchVariables := `{"StartAt":"Send","States":{"Send":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Parameters":{"QueueUrl":"http://localhost/1/missing","MessageBody":"x"},"Catch":[{"ErrorEquals":["SQS.AmazonSQSException"],"Assign":{"caught.$":"$.Error"},"Next":"Done"}],"End":true},"Done":{"Type":"Succeed","QueryLanguage":"JSONata","Output":"{% $caught %}"}}}`
 	if execution := start("jsonpath-catch-variables", catchVariables, `{}`); execution["status"] != "SUCCEEDED" || execution["output"] != `"SQS.AmazonSQSException"` {
 		t.Fatalf("JSONPath catch variables %#v", execution)
 	}
@@ -1784,7 +1884,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if out, ok := applyResultPath(map[string]any{"ResultPath": "$"}, nested, 4); !ok || out != 4 {
 		t.Fatalf("root ResultPath %#v", out)
 	}
-	selectedResult, selectedOK := applyStateResult(map[string]any{"ResultSelector": map[string]any{"picked.$": "$.value"}, "ResultPath": "$.task"}, map[string]any{"keep": true}, map[string]any{"value": 5.0, "drop": true}, p.deps.Rand)
+	selectedResult, selectedOK := applyStateResult(map[string]any{"ResultSelector": map[string]any{"picked.$": "$.value"}, "ResultPath": "$.task"}, map[string]any{"keep": true}, map[string]any{"value": 5.0, "drop": true}, nil, p.deps.Rand)
 	if !selectedOK || jsonPath(selectedResult, "$.keep") != true || jsonPath(selectedResult, "$.task.picked") != 5.0 {
 		t.Fatalf("selected result %#v", selectedResult)
 	}

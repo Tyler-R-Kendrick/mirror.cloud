@@ -776,7 +776,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-drop-map-object-key-context",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `itemDetails["Key"] = itemKeys[index]`,
+			old:  `itemDetails["Key"] = key`,
 			new:  `itemDetails["Key"] = ""`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesJSONataErrorsAndFields|TestDistributedMapRuns",

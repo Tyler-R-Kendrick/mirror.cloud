@@ -975,15 +975,19 @@ func TestStatesPayloadLimits(t *testing.T) {
 	if pass.status != "FAILED" || pass.errorName != "States.DataLimitExceeded" {
 		t.Fatalf("oversized Pass %#v", pass)
 	}
+	oversizedInput := walk(map[string]any{"StartAt": "Done", "States": map[string]any{"Done": map[string]any{"Type": "Pass", "InputPath": nil, "End": true}}}, large)
+	if oversizedInput.status != "FAILED" || oversizedInput.errorName != "States.DataLimitExceeded" {
+		t.Fatalf("oversized state input %#v", oversizedInput)
+	}
 	branch := func() map[string]any {
 		return map[string]any{"StartAt": "Pass", "States": map[string]any{"Pass": map[string]any{"Type": "Pass", "Result": strings.Repeat("x", 140*1024), "End": true}}}
 	}
-	parallel := walk(map[string]any{"StartAt": "Parallel", "States": map[string]any{"Parallel": map[string]any{"Type": "Parallel", "Branches": []any{branch(), branch()}, "End": true}}}, nil)
+	parallel := walk(map[string]any{"StartAt": "Parallel", "States": map[string]any{"Parallel": map[string]any{"Type": "Parallel", "Branches": []any{branch(), branch()}, "ResultSelector": map[string]any{"count": 2.0}, "End": true}}}, nil)
 	if parallel.status != "FAILED" || parallel.errorName != "States.DataLimitExceeded" {
 		t.Fatalf("oversized Parallel %#v", parallel)
 	}
 	iterator := branch()
-	mapped := walk(map[string]any{"StartAt": "Map", "States": map[string]any{"Map": map[string]any{"Type": "Map", "ItemsPath": "$.items", "ItemProcessor": iterator, "End": true}}}, map[string]any{"items": []any{1.0, 2.0}})
+	mapped := walk(map[string]any{"StartAt": "Map", "States": map[string]any{"Map": map[string]any{"Type": "Map", "ItemsPath": "$.items", "ItemProcessor": iterator, "ResultSelector": map[string]any{"count": 2.0}, "End": true}}}, map[string]any{"items": []any{1.0, 2.0}})
 	if mapped.status != "FAILED" || mapped.errorName != "States.DataLimitExceeded" {
 		t.Fatalf("oversized Map %#v", mapped)
 	}

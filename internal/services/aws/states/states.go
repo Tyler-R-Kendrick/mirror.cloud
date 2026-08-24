@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -66,16 +67,20 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	switch req.Operation {
 	case "CreateStateMachine":
 		name := first(req.Input, "name", "Name")
-		if name == "" {
-			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		if !validResourceName(name) {
+			return nil, &spi.Fault{Code: "InvalidName", HTTPStatus: 400, Fault: "client"}
 		}
 		definition := first(req.Input, "definition", "Definition")
-		if len(validateDefinition(definition)) > 0 {
+		if len(definition) < 1 || len(definition) > 1048576 || len(validateDefinition(definition)) > 0 {
 			return nil, &spi.Fault{Code: "InvalidDefinition", HTTPStatus: 400, Fault: "client"}
+		}
+		roleARN := first(req.Input, "roleArn", "RoleArn")
+		if !validRoleARN(roleARN) {
+			return nil, &spi.Fault{Code: "InvalidArn", HTTPStatus: 400, Fault: "client"}
 		}
 		publish := inputBool(req.Input, "publish", "Publish")
 		versionDescription := first(req.Input, "versionDescription", "VersionDescription")
-		if versionDescription != "" && !publish {
+		if len(versionDescription) > 256 || versionDescription != "" && !publish {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
 		arn := p.smARN(req, name)
@@ -83,9 +88,29 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if machineType == "" {
 			machineType = "STANDARD"
 		}
+		if machineType != "STANDARD" && machineType != "EXPRESS" {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
 		logging, _ := inputValue(req.Input, "loggingConfiguration", "LoggingConfiguration")
 		tracing, _ := inputValue(req.Input, "tracingConfiguration", "TracingConfiguration")
 		encryption, _ := inputValue(req.Input, "encryptionConfiguration", "EncryptionConfiguration")
+		if logging != nil && !validLoggingConfiguration(logging) {
+			return nil, &spi.Fault{Code: "InvalidLoggingConfiguration", HTTPStatus: 400, Fault: "client"}
+		}
+		if tracing != nil && !validTracingConfiguration(tracing) {
+			return nil, &spi.Fault{Code: "InvalidTracingConfiguration", HTTPStatus: 400, Fault: "client"}
+		}
+		if encryption != nil && !validEncryptionConfiguration(encryption) {
+			return nil, &spi.Fault{Code: "InvalidEncryptionConfiguration", HTTPStatus: 400, Fault: "client"}
+		}
+		rawTags, validTags := optionalSlice(req.Input, "tags", "Tags")
+		if !validTags {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
+		tags, tagFault := validatedTags(rawTags)
+		if tagFault != "" {
+			return nil, &spi.Fault{Code: tagFault, HTTPStatus: 400, Fault: "client"}
+		}
 		if existing, found := getRecord(ctx, p.col(req, "sm"), name); found {
 			if first(existing, "definition") != definition || first(existing, "type") != machineType ||
 				!reflect.DeepEqual(existing["_logging"], logging) || !reflect.DeepEqual(existing["_tracing"], tracing) ||
@@ -100,13 +125,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		rec := map[string]any{
 			"stateMachineArn": arn, "name": name, "definition": definition,
-			"roleArn": first(req.Input, "roleArn", "RoleArn"), "type": machineType,
+			"roleArn": roleARN, "type": machineType,
 			"status": "ACTIVE", "creationDate": float64(now), "revisionId": p.deps.Rand.UUID(), "updateDate": float64(now),
 			"_logging": logging, "_tracing": tracing, "_encryption": encryption, "_publish": publish, "_versionDescription": versionDescription,
 		}
 		b, _ := json.Marshal(rec)
 		_ = p.col(req, "sm").Put(ctx, name, b)
-		if tags := inputSlice(req.Input, "tags", "Tags"); tags != nil {
+		if tags != nil {
 			tagsJSON, _ := json.Marshal(tags)
 			_ = p.col(req, "tag").Put(ctx, arn, tagsJSON)
 		}
@@ -132,27 +157,36 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = json.Unmarshal(b, &rec)
 		publish := inputBool(req.Input, "publish", "Publish")
 		versionDescription := first(req.Input, "versionDescription", "VersionDescription")
-		if versionDescription != "" && !publish {
+		if len(versionDescription) > 256 || versionDescription != "" && !publish {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
 		changed := false
 		if d := first(req.Input, "definition", "Definition"); d != "" {
-			if len(validateDefinition(d)) > 0 {
+			if len(d) > 1048576 || len(validateDefinition(d)) > 0 {
 				return nil, &spi.Fault{Code: "InvalidDefinition", HTTPStatus: 400, Fault: "client"}
 			}
 			rec["definition"] = d
 			changed = true
 		}
 		if r := first(req.Input, "roleArn", "RoleArn"); r != "" {
+			if !validRoleARN(r) {
+				return nil, &spi.Fault{Code: "InvalidArn", HTTPStatus: 400, Fault: "client"}
+			}
 			rec["roleArn"] = r
 			changed = true
 		}
-		for _, field := range []struct{ lower, upper, stored string }{
-			{"loggingConfiguration", "LoggingConfiguration", "_logging"},
-			{"tracingConfiguration", "TracingConfiguration", "_tracing"},
-			{"encryptionConfiguration", "EncryptionConfiguration", "_encryption"},
+		for _, field := range []struct {
+			lower, upper, stored, fault string
+			valid                       func(any) bool
+		}{
+			{"loggingConfiguration", "LoggingConfiguration", "_logging", "InvalidLoggingConfiguration", validLoggingConfiguration},
+			{"tracingConfiguration", "TracingConfiguration", "_tracing", "InvalidTracingConfiguration", validTracingConfiguration},
+			{"encryptionConfiguration", "EncryptionConfiguration", "_encryption", "InvalidEncryptionConfiguration", validEncryptionConfiguration},
 		} {
 			if value, exists := inputValue(req.Input, field.lower, field.upper); exists {
+				if !field.valid(value) {
+					return nil, &spi.Fault{Code: field.fault, HTTPStatus: 400, Fault: "client"}
+				}
 				rec[field.stored], changed = value, true
 			}
 		}
@@ -381,6 +415,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "StartExecution", "StartSyncExecution":
 		arn := first(req.Input, "stateMachineArn", "StateMachineArn")
+		if len(arn) < 1 || len(arn) > 256 || strings.Contains(arn, "/") {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
 		name := baseSMName(arn)
 		sm, ok := p.resolveStateMachine(ctx, req, arn)
 		if !ok {
@@ -392,7 +429,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		exName := first(req.Input, "name", "Name")
 		if exName == "" {
 			exName = p.deps.Rand.UUID()
-		} else if !validExecutionName(exName) {
+		} else if !validResourceName(exName) {
 			return nil, &spi.Fault{Code: "InvalidName", HTTPStatus: 400, Fault: "client"}
 		}
 		execARN := p.execARN(req, name, exName)
@@ -400,8 +437,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if inputJSON == "" {
 			inputJSON = "{}"
 		}
-		if !json.Valid([]byte(inputJSON)) {
+		if len(inputJSON) > 262144 || !json.Valid([]byte(inputJSON)) {
 			return nil, &spi.Fault{Code: "InvalidExecutionInput", HTTPStatus: 400, Fault: "client"}
+		}
+		traceHeader := first(req.Input, "traceHeader", "TraceHeader")
+		if len(traceHeader) > 256 || !asciiString(traceHeader) {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
 		if req.Operation == "StartExecution" && first(sm, "type") == "STANDARD" {
 			if existing, found := getRecord(ctx, p.col(req, "ex"), execARN); found {
@@ -428,6 +469,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			"startDate": float64(now), "input": inputJSON,
 			"output": string(ob), "cause": wr.cause, "history": wr.hist, "definition": def,
 			"roleArn": sm["roleArn"], "revisionId": sm["revisionId"], "stateMachineName": name, "type": sm["type"],
+		}
+		if traceHeader != "" {
+			rec["traceHeader"] = traceHeader
 		}
 		if versionARN := first(sm, "_resolvedVersionArn"); versionARN != "" {
 			rec["stateMachineVersionArn"] = versionARN
@@ -650,28 +694,81 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return pagedResponse(req.Input, events, "events")
 	case "CreateActivity":
 		name := first(req.Input, "name", "Name")
+		if !validResourceName(name) {
+			return nil, &spi.Fault{Code: "InvalidName", HTTPStatus: 400, Fault: "client"}
+		}
 		arn := "arn:aws:states:" + req.Identity.Region + ":" + req.Identity.Account + ":activity:" + name
-		rec := map[string]any{"activityArn": arn, "name": name, "creationDate": float64(now)}
+		encryption, _ := inputValue(req.Input, "encryptionConfiguration", "EncryptionConfiguration")
+		if encryption != nil && !validEncryptionConfiguration(encryption) {
+			return nil, &spi.Fault{Code: "InvalidEncryptionConfiguration", HTTPStatus: 400, Fault: "client"}
+		}
+		rawTags, validTags := optionalSlice(req.Input, "tags", "Tags")
+		if !validTags {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
+		tags, tagFault := validatedTags(rawTags)
+		if tagFault != "" {
+			return nil, &spi.Fault{Code: tagFault, HTTPStatus: 400, Fault: "client"}
+		}
+		if existing, found := getRecord(ctx, p.col(req, "act"), name); found {
+			if !reflect.DeepEqual(existing["_encryption"], encryption) {
+				return nil, &spi.Fault{Code: "ActivityAlreadyExists", HTTPStatus: 400, Fault: "client"}
+			}
+			return &spi.Response{Output: map[string]any{"activityArn": arn, "creationDate": existing["creationDate"]}}, nil
+		}
+		rec := map[string]any{"activityArn": arn, "name": name, "creationDate": float64(now), "_encryption": encryption}
 		b, _ := json.Marshal(rec)
 		_ = p.col(req, "act").Put(ctx, name, b)
-		return &spi.Response{Output: rec}, nil
+		if tags != nil {
+			tagsJSON, _ := json.Marshal(tags)
+			_ = p.col(req, "tag").Put(ctx, arn, tagsJSON)
+		}
+		return &spi.Response{Output: map[string]any{"activityArn": arn, "creationDate": float64(now)}}, nil
 	case "DeleteActivity":
-		_ = p.col(req, "act").Delete(ctx, actName(first(req.Input, "activityArn", "ActivityArn")))
+		arn := first(req.Input, "activityArn", "ActivityArn")
+		name, valid := activityName(req, arn)
+		if !valid {
+			return nil, &spi.Fault{Code: "InvalidArn", HTTPStatus: 400, Fault: "client"}
+		}
+		_ = p.col(req, "act").Delete(ctx, name)
+		_ = p.col(req, "tag").Delete(ctx, arn)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "DescribeActivity":
-		name := actName(first(req.Input, "activityArn", "ActivityArn"))
+		name, valid := activityName(req, first(req.Input, "activityArn", "ActivityArn"))
+		if !valid {
+			return nil, &spi.Fault{Code: "InvalidArn", HTTPStatus: 400, Fault: "client"}
+		}
 		b, ok, _ := p.col(req, "act").Get(ctx, name)
 		if !ok {
 			return nil, &spi.Fault{Code: "ActivityDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
+		if encryption := rec["_encryption"]; encryption != nil {
+			rec["encryptionConfiguration"] = encryption
+		}
+		delete(rec, "_encryption")
 		return &spi.Response{Output: rec}, nil
 	case "ListActivities":
-		items := listRecords(ctx, p.col(req, "act"), func(record map[string]any) (map[string]any, bool) { return record, true })
+		items := listRecords(ctx, p.col(req, "act"), func(record map[string]any) (map[string]any, bool) {
+			return map[string]any{"activityArn": record["activityArn"], "creationDate": record["creationDate"], "name": record["name"]}, true
+		})
 		return pagedResponse(req.Input, items, "activities")
 	case "GetActivityTask":
 		want := first(req.Input, "activityArn", "ActivityArn")
+		name, valid := activityName(req, want)
+		if !valid {
+			return nil, &spi.Fault{Code: "InvalidArn", HTTPStatus: 400, Fault: "client"}
+		}
+		if _, exists := getRecord(ctx, p.col(req, "act"), name); !exists {
+			return nil, &spi.Fault{Code: "ActivityDoesNotExist", HTTPStatus: 400, Fault: "client"}
+		}
+		if worker, exists := inputValue(req.Input, "workerName", "WorkerName"); exists {
+			workerName, ok := worker.(string)
+			if !ok || len(workerName) < 1 || len(workerName) > 80 {
+				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+			}
+		}
 		kvs, _, _ := p.col(req, "pending").List(ctx, "", "", 0)
 		for _, kv := range kvs {
 			var pend pending
@@ -688,7 +785,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "SendTaskFailure":
 		return p.finishTask(ctx, req, now, false)
 	case "SendTaskHeartbeat":
-		if _, found, _ := p.col(req, "pending").Get(ctx, first(req.Input, "taskToken", "TaskToken")); !found {
+		token := first(req.Input, "taskToken", "TaskToken")
+		if len(token) < 1 || len(token) > 2048 {
+			return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
+		}
+		if _, found, _ := p.col(req, "pending").Get(ctx, token); !found {
 			return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
@@ -740,6 +841,20 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: response}, nil
 	case "TagResource":
 		arn := first(req.Input, "resourceArn", "ResourceArn")
+		if !p.tagResourceExists(ctx, req, arn) {
+			return nil, &spi.Fault{Code: resourceARNFault(arn), HTTPStatus: 400, Fault: "client"}
+		}
+		if _, exists := inputValue(req.Input, "tags", "Tags"); !exists {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
+		rawTags, validTags := optionalSlice(req.Input, "tags", "Tags")
+		if !validTags {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
+		incoming, tagFault := validatedTags(rawTags)
+		if tagFault != "" {
+			return nil, &spi.Fault{Code: tagFault, HTTPStatus: 400, Fault: "client"}
+		}
 		var tags []any
 		if b, ok, _ := p.col(req, "tag").Get(ctx, arn); ok {
 			_ = json.Unmarshal(b, &tags)
@@ -749,7 +864,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			m, _ := tag.(map[string]any)
 			indexes[first(m, "key", "Key")] = i
 		}
-		for _, tag := range asSlice(req.Input["tags"]) {
+		for _, tag := range incoming {
 			m, _ := tag.(map[string]any)
 			key := first(m, "key", "Key")
 			if i, ok := indexes[key]; ok {
@@ -759,18 +874,32 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				tags = append(tags, tag)
 			}
 		}
+		if len(tags) > 50 {
+			return nil, &spi.Fault{Code: "TooManyTags", HTTPStatus: 400, Fault: "client"}
+		}
 		b, _ := json.Marshal(tags)
 		_ = p.col(req, "tag").Put(ctx, arn, b)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "UntagResource":
 		arn := first(req.Input, "resourceArn", "ResourceArn")
+		if !p.tagResourceExists(ctx, req, arn) {
+			return nil, &spi.Fault{Code: resourceARNFault(arn), HTTPStatus: 400, Fault: "client"}
+		}
+		keys, validKeys := optionalSlice(req.Input, "tagKeys", "TagKeys")
+		if !validKeys || len(keys) == 0 {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
 		var tags []any
 		if b, ok, _ := p.col(req, "tag").Get(ctx, arn); ok {
 			_ = json.Unmarshal(b, &tags)
 		}
 		drop := map[string]bool{}
-		for _, key := range asSlice(req.Input["tagKeys"]) {
-			drop[fmt.Sprint(key)] = true
+		for _, key := range keys {
+			value := fmt.Sprint(key)
+			if !validTagText(value, 1, 128) || strings.HasPrefix(strings.ToLower(value), "aws:") {
+				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+			}
+			drop[value] = true
 		}
 		kept := tags[:0]
 		for _, tag := range tags {
@@ -783,7 +912,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = p.col(req, "tag").Put(ctx, arn, b)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "ListTagsForResource":
-		b, ok, _ := p.col(req, "tag").Get(ctx, first(req.Input, "resourceArn", "ResourceArn"))
+		arn := first(req.Input, "resourceArn", "ResourceArn")
+		if !p.tagResourceExists(ctx, req, arn) {
+			return nil, &spi.Fault{Code: resourceARNFault(arn), HTTPStatus: 400, Fault: "client"}
+		}
+		b, ok, _ := p.col(req, "tag").Get(ctx, arn)
 		var tags any = []any{}
 		if ok {
 			_ = json.Unmarshal(b, &tags)
@@ -968,6 +1101,30 @@ func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64
 
 func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok bool) (*spi.Response, error) {
 	tok := first(req.Input, "taskToken", "TaskToken")
+	if len(tok) < 1 || len(tok) > 2048 {
+		return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
+	}
+	output := ""
+	if ok {
+		value, exists := inputValue(req.Input, "output", "Output")
+		var valid bool
+		output, valid = value.(string)
+		if !exists || !valid || len(output) > 262144 || !json.Valid([]byte(output)) {
+			return nil, &spi.Fault{Code: "InvalidOutput", HTTPStatus: 400, Fault: "client"}
+		}
+	} else {
+		for _, field := range []struct {
+			lower, upper string
+			maximum      int
+		}{{"error", "Error", 256}, {"cause", "Cause", 32768}} {
+			if value, exists := inputValue(req.Input, field.lower, field.upper); exists {
+				text, valid := value.(string)
+				if !valid || len(text) > field.maximum {
+					return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+				}
+			}
+		}
+	}
 	b, found, _ := p.col(req, "pending").Get(ctx, tok)
 	if !found {
 		return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
@@ -981,7 +1138,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	}
 	var rec map[string]any
 	_ = json.Unmarshal(exb, &rec)
-	data := parseJSON(first(req.Input, "output", "Output"))
+	data := parseJSON(output)
 	from, definition := pend.StateName, pend.Definition
 	var sm map[string]any
 	_ = json.Unmarshal([]byte(pend.Definition), &sm)
@@ -2218,6 +2375,15 @@ func inputSlice(input map[string]any, keys ...string) []any {
 	return asSlice(value)
 }
 
+func optionalSlice(input map[string]any, keys ...string) ([]any, bool) {
+	value, exists := inputValue(input, keys...)
+	if !exists {
+		return nil, true
+	}
+	items, valid := value.([]any)
+	return items, valid
+}
+
 func inputBool(input map[string]any, keys ...string) bool {
 	value, _ := inputValue(input, keys...)
 	return toBool(value)
@@ -2499,20 +2665,171 @@ func validAliasName(name string) bool {
 	return hasNonDigit
 }
 
-func validExecutionName(name string) bool {
-	if len(name) < 1 || len(name) > 80 || !utf8.ValidString(name) {
+func validResourceName(name string) bool {
+	length := utf8.RuneCountInString(name)
+	if length < 1 || length > 80 || !utf8.ValidString(name) {
 		return false
 	}
 	for _, char := range name {
-		if char < ' ' || char >= 0x7f && char <= 0x9f || char == 0xfffe || char == 0xffff || strings.ContainsRune(" <>{}[]?*\"#%\\^|~`+$&,:/", char) {
+		if char < ' ' || char >= 0x7f && char <= 0x9f || char == 0xfffe || char == 0xffff || strings.ContainsRune(" <>{}[]?*\"#%\\^|~`$&,;:/", char) {
 			return false
 		}
 	}
 	return true
 }
 
-func actName(arn string) string {
-	return lastSeg(arn, "activity:")
+func validRoleARN(arn string) bool {
+	return len(arn) >= 1 && len(arn) <= 256 && strings.HasPrefix(arn, "arn:") && strings.Contains(arn, ":iam::") && strings.Contains(arn, ":role/")
+}
+
+func validEncryptionConfiguration(value any) bool {
+	configuration, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	typeName := first(configuration, "type", "Type")
+	keyValue, keySet := inputValue(configuration, "kmsKeyId", "KmsKeyId")
+	keyID, keyValid := keyValue.(string)
+	period, periodSet := inputValue(configuration, "kmsDataKeyReusePeriodSeconds", "KmsDataKeyReusePeriodSeconds")
+	if typeName == "AWS_OWNED_KEY" {
+		return !keySet && !periodSet
+	}
+	if typeName != "CUSTOMER_MANAGED_KMS_KEY" || !keySet || !keyValid || len(keyID) < 1 || len(keyID) > 2048 {
+		return false
+	}
+	if !periodSet {
+		return true
+	}
+	number, ok := exactNumber(period)
+	return ok && number == math.Trunc(number) && number >= 60 && number <= 900
+}
+
+func validLoggingConfiguration(value any) bool {
+	configuration, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	level := first(configuration, "level", "Level")
+	if level == "" {
+		level = "OFF"
+	}
+	if level != "ALL" && level != "ERROR" && level != "FATAL" && level != "OFF" {
+		return false
+	}
+	if included, exists := inputValue(configuration, "includeExecutionData", "IncludeExecutionData"); exists {
+		if _, ok := included.(bool); !ok {
+			return false
+		}
+	}
+	destinations, validDestinations := optionalSlice(configuration, "destinations", "Destinations")
+	if !validDestinations || len(destinations) > 1 || level != "OFF" && len(destinations) != 1 {
+		return false
+	}
+	for _, raw := range destinations {
+		destination, ok := raw.(map[string]any)
+		if !ok {
+			return false
+		}
+		groupValue, exists := inputValue(destination, "cloudWatchLogsLogGroup", "CloudWatchLogsLogGroup")
+		group, ok := groupValue.(map[string]any)
+		arn := first(group, "logGroupArn", "LogGroupArn")
+		if !exists || !ok || len(arn) < 1 || len(arn) > 256 {
+			return false
+		}
+	}
+	return true
+}
+
+func validTracingConfiguration(value any) bool {
+	configuration, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	enabled, exists := inputValue(configuration, "enabled", "Enabled")
+	_, boolean := enabled.(bool)
+	return exists && boolean
+}
+
+func exactNumber(value any) (float64, bool) {
+	switch number := value.(type) {
+	case float64:
+		return number, true
+	case int:
+		return float64(number), true
+	case json.Number:
+		parsed, err := number.Float64()
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func asciiString(value string) bool {
+	for _, char := range value {
+		if char > 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func validatedTags(raw []any) ([]any, string) {
+	if len(raw) > 50 {
+		return nil, "TooManyTags"
+	}
+	tags, seen := make([]any, 0, len(raw)), map[string]bool{}
+	for _, value := range raw {
+		tag, ok := value.(map[string]any)
+		if !ok {
+			return nil, "ValidationException"
+		}
+		key, tagValue := first(tag, "key", "Key"), first(tag, "value", "Value")
+		if !validTagText(key, 1, 128) || !validTagText(tagValue, 0, 256) || seen[key] || strings.HasPrefix(strings.ToLower(key), "aws:") || strings.HasPrefix(strings.ToLower(tagValue), "aws:") {
+			return nil, "ValidationException"
+		}
+		seen[key] = true
+		tags = append(tags, map[string]any{"key": key, "value": tagValue})
+	}
+	return tags, ""
+}
+
+func validTagText(value string, minimum, maximum int) bool {
+	length := utf8.RuneCountInString(value)
+	if !utf8.ValidString(value) || length < minimum || length > maximum {
+		return false
+	}
+	for _, char := range value {
+		if !unicode.IsLetter(char) && !unicode.IsNumber(char) && !unicode.IsSpace(char) && !strings.ContainsRune("_.:/=+-@", char) {
+			return false
+		}
+	}
+	return true
+}
+
+func (p *Pack) tagResourceExists(ctx context.Context, req *spi.Request, arn string) bool {
+	prefix := "arn:aws:states:" + req.Identity.Region + ":" + req.Identity.Account + ":"
+	if name, found := strings.CutPrefix(arn, prefix+"stateMachine:"); found && validResourceName(name) {
+		_, exists := getRecord(ctx, p.col(req, "sm"), name)
+		return exists
+	}
+	if name, found := strings.CutPrefix(arn, prefix+"activity:"); found && validResourceName(name) {
+		_, exists := getRecord(ctx, p.col(req, "act"), name)
+		return exists
+	}
+	return false
+}
+
+func resourceARNFault(arn string) string {
+	if len(arn) >= 1 && len(arn) <= 256 && strings.HasPrefix(arn, "arn:") && (strings.Contains(arn, ":stateMachine:") || strings.Contains(arn, ":activity:")) {
+		return "ResourceNotFound"
+	}
+	return "InvalidArn"
+}
+
+func activityName(req *spi.Request, arn string) (string, bool) {
+	prefix := "arn:aws:states:" + req.Identity.Region + ":" + req.Identity.Account + ":activity:"
+	name, found := strings.CutPrefix(arn, prefix)
+	return name, found && len(arn) <= 256 && validResourceName(name)
 }
 
 func lastSeg(s, sep string) string {

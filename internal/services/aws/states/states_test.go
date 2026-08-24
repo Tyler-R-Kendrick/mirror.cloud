@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -18,6 +19,8 @@ import (
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 )
+
+const testRoleARN = "arn:aws:iam::1:role/states"
 
 func TestStatesHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
@@ -68,7 +71,7 @@ func TestStateMachineVersionsAndAliases(t *testing.T) {
 	}
 
 	definition1 := `{"StartAt":"Version","States":{"Version":{"Type":"Pass","Result":{"version":1},"End":true}}}`
-	arn := must("CreateStateMachine", map[string]any{"name": "versioned", "definition": definition1, "type": "EXPRESS"}).Output["stateMachineArn"].(string)
+	arn := must("CreateStateMachine", map[string]any{"name": "versioned", "definition": definition1, "roleArn": testRoleARN, "type": "EXPRESS"}).Output["stateMachineArn"].(string)
 	v1 := must("PublishStateMachineVersion", map[string]any{"stateMachineArn": arn, "description": "one"}).Output["stateMachineVersionArn"].(string)
 	if again := must("PublishStateMachineVersion", map[string]any{"stateMachineArn": arn}).Output["stateMachineVersionArn"]; again != v1 {
 		t.Fatalf("idempotent publish %#v want %s", again, v1)
@@ -128,7 +131,7 @@ func TestExecutionNamesAreScopedToStateMachine(t *testing.T) {
 	create := func(name string) string {
 		t.Helper()
 		definition := `{"StartAt":"Done","States":{"Done":{"Type":"Pass","Result":"` + name + `","End":true}}}`
-		return invoke("CreateStateMachine", map[string]any{"name": name, "definition": definition})["stateMachineArn"].(string)
+		return invoke("CreateStateMachine", map[string]any{"name": name, "definition": definition, "roleArn": testRoleARN})["stateMachineArn"].(string)
 	}
 	firstARN := invoke("StartExecution", map[string]any{"stateMachineArn": create("first"), "name": "shared"})["executionArn"].(string)
 	secondARN := invoke("StartExecution", map[string]any{"stateMachineArn": create("second"), "name": "shared"})["executionArn"].(string)
@@ -166,11 +169,11 @@ func TestDescribeForExecutionAndRedrive(t *testing.T) {
 
 	activityARN := must("CreateActivity", map[string]any{"name": "redrive"})["activityArn"].(string)
 	definition := `{"StartAt":"Before","States":{"Before":{"Type":"Pass","Next":"Work"},"Work":{"Type":"Task","Resource":"` + activityARN + `","End":true}}}`
-	machineARN := must("CreateStateMachine", map[string]any{"name": "redrive", "definition": definition, "roleArn": "role"})["stateMachineArn"].(string)
+	machineARN := must("CreateStateMachine", map[string]any{"name": "redrive", "definition": definition, "roleArn": testRoleARN})["stateMachineArn"].(string)
 	executionARN := must("StartExecution", map[string]any{"stateMachineArn": machineARN, "name": "attempt", "input": `{"job":1}`})["executionArn"].(string)
 	originalToken := must("GetActivityTask", map[string]any{"activityArn": activityARN})["taskToken"].(string)
 	described := must("DescribeStateMachineForExecution", map[string]any{"executionArn": executionARN})
-	if described["definition"] != definition || described["name"] != "redrive" || described["roleArn"] != "role" {
+	if described["definition"] != definition || described["name"] != "redrive" || described["roleArn"] != testRoleARN {
 		t.Fatalf("state machine for execution %#v", described)
 	}
 	must("StopExecution", map[string]any{"executionArn": executionARN})
@@ -200,7 +203,7 @@ func TestDescribeForExecutionAndRedrive(t *testing.T) {
 	fault("RedriveExecution", map[string]any{"executionArn": "missing"}, "ExecutionDoesNotExist")
 	fault("DescribeStateMachineForExecution", map[string]any{"executionArn": "missing"}, "ExecutionDoesNotExist")
 
-	expressARN := must("CreateStateMachine", map[string]any{"name": "express-describe", "definition": `{"StartAt":"Fail","States":{"Fail":{"Type":"Fail"}}}`, "type": "EXPRESS"})["stateMachineArn"].(string)
+	expressARN := must("CreateStateMachine", map[string]any{"name": "express-describe", "definition": `{"StartAt":"Fail","States":{"Fail":{"Type":"Fail"}}}`, "roleArn": testRoleARN, "type": "EXPRESS"})["stateMachineArn"].(string)
 	expressExecutionARN := must("StartExecution", map[string]any{"stateMachineArn": expressARN})["executionArn"].(string)
 	fault("DescribeStateMachineForExecution", map[string]any{"executionArn": expressExecutionARN}, "StateMachineTypeNotSupported")
 	fault("RedriveExecution", map[string]any{"executionArn": expressExecutionARN}, "ExecutionNotRedrivable")
@@ -232,7 +235,7 @@ func TestDistributedMapRuns(t *testing.T) {
 
 	processor := `{"StartAt":"Done","ProcessorConfig":{"Mode":"DISTRIBUTED","ExecutionType":"STANDARD"},"States":{"Done":{"Type":"Succeed"}}}`
 	definition := `{"StartAt":"First","States":{"First":{"Type":"Map","Label":"first","ItemsPath":"$.items","ItemProcessor":` + processor + `,"ResultPath":null,"Next":"Second"},"Second":{"Type":"Map","Label":"second","ItemsPath":"$.items","ItemProcessor":` + processor + `,"End":true}}}`
-	machineARN := must("CreateStateMachine", map[string]any{"name": "distributed", "definition": definition})["stateMachineArn"].(string)
+	machineARN := must("CreateStateMachine", map[string]any{"name": "distributed", "definition": definition, "roleArn": testRoleARN})["stateMachineArn"].(string)
 	executionARN := must("StartExecution", map[string]any{"stateMachineArn": machineARN, "input": `{"items":[1,2,3]}`})["executionArn"].(string)
 	firstPage := must("ListMapRuns", map[string]any{"executionArn": executionARN, "maxResults": 1.0})
 	if len(firstPage["mapRuns"].([]any)) != 1 || firstPage["nextToken"] == nil {
@@ -263,7 +266,7 @@ func TestDistributedMapRuns(t *testing.T) {
 
 	failingProcessor := `{"StartAt":"Fail","ProcessorConfig":{"Mode":"DISTRIBUTED"},"States":{"Fail":{"Type":"Fail","Error":"ItemFailed"}}}`
 	toleratedDefinition := `{"StartAt":"Map","States":{"Map":{"Type":"Map","ItemsPath":"$.items","ToleratedFailureCount":2,"ItemProcessor":` + failingProcessor + `,"End":true}}}`
-	toleratedARN := must("CreateStateMachine", map[string]any{"name": "tolerated", "definition": toleratedDefinition})["stateMachineArn"].(string)
+	toleratedARN := must("CreateStateMachine", map[string]any{"name": "tolerated", "definition": toleratedDefinition, "roleArn": testRoleARN})["stateMachineArn"].(string)
 	toleratedExecution := must("StartExecution", map[string]any{"stateMachineArn": toleratedARN, "input": `{"items":[1,2]}`})["executionArn"].(string)
 	if execution := must("DescribeExecution", map[string]any{"executionArn": toleratedExecution}); execution["status"] != "SUCCEEDED" {
 		t.Fatalf("tolerated distributed map %#v", execution)
@@ -304,7 +307,7 @@ func TestStateMachineControlPlaneParity(t *testing.T) {
 
 	definition1 := `{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`
 	createInput := map[string]any{
-		"name": "published", "definition": definition1, "roleArn": "original", "publish": true, "versionDescription": "initial",
+		"name": "published", "definition": definition1, "roleArn": testRoleARN, "publish": true, "versionDescription": "initial",
 		"loggingConfiguration": map[string]any{"level": "OFF"}, "tracingConfiguration": map[string]any{"enabled": false},
 		"tags": []any{map[string]any{"key": "owner", "value": "first"}},
 	}
@@ -317,12 +320,12 @@ func TestStateMachineControlPlaneParity(t *testing.T) {
 	for key, value := range createInput {
 		idempotentInput[key] = value
 	}
-	idempotentInput["roleArn"] = "ignored"
+	idempotentInput["roleArn"] = "arn:aws:iam::1:role/ignored"
 	idempotentInput["tags"] = []any{map[string]any{"key": "owner", "value": "ignored"}}
 	if repeated := must("CreateStateMachine", idempotentInput); repeated["stateMachineArn"] != arn || repeated["stateMachineVersionArn"] != version1 {
 		t.Fatalf("idempotent create %#v", repeated)
 	}
-	if described := must("DescribeStateMachine", map[string]any{"stateMachineArn": arn}); described["roleArn"] != "original" || described["_publish"] != nil {
+	if described := must("DescribeStateMachine", map[string]any{"stateMachineArn": arn}); described["roleArn"] != testRoleARN || described["_publish"] != nil {
 		t.Fatalf("described state machine %#v", described)
 	}
 	if tags := must("ListTagsForResource", map[string]any{"resourceArn": arn})["tags"].([]any); len(tags) != 1 || tags[0].(map[string]any)["value"] != "first" {
@@ -334,7 +337,7 @@ func TestStateMachineControlPlaneParity(t *testing.T) {
 	}
 	changedCreate["definition"] = `{"StartAt":"Other","States":{"Other":{"Type":"Succeed"}}}`
 	fault("CreateStateMachine", changedCreate, "StateMachineAlreadyExists")
-	fault("CreateStateMachine", map[string]any{"name": "bad-description", "definition": definition1, "versionDescription": "invalid"}, "ValidationException")
+	fault("CreateStateMachine", map[string]any{"name": "bad-description", "definition": definition1, "roleArn": testRoleARN, "versionDescription": "invalid"}, "ValidationException")
 	if version := must("DescribeStateMachine", map[string]any{"stateMachineArn": version1}); version["stateMachineArn"] != version1 || version["definition"] != definition1 {
 		t.Fatalf("described version %#v", version)
 	}
@@ -367,9 +370,7 @@ func TestStateMachineControlPlaneParity(t *testing.T) {
 	if _, exists := getRecord(ctx, p.col(&spi.Request{Identity: id}, "ver"), "published:1"); exists {
 		t.Fatal("delete retained state machine version")
 	}
-	if tags := must("ListTagsForResource", map[string]any{"resourceArn": arn})["tags"].([]any); len(tags) != 0 {
-		t.Fatalf("delete retained tags %#v", tags)
-	}
+	fault("ListTagsForResource", map[string]any{"resourceArn": arn}, "ResourceNotFound")
 	fault("DeleteStateMachine", map[string]any{"stateMachineArn": arn}, "StateMachineDoesNotExist")
 }
 
@@ -398,7 +399,7 @@ func TestStartExecutionAdmission(t *testing.T) {
 	}
 	activityARN := must("CreateActivity", map[string]any{"name": "admission"})["activityArn"].(string)
 	definition := `{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"` + activityARN + `","End":true}}}`
-	machineARN := must("CreateStateMachine", map[string]any{"name": "admission", "definition": definition})["stateMachineArn"].(string)
+	machineARN := must("CreateStateMachine", map[string]any{"name": "admission", "definition": definition, "roleArn": testRoleARN})["stateMachineArn"].(string)
 	input := map[string]any{"stateMachineArn": machineARN, "name": "same", "input": `{"n":1}`}
 	started := must("StartExecution", input)
 	if repeated := must("StartExecution", input); repeated["executionArn"] != started["executionArn"] || repeated["startDate"] != started["startDate"] {
@@ -440,7 +441,7 @@ func TestStateListsAndHistoryPagination(t *testing.T) {
 	definition := `{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","Next":"Done"},"Done":{"Type":"Succeed"}}}`
 	arns := map[string]string{}
 	for _, name := range []string{"alpha", "beta", "gamma"} {
-		arns[name] = must("CreateStateMachine", map[string]any{"name": name, "definition": definition})["stateMachineArn"].(string)
+		arns[name] = must("CreateStateMachine", map[string]any{"name": name, "definition": definition, "roleArn": testRoleARN})["stateMachineArn"].(string)
 	}
 	machines1 := must("ListStateMachines", map[string]any{"maxResults": 2.0})
 	if listed := machines1["stateMachines"].([]any); len(listed) != 2 || listed[0].(map[string]any)["definition"] != nil || machines1["nextToken"] == nil {
@@ -453,9 +454,9 @@ func TestStateListsAndHistoryPagination(t *testing.T) {
 	fault("ListStateMachines", map[string]any{"maxResults": 1.5}, "ValidationException")
 
 	version1 := must("PublishStateMachineVersion", map[string]any{"stateMachineArn": arns["alpha"]})["stateMachineVersionArn"].(string)
-	must("UpdateStateMachine", map[string]any{"stateMachineArn": arns["alpha"], "roleArn": "second"})
+	must("UpdateStateMachine", map[string]any{"stateMachineArn": arns["alpha"], "roleArn": "arn:aws:iam::1:role/second"})
 	version2 := must("PublishStateMachineVersion", map[string]any{"stateMachineArn": arns["alpha"]})["stateMachineVersionArn"].(string)
-	must("UpdateStateMachine", map[string]any{"stateMachineArn": arns["alpha"], "roleArn": "third"})
+	must("UpdateStateMachine", map[string]any{"stateMachineArn": arns["alpha"], "roleArn": "arn:aws:iam::1:role/third"})
 	version3 := must("PublishStateMachineVersion", map[string]any{"stateMachineArn": arns["alpha"]})["stateMachineVersionArn"].(string)
 	versions1 := must("ListStateMachineVersions", map[string]any{"stateMachineArn": arns["alpha"], "maxResults": 2.0})
 	listedVersions := versions1["stateMachineVersions"].([]any)
@@ -500,7 +501,7 @@ func TestStateListsAndHistoryPagination(t *testing.T) {
 	}
 	fault("ListExecutions", map[string]any{"stateMachineArn": arns["alpha"], "redriveFilter": "REDRIVEN"}, "ValidationException")
 	fault("ListExecutions", map[string]any{}, "ValidationException")
-	expressARN := must("CreateStateMachine", map[string]any{"name": "express-list", "definition": definition, "type": "EXPRESS"})["stateMachineArn"].(string)
+	expressARN := must("CreateStateMachine", map[string]any{"name": "express-list", "definition": definition, "roleArn": testRoleARN, "type": "EXPRESS"})["stateMachineArn"].(string)
 	fault("ListExecutions", map[string]any{"stateMachineArn": expressARN}, "StateMachineTypeNotSupported")
 
 	history1 := must("GetExecutionHistory", map[string]any{"executionArn": executionARN, "maxResults": 1.0})
@@ -596,7 +597,6 @@ func TestStatesTagLifecycle(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
-	arn := "arn:aws:states:us-east-1:1:stateMachine:tagged"
 	must := func(operation string, input map[string]any) *spi.Response {
 		t.Helper()
 		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
@@ -605,6 +605,9 @@ func TestStatesTagLifecycle(t *testing.T) {
 		}
 		return response
 	}
+	arn := must("CreateStateMachine", map[string]any{
+		"name": "tagged", "definition": `{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`, "roleArn": testRoleARN,
+	}).Output["stateMachineArn"].(string)
 	must("TagResource", map[string]any{"resourceArn": arn, "tags": []any{
 		map[string]any{"key": "env", "value": "dev"}, map[string]any{"key": "team", "value": "platform"},
 	}})
@@ -614,6 +617,104 @@ func TestStatesTagLifecycle(t *testing.T) {
 	if len(tags) != 1 || tags[0].(map[string]any)["key"] != "env" || tags[0].(map[string]any)["value"] != "prod" {
 		t.Fatalf("tags %#v", tags)
 	}
+}
+
+func TestStatesRequestValidation(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	fault := func(operation string, input map[string]any, code string) {
+		t.Helper()
+		_, err := call(operation, input)
+		if got, ok := err.(*spi.Fault); !ok || got.Code != code {
+			t.Fatalf("%s fault %#v want %s", operation, err, code)
+		}
+	}
+	definition := `{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`
+	validCreate := func(name string) map[string]any {
+		return map[string]any{"name": name, "definition": definition, "roleArn": testRoleARN}
+	}
+
+	for _, test := range []struct {
+		name  string
+		input map[string]any
+		code  string
+	}{
+		{"missing role", map[string]any{"name": "missing-role", "definition": definition}, "InvalidArn"},
+		{"invalid name", validCreate("bad;name"), "InvalidName"},
+		{"invalid type", map[string]any{"name": "bad-type", "definition": definition, "roleArn": testRoleARN, "type": "FAST"}, "ValidationException"},
+		{"invalid logging", map[string]any{"name": "bad-log", "definition": definition, "roleArn": testRoleARN, "loggingConfiguration": map[string]any{"level": "ALL"}}, "InvalidLoggingConfiguration"},
+		{"invalid logging destinations", map[string]any{"name": "bad-log-list", "definition": definition, "roleArn": testRoleARN, "loggingConfiguration": map[string]any{"level": "OFF", "destinations": "wrong"}}, "InvalidLoggingConfiguration"},
+		{"invalid tracing", map[string]any{"name": "bad-trace", "definition": definition, "roleArn": testRoleARN, "tracingConfiguration": map[string]any{}}, "InvalidTracingConfiguration"},
+		{"invalid encryption", map[string]any{"name": "bad-key", "definition": definition, "roleArn": testRoleARN, "encryptionConfiguration": map[string]any{"type": "CUSTOMER_MANAGED_KMS_KEY"}}, "InvalidEncryptionConfiguration"},
+		{"invalid owned encryption", map[string]any{"name": "bad-owned-key", "definition": definition, "roleArn": testRoleARN, "encryptionConfiguration": map[string]any{"type": "AWS_OWNED_KEY", "kmsKeyId": ""}}, "InvalidEncryptionConfiguration"},
+		{"reserved tag", map[string]any{"name": "bad-tag", "definition": definition, "roleArn": testRoleARN, "tags": []any{map[string]any{"key": "aws:owner", "value": "me"}}}, "ValidationException"},
+		{"invalid tag list", map[string]any{"name": "bad-tag-list", "definition": definition, "roleArn": testRoleARN, "tags": "wrong"}, "ValidationException"},
+	} {
+		t.Run(test.name, func(t *testing.T) { fault("CreateStateMachine", test.input, test.code) })
+	}
+	tooManyTags := make([]any, 51)
+	for index := range tooManyTags {
+		tooManyTags[index] = map[string]any{"key": fmtString(index), "value": "v"}
+	}
+	fault("CreateStateMachine", map[string]any{"name": "too-many-tags", "definition": definition, "roleArn": testRoleARN, "tags": tooManyTags}, "TooManyTags")
+
+	created, err := call("CreateStateMachine", validCreate("plus+allowed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	arn := created.Output["stateMachineArn"].(string)
+	fault("StartExecution", map[string]any{"stateMachineArn": arn, "name": "bad;name"}, "InvalidName")
+	fault("StartExecution", map[string]any{"stateMachineArn": arn, "input": `"` + strings.Repeat("a", 262143) + `"`}, "InvalidExecutionInput")
+	fault("StartExecution", map[string]any{"stateMachineArn": arn, "traceHeader": "non-ascii-é"}, "ValidationException")
+
+	encryption := map[string]any{"type": "CUSTOMER_MANAGED_KMS_KEY", "kmsKeyId": "alias/activity", "kmsDataKeyReusePeriodSeconds": float64(60)}
+	activity, err := call("CreateActivity", map[string]any{"name": "encrypted", "encryptionConfiguration": encryption, "tags": []any{map[string]any{"key": "owner", "value": "first"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activityARN := activity.Output["activityArn"].(string)
+	if _, err := call("CreateActivity", map[string]any{"name": "encrypted", "encryptionConfiguration": encryption, "tags": []any{map[string]any{"key": "owner", "value": "ignored"}}}); err != nil {
+		t.Fatalf("idempotent activity: %v", err)
+	}
+	fault("CreateActivity", map[string]any{"name": "encrypted", "encryptionConfiguration": map[string]any{"type": "AWS_OWNED_KEY"}}, "ActivityAlreadyExists")
+	described, err := call("DescribeActivity", map[string]any{"activityArn": activityARN})
+	if err != nil || !reflect.DeepEqual(described.Output["encryptionConfiguration"], encryption) || described.Output["_encryption"] != nil {
+		t.Fatalf("described activity %#v, %v", described, err)
+	}
+	tags, err := call("ListTagsForResource", map[string]any{"resourceArn": activityARN})
+	if err != nil || tags.Output["tags"].([]any)[0].(map[string]any)["value"] != "first" {
+		t.Fatalf("activity tags %#v, %v", tags, err)
+	}
+	fault("GetActivityTask", map[string]any{"activityArn": activityARN, "workerName": ""}, "ValidationException")
+	fault("GetActivityTask", map[string]any{"activityArn": "not-an-arn"}, "InvalidArn")
+	activityDefinition := `{"StartAt":"Work","States":{"Work":{"Type":"Task","Resource":"` + activityARN + `","End":true}}}`
+	activityMachine, err := call("CreateStateMachine", map[string]any{"name": "validated-task", "definition": activityDefinition, "roleArn": testRoleARN})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = call("StartExecution", map[string]any{"stateMachineArn": activityMachine.Output["stateMachineArn"]}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := call("GetActivityTask", map[string]any{"activityArn": activityARN, "workerName": "worker"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := task.Output["taskToken"].(string)
+	fault("SendTaskSuccess", map[string]any{"taskToken": token, "output": "not-json"}, "InvalidOutput")
+	if _, err = call("SendTaskHeartbeat", map[string]any{"taskToken": token}); err != nil {
+		t.Fatalf("invalid output consumed task token: %v", err)
+	}
+	if _, err = call("SendTaskSuccess", map[string]any{"taskToken": token, "output": `{}`}); err != nil {
+		t.Fatal(err)
+	}
+	fault("TagResource", map[string]any{"resourceArn": "not-an-arn", "tags": []any{}}, "InvalidArn")
+	fault("TagResource", map[string]any{"resourceArn": "arn:aws:states:us-east-1:1:activity:missing", "tags": []any{}}, "ResourceNotFound")
+	fault("TagResource", map[string]any{"resourceArn": arn}, "ValidationException")
 }
 
 func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
@@ -648,10 +749,10 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		t.Fatal("started missing state machine")
 	}
 	definition := `{"StartAt":"Wait","States":{"Wait":{"Type":"Wait","Next":"Done"},"Done":{"Type":"Succeed"}}}`
-	created := must("CreateStateMachine", map[string]any{"Name": "lifecycle", "Definition": definition, "RoleArn": "old", "Type": "EXPRESS"})
+	created := must("CreateStateMachine", map[string]any{"Name": "lifecycle", "Definition": definition, "RoleArn": testRoleARN, "Type": "EXPRESS"})
 	arn := created.Output["stateMachineArn"].(string)
-	must("UpdateStateMachine", map[string]any{"StateMachineArn": arn, "Definition": definition, "RoleArn": "new"})
-	if described := must("DescribeStateMachine", map[string]any{"StateMachineArn": arn}).Output; described["roleArn"] != "new" || described["type"] != "EXPRESS" {
+	must("UpdateStateMachine", map[string]any{"StateMachineArn": arn, "Definition": definition, "RoleArn": "arn:aws:iam::1:role/new"})
+	if described := must("DescribeStateMachine", map[string]any{"StateMachineArn": arn}).Output; described["roleArn"] != "arn:aws:iam::1:role/new" || described["type"] != "EXPRESS" {
 		t.Fatalf("state machine %#v", described)
 	}
 	if machines := must("ListStateMachines", nil).Output["stateMachines"].([]any); len(machines) != 1 {
@@ -690,7 +791,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		t.Fatalf("unexpected activity task %#v", task)
 	}
 	activityDefinition := `{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"` + activityARN + `","End":true}}}`
-	activityMachine := must("CreateStateMachine", map[string]any{"Name": "activity-machine", "Definition": activityDefinition}).Output["stateMachineArn"].(string)
+	activityMachine := must("CreateStateMachine", map[string]any{"Name": "activity-machine", "Definition": activityDefinition, "RoleArn": testRoleARN}).Output["stateMachineArn"].(string)
 	runningARN := must("StartExecution", map[string]any{"StateMachineArn": activityMachine, "Name": "failure"}).Output["executionArn"].(string)
 	token := must("GetActivityTask", map[string]any{"ActivityArn": activityARN}).Output["taskToken"].(string)
 	must("SendTaskFailure", map[string]any{"TaskToken": token, "Error": "ActivityFailed"})
@@ -703,7 +804,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		}
 	}
 	recoveryDefinition := `{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"` + activityARN + `","Retry":[{"ErrorEquals":["Retryable"],"MaxAttempts":1}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.failure","Next":"Recovered"}],"End":true},"Recovered":{"Type":"Succeed"}}}`
-	recoveryMachine := must("CreateStateMachine", map[string]any{"Name": "activity-recovery", "Definition": recoveryDefinition}).Output["stateMachineArn"].(string)
+	recoveryMachine := must("CreateStateMachine", map[string]any{"Name": "activity-recovery", "Definition": recoveryDefinition, "RoleArn": testRoleARN}).Output["stateMachineArn"].(string)
 	recoveryARN := must("StartExecution", map[string]any{"StateMachineArn": recoveryMachine, "Name": "recovery", "Input": `{"keep":true}`}).Output["executionArn"].(string)
 	firstToken := must("GetActivityTask", map[string]any{"ActivityArn": activityARN}).Output["taskToken"].(string)
 	must("SendTaskHeartbeat", map[string]any{"TaskToken": firstToken})
@@ -721,7 +822,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		t.Fatalf("activity recovery %#v", recovered)
 	}
 	preserveDefinition := `{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"` + activityARN + `","ResultPath":null,"End":true}}}`
-	preserveMachine := must("CreateStateMachine", map[string]any{"Name": "activity-result-path", "Definition": preserveDefinition}).Output["stateMachineArn"].(string)
+	preserveMachine := must("CreateStateMachine", map[string]any{"Name": "activity-result-path", "Definition": preserveDefinition, "RoleArn": testRoleARN}).Output["stateMachineArn"].(string)
 	preserveARN := must("StartExecution", map[string]any{"StateMachineArn": preserveMachine, "Name": "preserve", "Input": `{"keep":true}`}).Output["executionArn"].(string)
 	preserveToken := must("GetActivityTask", map[string]any{"ActivityArn": activityARN}).Output["taskToken"].(string)
 	must("SendTaskSuccess", map[string]any{"TaskToken": preserveToken, "Output": `{"drop":true}`})
@@ -755,8 +856,9 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if _, err := call("ValidateStateMachineDefinition", map[string]any{"definition": definition, "maxResults": 101.0}); err == nil {
 		t.Fatal("accepted excessive validation results")
 	}
-	if _, err := call("CreateStateMachine", map[string]any{"Name": "invalid", "Definition": `{`}); err == nil {
-		t.Fatal("created invalid state machine")
+	_, invalidCreateErr := call("CreateStateMachine", map[string]any{"Name": "invalid", "Definition": `{`, "RoleArn": testRoleARN})
+	if fault, ok := invalidCreateErr.(*spi.Fault); !ok || fault.Code != "InvalidDefinition" {
+		t.Fatalf("invalid state machine error %#v", invalidCreateErr)
 	}
 	tested := must("TestState", map[string]any{"definition": `{"Type":"Pass","Parameters":{"message.$":"States.Format('Hi {}', $.name)"},"Next":"After"}`, "input": `{"name":"Ada"}`}).Output
 	if tested["status"] != "SUCCEEDED" || tested["nextState"] != "After" || !strings.Contains(tested["output"].(string), `"message":"Hi Ada"`) {

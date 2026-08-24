@@ -956,6 +956,85 @@ func TestVariableAssignmentLimits(t *testing.T) {
 	}
 }
 
+func TestStatesPayloadLimits(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	large := strings.Repeat("x", 256*1024)
+	if validStatePayload(large) || !validStatePayload(strings.Repeat("x", 256*1024-2)) {
+		t.Fatal("payload byte boundary")
+	}
+	walk := func(machine map[string]any, input any) walkResult {
+		t.Helper()
+		definition, _ := json.Marshal(machine)
+		return p.walk(ctx, &spi.Request{Identity: id}, string(definition), "", input, nil)
+	}
+	pass := walk(map[string]any{"StartAt": "Pass", "States": map[string]any{"Pass": map[string]any{"Type": "Pass", "Result": large, "End": true}}}, nil)
+	if pass.status != "FAILED" || pass.errorName != "States.DataLimitExceeded" {
+		t.Fatalf("oversized Pass %#v", pass)
+	}
+	branch := func() map[string]any {
+		return map[string]any{"StartAt": "Pass", "States": map[string]any{"Pass": map[string]any{"Type": "Pass", "Result": strings.Repeat("x", 140*1024), "End": true}}}
+	}
+	parallel := walk(map[string]any{"StartAt": "Parallel", "States": map[string]any{"Parallel": map[string]any{"Type": "Parallel", "Branches": []any{branch(), branch()}, "End": true}}}, nil)
+	if parallel.status != "FAILED" || parallel.errorName != "States.DataLimitExceeded" {
+		t.Fatalf("oversized Parallel %#v", parallel)
+	}
+	iterator := branch()
+	mapped := walk(map[string]any{"StartAt": "Map", "States": map[string]any{"Map": map[string]any{"Type": "Map", "ItemsPath": "$.items", "ItemProcessor": iterator, "End": true}}}, map[string]any{"items": []any{1.0, 2.0}})
+	if mapped.status != "FAILED" || mapped.errorName != "States.DataLimitExceeded" {
+		t.Fatalf("oversized Map %#v", mapped)
+	}
+
+	queue := sqs.New(deps)
+	queueResponse, err := queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "payload-limit"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queueURL := queueResponse.Output["QueueUrl"].(string)
+	taskDefinition, _ := json.Marshal(map[string]any{"StartAt": "Task", "States": map[string]any{
+		"Task":      map[string]any{"Type": "Task", "Resource": "arn:aws:states:::sqs:sendMessage", "Parameters": map[string]any{"QueueUrl": queueURL, "MessageBody": large}, "Catch": []any{map[string]any{"ErrorEquals": []any{"States.DataLimitExceeded"}, "Next": "Recovered"}}, "End": true},
+		"Recovered": map[string]any{"Type": "Succeed"},
+	}})
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStateMachine", Input: map[string]any{"name": "payload-limit", "definition": string(taskDefinition), "roleArn": testRoleARN, "type": "EXPRESS"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartSyncExecution", Input: map[string]any{"stateMachineArn": created.Output["stateMachineArn"]}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if execution.Output["status"] != "FAILED" || execution.Output["error"] != "States.DataLimitExceeded" {
+		t.Fatalf("oversized Task payload %#v", execution.Output)
+	}
+	messages, err := queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueUrl": queueURL}})
+	if err != nil || len(messages.Output["Messages"].([]any)) != 0 {
+		t.Fatalf("oversized Task invoked SQS %#v %v", messages, err)
+	}
+
+	table := dynamodb.New(deps)
+	if _, err := table.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTable", Input: map[string]any{"TableName": "payload-limit", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := table.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutItem", Input: map[string]any{"TableName": "payload-limit", "Item": map[string]any{"id": map[string]any{"S": "1"}, "body": map[string]any{"S": large}}}}); err != nil {
+		t.Fatal(err)
+	}
+	resultDefinition := `{"StartAt":"Read","States":{"Read":{"Type":"Task","Resource":"arn:aws:states:::aws-sdk:dynamodb:getItem","Parameters":{"TableName":"payload-limit","Key":{"id":{"S":"1"}}},"ResultSelector":{"id.$":"$.Item.id"},"End":true}}}`
+	resultMachine, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStateMachine", Input: map[string]any{"name": "result-payload-limit", "definition": resultDefinition, "roleArn": testRoleARN, "type": "EXPRESS"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultExecution, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartSyncExecution", Input: map[string]any{"stateMachineArn": resultMachine.Output["stateMachineArn"]}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resultExecution.Output["status"] != "FAILED" || resultExecution.Output["error"] != "States.DataLimitExceeded" {
+		t.Fatalf("oversized Task result %#v", resultExecution.Output)
+	}
+}
+
 func TestStatesDurableWait(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

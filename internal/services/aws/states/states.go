@@ -1604,6 +1604,9 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 }
 
 func (p *Pack) walk(ctx context.Context, req *spi.Request, def, from string, input any, retries map[string]map[int]int, inheritedVariables ...map[string]any) (result walkResult) {
+	if !validStatePayload(input) {
+		return walkResult{out: input, status: "FAILED", cause: "States.DataLimitExceeded", errorName: "States.DataLimitExceeded"}
+	}
 	currentState, currentInput := "", input
 	variables := map[string]any{}
 	if len(inheritedVariables) != 0 && inheritedVariables[0] != nil {
@@ -1706,6 +1709,9 @@ walkLoop:
 			}
 			if !ok {
 				return walkResult{out: rawInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
+			}
+			if !validStatePayload(data) {
+				return walkResult{out: rawInput, status: "FAILED", cause: "States.DataLimitExceeded", errorName: "States.DataLimitExceeded", hist: hist}
 			}
 			return walkResult{out: data, status: "SUCCEEDED", hist: hist}
 		case "Fail":
@@ -1852,6 +1858,9 @@ walkLoop:
 					}
 					failure = stateFailure{name: name, cause: name}
 				}
+				if failure.name == "" && !validStatePayload(payload) {
+					return walkResult{out: rawInput, status: "FAILED", cause: "States.DataLimitExceeded", errorName: "States.DataLimitExceeded", hist: hist}
+				}
 				if failure.name == "" && strings.Contains(res, ":activity:") {
 					tok := p.deps.Rand.Hex(16)
 					return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
@@ -1866,6 +1875,8 @@ walkLoop:
 					}
 					if err != nil {
 						failure = taskFailure(errorPrefix, sdk, err)
+					} else if !validStatePayload(out) {
+						return walkResult{out: rawInput, status: "FAILED", cause: "States.DataLimitExceeded", errorName: "States.DataLimitExceeded", hist: hist}
 					} else if callback {
 						pendingTask := &pending{
 							Token: token, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Variables: variables, Callback: true, Deadline: first(req.Input, "_executionDeadline"),
@@ -1988,6 +1999,9 @@ walkLoop:
 					results = append(results, wr.out)
 				}
 				if failed == nil {
+					if !validStatePayload(results) {
+						return walkResult{out: stateInput, status: "FAILED", cause: "States.DataLimitExceeded", errorName: "States.DataLimitExceeded", hist: hist}
+					}
 					if isJSONata {
 						data, ok = applyJSONataState(st, stateInput, results, stateContext, variables, p.deps.Rand)
 						if ok {
@@ -2275,6 +2289,9 @@ walkLoop:
 					if mapOutput == nil {
 						mapOutput = []any{}
 					}
+					if !validStatePayload(mapOutput) {
+						return walkResult{out: stateInput, status: "FAILED", cause: "States.DataLimitExceeded", errorName: "States.DataLimitExceeded", hist: hist}
+					}
 					if isJSONata {
 						data, ok = applyJSONataState(st, stateInput, mapOutput, stateContext, variables, p.deps.Rand, mapScope.variables)
 						if ok {
@@ -2351,6 +2368,9 @@ walkLoop:
 				failure = "States.QueryEvaluationError"
 			}
 			return walkResult{out: rawInput, status: "FAILED", cause: failure, errorName: failure, hist: hist}
+		}
+		if !validStatePayload(data) {
+			return walkResult{out: rawInput, status: "FAILED", cause: "States.DataLimitExceeded", errorName: "States.DataLimitExceeded", hist: hist}
 		}
 		if waitUntil.After(p.deps.Clock.Now()) {
 			if first(req.Input, "_executionType") == "EXPRESS" {
@@ -4500,6 +4520,11 @@ func aliasReferences(record map[string]any, versionARN string) bool {
 		}
 	}
 	return false
+}
+
+func validStatePayload(value any) bool {
+	encoded, err := json.Marshal(value)
+	return err == nil && len(encoded) <= 256*1024
 }
 
 func parseJSON(s string) any {

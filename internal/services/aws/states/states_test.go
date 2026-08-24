@@ -1722,6 +1722,31 @@ func TestStatesDataFlowValidation(t *testing.T) {
 	}
 }
 
+func TestStatesReferencePathValidation(t *testing.T) {
+	processor := `"ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`
+	distributedProcessor := `"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`
+	for _, definition := range []string{
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Wait","SecondsPath":"$[*]","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","TimeoutSecondsPath":"$..timeout","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Choice","Choices":[{"Variable":"$[*]","StringEquals":"x","Next":"Done"}]},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Choice","Choices":[{"Variable":"$.actual","StringEqualsPath":"$..expected","Next":"Done"}]},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Fail","ErrorPath":"$[*]"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":[{"ErrorEquals":["Boom"],"ResultPath":"$[*]","Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Map","ItemsPath":"$[*]",` + processor + `,"End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Map","ItemReader":{"Resource":"reader","ReaderConfig":{"MaxItemsPath":"$[*]"}},` + distributedProcessor + `,"End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Map","ItemBatcher":{"MaxItemsPerBatchPath":"$[*]"},` + distributedProcessor + `,"End":true}}}`,
+	} {
+		if diagnostics := validateDefinition(definition); len(diagnostics) != 1 {
+			t.Fatalf("reference-path diagnostics = %#v for %s", diagnostics, definition)
+		}
+	}
+	for path, valid := range map[string]bool{"$$.Execution.Name": true, "$value.limit": true, "$.items[0]": true, "$[*]": false, "$[0:2]": false} {
+		if got := validJSONPath(path, true); got != valid {
+			t.Fatalf("validJSONPath(%q, true) = %t, want %t", path, got, valid)
+		}
+	}
+}
+
 func TestStatesMapValidation(t *testing.T) {
 	inlineProcessor := `"ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`
 	processor := `"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`

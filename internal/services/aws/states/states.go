@@ -4927,7 +4927,7 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 					}
 					keys := slices.Sorted(maps.Keys(object))
 					nodes = []any{keys}
-				case "first", "last":
+				case "first", "last", "index":
 					array, valid := value.([]any)
 					if !valid || len(array) == 0 {
 						return nil, false
@@ -4935,6 +4935,14 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 					index := 0
 					if token.key == "last" {
 						index = len(array) - 1
+					} else if token.key == "index" {
+						index = token.start
+						if index < 0 {
+							index += len(array)
+						}
+						if index < 0 || index >= len(array) {
+							return nil, false
+						}
 					}
 					nodes = []any{array[index]}
 				}
@@ -5152,7 +5160,7 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 		} else if path[0] != '[' {
 			return nil, false
 		}
-		if !recursive && path == "length()" {
+		if !recursive && (path == "length()" || path == "size()") {
 			tokens = append(tokens, pathToken{kind: 'l'})
 			break
 		}
@@ -5175,6 +5183,14 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 				}
 			}
 			if path == "" {
+				break
+			}
+			if strings.HasPrefix(path, "index(") && strings.HasSuffix(path, ")") {
+				index, err := strconv.Atoi(strings.TrimSpace(path[len("index(") : len(path)-1]))
+				if err != nil {
+					return nil, false
+				}
+				tokens = append(tokens, pathToken{kind: 'j', key: "index", start: index})
 				break
 			}
 		}

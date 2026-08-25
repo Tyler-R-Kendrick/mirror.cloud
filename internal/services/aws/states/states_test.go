@@ -1694,6 +1694,7 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","InputPath":"$input.value","OutputPath":"$[*]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[0,2]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$['a','b']","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$..value","End":true}}}`,
 		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","ResultSelector":{"value.$":"$.value"},"End":true}}}`,
 	} {
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
@@ -1707,7 +1708,6 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","InputPath":"input","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"output","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"result","End":true}}}`,
-		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","InputPath":"$..input","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","InputPath":"$.['input']","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[0]output","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$[*]","End":true}}}`,
@@ -1731,7 +1731,6 @@ func TestStatesReferencePathValidation(t *testing.T) {
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Wait","SecondsPath":"$[*]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","TimeoutSecondsPath":"$..timeout","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Choice","Choices":[{"Variable":"$[*]","StringEquals":"x","Next":"Done"}]},"Done":{"Type":"Succeed"}}}`,
-		`{"StartAt":"Bad","States":{"Bad":{"Type":"Choice","Choices":[{"Variable":"$.actual","StringEqualsPath":"$..expected","Next":"Done"}]},"Done":{"Type":"Succeed"}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Fail","ErrorPath":"$[*]"}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":[{"ErrorEquals":["Boom"],"ResultPath":"$[*]","Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Map","ItemsPath":"$[*]",` + processor + `,"End":true}}}`,
@@ -1742,7 +1741,7 @@ func TestStatesReferencePathValidation(t *testing.T) {
 			t.Fatalf("reference-path diagnostics = %#v for %s", diagnostics, definition)
 		}
 	}
-	for path, valid := range map[string]bool{"$$.Execution.Name": true, "$value.limit": true, "$.items[0]": true, "$['a:b']": true, `$.store\.book`: true, "$.*": false, "$[*]": false, "$[0:2]": false, "$['a','b']": false} {
+	for path, valid := range map[string]bool{"$$.Execution.Name": true, "$value.limit": true, "$.items[0]": true, "$['a:b']": true, `$.store\.book`: true, "$.*": false, "$[*]": false, "$[0:2]": false, "$['a','b']": false, "$..items": false} {
 		if got := validJSONPath(path, true); got != valid {
 			t.Fatalf("validJSONPath(%q, true) = %t, want %t", path, got, valid)
 		}
@@ -3252,6 +3251,15 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	}
 	if empty, found := jsonPathLookup(paths, "$.a[9,10]"); !found || fmtString(empty) != `[]` {
 		t.Fatalf("empty union %#v %t", empty, found)
+	}
+	if recursive, found := jsonPathLookup(paths, "$..v"); !found || fmtString(recursive) != `[1,2,3]` {
+		t.Fatalf("recursive descent %#v %t", recursive, found)
+	}
+	if empty, found := jsonPathLookup(paths, "$..missing"); !found || fmtString(empty) != `[]` {
+		t.Fatalf("empty recursive descent %#v %t", empty, found)
+	}
+	if recursive, found := jsonPathLookup(map[string]any{"a": []any{1.0}}, "$..*"); !found || fmtString(recursive) != `[[1],1]` {
+		t.Fatalf("recursive wildcard %#v %t", recursive, found)
 	}
 	members := map[string]any{"store.book": map[string]any{"a:b": 1.0, "close]key": 2.0, "quote'key": 3.0, "comma,key": 4.0}}
 	if jsonPath(members, `$.store\.book['a:b']`) != 1.0 || jsonPath(members, `$['store.book']['close]key']`) != 2.0 || jsonPath(members, `$['store.book']['quote\'key']`) != 3.0 || fmtString(jsonPath(members, `$['store.book']['comma,key','a:b']`)) != `[4,1]` || fmtString(jsonPath(map[string]any{"b": 2.0, "a": 1.0}, "$.*")) != `[1,2]` {

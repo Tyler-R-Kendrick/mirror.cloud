@@ -4821,16 +4821,34 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 					}
 				}
 			case 'i':
-				if array, ok := node.([]any); ok && token.start >= 0 && token.start < len(array) {
-					next = append(next, array[token.start])
+				if array, ok := node.([]any); ok {
+					index := token.start
+					if index < 0 {
+						index += len(array)
+					}
+					if index >= 0 && index < len(array) {
+						next = append(next, array[index])
+					}
 				}
 			case '*':
-				if array, ok := node.([]any); ok {
-					next = append(next, array...)
+				switch node := node.(type) {
+				case []any:
+					next = append(next, node...)
+				case map[string]any:
+					for _, key := range slices.Sorted(maps.Keys(node)) {
+						next = append(next, node[key])
+					}
 				}
 			case 's':
 				if array, ok := node.([]any); ok {
-					start, end := max(0, token.start), min(len(array), token.end)
+					start, end := token.start, token.end
+					if start < 0 {
+						start += len(array)
+					}
+					if end < 0 {
+						end += len(array)
+					}
+					start, end = max(0, start), min(len(array), end)
 					if start <= end {
 						next = append(next, array[start:end]...)
 					}
@@ -4869,36 +4887,83 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 			return nil, false
 		}
 		if path[0] != '[' {
-			end := strings.IndexAny(path, ".[")
-			if end < 0 {
-				end = len(path)
+			var key strings.Builder
+			end := 0
+			for end < len(path) && path[end] != '.' && path[end] != '[' {
+				if path[end] == '\\' {
+					end++
+					if end == len(path) {
+						return nil, false
+					}
+				}
+				key.WriteByte(path[end])
+				end++
 			}
-			if end == 0 {
+			if key.Len() == 0 {
 				return nil, false
 			}
-			tokens = append(tokens, pathToken{kind: 'f', key: path[:end]})
+			if path[:end] == "*" {
+				tokens = append(tokens, pathToken{kind: '*'})
+			} else {
+				tokens = append(tokens, pathToken{kind: 'f', key: key.String()})
+			}
 			path = path[end:]
 			continue
 		}
-		close := strings.IndexByte(path, ']')
-		if close < 0 {
-			return nil, false
+		close := 1
+		if len(path) > 1 && (path[1] == '\'' || path[1] == '"') {
+			quote := path[1]
+			close = 2
+			for close < len(path) && path[close] != quote {
+				if path[close] == '\\' {
+					close++
+				}
+				close++
+			}
+			if close+1 >= len(path) || path[close+1] != ']' {
+				return nil, false
+			}
+			close++
+		} else {
+			close = strings.IndexByte(path, ']')
+			if close < 0 {
+				return nil, false
+			}
 		}
 		member := path[1:close]
 		path = path[close+1:]
 		switch {
+		case len(member) >= 2 && (member[0] == '\'' && member[len(member)-1] == '\'' || member[0] == '"' && member[len(member)-1] == '"'):
+			var key strings.Builder
+			for index := 1; index < len(member)-1; index++ {
+				if member[index] == '\\' {
+					index++
+					if index == len(member)-1 {
+						return nil, false
+					}
+				}
+				key.WriteByte(member[index])
+			}
+			tokens = append(tokens, pathToken{kind: 'f', key: key.String()})
 		case member == "*":
 			tokens = append(tokens, pathToken{kind: '*'})
 		case strings.Contains(member, ":"):
 			bounds := strings.SplitN(member, ":", 2)
-			start, startErr := strconv.Atoi(bounds[0])
-			end, endErr := strconv.Atoi(bounds[1])
-			if startErr != nil || endErr != nil {
-				return nil, false
+			start, end := 0, int(^uint(0)>>1)
+			var err error
+			if bounds[0] != "" {
+				start, err = strconv.Atoi(bounds[0])
+				if err != nil {
+					return nil, false
+				}
+			}
+			if bounds[1] != "" {
+				end, err = strconv.Atoi(bounds[1])
+				if err != nil {
+					return nil, false
+				}
 			}
 			tokens = append(tokens, pathToken{kind: 's', start: start, end: end})
-		case len(member) >= 2 && (member[0] == '\'' && member[len(member)-1] == '\'' || member[0] == '"' && member[len(member)-1] == '"'):
-			tokens = append(tokens, pathToken{kind: 'f', key: member[1 : len(member)-1]})
 		default:
 			index, err := strconv.Atoi(member)
 			if err != nil {

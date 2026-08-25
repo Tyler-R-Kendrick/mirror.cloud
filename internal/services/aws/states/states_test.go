@@ -1706,6 +1706,7 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.name =~ /a b/x)]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.name =~ /a.b/dU)]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.name =~ /\\d/U)]","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.name == '\\u00e9')]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.name in ['a','c'])]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.inside)]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.tags size 2)]","End":true}}}`,
@@ -1749,6 +1750,7 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.price < @.*)]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.name =~ /(/)]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.name =~ /a/z)]","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.name == '\\q')]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.tags size '2')]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.tags empty 1)]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$.items.index(1.5)","End":true}}}`,
@@ -3361,6 +3363,12 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	}
 	if filtered := jsonPath(products, `$[?(@.name != 'b')].name`); fmtString(filtered) != `["a","c"]` {
 		t.Fatalf("string filter %#v", filtered)
+	}
+	escapedFilterValues := []any{map[string]any{"name": "é"}, map[string]any{"name": "line\nbreak"}, map[string]any{"name": "quote'key"}}
+	for path, expected := range map[string]string{`$[?(@.name == '\u00e9')].name`: "é", `$[?(@.name == "\u00e9")].name`: "é", `$[?(@.name == 'line\nbreak')].name`: "line\nbreak", `$[?(@.name == 'quote\'key')].name`: "quote'key"} {
+		if filtered := jsonPath(escapedFilterValues, path); fmtString(filtered) != fmtString([]any{expected}) {
+			t.Fatalf("escaped string filter %s = %#v", path, filtered)
+		}
 	}
 	if filtered := jsonPath(products, "$[?(@.active == true)].name"); fmtString(filtered) != `["a","c"]` {
 		t.Fatalf("boolean filter %#v", filtered)

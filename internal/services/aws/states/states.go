@@ -1247,15 +1247,21 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 			}
 		}
-		wrapped, next, err := testDefinition(definition, stateName, data, mock, configuration)
+		wrapped, next, selection, err := testDefinition(definition, stateName, data, mock, configuration)
 		if err != nil {
 			return nil, &spi.Fault{Code: "InvalidDefinition", Message: err.Error(), HTTPStatus: 400, Fault: "client"}
 		}
+		if testContext == nil && selection.insideMap {
+			testContext = map[string]any{"Map": map[string]any{"Item": map[string]any{"Index": 0.0, "Value": data, "Source": "STATE_DATA"}}}
+		}
 		walkRequest := req
-		if testContext != nil {
+		if testContext != nil || selection.name != "" {
 			copy := *req
 			copy.Input = maps.Clone(req.Input)
-			copy.Input["_testStateContext"] = testContext
+			if testContext != nil {
+				copy.Input["_testStateContext"] = testContext
+			}
+			copy.Input["_testStateName"] = selection.name
 			walkRequest = &copy
 		}
 		var testMachine map[string]any
@@ -3116,8 +3122,12 @@ type jsonataScope struct {
 
 func jsonataContext(req *spi.Request, state string, extra map[string]any) map[string]any {
 	machineARN := first(req.Input, "_stateMachineArn", "stateMachineArn", "StateMachineArn")
+	stateName := first(req.Input, "_testStateName")
+	if stateName == "" {
+		stateName = state
+	}
 	context := map[string]any{
-		"State": map[string]any{"Name": state, "RetryCount": 0.0},
+		"State": map[string]any{"Name": stateName, "RetryCount": 0.0},
 		"StateMachine": map[string]any{
 			"Id": machineARN, "Name": baseSMName(machineARN),
 		},
@@ -7489,33 +7499,79 @@ func supportedStateType(typ string) bool {
 	}
 }
 
-func testDefinition(definition, stateName string, input any, mock, configuration map[string]any) (string, string, error) {
+type testStateSelection struct {
+	state     map[string]any
+	name      string
+	query     string
+	insideMap bool
+}
+
+func nestedTestState(machine map[string]any, stateName, inheritedQuery string, insideMap bool, matches *[]testStateSelection) {
+	queryLanguage := first(machine, "QueryLanguage")
+	if queryLanguage == "" {
+		queryLanguage = inheritedQuery
+	}
+	states, _ := machine["States"].(map[string]any)
+	for _, name := range slices.Sorted(maps.Keys(states)) {
+		state, _ := states[name].(map[string]any)
+		stateQuery := first(state, "QueryLanguage")
+		if stateQuery == "" {
+			stateQuery = queryLanguage
+		}
+		if name == stateName {
+			*matches = append(*matches, testStateSelection{state: state, name: name, query: stateQuery, insideMap: insideMap})
+		}
+		for _, raw := range asSlice(state["Branches"]) {
+			branch, _ := raw.(map[string]any)
+			nestedTestState(branch, stateName, stateQuery, insideMap, matches)
+		}
+		for _, key := range []string{"ItemProcessor", "Iterator"} {
+			if processor, exists := state[key].(map[string]any); exists {
+				nestedTestState(processor, stateName, stateQuery, true, matches)
+			}
+		}
+	}
+}
+
+func testDefinition(definition, stateName string, input any, mock, configuration map[string]any) (string, string, testStateSelection, error) {
 	var parsed map[string]any
 	if json.Unmarshal([]byte(definition), &parsed) != nil {
-		return "", "", fmt.Errorf("definition is not valid JSON")
+		return "", "", testStateSelection{}, fmt.Errorf("definition is not valid JSON")
 	}
-	state := parsed
-	states, fullMachine := parsed["States"].(map[string]any)
+	selection := testStateSelection{state: parsed, query: first(parsed, "QueryLanguage")}
+	_, fullMachine := parsed["States"].(map[string]any)
 	if fullMachine {
 		if stateName == "" {
 			stateName, _ = parsed["StartAt"].(string)
-		}
-		var found bool
-		state, found = states[stateName].(map[string]any)
-		if !found {
-			return "", "", fmt.Errorf("stateName does not identify a state")
+			states, _ := parsed["States"].(map[string]any)
+			state, found := states[stateName].(map[string]any)
+			if !found {
+				return "", "", testStateSelection{}, fmt.Errorf("stateName does not identify a state")
+			}
+			selection = testStateSelection{state: state, name: stateName, query: first(parsed, "QueryLanguage")}
+			if stateQuery := first(state, "QueryLanguage"); stateQuery != "" {
+				selection.query = stateQuery
+			}
+		} else {
+			matches := []testStateSelection{}
+			nestedTestState(parsed, stateName, "", false, &matches)
+			if len(matches) != 1 {
+				return "", "", testStateSelection{}, fmt.Errorf("stateName does not uniquely identify a state")
+			}
+			selection = matches[0]
 		}
 	} else if stateName != "" {
-		return "", "", fmt.Errorf("stateName requires a state machine definition")
+		return "", "", testStateSelection{}, fmt.Errorf("stateName requires a state machine definition")
 	}
+	state := selection.state
 	if !supportedStateType(first(state, "Type")) {
-		return "", "", fmt.Errorf("state does not have a supported Type")
+		return "", "", testStateSelection{}, fmt.Errorf("state does not have a supported Type")
 	}
 	if typ := first(state, "Type"); mock == nil && (typ == "Parallel" || typ == "Map" || typ == "Task" && strings.Contains(first(state, "Resource"), ":activity:")) {
-		return "", "", fmt.Errorf("state requires a mock")
+		return "", "", testStateSelection{}, fmt.Errorf("state requires a mock")
 	}
 	if mock != nil && !slices.Contains([]string{"Task", "Map", "Parallel"}, first(state, "Type")) {
-		return "", "", fmt.Errorf("mock requires a Task, Map, or Parallel state")
+		return "", "", testStateSelection{}, fmt.Errorf("mock requires a Task, Map, or Parallel state")
 	}
 	next := first(state, "Next")
 	copy := map[string]any{}
@@ -7540,12 +7596,12 @@ func testDefinition(definition, stateName string, input any, mock, configuration
 	if typ := first(copy, "Type"); typ != "Succeed" && typ != "Fail" {
 		copy["End"] = true
 	}
-	if copy["QueryLanguage"] == nil && parsed["QueryLanguage"] != nil {
-		copy["QueryLanguage"] = parsed["QueryLanguage"]
+	if copy["QueryLanguage"] == nil && selection.query != "" {
+		copy["QueryLanguage"] = selection.query
 	}
 	machine := map[string]any{"StartAt": "TestState", "States": map[string]any{"TestState": copy}}
 	encoded, _ := json.Marshal(machine)
-	return string(encoded), next, nil
+	return string(encoded), next, selection, nil
 }
 
 func smName(arn string) string {

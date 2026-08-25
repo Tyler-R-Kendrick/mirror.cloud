@@ -107,3 +107,31 @@ func TestMissingRequired(t *testing.T) {
 		t.Fatalf("required: %T %v", err, err)
 	}
 }
+
+func TestCRUDRetention(t *testing.T) {
+	svc := &model.Service{ID: "example.crud"}
+	for _, name := range []string{"CreateWidget", "GetWidget", "DeleteWidget", "ListWidgets"} {
+		svc.Operations = append(svc.Operations, model.Operation{Name: name, HTTP: model.HTTPBinding{Code: 200}})
+	}
+	pack := mock.New(svc, spitest.Deps(t), false)
+	invoke := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := pack.Invoke(context.Background(), &spi.Request{ServiceID: svc.ID, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+	invoke("CreateWidget", map[string]any{"Name": "one"})
+	invoke("CreateWidget", map[string]any{"Name": "two"})
+	if got := invoke("GetWidget", map[string]any{"Name": "one"})["Name"]; got != "one" {
+		t.Fatalf("first record lost: %#v", got)
+	}
+	if items := invoke("ListWidgets", nil)["Items"].([]any); len(items) != 2 {
+		t.Fatalf("list = %#v", items)
+	}
+	invoke("DeleteWidget", map[string]any{"Name": "one"})
+	if items := invoke("ListWidgets", nil)["Items"].([]any); len(items) != 1 {
+		t.Fatalf("list after delete = %#v", items)
+	}
+}

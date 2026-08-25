@@ -2998,6 +2998,66 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
 		{
+			name: "states-reject-json-path-structural-functions",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `[]string{"keys", "first", "last"}`,
+			new:  `[]string{"unsupported"}`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesDataFlowValidation|TestStatesLifecycleAndWalkerUnits",
+		},
+		{
+			name: "states-reject-json-path-map-length",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old: `case []any:
+					length = len(value)
+				case map[string]any:`,
+			new: `case []any:
+					length = len(value)
+				case map[string]int:`,
+			pkg: "./internal/services/aws/states",
+			run: "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
+			name: "states-ignore-json-path-keys",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `case "keys":`,
+			new:  `case "":`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
+			name: "states-reverse-json-path-keys",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `keys := slices.Sorted(maps.Keys(object))`,
+			new:  `keys := slices.Sorted(maps.Keys(object)); slices.Reverse(keys)`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
+			name: "states-ignore-json-path-sequence-functions",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `case "first", "last":`,
+			new:  `case "":`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
+			name: "states-accept-json-path-empty-sequence",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `if !valid || len(array) == 0 {`,
+			new:  `if !valid {`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
+			name: "states-return-first-for-json-path-last",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `if token.key == "last" {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
 			name: "states-truncate-json-path-wildcard",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `next = append(next, node...)`,

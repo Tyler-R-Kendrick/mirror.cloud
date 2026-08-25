@@ -4897,7 +4897,13 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 					}
 					start, end = max(0, start), min(len(array), end)
 					if start <= end {
-						next = append(next, array[start:end]...)
+						if token.step == 1 {
+							next = append(next, array[start:end]...)
+						} else {
+							for index := start; index < end; index += token.step {
+								next = append(next, array[index])
+							}
+						}
 					}
 				}
 			case 'u':
@@ -4966,6 +4972,7 @@ type pathToken struct {
 	kind       byte
 	key        string
 	start, end int
+	step       int
 	selectors  []pathToken
 }
 
@@ -5088,8 +5095,11 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 		case member == "*":
 			tokens = append(tokens, pathToken{kind: '*'})
 		case strings.Contains(member, ":"):
-			bounds := strings.SplitN(member, ":", 2)
-			start, end := 0, int(^uint(0)>>1)
+			bounds := strings.Split(member, ":")
+			if len(bounds) < 2 || len(bounds) > 3 {
+				return nil, false
+			}
+			start, end, step := 0, int(^uint(0)>>1), 1
 			var err error
 			if bounds[0] != "" {
 				start, err = strconv.Atoi(bounds[0])
@@ -5103,7 +5113,13 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 					return nil, false
 				}
 			}
-			tokens = append(tokens, pathToken{kind: 's', start: start, end: end})
+			if len(bounds) == 3 && bounds[2] != "" {
+				step, err = strconv.Atoi(bounds[2])
+				if err != nil || step <= 0 {
+					return nil, false
+				}
+			}
+			tokens = append(tokens, pathToken{kind: 's', start: start, end: end, step: step})
 		default:
 			index, err := strconv.Atoi(member)
 			if err != nil {

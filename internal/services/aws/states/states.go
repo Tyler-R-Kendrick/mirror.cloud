@@ -5018,6 +5018,12 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 					if end == len(path) {
 						return nil, false
 					}
+				} else if character := path[end]; character < utf8.RuneSelf {
+					first := key.Len() == 0
+					wildcard := first && character == '*' && (end+1 == len(path) || path[end+1] == '.' || path[end+1] == '[')
+					if !wildcard && !(character == '_' || character >= 'A' && character <= 'Z' || character >= 'a' && character <= 'z' || !first && character >= '0' && character <= '9') {
+						return nil, false
+					}
 				}
 				key.WriteByte(path[end])
 				end++

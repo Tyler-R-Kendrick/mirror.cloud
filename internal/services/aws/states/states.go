@@ -5296,12 +5296,12 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 		case quote == 0 && (expression[index] == '\'' || expression[index] == '"' || expression[index] == '/'):
 			quote = expression[index]
 		case quote == 0:
-			for _, candidate := range []string{"subsetof", "noneof", "anyof", "empty", "size", "nin", "in", "==", "!=", "<=", ">=", "=~", "<", ">"} {
+			for _, candidate := range []string{"subsetof", "contains", "noneof", "anyof", "empty", "size", "all", "nin", "in", "===", "!==", "==", "!=", "<=", ">=", "=~", "<", ">"} {
 				lexical := candidate[0] >= 'a' && candidate[0] <= 'z'
 				if lexical && (index == 0 || !space(expression[index-1]) || index+len(candidate) >= len(expression) || !space(expression[index+len(candidate)])) {
 					continue
 				}
-				if strings.HasPrefix(expression[index:], candidate) {
+				if len(expression)-index >= len(candidate) && (lexical && strings.EqualFold(expression[index:index+len(candidate)], candidate) || !lexical && strings.HasPrefix(expression[index:], candidate)) {
 					operator, operatorAt = candidate, index
 					break
 				}
@@ -5344,7 +5344,12 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 			return nil, false
 		}
 		rawRight = strings.TrimSpace(expression[:operatorAt])
-		operator = map[string]string{"<": ">", "<=": ">=", ">": "<", ">=": "<=", "==": "==", "!=": "!="}[operator]
+		operator = map[string]string{"<": ">", "<=": ">=", ">": "<", ">=": "<=", "==": "==", "!=": "!=", "===": "===", "!==": "!=="}[operator]
+	}
+	if operator == "===" {
+		operator = "=="
+	} else if operator == "!==" {
+		operator = "!="
 	}
 	if operator == "=~" {
 		end, escaped := 1, false
@@ -5378,7 +5383,7 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 		}
 		return map[string]any{"Variable": left, "StringRegex": pattern}, true
 	}
-	if slices.Contains([]string{"in", "nin", "subsetof", "anyof", "noneof"}, operator) {
+	if slices.Contains([]string{"in", "nin", "contains", "all", "subsetof", "anyof", "noneof"}, operator) {
 		rule := map[string]any{"Variable": left, "CollectionOperator": operator}
 		if rightPath, pathOperand := filterPath(rawRight); pathOperand {
 			rule["CollectionPath"] = rightPath
@@ -5525,11 +5530,21 @@ func jsonPathFilterCollection(operator string, left, right any) bool {
 		found := rightOK && contains(rightValues, left)
 		return found != (operator == "nin")
 	}
+	if operator == "contains" {
+		if leftString, ok := left.(string); ok {
+			rightString, ok := right.(string)
+			return ok && strings.Contains(leftString, rightString)
+		}
+		leftValues, ok := left.([]any)
+		return ok && contains(leftValues, right)
+	}
 	leftValues, leftOK := left.([]any)
 	if !leftOK || !rightOK {
 		return false
 	}
 	switch operator {
+	case "all":
+		return !slices.ContainsFunc(rightValues, func(value any) bool { return !contains(leftValues, value) })
 	case "subsetof":
 		return !slices.ContainsFunc(leftValues, func(value any) bool { return !contains(rightValues, value) })
 	case "anyof":

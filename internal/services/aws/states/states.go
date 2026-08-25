@@ -18,6 +18,7 @@ import (
 	"io"
 	"maps"
 	"math"
+	"net/url"
 	"reflect"
 	"regexp"
 	"slices"
@@ -36,6 +37,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	internalrand "github.com/tyler-r-kendrick/mirror.cloud/internal/rand"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/eventhttp"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
@@ -1242,8 +1244,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				return nil, &spi.Fault{Code: "InvalidArn", HTTPStatus: 400, Fault: "client"}
 			}
 		}
+		revealSecrets := false
 		if value, exists := inputValue(req.Input, "revealSecrets", "RevealSecrets"); exists {
-			if _, valid := value.(bool); !valid {
+			var valid bool
+			revealSecrets, valid = value.(bool)
+			if !valid {
 				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 			}
 		}
@@ -1254,16 +1259,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if testContext == nil && selection.insideMap {
 			testContext = map[string]any{"Map": map[string]any{"Item": map[string]any{"Index": 0.0, "Value": data, "Source": "STATE_DATA"}}}
 		}
-		walkRequest := req
-		if testContext != nil || selection.name != "" {
-			copy := *req
-			copy.Input = maps.Clone(req.Input)
-			if testContext != nil {
-				copy.Input["_testStateContext"] = testContext
-			}
-			copy.Input["_testStateName"] = selection.name
-			walkRequest = &copy
+		copy := *req
+		copy.Input = maps.Clone(req.Input)
+		if testContext != nil {
+			copy.Input["_testStateContext"] = testContext
 		}
+		copy.Input["_testStateName"] = selection.name
+		copy.Input["_testStateRevealSecrets"] = revealSecrets
+		walkRequest := &copy
 		var testMachine map[string]any
 		_ = json.Unmarshal([]byte(wrapped), &testMachine)
 		testedState, _ := testMachine["States"].(map[string]any)["TestState"].(map[string]any)
@@ -1474,6 +1477,8 @@ type walkResult struct {
 	errorName     string
 	nextState     string
 	inspection    map[string]any
+	taskResult    any
+	hasTaskResult bool
 	hist          []any
 	pending       *pending
 	failedState   string
@@ -1823,11 +1828,21 @@ func (p *Pack) walk(ctx context.Context, req *spi.Request, def, from string, inp
 		variables = inheritedVariables[0]
 	}
 	var mapRuns []mapRunDraft
+	var walkInspection map[string]any
+	var walkTaskResult any
+	var hasWalkTaskResult bool
 	defer func() {
 		if result.status == "FAILED" && result.failedState == "" {
 			result.failedState, result.failedInput = currentState, currentInput
 		}
 		result.mapRuns = append(result.mapRuns, mapRuns...)
+		if len(walkInspection) != 0 {
+			if result.inspection == nil {
+				result.inspection = map[string]any{}
+			}
+			maps.Copy(result.inspection, walkInspection)
+		}
+		result.taskResult, result.hasTaskResult = walkTaskResult, hasWalkTaskResult
 	}()
 	var sm map[string]any
 	if err := json.Unmarshal([]byte(def), &sm); err != nil {
@@ -2150,6 +2165,9 @@ walkLoop:
 					if !mocked {
 						out, err, errorPrefix, sdk, supported = p.invokeTask(ctx, taskReq, res, payload)
 					}
+					if inspected, ok := out.(inspectedTaskResult); ok {
+						out, walkInspection = inspected.value, inspected.inspection
+					}
 					if !supported {
 						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 					}
@@ -2165,6 +2183,7 @@ walkLoop:
 						startTaskTimers(pendingTask, p.deps.Clock.Now())
 						return walkResult{out: data, status: "RUNNING", hist: hist, pending: pendingTask}
 					} else if isJSONata {
+						walkTaskResult, hasWalkTaskResult = out, true
 						data, ok = applyJSONataState(st, rawInput, out, stateContext, variables, p.deps.Rand)
 						if ok {
 							jsonataOutputApplied = true
@@ -2172,6 +2191,7 @@ walkLoop:
 						}
 						failure = stateFailure{name: "States.QueryEvaluationError", cause: "States.QueryEvaluationError"}
 					} else {
+						walkTaskResult, hasWalkTaskResult = out, true
 						data, ok = applyStateResult(st, rawInput, out, stateContext, p.deps.Rand, variables)
 						if !ok {
 							return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
@@ -4667,7 +4687,110 @@ func intrinsicNumber(value any) (float64, bool) {
 	}
 }
 
+type inspectedTaskResult struct {
+	value      any
+	inspection map[string]any
+}
+
+func (p *Pack) invokeHTTPTask(ctx context.Context, req *spi.Request, payload any) (inspectedTaskResult, error) {
+	input, valid := payload.(map[string]any)
+	if !valid {
+		return inspectedTaskResult{}, &spi.Fault{Code: "States.Runtime", Message: "HTTP Task parameters must be an object.", HTTPStatus: 400, Fault: "client"}
+	}
+	endpoint, method := first(input, "ApiEndpoint"), first(input, "Method")
+	parsed, parseErr := url.Parse(endpoint)
+	if parseErr != nil || parsed.Host == "" || !slices.Contains([]string{"http", "https"}, parsed.Scheme) || !slices.Contains([]string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"}, method) {
+		return inspectedTaskResult{}, &spi.Fault{Code: "States.Runtime", Message: "HTTP Task endpoint or method is invalid.", HTTPStatus: 400, Fault: "client"}
+	}
+	authentication, _ := input["Authentication"].(map[string]any)
+	if authentication == nil {
+		authentication, _ = input["InvocationConfig"].(map[string]any)
+	}
+	connectionARN := first(authentication, "ConnectionArn")
+	connection, found := eventhttp.Connection(ctx, p.deps, req.Identity, connectionARN)
+	if !found {
+		return inspectedTaskResult{}, &spi.Fault{Code: "Events.ConnectionResource.ResourceNotFound", Message: "Connection does not exist.", HTTPStatus: 400, Fault: "client"}
+	}
+	headers, headersValid := optionalObject(input, "Headers")
+	query, queryValid := optionalObject(input, "QueryParameters")
+	if !headersValid || !queryValid {
+		return inspectedTaskResult{}, &spi.Fault{Code: "States.Runtime", Message: "HTTP Task headers and query parameters must be objects.", HTTPStatus: 400, Fault: "client"}
+	}
+	for name := range headers {
+		if forbiddenHTTPTaskHeader(name) {
+			return inspectedTaskResult{}, &spi.Fault{Code: "States.Runtime", Message: "HTTP Task header is not allowed.", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	var body []byte
+	if requestBody, exists := input["RequestBody"]; exists {
+		body, parseErr = json.Marshal(requestBody)
+		if parseErr != nil {
+			return inspectedTaskResult{}, &spi.Fault{Code: "States.Runtime", Message: "HTTP Task body is invalid.", HTTPStatus: 400, Fault: "client"}
+		}
+		contentTypeSet := slices.ContainsFunc(slices.Collect(maps.Keys(headers)), func(name string) bool { return strings.EqualFold(name, "Content-Type") })
+		if !contentTypeSet {
+			headers["Content-Type"] = "application/json; charset=UTF-8"
+		}
+	}
+	result, err := eventhttp.Invoke(ctx, connection, eventhttp.Call{
+		Endpoint: endpoint, Method: method, Headers: headers, Query: query, Body: body,
+		Timeout: 60 * time.Second, MaxRequestBytes: 262144, MaxResponseBytes: 262144,
+		UserAgent: "Amazon|StepFunctions|HttpInvoke|" + req.Identity.Region, Range: "bytes=0-262144",
+		RevealSecrets: toBool(req.Input["_testStateRevealSecrets"]),
+	})
+	inspected := inspectedTaskResult{inspection: result.Inspection}
+	if err != nil {
+		var fault *spi.Fault
+		if errors.As(err, &fault) && fault.Code == "ConnectionFailure" {
+			fault = &spi.Fault{Code: "Events.ConnectionResource.InvalidConnectionState", Message: fault.Message, HTTPStatus: fault.HTTPStatus, Fault: fault.Fault}
+			return inspected, fault
+		}
+		var timeout interface{ Timeout() bool }
+		if errors.As(err, &timeout) && timeout.Timeout() {
+			return inspected, &spi.Fault{Code: "States.Timeout", Message: err.Error(), HTTPStatus: 408, Fault: "server"}
+		}
+		return inspected, err
+	}
+	if result.StatusCode < 200 || result.StatusCode >= 300 {
+		return inspected, &spi.Fault{Code: "States.Http.StatusCode." + strconv.Itoa(result.StatusCode), Message: result.Status, HTTPStatus: result.StatusCode, Fault: "server"}
+	}
+	contentType := strings.ToLower(result.Headers.Get("Content-Type"))
+	if strings.HasPrefix(contentType, "application/octet-stream") || strings.HasPrefix(contentType, "image/") || strings.HasPrefix(contentType, "video/") || strings.HasPrefix(contentType, "audio/") || !utf8.Valid(result.Body) {
+		return inspected, &spi.Fault{Code: "States.Runtime", Message: "HTTP Task returned an unsupported response.", HTTPStatus: 400, Fault: "server"}
+	}
+	var output any
+	if len(result.Body) == 0 {
+		output = ""
+	} else if json.Unmarshal(result.Body, &output) != nil {
+		output = string(result.Body)
+	}
+	inspected.value = output
+	return inspected, nil
+}
+
+func optionalObject(input map[string]any, key string) (map[string]any, bool) {
+	value, exists := input[key]
+	if !exists {
+		return map[string]any{}, true
+	}
+	object, valid := value.(map[string]any)
+	return object, valid
+}
+
+func forbiddenHTTPTaskHeader(name string) bool {
+	switch strings.ToLower(name) {
+	case "a-im", "accept-charset", "accept-datetime", "accept-encoding", "authorization", "cache-control", "connection", "content-encoding", "content-md5", "date", "expect", "forwarded", "from", "host", "http2-settings", "if-match", "if-modified-since", "if-none-match", "if-range", "if-unmodified-since", "max-forwards", "origin", "pragma", "proxy-authorization", "referer", "server", "te", "trailer", "transfer-encoding", "upgrade", "via", "warning":
+		return true
+	default:
+		return false
+	}
+}
+
 func (p *Pack) invokeTask(ctx context.Context, req *spi.Request, resource string, payload any) (any, error, string, bool, bool) {
+	if resource == "arn:aws:states:::http:invoke" {
+		output, err := p.invokeHTTPTask(ctx, req, payload)
+		return output, err, "", false, true
+	}
 	callback := strings.HasSuffix(resource, ".waitForTaskToken")
 	resource, syncJSON, syncJob := syncTaskResource(resource)
 	resource = strings.TrimSuffix(resource, ".waitForTaskToken")
@@ -7340,6 +7463,9 @@ func inspectTestState(state map[string]any, input any, context, variables, mock,
 			}
 		}
 		result, hasResult := mock["Result"]
+		if !hasResult && wr.hasTaskResult {
+			result, hasResult = wr.taskResult, true
+		}
 		if first(state, "Type") == "Pass" {
 			result, hasResult = effectiveInput, valid
 			if configured, exists := state["Result"]; exists {

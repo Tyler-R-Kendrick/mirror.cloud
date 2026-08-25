@@ -16,6 +16,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/eventhttp"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/scheduleexpr"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
@@ -906,124 +907,34 @@ func InvokeAPIDestination(ctx context.Context, deps spi.Deps, identity spi.Ident
 	if !ok {
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Connection does not exist.", HTTPStatus: 404, Fault: "client"}
 	}
-	if connection["ConnectionState"] != "AUTHORIZED" {
-		return nil, &spi.Fault{Code: "ConnectionFailure", Message: "Connection is not authorized.", HTTPStatus: 400, Fault: "client"}
-	}
 	if err := waitAPIDestinationRate(ctx, deps, identity, arnResourceName(arn, "api-destination/"), destination); err != nil {
-		return nil, err
-	}
-	auth, _ := connection["AuthParameters"].(map[string]any)
-	invocation, _ := auth["InvocationHttpParameters"].(map[string]any)
-	payload, err := mergeConnectionBody(payload, invocation["BodyParameters"])
-	if err != nil {
 		return nil, err
 	}
 	endpoint := str(destination["InvocationEndpoint"])
 	for _, value := range anySlice(parameters["PathParameterValues"]) {
 		endpoint = strings.Replace(endpoint, "*", url.PathEscape(str(value)), 1)
 	}
-	request, err := http.NewRequestWithContext(ctx, str(destination["HttpMethod"]), endpoint, bytes.NewReader(payload))
+	headers := map[string]any{"Content-Type": "application/json; charset=utf-8"}
+	for key, value := range mapValue(parameters["HeaderParameters"]) {
+		headers[key] = value
+	}
+	result, err := eventhttp.Invoke(ctx, connection, eventhttp.Call{
+		Endpoint: endpoint, Method: str(destination["HttpMethod"]), Body: payload,
+		Headers: headers, Query: mapValue(parameters["QueryStringParameters"]),
+		Timeout: 5 * time.Second, MaxRequestBytes: 64 << 10, MaxResponseBytes: 6 << 20,
+		UserAgent: "Amazon/EventBridge/ApiDestinations", Range: "bytes=0-1048575", RevealSecrets: true,
+	})
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("Content-Type", "application/json; charset=utf-8")
-	applyHTTPMap(request.Header.Set, parameters["HeaderParameters"])
-	query := request.URL.Query()
-	applyHTTPMap(query.Set, parameters["QueryStringParameters"])
-	applyConnectionParameters(request.Header.Set, invocation["HeaderParameters"])
-	applyConnectionParameters(query.Set, invocation["QueryStringParameters"])
-	request.URL.RawQuery = query.Encode()
-	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	authorizationType := str(connection["AuthorizationType"])
-	switch authorizationType {
-	case "API_KEY":
-		apiKey, _ := auth["ApiKeyAuthParameters"].(map[string]any)
-		request.Header.Set(str(apiKey["ApiKeyName"]), str(apiKey["ApiKeyValue"]))
-	case "BASIC":
-		basic, _ := auth["BasicAuthParameters"].(map[string]any)
-		request.SetBasicAuth(str(basic["Username"]), str(basic["Password"]))
-	case "OAUTH_CLIENT_CREDENTIALS":
-		token, err := oauthToken(ctx, client, auth)
-		if err != nil {
-			return nil, err
-		}
-		request.Header.Set("Authorization", token)
-	default:
-		return nil, &spi.Fault{Code: "ValidationException", Message: "Unsupported API destination authorization type.", HTTPStatus: 400, Fault: "client"}
-	}
-	request.Header.Set("User-Agent", "Amazon/EventBridge/ApiDestinations")
-	request.Header.Set("Range", "bytes=0-1048575")
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	if authorizationType == "OAUTH_CLIENT_CREDENTIALS" && (response.StatusCode == 401 || response.StatusCode == 407) {
-		response.Body.Close()
-		token, tokenErr := oauthToken(ctx, client, auth)
-		if tokenErr != nil {
-			return nil, tokenErr
-		}
-		if err := waitAPIDestinationRate(ctx, deps, identity, arnResourceName(arn, "api-destination/"), destination); err != nil {
-			return nil, err
-		}
-		retry := request.Clone(ctx)
-		retry.Header = request.Header.Clone()
-		retry.Header.Set("Authorization", token)
-		retry.Body, _ = request.GetBody()
-		response, err = client.Do(retry)
-		if err != nil {
-			return nil, err
-		}
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, (6<<20)+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(body) > 6<<20 {
-		return nil, &spi.Fault{Code: "TargetInvocationFailed", Message: "API destination response exceeds 6 MB.", HTTPStatus: 502, Fault: "server"}
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		fault := &spi.Fault{Code: "TargetInvocationFailed", Message: response.Status, HTTPStatus: response.StatusCode, Fault: "server"}
-		if retryAfter := response.Header.Get("Retry-After"); retryAfter != "" {
+	if result.StatusCode < 200 || result.StatusCode >= 300 {
+		fault := &spi.Fault{Code: "TargetInvocationFailed", Message: result.Status, HTTPStatus: result.StatusCode, Fault: "server"}
+		if retryAfter := result.Headers.Get("Retry-After"); retryAfter != "" {
 			fault.Fields = map[string]any{"RetryAfter": retryAfter}
 		}
 		return nil, fault
 	}
-	return body, nil
-}
-
-func oauthToken(ctx context.Context, client *http.Client, auth map[string]any) (string, error) {
-	oauth, _ := auth["OAuthParameters"].(map[string]any)
-	parameters, _ := oauth["OAuthHttpParameters"].(map[string]any)
-	form := url.Values{}
-	applyConnectionParameters(form.Set, parameters["BodyParameters"])
-	request, err := http.NewRequestWithContext(ctx, str(oauth["HttpMethod"]), str(oauth["AuthorizationEndpoint"]), strings.NewReader(form.Encode()))
-	if err != nil {
-		return "", err
-	}
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	applyConnectionParameters(request.Header.Set, parameters["HeaderParameters"])
-	query := request.URL.Query()
-	applyConnectionParameters(query.Set, parameters["QueryStringParameters"])
-	request.URL.RawQuery = query.Encode()
-	credentials, _ := oauth["ClientParameters"].(map[string]any)
-	request.SetBasicAuth(str(credentials["ClientID"]), str(credentials["ClientSecret"]))
-	response, err := client.Do(request)
-	if err != nil {
-		return "", err
-	}
-	defer response.Body.Close()
-	var token map[string]any
-	if response.StatusCode < 200 || response.StatusCode >= 300 || json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&token) != nil || str(token["access_token"]) == "" {
-		return "", &spi.Fault{Code: "ConnectionFailure", Message: "OAuth token request failed.", HTTPStatus: 502, Fault: "server"}
-	}
-	tokenType := str(token["token_type"])
-	if tokenType == "" {
-		tokenType = "Bearer"
-	}
-	// ponytail: fetch per invocation; cache by connection when API Destination throughput makes token calls material.
-	return tokenType + " " + str(token["access_token"]), nil
+	return result.Body, nil
 }
 
 func apiDestinationRetryable(status int) bool {
@@ -1087,41 +998,16 @@ func arnResourceName(arn, marker string) string {
 	return name
 }
 
-func applyHTTPMap(set func(string, string), raw any) {
-	values, _ := raw.(map[string]any)
-	for key, value := range values {
-		set(key, str(value))
-	}
-}
-
-func applyConnectionParameters(set func(string, string), raw any) {
-	for _, value := range anySlice(raw) {
-		parameter, _ := value.(map[string]any)
-		set(str(parameter["Key"]), str(parameter["Value"]))
-	}
-}
-
 func mergeConnectionBody(payload []byte, raw any) ([]byte, error) {
-	parameters := anySlice(raw)
-	if len(parameters) == 0 {
-		return payload, nil
-	}
-	var body map[string]any
-	if json.Unmarshal(payload, &body) != nil || body == nil {
-		return nil, &spi.Fault{Code: "TargetInvocationFailed", Message: "Connection body parameters require a JSON object payload.", HTTPStatus: 400, Fault: "client"}
-	}
-	applyConnectionParameters(func(key, value string) { body[key] = value }, parameters)
-	merged, _ := json.Marshal(body)
-	if len(merged) > 64<<10 {
-		return nil, &spi.Fault{Code: "TargetInvocationFailed", Message: "API destination payload exceeds 64 KB.", HTTPStatus: 400, Fault: "client"}
-	}
-	return merged, nil
+	return eventhttp.MergeBody(payload, raw, 64<<10)
 }
 
 func anySlice(value any) []any {
 	values, _ := value.([]any)
 	return values
 }
+
+func mapValue(value any) map[string]any { values, _ := value.(map[string]any); return values }
 
 func str(v any) string { s, _ := v.(string); return s }
 

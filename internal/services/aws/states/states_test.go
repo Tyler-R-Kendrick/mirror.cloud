@@ -3279,7 +3279,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if _, found := jsonPathLookup(paths, "$.a[0].length()"); found {
 		t.Fatal("json path length accepted non-array")
 	}
-	numbers := map[string]any{"values": []any{1.0, "ignored", 2.0, 3.0}}
+	numbers := map[string]any{"values": []any{2.0, "ignored", 1.0, 3.0}}
 	if jsonPath(numbers, "$.values.min()") != 1.0 || jsonPath(numbers, "$.values.max()") != 3.0 || jsonPath(numbers, "$.values.avg()") != 2.0 || jsonPath(numbers, "$.values.sum()") != 6.0 {
 		t.Fatal("json path numeric functions")
 	}

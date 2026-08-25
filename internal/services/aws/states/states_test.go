@@ -3082,6 +3082,26 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if mockedTask["status"] != "SUCCEEDED" || mockedTask["nextState"] != "After" || mockedTask["output"] != `{"keep":true,"task":{"value":42}}` {
 		t.Fatalf("tested mock result %#v", mockedTask)
 	}
+	contextual := must("TestState", map[string]any{
+		"definition": `{"Type":"Task","Resource":"arn:aws:states:::unknown","ResultSelector":{"execution.$":"$$.Execution.Id","state.$":"$$.State.Name","value.$":"$.answer","variable.$":"$shared"},"End":true}`,
+		"mock":       map[string]any{"result": `{"answer":42}`},
+		"context":    `{"Execution":{"Id":"execution-1"},"State":{"Name":"Configured","EnteredTime":"2024-01-01T00:00:00Z"}}`,
+		"variables":  `{"shared":"available"}`,
+	}).Output
+	for _, fragment := range []string{`"execution":"execution-1"`, `"state":"Configured"`, `"value":42`, `"variable":"available"`} {
+		if contextual["status"] != "SUCCEEDED" || !strings.Contains(contextual["output"].(string), fragment) {
+			t.Fatalf("tested context and variables %#v", contextual)
+		}
+	}
+	jsonataContextual := must("TestState", map[string]any{
+		"definition": `{"QueryLanguage":"JSONata","Type":"Task","Resource":"arn:aws:states:::unknown","Output":{"execution":"{% $states.context.Execution.Id %}","variable":"{% $shared %}"},"End":true}`,
+		"mock":       map[string]any{"result": `{}`},
+		"context":    `{"Execution":{"Id":"execution-2"}}`,
+		"variables":  `{"shared":"jsonata"}`,
+	}).Output
+	if jsonataContextual["status"] != "SUCCEEDED" || jsonataContextual["output"] != `{"execution":"execution-2","variable":"jsonata"}` {
+		t.Fatalf("tested JSONata context and variables %#v", jsonataContextual)
+	}
 	mockedError := must("TestState", map[string]any{
 		"definition": `{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}`,
 		"mock":       map[string]any{"errorOutput": map[string]any{"error": "Boom", "cause": "mocked"}},
@@ -3135,6 +3155,18 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	for _, configuration := range []any{true, map[string]any{"retrierRetryCount": -1.0}, map[string]any{"retrierRetryCount": 1.5}} {
 		if _, err := call("TestState", map[string]any{"definition": `{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}`, "mock": map[string]any{"result": `{}`}, "stateConfiguration": configuration}); err == nil {
 			t.Fatalf("accepted invalid TestState configuration %#v", configuration)
+		}
+	}
+	for _, fields := range []map[string]any{
+		{"context": `{}`},
+		{"mock": map[string]any{"result": `{}`}, "context": true},
+		{"mock": map[string]any{"result": `{}`}, "context": `{"State":true}`},
+		{"mock": map[string]any{"result": `{}`}, "variables": `[]`},
+		{"mock": map[string]any{"result": `{}`}, "variables": `{"1bad":true}`},
+	} {
+		fields["definition"] = `{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}`
+		if _, err := call("TestState", fields); err == nil {
+			t.Fatalf("accepted invalid TestState context or variables %#v", fields)
 		}
 	}
 

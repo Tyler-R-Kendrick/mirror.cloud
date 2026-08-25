@@ -3065,6 +3065,24 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if tested["status"] != "SUCCEEDED" || tested["nextState"] != "After" || !strings.Contains(tested["output"].(string), `"message":"Hi Ada"`) {
 		t.Fatalf("tested pass %#v", tested)
 	}
+	debugged := must("TestState", map[string]any{
+		"definition":      `{"Type":"Pass","InputPath":"$.payload","Parameters":{"data":1},"ResultPath":"$.result","OutputPath":"$.result.data","Next":"After"}`,
+		"input":           `{"payload":{"foo":"bar"}}`,
+		"inspectionLevel": "DEBUG",
+	}).Output
+	debugInspection := debugged["inspectionData"].(map[string]any)
+	for key, want := range map[string]string{
+		"input":               `{"payload":{"foo":"bar"}}`,
+		"afterInputPath":      `{"foo":"bar"}`,
+		"afterParameters":     `{"data":1}`,
+		"result":              `{"data":1}`,
+		"afterResultSelector": `{"data":1}`,
+		"afterResultPath":     `{"payload":{"foo":"bar"},"result":{"data":1}}`,
+	} {
+		if debugInspection[key] != want {
+			t.Fatalf("TestState inspection %s = %#v, want %s", key, debugInspection[key], want)
+		}
+	}
 	testedFail := must("TestState", map[string]any{"definition": `{"Type":"Fail","Error":"Nope","Cause":"failed"}`}).Output
 	if testedFail["status"] != "FAILED" || testedFail["error"] != "Nope" || testedFail["cause"] != "failed" {
 		t.Fatalf("tested fail %#v", testedFail)
@@ -3094,13 +3112,26 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		}
 	}
 	jsonataContextual := must("TestState", map[string]any{
-		"definition": `{"QueryLanguage":"JSONata","Type":"Task","Resource":"arn:aws:states:::unknown","Output":{"execution":"{% $states.context.Execution.Id %}","variable":"{% $shared %}"},"End":true}`,
-		"mock":       map[string]any{"result": `{}`},
-		"context":    `{"Execution":{"Id":"execution-2"}}`,
-		"variables":  `{"shared":"jsonata"}`,
+		"definition":      `{"QueryLanguage":"JSONata","Type":"Task","Resource":"arn:aws:states:::unknown","Arguments":{"payload":"{% $shared %}"},"Output":{"execution":"{% $states.context.Execution.Id %}","variable":"{% $shared %}"},"End":true}`,
+		"mock":            map[string]any{"result": `{}`},
+		"context":         `{"Execution":{"Id":"execution-2"}}`,
+		"variables":       `{"shared":"jsonata"}`,
+		"inspectionLevel": "DEBUG",
 	}).Output
 	if jsonataContextual["status"] != "SUCCEEDED" || jsonataContextual["output"] != `{"execution":"execution-2","variable":"jsonata"}` {
 		t.Fatalf("tested JSONata context and variables %#v", jsonataContextual)
+	}
+	jsonataInspection := jsonataContextual["inspectionData"].(map[string]any)
+	if jsonataInspection["afterArguments"] != `{"payload":"jsonata"}` || jsonataInspection["result"] != `{}` || jsonataInspection["variables"] != `{"shared":"jsonata"}` {
+		t.Fatalf("tested JSONata inspection %#v", jsonataInspection)
+	}
+	inheritedJSONata := must("TestState", map[string]any{
+		"definition": `{"QueryLanguage":"JSONata","StartAt":"One","States":{"One":{"Type":"Task","Resource":"arn:aws:states:::unknown","Output":"{% $states.result.value %}","End":true}}}`,
+		"stateName":  "One",
+		"mock":       map[string]any{"result": `{"value":"inherited"}`},
+	}).Output
+	if inheritedJSONata["status"] != "SUCCEEDED" || inheritedJSONata["output"] != `"inherited"` {
+		t.Fatalf("tested inherited TestState query language %#v", inheritedJSONata)
 	}
 	mockedError := must("TestState", map[string]any{
 		"definition": `{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}`,
@@ -3115,19 +3146,27 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		`{"Type":"Map","ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"Retry":[{"ErrorEquals":["Boom"],"MaxAttempts":2}],"Catch":[{"ErrorEquals":["Boom"],"ResultPath":"$.failure","Next":"Recovered"}],"End":true}`,
 	} {
 		request := map[string]any{
-			"definition": definition,
-			"input":      `{"keep":true}`,
-			"mock":       map[string]any{"errorOutput": map[string]any{"error": "Boom", "cause": "mocked"}},
+			"definition":      definition,
+			"input":           `{"keep":true}`,
+			"mock":            map[string]any{"errorOutput": map[string]any{"error": "Boom", "cause": "mocked"}},
+			"inspectionLevel": "DEBUG",
 		}
 		request["stateConfiguration"] = map[string]any{"retrierRetryCount": 1.0}
 		retriable := must("TestState", request).Output
 		if retriable["status"] != "RETRIABLE" || retriable["error"] != "Boom" || retriable["cause"] != "mocked" {
 			t.Fatalf("tested retriable mock error %#v", retriable)
 		}
+		retryDetails := retriable["inspectionData"].(map[string]any)["errorDetails"].(map[string]any)
+		if retryDetails["retryIndex"] != 0 || retryDetails["retryBackoffIntervalSeconds"] != 2.0 {
+			t.Fatalf("tested retry inspection %#v", retryDetails)
+		}
 		request["stateConfiguration"] = map[string]any{"retrierRetryCount": 2.0}
 		caught := must("TestState", request).Output
 		if caught["status"] != "CAUGHT_ERROR" || caught["nextState"] != "Recovered" || caught["error"] != "Boom" || !strings.Contains(caught["output"].(string), `"keep":true`) || !strings.Contains(caught["output"].(string), `"Error":"Boom"`) {
 			t.Fatalf("tested caught mock error %#v", caught)
+		}
+		if details := caught["inspectionData"].(map[string]any)["errorDetails"].(map[string]any); details["catchIndex"] != 0 {
+			t.Fatalf("tested catch inspection %#v", details)
 		}
 	}
 	for _, definition := range []string{
@@ -3167,6 +3206,19 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		fields["definition"] = `{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}`
 		if _, err := call("TestState", fields); err == nil {
 			t.Fatalf("accepted invalid TestState context or variables %#v", fields)
+		}
+	}
+	for _, fields := range []map[string]any{
+		{"inspectionLevel": "BROKEN"},
+		{"inspectionLevel": "TRACE"},
+		{"mock": map[string]any{"result": `{}`}, "revealSecrets": false},
+	} {
+		fields["definition"] = `{"Type":"Pass","End":true}`
+		if fields["mock"] != nil {
+			fields["definition"] = `{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}`
+		}
+		if _, err := call("TestState", fields); err == nil {
+			t.Fatalf("accepted invalid TestState inspection %#v", fields)
 		}
 	}
 

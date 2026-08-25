@@ -1102,6 +1102,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "TestState":
 		definition := first(req.Input, "definition", "Definition")
 		input := first(req.Input, "input", "Input")
+		inspectionLevel := first(req.Input, "inspectionLevel", "InspectionLevel")
+		if inspectionLevel == "" {
+			inspectionLevel = "INFO"
+		}
+		if !slices.Contains([]string{"INFO", "DEBUG", "TRACE"}, inspectionLevel) {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
 		var data any = map[string]any{}
 		if input != "" && json.Unmarshal([]byte(input), &data) != nil {
 			return nil, &spi.Fault{Code: "InvalidExecutionInput", HTTPStatus: 400, Fault: "client"}
@@ -1188,6 +1195,15 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			copy.Input["_testStateContext"] = testContext
 			walkRequest = &copy
 		}
+		var testMachine map[string]any
+		_ = json.Unmarshal([]byte(wrapped), &testMachine)
+		testedState, _ := testMachine["States"].(map[string]any)["TestState"].(map[string]any)
+		if inspectionLevel == "TRACE" && (first(testedState, "Type") != "Task" || !strings.Contains(first(testedState, "Resource"), "states:::http:invoke")) {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
+		if _, revealSpecified := inputValue(req.Input, "revealSecrets", "RevealSecrets"); revealSpecified && mock != nil {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
 		wr := p.walk(ctx, walkRequest, wrapped, "", data, nil, variables)
 		output, _ := json.Marshal(wr.out)
 		response := map[string]any{"status": wr.status, "output": string(output)}
@@ -1201,6 +1217,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		if wr.cause != "" {
 			response["cause"] = wr.cause
+		}
+		if inspectionLevel != "INFO" {
+			response["inspectionData"] = inspectTestState(testedState, data, jsonataContext(walkRequest, "TestState", nil), variables, mock, wr, p.deps.Rand)
 		}
 		return &spi.Response{Output: response}, nil
 	case "TagResource":
@@ -1378,6 +1397,7 @@ type walkResult struct {
 	status, cause string
 	errorName     string
 	nextState     string
+	inspection    map[string]any
 	hist          []any
 	pending       *pending
 	failedState   string
@@ -1812,9 +1832,11 @@ walkLoop:
 			if retries[cur] == nil {
 				retries[cur] = map[int]int{}
 			}
+			retryIndex := -1
 			for index, raw := range asSlice(st["Retry"]) {
 				retrier, _ := raw.(map[string]any)
 				if matchesError(retrier["ErrorEquals"], failure.name) {
+					retryIndex = index
 					retries[cur][index] = int(toFloat(st["_TestStateRetrierRetryCount"]))
 					break
 				}
@@ -1822,17 +1844,18 @@ walkLoop:
 			failed := walkResult{out: rawInput, status: "FAILED", cause: failure.cause, errorName: failure.name, hist: hist}
 			var next string
 			var out any
+			var delay time.Duration
 			var retry, caught, valid bool
 			if isJSONata {
-				next, out, _, retry, caught, valid = recoverJSONata(st, failed, rawInput, stateContext, variables, p.deps.Rand, retries[cur])
+				next, out, delay, retry, caught, valid = recoverJSONata(st, failed, rawInput, stateContext, variables, p.deps.Rand, retries[cur])
 				if !valid {
 					return walkResult{out: rawInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}, true
 				}
 			} else {
-				next, out, _, retry, caught = recoverState(st, failed, rawInput, retries[cur], p.deps.Rand)
+				next, out, delay, retry, caught = recoverState(st, failed, rawInput, retries[cur], p.deps.Rand)
 			}
 			if retry {
-				return walkResult{out: rawInput, status: "RETRIABLE", cause: failure.cause, errorName: failure.name, hist: hist}, true
+				return walkResult{out: rawInput, status: "RETRIABLE", cause: failure.cause, errorName: failure.name, hist: hist, inspection: map[string]any{"errorDetails": map[string]any{"retryIndex": retryIndex, "retryBackoffIntervalSeconds": delay.Seconds()}}}, true
 			}
 			if !caught {
 				return failed, true
@@ -1846,7 +1869,11 @@ walkLoop:
 					return walkResult{out: rawInput, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}, true
 				}
 			}
-			return walkResult{out: out, status: "CAUGHT_ERROR", cause: failure.cause, errorName: failure.name, nextState: next, hist: hist}, true
+			catchIndex := slices.IndexFunc(asSlice(st["Catch"]), func(raw any) bool {
+				catcher, _ := raw.(map[string]any)
+				return matchesError(catcher["ErrorEquals"], failure.name)
+			})
+			return walkResult{out: out, status: "CAUGHT_ERROR", cause: failure.cause, errorName: failure.name, nextState: next, hist: hist, inspection: map[string]any{"errorDetails": map[string]any{"catchIndex": catchIndex}}}, true
 		}
 		if failed, mocked := applyMockedError(); mocked {
 			return failed
@@ -7144,6 +7171,69 @@ func jsonataReferences(value any, variable string) bool {
 	return false
 }
 
+func inspectTestState(state map[string]any, input any, context, variables, mock map[string]any, wr walkResult, random spi.Rand) map[string]any {
+	inspection := maps.Clone(wr.inspection)
+	if inspection == nil {
+		inspection = map[string]any{}
+	}
+	encode := func(key string, value any) {
+		if data, err := json.Marshal(value); err == nil {
+			inspection[key] = string(data)
+		}
+	}
+	encode("input", input)
+	if first(state, "QueryLanguage") == "JSONata" {
+		if arguments, exists := state["Arguments"]; exists {
+			if value, valid := evalJSONataValue(arguments, jsonataScope{input: input, context: context, variables: variables, random: random}); valid {
+				encode("afterArguments", value)
+			}
+		}
+		if result, exists := mock["Result"]; exists {
+			encode("result", result)
+		}
+	} else if afterInputPath, valid := applyDataPath(state, "InputPath", input, variables); valid {
+		encode("afterInputPath", afterInputPath)
+		effectiveInput := afterInputPath
+		switch first(state, "Type") {
+		case "Pass", "Parallel":
+			if parameters, exists := state["Parameters"].(map[string]any); exists {
+				effectiveInput, valid = applyParamsValidated(parameters, afterInputPath, context, random, variables)
+			}
+			if valid {
+				encode("afterParameters", effectiveInput)
+			}
+		case "Task":
+			if payload, payloadValid := taskPayload(state, afterInputPath, context, random, variables); payloadValid {
+				encode("afterParameters", payload)
+			}
+		}
+		result, hasResult := mock["Result"]
+		if first(state, "Type") == "Pass" {
+			result, hasResult = effectiveInput, valid
+			if configured, exists := state["Result"]; exists {
+				result, hasResult = configured, true
+			}
+		}
+		if hasResult {
+			encode("result", result)
+			selected := result
+			if selector, exists := state["ResultSelector"].(map[string]any); exists {
+				selected, valid = applyParamsValidated(selector, result, context, random, variables)
+			}
+			if valid {
+				encode("afterResultSelector", selected)
+				if combined, combinedValid := applyResultPath(state, cloneJSON(input), selected); combinedValid {
+					encode("afterResultPath", combined)
+				}
+			}
+		}
+	}
+	if len(variables) != 0 {
+		encode("variables", variables)
+	}
+	return inspection
+}
+
 func supportedStateType(typ string) bool {
 	switch typ {
 	case "Pass", "Succeed", "Fail", "Wait", "Task", "Choice", "Parallel", "Map":
@@ -7196,6 +7286,9 @@ func testDefinition(definition, stateName string, input any, mock, configuration
 	delete(copy, "Next")
 	if typ := first(copy, "Type"); typ != "Succeed" && typ != "Fail" {
 		copy["End"] = true
+	}
+	if copy["QueryLanguage"] == nil && parsed["QueryLanguage"] != nil {
+		copy["QueryLanguage"] = parsed["QueryLanguage"]
 	}
 	machine := map[string]any{"StartAt": "TestState", "States": map[string]any{"TestState": copy}}
 	encoded, _ := json.Marshal(machine)

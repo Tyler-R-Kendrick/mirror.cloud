@@ -3301,11 +3301,11 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if filtered := jsonPath(products, "$[?(@.price < @.limit)].name"); fmtString(filtered) != `["a","c"]` {
 		t.Fatalf("path filter %#v", filtered)
 	}
-	filterRoot := map[string]any{"limit": 10.0, "products": products}
-	if filtered := jsonPath(filterRoot, "$.products[?(@.price < $.limit)].name"); fmtString(filtered) != `["a","c"]` {
+	filterRoot := map[string]any{"limit": 7.0, "products": products}
+	if filtered := jsonPath(filterRoot, "$.products[?(@.price < $.limit)].name"); fmtString(filtered) != `["a"]` {
 		t.Fatalf("root path filter %#v", filtered)
 	}
-	if filtered := jsonPath(filterRoot, "$.products[?($.limit > @.price)].name"); fmtString(filtered) != `["a","c"]` {
+	if filtered := jsonPath(filterRoot, "$.products[?($.limit > @.price)].name"); fmtString(filtered) != `["a"]` {
 		t.Fatalf("root-left path filter %#v", filtered)
 	}
 	if filtered := jsonPath(products, "$[?(@.price < $limit)].name", map[string]any{"limit": 8.0}); fmtString(filtered) != `["a"]` {

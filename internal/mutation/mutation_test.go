@@ -2600,7 +2600,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-json-path-filter-match",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if matchChoice(token.filter, value) {`,
+			old:  `if matchChoice(token.filter, value, filterVariables) {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
@@ -2656,7 +2656,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-reject-json-path-filter-path-operand",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if strings.HasPrefix(rawRight, "@") {`,
+			old:  `if rightPath, pathOperand := filterPath(rawRight); pathOperand {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesDataFlowValidation|TestStatesLifecycleAndWalkerUnits",

@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	jsonata "github.com/jsonata-go/jsonata/v206"
@@ -4688,6 +4689,17 @@ func matchChoice(cm map[string]any, data any, variables ...map[string]any) bool 
 		}
 		return jsonPathFilterCollection(operator, got, right)
 	}
+	if operator, ok := cm["ValueOperator"].(string); ok {
+		right := cm["Value"]
+		if path, ok := cm["ValuePath"].(string); ok {
+			var found bool
+			right, found = jsonPathLookup(data, path, variables...)
+			if !found {
+				return false
+			}
+		}
+		return jsonPathFilterValue(operator, got, right)
+	}
 	for key, actual := range map[string]bool{
 		"IsNull": got == nil, "IsString": isString(got), "IsNumeric": isNumber(got), "IsBoolean": isBool(got), "IsTimestamp": isTimestamp(got),
 	} {
@@ -5284,7 +5296,7 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 		case quote == 0 && (expression[index] == '\'' || expression[index] == '"' || expression[index] == '/'):
 			quote = expression[index]
 		case quote == 0:
-			for _, candidate := range []string{"subsetof", "noneof", "anyof", "nin", "in", "==", "!=", "<=", ">=", "=~", "<", ">"} {
+			for _, candidate := range []string{"subsetof", "noneof", "anyof", "empty", "size", "nin", "in", "==", "!=", "<=", ">=", "=~", "<", ">"} {
 				lexical := candidate[0] >= 'a' && candidate[0] <= 'z'
 				if lexical && (index == 0 || !space(expression[index-1]) || index+len(candidate) >= len(expression) || !space(expression[index+len(candidate)])) {
 					continue
@@ -5372,6 +5384,17 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 			rule["CollectionPath"] = rightPath
 		} else if right, valid := jsonPathFilterLiteral(rawRight); valid {
 			rule["CollectionValue"] = right
+		} else {
+			return nil, false
+		}
+		return rule, true
+	}
+	if operator == "size" || operator == "empty" {
+		rule := map[string]any{"Variable": left, "ValueOperator": operator}
+		if rightPath, pathOperand := filterPath(rawRight); pathOperand {
+			rule["ValuePath"] = rightPath
+		} else if right, valid := jsonPathFilterLiteral(rawRight); valid && (operator == "size" && isNumber(right) || operator == "empty" && isBool(right)) {
+			rule["Value"] = right
 		} else {
 			return nil, false
 		}
@@ -5515,6 +5538,27 @@ func jsonPathFilterCollection(operator string, left, right any) bool {
 		return !slices.ContainsFunc(leftValues, func(value any) bool { return contains(rightValues, value) })
 	}
 	return false
+}
+
+func jsonPathFilterValue(operator string, left, right any) bool {
+	length := -1
+	switch left := left.(type) {
+	case string:
+		length = len(utf16.Encode([]rune(left)))
+	case []any:
+		length = len(left)
+	case map[string]any:
+		length = len(left)
+	}
+	if length < 0 {
+		return false
+	}
+	if operator == "empty" {
+		empty, valid := right.(bool)
+		return valid && (length == 0) == empty
+	}
+	size, valid := choiceNumber(right)
+	return operator == "size" && valid && length == int(size)
 }
 
 func validJSONPath(path string, reference bool) bool {

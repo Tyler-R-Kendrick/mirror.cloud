@@ -3334,6 +3334,12 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if empty, found := jsonPathLookup(paths, "$.a[9,10]"); !found || fmtString(empty) != `[]` {
 		t.Fatalf("empty union %#v %t", empty, found)
 	}
+	escapedMembers := map[string]any{"é": 1.0, "line\nbreak": 2.0, "quote'key": 3.0, `quote"key`: 4.0, `slash\key`: 5.0}
+	for path, expected := range map[string]any{`$['\u00e9']`: 1.0, `$['line\nbreak']`: 2.0, `$['quote\'key']`: 3.0, `$['quote"key']`: 4.0, `$['slash\\key']`: 5.0, `$["\u00e9"]`: 1.0} {
+		if value, found := jsonPathLookup(escapedMembers, path); !found || value != expected {
+			t.Fatalf("escaped member %s = %#v %t", path, value, found)
+		}
+	}
 	if recursive, found := jsonPathLookup(paths, "$..v"); !found || fmtString(recursive) != `[1,2,3]` {
 		t.Fatalf("recursive descent %#v %t", recursive, found)
 	}

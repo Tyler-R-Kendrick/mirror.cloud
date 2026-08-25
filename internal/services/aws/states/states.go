@@ -5229,17 +5229,29 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 		if len(member) < 2 || member[0] != member[len(member)-1] || member[0] != '\'' && member[0] != '"' {
 			return "", false
 		}
-		var key strings.Builder
+		if member[0] == '"' {
+			var key string
+			err := json.Unmarshal([]byte(member), &key)
+			return key, err == nil
+		}
+		var quoted strings.Builder
+		quoted.WriteByte('"')
 		for index := 1; index < len(member)-1; index++ {
-			if member[index] == '\\' {
+			if member[index] == '"' {
+				quoted.WriteByte('\\')
+			}
+			if member[index] == '\\' && index+1 < len(member)-1 && (member[index+1] == '\'' || member[index+1] == '"') {
 				index++
-				if index == len(member)-1 {
-					return "", false
+				if member[index] == '"' {
+					quoted.WriteByte('\\')
 				}
 			}
-			key.WriteByte(member[index])
+			quoted.WriteByte(member[index])
 		}
-		return key.String(), true
+		quoted.WriteByte('"')
+		var key string
+		err := json.Unmarshal([]byte(quoted.String()), &key)
+		return key, err == nil
 	}
 	var tokens []pathToken
 	for len(path) > 0 {

@@ -1742,6 +1742,15 @@ walkLoop:
 		hist = append(hist, map[string]any{"type": typ + "StateEntered", "id": hop + 1, "name": cur})
 		jsonataOutputApplied := false
 		jsonPathAssignmentInput := data
+		applyMockedResult := func(result any) bool {
+			if isJSONata {
+				data, ok = applyJSONataState(st, rawInput, result, stateContext, variables, p.deps.Rand)
+				jsonataOutputApplied = ok
+				return ok
+			}
+			data, ok = applyStateResult(st, rawInput, result, stateContext, p.deps.Rand, variables)
+			return ok && applyJSONPathAssignments(result, stateContext, variables, variables, p.deps.Rand, st)
+		}
 		var waitUntil time.Time
 		switch typ {
 		case "Pass":
@@ -2038,6 +2047,15 @@ walkLoop:
 			continue
 		case "Parallel":
 			stateInput := rawInput
+			if result, mocked := st["_TestStateMockResult"]; mocked {
+				if !validStatePayload(result) {
+					return walkResult{out: stateInput, status: "FAILED", cause: "States.DataLimitExceeded", errorName: "States.DataLimitExceeded", hist: hist}
+				}
+				if !applyMockedResult(result) {
+					return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+				}
+				break
+			}
 			branchInput := data
 			if params, ok := st["Parameters"].(map[string]any); ok && !isJSONata {
 				var valid bool
@@ -2154,6 +2172,15 @@ walkLoop:
 			}
 		case "Map":
 			stateInput := rawInput
+			if result, mocked := st["_TestStateMockResult"]; mocked {
+				if !validStatePayload(result) {
+					return walkResult{out: stateInput, status: "FAILED", cause: "States.DataLimitExceeded", errorName: "States.DataLimitExceeded", hist: hist}
+				}
+				if !applyMockedResult(result) {
+					return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}
+				}
+				break
+			}
 			var mapScope *jsonataScope
 			if isJSONata {
 				mapScope = &jsonataScope{input: rawInput, context: stateContext, variables: variables, random: p.deps.Rand}
@@ -7034,8 +7061,8 @@ func testDefinition(definition, stateName string, input any, mock map[string]any
 	if typ := first(state, "Type"); mock == nil && (typ == "Parallel" || typ == "Map" || typ == "Task" && strings.Contains(first(state, "Resource"), ":activity:")) {
 		return "", "", fmt.Errorf("state requires a mock")
 	}
-	if mock != nil && first(state, "Type") != "Task" {
-		return "", "", fmt.Errorf("mock requires a Task state")
+	if mock != nil && !slices.Contains([]string{"Task", "Map", "Parallel"}, first(state, "Type")) {
+		return "", "", fmt.Errorf("mock requires a Task, Map, or Parallel state")
 	}
 	next := first(state, "Next")
 	copy := map[string]any{}

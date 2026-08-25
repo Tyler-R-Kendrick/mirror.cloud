@@ -1711,6 +1711,10 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"result","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","InputPath":"$.['input']","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[0]output","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","InputPath":"$.foo bar","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","InputPath":"$.foo-bar","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","InputPath":"$.2foo","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","InputPath":"$.foo*","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[0:3:0]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$[*]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$[0:2]","End":true}}}`,
@@ -1744,7 +1748,7 @@ func TestStatesReferencePathValidation(t *testing.T) {
 			t.Fatalf("reference-path diagnostics = %#v for %s", diagnostics, definition)
 		}
 	}
-	for path, valid := range map[string]bool{"$$.Execution.Name": true, "$value.limit": true, "$.items[0]": true, "$['a:b']": true, `$.store\.book`: true, "$.*": false, "$[*]": false, "$[0:2]": false, "$['a','b']": false, "$..items": false} {
+	for path, valid := range map[string]bool{"$$.Execution.Name": true, "$value.limit": true, "$.items[0]": true, "$.foo_bar2": true, "$['a:b']": true, `$.store\.book`: true, "$.foo-bar": false, "$.*": false, "$[*]": false, "$[0:2]": false, "$['a','b']": false, "$..items": false} {
 		if got := validJSONPath(path, true); got != valid {
 			t.Fatalf("validJSONPath(%q, true) = %t, want %t", path, got, valid)
 		}
@@ -3264,8 +3268,8 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if recursive, found := jsonPathLookup(map[string]any{"a": []any{1.0}}, "$..*"); !found || fmtString(recursive) != `[[1],1]` {
 		t.Fatalf("recursive wildcard %#v %t", recursive, found)
 	}
-	members := map[string]any{"store.book": map[string]any{"a:b": 1.0, "close]key": 2.0, "quote'key": 3.0, "comma,key": 4.0}}
-	if jsonPath(members, `$.store\.book['a:b']`) != 1.0 || jsonPath(members, `$['store.book']['close]key']`) != 2.0 || jsonPath(members, `$['store.book']['quote\'key']`) != 3.0 || fmtString(jsonPath(members, `$['store.book']['comma,key','a:b']`)) != `[4,1]` || fmtString(jsonPath(map[string]any{"b": 2.0, "a": 1.0}, "$.*")) != `[1,2]` {
+	members := map[string]any{"store.book": map[string]any{"a:b": 1.0, "close]key": 2.0, "quote'key": 3.0, "comma,key": 4.0}, "foo bar": 5.0}
+	if jsonPath(members, `$.store\.book['a:b']`) != 1.0 || jsonPath(members, `$.foo\ bar`) != 5.0 || jsonPath(members, `$['store.book']['close]key']`) != 2.0 || jsonPath(members, `$['store.book']['quote\'key']`) != 3.0 || fmtString(jsonPath(members, `$['store.book']['comma,key','a:b']`)) != `[4,1]` || fmtString(jsonPath(map[string]any{"b": 2.0, "a": 1.0}, "$.*")) != `[1,2]` {
 		t.Fatal("json path members")
 	}
 	composite := map[string]any{"Retry": []any{map[string]any{"ErrorEquals": []any{"Boom"}, "MaxAttempts": 1.0}}, "Catch": []any{map[string]any{"ErrorEquals": []any{"States.ALL"}, "Next": "Recovered"}}}

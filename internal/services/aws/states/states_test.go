@@ -1692,6 +1692,7 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","InputPath":"$.input","Parameters":{"value.$":"$.value"},"ResultPath":null,"OutputPath":null,"End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","InputPath":"$$.Execution.Input","ResultPath":"$['result']","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","InputPath":"$input.value","OutputPath":"$[*]","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[0,2]","End":true}}}`,
 		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","ResultSelector":{"value.$":"$.value"},"End":true}}}`,
 	} {
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
@@ -3239,7 +3240,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		t.Fatalf("selected result %#v", selectedResult)
 	}
 	paths := map[string]any{"a": []any{map[string]any{"v": 1.0}, map[string]any{"v": 2.0}, map[string]any{"v": 3.0}}}
-	if jsonPath(paths, "$.a[1].v") != 2.0 || fmtString(jsonPath(paths, "$.a[0:2].v")) != `[1,2]` || fmtString(jsonPath(paths, "$.a[-2:].v")) != `[2,3]` || jsonPath(paths, "$.a[-1].v") != 3.0 || jsonPath(paths, "$['a'][2].v") != 3.0 || jsonPath(paths, "$.a[9]") != nil {
+	if jsonPath(paths, "$.a[1].v") != 2.0 || fmtString(jsonPath(paths, "$.a[0:2].v")) != `[1,2]` || fmtString(jsonPath(paths, "$.a[-2:].v")) != `[2,3]` || fmtString(jsonPath(paths, "$.a[0,2].v")) != `[1,3]` || jsonPath(paths, "$.a[-1].v") != 3.0 || jsonPath(paths, "$['a'][2].v") != 3.0 || jsonPath(paths, "$.a[9]") != nil {
 		t.Fatal("json path arrays")
 	}
 	if empty, found := jsonPathLookup([]any{}, "$[*]"); !found || fmtString(empty) != `[]` {
@@ -3247,6 +3248,9 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	}
 	if empty, found := jsonPathLookup(paths, "$.a[9:10]"); !found || fmtString(empty) != `[]` {
 		t.Fatalf("empty slice %#v %t", empty, found)
+	}
+	if empty, found := jsonPathLookup(paths, "$.a[9,10]"); !found || fmtString(empty) != `[]` {
+		t.Fatalf("empty union %#v %t", empty, found)
 	}
 	members := map[string]any{"store.book": map[string]any{"a:b": 1.0, "close]key": 2.0, "quote'key": 3.0}}
 	if jsonPath(members, `$.store\.book['a:b']`) != 1.0 || jsonPath(members, `$['store.book']['close]key']`) != 2.0 || jsonPath(members, `$['store.book']['quote\'key']`) != 3.0 || fmtString(jsonPath(map[string]any{"b": 2.0, "a": 1.0}, "$.*")) != `[1,2]` {

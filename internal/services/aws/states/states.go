@@ -4677,6 +4677,17 @@ func matchChoice(cm map[string]any, data any, variables ...map[string]any) bool 
 	if !present {
 		return false
 	}
+	if operator, ok := cm["CollectionOperator"].(string); ok {
+		right := cm["CollectionValue"]
+		if path, ok := cm["CollectionPath"].(string); ok {
+			var found bool
+			right, found = jsonPathLookup(data, path, variables...)
+			if !found {
+				return operator == "nin"
+			}
+		}
+		return jsonPathFilterCollection(operator, got, right)
+	}
 	for key, actual := range map[string]bool{
 		"IsNull": got == nil, "IsString": isString(got), "IsNumeric": isNumber(got), "IsBoolean": isBool(got), "IsTimestamp": isTimestamp(got),
 	} {
@@ -5105,7 +5116,7 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 		member := path[1:close]
 		path = path[close+1:]
 		var parts []string
-		start, quote := 0, byte(0)
+		start, nested, quote := 0, 0, byte(0)
 		for index := 0; index < len(member); index++ {
 			switch {
 			case quote != 0 && member[index] == '\\':
@@ -5114,7 +5125,11 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 				quote = 0
 			case quote == 0 && (member[index] == '\'' || member[index] == '"' || member[index] == '/'):
 				quote = member[index]
-			case quote == 0 && member[index] == ',':
+			case quote == 0 && member[index] == '[':
+				nested++
+			case quote == 0 && member[index] == ']':
+				nested--
+			case quote == 0 && nested == 0 && member[index] == ',':
 				parts = append(parts, member[start:index])
 				start = index + 1
 			}
@@ -5257,6 +5272,9 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 		return map[string]any{"Not": rule}, true
 	}
 	operator, operatorAt, quote := "", -1, byte(0)
+	space := func(character byte) bool {
+		return character == ' ' || character == '\t' || character == '\n' || character == '\r'
+	}
 	for index := 0; index < len(expression); index++ {
 		switch {
 		case quote != 0 && expression[index] == '\\':
@@ -5266,7 +5284,11 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 		case quote == 0 && (expression[index] == '\'' || expression[index] == '"' || expression[index] == '/'):
 			quote = expression[index]
 		case quote == 0:
-			for _, candidate := range []string{"==", "!=", "<=", ">=", "=~", "<", ">"} {
+			for _, candidate := range []string{"subsetof", "noneof", "anyof", "nin", "in", "==", "!=", "<=", ">=", "=~", "<", ">"} {
+				lexical := candidate[0] >= 'a' && candidate[0] <= 'z'
+				if lexical && (index == 0 || !space(expression[index-1]) || index+len(candidate) >= len(expression) || !space(expression[index+len(candidate)])) {
+					continue
+				}
 				if strings.HasPrefix(expression[index:], candidate) {
 					operator, operatorAt = candidate, index
 					break
@@ -5344,6 +5366,17 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 		}
 		return map[string]any{"Variable": left, "StringRegex": pattern}, true
 	}
+	if slices.Contains([]string{"in", "nin", "subsetof", "anyof", "noneof"}, operator) {
+		rule := map[string]any{"Variable": left, "CollectionOperator": operator}
+		if rightPath, pathOperand := filterPath(rawRight); pathOperand {
+			rule["CollectionPath"] = rightPath
+		} else if right, valid := jsonPathFilterLiteral(rawRight); valid {
+			rule["CollectionValue"] = right
+		} else {
+			return nil, false
+		}
+		return rule, true
+	}
 	suffix := map[string]string{"==": "Equals", "<": "LessThan", "<=": "LessThanEquals", ">": "GreaterThan", ">=": "GreaterThanEquals"}[operator]
 	if rightPath, pathOperand := filterPath(rawRight); pathOperand {
 		prefixes := []string{"String", "Numeric", "Timestamp"}
@@ -5366,20 +5399,8 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 		}
 		return rule, true
 	}
-	var right any
-	if len(rawRight) >= 2 && rawRight[0] == '\'' && rawRight[len(rawRight)-1] == '\'' {
-		var value strings.Builder
-		for index := 1; index < len(rawRight)-1; index++ {
-			if rawRight[index] == '\\' {
-				index++
-				if index == len(rawRight)-1 {
-					return nil, false
-				}
-			}
-			value.WriteByte(rawRight[index])
-		}
-		right = value.String()
-	} else if json.Unmarshal([]byte(rawRight), &right) != nil {
+	right, valid := jsonPathFilterLiteral(rawRight)
+	if !valid {
 		return nil, false
 	}
 	if right == nil {
@@ -5413,6 +5434,87 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 		return nil, false
 	}
 	return map[string]any{"Variable": left, prefix + suffix: right}, true
+}
+
+func jsonPathFilterLiteral(raw string) (any, bool) {
+	raw = strings.TrimSpace(raw)
+	if len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\'' {
+		var value strings.Builder
+		for index := 1; index < len(raw)-1; index++ {
+			if raw[index] == '\\' {
+				index++
+				if index == len(raw)-1 {
+					return nil, false
+				}
+			}
+			value.WriteByte(raw[index])
+		}
+		return value.String(), true
+	}
+	if len(raw) >= 2 && raw[0] == '[' && raw[len(raw)-1] == ']' {
+		if strings.TrimSpace(raw[1:len(raw)-1]) == "" {
+			return []any{}, true
+		}
+		var values []any
+		start, nested, quote := 1, 0, byte(0)
+		for index := 1; index < len(raw)-1; index++ {
+			switch {
+			case quote != 0 && raw[index] == '\\':
+				index++
+			case quote != 0 && raw[index] == quote:
+				quote = 0
+			case quote == 0 && (raw[index] == '\'' || raw[index] == '"'):
+				quote = raw[index]
+			case quote == 0 && raw[index] == '[':
+				nested++
+			case quote == 0 && raw[index] == ']':
+				nested--
+			case quote == 0 && nested == 0 && raw[index] == ',':
+				value, valid := jsonPathFilterLiteral(raw[start:index])
+				if !valid {
+					return nil, false
+				}
+				values = append(values, value)
+				start = index + 1
+			}
+		}
+		value, valid := jsonPathFilterLiteral(raw[start : len(raw)-1])
+		return append(values, value), valid
+	}
+	var value any
+	if json.Unmarshal([]byte(raw), &value) != nil {
+		return nil, false
+	}
+	return value, true
+}
+
+func jsonPathFilterCollection(operator string, left, right any) bool {
+	rightValues, rightOK := right.([]any)
+	equal := func(left, right any) bool {
+		leftNumber, leftOK := choiceNumber(left)
+		rightNumber, rightOK := choiceNumber(right)
+		return leftOK && rightOK && leftNumber == rightNumber || reflect.DeepEqual(left, right)
+	}
+	contains := func(values []any, value any) bool {
+		return slices.ContainsFunc(values, func(candidate any) bool { return equal(value, candidate) })
+	}
+	if operator == "in" || operator == "nin" {
+		found := rightOK && contains(rightValues, left)
+		return found != (operator == "nin")
+	}
+	leftValues, leftOK := left.([]any)
+	if !leftOK || !rightOK {
+		return false
+	}
+	switch operator {
+	case "subsetof":
+		return !slices.ContainsFunc(leftValues, func(value any) bool { return !contains(rightValues, value) })
+	case "anyof":
+		return slices.ContainsFunc(leftValues, func(value any) bool { return contains(rightValues, value) })
+	case "noneof":
+		return !slices.ContainsFunc(leftValues, func(value any) bool { return contains(rightValues, value) })
+	}
+	return false
 }
 
 func validJSONPath(path string, reference bool) bool {

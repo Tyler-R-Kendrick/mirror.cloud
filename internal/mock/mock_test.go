@@ -46,6 +46,10 @@ func exampleService() *model.Service {
 
 func TestSynthesizeDeterministic(t *testing.T) {
 	svc := exampleService()
+	pack := mock.New(svc, spitest.Deps(t), false)
+	if pack.ServiceID() != svc.ID || pack.Tier() != model.TierMock || !reflect.DeepEqual(pack.Operations(), []string{"GetWidget"}) || pack.String() != "mock:"+svc.ID {
+		t.Fatal("pack metadata")
+	}
 	in := map[string]any{"Name": "w"}
 	req := func() *spi.Request {
 		return &spi.Request{ServiceID: svc.ID, Operation: "GetWidget", Input: in}

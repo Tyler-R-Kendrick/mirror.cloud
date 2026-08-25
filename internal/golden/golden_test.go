@@ -22,3 +22,9 @@ func TestAssertRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestClip(t *testing.T) {
+	if clip([]byte("short")) != "short" || len(clip(make([]byte, 5000))) >= 5000 {
+		t.Fatal("clip bounds")
+	}
+}

@@ -2894,6 +2894,40 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
 		{
+			name: "states-reject-json-path-length-function",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `if !recursive && path == "length()" {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesDataFlowValidation|TestStatesLifecycleAndWalkerUnits",
+		},
+		{
+			name: "states-keep-json-path-length-wrapper",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `value = nodes[0]`,
+			new:  `value = nodes`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
+			name: "states-accept-json-path-length-non-array",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old: `array, valid := value.([]any)
+			if !valid {`,
+			new: `array, valid := value.([]any)
+			if valid {`,
+			pkg: "./internal/services/aws/states",
+			run: "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
+			name: "states-increment-json-path-length",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `nodes, multiple = []any{float64(len(array))}, false`,
+			new:  `nodes, multiple = []any{float64(len(array) + 1)}, false`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
 			name: "states-truncate-json-path-wildcard",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `next = append(next, node...)`,

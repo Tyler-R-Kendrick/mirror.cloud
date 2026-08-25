@@ -2080,10 +2080,10 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-accept-invalid-map-items-path",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  "if value, exists := state[\"ItemsPath\"]; exists {\n\t\t\t\treference, valid := value.(string)\n\t\t\t\tif !valid || !strings.HasPrefix(reference, \"$\") {",
-			new:  "if value, exists := state[\"ItemsPath\"]; exists {\n\t\t\t\treference, valid := value.(string)\n\t\t\t\tif (!valid || !strings.HasPrefix(reference, \"$\")) && false {",
+			old:  "if value, exists := state[\"ItemsPath\"]; exists {\n\t\t\t\treference, valid := value.(string)\n\t\t\t\tif !valid || !validJSONPath(reference, true) {",
+			new:  "if value, exists := state[\"ItemsPath\"]; exists {\n\t\t\t\treference, valid := value.(string)\n\t\t\t\tif !valid || !strings.HasPrefix(reference, \"$\") {",
 			pkg:  "./internal/services/aws/states",
-			run:  "TestStatesMapValidation",
+			run:  "TestStatesReferencePathValidation",
 		},
 		{
 			name: "states-accept-invalid-map-config-object",
@@ -2266,14 +2266,6 @@ func TestMutantsAreKilled(t *testing.T) {
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `if reference, valid := pathValue.(string); path && (!valid || !validJSONPath(reference, true)) {`,
 			new:  `if reference, valid := pathValue.(string); path && (!valid || !strings.HasPrefix(reference, "$")) {`,
-			pkg:  "./internal/services/aws/states",
-			run:  "TestStatesReferencePathValidation",
-		},
-		{
-			name: "states-accept-invalid-items-path",
-			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  "if !valid || !validJSONPath(reference, true) {\n\t\t\t\t\tadd(\"SCHEMA_VALIDATION_FAILED\", \"ItemsPath must be a reference path.\"",
-			new:  "if false {\n\t\t\t\t\tadd(\"SCHEMA_VALIDATION_FAILED\", \"ItemsPath must be a reference path.\"",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesReferencePathValidation",
 		},

@@ -3215,6 +3215,31 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 			t.Fatalf("accepted invalid TestState mock %#v", mock)
 		}
 	}
+	modeledTask := `{"Type":"Task","Resource":"arn:aws:states:::aws-sdk:dynamodb:describeEndpoints","End":true}`
+	if _, err := call("TestState", map[string]any{"definition": modeledTask, "mock": map[string]any{"result": `{}`}}); err == nil {
+		t.Fatal("accepted STRICT mock missing modeled required fields")
+	}
+	for _, mock := range []map[string]any{
+		{"result": `{}`, "fieldValidationMode": "PRESENT"},
+		{"result": `{"Endpoints":"unchecked"}`, "fieldValidationMode": "NONE"},
+		{"result": `{"Endpoints":[],"FutureField":true}`},
+	} {
+		if result := must("TestState", map[string]any{"definition": modeledTask, "mock": mock}).Output; result["status"] != "SUCCEEDED" {
+			t.Fatalf("rejected valid modeled mock %#v", result)
+		}
+	}
+	if _, err := call("TestState", map[string]any{"definition": modeledTask, "mock": map[string]any{"result": `{"Endpoints":"wrong"}`, "fieldValidationMode": "PRESENT"}}); err == nil {
+		t.Fatal("accepted PRESENT mock with wrong modeled type")
+	}
+	for _, input := range []map[string]any{
+		{"definition": `{"Type":"Parallel","Branches":[{},{}],"End":true}`, "mock": map[string]any{"result": `[1]`, "fieldValidationMode": "NONE"}},
+		{"definition": `{"Type":"Parallel","Branches":[],"End":true}`, "mock": map[string]any{"result": `{}`}},
+		{"definition": `{"Type":"Map","ItemProcessor":{},"End":true}`, "mock": map[string]any{"result": `{}`}},
+	} {
+		if _, err := call("TestState", input); err == nil {
+			t.Fatalf("accepted invalid aggregate mock shape %#v", input)
+		}
+	}
 	if _, err := call("TestState", map[string]any{"definition": `{"Type":"Pass","End":true}`, "mock": map[string]any{"result": `{}`}}); err == nil {
 		t.Fatal("accepted mock for Pass state")
 	}

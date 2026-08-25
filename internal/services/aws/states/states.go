@@ -4944,7 +4944,7 @@ func validJSONPath(path string, reference bool) bool {
 }
 
 func validResultPath(path string) bool {
-	return validJSONPath(path, true) && !strings.HasPrefix(path, "$$") && (len(path) == 1 || path[1] == '.' || path[1] == '[')
+	return validJSONPath(path, true) && (len(path) == 1 || path[1] == '.' || path[1] == '[')
 }
 
 func asSlice(v any) []any {

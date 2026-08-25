@@ -4908,7 +4908,10 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 		nodes = next
 	}
 	if multiple {
-		return nodes, len(nodes) > 0
+		if nodes == nil {
+			nodes = []any{}
+		}
+		return nodes, true
 	}
 	if len(nodes) == 0 {
 		return nil, false

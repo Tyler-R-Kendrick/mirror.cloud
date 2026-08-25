@@ -5224,35 +5224,36 @@ type pathToken struct {
 	arguments  []string
 }
 
-func jsonPathTokens(path string) ([]pathToken, bool) {
-	unquote := func(member string) (string, bool) {
-		if len(member) < 2 || member[0] != member[len(member)-1] || member[0] != '\'' && member[0] != '"' {
-			return "", false
+func jsonPathUnquote(value string) (string, bool) {
+	if len(value) < 2 || value[0] != value[len(value)-1] || value[0] != '\'' && value[0] != '"' {
+		return "", false
+	}
+	if value[0] == '"' {
+		var decoded string
+		err := json.Unmarshal([]byte(value), &decoded)
+		return decoded, err == nil
+	}
+	var quoted strings.Builder
+	quoted.WriteByte('"')
+	for index := 1; index < len(value)-1; index++ {
+		if value[index] == '"' {
+			quoted.WriteByte('\\')
 		}
-		if member[0] == '"' {
-			var key string
-			err := json.Unmarshal([]byte(member), &key)
-			return key, err == nil
-		}
-		var quoted strings.Builder
-		quoted.WriteByte('"')
-		for index := 1; index < len(member)-1; index++ {
-			if member[index] == '"' {
+		if value[index] == '\\' && index+1 < len(value)-1 && (value[index+1] == '\'' || value[index+1] == '"') {
+			index++
+			if value[index] == '"' {
 				quoted.WriteByte('\\')
 			}
-			if member[index] == '\\' && index+1 < len(member)-1 && (member[index+1] == '\'' || member[index+1] == '"') {
-				index++
-				if member[index] == '"' {
-					quoted.WriteByte('\\')
-				}
-			}
-			quoted.WriteByte(member[index])
 		}
-		quoted.WriteByte('"')
-		var key string
-		err := json.Unmarshal([]byte(quoted.String()), &key)
-		return key, err == nil
+		quoted.WriteByte(value[index])
 	}
+	quoted.WriteByte('"')
+	var decoded string
+	err := json.Unmarshal([]byte(quoted.String()), &decoded)
+	return decoded, err == nil
+}
+
+func jsonPathTokens(path string) ([]pathToken, bool) {
 	var tokens []pathToken
 	for len(path) > 0 {
 		recursive := false
@@ -5413,7 +5414,7 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 			parts = append(parts, member[start:])
 			selectors := make([]pathToken, len(parts))
 			for index, part := range parts {
-				if key, quoted := unquote(part); quoted {
+				if key, quoted := jsonPathUnquote(part); quoted {
 					selectors[index] = pathToken{kind: 'f', key: key}
 					continue
 				}
@@ -5434,7 +5435,7 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 			}
 			tokens = append(tokens, pathToken{kind: 'q', filter: rule})
 		case len(member) >= 2 && (member[0] == '\'' || member[0] == '"'):
-			key, valid := unquote(member)
+			key, valid := jsonPathUnquote(member)
 			if !valid {
 				return nil, false
 			}
@@ -5812,18 +5813,8 @@ func jsonPathRegexUnicodeClasses(pattern string) string {
 
 func jsonPathFilterLiteral(raw string) (any, bool) {
 	raw = strings.TrimSpace(raw)
-	if len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\'' {
-		var value strings.Builder
-		for index := 1; index < len(raw)-1; index++ {
-			if raw[index] == '\\' {
-				index++
-				if index == len(raw)-1 {
-					return nil, false
-				}
-			}
-			value.WriteByte(raw[index])
-		}
-		return value.String(), true
+	if len(raw) >= 2 && (raw[0] == '\'' || raw[0] == '"') {
+		return jsonPathUnquote(raw)
 	}
 	if len(raw) >= 2 && raw[0] == '[' && raw[len(raw)-1] == ']' {
 		if strings.TrimSpace(raw[1:len(raw)-1]) == "" {

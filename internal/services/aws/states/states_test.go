@@ -3380,6 +3380,15 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if filtered := jsonPath([]any{map[string]any{"name": "Ä"}}, `$[?(@.name =~ /ä/iuU)].name`); fmtString(filtered) != `["Ä"]` {
 		t.Fatalf("unicode regex filter %#v", filtered)
 	}
+	unicodePatterns := map[string]string{`\d`: "١", `[\d]+`: "١٢", `\s`: "\u00a0", `[\s]`: "\u00a0", `\w+`: "éclair", `[\w]+`: "éclair", `\D`: "é"}
+	for pattern, name := range unicodePatterns {
+		if filtered := jsonPath([]any{map[string]any{"name": name}}, `$[?(@.name =~ /`+pattern+`/U)].name`); fmtString(filtered) != fmtString([]any{name}) {
+			t.Fatalf("unicode class %s filter %#v", pattern, filtered)
+		}
+	}
+	if filtered := jsonPath([]any{map[string]any{"name": "١"}}, `$[?(@.name =~ /\d/)].name`); fmtString(filtered) != `[]` {
+		t.Fatalf("ASCII regex class filter %#v", filtered)
+	}
 	if filtered := jsonPath(products, "$[?(@.name =~ /a{1,2}/)].name"); fmtString(filtered) != `["a"]` {
 		t.Fatalf("regex comma filter %#v", filtered)
 	}

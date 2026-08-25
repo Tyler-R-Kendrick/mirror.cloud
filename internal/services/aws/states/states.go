@@ -1183,6 +1183,24 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 					return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 				}
 			}
+			if value, exists := inputValue(configuration, "errorCausedByState", "ErrorCausedByState"); exists {
+				name, valid := value.(string)
+				if !valid || utf8.RuneCountInString(name) < 1 || utf8.RuneCountInString(name) > 80 {
+					return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+				}
+			}
+			if value, exists := inputValue(configuration, "mapIterationFailureCount", "MapIterationFailureCount"); exists {
+				count, valid := exactNumber(value)
+				if !valid || count < 0 || count != math.Trunc(count) {
+					return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+				}
+			}
+			if value, exists := inputValue(configuration, "mapItemReaderData", "MapItemReaderData"); exists {
+				data, valid := value.(string)
+				if !valid || len(data) > 262144 {
+					return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+				}
+			}
 		}
 		wrapped, next, err := testDefinition(definition, first(req.Input, "stateName", "StateName"), data, mock, configuration)
 		if err != nil {
@@ -1198,6 +1216,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		var testMachine map[string]any
 		_ = json.Unmarshal([]byte(wrapped), &testMachine)
 		testedState, _ := testMachine["States"].(map[string]any)["TestState"].(map[string]any)
+		if _, mockedError := mock["ErrorOutput"]; mockedError && slices.Contains([]string{"Map", "Parallel"}, first(testedState, "Type")) && first(configuration, "errorCausedByState", "ErrorCausedByState") == "" {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
 		if inspectionLevel == "TRACE" && (first(testedState, "Type") != "Task" || !strings.Contains(first(testedState, "Resource"), "states:::http:invoke")) {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
@@ -1220,7 +1241,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			response["cause"] = wr.cause
 		}
 		if inspectionLevel != "INFO" {
-			response["inspectionData"] = inspectTestState(testedState, inspectionInput, jsonataContext(walkRequest, "TestState", nil), variables, mock, wr, p.deps.Rand)
+			response["inspectionData"] = inspectTestState(testedState, inspectionInput, jsonataContext(walkRequest, "TestState", nil), variables, mock, configuration, wr, p.deps.Rand)
 		}
 		return &spi.Response{Output: response}, nil
 	case "TagResource":
@@ -7172,7 +7193,7 @@ func jsonataReferences(value any, variable string) bool {
 	return false
 }
 
-func inspectTestState(state map[string]any, input any, context, variables, mock map[string]any, wr walkResult, random spi.Rand) map[string]any {
+func inspectTestState(state map[string]any, input any, context, variables, mock, configuration map[string]any, wr walkResult, random spi.Rand) map[string]any {
 	inspection := maps.Clone(wr.inspection)
 	if inspection == nil {
 		inspection = map[string]any{}
@@ -7206,6 +7227,58 @@ func inspectTestState(state map[string]any, input any, context, variables, mock 
 		case "Task":
 			if payload, payloadValid := taskPayload(state, afterInputPath, context, random, variables); payloadValid {
 				encode("afterParameters", payload)
+			}
+		case "Map":
+			dataset := afterInputPath
+			if raw := first(configuration, "mapItemReaderData", "MapItemReaderData"); raw != "" {
+				reader, _ := state["ItemReader"].(map[string]any)
+				readerConfig, _ := reader["ReaderConfig"].(map[string]any)
+				if inputType := first(readerConfig, "InputType"); inputType == "" || inputType == "JSON" {
+					valid = json.Unmarshal([]byte(raw), &dataset) == nil
+					if pointer := first(readerConfig, "ItemsPointer"); valid && pointer != "" {
+						dataset, valid = resolveJSONPointer(dataset, pointer)
+					}
+					if valid {
+						encode("afterItemsPointer", dataset)
+					}
+				}
+			}
+			if path := first(state, "ItemsPath"); valid && path != "" {
+				dataset, valid = jsonPathLookup(dataset, path, variables)
+			}
+			if valid {
+				encode("afterItemsPath", dataset)
+			}
+			items, array := dataset.([]any)
+			valid = valid && array
+			selected := append([]any(nil), items...)
+			selector := state["ItemSelector"]
+			if selector == nil {
+				selector = state["Parameters"]
+			}
+			for index, item := range selected {
+				itemContext := map[string]any{"Map": map[string]any{"Item": map[string]any{"Index": float64(index), "Value": item, "Source": "STATE_DATA"}}}
+				if configured, exists := selector.(map[string]any); exists {
+					selected[index], valid = applyParamsValidated(configured, afterInputPath, mergeJSONataContext(context, itemContext), random, variables)
+					if !valid {
+						break
+					}
+				}
+			}
+			if valid {
+				encode("afterItemSelector", selected)
+				if batched, batchValid := batchMapItems(state, afterInputPath, selected, random, nil, variables); batchValid {
+					encode("afterItemBatcher", batched)
+				}
+			}
+			if value, _, valueValid := stateInteger(state, "MaxConcurrency", input, nil, 0, math.MaxInt32, variables); valueValid {
+				inspection["maxConcurrency"] = int(value)
+			}
+			if value, _, valueValid := stateInteger(state, "ToleratedFailureCount", input, nil, 0, math.MaxInt32, variables); valueValid {
+				inspection["toleratedFailureCount"] = int(value)
+			}
+			if value, _, valueValid := stateInteger(state, "ToleratedFailurePercentage", input, nil, 0, 100, variables); valueValid {
+				inspection["toleratedFailurePercentage"] = value
 			}
 		}
 		result, hasResult := mock["Result"]

@@ -1710,6 +1710,8 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.tags contains 'sale')]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.items.length()","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.items.sum()","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.items.first()","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.object.keys()","End":true}}}`,
 		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","ResultSelector":{"value.$":"$.value"},"End":true}}}`,
 	} {
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
@@ -3276,7 +3278,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if jsonPath(paths, "$.a.length()") != 3.0 || jsonPath(paths, "$.a[*].length()") != 3.0 || jsonPath(paths, "$..a.length()") != 3.0 {
 		t.Fatal("json path length function")
 	}
-	if _, found := jsonPathLookup(paths, "$.a[0].length()"); found {
+	if _, found := jsonPathLookup(paths, "$.a[0].v.length()"); found {
 		t.Fatal("json path length accepted non-array")
 	}
 	numbers := map[string]any{"values": []any{2.0, "ignored", 1.0, 3.0}}
@@ -3288,6 +3290,13 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	}
 	if _, found := jsonPathLookup(map[string]any{"values": []any{"x"}}, "$.values.sum()"); found {
 		t.Fatal("json path aggregation accepted empty numeric input")
+	}
+	structure := map[string]any{"object": map[string]any{"b": 2.0, "a": 1.0}, "values": []any{"a", "b", "c"}}
+	if jsonPath(structure, "$.object.length()") != 2.0 || fmtString(jsonPath(structure, "$.object.keys()")) != `["a","b"]` || jsonPath(structure, "$.values.first()") != "a" || jsonPath(structure, "$.values.last()") != "c" {
+		t.Fatal("json path structural functions")
+	}
+	if _, found := jsonPathLookup(map[string]any{"values": []any{}}, "$.values.first()"); found {
+		t.Fatal("json path first accepted empty array")
 	}
 	if empty, found := jsonPathLookup([]any{}, "$[*]"); !found || fmtString(empty) != `[]` {
 		t.Fatalf("empty wildcard %#v %t", empty, found)

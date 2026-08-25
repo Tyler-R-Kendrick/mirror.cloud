@@ -19,6 +19,7 @@ import (
 	"maps"
 	"math"
 	"reflect"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -4687,6 +4688,22 @@ func matchChoice(cm map[string]any, data any, variables ...map[string]any) bool 
 		value, valid := got.(string)
 		return valid && wildcardMatch(pattern, value)
 	}
+	if pattern, ok := cm["StringRegex"].(*regexp.Regexp); ok {
+		values := []any{got}
+		if array, ok := got.([]any); ok {
+			values = array
+		}
+		for _, value := range values {
+			text := ""
+			if _, ok := value.(string); ok || isBool(value) || isNumber(value) {
+				text = fmt.Sprint(value)
+			}
+			if pattern.MatchString(text) {
+				return true
+			}
+		}
+		return false
+	}
 	if op, want, ok := choiceComparison(cm, "String", data, variables...); ok {
 		left, leftOK := got.(string)
 		right, rightOK := want.(string)
@@ -5071,7 +5088,7 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 				close++
 			case quote != 0 && path[close] == quote:
 				quote = 0
-			case quote == 0 && (path[close] == '\'' || path[close] == '"'):
+			case quote == 0 && (path[close] == '\'' || path[close] == '"' || path[close] == '/'):
 				quote = path[close]
 			case quote == 0 && path[close] == '[':
 				nested++
@@ -5095,7 +5112,7 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 				index++
 			case quote != 0 && member[index] == quote:
 				quote = 0
-			case quote == 0 && (member[index] == '\'' || member[index] == '"'):
+			case quote == 0 && (member[index] == '\'' || member[index] == '"' || member[index] == '/'):
 				quote = member[index]
 			case quote == 0 && member[index] == ',':
 				parts = append(parts, member[start:index])
@@ -5181,7 +5198,7 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 				index++
 			case quote != 0 && expression[index] == quote:
 				quote = 0
-			case quote == 0 && (expression[index] == '\'' || expression[index] == '"'):
+			case quote == 0 && (expression[index] == '\'' || expression[index] == '"' || expression[index] == '/'):
 				quote = expression[index]
 			case quote == 0 && expression[index] == '(':
 				depth++
@@ -5207,7 +5224,7 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 				index++
 			case quote != 0 && expression[index] == quote:
 				quote = 0
-			case quote == 0 && (expression[index] == '\'' || expression[index] == '"'):
+			case quote == 0 && (expression[index] == '\'' || expression[index] == '"' || expression[index] == '/'):
 				quote = expression[index]
 			case quote == 0 && expression[index] == '(':
 				depth++
@@ -5246,10 +5263,10 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 			index++
 		case quote != 0 && expression[index] == quote:
 			quote = 0
-		case quote == 0 && (expression[index] == '\'' || expression[index] == '"'):
+		case quote == 0 && (expression[index] == '\'' || expression[index] == '"' || expression[index] == '/'):
 			quote = expression[index]
 		case quote == 0:
-			for _, candidate := range []string{"==", "!=", "<=", ">=", "<", ">"} {
+			for _, candidate := range []string{"==", "!=", "<=", ">=", "=~", "<", ">"} {
 				if strings.HasPrefix(expression[index:], candidate) {
 					operator, operatorAt = candidate, index
 					break
@@ -5294,6 +5311,38 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 		}
 		rawRight = strings.TrimSpace(expression[:operatorAt])
 		operator = map[string]string{"<": ">", "<=": ">=", ">": "<", ">=": "<=", "==": "==", "!=": "!="}[operator]
+	}
+	if operator == "=~" {
+		end, escaped := 1, false
+		for end < len(rawRight) && (rawRight[end] != '/' || escaped) {
+			if escaped {
+				escaped = false
+			} else {
+				escaped = rawRight[end] == '\\'
+			}
+			end++
+		}
+		if len(rawRight) < 2 || rawRight[0] != '/' || end == len(rawRight) {
+			return nil, false
+		}
+		modifiers := ""
+		for _, flag := range rawRight[end+1:] {
+			switch flag {
+			case 'i', 'm', 's':
+				modifiers += string(flag)
+			case 'u':
+			default:
+				return nil, false
+			}
+		}
+		if modifiers != "" {
+			modifiers = "(?" + modifiers + ")"
+		}
+		pattern, err := regexp.Compile(modifiers + "^(?:" + strings.ReplaceAll(rawRight[1:end], `\/`, "/") + ")$")
+		if err != nil {
+			return nil, false
+		}
+		return map[string]any{"Variable": left, "StringRegex": pattern}, true
 	}
 	suffix := map[string]string{"==": "Equals", "<": "LessThan", "<=": "LessThanEquals", ">": "GreaterThan", ">=": "GreaterThanEquals"}[operator]
 	if rightPath, pathOperand := filterPath(rawRight); pathOperand {

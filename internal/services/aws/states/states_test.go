@@ -3083,12 +3083,12 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		t.Fatalf("tested mock result %#v", mockedTask)
 	}
 	contextual := must("TestState", map[string]any{
-		"definition": `{"Type":"Task","Resource":"arn:aws:states:::unknown","ResultSelector":{"execution.$":"$$.Execution.Id","state.$":"$$.State.Name","value.$":"$.answer","variable.$":"$shared"},"End":true}`,
+		"definition": `{"Type":"Task","Resource":"arn:aws:states:::unknown","ResultSelector":{"entered.$":"$$.State.EnteredTime","execution.$":"$$.Execution.Id","state.$":"$$.State.Name","value.$":"$.answer","variable.$":"$shared"},"End":true}`,
 		"mock":       map[string]any{"result": `{"answer":42}`},
 		"context":    `{"Execution":{"Id":"execution-1"},"State":{"Name":"Configured","EnteredTime":"2024-01-01T00:00:00Z"}}`,
 		"variables":  `{"shared":"available"}`,
 	}).Output
-	for _, fragment := range []string{`"execution":"execution-1"`, `"state":"Configured"`, `"value":42`, `"variable":"available"`} {
+	for _, fragment := range []string{`"entered":"2024-01-01T00:00:00Z"`, `"execution":"execution-1"`, `"state":"Configured"`, `"value":42`, `"variable":"available"`} {
 		if contextual["status"] != "SUCCEEDED" || !strings.Contains(contextual["output"].(string), fragment) {
 			t.Fatalf("tested context and variables %#v", contextual)
 		}

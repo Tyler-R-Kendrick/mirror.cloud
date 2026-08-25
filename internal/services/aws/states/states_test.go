@@ -2910,6 +2910,114 @@ func TestDistributedMapResultWriter(t *testing.T) {
 	}
 }
 
+func TestStatesHTTPTaskAndTrace(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/failure" {
+			http.Error(w, "teapot", http.StatusTeapot)
+			return
+		}
+		if r.URL.Path == "/binary" {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write([]byte("binary"))
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Response", "present")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"apiKey": r.Header.Get("X-Api-Key"), "connectionHeader": r.Header.Get("X-Connection"), "definitionHeader": r.Header.Get("X-Definition"),
+			"connectionQuery": r.URL.Query().Get("connectionQuery"), "definitionQuery": r.URL.Query().Get("definitionQuery"), "body": body,
+		})
+	}))
+	defer server.Close()
+
+	deps := spitest.Deps(t)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	connection := map[string]any{
+		"ConnectionState": "AUTHORIZED", "AuthorizationType": "API_KEY",
+		"AuthParameters": map[string]any{
+			"ApiKeyAuthParameters": map[string]any{"ApiKeyName": "X-Api-Key", "ApiKeyValue": "api-secret"},
+			"InvocationHttpParameters": map[string]any{
+				"HeaderParameters":      []any{map[string]any{"Key": "X-Connection", "Value": "header-secret"}},
+				"QueryStringParameters": []any{map[string]any{"Key": "connectionQuery", "Value": "query-secret"}},
+				"BodyParameters":        []any{map[string]any{"Key": "connectionBody", "Value": "body-secret"}},
+			},
+		},
+	}
+	encoded, _ := json.Marshal(connection)
+	if err := deps.Store.Scope(id.Account, id.Region).Collection("connections").Put(ctx, "http", encoded); err != nil {
+		t.Fatal(err)
+	}
+	p := New(deps)
+	defer p.Close()
+	call := func(endpoint string, reveal bool, headers map[string]any) map[string]any {
+		t.Helper()
+		parameters := map[string]any{
+			"ApiEndpoint": endpoint, "Method": "POST", "Authentication": map[string]any{"ConnectionArn": "arn:aws:events:us-east-1:1:connection/http/id"},
+			"QueryParameters": map[string]any{"definitionQuery": "defined"}, "RequestBody": map[string]any{"definitionBody": "defined"},
+		}
+		if headers != nil {
+			parameters["Headers"] = headers
+		}
+		definition, _ := json.Marshal(map[string]any{
+			"Type": "Task", "Resource": "arn:aws:states:::http:invoke", "End": true,
+			"Parameters": parameters,
+		})
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "TestState", Input: map[string]any{
+			"definition": string(definition), "inspectionLevel": "TRACE", "revealSecrets": reveal,
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+
+	succeeded := call(server.URL, false, map[string]any{"X-Definition": "defined"})
+	if succeeded["status"] != "SUCCEEDED" {
+		t.Fatalf("HTTP Task %#v", succeeded)
+	}
+	for _, fragment := range []string{`"apiKey":"api-secret"`, `"connectionHeader":"header-secret"`, `"connectionQuery":"query-secret"`, `"connectionBody":"body-secret"`} {
+		if !strings.Contains(succeeded["output"].(string), fragment) {
+			t.Fatalf("HTTP Task output %s missing %s", succeeded["output"], fragment)
+		}
+	}
+	inspection := succeeded["inspectionData"].(map[string]any)
+	requestInspection := inspection["request"].(map[string]any)
+	for _, secret := range []string{"api-secret", "header-secret", "query-secret", "body-secret"} {
+		if strings.Contains(fmt.Sprint(requestInspection), secret) {
+			t.Fatalf("redacted request exposed %s: %#v", secret, requestInspection)
+		}
+	}
+	if !strings.Contains(requestInspection["headers"].(string), "X-Definition") || !strings.Contains(requestInspection["url"].(string), "definitionQuery=defined") || !strings.Contains(requestInspection["body"].(string), "definitionBody") {
+		t.Fatalf("request inspection %#v", requestInspection)
+	}
+	responseInspection := inspection["response"].(map[string]any)
+	if responseInspection["statusCode"] != "200" || !strings.Contains(responseInspection["headers"].(string), "X-Response") || !strings.Contains(inspection["result"].(string), "api-secret") {
+		t.Fatalf("response inspection %#v result=%#v", responseInspection, inspection["result"])
+	}
+
+	revealed := call(server.URL, true, map[string]any{"X-Definition": "defined"})["inspectionData"].(map[string]any)["request"].(map[string]any)
+	for _, secret := range []string{"api-secret", "header-secret", "query-secret", "body-secret"} {
+		if !strings.Contains(fmt.Sprint(revealed), secret) {
+			t.Fatalf("revealed request omitted %s: %#v", secret, revealed)
+		}
+	}
+	failed := call(server.URL+"/failure", false, nil)
+	if failed["status"] != "FAILED" || failed["error"] != "States.Http.StatusCode.418" || failed["inspectionData"].(map[string]any)["response"].(map[string]any)["statusCode"] != "418" {
+		t.Fatalf("HTTP status failure %#v", failed)
+	}
+	unsupported := call(server.URL+"/binary", false, nil)
+	if unsupported["status"] != "FAILED" || unsupported["error"] != "States.Runtime" {
+		t.Fatalf("unsupported HTTP response %#v", unsupported)
+	}
+	forbidden := call(server.URL, false, map[string]any{"Authorization": "defined"})
+	if forbidden["status"] != "FAILED" || forbidden["error"] != "States.Runtime" {
+		t.Fatalf("forbidden HTTP header %#v", forbidden)
+	}
+}
+
 func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

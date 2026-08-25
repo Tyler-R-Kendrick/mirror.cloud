@@ -3074,9 +3074,29 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if testedChoice["status"] != "SUCCEEDED" || testedChoice["nextState"] != "Yes" {
 		t.Fatalf("tested choice %#v", testedChoice)
 	}
+	mockedTask := must("TestState", map[string]any{
+		"definition": `{"Type":"Task","Resource":"arn:aws:states:::unknown","ResultSelector":{"value.$":"$.answer"},"ResultPath":"$.task","Next":"After"}`,
+		"input":      `{"keep":true}`,
+		"mock":       map[string]any{"result": `{"answer":42}`},
+	}).Output
+	if mockedTask["status"] != "SUCCEEDED" || mockedTask["nextState"] != "After" || mockedTask["output"] != `{"keep":true,"task":{"value":42}}` {
+		t.Fatalf("tested mock result %#v", mockedTask)
+	}
+	mockedError := must("TestState", map[string]any{
+		"definition": `{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}`,
+		"mock":       map[string]any{"errorOutput": map[string]any{"error": "Boom", "cause": "mocked"}},
+	}).Output
+	if mockedError["status"] != "FAILED" || mockedError["error"] != "Boom" || mockedError["cause"] != "mocked" {
+		t.Fatalf("tested mock error %#v", mockedError)
+	}
 	for _, input := range []map[string]any{{"definition": `{`}, {"definition": `{"Type":"Pass"}`, "input": `{`}} {
 		if _, err := call("TestState", input); err == nil {
 			t.Fatalf("accepted invalid TestState %#v", input)
+		}
+	}
+	for _, mock := range []any{true, map[string]any{}, map[string]any{"result": `{`, "fieldValidationMode": "LOOSE"}, map[string]any{"result": `{}`, "errorOutput": map[string]any{"error": "Boom"}}} {
+		if _, err := call("TestState", map[string]any{"definition": `{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}`, "mock": mock}); err == nil {
+			t.Fatalf("accepted invalid TestState mock %#v", mock)
 		}
 	}
 

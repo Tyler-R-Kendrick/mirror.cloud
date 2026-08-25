@@ -1703,6 +1703,8 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.name =~ /[AB]/i)]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.name in ['a','c'])]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.inside)]","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.tags size 2)]","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.tags empty false)]","End":true}}}`,
 		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","ResultSelector":{"value.$":"$.value"},"End":true}}}`,
 	} {
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
@@ -1729,6 +1731,8 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.price < @.*)]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.name =~ /(/)]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.name =~ /a/z)]","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.tags size '2')]","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.tags empty 1)]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$[*]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$[0:2]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$$.Execution.Input","End":true}}}`,
@@ -3348,6 +3352,25 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	}
 	if filtered := jsonPath(products, `$[?(@.tags noneof ['sale'])].name`); fmtString(filtered) != `["b","c"]` {
 		t.Fatalf("none-of filter %#v", filtered)
+	}
+	containers := []any{
+		map[string]any{"name": "array", "value": []any{}},
+		map[string]any{"name": "text", "value": ""},
+		map[string]any{"name": "map", "value": map[string]any{}},
+		map[string]any{"name": "full", "value": []any{1.0}},
+		map[string]any{"name": "emoji", "value": "😀"},
+	}
+	if filtered := jsonPath(containers, `$[?(@.value empty true)].name`); fmtString(filtered) != `["array","text","map"]` {
+		t.Fatalf("empty filter %#v", filtered)
+	}
+	if filtered := jsonPath(containers, `$[?(@.value size 0)].name`); fmtString(filtered) != `["array","text","map"]` {
+		t.Fatalf("size filter %#v", filtered)
+	}
+	if filtered := jsonPath(containers, `$[?(@.value size 2)].name`); fmtString(filtered) != `["emoji"]` {
+		t.Fatalf("utf16 size filter %#v", filtered)
+	}
+	if filtered := jsonPath(map[string]any{"size": 2.0, "items": containers}, `$.items[?(@.value size $.size)].name`); fmtString(filtered) != `["emoji"]` {
+		t.Fatalf("size path filter %#v", filtered)
 	}
 	if filtered := jsonPath([]any{1.0, 2.0, 3.0}, "$[?(@ > 1)]"); fmtString(filtered) != `[2,3]` {
 		t.Fatalf("primitive filter %#v", filtered)

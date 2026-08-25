@@ -5615,12 +5615,14 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 		if len(rawRight) < 2 || rawRight[0] != '/' || end == len(rawRight) {
 			return nil, false
 		}
-		modifiers := ""
+		modifiers, comments := "", false
 		for _, flag := range rawRight[end+1:] {
 			switch flag {
 			case 'i', 'm', 's':
 				modifiers += string(flag)
-			case 'u':
+			case 'x':
+				comments = true
+			case 'd', 'u', 'U':
 			default:
 				return nil, false
 			}
@@ -5628,7 +5630,11 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 		if modifiers != "" {
 			modifiers = "(?" + modifiers + ")"
 		}
-		pattern, err := regexp.Compile(modifiers + "^(?:" + strings.ReplaceAll(rawRight[1:end], `\/`, "/") + ")$")
+		expression := strings.ReplaceAll(rawRight[1:end], `\/`, "/")
+		if comments {
+			expression = jsonPathRegexComments(expression)
+		}
+		pattern, err := regexp.Compile(modifiers + "^(?:" + expression + ")$")
 		if err != nil {
 			return nil, false
 		}
@@ -5713,6 +5719,42 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 		return nil, false
 	}
 	return map[string]any{"Variable": left, prefix + suffix: right}, true
+}
+
+func jsonPathRegexComments(pattern string) string {
+	var result strings.Builder
+	escaped, comment := false, false
+	for _, character := range pattern {
+		if comment {
+			if character == '\n' || character == '\r' {
+				comment = false
+			}
+			continue
+		}
+		if escaped {
+			if !unicode.IsSpace(character) && character != '#' {
+				result.WriteByte('\\')
+			}
+			result.WriteRune(character)
+			escaped = false
+			continue
+		}
+		if character == '\\' {
+			escaped = true
+			continue
+		}
+		if character == '#' {
+			comment = true
+			continue
+		}
+		if !unicode.IsSpace(character) {
+			result.WriteRune(character)
+		}
+	}
+	if escaped {
+		result.WriteByte('\\')
+	}
+	return result.String()
 }
 
 func jsonPathFilterLiteral(raw string) (any, bool) {

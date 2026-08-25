@@ -2712,7 +2712,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-reverse-json-path-filter-literal-left",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `operator = map[string]string{"<": ">", "<=": ">=", ">": "<", ">=": "<=", "==": "==", "!=": "!="}[operator]`,
+			old:  `operator = map[string]string{"<": ">", "<=": ">=", ">": "<", ">=": "<=", "==": "==", "!=": "!=", "===": "===", "!==": "!=="}[operator]`,
 			new:  `operator = operator`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",

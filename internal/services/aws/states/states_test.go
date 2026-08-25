@@ -3242,6 +3242,12 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if jsonPath(paths, "$.a[1].v") != 2.0 || fmtString(jsonPath(paths, "$.a[0:2].v")) != `[1,2]` || fmtString(jsonPath(paths, "$.a[-2:].v")) != `[2,3]` || jsonPath(paths, "$.a[-1].v") != 3.0 || jsonPath(paths, "$['a'][2].v") != 3.0 || jsonPath(paths, "$.a[9]") != nil {
 		t.Fatal("json path arrays")
 	}
+	if empty, found := jsonPathLookup([]any{}, "$[*]"); !found || fmtString(empty) != `[]` {
+		t.Fatalf("empty wildcard %#v %t", empty, found)
+	}
+	if empty, found := jsonPathLookup(paths, "$.a[9:10]"); !found || fmtString(empty) != `[]` {
+		t.Fatalf("empty slice %#v %t", empty, found)
+	}
 	members := map[string]any{"store.book": map[string]any{"a:b": 1.0, "close]key": 2.0, "quote'key": 3.0}}
 	if jsonPath(members, `$.store\.book['a:b']`) != 1.0 || jsonPath(members, `$['store.book']['close]key']`) != 2.0 || jsonPath(members, `$['store.book']['quote\'key']`) != 3.0 || fmtString(jsonPath(map[string]any{"b": 2.0, "a": 1.0}, "$.*")) != `[1,2]` {
 		t.Fatal("json path members")

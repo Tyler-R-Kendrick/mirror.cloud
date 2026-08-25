@@ -1740,7 +1740,7 @@ func TestStatesReferencePathValidation(t *testing.T) {
 			t.Fatalf("reference-path diagnostics = %#v for %s", diagnostics, definition)
 		}
 	}
-	for path, valid := range map[string]bool{"$$.Execution.Name": true, "$value.limit": true, "$.items[0]": true, "$[*]": false, "$[0:2]": false} {
+	for path, valid := range map[string]bool{"$$.Execution.Name": true, "$value.limit": true, "$.items[0]": true, "$['a:b']": true, `$.store\.book`: true, "$.*": false, "$[*]": false, "$[0:2]": false} {
 		if got := validJSONPath(path, true); got != valid {
 			t.Fatalf("validJSONPath(%q, true) = %t, want %t", path, got, valid)
 		}
@@ -3219,8 +3219,12 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		t.Fatalf("selected result %#v", selectedResult)
 	}
 	paths := map[string]any{"a": []any{map[string]any{"v": 1.0}, map[string]any{"v": 2.0}, map[string]any{"v": 3.0}}}
-	if jsonPath(paths, "$.a[1].v") != 2.0 || fmtString(jsonPath(paths, "$.a[0:2].v")) != `[1,2]` || jsonPath(paths, "$['a'][2].v") != 3.0 || jsonPath(paths, "$.a[9]") != nil {
+	if jsonPath(paths, "$.a[1].v") != 2.0 || fmtString(jsonPath(paths, "$.a[0:2].v")) != `[1,2]` || fmtString(jsonPath(paths, "$.a[-2:].v")) != `[2,3]` || jsonPath(paths, "$.a[-1].v") != 3.0 || jsonPath(paths, "$['a'][2].v") != 3.0 || jsonPath(paths, "$.a[9]") != nil {
 		t.Fatal("json path arrays")
+	}
+	members := map[string]any{"store.book": map[string]any{"a:b": 1.0, "close]key": 2.0, "quote'key": 3.0}}
+	if jsonPath(members, `$.store\.book['a:b']`) != 1.0 || jsonPath(members, `$['store.book']['close]key']`) != 2.0 || jsonPath(members, `$['store.book']['quote\'key']`) != 3.0 || fmtString(jsonPath(map[string]any{"b": 2.0, "a": 1.0}, "$.*")) != `[1,2]` {
+		t.Fatal("json path members")
 	}
 	composite := map[string]any{"Retry": []any{map[string]any{"ErrorEquals": []any{"Boom"}, "MaxAttempts": 1.0}}, "Catch": []any{map[string]any{"ErrorEquals": []any{"States.ALL"}, "Next": "Recovered"}}}
 	compositeAttempts := map[int]int{}

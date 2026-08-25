@@ -3090,6 +3090,27 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		t.Fatalf("tested mock error %#v", mockedError)
 	}
 	for _, definition := range []string{
+		`{"Type":"Task","Resource":"arn:aws:states:::unknown","Retry":[{"ErrorEquals":["Boom"],"MaxAttempts":2}],"Catch":[{"ErrorEquals":["Boom"],"ResultPath":"$.failure","Next":"Recovered"}],"End":true}`,
+		`{"Type":"Parallel","Branches":[],"Retry":[{"ErrorEquals":["Boom"],"MaxAttempts":2}],"Catch":[{"ErrorEquals":["Boom"],"ResultPath":"$.failure","Next":"Recovered"}],"End":true}`,
+		`{"Type":"Map","ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"Retry":[{"ErrorEquals":["Boom"],"MaxAttempts":2}],"Catch":[{"ErrorEquals":["Boom"],"ResultPath":"$.failure","Next":"Recovered"}],"End":true}`,
+	} {
+		request := map[string]any{
+			"definition": definition,
+			"input":      `{"keep":true}`,
+			"mock":       map[string]any{"errorOutput": map[string]any{"error": "Boom", "cause": "mocked"}},
+		}
+		request["stateConfiguration"] = map[string]any{"retrierRetryCount": 1.0}
+		retriable := must("TestState", request).Output
+		if retriable["status"] != "RETRIABLE" || retriable["error"] != "Boom" || retriable["cause"] != "mocked" {
+			t.Fatalf("tested retriable mock error %#v", retriable)
+		}
+		request["stateConfiguration"] = map[string]any{"retrierRetryCount": 2.0}
+		caught := must("TestState", request).Output
+		if caught["status"] != "CAUGHT_ERROR" || caught["nextState"] != "Recovered" || caught["error"] != "Boom" || !strings.Contains(caught["output"].(string), `"keep":true`) || !strings.Contains(caught["output"].(string), `"Error":"Boom"`) {
+			t.Fatalf("tested caught mock error %#v", caught)
+		}
+	}
+	for _, definition := range []string{
 		`{"Type":"Parallel","Branches":[{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}],"ResultSelector":{"first.$":"$[0]"},"End":true}`,
 		`{"Type":"Map","ItemsPath":"$.items","ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"ResultSelector":{"first.$":"$[0]"},"End":true}`,
 	} {
@@ -3110,6 +3131,11 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	}
 	if _, err := call("TestState", map[string]any{"definition": `{"Type":"Pass","End":true}`, "mock": map[string]any{"result": `{}`}}); err == nil {
 		t.Fatal("accepted mock for Pass state")
+	}
+	for _, configuration := range []any{true, map[string]any{"retrierRetryCount": -1.0}, map[string]any{"retrierRetryCount": 1.5}} {
+		if _, err := call("TestState", map[string]any{"definition": `{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}`, "mock": map[string]any{"result": `{}`}, "stateConfiguration": configuration}); err == nil {
+			t.Fatalf("accepted invalid TestState configuration %#v", configuration)
+		}
 	}
 
 	walk := func(def string, input any) walkResult {

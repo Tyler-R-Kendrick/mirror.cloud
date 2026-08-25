@@ -2896,7 +2896,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-reject-json-path-length-function",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if !recursive && path == "length()" {`,
+			old:  `if !recursive && (path == "length()" || path == "size()") {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesDataFlowValidation|TestStatesLifecycleAndWalkerUnits",
@@ -3036,7 +3036,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-json-path-sequence-functions",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `case "first", "last":`,
+			old:  `case "first", "last", "index":`,
 			new:  `case "":`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",

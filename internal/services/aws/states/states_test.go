@@ -3133,6 +3133,40 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if inheritedJSONata["status"] != "SUCCEEDED" || inheritedJSONata["output"] != `"inherited"` {
 		t.Fatalf("tested inherited TestState query language %#v", inheritedJSONata)
 	}
+	nestedDefinition := `{"StartAt":"Each","States":{"Each":{"Type":"Map","ItemsPath":"$.items","ItemProcessor":{"StartAt":"Child","States":{"Child":{"Type":"Task","Resource":"arn:aws:states:::unknown","ResultSelector":{"index.$":"$$.Map.Item.Index","result.$":"$.ok","source.$":"$$.Map.Item.Source","state.$":"$$.State.Name","value.$":"$$.Map.Item.Value"},"End":true}}},"End":true}}}`
+	nestedState := must("TestState", map[string]any{
+		"definition": nestedDefinition,
+		"stateName":  "Child",
+		"input":      `{"item":"value"}`,
+		"mock":       map[string]any{"result": `{"ok":true}`},
+	}).Output
+	for _, fragment := range []string{`"index":0`, `"result":true`, `"source":"STATE_DATA"`, `"state":"Child"`, `"value":{"item":"value"}`} {
+		if nestedState["status"] != "SUCCEEDED" || !strings.Contains(nestedState["output"].(string), fragment) {
+			t.Fatalf("tested nested Map state context %#v", nestedState)
+		}
+	}
+	nestedJSONata := must("TestState", map[string]any{
+		"definition": `{"QueryLanguage":"JSONata","StartAt":"Each","States":{"Each":{"Type":"Map","Items":"{% $states.input.items %}","ItemProcessor":{"StartAt":"Child","States":{"Child":{"Type":"Task","Resource":"arn:aws:states:::unknown","Output":{"state":"{% $states.context.State.Name %}","value":"{% $states.context.Map.Item.Value.item %}"},"End":true}}},"End":true}}}`,
+		"stateName":  "Child",
+		"input":      `{"item":"jsonata"}`,
+		"mock":       map[string]any{"result": `{}`},
+	}).Output
+	if nestedJSONata["status"] != "SUCCEEDED" || nestedJSONata["output"] != `{"state":"Child","value":"jsonata"}` {
+		t.Fatalf("tested nested JSONata Map context %#v", nestedJSONata)
+	}
+	nestedParallel := must("TestState", map[string]any{
+		"definition": `{"StartAt":"Both","States":{"Both":{"Type":"Parallel","Branches":[{"StartAt":"Inside","States":{"Inside":{"Type":"Pass","Parameters":{"state.$":"$$.State.Name"},"End":true}}}],"End":true}}}`,
+		"stateName":  "Inside",
+	}).Output
+	if nestedParallel["status"] != "SUCCEEDED" || nestedParallel["output"] != `{"state":"Inside"}` {
+		t.Fatalf("tested nested Parallel state %#v", nestedParallel)
+	}
+	if _, err := call("TestState", map[string]any{
+		"definition": `{"StartAt":"Both","States":{"Both":{"Type":"Parallel","Branches":[{"StartAt":"Dup","States":{"Dup":{"Type":"Pass","End":true}}},{"StartAt":"Dup","States":{"Dup":{"Type":"Pass","End":true}}}],"End":true}}}`,
+		"stateName":  "Dup",
+	}); err == nil {
+		t.Fatal("accepted ambiguous nested TestState stateName")
+	}
 	mockedError := must("TestState", map[string]any{
 		"definition": `{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}`,
 		"mock":       map[string]any{"errorOutput": map[string]any{"error": "Boom", "cause": "mocked"}},

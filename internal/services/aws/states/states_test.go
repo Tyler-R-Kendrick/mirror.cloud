@@ -1700,6 +1700,7 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.active == true && @.price < @.limit)]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.products[?(@.price < $.limit)]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(10 > @.price)]","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.name =~ /[AB]/i)]","End":true}}}`,
 		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","ResultSelector":{"value.$":"$.value"},"End":true}}}`,
 	} {
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
@@ -1724,6 +1725,8 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.price < true)]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.active &&)]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.price < @.*)]","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.name =~ /(/)]","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.name =~ /a/z)]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$[*]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$[0:2]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$$.Execution.Input","End":true}}}`,
@@ -3277,8 +3280,8 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		t.Fatalf("recursive wildcard %#v %t", recursive, found)
 	}
 	products := []any{
-		map[string]any{"name": "a", "price": 5.0, "limit": 10.0, "active": true, "note": nil, "metrics": []any{5.0}},
-		map[string]any{"name": "b", "price": 12.0, "limit": 10.0, "active": false, "metrics": []any{4.0}},
+		map[string]any{"name": "a", "code": "a/b", "price": 5.0, "limit": 10.0, "active": true, "note": nil, "metrics": []any{5.0}, "tags": []any{"red", "sale"}},
+		map[string]any{"name": "b", "price": 12.0, "limit": 10.0, "active": false, "metrics": []any{4.0}, "tags": []any{"blue"}},
 		map[string]any{"name": "c", "price": 8.0, "limit": 9.0, "active": true, "note": "x", "metrics": []any{6.0}},
 	}
 	if filtered := jsonPath(products, "$[?(@.price < 10)].name"); fmtString(filtered) != `["a","c"]` {
@@ -3304,6 +3307,24 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	}
 	if filtered := jsonPath(products, "$[?(10 > @.price)].name"); fmtString(filtered) != `["a","c"]` {
 		t.Fatalf("literal-left filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, "$[?(@.name =~ /[AB]/i)].name"); fmtString(filtered) != `["a","b"]` {
+		t.Fatalf("regex filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, "$[?(@.name =~ /a{1,2}/)].name"); fmtString(filtered) != `["a"]` {
+		t.Fatalf("regex comma filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, `$[?(@.code =~ /a\/b/)].name`); fmtString(filtered) != `["a"]` {
+		t.Fatalf("regex slash filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, `$[?(@.price =~ /5/)].name`); fmtString(filtered) != `["a"]` {
+		t.Fatalf("numeric regex filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, `$[?(@.active =~ /true/)].name`); fmtString(filtered) != `["a","c"]` {
+		t.Fatalf("boolean regex filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, `$[?(@.tags =~ /red/)].name`); fmtString(filtered) != `["a"]` {
+		t.Fatalf("array regex filter %#v", filtered)
 	}
 	if filtered := jsonPath([]any{1.0, 2.0, 3.0}, "$[?(@ > 1)]"); fmtString(filtered) != `[2,3]` {
 		t.Fatalf("primitive filter %#v", filtered)

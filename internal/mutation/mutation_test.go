@@ -2478,6 +2478,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
 		{
+			name: "states-reject-empty-json-path-result",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `return nodes, true`,
+			new:  `return nodes, len(nodes) > 0`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
+			name: "states-return-null-empty-json-path-result",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `if nodes == nil {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
 			name: "states-truncate-json-path-wildcard",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `next = append(next, node...)`,

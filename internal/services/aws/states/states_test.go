@@ -1712,6 +1712,8 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.items.sum()","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.items.first()","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.object.keys()","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.items.index(-1)","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.items.size()","End":true}}}`,
 		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","ResultSelector":{"value.$":"$.value"},"End":true}}}`,
 	} {
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
@@ -1741,6 +1743,7 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.tags size '2')]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.tags empty 1)]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$.items.length(1)","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$.items.index(1.5)","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$[*]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$[0:2]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$$.Execution.Input","End":true}}}`,
@@ -3292,11 +3295,14 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		t.Fatal("json path aggregation accepted empty numeric input")
 	}
 	structure := map[string]any{"object": map[string]any{"b": 2.0, "a": 1.0}, "values": []any{"a", "b", "c"}}
-	if jsonPath(structure, "$.object.length()") != 2.0 || fmtString(jsonPath(structure, "$.object.keys()")) != `["a","b"]` || jsonPath(structure, "$.values.first()") != "a" || jsonPath(structure, "$.values.last()") != "c" {
+	if jsonPath(structure, "$.object.length()") != 2.0 || jsonPath(structure, "$.object.size()") != 2.0 || fmtString(jsonPath(structure, "$.object.keys()")) != `["a","b"]` || jsonPath(structure, "$.values.first()") != "a" || jsonPath(structure, "$.values.last()") != "c" || jsonPath(structure, "$.values.index(1)") != "b" || jsonPath(structure, "$.values.index(-1)") != "c" {
 		t.Fatal("json path structural functions")
 	}
 	if _, found := jsonPathLookup(map[string]any{"values": []any{}}, "$.values.first()"); found {
 		t.Fatal("json path first accepted empty array")
+	}
+	if _, found := jsonPathLookup(structure, "$.values.index(3)"); found {
+		t.Fatal("json path index accepted out-of-range index")
 	}
 	if empty, found := jsonPathLookup([]any{}, "$[*]"); !found || fmtString(empty) != `[]` {
 		t.Fatalf("empty wildcard %#v %t", empty, found)

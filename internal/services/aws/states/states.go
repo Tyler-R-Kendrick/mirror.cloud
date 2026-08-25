@@ -1137,6 +1137,32 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				mock = map[string]any{"ErrorOutput": failure}
 			}
 		}
+		var testContext map[string]any
+		if value, exists := inputValue(req.Input, "context", "Context"); exists {
+			raw, valid := value.(string)
+			if !valid || mock == nil || len(raw) > 262144 || json.Unmarshal([]byte(raw), &testContext) != nil {
+				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+			}
+			for _, key := range []string{"Execution", "Map", "State", "StateMachine", "Task"} {
+				if nested, exists := testContext[key]; exists {
+					if _, valid := nested.(map[string]any); !valid {
+						return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+					}
+				}
+			}
+		}
+		variables := map[string]any{}
+		if value, exists := inputValue(req.Input, "variables", "Variables"); exists {
+			raw, valid := value.(string)
+			if !valid || len(raw) > 262144 || json.Unmarshal([]byte(raw), &variables) != nil {
+				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+			}
+			for name := range variables {
+				if !validVariableName(name) {
+					return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+				}
+			}
+		}
 		var configuration map[string]any
 		if value, exists := inputValue(req.Input, "stateConfiguration", "StateConfiguration"); exists {
 			var valid bool
@@ -1155,7 +1181,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if err != nil {
 			return nil, &spi.Fault{Code: "InvalidDefinition", Message: err.Error(), HTTPStatus: 400, Fault: "client"}
 		}
-		wr := p.walk(ctx, req, wrapped, "", data, nil)
+		walkRequest := req
+		if testContext != nil {
+			copy := *req
+			copy.Input = maps.Clone(req.Input)
+			copy.Input["_testStateContext"] = testContext
+			walkRequest = &copy
+		}
+		wr := p.walk(ctx, walkRequest, wrapped, "", data, nil, variables)
 		output, _ := json.Marshal(wr.out)
 		response := map[string]any{"status": wr.status, "output": string(output)}
 		if wr.nextState != "" {
@@ -1748,7 +1781,9 @@ walkLoop:
 		}
 		isJSONata := queryLanguage == "JSONata"
 		stateContext := jsonataContext(req, cur, nil)
-		stateContext["State"].(map[string]any)["EnteredTime"] = p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)
+		if _, supplied := stateContext["State"].(map[string]any)["EnteredTime"]; !supplied {
+			stateContext["State"].(map[string]any)["EnteredTime"] = p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)
+		}
 		if !isJSONata {
 			data, ok = applyDataPath(st, "InputPath", data, variables)
 			if !ok {
@@ -3012,6 +3047,19 @@ func jsonataContext(req *spi.Request, state string, extra map[string]any) map[st
 	}
 	if len(execution) != 0 {
 		context["Execution"] = execution
+	}
+	if supplied, ok := req.Input["_testStateContext"].(map[string]any); ok {
+		for key, value := range supplied {
+			base, baseObject := context[key].(map[string]any)
+			incoming, incomingObject := value.(map[string]any)
+			if baseObject && incomingObject {
+				merged := maps.Clone(base)
+				maps.Copy(merged, incoming)
+				context[key] = merged
+			} else {
+				context[key] = value
+			}
+		}
 	}
 	for key, value := range extra {
 		context[key] = value

@@ -56,8 +56,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-test-state-mocked-error",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if mocked, exists := st["_TestStateMockError"].(map[string]any); exists {`,
-			new:  `if false {`,
+			old: "mocked, exists := st[\"_TestStateMockError\"].(map[string]any)\n\t\t\tif !exists {",
+			new: "mocked, exists := st[\"_TestStateMockError\"].(map[string]any)\n\t\t\tif true {",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
@@ -200,7 +200,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-test-state-machine-query-language",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if copy["QueryLanguage"] == nil && parsed["QueryLanguage"] != nil {`,
+			old:  `if copy["QueryLanguage"] == nil && selection.query != "" {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
@@ -1216,8 +1216,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-reuse-parent-context-for-map-child",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `walkRequest = &copy`,
-			new:  `walkRequest = req`,
+			old: "copy.Input[\"_executionDeadline\"] = executionDeadline(string(idef), executionType, p.deps.Clock.Now())\n\t\t\t\t\t\t\t\t\t\twalkRequest = &copy",
+			new: "copy.Input[\"_executionDeadline\"] = executionDeadline(string(idef), executionType, p.deps.Clock.Now())\n\t\t\t\t\t\t\t\t\t\twalkRequest = req",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesJSONataErrorsAndFields",
 		},

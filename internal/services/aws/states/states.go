@@ -1204,6 +1204,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if _, revealSpecified := inputValue(req.Input, "revealSecrets", "RevealSecrets"); revealSpecified && mock != nil {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
+		inspectionInput := cloneJSON(data)
 		wr := p.walk(ctx, walkRequest, wrapped, "", data, nil, variables)
 		output, _ := json.Marshal(wr.out)
 		response := map[string]any{"status": wr.status, "output": string(output)}
@@ -1219,7 +1220,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			response["cause"] = wr.cause
 		}
 		if inspectionLevel != "INFO" {
-			response["inspectionData"] = inspectTestState(testedState, data, jsonataContext(walkRequest, "TestState", nil), variables, mock, wr, p.deps.Rand)
+			response["inspectionData"] = inspectTestState(testedState, inspectionInput, jsonataContext(walkRequest, "TestState", nil), variables, mock, wr, p.deps.Rand)
 		}
 		return &spi.Response{Output: response}, nil
 	case "TagResource":

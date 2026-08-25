@@ -4921,9 +4921,31 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 						}
 					}
 				}
+			case 'r':
+				var descend func(any)
+				descend = func(value any) {
+					switch value := value.(type) {
+					case map[string]any:
+						for _, key := range slices.Sorted(maps.Keys(value)) {
+							child := value[key]
+							if token.key == "*" || token.key == key {
+								next = append(next, child)
+							}
+							descend(child)
+						}
+					case []any:
+						for _, child := range value {
+							if token.key == "*" {
+								next = append(next, child)
+							}
+							descend(child)
+						}
+					}
+				}
+				descend(node)
 			}
 		}
-		if token.kind == '*' || token.kind == 's' || token.kind == 'u' {
+		if token.kind == '*' || token.kind == 's' || token.kind == 'u' || token.kind == 'r' {
 			multiple = true
 		}
 		nodes = next
@@ -4966,8 +4988,14 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 	}
 	var tokens []pathToken
 	for len(path) > 0 {
+		recursive := false
 		if path[0] == '.' {
-			path = path[1:]
+			recursive = len(path) > 1 && path[1] == '.'
+			if recursive {
+				path = path[2:]
+			} else {
+				path = path[1:]
+			}
 			if len(path) == 0 || path[0] == '.' || path[0] == '[' {
 				return nil, false
 			}
@@ -4990,7 +5018,9 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 			if key.Len() == 0 {
 				return nil, false
 			}
-			if path[:end] == "*" {
+			if recursive {
+				tokens = append(tokens, pathToken{kind: 'r', key: key.String()})
+			} else if path[:end] == "*" {
 				tokens = append(tokens, pathToken{kind: '*'})
 			} else {
 				tokens = append(tokens, pathToken{kind: 'f', key: key.String()})

@@ -4857,6 +4857,7 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 	}
 	nodes := []any{data}
 	multiple := false
+	var filterVariables map[string]any
 	for _, token := range tokens {
 		var next []any
 		for _, node := range nodes {
@@ -4951,8 +4952,14 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 				descend(node)
 			case 'q':
 				if array, ok := node.([]any); ok {
+					if filterVariables == nil {
+						filterVariables = map[string]any{"!": data}
+						if len(variables) > 0 {
+							maps.Copy(filterVariables, variables[0])
+						}
+					}
 					for _, value := range array {
-						if matchChoice(token.filter, value) {
+						if matchChoice(token.filter, value, filterVariables) {
 							next = append(next, value)
 						}
 					}
@@ -5246,16 +5253,27 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 			}
 		}
 	}
+	filterPath := func(raw string) (string, bool) {
+		if strings.HasPrefix(raw, "@") {
+			path := "$" + raw[1:]
+			return path, validJSONPath(path, true)
+		}
+		path := raw
+		if !validJSONPath(path, true) || strings.HasPrefix(path, "$$") {
+			return "", false
+		}
+		if path == "$" || strings.HasPrefix(path, "$.") || strings.HasPrefix(path, "$[") {
+			path = "$!" + path[1:]
+		}
+		return path, true
+	}
 	left := expression
 	if operatorAt >= 0 {
 		left = expression[:operatorAt]
 	}
 	left = strings.TrimSpace(left)
-	if !strings.HasPrefix(left, "@") {
-		return nil, false
-	}
-	left = "$" + left[1:]
-	if !validJSONPath(left, true) {
+	left, valid := filterPath(left)
+	if !valid {
 		return nil, false
 	}
 	if operatorAt < 0 {
@@ -5263,11 +5281,7 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 	}
 	rawRight := strings.TrimSpace(expression[operatorAt+len(operator):])
 	suffix := map[string]string{"==": "Equals", "<": "LessThan", "<=": "LessThanEquals", ">": "GreaterThan", ">=": "GreaterThanEquals"}[operator]
-	if strings.HasPrefix(rawRight, "@") {
-		rightPath := "$" + rawRight[1:]
-		if !validJSONPath(rightPath, true) {
-			return nil, false
-		}
+	if rightPath, pathOperand := filterPath(rawRight); pathOperand {
 		prefixes := []string{"String", "Numeric", "Timestamp"}
 		if operator == "==" || operator == "!=" {
 			prefixes = append(prefixes, "Boolean")

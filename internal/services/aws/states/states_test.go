@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1708,6 +1709,7 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.name IN ['a','c'])]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.tags contains 'sale')]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.items.length()","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.items.sum()","End":true}}}`,
 		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","ResultSelector":{"value.$":"$.value"},"End":true}}}`,
 	} {
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
@@ -3276,6 +3278,16 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	}
 	if _, found := jsonPathLookup(paths, "$.a[0].length()"); found {
 		t.Fatal("json path length accepted non-array")
+	}
+	numbers := map[string]any{"values": []any{1.0, "ignored", 2.0, 3.0}}
+	if jsonPath(numbers, "$.values.min()") != 1.0 || jsonPath(numbers, "$.values.max()") != 3.0 || jsonPath(numbers, "$.values.avg()") != 2.0 || jsonPath(numbers, "$.values.sum()") != 6.0 {
+		t.Fatal("json path numeric functions")
+	}
+	if deviation, _ := jsonPath(numbers, "$.values.stddev()").(float64); math.Abs(deviation-math.Sqrt(2.0/3.0)) > 1e-12 {
+		t.Fatalf("json path standard deviation %v", deviation)
+	}
+	if _, found := jsonPathLookup(map[string]any{"values": []any{"x"}}, "$.values.sum()"); found {
+		t.Fatal("json path aggregation accepted empty numeric input")
 	}
 	if empty, found := jsonPathLookup([]any{}, "$[*]"); !found || fmtString(empty) != `[]` {
 		t.Fatalf("empty wildcard %#v %t", empty, found)

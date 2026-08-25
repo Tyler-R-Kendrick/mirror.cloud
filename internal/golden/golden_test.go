@@ -17,6 +17,8 @@ func TestAssertRoundTrip(t *testing.T) {
 	AssertJSON(t, map[string]any{"a": 1, "b": "x"})
 	t.Setenv("UPDATE_GOLDEN", "0")
 	AssertJSON(t, map[string]any{"a": 1, "b": "x"})
+	t.Setenv("UPDATE_GOLDEN", "true")
+	Assert(t, []byte("updated\n"))
 	p := filepath.Join("testdata", sanitize(t.Name())+".golden")
 	if _, err := os.Stat(p); err != nil {
 		t.Fatal(err)

@@ -1716,6 +1716,8 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.items.size()","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.words.concat(\"!\")","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.items.append($.extra)","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.ignored.sum(10,$.numbers)","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.ignored.length($.object)","End":true}}}`,
 		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","ResultSelector":{"value.$":"$.value"},"End":true}}}`,
 	} {
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
@@ -1744,7 +1746,6 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.name =~ /a/z)]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.tags size '2')]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.tags empty 1)]","End":true}}}`,
-		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$.items.length(1)","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$.items.index(1.5)","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$.items.append(unknown)","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$.items.append($.bad*)","End":true}}}`,
@@ -3308,9 +3309,15 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if _, found := jsonPathLookup(structure, "$.values.index(3)"); found {
 		t.Fatal("json path index accepted out-of-range index")
 	}
-	functionArgs := map[string]any{"words": []any{"a", 1.0, "b"}, "suffix": "!", "values": []any{1.0}, "extra": 3.0, "more": []any{"x", 2.0}}
+	functionArgs := map[string]any{"words": []any{"a", 1.0, "b"}, "suffix": "!", "values": []any{1.0}, "extra": 3.0, "more": []any{"x", 2.0}, "numbers": []any{2.0, 3.0}}
 	if jsonPath(functionArgs, `$.words.concat(",", $.suffix, $.more, $.more.first())`) != "ab,!x2x" || jsonPath(functionArgs, `$.words.concat()`) != "ab" || fmtString(jsonPath(functionArgs, `$.values.append(2, $.extra)`)) != `[1,2,3]` || fmtString(jsonPath(functionArgs, `$.values.append([2,3])`)) != `[1,[2,3]]` || fmtString(jsonPath(functionArgs, `$.values.append()`)) != `[1]` {
 		t.Fatal("json path argument functions")
+	}
+	if jsonPath(functionArgs, `$.values.sum(4, $.numbers)`) != 10.0 || jsonPath(functionArgs, `$.suffix.min(4, 2)`) != 2.0 || jsonPath(functionArgs, `$.suffix.length($.words)`) != 3.0 {
+		t.Fatal("json path aggregate function arguments")
+	}
+	if _, found := jsonPathLookup(functionArgs, `$.suffix.length($.words, $.values)`); found {
+		t.Fatal("json path length accepted multiple arguments")
 	}
 	if _, found := jsonPathLookup(functionArgs, `$.values.append($.missing)`); found {
 		t.Fatal("json path function accepted missing path argument")

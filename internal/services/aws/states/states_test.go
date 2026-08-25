@@ -1693,6 +1693,7 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","InputPath":"$$.Execution.Input","ResultPath":"$['result']","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","InputPath":"$input.value","OutputPath":"$[*]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[0,2]","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$['a','b']","End":true}}}`,
 		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","ResultSelector":{"value.$":"$.value"},"End":true}}}`,
 	} {
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
@@ -1741,7 +1742,7 @@ func TestStatesReferencePathValidation(t *testing.T) {
 			t.Fatalf("reference-path diagnostics = %#v for %s", diagnostics, definition)
 		}
 	}
-	for path, valid := range map[string]bool{"$$.Execution.Name": true, "$value.limit": true, "$.items[0]": true, "$['a:b']": true, `$.store\.book`: true, "$.*": false, "$[*]": false, "$[0:2]": false} {
+	for path, valid := range map[string]bool{"$$.Execution.Name": true, "$value.limit": true, "$.items[0]": true, "$['a:b']": true, `$.store\.book`: true, "$.*": false, "$[*]": false, "$[0:2]": false, "$['a','b']": false} {
 		if got := validJSONPath(path, true); got != valid {
 			t.Fatalf("validJSONPath(%q, true) = %t, want %t", path, got, valid)
 		}
@@ -3252,8 +3253,8 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if empty, found := jsonPathLookup(paths, "$.a[9,10]"); !found || fmtString(empty) != `[]` {
 		t.Fatalf("empty union %#v %t", empty, found)
 	}
-	members := map[string]any{"store.book": map[string]any{"a:b": 1.0, "close]key": 2.0, "quote'key": 3.0}}
-	if jsonPath(members, `$.store\.book['a:b']`) != 1.0 || jsonPath(members, `$['store.book']['close]key']`) != 2.0 || jsonPath(members, `$['store.book']['quote\'key']`) != 3.0 || fmtString(jsonPath(map[string]any{"b": 2.0, "a": 1.0}, "$.*")) != `[1,2]` {
+	members := map[string]any{"store.book": map[string]any{"a:b": 1.0, "close]key": 2.0, "quote'key": 3.0, "comma,key": 4.0}}
+	if jsonPath(members, `$.store\.book['a:b']`) != 1.0 || jsonPath(members, `$['store.book']['close]key']`) != 2.0 || jsonPath(members, `$['store.book']['quote\'key']`) != 3.0 || fmtString(jsonPath(members, `$['store.book']['comma,key','a:b']`)) != `[4,1]` || fmtString(jsonPath(map[string]any{"b": 2.0, "a": 1.0}, "$.*")) != `[1,2]` {
 		t.Fatal("json path members")
 	}
 	composite := map[string]any{"Retry": []any{map[string]any{"ErrorEquals": []any{"Boom"}, "MaxAttempts": 1.0}}, "Catch": []any{map[string]any{"ErrorEquals": []any{"States.ALL"}, "Next": "Recovered"}}}

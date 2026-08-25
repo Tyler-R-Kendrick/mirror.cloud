@@ -4264,21 +4264,25 @@ func splitIntrinsicArgs(raw string) []string {
 	}
 	var args []string
 	start, depth := 0, 0
-	quoted, escaped := false, false
+	quote, escaped := rune(0), false
 	for i, r := range raw {
 		if escaped {
 			escaped = false
 			continue
 		}
-		if r == '\\' && quoted {
+		if r == '\\' && quote != 0 {
 			escaped = true
 			continue
 		}
-		if r == '\'' {
-			quoted = !quoted
+		if quote == r {
+			quote = 0
 			continue
 		}
-		if quoted {
+		if quote == 0 && (r == '\'' || r == '"') {
+			quote = r
+			continue
+		}
+		if quote != 0 {
 			continue
 		}
 		switch r {
@@ -4873,6 +4877,7 @@ func jsonPath(data any, path string, variables ...map[string]any) any {
 }
 
 func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bool) {
+	rootData := data
 	if len(path) > 1 && path[0] == '$' && path[1] != '.' && path[1] != '[' && path[1] != '$' {
 		end := strings.IndexAny(path, ".[")
 		if end < 0 {
@@ -4985,6 +4990,51 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 				}
 			}
 			nodes, multiple = []any{result}, false
+			continue
+		}
+		if token.kind == 'a' {
+			value := any(nodes)
+			if len(nodes) == 1 {
+				value = nodes[0]
+			}
+			arguments := make([]any, len(token.arguments))
+			for index, raw := range token.arguments {
+				var valid bool
+				arguments[index], valid = evalIntrinsicArg(raw, rootData, nil, nil, variables...)
+				if !valid {
+					return nil, false
+				}
+			}
+			switch token.key {
+			case "concat":
+				var result strings.Builder
+				if array, valid := value.([]any); valid {
+					for _, item := range array {
+						if text, valid := item.(string); valid {
+							result.WriteString(text)
+						}
+					}
+				}
+				for _, argument := range arguments {
+					values := []any{argument}
+					if array, valid := argument.([]any); valid {
+						values = array
+					}
+					for _, item := range values {
+						if item != nil {
+							result.WriteString(fmt.Sprint(item))
+						}
+					}
+				}
+				nodes = []any{result.String()}
+			case "append":
+				array, valid := value.([]any)
+				if !valid {
+					return nil, false
+				}
+				nodes = []any{append(append([]any(nil), array...), arguments...)}
+			}
+			multiple = false
 			continue
 		}
 		var next []any
@@ -5125,6 +5175,7 @@ type pathToken struct {
 	step       int
 	selectors  []pathToken
 	filter     map[string]any
+	arguments  []string
 }
 
 func jsonPathTokens(path string) ([]pathToken, bool) {
@@ -5191,6 +5242,36 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 					return nil, false
 				}
 				tokens = append(tokens, pathToken{kind: 'j', key: "index", start: index})
+				break
+			}
+			for _, function := range []string{"concat", "append"} {
+				prefix := function + "("
+				if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, ")") {
+					continue
+				}
+				arguments := splitIntrinsicArgs(path[len(prefix) : len(path)-1])
+				for index, argument := range arguments {
+					argument = strings.TrimSpace(argument)
+					if argument == "" {
+						return nil, false
+					}
+					if strings.HasPrefix(argument, "$") {
+						if !validJSONPath(argument, false) {
+							return nil, false
+						}
+					} else {
+						var value any
+						if json.Unmarshal([]byte(argument), &value) != nil {
+							return nil, false
+						}
+					}
+					arguments[index] = argument
+				}
+				tokens = append(tokens, pathToken{kind: 'a', key: function, arguments: arguments})
+				path = ""
+				break
+			}
+			if path == "" {
 				break
 			}
 		}

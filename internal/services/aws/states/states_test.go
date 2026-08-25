@@ -3151,7 +3151,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 			"mock":            map[string]any{"errorOutput": map[string]any{"error": "Boom", "cause": "mocked"}},
 			"inspectionLevel": "DEBUG",
 		}
-		request["stateConfiguration"] = map[string]any{"retrierRetryCount": 1.0}
+		request["stateConfiguration"] = map[string]any{"retrierRetryCount": 1.0, "errorCausedByState": "Child"}
 		retriable := must("TestState", request).Output
 		if retriable["status"] != "RETRIABLE" || retriable["error"] != "Boom" || retriable["cause"] != "mocked" {
 			t.Fatalf("tested retriable mock error %#v", retriable)
@@ -3160,7 +3160,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		if retryDetails["retryIndex"] != 0 || retryDetails["retryBackoffIntervalSeconds"] != 2.0 {
 			t.Fatalf("tested retry inspection %#v", retryDetails)
 		}
-		request["stateConfiguration"] = map[string]any{"retrierRetryCount": 2.0}
+		request["stateConfiguration"] = map[string]any{"retrierRetryCount": 2.0, "errorCausedByState": "Child"}
 		caught := must("TestState", request).Output
 		if caught["status"] != "CAUGHT_ERROR" || caught["nextState"] != "Recovered" || caught["error"] != "Boom" || !strings.Contains(caught["output"].(string), `"keep":true`) || !strings.Contains(caught["output"].(string), `"Error":"Boom"`) {
 			t.Fatalf("tested caught mock error %#v", caught)
@@ -3178,6 +3178,33 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 			t.Fatalf("tested aggregate mock %#v", mocked)
 		}
 	}
+	mapInspected := must("TestState", map[string]any{
+		"definition":      `{"Type":"Map","InputPath":"$.payload","ItemsPath":"$.items","ItemSelector":{"index.$":"$$.Map.Item.Index","value.$":"$$.Map.Item.Value"},"ItemBatcher":{"MaxItemsPerBatch":2},"MaxConcurrency":3,"ToleratedFailureCount":1,"ToleratedFailurePercentage":25,"ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}`,
+		"input":           `{"payload":{"items":["a","b","c"]}}`,
+		"mock":            map[string]any{"result": `[]`},
+		"inspectionLevel": "DEBUG",
+	}).Output["inspectionData"].(map[string]any)
+	for key, want := range map[string]any{
+		"afterItemsPath":             `["a","b","c"]`,
+		"afterItemSelector":          `[{"index":0,"value":"a"},{"index":1,"value":"b"},{"index":2,"value":"c"}]`,
+		"afterItemBatcher":           `[{"Items":[{"index":0,"value":"a"},{"index":1,"value":"b"}]},{"Items":[{"index":2,"value":"c"}]}]`,
+		"maxConcurrency":             3,
+		"toleratedFailureCount":      1,
+		"toleratedFailurePercentage": 25.0,
+	} {
+		if mapInspected[key] != want {
+			t.Fatalf("TestState Map inspection %s = %#v, want %#v", key, mapInspected[key], want)
+		}
+	}
+	readerInspected := must("TestState", map[string]any{
+		"definition":         `{"Type":"Map","ItemReader":{"Resource":"arn:aws:states:::s3:getObject","ReaderConfig":{"InputType":"JSON","ItemsPointer":"/records"}},"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}`,
+		"mock":               map[string]any{"result": `[]`},
+		"stateConfiguration": map[string]any{"mapItemReaderData": `{"records":[1,2]}`},
+		"inspectionLevel":    "DEBUG",
+	}).Output["inspectionData"].(map[string]any)
+	if readerInspected["afterItemsPointer"] != `[1,2]` || readerInspected["afterItemsPath"] != `[1,2]` {
+		t.Fatalf("TestState ItemReader inspection %#v", readerInspected)
+	}
 	for _, input := range []map[string]any{{"definition": `{`}, {"definition": `{"Type":"Pass"}`, "input": `{`}} {
 		if _, err := call("TestState", input); err == nil {
 			t.Fatalf("accepted invalid TestState %#v", input)
@@ -3191,10 +3218,24 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if _, err := call("TestState", map[string]any{"definition": `{"Type":"Pass","End":true}`, "mock": map[string]any{"result": `{}`}}); err == nil {
 		t.Fatal("accepted mock for Pass state")
 	}
-	for _, configuration := range []any{true, map[string]any{"retrierRetryCount": -1.0}, map[string]any{"retrierRetryCount": 1.5}} {
+	for _, configuration := range []any{
+		true,
+		map[string]any{"retrierRetryCount": -1.0},
+		map[string]any{"retrierRetryCount": 1.5},
+		map[string]any{"errorCausedByState": ""},
+		map[string]any{"mapIterationFailureCount": -1.0},
+		map[string]any{"mapIterationFailureCount": 1.5},
+		map[string]any{"mapItemReaderData": true},
+	} {
 		if _, err := call("TestState", map[string]any{"definition": `{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}`, "mock": map[string]any{"result": `{}`}, "stateConfiguration": configuration}); err == nil {
 			t.Fatalf("accepted invalid TestState configuration %#v", configuration)
 		}
+	}
+	if _, err := call("TestState", map[string]any{
+		"definition": `{"Type":"Parallel","Branches":[],"End":true}`,
+		"mock":       map[string]any{"errorOutput": map[string]any{"error": "Boom"}},
+	}); err == nil {
+		t.Fatal("accepted aggregate mock error without errorCausedByState")
 	}
 	for _, fields := range []map[string]any{
 		{"context": `{}`},

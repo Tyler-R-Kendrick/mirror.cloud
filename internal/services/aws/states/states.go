@@ -4951,17 +4951,26 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 				}
 				descend(node)
 			case 'q':
-				if array, ok := node.([]any); ok {
-					if filterVariables == nil {
-						filterVariables = map[string]any{"!": data}
-						if len(variables) > 0 {
-							maps.Copy(filterVariables, variables[0])
-						}
+				var values []any
+				switch node := node.(type) {
+				case []any:
+					values = node
+				case map[string]any:
+					for _, key := range slices.Sorted(maps.Keys(node)) {
+						values = append(values, node[key])
 					}
-					for _, value := range array {
-						if matchChoice(token.filter, value, filterVariables) {
-							next = append(next, value)
-						}
+				default:
+					continue
+				}
+				if filterVariables == nil {
+					filterVariables = map[string]any{"!": data}
+					if len(variables) > 0 {
+						maps.Copy(filterVariables, variables[0])
+					}
+				}
+				for _, value := range values {
+					if matchChoice(token.filter, value, filterVariables) {
+						next = append(next, value)
 					}
 				}
 			}
@@ -5273,13 +5282,21 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 	}
 	left = strings.TrimSpace(left)
 	left, valid := filterPath(left)
-	if !valid {
-		return nil, false
-	}
 	if operatorAt < 0 {
+		if !valid {
+			return nil, false
+		}
 		return map[string]any{"Variable": left, "IsPresent": true}, true
 	}
 	rawRight := strings.TrimSpace(expression[operatorAt+len(operator):])
+	if !valid {
+		left, valid = filterPath(rawRight)
+		if !valid {
+			return nil, false
+		}
+		rawRight = strings.TrimSpace(expression[:operatorAt])
+		operator = map[string]string{"<": ">", "<=": ">=", ">": "<", ">=": "<=", "==": "==", "!=": "!="}[operator]
+	}
 	suffix := map[string]string{"==": "Equals", "<": "LessThan", "<=": "LessThanEquals", ">": "GreaterThan", ">=": "GreaterThanEquals"}[operator]
 	if rightPath, pathOperand := filterPath(rawRight); pathOperand {
 		prefixes := []string{"String", "Numeric", "Timestamp"}

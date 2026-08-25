@@ -5615,14 +5615,16 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 		if len(rawRight) < 2 || rawRight[0] != '/' || end == len(rawRight) {
 			return nil, false
 		}
-		modifiers, comments := "", false
+		modifiers, comments, unicodeClasses := "", false, false
 		for _, flag := range rawRight[end+1:] {
 			switch flag {
 			case 'i', 'm', 's':
 				modifiers += string(flag)
 			case 'x':
 				comments = true
-			case 'd', 'u', 'U':
+			case 'U':
+				unicodeClasses = true
+			case 'd', 'u':
 			default:
 				return nil, false
 			}
@@ -5633,6 +5635,9 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 		expression := strings.ReplaceAll(rawRight[1:end], `\/`, "/")
 		if comments {
 			expression = jsonPathRegexComments(expression)
+		}
+		if unicodeClasses {
+			expression = jsonPathRegexUnicodeClasses(expression)
 		}
 		pattern, err := regexp.Compile(modifiers + "^(?:" + expression + ")$")
 		if err != nil {
@@ -5753,6 +5758,42 @@ func jsonPathRegexComments(pattern string) string {
 	}
 	if escaped {
 		result.WriteByte('\\')
+	}
+	return result.String()
+}
+
+func jsonPathRegexUnicodeClasses(pattern string) string {
+	// ponytail: Go has no Java regex mode; extend this translation if Jayway-only Unicode properties or boundaries are needed.
+	const space = `\x{0009}-\x{000D}\x{0020}\x{0085}\x{00A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}`
+	const word = `\pL\pM\p{Nd}\p{Pc}\x{200C}\x{200D}`
+	replacements := map[byte]string{
+		'd': `\p{Nd}`, 'D': `\P{Nd}`,
+		's': "[" + space + "]", 'S': "[^" + space + "]",
+		'w': "[" + word + "]", 'W': "[^" + word + "]",
+	}
+	var result strings.Builder
+	inClass := false
+	for index := 0; index < len(pattern); index++ {
+		if pattern[index] != '\\' || index+1 == len(pattern) {
+			result.WriteByte(pattern[index])
+			if pattern[index] == '[' {
+				inClass = true
+			} else if pattern[index] == ']' {
+				inClass = false
+			}
+			continue
+		}
+		if replacement, exists := replacements[pattern[index+1]]; exists {
+			if inClass && strings.ContainsRune("dsw", rune(pattern[index+1])) {
+				replacement = map[byte]string{'d': `\p{Nd}`, 's': space, 'w': word}[pattern[index+1]]
+			}
+			result.WriteString(replacement)
+			index++
+			continue
+		}
+		result.WriteByte(pattern[index])
+		index++
+		result.WriteByte(pattern[index])
 	}
 	return result.String()
 }

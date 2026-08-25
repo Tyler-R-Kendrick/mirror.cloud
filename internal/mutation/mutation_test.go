@@ -3166,6 +3166,48 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
 		{
+			name: "states-ignore-json-path-length-argument",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `if len(arguments) > 0 {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
+			name: "states-accept-multiple-json-path-length-arguments",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `if len(arguments) != 1 {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
+			name: "states-reject-json-path-numeric-arguments-on-scalar",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `values := make([]float64, 0, len(array)+len(arguments))`,
+			new:  `values := make([]float64, 0, len(array)+len(arguments)); if array == nil { return nil, false }`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
+			name: "states-dont-flatten-json-path-numeric-array-argument",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old: `if array, valid := argument.([]any); valid {
+					consume(array)`,
+			new: `if false {
+					consume(nil)`,
+			pkg: "./internal/services/aws/states",
+			run: "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
+			name: "states-ignore-json-path-numeric-scalar-argument",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `consume([]any{argument})`,
+			new:  `consume(nil)`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
 			name: "states-truncate-json-path-wildcard",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `next = append(next, node...)`,

@@ -3210,6 +3210,39 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 			t.Fatalf("accepted invalid TestState %#v", input)
 		}
 	}
+	for _, invalidRequest := range []map[string]any{
+		{},
+		{"definition": true},
+		{"definition": ""},
+		{"definition": strings.Repeat(" ", 1048577)},
+		{"definition": `{"Type":"Pass","End":true}`, "input": true},
+		{"definition": `{"Type":"Pass","End":true}`, "input": strings.Repeat(" ", 262145)},
+		{"definition": `{"Type":"Pass","End":true}`, "stateName": ""},
+		{"definition": `{"Type":"Pass","End":true}`, "stateName": strings.Repeat("x", 81)},
+		{"definition": `{"Type":"Pass","End":true}`, "stateName": "Only"},
+		{"definition": `{"StartAt":"One","States":{"One":{"Type":"Pass","End":true}}}`, "stateName": "Missing"},
+		{"definition": `{"Type":"Pass","End":true}`, "inspectionLevel": true},
+		{"definition": `{"Type":"Pass","End":true}`, "roleArn": "not-an-arn"},
+		{"definition": `{"Type":"Pass","End":true}`, "revealSecrets": "yes"},
+	} {
+		if _, err := call("TestState", invalidRequest); err == nil {
+			t.Fatalf("accepted invalid TestState request %#v", invalidRequest)
+		}
+	}
+	for _, errorOutput := range []any{
+		map[string]any{},
+		map[string]any{"error": true},
+		map[string]any{"error": strings.Repeat("x", 257)},
+		map[string]any{"error": "Boom", "cause": true},
+		map[string]any{"error": "Boom", "cause": strings.Repeat("x", 32769)},
+	} {
+		if _, err := call("TestState", map[string]any{"definition": `{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}`, "mock": map[string]any{"errorOutput": errorOutput}}); err == nil {
+			t.Fatalf("accepted invalid TestState mock error %#v", errorOutput)
+		}
+	}
+	if emptyError := must("TestState", map[string]any{"definition": `{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}`, "mock": map[string]any{"errorOutput": map[string]any{"error": ""}}}).Output; emptyError["status"] != "FAILED" {
+		t.Fatalf("rejected empty allowed TestState error %#v", emptyError)
+	}
 	for _, mock := range []any{true, map[string]any{}, map[string]any{"result": `{`, "fieldValidationMode": "LOOSE"}, map[string]any{"result": `{}`, "errorOutput": map[string]any{"error": "Boom"}}} {
 		if _, err := call("TestState", map[string]any{"definition": `{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}`, "mock": mock}); err == nil {
 			t.Fatalf("accepted invalid TestState mock %#v", mock)

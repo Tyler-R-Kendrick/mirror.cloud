@@ -1697,6 +1697,7 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$..value","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[0:3:2]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.price < 10)]","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.active == true && @.price < @.limit)]","End":true}}}`,
 		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","ResultSelector":{"value.$":"$.value"},"End":true}}}`,
 	} {
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
@@ -1719,6 +1720,8 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[0:3:0]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.price = 10)]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.price < true)]","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.active &&)]","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.price < @.*)]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$[*]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$[0:2]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$$.Execution.Input","End":true}}}`,
@@ -3272,9 +3275,9 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		t.Fatalf("recursive wildcard %#v %t", recursive, found)
 	}
 	products := []any{
-		map[string]any{"name": "a", "price": 5.0, "active": true, "note": nil},
-		map[string]any{"name": "b", "price": 12.0, "active": false},
-		map[string]any{"name": "c", "price": 8.0, "active": true, "note": "x"},
+		map[string]any{"name": "a", "price": 5.0, "limit": 10.0, "active": true, "note": nil, "metrics": []any{5.0}},
+		map[string]any{"name": "b", "price": 12.0, "limit": 10.0, "active": false, "metrics": []any{4.0}},
+		map[string]any{"name": "c", "price": 8.0, "limit": 9.0, "active": true, "note": "x", "metrics": []any{6.0}},
 	}
 	if filtered := jsonPath(products, "$[?(@.price < 10)].name"); fmtString(filtered) != `["a","c"]` {
 		t.Fatalf("numeric filter %#v", filtered)
@@ -3293,6 +3296,24 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	}
 	if filtered, found := jsonPathLookup(products, "$[?(@.price > 100)]"); !found || fmtString(filtered) != `[]` {
 		t.Fatalf("empty filter %#v %t", filtered, found)
+	}
+	if filtered := jsonPath(products, "$[?(@.price < @.limit)].name"); fmtString(filtered) != `["a","c"]` {
+		t.Fatalf("path filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, "$[?(@.active == true && @.price < 6)].name"); fmtString(filtered) != `["a"]` {
+		t.Fatalf("and filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, `$[?(@.name == 'a' || @.name == 'b')].name`); fmtString(filtered) != `["a","b"]` {
+		t.Fatalf("or filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, `$[?(@.name == 'a' || @.name == 'b' && @.active == false)].name`); fmtString(filtered) != `["a","b"]` {
+		t.Fatalf("filter precedence %#v", filtered)
+	}
+	if filtered := jsonPath(products, "$[?(!(@.active == true))].name"); fmtString(filtered) != `["b"]` {
+		t.Fatalf("not filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, "$[?(@.metrics[0] >= 5)].name"); fmtString(filtered) != `["a","c"]` {
+		t.Fatalf("nested filter %#v", filtered)
 	}
 	members := map[string]any{"store.book": map[string]any{"a:b": 1.0, "close]key": 2.0, "quote'key": 3.0, "comma,key": 4.0}, "foo bar": 5.0}
 	if jsonPath(members, `$.store\.book['a:b']`) != 1.0 || jsonPath(members, `$.foo\ bar`) != 5.0 || jsonPath(members, `$['store.book']['close]key']`) != 2.0 || jsonPath(members, `$['store.book']['quote\'key']`) != 3.0 || fmtString(jsonPath(members, `$['store.book']['comma,key','a:b']`)) != `[4,1]` || fmtString(jsonPath(map[string]any{"b": 2.0, "a": 1.0}, "$.*")) != `[1,2]` {

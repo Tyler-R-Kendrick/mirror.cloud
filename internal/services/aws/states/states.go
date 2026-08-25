@@ -4899,18 +4899,51 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 	multiple := false
 	var filterVariables map[string]any
 	for _, token := range tokens {
-		if token.kind == 'l' || token.kind == 'n' {
+		if token.kind == 'l' || token.kind == 'n' || token.kind == 'j' {
 			value := any(nodes)
 			if len(nodes) == 1 {
 				value = nodes[0]
 			}
+			if token.kind == 'l' {
+				length := -1
+				switch value := value.(type) {
+				case []any:
+					length = len(value)
+				case map[string]any:
+					length = len(value)
+				}
+				if length < 0 {
+					return nil, false
+				}
+				nodes, multiple = []any{float64(length)}, false
+				continue
+			}
+			if token.kind == 'j' {
+				switch token.key {
+				case "keys":
+					object, valid := value.(map[string]any)
+					if !valid {
+						return nil, false
+					}
+					keys := slices.Sorted(maps.Keys(object))
+					nodes = []any{keys}
+				case "first", "last":
+					array, valid := value.([]any)
+					if !valid || len(array) == 0 {
+						return nil, false
+					}
+					index := 0
+					if token.key == "last" {
+						index = len(array) - 1
+					}
+					nodes = []any{array[index]}
+				}
+				multiple = false
+				continue
+			}
 			array, valid := value.([]any)
 			if !valid {
 				return nil, false
-			}
-			if token.kind == 'l' {
-				nodes, multiple = []any{float64(len(array))}, false
-				continue
 			}
 			values := make([]float64, 0, len(array))
 			for _, item := range array {
@@ -5127,6 +5160,16 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 			for _, function := range []string{"min", "max", "avg", "stddev", "sum"} {
 				if path == function+"()" {
 					tokens = append(tokens, pathToken{kind: 'n', key: function})
+					path = ""
+					break
+				}
+			}
+			if path == "" {
+				break
+			}
+			for _, function := range []string{"keys", "first", "last"} {
+				if path == function+"()" {
+					tokens = append(tokens, pathToken{kind: 'j', key: function})
 					path = ""
 					break
 				}

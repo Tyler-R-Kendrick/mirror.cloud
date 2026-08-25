@@ -1137,14 +1137,30 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				mock = map[string]any{"ErrorOutput": failure}
 			}
 		}
-		wrapped, next, err := testDefinition(definition, first(req.Input, "stateName", "StateName"), data, mock)
+		var configuration map[string]any
+		if value, exists := inputValue(req.Input, "stateConfiguration", "StateConfiguration"); exists {
+			var valid bool
+			configuration, valid = value.(map[string]any)
+			if !valid {
+				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+			}
+			if value, exists := inputValue(configuration, "retrierRetryCount", "RetrierRetryCount"); exists {
+				count, valid := exactNumber(value)
+				if !valid || count < 0 || count != math.Trunc(count) {
+					return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+				}
+			}
+		}
+		wrapped, next, err := testDefinition(definition, first(req.Input, "stateName", "StateName"), data, mock, configuration)
 		if err != nil {
 			return nil, &spi.Fault{Code: "InvalidDefinition", Message: err.Error(), HTTPStatus: 400, Fault: "client"}
 		}
 		wr := p.walk(ctx, req, wrapped, "", data, nil)
 		output, _ := json.Marshal(wr.out)
 		response := map[string]any{"status": wr.status, "output": string(output)}
-		if next != "" && wr.status == "SUCCEEDED" {
+		if wr.nextState != "" {
+			response["nextState"] = wr.nextState
+		} else if next != "" && wr.status == "SUCCEEDED" {
 			response["nextState"] = next
 		}
 		if wr.errorName != "" {
@@ -1328,6 +1344,7 @@ type walkResult struct {
 	out           any
 	status, cause string
 	errorName     string
+	nextState     string
 	hist          []any
 	pending       *pending
 	failedState   string
@@ -1751,6 +1768,54 @@ walkLoop:
 			data, ok = applyStateResult(st, rawInput, result, stateContext, p.deps.Rand, variables)
 			return ok && applyJSONPathAssignments(result, stateContext, variables, variables, p.deps.Rand, st)
 		}
+		applyMockedError := func() (walkResult, bool) {
+			mocked, exists := st["_TestStateMockError"].(map[string]any)
+			if !exists {
+				return walkResult{}, false
+			}
+			failure := stateFailure{name: first(mocked, "error", "Error"), cause: first(mocked, "cause", "Cause")}
+			if retries[cur] == nil {
+				retries[cur] = map[int]int{}
+			}
+			for index, raw := range asSlice(st["Retry"]) {
+				retrier, _ := raw.(map[string]any)
+				if matchesError(retrier["ErrorEquals"], failure.name) {
+					retries[cur][index] = int(toFloat(st["_TestStateRetrierRetryCount"]))
+					break
+				}
+			}
+			failed := walkResult{out: rawInput, status: "FAILED", cause: failure.cause, errorName: failure.name, hist: hist}
+			var next string
+			var out any
+			var retry, caught, valid bool
+			if isJSONata {
+				next, out, _, retry, caught, valid = recoverJSONata(st, failed, rawInput, stateContext, variables, p.deps.Rand, retries[cur])
+				if !valid {
+					return walkResult{out: rawInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}, true
+				}
+			} else {
+				next, out, _, retry, caught = recoverState(st, failed, rawInput, retries[cur], p.deps.Rand)
+			}
+			if retry {
+				return walkResult{out: rawInput, status: "RETRIABLE", cause: failure.cause, errorName: failure.name, hist: hist}, true
+			}
+			if !caught {
+				return failed, true
+			}
+			if !isJSONata {
+				if !applyCatchAssignments(st, failure, rawInput, stateContext, variables, p.deps.Rand) {
+					return walkResult{out: rawInput, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}, true
+				}
+				out, ok = applyDataPath(st, "OutputPath", out, variables)
+				if !ok {
+					return walkResult{out: rawInput, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}, true
+				}
+			}
+			return walkResult{out: out, status: "CAUGHT_ERROR", cause: failure.cause, errorName: failure.name, nextState: next, hist: hist}, true
+		}
+		if failed, mocked := applyMockedError(); mocked {
+			return failed
+		}
 		var waitUntil time.Time
 		switch typ {
 		case "Pass":
@@ -1882,9 +1947,6 @@ walkLoop:
 				setJSONataRetryCount(stateContext, retries[cur])
 				payload, payloadOK := taskPayload(st, data, mergeJSONataContext(stateContext, taskContext), p.deps.Rand, variables)
 				failure := stateFailure{}
-				if mocked, exists := st["_TestStateMockError"].(map[string]any); exists {
-					failure = stateFailure{name: first(mocked, "error", "Error"), cause: first(mocked, "cause", "Cause")}
-				}
 				if !payloadOK {
 					failure = stateFailure{name: "States.Runtime", cause: "States.Runtime"}
 				}
@@ -7043,7 +7105,7 @@ func supportedStateType(typ string) bool {
 	}
 }
 
-func testDefinition(definition, stateName string, input any, mock map[string]any) (string, string, error) {
+func testDefinition(definition, stateName string, input any, mock, configuration map[string]any) (string, string, error) {
 	var parsed map[string]any
 	if json.Unmarshal([]byte(definition), &parsed) != nil {
 		return "", "", fmt.Errorf("definition is not valid JSON")
@@ -7073,6 +7135,9 @@ func testDefinition(definition, stateName string, input any, mock map[string]any
 		copy["_TestStateMockResult"] = result
 	} else if failure, exists := mock["ErrorOutput"]; exists {
 		copy["_TestStateMockError"] = failure
+	}
+	if count, exists := inputValue(configuration, "retrierRetryCount", "RetrierRetryCount"); exists {
+		copy["_TestStateRetrierRetryCount"] = count
 	}
 	if first(copy, "Type") == "Choice" {
 		next = choiceNext(copy, input)

@@ -4901,13 +4901,23 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 					}
 				}
 			case 'u':
-				if array, ok := node.([]any); ok {
-					for _, index := range token.indexes {
-						if index < 0 {
-							index += len(array)
+				for _, selector := range token.selectors {
+					switch selector.kind {
+					case 'f':
+						if object, ok := node.(map[string]any); ok {
+							if value, exists := object[selector.key]; exists {
+								next = append(next, value)
+							}
 						}
-						if index >= 0 && index < len(array) {
-							next = append(next, array[index])
+					case 'i':
+						if array, ok := node.([]any); ok {
+							index := selector.start
+							if index < 0 {
+								index += len(array)
+							}
+							if index >= 0 && index < len(array) {
+								next = append(next, array[index])
+							}
 						}
 					}
 				}
@@ -4934,10 +4944,26 @@ type pathToken struct {
 	kind       byte
 	key        string
 	start, end int
-	indexes    []int
+	selectors  []pathToken
 }
 
 func jsonPathTokens(path string) ([]pathToken, bool) {
+	unquote := func(member string) (string, bool) {
+		if len(member) < 2 || member[0] != member[len(member)-1] || member[0] != '\'' && member[0] != '"' {
+			return "", false
+		}
+		var key strings.Builder
+		for index := 1; index < len(member)-1; index++ {
+			if member[index] == '\\' {
+				index++
+				if index == len(member)-1 {
+					return "", false
+				}
+			}
+			key.WriteByte(member[index])
+		}
+		return key.String(), true
+	}
 	var tokens []pathToken
 	for len(path) > 0 {
 		if path[0] == '.' {
@@ -4972,54 +4998,65 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 			path = path[end:]
 			continue
 		}
-		close := 1
-		if len(path) > 1 && (path[1] == '\'' || path[1] == '"') {
-			quote := path[1]
-			close = 2
-			for close < len(path) && path[close] != quote {
-				if path[close] == '\\' {
-					close++
-				}
+		close, quote := 1, byte(0)
+		for close < len(path) {
+			switch {
+			case quote != 0 && path[close] == '\\':
 				close++
-			}
-			if close+1 >= len(path) || path[close+1] != ']' {
-				return nil, false
+			case quote != 0 && path[close] == quote:
+				quote = 0
+			case quote == 0 && (path[close] == '\'' || path[close] == '"'):
+				quote = path[close]
+			case quote == 0 && path[close] == ']':
+				goto memberClosed
 			}
 			close++
-		} else {
-			close = strings.IndexByte(path, ']')
-			if close < 0 {
-				return nil, false
-			}
 		}
+		return nil, false
+	memberClosed:
 		member := path[1:close]
 		path = path[close+1:]
-		switch {
-		case len(member) >= 2 && (member[0] == '\'' && member[len(member)-1] == '\'' || member[0] == '"' && member[len(member)-1] == '"'):
-			var key strings.Builder
-			for index := 1; index < len(member)-1; index++ {
-				if member[index] == '\\' {
-					index++
-					if index == len(member)-1 {
-						return nil, false
-					}
-				}
-				key.WriteByte(member[index])
+		var parts []string
+		start, quote := 0, byte(0)
+		for index := 0; index < len(member); index++ {
+			switch {
+			case quote != 0 && member[index] == '\\':
+				index++
+			case quote != 0 && member[index] == quote:
+				quote = 0
+			case quote == 0 && (member[index] == '\'' || member[index] == '"'):
+				quote = member[index]
+			case quote == 0 && member[index] == ',':
+				parts = append(parts, member[start:index])
+				start = index + 1
 			}
-			tokens = append(tokens, pathToken{kind: 'f', key: key.String()})
-		case member == "*":
-			tokens = append(tokens, pathToken{kind: '*'})
-		case strings.Contains(member, ","):
-			parts := strings.Split(member, ",")
-			indexes := make([]int, len(parts))
+		}
+		if len(parts) > 0 {
+			parts = append(parts, member[start:])
+			selectors := make([]pathToken, len(parts))
 			for index, part := range parts {
+				if key, quoted := unquote(part); quoted {
+					selectors[index] = pathToken{kind: 'f', key: key}
+					continue
+				}
 				value, err := strconv.Atoi(part)
 				if err != nil {
 					return nil, false
 				}
-				indexes[index] = value
+				selectors[index] = pathToken{kind: 'i', start: value}
 			}
-			tokens = append(tokens, pathToken{kind: 'u', indexes: indexes})
+			tokens = append(tokens, pathToken{kind: 'u', selectors: selectors})
+			continue
+		}
+		switch {
+		case len(member) >= 2 && (member[0] == '\'' || member[0] == '"'):
+			key, valid := unquote(member)
+			if !valid {
+				return nil, false
+			}
+			tokens = append(tokens, pathToken{kind: 'f', key: key})
+		case member == "*":
+			tokens = append(tokens, pathToken{kind: '*'})
 		case strings.Contains(member, ":"):
 			bounds := strings.SplitN(member, ":", 2)
 			start, end := 0, int(^uint(0)>>1)

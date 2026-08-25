@@ -1695,6 +1695,7 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[0,2]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$['a','b']","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$..value","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[0:3:2]","End":true}}}`,
 		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","ResultSelector":{"value.$":"$.value"},"End":true}}}`,
 	} {
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
@@ -1710,6 +1711,7 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"result","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","InputPath":"$.['input']","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[0]output","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[0:3:0]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$[*]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$[0:2]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$$.Execution.Input","End":true}}}`,
@@ -3241,7 +3243,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		t.Fatalf("selected result %#v", selectedResult)
 	}
 	paths := map[string]any{"a": []any{map[string]any{"v": 1.0}, map[string]any{"v": 2.0}, map[string]any{"v": 3.0}}}
-	if jsonPath(paths, "$.a[1].v") != 2.0 || fmtString(jsonPath(paths, "$.a[0:2].v")) != `[1,2]` || fmtString(jsonPath(paths, "$.a[-2:].v")) != `[2,3]` || fmtString(jsonPath(paths, "$.a[0,2].v")) != `[1,3]` || jsonPath(paths, "$.a[-1].v") != 3.0 || jsonPath(paths, "$['a'][2].v") != 3.0 || jsonPath(paths, "$.a[9]") != nil {
+	if jsonPath(paths, "$.a[1].v") != 2.0 || fmtString(jsonPath(paths, "$.a[0:2].v")) != `[1,2]` || fmtString(jsonPath(paths, "$.a[-2:].v")) != `[2,3]` || fmtString(jsonPath(paths, "$.a[0:3:2].v")) != `[1,3]` || fmtString(jsonPath(paths, "$.a[0,2].v")) != `[1,3]` || jsonPath(paths, "$.a[-1].v") != 3.0 || jsonPath(paths, "$['a'][2].v") != 3.0 || jsonPath(paths, "$.a[9]") != nil {
 		t.Fatal("json path arrays")
 	}
 	if empty, found := jsonPathLookup([]any{}, "$[*]"); !found || fmtString(empty) != `[]` {

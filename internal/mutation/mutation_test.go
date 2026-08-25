@@ -2912,18 +2912,16 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-accept-json-path-length-non-array",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old: `array, valid := value.([]any)
-			if !valid {`,
-			new: `array, valid := value.([]any)
-			if valid {`,
-			pkg: "./internal/services/aws/states",
-			run: "TestStatesLifecycleAndWalkerUnits",
+			old:  `if length < 0 {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
 		{
 			name: "states-increment-json-path-length",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `nodes, multiple = []any{float64(len(array))}, false`,
-			new:  `nodes, multiple = []any{float64(len(array) + 1)}, false`,
+			old:  `nodes, multiple = []any{float64(length)}, false`,
+			new:  `nodes, multiple = []any{float64(length + 1)}, false`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
@@ -2938,7 +2936,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-json-path-numeric-function-token",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if token.kind == 'l' || token.kind == 'n' {`,
+			old:  `if token.kind == 'l' || token.kind == 'n' || token.kind == 'j' {`,
 			new:  `if token.kind == 'l' {`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",

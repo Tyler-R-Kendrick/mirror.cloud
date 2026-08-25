@@ -2752,7 +2752,7 @@ func applyResultPath(state map[string]any, input, result any) (any, bool) {
 		return input, true
 	}
 	path, ok := raw.(string)
-	if !ok || !validResultPath(path) {
+	if !ok {
 		return input, false
 	}
 	tokens, ok := jsonPathTokens(path[1:])

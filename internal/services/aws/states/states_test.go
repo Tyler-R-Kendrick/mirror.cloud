@@ -3317,6 +3317,9 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if filtered := jsonPath(products, `$[?(@.code =~ /a\/b/)].name`); fmtString(filtered) != `["a"]` {
 		t.Fatalf("regex slash filter %#v", filtered)
 	}
+	if filtered := jsonPath(products, `$[?(@.code =~ /a/)].name`); fmtString(filtered) != `[]` {
+		t.Fatalf("regex full-match filter %#v", filtered)
+	}
 	if filtered := jsonPath(products, `$[?(@.price =~ /5/)].name`); fmtString(filtered) != `["a"]` {
 		t.Fatalf("numeric regex filter %#v", filtered)
 	}

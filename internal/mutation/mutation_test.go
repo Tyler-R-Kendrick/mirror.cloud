@@ -2560,15 +2560,15 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-truncate-quoted-json-path-member",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if len(path) > 1 && (path[1] == '\'' || path[1] == '"') {`,
-			new:  `if false {`,
+			old:  `case quote == 0 && (path[close] == '\'' || path[close] == '"'):`,
+			new:  `case false:`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
 		{
 			name: "states-reject-colon-json-path-member",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `case len(member) >= 2 && (member[0] == '\'' && member[len(member)-1] == '\'' || member[0] == '"' && member[len(member)-1] == '"'):`,
+			old:  `case len(member) >= 2 && (member[0] == '\'' || member[0] == '"'):`,
 			new:  `case false:`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",

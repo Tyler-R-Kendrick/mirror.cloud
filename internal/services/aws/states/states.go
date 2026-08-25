@@ -2752,24 +2752,71 @@ func applyResultPath(state map[string]any, input, result any) (any, bool) {
 		return input, true
 	}
 	path, ok := raw.(string)
-	root, object := input.(map[string]any)
-	if !ok || !object || !strings.HasPrefix(path, "$.") {
+	if !ok || !validResultPath(path) {
 		return input, false
 	}
-	parts := strings.Split(strings.TrimPrefix(path, "$."), ".")
-	cur := root
-	for _, part := range parts[:len(parts)-1] {
-		next, ok := cur[part].(map[string]any)
-		if !ok {
+	tokens, ok := jsonPathTokens(path[1:])
+	if !ok || len(tokens) == 0 {
+		return input, false
+	}
+	var build func([]pathToken) (any, bool)
+	build = func(tokens []pathToken) (any, bool) {
+		if len(tokens) == 0 {
+			return result, true
+		}
+		child, valid := build(tokens[1:])
+		if !valid {
+			return nil, false
+		}
+		switch token := tokens[0]; token.kind {
+		case 'f':
+			return map[string]any{token.key: child}, true
+		default:
+			return nil, false
+		}
+	}
+	current := input
+	for index, token := range tokens {
+		last := index == len(tokens)-1
+		switch token.kind {
+		case 'f':
+			object, valid := current.(map[string]any)
+			if !valid {
+				return input, false
+			}
+			if last {
+				object[token.key] = result
+				return input, true
+			}
+			next, exists := object[token.key]
+			if !exists {
+				next, valid = build(tokens[index+1:])
+				if !valid {
+					return input, false
+				}
+				object[token.key] = next
+				return input, true
+			}
+			current = next
+		case 'i':
+			array, valid := current.([]any)
+			position := token.start
+			if position < 0 {
+				position += len(array)
+			}
+			if !valid || position < 0 || position >= len(array) {
+				return input, false
+			}
+			if last {
+				array[position] = result
+				return input, true
+			}
+			current = array[position]
+		default:
 			return input, false
 		}
-		cur = next
 	}
-	if parts[len(parts)-1] == "" {
-		return input, false
-	}
-	cur[parts[len(parts)-1]] = result
-	return input, true
+	return input, false
 }
 
 func applyStateResult(state map[string]any, input, result any, context map[string]any, random spi.Rand, variables ...map[string]any) (any, bool) {

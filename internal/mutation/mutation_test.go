@@ -30,6 +30,14 @@ func TestMutantsAreKilled(t *testing.T) {
 	}
 	mutants := []mutant{
 		{
+			name: "mock-reset-crud-records-on-create",
+			file: filepath.Join("internal", "mock", "mock.go"),
+			old:  `if p.crud["rec"] == nil {`,
+			new:  `if true {`,
+			pkg:  "./internal/mock",
+			run:  "TestCRUDRetention",
+		},
+		{
 			name: "kms-reuse-gcm-nonce",
 			file: filepath.Join("internal", "services", "aws", "kms", "kms.go"),
 			old:  `rand.Read(nonce)`,

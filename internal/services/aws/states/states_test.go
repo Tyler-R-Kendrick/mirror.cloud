@@ -1707,6 +1707,7 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.tags empty false)]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.name IN ['a','c'])]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.tags contains 'sale')]","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.items.length()","End":true}}}`,
 		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","ResultSelector":{"value.$":"$.value"},"End":true}}}`,
 	} {
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
@@ -1735,6 +1736,7 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.name =~ /a/z)]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.tags size '2')]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$[?(@.tags empty 1)]","End":true}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","OutputPath":"$.items.length(1)","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$[*]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$[0:2]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Pass","ResultPath":"$$.Execution.Input","End":true}}}`,
@@ -3268,6 +3270,12 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	paths := map[string]any{"a": []any{map[string]any{"v": 1.0}, map[string]any{"v": 2.0}, map[string]any{"v": 3.0}}}
 	if jsonPath(paths, "$.a[1].v") != 2.0 || fmtString(jsonPath(paths, "$.a[0:2].v")) != `[1,2]` || fmtString(jsonPath(paths, "$.a[-2:].v")) != `[2,3]` || fmtString(jsonPath(paths, "$.a[0:3:2].v")) != `[1,3]` || fmtString(jsonPath(paths, "$.a[0,2].v")) != `[1,3]` || jsonPath(paths, "$.a[-1].v") != 3.0 || jsonPath(paths, "$['a'][2].v") != 3.0 || jsonPath(paths, "$.a[9]") != nil {
 		t.Fatal("json path arrays")
+	}
+	if jsonPath(paths, "$.a.length()") != 3.0 || jsonPath(paths, "$.a[*].length()") != 3.0 || jsonPath(paths, "$..a.length()") != 3.0 {
+		t.Fatal("json path length function")
+	}
+	if _, found := jsonPathLookup(paths, "$.a[0].length()"); found {
+		t.Fatal("json path length accepted non-array")
 	}
 	if empty, found := jsonPathLookup([]any{}, "$[*]"); !found || fmtString(empty) != `[]` {
 		t.Fatalf("empty wildcard %#v %t", empty, found)

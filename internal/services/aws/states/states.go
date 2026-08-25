@@ -38,6 +38,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -1121,7 +1122,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 			}
 			mode := first(mock, "fieldValidationMode", "FieldValidationMode")
-			if mode != "" && mode != "STRICT" && mode != "PRESENT" && mode != "NONE" {
+			if mode == "" {
+				mode = "STRICT"
+			}
+			if mode != "STRICT" && mode != "PRESENT" && mode != "NONE" {
 				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 			}
 			result, hasResult := inputValue(mock, "result", "Result")
@@ -1135,13 +1139,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				if !valid || len(raw) > 262144 || json.Unmarshal([]byte(raw), &decoded) != nil {
 					return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 				}
-				mock = map[string]any{"Result": decoded}
+				mock = map[string]any{"Result": decoded, "FieldValidationMode": mode}
 			} else {
 				failure, valid := errorOutput.(map[string]any)
 				if !valid || first(failure, "error", "Error") == "" {
 					return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 				}
-				mock = map[string]any{"ErrorOutput": failure}
+				mock = map[string]any{"ErrorOutput": failure, "FieldValidationMode": mode}
 			}
 		}
 		var testContext map[string]any
@@ -1216,6 +1220,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		var testMachine map[string]any
 		_ = json.Unmarshal([]byte(wrapped), &testMachine)
 		testedState, _ := testMachine["States"].(map[string]any)["TestState"].(map[string]any)
+		if result, mockedResult := mock["Result"]; mockedResult && !validTestStateMock(testedState, result, first(mock, "FieldValidationMode")) {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
 		if _, mockedError := mock["ErrorOutput"]; mockedError && slices.Contains([]string{"Map", "Parallel"}, first(testedState, "Type")) && first(configuration, "errorCausedByState", "ErrorCausedByState") == "" {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
@@ -7306,6 +7313,130 @@ func inspectTestState(state map[string]any, input any, context, variables, mock,
 		encode("variables", variables)
 	}
 	return inspection
+}
+
+func validTestStateMock(state map[string]any, result any, mode string) bool {
+	switch first(state, "Type") {
+	case "Parallel":
+		branches := asSlice(state["Branches"])
+		values, valid := result.([]any)
+		return valid && len(values) == len(branches)
+	case "Map":
+		if _, writesResult := state["ResultWriter"]; writesResult {
+			_, valid := result.(map[string]any)
+			return valid
+		}
+		_, valid := result.([]any)
+		return valid
+	case "Task":
+		if mode == "NONE" {
+			return true
+		}
+		resource := first(state, "Resource")
+		if strings.Contains(resource, "states:::http:invoke") || strings.Contains(resource, "apigateway:invoke") || strings.Contains(resource, "eks:call") || strings.Contains(resource, "eks:runJob") {
+			return true
+		}
+		resource, _, synchronous := syncTaskResource(strings.TrimSuffix(resource, ".waitForTaskToken"))
+		service, operation := "", ""
+		if strings.Contains(resource, "lambda:invoke") {
+			service, operation = "lambda", "Invoke"
+		} else {
+			service, operation, _, _, _ = taskIntegration(resource)
+		}
+		if synchronous {
+			polling := map[string]string{
+				"arn:aws:states:::batch:submitJob": "DescribeJobs", "arn:aws:states:::codebuild:startBuild": "BatchGetBuilds",
+				"arn:aws:states:::ecs:runTask": "DescribeTasks", "arn:aws:states:::elasticmapreduce:addStep": "DescribeStep",
+				"arn:aws:states:::elasticmapreduce:createCluster": "DescribeCluster", "arn:aws:states:::glue:startJobRun": "GetJobRun",
+				"arn:aws:states:::states:startExecution": "DescribeExecution",
+			}
+			operation = polling[resource]
+		}
+		for index := range specboot.Bundle().Services {
+			candidate := &specboot.Bundle().Services[index]
+			if !matchesTaskService(candidate.ID, service) {
+				continue
+			}
+			op := candidate.OperationByName(operation)
+			if op == nil || op.Output == "" {
+				return true
+			}
+			return validModelValue(candidate, op.Output, result, mode == "STRICT", 0)
+		}
+	}
+	return true
+}
+
+func validModelValue(service *model.Service, shapeID string, value any, requireFields bool, depth int) bool {
+	if depth > 100 {
+		return false
+	}
+	shape, exists := service.Shapes[shapeID]
+	if !exists {
+		return true
+	}
+	switch shape.Kind {
+	case model.KindStructure:
+		object, valid := value.(map[string]any)
+		if !valid {
+			return false
+		}
+		for name, member := range shape.Members {
+			field, present := object[name]
+			if requireFields && member.Required && !present {
+				return false
+			}
+			if present && !validModelValue(service, member.Shape, field, requireFields, depth+1) {
+				return false
+			}
+		}
+		return true
+	case model.KindUnion:
+		object, valid := value.(map[string]any)
+		if !valid {
+			return false
+		}
+		known := 0
+		for name, field := range object {
+			if member, exists := shape.Members[name]; exists {
+				known++
+				if !validModelValue(service, member.Shape, field, requireFields, depth+1) {
+					return false
+				}
+			}
+		}
+		return known <= 1 && (!requireFields || known == 1)
+	case model.KindList:
+		items, valid := value.([]any)
+		if !valid {
+			return false
+		}
+		return !slices.ContainsFunc(items, func(item any) bool { return !validModelValue(service, shape.Member, item, requireFields, depth+1) })
+	case model.KindMap:
+		items, valid := value.(map[string]any)
+		if !valid {
+			return false
+		}
+		return !slices.ContainsFunc(slices.Collect(maps.Values(items)), func(item any) bool { return !validModelValue(service, shape.Member, item, requireFields, depth+1) })
+	case model.KindEnum, model.KindString, model.KindBlob:
+		_, valid := value.(string)
+		return valid
+	case model.KindInteger, model.KindLong:
+		number, valid := exactNumber(value)
+		return valid && number == math.Trunc(number)
+	case model.KindFloat, model.KindDouble:
+		_, valid := exactNumber(value)
+		return valid
+	case model.KindBoolean:
+		_, valid := value.(bool)
+		return valid
+	case model.KindTimestamp:
+		_, stringValue := value.(string)
+		_, numericValue := exactNumber(value)
+		return stringValue || numericValue
+	default:
+		return true
+	}
 }
 
 func supportedStateType(typ string) bool {

@@ -1101,9 +1101,35 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"result": result, "diagnostics": items, "truncated": truncated}}, nil
 	case "TestState":
-		definition := first(req.Input, "definition", "Definition")
-		input := first(req.Input, "input", "Input")
-		inspectionLevel := first(req.Input, "inspectionLevel", "InspectionLevel")
+		definitionValue, definitionSet := inputValue(req.Input, "definition", "Definition")
+		definition, definitionValid := definitionValue.(string)
+		if !definitionSet || !definitionValid || len(definition) < 1 || len(definition) > 1048576 {
+			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+		}
+		input := ""
+		if value, exists := inputValue(req.Input, "input", "Input"); exists {
+			var valid bool
+			input, valid = value.(string)
+			if !valid || len(input) > 262144 {
+				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+		stateName := ""
+		if value, exists := inputValue(req.Input, "stateName", "StateName"); exists {
+			var valid bool
+			stateName, valid = value.(string)
+			if !valid || utf8.RuneCountInString(stateName) < 1 || utf8.RuneCountInString(stateName) > 80 {
+				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+		inspectionLevel := ""
+		if value, exists := inputValue(req.Input, "inspectionLevel", "InspectionLevel"); exists {
+			var valid bool
+			inspectionLevel, valid = value.(string)
+			if !valid {
+				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+			}
+		}
 		if inspectionLevel == "" {
 			inspectionLevel = "INFO"
 		}
@@ -1142,7 +1168,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				mock = map[string]any{"Result": decoded, "FieldValidationMode": mode}
 			} else {
 				failure, valid := errorOutput.(map[string]any)
-				if !valid || first(failure, "error", "Error") == "" {
+				errorValue, errorSet := inputValue(failure, "error", "Error")
+				errorName, errorValid := errorValue.(string)
+				causeValue, causeSet := inputValue(failure, "cause", "Cause")
+				cause, causeValid := causeValue.(string)
+				if !valid || !errorSet || !errorValid || len(errorName) > 256 || causeSet && (!causeValid || len(cause) > 32768) {
 					return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 				}
 				mock = map[string]any{"ErrorOutput": failure, "FieldValidationMode": mode}
@@ -1206,7 +1236,18 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				}
 			}
 		}
-		wrapped, next, err := testDefinition(definition, first(req.Input, "stateName", "StateName"), data, mock, configuration)
+		if value, exists := inputValue(req.Input, "roleArn", "RoleArn"); exists {
+			role, valid := value.(string)
+			if !valid || !validRoleARN(role) {
+				return nil, &spi.Fault{Code: "InvalidArn", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+		if value, exists := inputValue(req.Input, "revealSecrets", "RevealSecrets"); exists {
+			if _, valid := value.(bool); !valid {
+				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+		wrapped, next, err := testDefinition(definition, stateName, data, mock, configuration)
 		if err != nil {
 			return nil, &spi.Fault{Code: "InvalidDefinition", Message: err.Error(), HTTPStatus: 400, Fault: "client"}
 		}
@@ -7454,11 +7495,18 @@ func testDefinition(definition, stateName string, input any, mock, configuration
 		return "", "", fmt.Errorf("definition is not valid JSON")
 	}
 	state := parsed
-	if states, ok := parsed["States"].(map[string]any); ok {
+	states, fullMachine := parsed["States"].(map[string]any)
+	if fullMachine {
 		if stateName == "" {
 			stateName, _ = parsed["StartAt"].(string)
 		}
-		state, _ = states[stateName].(map[string]any)
+		var found bool
+		state, found = states[stateName].(map[string]any)
+		if !found {
+			return "", "", fmt.Errorf("stateName does not identify a state")
+		}
+	} else if stateName != "" {
+		return "", "", fmt.Errorf("stateName requires a state machine definition")
 	}
 	if !supportedStateType(first(state, "Type")) {
 		return "", "", fmt.Errorf("state does not have a supported Type")

@@ -5186,7 +5186,7 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 		operator, field string
 	}{{"||", "Or"}, {"&&", "And"}} {
 		var parts []string
-		start, depth, brackets, quote := 0, 0, 0, byte(0)
+		start, depth, quote := 0, 0, byte(0)
 		for index := 0; index < len(expression); index++ {
 			switch {
 			case quote != 0 && expression[index] == '\\':
@@ -5199,11 +5199,7 @@ func jsonPathFilterRule(expression string) (map[string]any, bool) {
 				depth++
 			case quote == 0 && expression[index] == ')':
 				depth--
-			case quote == 0 && expression[index] == '[':
-				brackets++
-			case quote == 0 && expression[index] == ']':
-				brackets--
-			case quote == 0 && depth == 0 && brackets == 0 && strings.HasPrefix(expression[index:], logical.operator):
+			case quote == 0 && depth == 0 && strings.HasPrefix(expression[index:], logical.operator):
 				parts = append(parts, expression[start:index])
 				index++
 				start = index + 1

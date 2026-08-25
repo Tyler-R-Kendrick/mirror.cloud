@@ -3372,6 +3372,12 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if filtered := jsonPath(products, "$[?(@.name =~ /[AB]/i)].name"); fmtString(filtered) != `["a","b"]` {
 		t.Fatalf("regex filter %#v", filtered)
 	}
+	if filtered := jsonPath([]any{map[string]any{"name": "ab"}, map[string]any{"name": "a b"}}, "$[?(@.name =~ /a # comment\n b/x)].name"); fmtString(filtered) != `["ab"]` {
+		t.Fatalf("comments regex filter %#v", filtered)
+	}
+	if filtered := jsonPath([]any{map[string]any{"name": "Ä"}}, `$[?(@.name =~ /ä/iuU)].name`); fmtString(filtered) != `["Ä"]` {
+		t.Fatalf("unicode regex filter %#v", filtered)
+	}
 	if filtered := jsonPath(products, "$[?(@.name =~ /a{1,2}/)].name"); fmtString(filtered) != `["a"]` {
 		t.Fatalf("regex comma filter %#v", filtered)
 	}

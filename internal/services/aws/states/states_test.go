@@ -3334,6 +3334,9 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if filtered := jsonPath(products, `$[?(@.name in ['a','c'])].name`); fmtString(filtered) != `["a","c"]` {
 		t.Fatalf("in filter %#v", filtered)
 	}
+	if filtered := jsonPath([]any{map[string]any{"n": 1}}, `$[?(@.n in [1])]`); fmtString(filtered) != `[{"n":1}]` {
+		t.Fatalf("numeric in filter %#v", filtered)
+	}
 	if filtered := jsonPath(products, `$[?(@.name nin ['a','c'])].name`); fmtString(filtered) != `["b"]` {
 		t.Fatalf("not-in filter %#v", filtered)
 	}

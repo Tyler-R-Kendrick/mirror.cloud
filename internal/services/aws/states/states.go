@@ -4956,9 +4956,7 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 				case []any:
 					values = node
 				case map[string]any:
-					for _, key := range slices.Sorted(maps.Keys(node)) {
-						values = append(values, node[key])
-					}
+					values = []any{node}
 				default:
 					continue
 				}

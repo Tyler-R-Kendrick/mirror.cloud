@@ -3308,7 +3308,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if filtered := jsonPath([]any{1.0, 2.0, 3.0}, "$[?(@ > 1)]"); fmtString(filtered) != `[2,3]` {
 		t.Fatalf("primitive filter %#v", filtered)
 	}
-	if filtered := jsonPath(map[string]any{"b": 2.0, "a": 1.0, "c": 3.0}, "$[?(@ > 1)]"); fmtString(filtered) != `[2,3]` {
+	if filtered := jsonPath(map[string]any{"name": "a", "price": 5.0}, "$[?(@.price < 10)].name"); fmtString(filtered) != `["a"]` {
 		t.Fatalf("object filter %#v", filtered)
 	}
 	filterRoot := map[string]any{"limit": 7.0, "products": products}

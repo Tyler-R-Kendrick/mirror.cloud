@@ -2696,8 +2696,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-json-path-object-filter",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  "case []any:\n\t\t\t\t\tvalues = node\n\t\t\t\tcase map[string]any:",
-			new:  "case []any:\n\t\t\t\t\tvalues = node\n\t\t\t\tcase nil:",
+			old:  "case map[string]any:\n\t\t\t\t\tvalues = []any{node}",
+			new:  "case nil:\n\t\t\t\t\tvalues = []any{node}",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},

@@ -4900,9 +4900,20 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 						next = append(next, array[start:end]...)
 					}
 				}
+			case 'u':
+				if array, ok := node.([]any); ok {
+					for _, index := range token.indexes {
+						if index < 0 {
+							index += len(array)
+						}
+						if index >= 0 && index < len(array) {
+							next = append(next, array[index])
+						}
+					}
+				}
 			}
 		}
-		if token.kind == '*' || token.kind == 's' {
+		if token.kind == '*' || token.kind == 's' || token.kind == 'u' {
 			multiple = true
 		}
 		nodes = next
@@ -4923,6 +4934,7 @@ type pathToken struct {
 	kind       byte
 	key        string
 	start, end int
+	indexes    []int
 }
 
 func jsonPathTokens(path string) ([]pathToken, bool) {
@@ -4997,6 +5009,17 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 			tokens = append(tokens, pathToken{kind: 'f', key: key.String()})
 		case member == "*":
 			tokens = append(tokens, pathToken{kind: '*'})
+		case strings.Contains(member, ","):
+			parts := strings.Split(member, ",")
+			indexes := make([]int, len(parts))
+			for index, part := range parts {
+				value, err := strconv.Atoi(part)
+				if err != nil {
+					return nil, false
+				}
+				indexes[index] = value
+			}
+			tokens = append(tokens, pathToken{kind: 'u', indexes: indexes})
 		case strings.Contains(member, ":"):
 			bounds := strings.SplitN(member, ":", 2)
 			start, end := 0, int(^uint(0)>>1)

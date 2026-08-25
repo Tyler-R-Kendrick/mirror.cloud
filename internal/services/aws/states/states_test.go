@@ -1705,6 +1705,8 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.inside)]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.tags size 2)]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.tags empty false)]","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.name IN ['a','c'])]","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.tags contains 'sale')]","End":true}}}`,
 		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","ResultSelector":{"value.$":"$.value"},"End":true}}}`,
 	} {
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
@@ -3343,6 +3345,24 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	}
 	if filtered := jsonPath(products, `$[?(@.name nin ['a','c'])].name`); fmtString(filtered) != `["b"]` {
 		t.Fatalf("not-in filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, `$[?(@.name IN ['a','c'])].name`); fmtString(filtered) != `["a","c"]` {
+		t.Fatalf("uppercase in filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, `$[?(@.name === 'a')].name`); fmtString(filtered) != `["a"]` {
+		t.Fatalf("strict equality filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, `$[?(@.name !== 'a')].name`); fmtString(filtered) != `["b","c"]` {
+		t.Fatalf("strict inequality filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, `$[?(@.code contains '/')].name`); fmtString(filtered) != `["a"]` {
+		t.Fatalf("string contains filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, `$[?(@.tags contains 'sale')].name`); fmtString(filtered) != `["a"]` {
+		t.Fatalf("array contains filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, `$[?(@.tags all ['red','sale'])].name`); fmtString(filtered) != `["a"]` {
+		t.Fatalf("all filter %#v", filtered)
 	}
 	if filtered := jsonPath(products, `$[?(@.tags subsetof ['red','sale','blue'])].name`); fmtString(filtered) != `["a","b"]` {
 		t.Fatalf("subset filter %#v", filtered)

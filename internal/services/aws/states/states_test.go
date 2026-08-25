@@ -1701,6 +1701,8 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.products[?(@.price < $.limit)]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(10 > @.price)]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.name =~ /[AB]/i)]","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.name in ['a','c'])]","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.inside)]","End":true}}}`,
 		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","ResultSelector":{"value.$":"$.value"},"End":true}}}`,
 	} {
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
@@ -3282,7 +3284,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	products := []any{
 		map[string]any{"name": "a", "code": "a/b", "price": 5.0, "limit": 10.0, "active": true, "note": nil, "metrics": []any{5.0}, "tags": []any{"red", "sale"}},
 		map[string]any{"name": "b", "price": 12.0, "limit": 10.0, "active": false, "metrics": []any{4.0}, "tags": []any{"blue"}},
-		map[string]any{"name": "c", "price": 8.0, "limit": 9.0, "active": true, "note": "x", "metrics": []any{6.0}},
+		map[string]any{"name": "c", "price": 8.0, "limit": 9.0, "active": true, "note": "x", "metrics": []any{6.0}, "tags": []any{"green"}},
 	}
 	if filtered := jsonPath(products, "$[?(@.price < 10)].name"); fmtString(filtered) != `["a","c"]` {
 		t.Fatalf("numeric filter %#v", filtered)
@@ -3329,6 +3331,21 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if filtered := jsonPath(products, `$[?(@.tags =~ /red/)].name`); fmtString(filtered) != `["a"]` {
 		t.Fatalf("array regex filter %#v", filtered)
 	}
+	if filtered := jsonPath(products, `$[?(@.name in ['a','c'])].name`); fmtString(filtered) != `["a","c"]` {
+		t.Fatalf("in filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, `$[?(@.name nin ['a','c'])].name`); fmtString(filtered) != `["b"]` {
+		t.Fatalf("not-in filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, `$[?(@.tags subsetof ['red','sale','blue'])].name`); fmtString(filtered) != `["a","b"]` {
+		t.Fatalf("subset filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, `$[?(@.tags anyof ['sale'])].name`); fmtString(filtered) != `["a"]` {
+		t.Fatalf("any-of filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, `$[?(@.tags noneof ['sale'])].name`); fmtString(filtered) != `["b","c"]` {
+		t.Fatalf("none-of filter %#v", filtered)
+	}
 	if filtered := jsonPath([]any{1.0, 2.0, 3.0}, "$[?(@ > 1)]"); fmtString(filtered) != `[2,3]` {
 		t.Fatalf("primitive filter %#v", filtered)
 	}
@@ -3341,6 +3358,10 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	}
 	if filtered := jsonPath(filterRoot, "$.products[?($.limit > @.price)].name"); fmtString(filtered) != `["a"]` {
 		t.Fatalf("root-left path filter %#v", filtered)
+	}
+	filterRoot["allowed"] = []any{"a", "c"}
+	if filtered := jsonPath(filterRoot, "$.products[?(@.name in $.allowed)].name"); fmtString(filtered) != `["a","c"]` {
+		t.Fatalf("collection path filter %#v", filtered)
 	}
 	if filtered := jsonPath(products, "$[?(@.price < $limit)].name", map[string]any{"limit": 8.0}); fmtString(filtered) != `["a"]` {
 		t.Fatalf("variable path filter %#v", filtered)

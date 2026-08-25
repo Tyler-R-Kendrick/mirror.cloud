@@ -4949,9 +4949,17 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 					}
 				}
 				descend(node)
+			case 'q':
+				if array, ok := node.([]any); ok {
+					for _, value := range array {
+						if matchChoice(token.filter, value) {
+							next = append(next, value)
+						}
+					}
+				}
 			}
 		}
-		if token.kind == '*' || token.kind == 's' || token.kind == 'u' || token.kind == 'r' {
+		if token.kind == '*' || token.kind == 's' || token.kind == 'u' || token.kind == 'r' || token.kind == 'q' {
 			multiple = true
 		}
 		nodes = next
@@ -4974,6 +4982,7 @@ type pathToken struct {
 	start, end int
 	step       int
 	selectors  []pathToken
+	filter     map[string]any
 }
 
 func jsonPathTokens(path string) ([]pathToken, bool) {
@@ -5092,6 +5101,12 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 			continue
 		}
 		switch {
+		case strings.HasPrefix(member, "?(") && strings.HasSuffix(member, ")"):
+			rule, valid := jsonPathFilterRule(member[2 : len(member)-1])
+			if !valid {
+				return nil, false
+			}
+			tokens = append(tokens, pathToken{kind: 'q', filter: rule})
 		case len(member) >= 2 && (member[0] == '\'' || member[0] == '"'):
 			key, valid := unquote(member)
 			if !valid {
@@ -5135,6 +5150,95 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 		}
 	}
 	return tokens, true
+}
+
+func jsonPathFilterRule(expression string) (map[string]any, bool) {
+	expression = strings.TrimSpace(expression)
+	operator, operatorAt, quote := "", -1, byte(0)
+	for index := 0; index < len(expression); index++ {
+		switch {
+		case quote != 0 && expression[index] == '\\':
+			index++
+		case quote != 0 && expression[index] == quote:
+			quote = 0
+		case quote == 0 && (expression[index] == '\'' || expression[index] == '"'):
+			quote = expression[index]
+		case quote == 0:
+			for _, candidate := range []string{"==", "!=", "<=", ">=", "<", ">"} {
+				if strings.HasPrefix(expression[index:], candidate) {
+					operator, operatorAt = candidate, index
+					break
+				}
+			}
+			if operatorAt >= 0 {
+				index = len(expression)
+			}
+		}
+	}
+	left := expression
+	if operatorAt >= 0 {
+		left = expression[:operatorAt]
+	}
+	left = strings.TrimSpace(left)
+	if !strings.HasPrefix(left, "@") {
+		return nil, false
+	}
+	left = "$" + left[1:]
+	if !validJSONPath(left, true) {
+		return nil, false
+	}
+	if operatorAt < 0 {
+		return map[string]any{"Variable": left, "IsPresent": true}, true
+	}
+	rawRight := strings.TrimSpace(expression[operatorAt+len(operator):])
+	var right any
+	if len(rawRight) >= 2 && rawRight[0] == '\'' && rawRight[len(rawRight)-1] == '\'' {
+		var value strings.Builder
+		for index := 1; index < len(rawRight)-1; index++ {
+			if rawRight[index] == '\\' {
+				index++
+				if index == len(rawRight)-1 {
+					return nil, false
+				}
+			}
+			value.WriteByte(rawRight[index])
+		}
+		right = value.String()
+	} else if json.Unmarshal([]byte(rawRight), &right) != nil {
+		return nil, false
+	}
+	if right == nil {
+		if operator != "==" && operator != "!=" {
+			return nil, false
+		}
+		rule := map[string]any{"Variable": left, "IsNull": true}
+		if operator == "!=" {
+			return map[string]any{"Not": rule}, true
+		}
+		return rule, true
+	}
+	prefix := ""
+	switch right.(type) {
+	case string:
+		prefix = "String"
+	case float64:
+		prefix = "Numeric"
+	case bool:
+		if operator != "==" && operator != "!=" {
+			return nil, false
+		}
+		prefix = "Boolean"
+	default:
+		return nil, false
+	}
+	suffix := map[string]string{"==": "Equals", "<": "LessThan", "<=": "LessThanEquals", ">": "GreaterThan", ">=": "GreaterThanEquals"}[operator]
+	if operator == "!=" {
+		return map[string]any{"Not": map[string]any{"Variable": left, prefix + "Equals": right}}, true
+	}
+	if suffix == "" {
+		return nil, false
+	}
+	return map[string]any{"Variable": left, prefix + suffix: right}, true
 }
 
 func validJSONPath(path string, reference bool) bool {

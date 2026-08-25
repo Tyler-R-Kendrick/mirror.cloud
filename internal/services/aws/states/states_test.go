@@ -1698,6 +1698,7 @@ func TestStatesDataFlowValidation(t *testing.T) {
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[0:3:2]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.price < 10)]","End":true}}}`,
 		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$[?(@.active == true && @.price < @.limit)]","End":true}}}`,
+		`{"StartAt":"Pass","States":{"Pass":{"Type":"Pass","OutputPath":"$.products[?(@.price < $.limit)]","End":true}}}`,
 		`{"StartAt":"Task","States":{"Task":{"Type":"Task","Resource":"x","ResultSelector":{"value.$":"$.value"},"End":true}}}`,
 	} {
 		if diagnostics := validateDefinition(definition); len(diagnostics) != 0 {
@@ -3299,6 +3300,16 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	}
 	if filtered := jsonPath(products, "$[?(@.price < @.limit)].name"); fmtString(filtered) != `["a","c"]` {
 		t.Fatalf("path filter %#v", filtered)
+	}
+	filterRoot := map[string]any{"limit": 10.0, "products": products}
+	if filtered := jsonPath(filterRoot, "$.products[?(@.price < $.limit)].name"); fmtString(filtered) != `["a","c"]` {
+		t.Fatalf("root path filter %#v", filtered)
+	}
+	if filtered := jsonPath(filterRoot, "$.products[?($.limit > @.price)].name"); fmtString(filtered) != `["a","c"]` {
+		t.Fatalf("root-left path filter %#v", filtered)
+	}
+	if filtered := jsonPath(products, "$[?(@.price < $limit)].name", map[string]any{"limit": 8.0}); fmtString(filtered) != `["a"]` {
+		t.Fatalf("variable path filter %#v", filtered)
 	}
 	if filtered := jsonPath(products, "$[?(@.active == true && @.price < 6)].name"); fmtString(filtered) != `["a"]` {
 		t.Fatalf("and filter %#v", filtered)

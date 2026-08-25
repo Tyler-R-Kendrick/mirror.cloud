@@ -1731,6 +1731,7 @@ func TestStatesReferencePathValidation(t *testing.T) {
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Wait","SecondsPath":"$[*]","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","TimeoutSecondsPath":"$..timeout","End":true}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Choice","Choices":[{"Variable":"$[*]","StringEquals":"x","Next":"Done"}]},"Done":{"Type":"Succeed"}}}`,
+		`{"StartAt":"Bad","States":{"Bad":{"Type":"Choice","Choices":[{"Variable":"$.actual","StringEqualsPath":"$[0]expected","Next":"Done"}]},"Done":{"Type":"Succeed"}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Fail","ErrorPath":"$[*]"}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Task","Resource":"x","Catch":[{"ErrorEquals":["Boom"],"ResultPath":"$[*]","Next":"Done"}],"End":true},"Done":{"Type":"Succeed"}}}`,
 		`{"StartAt":"Bad","States":{"Bad":{"Type":"Map","ItemsPath":"$[*]",` + processor + `,"End":true}}}`,

@@ -2528,8 +2528,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-treat-json-path-array-union-as-single",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if token.kind == '*' || token.kind == 's' || token.kind == 'u' {`,
-			new:  `if token.kind == '*' || token.kind == 's' {`,
+			old:  `if token.kind == '*' || token.kind == 's' || token.kind == 'u' || token.kind == 'r' {`,
+			new:  `if token.kind == '*' || token.kind == 's' || token.kind == 'r' {`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},

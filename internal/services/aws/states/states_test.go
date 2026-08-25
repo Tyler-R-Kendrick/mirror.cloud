@@ -3222,8 +3222,14 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	if out, ok := applyResultPath(map[string]any{"ResultPath": `$[-1]['result.value']`}, arrayInput, 3); !ok || jsonPath(out, `$[1]['result.value']`) != 3 {
 		t.Fatalf("array ResultPath %#v", out)
 	}
+	if out, ok := applyResultPath(map[string]any{"ResultPath": "$[-1]"}, []any{1.0, 2.0}, 3); !ok || jsonPath(out, "$[1]") != 3 {
+		t.Fatalf("direct array ResultPath %#v", out)
+	}
 	if _, ok := applyResultPath(map[string]any{"ResultPath": "$.result.value"}, map[string]any{"result": 1.0}, 3); ok {
 		t.Fatal("conflicting ResultPath")
+	}
+	if _, ok := applyResultPath(map[string]any{"ResultPath": "$[*]"}, []any{1.0}, 3); ok {
+		t.Fatal("non-reference ResultPath")
 	}
 	if out, ok := applyResultPath(map[string]any{"ResultPath": "$"}, nested, 4); !ok || out != 4 {
 		t.Fatalf("root ResultPath %#v", out)

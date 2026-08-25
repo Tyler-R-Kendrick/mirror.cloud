@@ -4899,7 +4899,7 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 	multiple := false
 	var filterVariables map[string]any
 	for _, token := range tokens {
-		if token.kind == 'l' {
+		if token.kind == 'l' || token.kind == 'n' {
 			value := any(nodes)
 			if len(nodes) == 1 {
 				value = nodes[0]
@@ -4908,7 +4908,42 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 			if !valid {
 				return nil, false
 			}
-			nodes, multiple = []any{float64(len(array))}, false
+			if token.kind == 'l' {
+				nodes, multiple = []any{float64(len(array))}, false
+				continue
+			}
+			values := make([]float64, 0, len(array))
+			for _, item := range array {
+				if number, numeric := choiceNumber(item); numeric {
+					values = append(values, number)
+				}
+			}
+			if len(values) == 0 {
+				return nil, false
+			}
+			result := values[0]
+			switch token.key {
+			case "min":
+				result = slices.Min(values)
+			case "max":
+				result = slices.Max(values)
+			case "avg", "sum", "stddev":
+				result = 0
+				for _, number := range values {
+					result += number
+				}
+				if token.key == "avg" {
+					result /= float64(len(values))
+				} else if token.key == "stddev" {
+					average := result / float64(len(values))
+					result = 0
+					for _, number := range values {
+						result += (number - average) * (number - average)
+					}
+					result = math.Sqrt(result / float64(len(values)))
+				}
+			}
+			nodes, multiple = []any{result}, false
 			continue
 		}
 		var next []any
@@ -5087,6 +5122,18 @@ func jsonPathTokens(path string) ([]pathToken, bool) {
 		if !recursive && path == "length()" {
 			tokens = append(tokens, pathToken{kind: 'l'})
 			break
+		}
+		if !recursive {
+			for _, function := range []string{"min", "max", "avg", "stddev", "sum"} {
+				if path == function+"()" {
+					tokens = append(tokens, pathToken{kind: 'n', key: function})
+					path = ""
+					break
+				}
+			}
+			if path == "" {
+				break
+			}
 		}
 		if path[0] != '[' {
 			var key strings.Builder

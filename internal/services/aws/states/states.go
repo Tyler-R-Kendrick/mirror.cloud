@@ -1106,7 +1106,38 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if input != "" && json.Unmarshal([]byte(input), &data) != nil {
 			return nil, &spi.Fault{Code: "InvalidExecutionInput", HTTPStatus: 400, Fault: "client"}
 		}
-		wrapped, next, err := testDefinition(definition, first(req.Input, "stateName", "StateName"), data)
+		var mock map[string]any
+		if value, exists := inputValue(req.Input, "mock", "Mock"); exists {
+			var valid bool
+			mock, valid = value.(map[string]any)
+			if !valid {
+				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+			}
+			mode := first(mock, "fieldValidationMode", "FieldValidationMode")
+			if mode != "" && mode != "STRICT" && mode != "PRESENT" && mode != "NONE" {
+				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+			}
+			result, hasResult := inputValue(mock, "result", "Result")
+			errorOutput, hasError := inputValue(mock, "errorOutput", "ErrorOutput")
+			if hasResult == hasError {
+				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+			}
+			if hasResult {
+				raw, valid := result.(string)
+				var decoded any
+				if !valid || len(raw) > 262144 || json.Unmarshal([]byte(raw), &decoded) != nil {
+					return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+				}
+				mock = map[string]any{"Result": decoded}
+			} else {
+				failure, valid := errorOutput.(map[string]any)
+				if !valid || first(failure, "error", "Error") == "" {
+					return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+				}
+				mock = map[string]any{"ErrorOutput": failure}
+			}
+		}
+		wrapped, next, err := testDefinition(definition, first(req.Input, "stateName", "StateName"), data, mock)
 		if err != nil {
 			return nil, &spi.Fault{Code: "InvalidDefinition", Message: err.Error(), HTTPStatus: 400, Fault: "client"}
 		}
@@ -1842,6 +1873,9 @@ walkLoop:
 				setJSONataRetryCount(stateContext, retries[cur])
 				payload, payloadOK := taskPayload(st, data, mergeJSONataContext(stateContext, taskContext), p.deps.Rand, variables)
 				failure := stateFailure{}
+				if mocked, exists := st["_TestStateMockError"].(map[string]any); exists {
+					failure = stateFailure{name: first(mocked, "error", "Error"), cause: first(mocked, "cause", "Cause")}
+				}
 				if !payloadOK {
 					failure = stateFailure{name: "States.Runtime", cause: "States.Runtime"}
 				}
@@ -1894,7 +1928,8 @@ walkLoop:
 				if failure.name == "" && !validStatePayload(payload) {
 					return walkResult{out: rawInput, status: "FAILED", cause: "States.DataLimitExceeded", errorName: "States.DataLimitExceeded", hist: hist}
 				}
-				if failure.name == "" && strings.Contains(res, ":activity:") {
+				mockedResult, mocked := st["_TestStateMockResult"]
+				if failure.name == "" && !mocked && strings.Contains(res, ":activity:") {
 					tok := p.deps.Rand.Hex(16)
 					return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
 						Token: tok, ActivityARN: res, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Variables: variables, Deadline: first(req.Input, "_executionDeadline"),
@@ -1902,7 +1937,10 @@ walkLoop:
 					}}
 				}
 				if failure.name == "" {
-					out, err, errorPrefix, sdk, supported := p.invokeTask(ctx, taskReq, res, payload)
+					out, err, errorPrefix, sdk, supported := mockedResult, error(nil), "", false, true
+					if !mocked {
+						out, err, errorPrefix, sdk, supported = p.invokeTask(ctx, taskReq, res, payload)
+					}
 					if !supported {
 						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
 					}
@@ -1910,7 +1948,7 @@ walkLoop:
 						failure = taskFailure(errorPrefix, sdk, err)
 					} else if !validStatePayload(out) {
 						return walkResult{out: rawInput, status: "FAILED", cause: "States.DataLimitExceeded", errorName: "States.DataLimitExceeded", hist: hist}
-					} else if callback {
+					} else if callback && !mocked {
 						pendingTask := &pending{
 							Token: token, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Variables: variables, Callback: true, Deadline: first(req.Input, "_executionDeadline"),
 							TimeoutSeconds: int(timeout), HeartbeatSeconds: int(heartbeat),
@@ -6978,7 +7016,7 @@ func supportedStateType(typ string) bool {
 	}
 }
 
-func testDefinition(definition, stateName string, input any) (string, string, error) {
+func testDefinition(definition, stateName string, input any, mock map[string]any) (string, string, error) {
 	var parsed map[string]any
 	if json.Unmarshal([]byte(definition), &parsed) != nil {
 		return "", "", fmt.Errorf("definition is not valid JSON")
@@ -6993,13 +7031,21 @@ func testDefinition(definition, stateName string, input any) (string, string, er
 	if !supportedStateType(first(state, "Type")) {
 		return "", "", fmt.Errorf("state does not have a supported Type")
 	}
-	if typ := first(state, "Type"); typ == "Parallel" || typ == "Map" || typ == "Task" && strings.Contains(first(state, "Resource"), ":activity:") {
+	if typ := first(state, "Type"); mock == nil && (typ == "Parallel" || typ == "Map" || typ == "Task" && strings.Contains(first(state, "Resource"), ":activity:")) {
 		return "", "", fmt.Errorf("state requires a mock")
+	}
+	if mock != nil && first(state, "Type") != "Task" {
+		return "", "", fmt.Errorf("mock requires a Task state")
 	}
 	next := first(state, "Next")
 	copy := map[string]any{}
 	for key, value := range state {
 		copy[key] = value
+	}
+	if result, exists := mock["Result"]; exists {
+		copy["_TestStateMockResult"] = result
+	} else if failure, exists := mock["ErrorOutput"]; exists {
+		copy["_TestStateMockError"] = failure
 	}
 	if first(copy, "Type") == "Choice" {
 		next = choiceNext(copy, input)

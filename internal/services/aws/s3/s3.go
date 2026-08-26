@@ -113,7 +113,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "GetBucketLocation":
 		return p.getBucketLocation(ctx, req)
 	case "PutObject":
-		return p.putObject(ctx, req)
+		return p.putObject(ctx, req, "")
 	case "GetObject":
 		return p.getObject(ctx, req)
 	case "HeadObject":
@@ -470,7 +470,7 @@ func (p *Pack) getBucketLocation(ctx context.Context, req *spi.Request) (*spi.Re
 	return &spi.Response{Output: map[string]any{"LocationConstraint": req.Identity.Region}}, nil
 }
 
-func (p *Pack) putObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag string) (*spi.Response, error) {
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
@@ -486,7 +486,9 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if err != nil {
 		return nil, err
 	}
-	etag := `"` + info.MD5 + `"`
+	if etag == "" {
+		etag = `"` + info.MD5 + `"`
+	}
 	mtime := p.deps.Clock.Now().UTC().Format(http.TimeFormat)
 	storageClass := str(req.Input["StorageClass"])
 	if storageClass == "" {
@@ -546,7 +548,7 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 		return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: 404, Fault: "client"}
 	}
 	h := http.Header{}
-	etag := `"` + info.MD5 + `"`
+	etag := objectETag(meta, info.MD5)
 	h.Set("ETag", etag)
 	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
 	mtime := str(meta["mtime"])
@@ -602,6 +604,10 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	if raw, ok, _ := p.col(req, "objects").Get(ctx, b+"/"+key); ok {
 		var meta map[string]any
 		_ = json.Unmarshal(raw, &meta)
+		h.Set("ETag", objectETag(meta, info.MD5))
+		if modified := str(meta["mtime"]); modified != "" {
+			h.Set("Last-Modified", modified)
+		}
 		setReplicationHeaders(h, meta)
 	}
 	return &spi.Response{Status: 200, Headers: h}, nil
@@ -756,7 +762,7 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		return nil, err
 	}
 	defer source.body.Close()
-	if err := checkCopySourcePreconditions(req, `"`+source.info.MD5+`"`, str(source.meta["mtime"])); err != nil {
+	if err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta["mtime"])); err != nil {
 		return nil, err
 	}
 	directive := str(req.Input["TaggingDirective"])
@@ -771,7 +777,7 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		req.Input["Tagging"] = values.Encode()
 	}
 	req.Body = source.body
-	response, err := p.putObject(ctx, req)
+	response, err := p.putObject(ctx, req, "")
 	if err == nil && source.version != "" {
 		response.Headers.Set("x-amz-copy-source-version-id", source.version)
 	}
@@ -793,7 +799,7 @@ func (p *Pack) uploadPartCopy(ctx context.Context, req *spi.Request) (*spi.Respo
 		return nil, err
 	}
 	defer source.body.Close()
-	if err := checkCopySourcePreconditions(req, `"`+source.info.MD5+`"`, str(source.meta["mtime"])); err != nil {
+	if err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta["mtime"])); err != nil {
 		return nil, err
 	}
 	req.Body = source.body
@@ -877,7 +883,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	etag := fmt.Sprintf(`"%s-%d"`, hex.EncodeToString(sum[:]), len(parts))
 	req.Input["Bucket"], req.Input["Key"] = bucket, key
 	req.Body = io.NopCloser(&buf)
-	resp, err := p.putObject(ctx, req)
+	resp, err := p.putObject(ctx, req, etag)
 	if err != nil {
 		return nil, err
 	}
@@ -1389,6 +1395,13 @@ func applyCopySourceRange(body []byte, value string) ([]byte, error) {
 		end = len(body) - 1
 	}
 	return body[start : end+1], nil
+}
+
+func objectETag(meta map[string]any, md5sum string) string {
+	if etag := str(meta["etag"]); etag != "" {
+		return etag
+	}
+	return `"` + md5sum + `"`
 }
 
 func etagMatches(condition, etag string) bool {

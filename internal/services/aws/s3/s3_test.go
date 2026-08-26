@@ -341,7 +341,12 @@ func TestMultipartETagForm(t *testing.T) {
 	if !regexp.MustCompile(`^"[0-9a-f]{32}-2"$`).MatchString(etag) {
 		t.Fatalf("multipart etag form: %q", etag)
 	}
-	got := readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "k"}, nil))
+	object := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "k"}, nil)
+	if object.Headers.Get("ETag") != etag || mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "k"}, nil).Headers.Get("ETag") != etag {
+		t.Fatal("multipart ETag was not persisted")
+	}
+	mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": "copy", "CopySource": "b/k", "CopySourceIfMatch": etag}, nil)
+	got := readStream(t, object)
 	if len(got) != len(firstBody)+3 || !bytes.Equal(got[:len(firstBody)], firstBody) || string(got[len(firstBody):]) != "BBB" {
 		t.Fatalf("assembled %d bytes", len(got))
 	}

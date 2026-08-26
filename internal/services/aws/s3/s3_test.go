@@ -156,6 +156,12 @@ func TestTagValidationAndBucketSemantics(t *testing.T) {
 		}
 		return out
 	}
+	mustInvoke(t, p, "PutObjectTagging", map[string]any{"Bucket": "b", "Key": "source", "TagSet": tags(10)}, nil)
+	mustInvoke(t, p, "PutBucketTagging", map[string]any{"Bucket": "b", "TagSet": tags(50)}, nil)
+	characterization["acceptedObjectTags"] = 10
+	characterization["acceptedBucketTags"] = 50
+	mustInvoke(t, p, "PutObjectTagging", map[string]any{"Bucket": "b", "Key": "source", "TagSet": valid}, nil)
+	mustInvoke(t, p, "DeleteBucketTagging", map[string]any{"Bucket": "b"}, nil)
 	for _, test := range []struct {
 		name string
 		set  any

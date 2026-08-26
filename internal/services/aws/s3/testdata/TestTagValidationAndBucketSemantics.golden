@@ -4,6 +4,8 @@
   "GetBucketTaggingMissingBucket": "NoSuchBucket",
   "PutBucketTaggingMissingBucket": "NoSuchBucket",
   "PutObjectDuplicateHeader": "InvalidArgument",
+  "acceptedBucketTags": 50,
+  "acceptedObjectTags": 10,
   "duplicate-key": "InvalidTag",
   "empty-key": "InvalidTag",
   "invalid-header-key": "InvalidArgument",

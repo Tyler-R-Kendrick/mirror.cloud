@@ -836,21 +836,46 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	id := mpuID(req)
 	p.mu.Lock()
 	u := p.mpu[id]
+	var bucket, key string
+	stored := map[int][]byte{}
+	if u != nil {
+		bucket, key = u.bucket, u.key
+		for number, body := range u.parts {
+			stored[number] = body
+		}
+	}
 	p.mu.Unlock()
 	if u == nil {
 		return nil, &spi.Fault{Code: "NoSuchUpload", HTTPStatus: 404, Fault: "client"}
 	}
+	parts := asSlice(asMap(req.Input["MultipartUpload"])["Parts"])
+	if len(parts) == 0 {
+		return nil, &spi.Fault{Code: "InvalidPart", HTTPStatus: 400, Fault: "client"}
+	}
 	var buf bytes.Buffer
 	var md5s []byte
-	for i := 1; i <= len(u.parts); i++ {
-		part := u.parts[i]
-		buf.Write(part)
+	previous := 0
+	for index, completed := range parts {
+		item := asMap(completed)
+		number := asInt(item["PartNumber"])
+		if number <= previous {
+			return nil, &spi.Fault{Code: "InvalidPartOrder", HTTPStatus: 400, Fault: "client"}
+		}
+		part, exists := stored[number]
 		s := md5.Sum(part)
+		if !exists || strings.Trim(strings.TrimSpace(str(item["ETag"])), `"`) != hex.EncodeToString(s[:]) {
+			return nil, &spi.Fault{Code: "InvalidPart", HTTPStatus: 400, Fault: "client"}
+		}
+		if index < len(parts)-1 && len(part) < 5<<20 {
+			return nil, &spi.Fault{Code: "EntityTooSmall", HTTPStatus: 400, Fault: "client"}
+		}
+		buf.Write(part)
 		md5s = append(md5s, s[:]...)
+		previous = number
 	}
 	sum := md5.Sum(md5s)
-	etag := fmt.Sprintf(`"%s-%d"`, hex.EncodeToString(sum[:]), len(u.parts))
-	req.Input["Bucket"], req.Input["Key"] = u.bucket, u.key
+	etag := fmt.Sprintf(`"%s-%d"`, hex.EncodeToString(sum[:]), len(parts))
+	req.Input["Bucket"], req.Input["Key"] = bucket, key
 	req.Body = io.NopCloser(&buf)
 	resp, err := p.putObject(ctx, req)
 	if err != nil {
@@ -860,7 +885,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 		resp.Headers = http.Header{}
 	}
 	resp.Headers.Set("ETag", etag)
-	resp.Output = map[string]any{"Bucket": u.bucket, "Key": u.key, "ETag": etag}
+	resp.Output = map[string]any{"Bucket": bucket, "Key": key, "ETag": etag}
 	p.mu.Lock()
 	delete(p.mpu, id)
 	p.mu.Unlock()

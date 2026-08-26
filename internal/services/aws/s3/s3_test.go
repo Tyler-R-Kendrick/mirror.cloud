@@ -297,6 +297,42 @@ func TestDeleteBucketClearsBucketState(t *testing.T) {
 	}
 }
 
+func TestBucketVersioningState(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	input := map[string]any{"Bucket": "versioning-bucket"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	if got := mustInvoke(t, p, "GetBucketVersioning", input, nil).Output; len(got) != 0 {
+		t.Fatalf("unset versioning = %#v", got)
+	}
+
+	for _, test := range []struct {
+		status  string
+		code    string
+		message string
+	}{
+		{"", "IllegalVersioningConfigurationException", "The Versioning element must be specified"},
+		{"Invalid", "MalformedXML", ""},
+	} {
+		_, err := invoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "versioning-bucket", "Status": test.status}, nil)
+		fault := asFault(t, err)
+		if fault.Code != test.code || fault.Message != test.message || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("status %q = %#v", test.status, fault)
+		}
+		if got := mustInvoke(t, p, "GetBucketVersioning", input, nil).Output; len(got) != 0 {
+			t.Fatalf("status %q persisted: %#v", test.status, got)
+		}
+	}
+
+	for _, status := range []string{"Enabled", "Suspended"} {
+		if got := mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "versioning-bucket", "Status": status}, nil).Output; len(got) != 0 {
+			t.Fatalf("put %s output = %#v", status, got)
+		}
+		if got := mustInvoke(t, p, "GetBucketVersioning", input, nil).Output["Status"]; got != status {
+			t.Fatalf("get %s = %v", status, got)
+		}
+	}
+}
+
 func TestObjectMetadata(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)

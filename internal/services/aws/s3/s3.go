@@ -1595,10 +1595,13 @@ func (p *Pack) versioning(ctx context.Context, req *spi.Request) (*spi.Response,
 	if req.Operation == "PutBucketVersioning" {
 		st := str(req.Input["Status"])
 		if st == "" {
-			st = "Enabled"
+			return nil, &spi.Fault{Code: "IllegalVersioningConfigurationException", Message: "The Versioning element must be specified", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		if st != "Enabled" && st != "Suspended" {
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
 		_ = p.col(req, "versioning").Put(ctx, b, []byte(st))
-		return &spi.Response{Status: 200, Output: map[string]any{"Status": st}}, nil
+		return &spi.Response{Status: 200, Output: map[string]any{}}, nil
 	}
 	raw, ok, _ := p.col(req, "versioning").Get(ctx, b)
 	if !ok || len(raw) == 0 {

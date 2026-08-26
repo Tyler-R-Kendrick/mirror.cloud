@@ -378,8 +378,26 @@ func TestWriteChecksumValidation(t *testing.T) {
 		"ChecksumSHA256":    b64(sha256sum[:]),
 		"ChecksumSHA512":    b64(sha512sum[:]),
 	}
+	responseHeaders := map[string]string{
+		"ChecksumMD5": "x-amz-checksum-md5", "ChecksumCRC32": "x-amz-checksum-crc32", "ChecksumCRC32C": "x-amz-checksum-crc32c",
+		"ChecksumCRC64NVME": "x-amz-checksum-crc64nvme", "ChecksumSHA1": "x-amz-checksum-sha1",
+		"ChecksumSHA256": "x-amz-checksum-sha256", "ChecksumSHA512": "x-amz-checksum-sha512",
+	}
 	for name, value := range checksums {
-		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": name, name: value}, body)
+		put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": name, name: value}, body)
+		if header := responseHeaders[name]; header != "" {
+			if put.Headers.Get(header) != value || put.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+				t.Fatalf("%s put checksum headers = %v", name, put.Headers)
+			}
+			get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": name, "ChecksumMode": "ENABLED"}, nil)
+			if get.Headers.Get(header) != value || get.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+				t.Fatalf("%s get checksum headers = %v", name, get.Headers)
+			}
+			_ = get.Stream.Close()
+			if head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": name, "ChecksumMode": "ENABLED"}, nil); head.Headers.Get(header) != value {
+				t.Fatalf("%s head checksum headers = %v", name, head.Headers)
+			}
+		}
 		_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": name + "-bad", name: "AA=="}, body)
 		if fault := asFault(t, err); fault.Code != "BadDigest" || fault.HTTPStatus != http.StatusBadRequest {
 			t.Fatalf("%s fault = %#v", name, fault)
@@ -401,6 +419,9 @@ func TestWriteChecksumValidation(t *testing.T) {
 		t.Fatalf("upload checksum fault = %#v", fault)
 	}
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 1, "ChecksumMD5": checksums["ChecksumMD5"]}, body)
+	if part.Headers.Get("x-amz-checksum-md5") != checksums["ChecksumMD5"] {
+		t.Fatalf("upload checksum headers = %v", part.Headers)
+	}
 	complete := completeInput(uploadID, completedPart(1, part))
 	complete["ChecksumMD5"] = "AA=="
 	_, err = invoke(t, p, "CompleteMultipartUpload", complete, nil)
@@ -408,7 +429,10 @@ func TestWriteChecksumValidation(t *testing.T) {
 		t.Fatalf("complete checksum fault = %#v", fault)
 	}
 	complete["ChecksumMD5"] = checksums["ChecksumMD5"]
-	mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
+	done := mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
+	if done.Output["ChecksumMD5"] != checksums["ChecksumMD5"] || done.Output["ChecksumType"] != "FULL_OBJECT" {
+		t.Fatalf("complete checksum output = %#v", done.Output)
+	}
 }
 
 func TestCompleteMultipartUploadManifest(t *testing.T) {

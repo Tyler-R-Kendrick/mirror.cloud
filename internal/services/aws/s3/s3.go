@@ -492,6 +492,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag string) (*s
 	if err := validateChecksum(req, body); err != nil {
 		return nil, err
 	}
+	provided := providedChecksums(req)
 	info, err := p.deps.Blobs.Put(ctx, blobKey(req, b, key), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -508,10 +509,17 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag string) (*s
 	if p.versioningEnabled(ctx, req, b) {
 		vid = p.deps.Rand.Hex(8)
 		_, _ = p.deps.Blobs.Put(ctx, blobKey(req, b, key)+"@"+vid, bytes.NewReader(body))
-		vm, _ := json.Marshal(map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "mtime": mtime, "key": key, "storageClass": storageClass})
+		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "mtime": mtime, "key": key, "storageClass": storageClass}
+		if len(provided) > 0 {
+			versionMeta["checksums"] = provided
+		}
+		vm, _ := json.Marshal(versionMeta)
 		_ = p.col(req, "versions").Put(ctx, b+"/"+key+"/"+vid, vm)
 	}
 	metaDoc := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "versionId": vid, "deleteMarker": false, "storageClass": storageClass}
+	if len(provided) > 0 {
+		metaDoc["checksums"] = provided
+	}
 	meta, _ := json.Marshal(metaDoc)
 	_ = p.col(req, "objects").Put(ctx, b+"/"+key, meta)
 	if tags := requestTags(req); len(tags) > 0 {
@@ -523,10 +531,11 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag string) (*s
 	if vid != "" {
 		h.Set("x-amz-version-id", vid)
 	}
-	if req.HTTP != nil {
-		if c := req.HTTP.Header.Get("x-amz-checksum-crc32"); c != "" {
-			h.Set("x-amz-checksum-crc32", c)
-		}
+	for header, value := range provided {
+		h.Set(header, value)
+	}
+	if len(provided) > 0 {
+		h.Set("x-amz-checksum-type", "FULL_OBJECT")
 	}
 	if status := p.replicateObject(ctx, req, b, key, body, metaDoc); status != "" {
 		metaDoc["replicationStatus"] = status
@@ -575,6 +584,9 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if keyID := str(meta["ssekmsKeyId"]); keyID != "" {
 		h.Set("x-amz-server-side-encryption-aws-kms-key-id", keyID)
 	}
+	if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
+		setChecksumHeaders(h, meta)
+	}
 	setReplicationHeaders(h, meta)
 	data, _ := io.ReadAll(rc)
 	_ = rc.Close()
@@ -617,6 +629,9 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		h.Set("ETag", objectETag(meta, info.MD5))
 		if modified := str(meta["mtime"]); modified != "" {
 			h.Set("Last-Modified", modified)
+		}
+		if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
+			setChecksumHeaders(h, meta)
 		}
 		setReplicationHeaders(h, meta)
 	}
@@ -848,6 +863,9 @@ func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response,
 	etag := `"` + hex.EncodeToString(sum[:]) + `"`
 	h := http.Header{}
 	h.Set("ETag", etag)
+	for header, value := range providedChecksums(req) {
+		h.Set(header, value)
+	}
 	return &spi.Response{Headers: h, Output: map[string]any{"ETag": etag}}, nil
 }
 
@@ -911,6 +929,12 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	}
 	resp.Headers.Set("ETag", etag)
 	resp.Output = map[string]any{"Bucket": bucket, "Key": key, "ETag": etag}
+	for _, checksum := range checksums {
+		if value := requestCondition(req, checksum.input, checksum.header); value != "" {
+			resp.Output[checksum.input] = value
+			resp.Output["ChecksumType"] = "FULL_OBJECT"
+		}
+	}
 	p.mu.Lock()
 	delete(p.mpu, id)
 	p.mu.Unlock()
@@ -1426,6 +1450,15 @@ func objectETag(meta map[string]any, md5sum string) string {
 var (
 	crc32C    = crc32.MakeTable(crc32.Castagnoli)
 	crc64NVME = crc64.MakeTable(0x9a6c9329ac4bc9b5)
+	checksums = []struct{ input, header string }{
+		{"ChecksumMD5", "x-amz-checksum-md5"},
+		{"ChecksumCRC32", "x-amz-checksum-crc32"},
+		{"ChecksumCRC32C", "x-amz-checksum-crc32c"},
+		{"ChecksumCRC64NVME", "x-amz-checksum-crc64nvme"},
+		{"ChecksumSHA1", "x-amz-checksum-sha1"},
+		{"ChecksumSHA256", "x-amz-checksum-sha256"},
+		{"ChecksumSHA512", "x-amz-checksum-sha512"},
+	}
 )
 
 func validateChecksum(req *spi.Request, body []byte) error {
@@ -1447,27 +1480,40 @@ func validateChecksum(req *spi.Request, body []byte) error {
 	binary.BigEndian.PutUint32(crc32sum, crc32.ChecksumIEEE(body))
 	binary.BigEndian.PutUint32(crc32csum, crc32.Checksum(body, crc32C))
 	binary.BigEndian.PutUint64(crc64sum, crc64.Checksum(body, crc64NVME))
-	for _, checksum := range []struct {
-		input, header string
-		sum           []byte
-	}{
-		{"ContentMD5", "Content-MD5", md5sum[:]},
-		{"ChecksumMD5", "x-amz-checksum-md5", md5sum[:]},
-		{"ChecksumCRC32", "x-amz-checksum-crc32", crc32sum},
-		{"ChecksumCRC32C", "x-amz-checksum-crc32c", crc32csum},
-		{"ChecksumCRC64NVME", "x-amz-checksum-crc64nvme", crc64sum},
-		{"ChecksumSHA1", "x-amz-checksum-sha1", sha1sum[:]},
-		{"ChecksumSHA256", "x-amz-checksum-sha256", sha256sum[:]},
-		{"ChecksumSHA512", "x-amz-checksum-sha512", sha512sum[:]},
-	} {
+	sums := map[string][]byte{
+		"ContentMD5": md5sum[:], "ChecksumMD5": md5sum[:],
+		"ChecksumCRC32": crc32sum, "ChecksumCRC32C": crc32csum, "ChecksumCRC64NVME": crc64sum,
+		"ChecksumSHA1": sha1sum[:], "ChecksumSHA256": sha256sum[:], "ChecksumSHA512": sha512sum[:],
+	}
+	for _, checksum := range append([]struct{ input, header string }{{"ContentMD5", "Content-MD5"}}, checksums...) {
 		if value := requestCondition(req, checksum.input, checksum.header); value != "" {
 			decoded, err := base64.StdEncoding.DecodeString(value)
-			if err != nil || !bytes.Equal(decoded, checksum.sum) {
+			if err != nil || !bytes.Equal(decoded, sums[checksum.input]) {
 				return &spi.Fault{Code: "BadDigest", HTTPStatus: 400, Fault: "client"}
 			}
 		}
 	}
 	return nil
+}
+
+func providedChecksums(req *spi.Request) map[string]string {
+	provided := map[string]string{}
+	for _, checksum := range checksums {
+		if value := requestCondition(req, checksum.input, checksum.header); value != "" {
+			provided[checksum.header] = value
+		}
+	}
+	return provided
+}
+
+func setChecksumHeaders(headers http.Header, meta map[string]any) {
+	stored := asMap(meta["checksums"])
+	for header, value := range stored {
+		headers.Set(header, str(value))
+	}
+	if len(stored) > 0 {
+		headers.Set("x-amz-checksum-type", "FULL_OBJECT")
+	}
 }
 
 func etagMatches(condition, etag string) bool {

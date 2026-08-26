@@ -49,6 +49,11 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		o.BaseEndpoint = aws.String(ts.URL)
 		o.UsePathStyle = true
 	})
+	for _, name := range []string{"ab", "192.168.5.4", "reserved--table-s3"} {
+		if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String(name)}); err == nil || !strings.Contains(err.Error(), "InvalidBucketName") {
+			t.Fatalf("invalid bucket name %q: %v", name, err)
+		}
+	}
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk")}); err != nil {
 		t.Fatalf("create bucket: %v", err)
 	}

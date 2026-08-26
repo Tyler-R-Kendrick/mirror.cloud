@@ -189,6 +189,22 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given an invalid bucket name When creating it Then it is rejected", func(t *testing.T) {
+		for _, name := range []string{"ab", "192.168.5.4", "reserved--table-s3"} {
+			res := do(http.MethodPut, "/"+name, nil, "")
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidBucketName")) {
+				t.Fatalf("name %q = %d %s", name, res.StatusCode, body)
+			}
+		}
+		res := do(http.MethodPut, "/valid-after-invalid", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("valid create after invalid names %d", res.StatusCode)
+		}
+	})
+
 	t.Run("Given an invalid storage class When PUT object Then it is rejected", func(t *testing.T) {
 		res := do(http.MethodPut, "/classes", nil, "")
 		res.Body.Close()

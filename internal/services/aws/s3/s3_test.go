@@ -1839,6 +1839,29 @@ func TestXXHashMultipartChecksums(t *testing.T) {
 	}
 }
 
+func TestXXHashChecksumCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	body := []byte("123456789")
+	snapshot := map[string]any{}
+	for _, tc := range []struct{ algorithm, input, header, value string }{
+		{"XXHASH64", "ChecksumXXHASH64", "x-amz-checksum-xxhash64", "jLhB20DmroM="},
+		{"XXHASH3", "ChecksumXXHASH3", "x-amz-checksum-xxhash3", "ctyxi2ehff8="},
+		{"XXHASH128", "ChecksumXXHASH128", "x-amz-checksum-xxhash128", "MxGUd+3l3NXpcWQnaB1YYA=="},
+	} {
+		put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": tc.algorithm, tc.input: tc.value}, body)
+		get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": tc.algorithm, "ChecksumMode": "ENABLED"}, nil)
+		_ = get.Stream.Close()
+		snapshot[tc.algorithm] = map[string]any{"put": put.Headers.Get(tc.header), "get": get.Headers.Get(tc.header), "type": get.Headers.Get("x-amz-checksum-type")}
+	}
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "multipart", "ChecksumAlgorithm": "XXHASH128"}, nil)
+	id := created.Output["UploadId"].(string)
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "multipart", "UploadId": id, "PartNumber": 1}, body)
+	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, part)), nil)
+	snapshot["multipart"] = map[string]any{"part": part.Headers.Get("x-amz-checksum-xxhash128"), "complete": done.Output["ChecksumXXHASH128"], "type": done.Output["ChecksumType"]}
+	golden.AssertJSON(t, snapshot)
+}
+
 func TestMultipartChecksumCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

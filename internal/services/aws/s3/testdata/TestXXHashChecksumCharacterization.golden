@@ -1,0 +1,22 @@
+{
+  "XXHASH128": {
+    "get": "MxGUd+3l3NXpcWQnaB1YYA==",
+    "put": "MxGUd+3l3NXpcWQnaB1YYA==",
+    "type": "FULL_OBJECT"
+  },
+  "XXHASH3": {
+    "get": "ctyxi2ehff8=",
+    "put": "ctyxi2ehff8=",
+    "type": "FULL_OBJECT"
+  },
+  "XXHASH64": {
+    "get": "jLhB20DmroM=",
+    "put": "jLhB20DmroM=",
+    "type": "FULL_OBJECT"
+  },
+  "multipart": {
+    "complete": "qhtapxAN/tUuBHXli2H9nQ==-1",
+    "part": "MxGUd+3l3NXpcWQnaB1YYA==",
+    "type": "COMPOSITE"
+  }
+}

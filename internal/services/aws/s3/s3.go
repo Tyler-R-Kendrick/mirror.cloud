@@ -2041,7 +2041,7 @@ func partNumber(req *spi.Request) int {
 func objectPartRange(req *spi.Request, meta map[string]any, size int64) (start, length int64, count int, requested bool, err error) {
 	_, upper := req.Input["PartNumber"]
 	_, lower := req.Input["partNumber"]
-	requested = upper || lower || req.HTTP != nil && req.HTTP.URL.Query().Has("partNumber")
+	requested = upper || lower
 	if !requested {
 		return 0, size, 0, false, nil
 	}

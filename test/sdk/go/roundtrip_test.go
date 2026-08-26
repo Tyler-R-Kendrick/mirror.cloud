@@ -168,6 +168,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if aws.ToString(versionCopy.CopySourceVersionId) != aws.ToString(put.VersionId) {
 		t.Fatalf("copy source version %q want %q", aws.ToString(versionCopy.CopySourceVersionId), aws.ToString(put.VersionId))
 	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("bad-metadata-directive"), CopySource: aws.String("sdk/k"), MetadataDirective: s3types.MetadataDirective("INVALID")}); err == nil || !strings.Contains(err.Error(), "InvalidArgument") {
+		t.Fatalf("invalid metadata directive: %v", err)
+	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("bad-tagging-directive"), CopySource: aws.String("sdk/k"), TaggingDirective: s3types.TaggingDirective("INVALID")}); err == nil || !strings.Contains(err.Error(), "InvalidArgument") {
+		t.Fatalf("invalid tagging directive: %v", err)
+	}
 	versioned, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("version-copy")})
 	if err != nil {
 		t.Fatalf("get version copy: %v", err)

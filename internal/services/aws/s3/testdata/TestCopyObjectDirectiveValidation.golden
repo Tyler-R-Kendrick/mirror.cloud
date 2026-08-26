@@ -1,0 +1,6 @@
+{
+  "MetadataDirective-INVALID": "InvalidArgument",
+  "MetadataDirective-copy": "InvalidArgument",
+  "TaggingDirective-INVALID": "InvalidArgument",
+  "TaggingDirective-replace": "InvalidArgument"
+}

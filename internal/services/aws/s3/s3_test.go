@@ -182,6 +182,31 @@ func TestCopyObjectTaggingDirective(t *testing.T) {
 	}
 }
 
+func TestCopyObjectDirectiveValidation(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "source"}, []byte("body"))
+	errors := map[string]any{}
+	for _, test := range []struct{ input, value string }{
+		{"MetadataDirective", "INVALID"},
+		{"MetadataDirective", "copy"},
+		{"TaggingDirective", "INVALID"},
+		{"TaggingDirective", "replace"},
+	} {
+		key := test.input + "-" + test.value
+		_, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": key, "CopySource": "b/source", test.input: test.value}, nil)
+		fault := asFault(t, err)
+		if fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("%s=%s fault = %#v", test.input, test.value, fault)
+		}
+		errors[key] = fault.Code
+		if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": key}, nil); asFault(t, err).Code != "NoSuchKey" {
+			t.Fatalf("invalid directive created %s: %v", key, err)
+		}
+	}
+	golden.AssertJSON(t, errors)
+}
+
 func TestTagValidationAndBucketSemantics(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	characterization := map[string]any{}

@@ -404,4 +404,10 @@ func TestBootedServerS3VersionedTaggingContract(t *testing.T) {
 	if code, _, headers := do(http.MethodHead, "/tags/metadata-copy", "", nil); code != http.StatusOK || headers.Get("Content-Type") != "text/plain" || headers.Get("x-amz-meta-owner") != "mirror" || headers.Get("x-amz-website-redirect-location") != "" {
 		t.Fatalf("head copied metadata %d %v", code, headers)
 	}
+	for _, test := range []struct{ key, header string }{{"bad-metadata-directive", "x-amz-metadata-directive"}, {"bad-tagging-directive", "x-amz-tagging-directive"}} {
+		headers := map[string]string{"x-amz-copy-source": "tags/metadata", test.header: "INVALID"}
+		if code, body, _ := do(http.MethodPut, "/tags/"+test.key, "", headers); code != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidArgument")) {
+			t.Fatalf("%s %d %s", test.header, code, body)
+		}
+	}
 }

@@ -529,7 +529,24 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		root = "ListBucketResult"
 	}
 	fmt.Fprintf(&b, "<%s>", root)
-	write(resp.Output, &b)
+	if op.Name == "ListParts" {
+		top := make(map[string]any, len(resp.Output)-1)
+		for key, value := range resp.Output {
+			if key != "Parts" {
+				top[key] = value
+			}
+		}
+		write(top, &b)
+		if parts, ok := resp.Output["Parts"].([]any); ok {
+			for _, part := range parts {
+				b.WriteString("<Part>")
+				write(part, &b)
+				b.WriteString("</Part>")
+			}
+		}
+	} else {
+		write(resp.Output, &b)
+	}
 	fmt.Fprintf(&b, "</%s>", root)
 	_, err := io.WriteString(w, b.String())
 	return err

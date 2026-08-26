@@ -44,7 +44,14 @@ type Pack struct {
 
 type mpu struct {
 	bucket, key, uploadID string
-	parts                 map[int][]byte
+	storageClass          string
+	parts                 map[int]multipartPart
+}
+
+type multipartPart struct {
+	body      []byte
+	modified  string
+	checksums map[string]string
 }
 
 type copySource struct {
@@ -818,8 +825,12 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	id := p.deps.Rand.Hex(16)
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	storageClass := str(req.Input["StorageClass"])
+	if storageClass == "" {
+		storageClass = "STANDARD"
+	}
 	p.mu.Lock()
-	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, parts: map[int][]byte{}}
+	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, parts: map[int]multipartPart{}}
 	p.mu.Unlock()
 	return &spi.Response{Output: map[string]any{"Bucket": b, "Key": key, "UploadId": id}}, nil
 }
@@ -862,7 +873,7 @@ func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response,
 	p.mu.Lock()
 	u := p.mpu[id]
 	if u != nil {
-		u.parts[pn] = body
+		u.parts[pn] = multipartPart{body: body, modified: p.deps.Clock.Now().UTC().Format(time.RFC3339), checksums: providedChecksums(req)}
 	}
 	p.mu.Unlock()
 	sum := md5.Sum(body)
@@ -883,8 +894,8 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	stored := map[int][]byte{}
 	if u != nil {
 		bucket, key = u.bucket, u.key
-		for number, body := range u.parts {
-			stored[number] = body
+		for number, part := range u.parts {
+			stored[number] = part.body
 		}
 	}
 	p.mu.Unlock()
@@ -949,17 +960,71 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 
 func (p *Pack) listParts(req *spi.Request) (*spi.Response, error) {
 	id := mpuID(req)
-	p.mu.Lock()
-	u := p.mpu[id]
-	p.mu.Unlock()
-	var parts []any
-	if u != nil {
-		for n, body := range u.parts {
-			sum := md5.Sum(body)
-			parts = append(parts, map[string]any{"PartNumber": n, "ETag": `"` + hex.EncodeToString(sum[:]) + `"`, "Size": len(body)})
+	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	marker := asInt(req.Input["PartNumberMarker"])
+	maxParts := 1000
+	if _, provided := req.Input["MaxParts"]; provided {
+		maxParts = asInt(req.Input["MaxParts"])
+	}
+	if req.HTTP != nil {
+		if raw := req.HTTP.URL.Query().Get("part-number-marker"); raw != "" {
+			var err error
+			marker, err = strconv.Atoi(raw)
+			if err != nil {
+				return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+		}
+		if raw := req.HTTP.URL.Query().Get("max-parts"); raw != "" {
+			var err error
+			maxParts, err = strconv.Atoi(raw)
+			if err != nil {
+				return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
 		}
 	}
-	return &spi.Response{Output: map[string]any{"Parts": parts, "UploadId": id}}, nil
+	if marker < 0 || maxParts < 0 || maxParts > 1000 {
+		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	u := p.mpu[id]
+	if u == nil || u.bucket != b || u.key != key {
+		return nil, &spi.Fault{Code: "NoSuchUpload", HTTPStatus: http.StatusNotFound, Fault: "client"}
+	}
+	numbers := make([]int, 0, len(u.parts))
+	for number := range u.parts {
+		if number > marker {
+			numbers = append(numbers, number)
+		}
+	}
+	sort.Ints(numbers)
+	truncated := len(numbers) > maxParts
+	if truncated {
+		numbers = numbers[:maxParts]
+	}
+	parts := make([]any, 0, len(numbers))
+	for _, number := range numbers {
+		part := u.parts[number]
+		sum := md5.Sum(part.body)
+		row := map[string]any{"PartNumber": number, "ETag": `"` + hex.EncodeToString(sum[:]) + `"`, "Size": len(part.body), "LastModified": part.modified}
+		for _, checksum := range checksums {
+			if value := part.checksums[checksum.header]; value != "" {
+				row[checksum.input] = value
+			}
+		}
+		parts = append(parts, row)
+	}
+	out := map[string]any{
+		"Bucket": b, "Key": key, "UploadId": id, "PartNumberMarker": marker,
+		"MaxParts": maxParts, "IsTruncated": truncated, "Parts": parts, "StorageClass": u.storageClass,
+	}
+	if truncated {
+		out["NextPartNumberMarker"] = marker
+		if len(numbers) > 0 {
+			out["NextPartNumberMarker"] = numbers[len(numbers)-1]
+		}
+	}
+	return &spi.Response{Output: out}, nil
 }
 
 func (p *Pack) listMultipartUploads(req *spi.Request) (*spi.Response, error) {

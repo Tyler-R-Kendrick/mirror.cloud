@@ -209,6 +209,35 @@ func TestDeleteBucketRequiresEmptyBucket(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestDeleteBucketClearsBucketState(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	input := map[string]any{"Bucket": "recreated-bucket"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "recreated-bucket", "Status": "Enabled"}, nil)
+	mustInvoke(t, p, "PutBucketTagging", map[string]any{"Bucket": "recreated-bucket", "TagSet": []any{map[string]any{"Key": "old", "Value": "state"}}}, nil)
+	mustInvoke(t, p, "PutBucketCors", map[string]any{"Bucket": "recreated-bucket", "CORSRules": []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{"*"}}}}, nil)
+	mustInvoke(t, p, "PutBucketAnalyticsConfiguration", map[string]any{"Bucket": "recreated-bucket", "Id": "old"}, nil)
+	mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "recreated-bucket", "Key": "unfinished"}, nil)
+	mustInvoke(t, p, "DeleteBucket", input, nil)
+	mustInvoke(t, p, "CreateBucket", input, nil)
+
+	if got := mustInvoke(t, p, "GetBucketVersioning", input, nil); got.Output["Status"] == "Enabled" {
+		t.Fatalf("recreated bucket inherited versioning: %#v", got.Output)
+	}
+	if _, err := invoke(t, p, "GetBucketTagging", input, nil); asFault(t, err).Code != "NoSuchTagSet" {
+		t.Fatalf("recreated bucket inherited tags: %v", err)
+	}
+	if _, err := invoke(t, p, "GetBucketCors", input, nil); asFault(t, err).Code != "NoSuchCORSConfiguration" {
+		t.Fatalf("recreated bucket inherited CORS: %v", err)
+	}
+	if got := mustInvoke(t, p, "ListBucketAnalyticsConfigurations", input, nil); len(got.Output["List"].([]any)) != 0 {
+		t.Fatalf("recreated bucket inherited named configuration: %#v", got.Output)
+	}
+	if got := mustInvoke(t, p, "ListMultipartUploads", input, nil); len(got.Output["Uploads"].([]any)) != 0 {
+		t.Fatalf("recreated bucket inherited multipart uploads: %#v", got.Output)
+	}
+}
+
 func TestObjectMetadata(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)

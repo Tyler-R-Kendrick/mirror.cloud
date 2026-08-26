@@ -507,8 +507,36 @@ func (p *Pack) deleteBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		}
 		return nil, &spi.Fault{Code: "BucketNotEmpty", Message: message, HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"BucketName": b}}
 	}
-	_ = p.col(req, "buckets").Delete(ctx, b)
-	_ = p.deps.Store.Scope("_mirror", "global").Collection("s3buckets").Delete(ctx, b)
+	for _, name := range []string{"versioning", "tags", "notify"} {
+		if err := p.col(req, name).Delete(ctx, b); err != nil {
+			return nil, err
+		}
+	}
+	for _, name := range []string{"bktcfg", "namedcfg", "objlock", "annots", "replicas", "tags"} {
+		col := p.col(req, name)
+		kvs, _, err := col.List(ctx, b+"/", "", 0)
+		if err != nil {
+			return nil, err
+		}
+		for _, kv := range kvs {
+			if err := col.Delete(ctx, kv.Key); err != nil {
+				return nil, err
+			}
+		}
+	}
+	p.mu.Lock()
+	for id, upload := range p.mpu {
+		if upload.bucket == b {
+			delete(p.mpu, id)
+		}
+	}
+	p.mu.Unlock()
+	if err := p.col(req, "buckets").Delete(ctx, b); err != nil {
+		return nil, err
+	}
+	if err := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets").Delete(ctx, b); err != nil {
+		return nil, err
+	}
 	return &spi.Response{Status: 204}, nil
 }
 

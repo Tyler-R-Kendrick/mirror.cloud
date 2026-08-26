@@ -112,6 +112,45 @@ func TestCreatePutGetBytesMatch(t *testing.T) {
 	}
 }
 
+func TestObjectMetadata(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "b", "Status": "Enabled"}, nil)
+	first := mustInvoke(t, p, "PutObject", map[string]any{
+		"Bucket": "b", "Key": "source", "CacheControl": "max-age=60", "ContentDisposition": `attachment; filename="one.txt"`,
+		"ContentEncoding": "gzip", "ContentLanguage": "en-US", "ContentType": "text/plain", "Expires": "Wed, 21 Oct 2026 07:28:00 GMT",
+		"Metadata": map[string]any{"Owner": "mirror", "Empty": ""},
+	}, []byte("first"))
+	assert := func(name string, response *spi.Response, contentType, owner string) {
+		t.Helper()
+		if response.Headers.Get("Content-Type") != contentType || response.Headers.Get("x-amz-meta-owner") != owner {
+			t.Fatalf("%s metadata = %v", name, response.Headers)
+		}
+	}
+	get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "source", "VersionId": first.Headers.Get("x-amz-version-id")}, nil)
+	assert("get", get, "text/plain", "mirror")
+	if get.Headers.Get("Cache-Control") != "max-age=60" || get.Headers.Get("Content-Disposition") != `attachment; filename="one.txt"` || get.Headers.Get("Content-Encoding") != "gzip" || get.Headers.Get("Content-Language") != "en-US" || get.Headers.Get("Expires") != "Wed, 21 Oct 2026 07:28:00 GMT" {
+		t.Fatalf("get system metadata = %v", get.Headers)
+	}
+	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "source", "VersionId": first.Headers.Get("x-amz-version-id")}, nil)
+	assert("head", head, "text/plain", "mirror")
+
+	mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": "copied", "CopySource": "b/source"}, nil)
+	assert("copied", mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "copied"}, nil), "text/plain", "mirror")
+	mustInvoke(t, p, "CopyObject", map[string]any{
+		"Bucket": "b", "Key": "replaced", "CopySource": "b/source", "MetadataDirective": "REPLACE",
+		"ContentType": "application/json", "Metadata": map[string]any{"Owner": "new"},
+	}, nil)
+	replaced := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "replaced"}, nil)
+	assert("replaced", replaced, "application/json", "new")
+	if replaced.Headers.Get("Cache-Control") != "" || replaced.Headers.Get("Content-Encoding") != "" {
+		t.Fatalf("replace inherited system metadata = %v", replaced.Headers)
+	}
+
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "default"}, []byte("body"))
+	assert("default", mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "default"}, nil), "binary/octet-stream", "")
+}
+
 func TestCopyObjectTaggingDirective(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)

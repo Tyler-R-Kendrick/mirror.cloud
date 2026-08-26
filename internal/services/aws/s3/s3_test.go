@@ -365,7 +365,10 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 	noncontiguous := create("noncontiguous")
 	mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": noncontiguous, "PartNumber": 1}, []byte("omitted"))
 	third := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": noncontiguous, "PartNumber": 3}, []byte("third"))
-	mustInvoke(t, p, "CompleteMultipartUpload", completeInput(noncontiguous, completedPart(3, third)), nil)
+	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(noncontiguous, completedPart(3, third)), nil)
+	if !regexp.MustCompile(`-1"$`).MatchString(done.Headers.Get("ETag")) {
+		t.Fatalf("selected part ETag = %q", done.Headers.Get("ETag"))
+	}
 	if got := readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "noncontiguous"}, nil)); string(got) != "third" {
 		t.Fatalf("noncontiguous completion = %q", got)
 	}

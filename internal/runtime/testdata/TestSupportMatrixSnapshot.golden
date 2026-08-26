@@ -161,6 +161,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 
 S3 GetObjectAttributes honors requested ETag, checksum, object-parts, storage-class, and size fields for current or explicit versions, with composite part checksums and marker/limit pagination; full-object checksums return only the total part count.
 S3 GetObject, HeadObject, and GetObjectAttributes enforce If-Match, If-None-Match, If-Modified-Since, and If-Unmodified-Since with ETag-over-date precedence.
+S3 GetObject and HeadObject support one bounded, open-ended, or suffix byte range with 206 response metadata, 416 unsatisfied-range metadata, and checksum suppression for partial data; malformed and multiple ranges fall back to a full read.
 S3 object tags are isolated per object version: Put/Get/DeleteObjectTagging select current or explicit versions and return version IDs, versioned copies preserve the selected source tags, and GetObject/HeadObject return tag counts. Untagged overwrites and delete markers clear only current tags, preserving historical version tags.
 
 IAM evaluates user, group, role, and Organizations SCP policies: explicit Deny, then Allow. A principal with policies and no matching Allow is denied; no policies still allows. Access keys and `X-Mirror-Role` select principals. SimulatePrincipalPolicy/SimulateCustomPolicy use the same evaluator. Ops not in pack Operations() are mock-tier (or 501 under --strict), not leftover-KV sold as emulate.

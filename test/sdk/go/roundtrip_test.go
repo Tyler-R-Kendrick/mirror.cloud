@@ -130,6 +130,16 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 			t.Fatalf("invalid storage class created %q: %v", key, err)
 		}
 	}
+	longKey := strings.Repeat("é", 513)
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String(longKey), Body: bytes.NewReader([]byte("body"))}); err == nil || !strings.Contains(err.Error(), "KeyTooLongError") {
+		t.Fatalf("oversized put key: %v", err)
+	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String(longKey), CopySource: aws.String("missing/source")}); err == nil || !strings.Contains(err.Error(), "KeyTooLongError") {
+		t.Fatalf("oversized copy key: %v", err)
+	}
+	if _, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String(longKey)}); err == nil || !strings.Contains(err.Error(), "KeyTooLongError") {
+		t.Fatalf("oversized multipart key: %v", err)
+	}
 	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("archive"), Body: bytes.NewReader([]byte("cold")), StorageClass: s3types.StorageClassGlacier}); err != nil {
 		t.Fatalf("put archive: %v", err)
 	}

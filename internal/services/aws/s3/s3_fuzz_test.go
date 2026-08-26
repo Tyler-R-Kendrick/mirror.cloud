@@ -181,3 +181,34 @@ func FuzzCreateBucketLocations(f *testing.F) {
 		}
 	})
 }
+
+func FuzzBucketVersioningState(f *testing.F) {
+	for _, status := range []string{"", "Enabled", "Suspended", "Invalid", "enabled"} {
+		f.Add(status)
+	}
+	f.Fuzz(func(t *testing.T, status string) {
+		p := s3.New(spitest.Deps(t))
+		input := map[string]any{"Bucket": "versioning-fuzz"}
+		mustInvoke(t, p, "CreateBucket", input, nil)
+		response, err := invoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "versioning-fuzz", "Status": status}, nil)
+		if status == "Enabled" || status == "Suspended" {
+			if err != nil || response.Status != http.StatusOK {
+				t.Fatalf("valid status %q: %#v %v", status, response, err)
+			}
+			if got := mustInvoke(t, p, "GetBucketVersioning", input, nil).Output["Status"]; got != status {
+				t.Fatalf("stored status %q = %v", status, got)
+			}
+			return
+		}
+		want := "MalformedXML"
+		if status == "" {
+			want = "IllegalVersioningConfigurationException"
+		}
+		if fault := asFault(t, err); fault.Code != want || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("invalid status %q = %#v", status, fault)
+		}
+		if got := mustInvoke(t, p, "GetBucketVersioning", input, nil).Output; len(got) != 0 {
+			t.Fatalf("invalid status %q persisted: %#v", status, got)
+		}
+	})
+}

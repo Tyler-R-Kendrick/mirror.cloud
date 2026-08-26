@@ -601,6 +601,7 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	h := http.Header{}
 	etag := objectETag(meta, info.MD5)
 	h.Set("ETag", etag)
+	h.Set("Accept-Ranges", "bytes")
 	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
 	mtime := str(meta["mtime"])
 	if mtime == "" {
@@ -648,11 +649,17 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 			setPartChecksumHeaders(h, meta, partMetadata(meta, partNumber(req)), length == info.Size)
 		}
 	}
-	if req.HTTP != nil {
-		if rng := req.HTTP.Header.Get("Range"); strings.HasPrefix(rng, "bytes=") {
-			data = applyRange(data, rng)
-			h.Set("Content-Length", strconv.Itoa(len(data)))
-			return &spi.Response{Status: 206, Headers: h, Stream: io.NopCloser(bytes.NewReader(data))}, nil
+	if rng := requestCondition(req, "Range", "Range"); rng != "" {
+		rangeStart, rangeLength, ranged, err := objectByteRange(rng, int64(len(data)))
+		if err != nil {
+			return nil, err
+		}
+		if ranged {
+			data = data[rangeStart : rangeStart+rangeLength]
+			h.Set("Content-Length", strconv.FormatInt(rangeLength, 10))
+			h.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", rangeStart, rangeStart+rangeLength-1, info.Size))
+			setPartChecksumHeaders(h, meta, nil, rangeLength == info.Size)
+			return &spi.Response{Status: http.StatusPartialContent, Headers: h, Stream: io.NopCloser(bytes.NewReader(data))}, nil
 		}
 	}
 	if requested {
@@ -681,6 +688,7 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	}
 	h := http.Header{}
 	h.Set("ETag", objectETag(meta, info.MD5))
+	h.Set("Accept-Ranges", "bytes")
 	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
 	h.Set("Last-Modified", str(meta["mtime"]))
 	if version := str(meta["versionId"]); version != "" {
@@ -712,6 +720,18 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		}
 		if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
 			setPartChecksumHeaders(h, meta, partMetadata(meta, partNumber(req)), length == info.Size)
+		}
+	}
+	if rng := requestCondition(req, "Range", "Range"); rng != "" {
+		rangeStart, rangeLength, ranged, err := objectByteRange(rng, info.Size)
+		if err != nil {
+			return nil, err
+		}
+		if ranged {
+			status = http.StatusPartialContent
+			h.Set("Content-Length", strconv.FormatInt(rangeLength, 10))
+			h.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", rangeStart, rangeStart+rangeLength-1, info.Size))
+			setPartChecksumHeaders(h, meta, nil, rangeLength == info.Size)
 		}
 	}
 	return &spi.Response{Status: status, Headers: h}, nil
@@ -2306,22 +2326,46 @@ func asInt(v any) int {
 	return 0
 }
 
-func applyRange(b []byte, rng string) []byte {
-	rng = strings.TrimPrefix(rng, "bytes=")
-	parts := strings.SplitN(rng, "-", 2)
-	start, _ := strconv.Atoi(parts[0])
-	end := len(b) - 1
-	if len(parts) > 1 && parts[1] != "" {
-		end, _ = strconv.Atoi(parts[1])
+func objectByteRange(value string, size int64) (start, length int64, requested bool, err error) {
+	raw, ok := strings.CutPrefix(value, "bytes=")
+	first, last, found := strings.Cut(raw, "-")
+	if !ok || !found || strings.Contains(last, ",") || strings.Contains(last, "-") {
+		return 0, size, false, nil
 	}
-	if start < 0 {
-		start = 0
+	invalid := func() (int64, int64, bool, error) {
+		h := http.Header{}
+		h.Set("Content-Range", fmt.Sprintf("bytes */%d", size))
+		return 0, 0, true, &spi.Fault{Code: "InvalidRange", Message: "The requested range is not satisfiable", HTTPStatus: http.StatusRequestedRangeNotSatisfiable, Fault: "client", Headers: h}
 	}
-	if end >= len(b) {
-		end = len(b) - 1
+	if first == "" {
+		suffix, parseErr := strconv.ParseInt(last, 10, 64)
+		if parseErr != nil || suffix < 0 {
+			return 0, size, false, nil
+		}
+		if suffix == 0 || size == 0 {
+			return invalid()
+		}
+		if suffix > size {
+			suffix = size
+		}
+		return size - suffix, suffix, true, nil
 	}
-	if start > end {
-		return nil
+	start, parseErr := strconv.ParseInt(first, 10, 64)
+	if parseErr != nil || start < 0 {
+		return 0, size, false, nil
 	}
-	return b[start : end+1]
+	if start >= size {
+		return invalid()
+	}
+	end := size - 1
+	if last != "" {
+		end, parseErr = strconv.ParseInt(last, 10, 64)
+		if parseErr != nil || end < start {
+			return 0, size, false, nil
+		}
+		if end >= size {
+			end = size - 1
+		}
+	}
+	return start, end - start + 1, true, nil
 }

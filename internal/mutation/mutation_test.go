@@ -448,8 +448,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-default-missing-part-number",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "\treturn 0\n}\n\nfunc asInt",
-			new:  "\treturn 1\n}\n\nfunc asInt",
+			old:  "\treturn 0\n}\n\nfunc objectPartRange",
+			new:  "\treturn 1\n}\n\nfunc objectPartRange",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestMultipartPartNumberBounds",
 		},
@@ -480,8 +480,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-hide-copy-source-version-header",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "response, err := p.putObject(ctx, req, \"\", \"\")\n\tif err == nil && source.version != \"\" {",
-			new:  "response, err := p.putObject(ctx, req, \"\", \"\")\n\tif false {",
+			old:  "response, err := p.putObject(ctx, req, \"\", \"\", nil)\n\tif err == nil && source.version != \"\" {",
+			new:  "response, err := p.putObject(ctx, req, \"\", \"\", nil)\n\tif false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCopyObjectSourceVersions",
 		},
@@ -592,8 +592,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-store-single-part-etag-after-multipart",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `resp, err := p.putObject(ctx, req, etag, u.checksumType)`,
-			new:  `resp, err := p.putObject(ctx, req, "", u.checksumType)`,
+			old:  `resp, err := p.putObject(ctx, req, etag, u.checksumType, completedParts)`,
+			new:  `resp, err := p.putObject(ctx, req, "", u.checksumType, completedParts)`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestMultipartETagForm",
 		},
@@ -7440,7 +7440,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-ignore-list-object-storage-class",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `storageClass := str(req.Input["StorageClass"])`,
+			old:  `storageClass := requestCondition(req, "StorageClass", "x-amz-storage-class")`,
 			new:  `storageClass := ""`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestListObjectsV2Prefix",

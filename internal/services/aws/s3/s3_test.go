@@ -410,6 +410,16 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 	}
 	sizedInput["MpuObjectSize"] = "5"
 	mustInvoke(t, p, "CompleteMultipartUpload", sizedInput, nil)
+	zero := create("zero")
+	zeroPart := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": zero, "PartNumber": 1}, []byte{})
+	zeroInput := completeInput(zero, completedPart(1, zeroPart))
+	zeroInput["MpuObjectSize"] = "invalid"
+	_, err = invoke(t, p, "CompleteMultipartUpload", zeroInput, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" {
+		t.Fatalf("zero object size fault = %#v", fault)
+	}
+	zeroInput["MpuObjectSize"] = "0"
+	mustInvoke(t, p, "CompleteMultipartUpload", zeroInput, nil)
 	wantFault(create("empty"), "InvalidPart")
 }
 

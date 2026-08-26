@@ -116,6 +116,20 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("missing-source"), CopySource: aws.String("missing/k")}); err == nil || !strings.Contains(err.Error(), "NoSuchBucket") {
 		t.Fatalf("copy missing source bucket: %v", err)
 	}
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("invalid-class"), Body: bytes.NewReader([]byte("body")), StorageClass: s3types.StorageClass("INVALID")}); err == nil || !strings.Contains(err.Error(), "InvalidStorageClass") {
+		t.Fatalf("invalid put storage class: %v", err)
+	}
+	if _, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("invalid-multipart-class"), StorageClass: s3types.StorageClassOutposts}); err == nil || !strings.Contains(err.Error(), "InvalidStorageClass") {
+		t.Fatalf("invalid multipart storage class: %v", err)
+	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("invalid-copy-class"), CopySource: aws.String("sdk/k"), StorageClass: s3types.StorageClass("INVALID")}); err == nil || !strings.Contains(err.Error(), "InvalidStorageClass") {
+		t.Fatalf("invalid copy storage class: %v", err)
+	}
+	for _, key := range []string{"invalid-class", "invalid-multipart-class", "invalid-copy-class"} {
+		if _, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key)}); err == nil || !strings.Contains(err.Error(), "NotFound") {
+			t.Fatalf("invalid storage class created %q: %v", key, err)
+		}
+	}
 	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("archive"), Body: bytes.NewReader([]byte("cold")), StorageClass: s3types.StorageClassGlacier}); err != nil {
 		t.Fatalf("put archive: %v", err)
 	}

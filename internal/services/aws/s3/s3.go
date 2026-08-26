@@ -872,9 +872,11 @@ func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response,
 	}
 	p.mu.Lock()
 	u := p.mpu[id]
-	if u != nil {
-		u.parts[pn] = multipartPart{body: body, modified: p.deps.Clock.Now().UTC().Format(time.RFC3339), checksums: providedChecksums(req)}
+	if !matchesMultipartUpload(u, req) {
+		p.mu.Unlock()
+		return nil, &spi.Fault{Code: "NoSuchUpload", HTTPStatus: http.StatusNotFound, Fault: "client"}
 	}
+	u.parts[pn] = multipartPart{body: body, modified: p.deps.Clock.Now().UTC().Format(time.RFC3339), checksums: providedChecksums(req)}
 	p.mu.Unlock()
 	sum := md5.Sum(body)
 	etag := `"` + hex.EncodeToString(sum[:]) + `"`
@@ -899,7 +901,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 		}
 	}
 	p.mu.Unlock()
-	if u == nil {
+	if !matchesMultipartUpload(u, req) {
 		return nil, &spi.Fault{Code: "NoSuchUpload", HTTPStatus: 404, Fault: "client"}
 	}
 	parts := asSlice(asMap(req.Input["MultipartUpload"])["Parts"])
@@ -988,7 +990,7 @@ func (p *Pack) listParts(req *spi.Request) (*spi.Response, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	u := p.mpu[id]
-	if u == nil || u.bucket != b || u.key != key {
+	if !matchesMultipartUpload(u, req) {
 		return nil, &spi.Fault{Code: "NoSuchUpload", HTTPStatus: http.StatusNotFound, Fault: "client"}
 	}
 	numbers := make([]int, 0, len(u.parts))
@@ -1078,9 +1080,18 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 func (p *Pack) abortMPU(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	id := mpuID(req)
 	p.mu.Lock()
+	if !matchesMultipartUpload(p.mpu[id], req) {
+		p.mu.Unlock()
+		return nil, &spi.Fault{Code: "NoSuchUpload", HTTPStatus: http.StatusNotFound, Fault: "client"}
+	}
 	delete(p.mpu, id)
 	p.mu.Unlock()
 	return &spi.Response{Status: 204}, nil
+}
+
+func matchesMultipartUpload(upload *mpu, req *spi.Request) bool {
+	bucket, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	return upload != nil && (bucket == "" || upload.bucket == bucket) && (key == "" || upload.key == key)
 }
 
 func (p *Pack) versioning(ctx context.Context, req *spi.Request) (*spi.Response, error) {

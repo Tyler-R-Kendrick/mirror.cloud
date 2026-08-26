@@ -158,6 +158,37 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a bucket When versioning changes Then its state matches AWS", func(t *testing.T) {
+		res := do(http.MethodPut, "/versioning-state", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/versioning-state?versioning", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || bytes.Contains(body, []byte("<Status>")) {
+			t.Fatalf("unset versioning %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodPut, "/versioning-state?versioning", []byte("<VersioningConfiguration/>"), "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("IllegalVersioningConfigurationException")) {
+			t.Fatalf("missing versioning status %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodPut, "/versioning-state?versioning", []byte("<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"), "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("enable versioning %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/versioning-state?versioning", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Status>Enabled</Status>")) {
+			t.Fatalf("enabled versioning %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given an invalid storage class When PUT object Then it is rejected", func(t *testing.T) {
 		res := do(http.MethodPut, "/classes", nil, "")
 		res.Body.Close()

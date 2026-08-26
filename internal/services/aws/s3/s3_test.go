@@ -214,6 +214,13 @@ func TestCopyObjectSourceVersions(t *testing.T) {
 	firstVersion := first.Headers.Get("x-amz-version-id")
 	_ = deps.Clock.Advance(time.Second)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": key}, []byte("second"))
+	versioned := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": key, "VersionId": firstVersion}, nil)
+	if versioned.Headers.Get("ETag") != first.Headers.Get("ETag") || versioned.Headers.Get("x-amz-version-id") != firstVersion || string(readStream(t, versioned)) != "first" {
+		t.Fatalf("versioned get headers = %v", versioned.Headers)
+	}
+	if head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": key, "VersionId": firstVersion}, nil); head.Headers.Get("ETag") != first.Headers.Get("ETag") || head.Headers.Get("x-amz-version-id") != firstVersion || head.Headers.Get("Content-Length") != "5" {
+		t.Fatalf("versioned head headers = %v", head.Headers)
+	}
 	source := "b/" + url.PathEscape(key)
 
 	copyVersion := mustInvoke(t, p, "CopyObject", map[string]any{

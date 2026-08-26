@@ -550,13 +550,9 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag string) (*s
 func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
 	wantVer := str(req.Input["VersionId"])
-	metaRaw, _, _ := p.col(req, "objects").Get(ctx, b+"/"+key)
-	var meta map[string]any
-	_ = json.Unmarshal(metaRaw, &meta)
-	if wantVer == "" {
-		if truthy(meta["deleteMarker"]) {
-			return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: 404, Fault: "client"}
-		}
+	meta, exists := p.objectMetadata(ctx, req, b, key, wantVer)
+	if !exists || truthy(meta["deleteMarker"]) {
+		return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: 404, Fault: "client"}
 	}
 	bk := blobKey(req, b, key)
 	if wantVer != "" {
@@ -615,26 +611,30 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 
 func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
-	info, err := p.deps.Blobs.Stat(ctx, blobKey(req, b, key))
+	wantVer := str(req.Input["VersionId"])
+	meta, exists := p.objectMetadata(ctx, req, b, key, wantVer)
+	if !exists || truthy(meta["deleteMarker"]) {
+		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
+	}
+	bk := blobKey(req, b, key)
+	if wantVer != "" {
+		bk += "@" + wantVer
+	}
+	info, err := p.deps.Blobs.Stat(ctx, bk)
 	if err != nil {
 		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
 	}
 	h := http.Header{}
-	h.Set("ETag", `"`+info.MD5+`"`)
+	h.Set("ETag", objectETag(meta, info.MD5))
 	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
-	h.Set("Last-Modified", p.deps.Clock.Now().UTC().Format(http.TimeFormat))
-	if raw, ok, _ := p.col(req, "objects").Get(ctx, b+"/"+key); ok {
-		var meta map[string]any
-		_ = json.Unmarshal(raw, &meta)
-		h.Set("ETag", objectETag(meta, info.MD5))
-		if modified := str(meta["mtime"]); modified != "" {
-			h.Set("Last-Modified", modified)
-		}
-		if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
-			setChecksumHeaders(h, meta)
-		}
-		setReplicationHeaders(h, meta)
+	h.Set("Last-Modified", str(meta["mtime"]))
+	if version := str(meta["versionId"]); version != "" {
+		h.Set("x-amz-version-id", version)
 	}
+	if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
+		setChecksumHeaders(h, meta)
+	}
+	setReplicationHeaders(h, meta)
 	return &spi.Response{Status: 200, Headers: h}, nil
 }
 
@@ -1393,17 +1393,11 @@ func (p *Pack) openCopySource(ctx context.Context, req *spi.Request) (*copySourc
 	if err != nil {
 		return nil, err
 	}
-	metaKey := bucket + "/" + key
 	blob := blobKey(req, bucket, key)
-	collection := "objects"
 	if version != "" {
-		metaKey += "/" + version
 		blob += "@" + version
-		collection = "versions"
 	}
-	metaRaw, exists, _ := p.col(req, collection).Get(ctx, metaKey)
-	var meta map[string]any
-	_ = json.Unmarshal(metaRaw, &meta)
+	meta, exists := p.objectMetadata(ctx, req, bucket, key, version)
 	if !exists {
 		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
 	}
@@ -1418,6 +1412,17 @@ func (p *Pack) openCopySource(ctx context.Context, req *spi.Request) (*copySourc
 		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
 	}
 	return &copySource{bucket: bucket, key: key, version: version, body: body, info: info, meta: meta}, nil
+}
+
+func (p *Pack) objectMetadata(ctx context.Context, req *spi.Request, bucket, key, version string) (map[string]any, bool) {
+	collection, metaKey := "objects", bucket+"/"+key
+	if version != "" {
+		collection, metaKey = "versions", metaKey+"/"+version
+	}
+	raw, exists, _ := p.col(req, collection).Get(ctx, metaKey)
+	var meta map[string]any
+	_ = json.Unmarshal(raw, &meta)
+	return meta, exists
 }
 
 func applyCopySourceRange(body []byte, value string) ([]byte, error) {

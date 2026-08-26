@@ -3,7 +3,10 @@ package eventhttp
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
 func TestEncodeFormArrayFormats(t *testing.T) {
@@ -36,7 +39,9 @@ func TestMergeBodyLimitWithoutConnectionParameters(t *testing.T) {
 func TestInvokeChecksTransformedBodyLimit(t *testing.T) {
 	body := []byte(`{"value":"////"}`)
 	connection := map[string]any{"ConnectionState": "AUTHORIZED", "AuthorizationType": "BASIC", "AuthParameters": map[string]any{"BasicAuthParameters": map[string]any{}}}
-	if _, err := Invoke(context.Background(), connection, Call{Endpoint: "http://example.invalid", Method: "POST", Body: body, MaxRequestBytes: int64(len(body)), FormArrayFormat: "INDICES"}); err == nil {
-		t.Fatal("accepted URL-encoded body expanded beyond request limit")
+	_, err := Invoke(context.Background(), connection, Call{Endpoint: "http://example.invalid", Method: "POST", Body: body, MaxRequestBytes: int64(len(body)), FormArrayFormat: "INDICES"})
+	var fault *spi.Fault
+	if !errors.As(err, &fault) || fault.Code != "TargetInvocationFailed" {
+		t.Fatalf("accepted URL-encoded body expanded beyond request limit: %v", err)
 	}
 }

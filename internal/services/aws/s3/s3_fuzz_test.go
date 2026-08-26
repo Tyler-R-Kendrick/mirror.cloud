@@ -2,6 +2,8 @@ package s3_test
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
@@ -60,6 +62,26 @@ func FuzzStorageClassValidation(f *testing.F) {
 		}
 		if fault := asFault(t, err); fault.Code != "InvalidStorageClass" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["StorageClassRequested"] != class {
 			t.Fatalf("invalid storage class %q = %#v", class, fault)
+		}
+	})
+}
+
+func FuzzObjectKeyLength(f *testing.F) {
+	for _, key := range []string{"", "key", strings.Repeat("a", 1024), strings.Repeat("é", 512), strings.Repeat("a", 1025), strings.Repeat("é", 513)} {
+		f.Add(key)
+	}
+	f.Fuzz(func(t *testing.T, key string) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "keys"}, nil)
+		_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": "keys", "Key": key}, []byte("body"))
+		if len(key) <= 1024 {
+			if err != nil {
+				t.Fatalf("valid %d-byte key: %v", len(key), err)
+			}
+			return
+		}
+		if fault := asFault(t, err); fault.Code != "KeyTooLongError" || fault.Fields["Size"] != strconv.Itoa(len(key)) {
+			t.Fatalf("invalid %d-byte key = %#v", len(key), fault)
 		}
 	})
 }

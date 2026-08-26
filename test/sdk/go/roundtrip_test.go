@@ -160,6 +160,44 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if aws.ToString(put.ChecksumCRC32) == "" || aws.ToString(verified.ChecksumCRC32) != aws.ToString(put.ChecksumCRC32) {
 		t.Fatalf("get checksum %q want %q", aws.ToString(verified.ChecksumCRC32), aws.ToString(put.ChecksumCRC32))
 	}
+	xxhash128 := "MxGUd+3l3NXpcWQnaB1YYA=="
+	xxhashPut, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{
+		Bucket: aws.String("sdk"), Key: aws.String("xxhash"), Body: bytes.NewReader([]byte("123456789")), ChecksumXXHASH128: aws.String(xxhash128),
+	})
+	if err != nil || aws.ToString(xxhashPut.ChecksumXXHASH128) != xxhash128 {
+		t.Fatalf("put xxhash checksum: %#v %v", xxhashPut, err)
+	}
+	xxhashGet, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("xxhash"), ChecksumMode: s3types.ChecksumModeEnabled})
+	if err != nil {
+		t.Fatalf("get xxhash checksum: %v", err)
+	}
+	xxhashBody, _ := io.ReadAll(xxhashGet.Body)
+	_ = xxhashGet.Body.Close()
+	if string(xxhashBody) != "123456789" || aws.ToString(xxhashGet.ChecksumXXHASH128) != xxhash128 {
+		t.Fatalf("get xxhash checksum: %#v body=%q", xxhashGet, xxhashBody)
+	}
+	xxhashUpload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{
+		Bucket: aws.String("sdk"), Key: aws.String("xxhash-multipart"), ChecksumAlgorithm: s3types.ChecksumAlgorithmXxhash3,
+	})
+	if err != nil {
+		t.Fatalf("create xxhash multipart: %v", err)
+	}
+	xxhash3 := "ctyxi2ehff8="
+	xxhashPart, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{
+		Bucket: aws.String("sdk"), Key: aws.String("xxhash-multipart"), UploadId: xxhashUpload.UploadId,
+		PartNumber: aws.Int32(1), Body: bytes.NewReader([]byte("123456789")), ChecksumXXHASH3: aws.String(xxhash3),
+	})
+	if err != nil || aws.ToString(xxhashPart.ChecksumXXHASH3) != xxhash3 {
+		t.Fatalf("upload xxhash part: %#v %v", xxhashPart, err)
+	}
+	xxhashComposite := "ksPmtVIgSbU=-1"
+	xxhashComplete, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{
+		Bucket: aws.String("sdk"), Key: aws.String("xxhash-multipart"), UploadId: xxhashUpload.UploadId, ChecksumXXHASH3: aws.String(xxhashComposite),
+		MultipartUpload: &s3types.CompletedMultipartUpload{Parts: []s3types.CompletedPart{{PartNumber: aws.Int32(1), ETag: xxhashPart.ETag, ChecksumXXHASH3: xxhashPart.ChecksumXXHASH3}}},
+	})
+	if err != nil || aws.ToString(xxhashComplete.ChecksumXXHASH3) != xxhashComposite {
+		t.Fatalf("complete xxhash multipart: %#v %v", xxhashComplete, err)
+	}
 	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{
 		Bucket: aws.String("sdk"), Key: aws.String("copied"), CopySource: aws.String("sdk/k"), CopySourceIfMatch: got.ETag, ExpectedSourceBucketOwner: aws.String("000000000000"),
 	}); err != nil {

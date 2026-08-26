@@ -3018,6 +3018,70 @@ func TestStatesHTTPTaskAndTrace(t *testing.T) {
 	}
 }
 
+func TestStatesTestStateMapFailureCounts(t *testing.T) {
+	p := New(spitest.Deps(t))
+	defer p.Close()
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	call := func(definition, input string, count float64) (map[string]any, error) {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "TestState", Input: map[string]any{
+			"definition": definition, "input": input, "inspectionLevel": "DEBUG",
+			"mock": map[string]any{"result": `[1,2,3]`}, "stateConfiguration": map[string]any{"mapIterationFailureCount": count},
+		}})
+		if response == nil {
+			return nil, err
+		}
+		return response.Output, err
+	}
+	processor := `"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}}`
+	definition := `{"Type":"Map","ItemsPath":"$.items",` + processor + `,"ToleratedFailureCount":1,"End":true}`
+	withinTolerance, err := call(definition, `{"items":[1,2,3]}`, 1)
+	if err != nil || withinTolerance["status"] != "SUCCEEDED" {
+		t.Fatalf("failure count within tolerance %#v err=%v", withinTolerance, err)
+	}
+	inspection := withinTolerance["inspectionData"].(map[string]any)
+	if inspection["afterItemBatcher"] != `[1,2,3]` || inspection["toleratedFailureCount"] != 1 {
+		t.Fatalf("Map failure inspection %#v", inspection)
+	}
+	exceeded, err := call(definition, `{"items":[1,2,3]}`, 2)
+	if err != nil || exceeded["status"] != "FAILED" || exceeded["error"] != "States.ExceedToleratedFailureThreshold" {
+		t.Fatalf("exceeded failure count %#v err=%v", exceeded, err)
+	}
+	percentage := `{"Type":"Map","ItemsPath":"$.items",` + processor + `,"ToleratedFailurePercentage":50,"End":true}`
+	if output, err := call(percentage, `{"items":[1,2,3]}`, 2); err != nil || output["error"] != "States.ExceedToleratedFailureThreshold" {
+		t.Fatalf("exceeded failure percentage %#v err=%v", output, err)
+	}
+	caughtDefinition := `{"Type":"Map","ItemsPath":"$.items",` + processor + `,"ToleratedFailureCount":0,"Catch":[{"ErrorEquals":["States.ExceedToleratedFailureThreshold"],"Next":"Recover"}],"End":true}`
+	if output, err := call(caughtDefinition, `{"items":[1,2]}`, 1); err != nil || output["status"] != "CAUGHT_ERROR" || output["nextState"] != "Recover" {
+		t.Fatalf("caught failure threshold %#v err=%v", output, err)
+	}
+	if _, err := call(definition, `{"items":[1,2,3]}`, 4); err == nil {
+		t.Fatal("accepted failure count above item count")
+	}
+	inline := `{"Type":"Map","ItemsPath":"$.items","ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}`
+	if _, err := call(inline, `{"items":[1]}`, 0); err == nil {
+		t.Fatal("accepted failure count for inline Map")
+	}
+	nested := `{"StartAt":"Outer","States":{"Outer":{"Type":"Map","ItemsPath":"$.items","ItemProcessor":{"StartAt":"Inner","States":{"Inner":{"Type":"Map","ItemsPath":"$.items",` + processor + `,"End":true}}},"End":true}}}`
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "TestState", Input: map[string]any{
+		"definition": nested, "stateName": "Inner", "input": `{"items":[1,2]}`, "mock": map[string]any{"result": `[1,2]`},
+		"stateConfiguration": map[string]any{"mapIterationFailureCount": 2.0},
+	}})
+	if err == nil || response != nil {
+		t.Fatalf("accepted all failed iterations inside Map: %#v err=%v", response, err)
+	}
+	jsonataDefinition := `{"QueryLanguage":"JSONata","Type":"Map","Items":"{% $states.input.items %}","ItemSelector":{"value":"{% $states.context.Map.Item.Value %}"},` + processor + `,"ToleratedFailureCount":1,"End":true}`
+	jsonata, err := call(jsonataDefinition, `{"items":[1,2,3]}`, 2)
+	if err != nil || jsonata["error"] != "States.ExceedToleratedFailureThreshold" {
+		t.Fatalf("JSONata Map failure count %#v err=%v", jsonata, err)
+	}
+	jsonataInspection := jsonata["inspectionData"].(map[string]any)
+	if jsonataInspection["afterItemSelector"] != `[{"value":1},{"value":2},{"value":3}]` || jsonataInspection["afterItemBatcher"] != `[{"value":1},{"value":2},{"value":3}]` {
+		t.Fatalf("JSONata Map inspection %#v", jsonataInspection)
+	}
+}
+
 func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

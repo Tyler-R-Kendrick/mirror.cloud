@@ -394,6 +394,22 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 	smallFirst := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": tooSmall, "PartNumber": 1}, []byte("small"))
 	smallLast := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": tooSmall, "PartNumber": 2}, []byte("last"))
 	wantFault(tooSmall, "EntityTooSmall", completedPart(1, smallFirst), completedPart(2, smallLast))
+
+	sized := create("sized")
+	sizedPart := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": sized, "PartNumber": 1}, []byte("sized"))
+	sizedInput := completeInput(sized, completedPart(1, sizedPart))
+	sizedInput["MpuObjectSize"] = "4"
+	_, err := invoke(t, p, "CompleteMultipartUpload", sizedInput, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("object size fault = %#v", fault)
+	}
+	sizedInput["MpuObjectSize"] = "invalid"
+	_, err = invoke(t, p, "CompleteMultipartUpload", sizedInput, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("invalid object size fault = %#v", fault)
+	}
+	sizedInput["MpuObjectSize"] = "5"
+	mustInvoke(t, p, "CompleteMultipartUpload", sizedInput, nil)
 	wantFault(create("empty"), "InvalidPart")
 }
 

@@ -879,6 +879,12 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 		md5s = append(md5s, s[:]...)
 		previous = number
 	}
+	if value := requestCondition(req, "MpuObjectSize", "x-amz-mp-object-size"); value != "" {
+		size, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || size != int64(buf.Len()) {
+			return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: 400, Fault: "client"}
+		}
+	}
 	sum := md5.Sum(md5s)
 	etag := fmt.Sprintf(`"%s-%d"`, hex.EncodeToString(sum[:]), len(parts))
 	req.Input["Bucket"], req.Input["Key"] = bucket, key

@@ -1276,6 +1276,29 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if _, mockedError := mock["ErrorOutput"]; mockedError && slices.Contains([]string{"Map", "Parallel"}, first(testedState, "Type")) && first(configuration, "errorCausedByState", "ErrorCausedByState") == "" {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
+		if rawCount, configured := inputValue(configuration, "mapIterationFailureCount", "MapIterationFailureCount"); configured {
+			processor, _ := testedState["ItemProcessor"].(map[string]any)
+			processorConfig, _ := processor["ProcessorConfig"].(map[string]any)
+			if first(testedState, "Type") != "Map" || first(processorConfig, "Mode") != "DISTRIBUTED" {
+				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+			}
+			mapInspection := inspectTestState(testedState, cloneJSON(data), jsonataContext(walkRequest, "TestState", nil), variables, mock, configuration, walkResult{}, p.deps.Rand)
+			itemCount, countValid := testStateMapItemCount(mapInspection)
+			failureCount := int(toFloat(rawCount))
+			if !countValid || failureCount > itemCount || selection.insideMap && failureCount == itemCount {
+				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+			}
+			if testStateMapFailuresExceeded(testedState, data, jsonataContext(walkRequest, "TestState", nil), variables, p.deps.Rand, failureCount, itemCount) {
+				failure := map[string]any{"error": "States.ExceedToleratedFailureThreshold", "cause": "States.ExceedToleratedFailureThreshold"}
+				delete(testedState, "_TestStateMockResult")
+				testedState["_TestStateMockError"] = failure
+				mock = maps.Clone(mock)
+				delete(mock, "Result")
+				mock["ErrorOutput"] = failure
+				wrappedBytes, _ := json.Marshal(testMachine)
+				wrapped = string(wrappedBytes)
+			}
+		}
 		if inspectionLevel == "TRACE" && (first(testedState, "Type") != "Task" || !strings.Contains(first(testedState, "Resource"), "states:::http:invoke")) {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
@@ -7394,6 +7417,40 @@ func inspectTestState(state map[string]any, input any, context, variables, mock,
 		if result, exists := mock["Result"]; exists {
 			encode("result", result)
 		}
+		if first(state, "Type") == "Map" {
+			scope := jsonataScope{input: input, context: context, variables: variables, random: random}
+			items, valid := input, true
+			if configured, exists := state["Items"]; exists {
+				items, valid = evalJSONataValue(configured, scope)
+			}
+			selected, array := items.([]any)
+			valid = valid && array
+			selected = append([]any(nil), selected...)
+			if selector, exists := state["ItemSelector"]; valid && exists {
+				for index, item := range selected {
+					itemContext := map[string]any{"Map": map[string]any{"Item": map[string]any{"Index": float64(index), "Value": item, "Source": "STATE_DATA"}}}
+					selected[index], valid = evalJSONataValue(selector, jsonataScope{input: input, context: mergeJSONataContext(context, itemContext), variables: variables, random: random})
+					if !valid {
+						break
+					}
+				}
+			}
+			if valid {
+				encode("afterItemSelector", selected)
+				if batched, batchValid := batchMapItems(state, input, selected, random, &scope, variables); batchValid {
+					encode("afterItemBatcher", batched)
+				}
+			}
+			if value, _, valueValid := stateInteger(state, "MaxConcurrency", input, &scope, 0, math.MaxInt32, variables); valueValid {
+				inspection["maxConcurrency"] = int(value)
+			}
+			if value, _, valueValid := stateInteger(state, "ToleratedFailureCount", input, &scope, 0, math.MaxInt32, variables); valueValid {
+				inspection["toleratedFailureCount"] = int(value)
+			}
+			if value, _, valueValid := stateInteger(state, "ToleratedFailurePercentage", input, &scope, 0, 100, variables); valueValid {
+				inspection["toleratedFailurePercentage"] = value
+			}
+		}
 	} else if afterInputPath, valid := applyDataPath(state, "InputPath", input, variables); valid {
 		encode("afterInputPath", afterInputPath)
 		effectiveInput := afterInputPath
@@ -7490,6 +7547,36 @@ func inspectTestState(state map[string]any, input any, context, variables, mock,
 		encode("variables", variables)
 	}
 	return inspection
+}
+
+func testStateMapItemCount(inspection map[string]any) (int, bool) {
+	for _, key := range []string{"afterItemBatcher", "afterItemSelector", "afterItemsPath", "afterItemsPointer"} {
+		raw, exists := inspection[key].(string)
+		if !exists {
+			continue
+		}
+		var items []any
+		if json.Unmarshal([]byte(raw), &items) == nil {
+			return len(items), true
+		}
+	}
+	return 0, false
+}
+
+func testStateMapFailuresExceeded(state map[string]any, input any, context, variables map[string]any, random spi.Rand, failures, items int) bool {
+	var scope *jsonataScope
+	if first(state, "QueryLanguage") == "JSONata" {
+		scope = &jsonataScope{input: input, context: context, variables: variables, random: random}
+	}
+	count, hasCount, countValid := stateInteger(state, "ToleratedFailureCount", input, scope, 0, math.MaxInt32, variables)
+	percentage, hasPercentage, percentageValid := stateInteger(state, "ToleratedFailurePercentage", input, scope, 0, 100, variables)
+	if !countValid || !percentageValid || failures == 0 {
+		return false
+	}
+	if !hasCount && !hasPercentage {
+		return true
+	}
+	return hasCount && float64(failures) > count || hasPercentage && float64(failures)*100/float64(items) > percentage
 }
 
 func validTestStateMock(state map[string]any, result any, mode string) bool {

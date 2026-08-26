@@ -75,6 +75,38 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a globally owned bucket When another identity creates it Then ownership errors are returned", func(t *testing.T) {
+		create := func(account, region string) (int, []byte) {
+			t.Helper()
+			req, err := http.NewRequest(http.MethodPut, ts.URL+"/global-name", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", auth)
+			req.Header.Set("X-Mirror-Account-Id", account)
+			req.Header.Set("X-Mirror-Region", region)
+			res, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			return res.StatusCode, body
+		}
+		if status, _ := create("111111111111", "us-east-1"); status != http.StatusOK {
+			t.Fatalf("initial create %d", status)
+		}
+		if status, _ := create("111111111111", "us-east-1"); status != http.StatusOK {
+			t.Fatalf("idempotent create %d", status)
+		}
+		if status, body := create("222222222222", "us-east-1"); status != http.StatusConflict || !bytes.Contains(body, []byte("BucketAlreadyExists")) {
+			t.Fatalf("cross-account create %d %s", status, body)
+		}
+		if status, body := create("111111111111", "us-west-2"); status != http.StatusConflict || !bytes.Contains(body, []byte("BucketAlreadyOwnedByYou")) {
+			t.Fatalf("cross-region create %d %s", status, body)
+		}
+	})
+
 	t.Run("Given an invalid storage class When PUT object Then it is rejected", func(t *testing.T) {
 		res := do(http.MethodPut, "/classes", nil, "")
 		res.Body.Close()

@@ -3101,6 +3101,9 @@ func TestStatesTestStateMapFailureCounts(t *testing.T) {
 	if _, err := call(definition, `{"items":[1,2,3]}`, 4); err == nil {
 		t.Fatal("accepted failure count above item count")
 	}
+	if _, err := call(definition, `{"items":[1,2,3]}`, -1); err == nil {
+		t.Fatal("accepted negative failure count")
+	}
 	inline := `{"Type":"Map","ItemsPath":"$.items","ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}`
 	if _, err := call(inline, `{"items":[1]}`, 0); err == nil {
 		t.Fatal("accepted failure count for inline Map")

@@ -72,8 +72,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-hide-http-task-secrets",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `RevealSecrets: toBool(req.Input["_testStateRevealSecrets"]),`,
-			new:  `RevealSecrets: false,`,
+			old:  `RevealSecrets:   toBool(req.Input["_testStateRevealSecrets"]),`,
+			new:  `RevealSecrets:   false,`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesHTTPTaskAndTrace",
 		},
@@ -422,12 +422,12 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
 		{
-			name: "states-ignore-test-state-map-failure-count",
+			name: "states-ignore-test-state-map-failure-count-validation",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `"mapIterationFailureCount", "MapIterationFailureCount"`,
-			new:  `"missingFailureCount", "MissingFailureCount"`,
+			old:  `if value, exists := inputValue(configuration, "mapIterationFailureCount", "MapIterationFailureCount"); exists {`,
+			new:  `if false {`,
 			pkg:  "./internal/services/aws/states",
-			run:  "TestStatesLifecycleAndWalkerUnits",
+			run:  "TestStatesTestStateMapFailureCounts",
 		},
 		{
 			name: "states-ignore-test-state-map-reader-data",

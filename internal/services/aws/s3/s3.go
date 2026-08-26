@@ -589,6 +589,9 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 
 func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
 	wantVer := str(req.Input["VersionId"])
 	meta, exists := p.objectMetadata(ctx, req, b, key, wantVer)
 	if !exists {
@@ -678,6 +681,9 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 
 func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
 	wantVer := str(req.Input["VersionId"])
 	meta, exists := p.objectMetadata(ctx, req, b, key, wantVer)
 	if !exists {
@@ -748,6 +754,9 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 
 func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
 	wantVer := str(req.Input["VersionId"])
 	if p.versioningEnabled(ctx, req, b) && wantVer == "" {
 		vid := p.deps.Rand.Hex(8)
@@ -1661,6 +1670,9 @@ func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Res
 
 func (p *Pack) objectTagTarget(ctx context.Context, req *spi.Request) (string, string, error) {
 	b, key, version := str(req.Input["Bucket"]), str(req.Input["Key"]), str(req.Input["VersionId"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return "", "", err
+	}
 	meta, ok := p.objectMetadata(ctx, req, b, key, version)
 	if !ok {
 		return "", "", &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: 404, Fault: "client"}
@@ -1959,9 +1971,23 @@ func (p *Pack) namedCfg(ctx context.Context, req *spi.Request) (*spi.Response, e
 }
 
 func (p *Pack) requireBucket(ctx context.Context, req *spi.Request, b string) error {
+	expected := requestCondition(req, "ExpectedBucketOwner", "x-amz-expected-bucket-owner")
+	if expected != "" {
+		if len(expected) != 12 {
+			return &spi.Fault{Code: "InvalidBucketOwnerAWSAccountID", Message: "The value of the expected bucket owner parameter must be an AWS Account ID", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		for _, r := range expected {
+			if r < '0' || r > '9' {
+				return &spi.Fault{Code: "InvalidBucketOwnerAWSAccountID", Message: "The value of the expected bucket owner parameter must be an AWS Account ID", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+		}
+	}
 	_, ok, _ := p.col(req, "buckets").Get(ctx, b)
 	if !ok {
 		return &spi.Fault{Code: "NoSuchBucket", Message: "The specified bucket does not exist", HTTPStatus: 404, Fault: "client"}
+	}
+	if expected != "" && expected != req.Identity.Account {
+		return &spi.Fault{Code: "AccessDenied", Message: "Access Denied", HTTPStatus: http.StatusForbidden, Fault: "client"}
 	}
 	return nil
 }

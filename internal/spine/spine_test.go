@@ -192,7 +192,7 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 		t.Fatalf("deleted key still there %d %s", code, b)
 	}
 
-	code, b, createHeaders := do(http.MethodPost, "/qb/m?uploads", "", map[string]string{"x-amz-checksum-algorithm": "CRC32", "x-amz-checksum-type": "FULL_OBJECT"})
+	code, b, createHeaders := do(http.MethodPost, "/qb/m?uploads", "", map[string]string{"x-amz-checksum-algorithm": "CRC32", "x-amz-checksum-type": "FULL_OBJECT", "x-amz-storage-class": "STANDARD_IA", "x-amz-tagging": "env=test&team=storage"})
 	if code >= 300 {
 		t.Fatalf("create mpu %d %s", code, b)
 	} else if createHeaders.Get("x-amz-checksum-algorithm") != "CRC32" || createHeaders.Get("x-amz-checksum-type") != "FULL_OBJECT" {
@@ -289,7 +289,10 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	} else if !bytes.Contains(b, []byte(checksum)) {
 		t.Fatalf("multipart checksum output %s", b)
 	}
-	if code, b, h := do(http.MethodGet, "/qb/m", "", map[string]string{"x-amz-checksum-mode": "ENABLED"}); code != http.StatusOK || h.Get("x-amz-checksum-crc32") != checksum || h.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+	if code, b, h := do(http.MethodGet, "/qb/m", "", map[string]string{"x-amz-checksum-mode": "ENABLED"}); code != http.StatusOK || h.Get("x-amz-checksum-crc32") != checksum || h.Get("x-amz-checksum-type") != "FULL_OBJECT" || h.Get("x-amz-storage-class") != "STANDARD_IA" {
 		t.Fatalf("get multipart checksum %d %s %v", code, b, h)
+	}
+	if code, b, _ := do(http.MethodGet, "/qb/m?tagging", "", nil); code != http.StatusOK || bytes.Contains(b, []byte("<member>")) || !bytes.Contains(b, []byte("<TagSet><Tag><Key>env</Key><Value>test</Value></Tag><Tag><Key>team</Key><Value>storage</Value></Tag></TagSet>")) {
+		t.Fatalf("get multipart tags %d %s", code, b)
 	}
 }

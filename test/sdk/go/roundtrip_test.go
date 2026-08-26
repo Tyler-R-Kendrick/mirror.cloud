@@ -186,6 +186,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}
 	checksumUpload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{
 		Bucket: aws.String("sdk"), Key: aws.String("checksum-multipart"), ChecksumAlgorithm: s3types.ChecksumAlgorithmSha256,
+		StorageClass: s3types.StorageClassStandardIa, Tagging: aws.String("env=test&team=storage"),
 	})
 	if err != nil {
 		t.Fatalf("create checksum multipart: %v", err)
@@ -213,8 +214,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	checksumHead, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{
 		Bucket: aws.String("sdk"), Key: aws.String("checksum-multipart"), ChecksumMode: s3types.ChecksumModeEnabled,
 	})
-	if err != nil || aws.ToString(checksumHead.ChecksumSHA256) != aws.ToString(checksumComplete.ChecksumSHA256) {
+	if err != nil || aws.ToString(checksumHead.ChecksumSHA256) != aws.ToString(checksumComplete.ChecksumSHA256) || checksumHead.StorageClass != s3types.StorageClassStandardIa {
 		t.Fatalf("head checksum multipart: %#v %v", checksumHead, err)
+	}
+	checksumTags, err := s3c.GetObjectTagging(context.Background(), &s3.GetObjectTaggingInput{Bucket: aws.String("sdk"), Key: aws.String("checksum-multipart")})
+	if err != nil || len(checksumTags.TagSet) != 2 || aws.ToString(checksumTags.TagSet[0].Key) != "env" || aws.ToString(checksumTags.TagSet[0].Value) != "test" || aws.ToString(checksumTags.TagSet[1].Key) != "team" || aws.ToString(checksumTags.TagSet[1].Value) != "storage" {
+		t.Fatalf("multipart creation tags: %#v %v", checksumTags, err)
 	}
 
 	ddb := dynamodb.NewFromConfig(awscfg, func(o *dynamodb.Options) { o.BaseEndpoint = aws.String(ts.URL) })

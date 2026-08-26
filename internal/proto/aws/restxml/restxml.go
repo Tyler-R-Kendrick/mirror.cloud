@@ -534,6 +534,14 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		writeFlattened(resp.Output, &b, [][2]string{{"Parts", "Part"}})
 	case "ListMultipartUploads":
 		writeFlattened(resp.Output, &b, [][2]string{{"Uploads", "Upload"}, {"CommonPrefixes", "CommonPrefixes"}})
+	case "GetObjectTagging", "GetBucketTagging":
+		b.WriteString("<TagSet>")
+		for _, item := range resp.Output["TagSet"].([]any) {
+			b.WriteString("<Tag>")
+			write(item, &b)
+			b.WriteString("</Tag>")
+		}
+		b.WriteString("</TagSet>")
 	default:
 		write(resp.Output, &b)
 	}

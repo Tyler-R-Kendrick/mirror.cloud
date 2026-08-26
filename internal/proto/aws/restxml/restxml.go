@@ -408,6 +408,22 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 		}
 		in["Objects"] = objs
 		in["Delete"] = map[string]any{"Objects": objs}
+	case "CompleteMultipartUpload":
+		var completed struct {
+			Part []struct {
+				ETag       string `xml:"ETag"`
+				PartNumber int    `xml:"PartNumber"`
+			} `xml:"Part"`
+		}
+		if xml.Unmarshal(raw, &completed) != nil {
+			in["_body"] = string(raw)
+			return
+		}
+		parts := make([]any, 0, len(completed.Part))
+		for _, part := range completed.Part {
+			parts = append(parts, map[string]any{"ETag": part.ETag, "PartNumber": part.PartNumber})
+		}
+		in["MultipartUpload"] = map[string]any{"Parts": parts}
 	case "PutBucketTagging", "PutObjectTagging":
 		var t struct {
 			TagSet struct {

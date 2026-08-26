@@ -58,6 +58,53 @@ func TestConcurrentPutsSameKey(t *testing.T) {
 	_ = got.Stream.Close()
 }
 
+func TestConcurrentArchiveRestoresConverge(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != nil {
+			stream = io.NopCloser(bytes.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "archive"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutObject", map[string]any{"Bucket": "archive", "Key": "cold", "StorageClass": "GLACIER"}, []byte("body")); err != nil {
+		t.Fatal(err)
+	}
+
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := call("RestoreObject", map[string]any{"Bucket": "archive", "Key": "cold", "RestoreRequest": map[string]any{"Days": 1}}, nil)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent restore: %v", err)
+		}
+	}
+	got, err := call("GetObject", map[string]any{"Bucket": "archive", "Key": "cold"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(got.Stream)
+	_ = got.Stream.Close()
+	if string(body) != "body" || got.Headers.Get("x-amz-restore") == "" {
+		t.Fatalf("restore did not converge body=%q headers=%v", body, got.Headers)
+	}
+}
+
 func TestTwoAccountsNeverSeeEachOtherUnderLoad(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

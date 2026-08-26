@@ -129,7 +129,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "GetBucketLocation":
 		return p.getBucketLocation(ctx, req)
 	case "PutObject":
-		return p.putObject(ctx, req, "", "")
+		return p.putObject(ctx, req, "", "", nil)
 	case "GetObject":
 		return p.getObject(ctx, req)
 	case "HeadObject":
@@ -486,7 +486,7 @@ func (p *Pack) getBucketLocation(ctx context.Context, req *spi.Request) (*spi.Re
 	return &spi.Response{Output: map[string]any{"LocationConstraint": req.Identity.Region}}, nil
 }
 
-func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumType string) (*spi.Response, error) {
+func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumType string, parts []any) (*spi.Response, error) {
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
@@ -524,6 +524,9 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		vid = p.deps.Rand.Hex(8)
 		_, _ = p.deps.Blobs.Put(ctx, blobKey(req, b, key)+"@"+vid, bytes.NewReader(body))
 		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "mtime": mtime, "key": key, "storageClass": storageClass}
+		if len(parts) > 0 {
+			versionMeta["parts"] = parts
+		}
 		if len(provided) > 0 {
 			versionMeta["checksums"] = provided
 			versionMeta["checksumType"] = checksumType
@@ -532,6 +535,9 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		_ = p.col(req, "versions").Put(ctx, b+"/"+key+"/"+vid, vm)
 	}
 	metaDoc := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "versionId": vid, "deleteMarker": false, "storageClass": storageClass}
+	if len(parts) > 0 {
+		metaDoc["parts"] = parts
+	}
 	if len(provided) > 0 {
 		metaDoc["checksums"] = provided
 		metaDoc["checksumType"] = checksumType
@@ -605,6 +611,21 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	setReplicationHeaders(h, meta)
 	data, _ := io.ReadAll(rc)
 	_ = rc.Close()
+	start, length, count, requested, err := objectPartRange(req, meta, int64(len(data)))
+	if err != nil {
+		return nil, err
+	}
+	if requested {
+		data = data[start : start+length]
+		h.Set("Content-Length", strconv.FormatInt(length, 10))
+		h.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, start+length-1, info.Size))
+		if count > 0 {
+			h.Set("x-amz-mp-parts-count", strconv.Itoa(count))
+		}
+		if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
+			setPartChecksumHeaders(h, meta, partMetadata(meta, partNumber(req)), length == info.Size)
+		}
+	}
 	if req.HTTP != nil {
 		if im := req.HTTP.Header.Get("If-Match"); im != "" && im != etag && im != strings.Trim(etag, `"`) {
 			return nil, &spi.Fault{Code: "PreconditionFailed", HTTPStatus: 412, Fault: "client"}
@@ -624,6 +645,9 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 			h.Set("Content-Length", strconv.Itoa(len(data)))
 			return &spi.Response{Status: 206, Headers: h, Stream: io.NopCloser(bytes.NewReader(data))}, nil
 		}
+	}
+	if requested {
+		return &spi.Response{Status: 206, Headers: h, Stream: io.NopCloser(bytes.NewReader(data))}, nil
 	}
 	return &spi.Response{Status: 200, Headers: h, Stream: io.NopCloser(bytes.NewReader(data))}, nil
 }
@@ -657,7 +681,23 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		setChecksumHeaders(h, meta)
 	}
 	setReplicationHeaders(h, meta)
-	return &spi.Response{Status: 200, Headers: h}, nil
+	start, length, count, requested, err := objectPartRange(req, meta, info.Size)
+	if err != nil {
+		return nil, err
+	}
+	status := 200
+	if requested {
+		status = 206
+		h.Set("Content-Length", strconv.FormatInt(length, 10))
+		h.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, start+length-1, info.Size))
+		if count > 0 {
+			h.Set("x-amz-mp-parts-count", strconv.Itoa(count))
+		}
+		if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
+			setPartChecksumHeaders(h, meta, partMetadata(meta, partNumber(req)), length == info.Size)
+		}
+	}
+	return &spi.Response{Status: status, Headers: h}, nil
 }
 
 func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -824,7 +864,7 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		req.Input["Tagging"] = values.Encode()
 	}
 	req.Body = source.body
-	response, err := p.putObject(ctx, req, "", "")
+	response, err := p.putObject(ctx, req, "", "", nil)
 	if err == nil && source.version != "" {
 		response.Headers.Set("x-amz-copy-source-version-id", source.version)
 	}
@@ -953,6 +993,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	var buf bytes.Buffer
 	var md5s []byte
 	var partChecksums []byte
+	var completedParts []any
 	previous := 0
 	checksum, _ := checksumByAlgorithm(u.checksumAlgorithm)
 	if requestedType := strings.ToUpper(requestCondition(req, "ChecksumType", "x-amz-checksum-type")); requestedType != "" && requestedType != u.checksumType {
@@ -984,6 +1025,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 		}
 		decoded, _ := base64.StdEncoding.DecodeString(partChecksum)
 		partChecksums = append(partChecksums, decoded...)
+		completedParts = append(completedParts, map[string]any{"number": number, "size": len(part.body), "checksums": part.checksums})
 		buf.Write(part.body)
 		md5s = append(md5s, s[:]...)
 		previous = number
@@ -1011,7 +1053,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	req.Input[checksum.input], req.Input["ChecksumType"] = objectChecksum, u.checksumType
 	req.Input["Bucket"], req.Input["Key"], req.Input["StorageClass"], req.Input["Tagging"] = bucket, key, u.storageClass, u.tagging
 	req.Body = io.NopCloser(&buf)
-	resp, err := p.putObject(ctx, req, etag, u.checksumType)
+	resp, err := p.putObject(ctx, req, etag, u.checksumType, completedParts)
 	if err != nil {
 		return nil, err
 	}
@@ -1994,6 +2036,64 @@ func partNumber(req *spi.Request) int {
 		return n
 	}
 	return 0
+}
+
+func objectPartRange(req *spi.Request, meta map[string]any, size int64) (start, length int64, count int, requested bool, err error) {
+	_, upper := req.Input["PartNumber"]
+	_, lower := req.Input["partNumber"]
+	requested = upper || lower || req.HTTP != nil && req.HTTP.URL.Query().Has("partNumber")
+	if !requested {
+		return 0, size, 0, false, nil
+	}
+	if requestCondition(req, "Range", "Range") != "" {
+		return 0, 0, 0, true, &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	number := partNumber(req)
+	if number < 1 || number > 10000 {
+		return 0, 0, 0, true, &spi.Fault{Code: "InvalidPartNumber", HTTPStatus: http.StatusRequestedRangeNotSatisfiable, Fault: "client"}
+	}
+	parts := asSlice(meta["parts"])
+	if len(parts) == 0 {
+		if number == 1 {
+			return 0, size, 0, true, nil
+		}
+		return 0, 0, 0, true, &spi.Fault{Code: "InvalidPartNumber", HTTPStatus: http.StatusRequestedRangeNotSatisfiable, Fault: "client"}
+	}
+	for _, raw := range parts {
+		part := asMap(raw)
+		partSize := int64(asInt(part["size"]))
+		if asInt(part["number"]) == number {
+			return start, partSize, len(parts), true, nil
+		}
+		start += partSize
+	}
+	return 0, 0, 0, true, &spi.Fault{Code: "InvalidPartNumber", HTTPStatus: http.StatusRequestedRangeNotSatisfiable, Fault: "client"}
+}
+
+func partMetadata(meta map[string]any, number int) map[string]any {
+	for _, raw := range asSlice(meta["parts"]) {
+		part := asMap(raw)
+		if asInt(part["number"]) == number {
+			return part
+		}
+	}
+	return nil
+}
+
+func setPartChecksumHeaders(headers http.Header, meta, part map[string]any, wholeObject bool) {
+	if part == nil && wholeObject || str(meta["checksumType"]) != "COMPOSITE" && wholeObject {
+		return
+	}
+	for _, checksum := range checksums {
+		headers.Del(checksum.header)
+	}
+	headers.Del("x-amz-checksum-type")
+	if part != nil && str(meta["checksumType"]) == "COMPOSITE" {
+		for header, value := range asMap(part["checksums"]) {
+			headers.Set(header, str(value))
+		}
+		headers.Set("x-amz-checksum-type", "COMPOSITE")
+	}
 }
 
 func asInt(v any) int {

@@ -378,6 +378,59 @@ func TestMultipartETagForm(t *testing.T) {
 	}
 }
 
+func TestMultipartPartReads(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "b", "Status": "Enabled"}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "k", "ChecksumAlgorithm": "SHA256"}, nil)
+	id := created.Output["UploadId"].(string)
+	firstBody := bytes.Repeat([]byte("A"), 5<<20)
+	first := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 1}, firstBody)
+	second := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 2}, []byte("tail"))
+	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, first), completedPart(2, second)), nil)
+	version := done.Headers.Get("x-amz-version-id")
+	if version == "" {
+		t.Fatal("missing multipart version")
+	}
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "k"}, []byte("newer"))
+
+	input := map[string]any{"Bucket": "b", "Key": "k", "VersionId": version, "PartNumber": 2, "ChecksumMode": "ENABLED"}
+	get := mustInvoke(t, p, "GetObject", input, nil)
+	if body := readStream(t, get); string(body) != "tail" {
+		t.Fatalf("part body = %q", body)
+	}
+	if get.Status != http.StatusPartialContent || get.Headers.Get("Content-Length") != "4" || get.Headers.Get("Content-Range") != "bytes 5242880-5242883/5242884" || get.Headers.Get("x-amz-mp-parts-count") != "2" {
+		t.Fatalf("part headers = status %d %v", get.Status, get.Headers)
+	}
+	if get.Headers.Get("x-amz-checksum-sha256") != second.Headers.Get("x-amz-checksum-sha256") || get.Headers.Get("x-amz-checksum-type") != "COMPOSITE" {
+		t.Fatalf("part checksum = %v", get.Headers)
+	}
+	head := mustInvoke(t, p, "HeadObject", input, nil)
+	if head.Status != http.StatusPartialContent || head.Headers.Get("Content-Length") != "4" || head.Headers.Get("Content-Range") != get.Headers.Get("Content-Range") || head.Headers.Get("x-amz-mp-parts-count") != "2" || head.Headers.Get("x-amz-checksum-sha256") != second.Headers.Get("x-amz-checksum-sha256") {
+		t.Fatalf("head part = status %d %v", head.Status, head.Headers)
+	}
+
+	whole := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "k", "PartNumber": 1}, nil)
+	if body := readStream(t, whole); string(body) != "newer" || whole.Status != http.StatusPartialContent || whole.Headers.Get("x-amz-mp-parts-count") != "" {
+		t.Fatalf("ordinary part one = %q status %d %v", body, whole.Status, whole.Headers)
+	}
+	for _, number := range []int{0, 3, 10001} {
+		_, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "k", "VersionId": version, "PartNumber": number}, nil)
+		if fault := asFault(t, err); fault.Code != "InvalidPartNumber" || fault.HTTPStatus != http.StatusRequestedRangeNotSatisfiable {
+			t.Fatalf("part %d fault = %#v", number, fault)
+		}
+	}
+	_, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "k", "VersionId": version, "PartNumber": 1, "Range": "bytes=0-1"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("part and range fault = %#v", fault)
+	}
+
+	golden.AssertJSON(t, map[string]any{
+		"get":  map[string]any{"body": "tail", "status": get.Status, "length": get.Headers.Get("Content-Length"), "range": get.Headers.Get("Content-Range"), "parts": get.Headers.Get("x-amz-mp-parts-count"), "checksum": get.Headers.Get("x-amz-checksum-sha256")},
+		"head": map[string]any{"status": head.Status, "length": head.Headers.Get("Content-Length"), "range": head.Headers.Get("Content-Range"), "parts": head.Headers.Get("x-amz-mp-parts-count"), "checksum": head.Headers.Get("x-amz-checksum-sha256")},
+	})
+}
+
 func TestWriteChecksumValidation(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)

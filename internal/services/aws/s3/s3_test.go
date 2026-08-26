@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -557,6 +558,58 @@ func TestMultipartPartReads(t *testing.T) {
 		"get":  map[string]any{"body": "tail", "status": get.Status, "length": get.Headers.Get("Content-Length"), "range": get.Headers.Get("Content-Range"), "parts": get.Headers.Get("x-amz-mp-parts-count"), "checksum": get.Headers.Get("x-amz-checksum-sha256")},
 		"head": map[string]any{"status": head.Status, "length": head.Headers.Get("Content-Length"), "range": head.Headers.Get("Content-Range"), "parts": head.Headers.Get("x-amz-mp-parts-count"), "checksum": head.Headers.Get("x-amz-checksum-sha256")},
 	})
+}
+
+func TestObjectByteRanges(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	body := []byte("0123456789")
+	sum := make([]byte, 4)
+	binary.BigEndian.PutUint32(sum, crc32.ChecksumIEEE(body))
+	checksum := base64.StdEncoding.EncodeToString(sum)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "range", "ChecksumCRC32": checksum}, body)
+	get := func(value string) (*spi.Response, []byte, error) {
+		response, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "range", "Range": value, "ChecksumMode": "ENABLED"}, nil)
+		if err != nil {
+			return response, nil, err
+		}
+		return response, readStream(t, response), nil
+	}
+	for _, test := range []struct {
+		value, body, contentRange string
+		checksum                  bool
+	}{
+		{"bytes=2-5", "2345", "bytes 2-5/10", false},
+		{"bytes=7-", "789", "bytes 7-9/10", false},
+		{"bytes=-3", "789", "bytes 7-9/10", false},
+		{"bytes=-20", "0123456789", "bytes 0-9/10", true},
+		{"bytes=8-99", "89", "bytes 8-9/10", false},
+	} {
+		response, got, err := get(test.value)
+		if err != nil || response.Status != http.StatusPartialContent || string(got) != test.body || response.Headers.Get("Content-Range") != test.contentRange || response.Headers.Get("Content-Length") != strconv.Itoa(len(test.body)) || response.Headers.Get("Accept-Ranges") != "bytes" {
+			t.Fatalf("range %q = %q %#v %v", test.value, got, response, err)
+		}
+		if hasChecksum := response.Headers.Get("x-amz-checksum-crc32") != ""; hasChecksum != test.checksum {
+			t.Fatalf("range %q checksum headers = %v", test.value, response.Headers)
+		}
+	}
+	for _, value := range []string{"items=0-1", "bytes=bad", "bytes=5-2", "bytes=0-1,3-4"} {
+		response, got, err := get(value)
+		if err != nil || response.Status != http.StatusOK || string(got) != string(body) || response.Headers.Get("Content-Range") != "" {
+			t.Fatalf("ignored range %q = %q %#v %v", value, got, response, err)
+		}
+	}
+	for _, value := range []string{"bytes=10-", "bytes=-0"} {
+		_, _, err := get(value)
+		fault := asFault(t, err)
+		if fault.Code != "InvalidRange" || fault.HTTPStatus != http.StatusRequestedRangeNotSatisfiable || fault.Headers.Get("Content-Range") != "bytes */10" {
+			t.Fatalf("range %q fault = %#v", value, fault)
+		}
+	}
+	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "range", "Range": "bytes=-3", "ChecksumMode": "ENABLED"}, nil)
+	if head.Status != http.StatusPartialContent || head.Headers.Get("Content-Length") != "3" || head.Headers.Get("Content-Range") != "bytes 7-9/10" || head.Headers.Get("Accept-Ranges") != "bytes" || head.Headers.Get("x-amz-checksum-crc32") != "" {
+		t.Fatalf("head range = %#v", head)
+	}
 }
 
 func TestGetObjectAttributesContract(t *testing.T) {

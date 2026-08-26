@@ -122,6 +122,22 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), VersionId: put.VersionId, IfNoneMatch: put.ETag}); err == nil {
 		t.Fatal("conditional get with matching If-None-Match succeeded")
 	}
+	ranged, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), VersionId: put.VersionId, Range: aws.String("bytes=-3"), ChecksumMode: s3types.ChecksumModeEnabled})
+	if err != nil {
+		t.Fatalf("suffix range: %v", err)
+	}
+	suffixBody, _ := io.ReadAll(ranged.Body)
+	_ = ranged.Body.Close()
+	if string(suffixBody) != "sdk" || aws.ToString(ranged.ContentRange) != "bytes 6-8/9" || aws.ToInt64(ranged.ContentLength) != 3 || aws.ToString(ranged.ChecksumCRC32) != "" {
+		t.Fatalf("suffix range body=%q output=%#v", suffixBody, ranged)
+	}
+	headRange, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), VersionId: put.VersionId, Range: aws.String("bytes=1-3")})
+	if err != nil || aws.ToInt64(headRange.ContentLength) != 3 {
+		t.Fatalf("head range: %#v %v", headRange, err)
+	}
+	if _, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), VersionId: put.VersionId, Range: aws.String("bytes=9-")}); err == nil {
+		t.Fatal("unsatisfiable range succeeded")
+	}
 	originalTags, err := s3c.GetObjectTagging(context.Background(), &s3.GetObjectTaggingInput{Bucket: aws.String("sdk"), Key: aws.String("k"), VersionId: put.VersionId})
 	if err != nil || aws.ToString(originalTags.VersionId) != aws.ToString(put.VersionId) || len(originalTags.TagSet) != 1 || aws.ToString(originalTags.TagSet[0].Key) != "stage" || aws.ToString(originalTags.TagSet[0].Value) != "original" {
 		t.Fatalf("get original tags: %#v %v", originalTags, err)

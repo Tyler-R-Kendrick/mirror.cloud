@@ -172,6 +172,18 @@ func TestBootedServerS3VersioningPaginationPresign(t *testing.T) {
 			t.Fatalf("%s %s conditions %#v = %d %s", request.method, request.path, request.headers, code, body)
 		}
 	}
+	if code, body, headers := do(http.MethodGet, "/holes/ims", "", map[string]string{"Authorization": auth, "Range": "bytes=-2"}); code != http.StatusPartialContent || string(body) != "dy" || headers.Get("Content-Range") != "bytes 2-3/4" || headers.Get("Accept-Ranges") != "bytes" {
+		t.Fatalf("suffix range %d %q %v", code, body, headers)
+	}
+	if code, _, headers := do(http.MethodHead, "/holes/ims", "", map[string]string{"Authorization": auth, "Range": "bytes=1-2"}); code != http.StatusPartialContent || headers.Get("Content-Length") != "2" || headers.Get("Content-Range") != "bytes 1-2/4" {
+		t.Fatalf("head range %d %v", code, headers)
+	}
+	if code, body, headers := do(http.MethodGet, "/holes/ims", "", map[string]string{"Authorization": auth, "Range": "bytes=4-"}); code != http.StatusRequestedRangeNotSatisfiable || headers.Get("Content-Range") != "bytes */4" {
+		t.Fatalf("invalid range %d %s %v", code, body, headers)
+	}
+	if code, body, _ := do(http.MethodGet, "/holes/ims", "", map[string]string{"Authorization": auth, "Range": "bytes=bad"}); code != http.StatusOK || string(body) != "body" {
+		t.Fatalf("malformed range %d %q", code, body)
+	}
 
 	q := "/holes/ims?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test/20200101/us-east-1/s3/aws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=00"
 	if code, b, _ := do(http.MethodGet, q, "", nil); code != 200 || string(b) != "body" {

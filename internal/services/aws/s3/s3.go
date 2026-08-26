@@ -45,6 +45,7 @@ type Pack struct {
 type mpu struct {
 	bucket, key, uploadID           string
 	storageClass, initiated         string
+	tagging                         string
 	checksumAlgorithm, checksumType string
 	parts                           map[int]multipartPart
 }
@@ -514,7 +515,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		etag = `"` + info.MD5 + `"`
 	}
 	mtime := p.deps.Clock.Now().UTC().Format(http.TimeFormat)
-	storageClass := str(req.Input["StorageClass"])
+	storageClass := requestCondition(req, "StorageClass", "x-amz-storage-class")
 	if storageClass == "" {
 		storageClass = "STANDARD"
 	}
@@ -845,13 +846,13 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if err := validateMultipartChecksumContract(req, algorithm, checksumType); err != nil {
 		return nil, err
 	}
-	storageClass := str(req.Input["StorageClass"])
+	storageClass := requestCondition(req, "StorageClass", "x-amz-storage-class")
 	if storageClass == "" {
 		storageClass = "STANDARD"
 	}
 	id := p.deps.Rand.Hex(16)
 	p.mu.Lock()
-	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), checksumAlgorithm: algorithm, checksumType: checksumType, parts: map[int]multipartPart{}}
+	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), tagging: requestCondition(req, "Tagging", "x-amz-tagging"), checksumAlgorithm: algorithm, checksumType: checksumType, parts: map[int]multipartPart{}}
 	p.mu.Unlock()
 	h := http.Header{}
 	h.Set("x-amz-checksum-algorithm", algorithm)
@@ -1008,7 +1009,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 		}
 	}
 	req.Input[checksum.input], req.Input["ChecksumType"] = objectChecksum, u.checksumType
-	req.Input["Bucket"], req.Input["Key"] = bucket, key
+	req.Input["Bucket"], req.Input["Key"], req.Input["StorageClass"], req.Input["Tagging"] = bucket, key, u.storageClass, u.tagging
 	req.Body = io.NopCloser(&buf)
 	resp, err := p.putObject(ctx, req, etag, u.checksumType)
 	if err != nil {

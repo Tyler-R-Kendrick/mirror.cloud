@@ -543,17 +543,51 @@ func TestMultipartChecksumContract(t *testing.T) {
 func TestMultipartChecksumCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
-	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "snapshot", "ChecksumAlgorithm": "SHA256"}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "snapshot", "ChecksumAlgorithm": "SHA256", "StorageClass": "STANDARD_IA", "Tagging": "env=snapshot"}, nil)
 	id := created.Output["UploadId"].(string)
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "b", "Key": "snapshot", "UploadId": id, "PartNumber": 1}, []byte("snapshot"))
 	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "b", "Key": "snapshot", "UploadId": id}, nil)
 	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, part)), nil)
+	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "snapshot"}, nil)
+	tags := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "b", "Key": "snapshot"}, nil).Output["TagSet"]
 	golden.AssertJSON(t, map[string]any{
-		"create":   map[string]any{"algorithm": created.Output["ChecksumAlgorithm"], "type": created.Output["ChecksumType"]},
+		"create":   map[string]any{"algorithm": created.Output["ChecksumAlgorithm"], "type": created.Output["ChecksumType"], "storageClass": "STANDARD_IA", "tags": "env=snapshot"},
 		"part":     map[string]any{"checksum": part.Headers.Get("x-amz-checksum-sha256")},
 		"list":     map[string]any{"algorithm": listed.Output["ChecksumAlgorithm"], "type": listed.Output["ChecksumType"], "part": listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumSHA256"]},
 		"complete": map[string]any{"checksum": done.Output["ChecksumSHA256"], "type": done.Output["ChecksumType"]},
+		"object":   map[string]any{"storageClass": head.Headers.Get("x-amz-storage-class"), "tags": tags},
 	})
+}
+
+func TestMultipartCreationAttributes(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{
+		"Bucket": "b", "Key": "attributes", "StorageClass": "STANDARD_IA", "Tagging": "team=storage&env=test",
+	}, nil)
+	id := created.Output["UploadId"].(string)
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "b", "Key": "attributes", "UploadId": id, "PartNumber": 1}, []byte("body"))
+	complete := completeInput(id, completedPart(1, part))
+	complete["StorageClass"], complete["Tagging"] = "STANDARD", "ignored=true"
+	mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
+
+	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "attributes"}, nil)
+	if head.Headers.Get("x-amz-storage-class") != "STANDARD_IA" {
+		t.Fatalf("multipart storage class = %v", head.Headers)
+	}
+	get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "attributes"}, nil)
+	if get.Headers.Get("x-amz-storage-class") != "STANDARD_IA" {
+		t.Fatalf("multipart get storage class = %v", get.Headers)
+	}
+	_ = get.Stream.Close()
+	tags := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "b", "Key": "attributes"}, nil).Output["TagSet"].([]any)
+	if len(tags) != 2 || asMapForTest(tags[0])["Key"] != "env" || asMapForTest(tags[0])["Value"] != "test" || asMapForTest(tags[1])["Key"] != "team" || asMapForTest(tags[1])["Value"] != "storage" {
+		t.Fatalf("multipart tags = %#v", tags)
+	}
+	standard := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "standard"}, []byte("body"))
+	if head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "standard"}, nil); standard.Headers.Get("x-amz-storage-class") != "" || head.Headers.Get("x-amz-storage-class") != "" {
+		t.Fatalf("standard storage class headers = put %v head %v", standard.Headers, head.Headers)
+	}
 }
 
 func TestCompleteMultipartUploadManifest(t *testing.T) {

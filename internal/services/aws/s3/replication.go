@@ -271,7 +271,7 @@ func setReplicationHeaders(headers http.Header, meta map[string]any) {
 	if status := str(meta["replicationStatus"]); status != "" {
 		headers.Set("x-amz-replication-status", status)
 	}
-	if storageClass := str(meta["storageClass"]); storageClass != "" {
+	if storageClass := str(meta["storageClass"]); storageClass != "" && storageClass != "STANDARD" {
 		headers.Set("x-amz-storage-class", storageClass)
 	}
 }

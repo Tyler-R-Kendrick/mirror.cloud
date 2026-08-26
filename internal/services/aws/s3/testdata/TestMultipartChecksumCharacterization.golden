@@ -5,12 +5,23 @@
   },
   "create": {
     "algorithm": "SHA256",
+    "storageClass": "STANDARD_IA",
+    "tags": "env=snapshot",
     "type": "COMPOSITE"
   },
   "list": {
     "algorithm": "SHA256",
     "part": "FqDusHkbbJJFH9KE3Z9Zngp9vn9uvqbi0tBsf3SuwRI=",
     "type": "COMPOSITE"
+  },
+  "object": {
+    "storageClass": "STANDARD_IA",
+    "tags": [
+      {
+        "Key": "env",
+        "Value": "snapshot"
+      }
+    ]
   },
   "part": {
     "checksum": "FqDusHkbbJJFH9KE3Z9Zngp9vn9uvqbi0tBsf3SuwRI="

@@ -170,6 +170,19 @@ func FuzzCreateBucketLocations(f *testing.F) {
 			if err != nil || response.Status != http.StatusOK {
 				t.Fatalf("valid endpoint=%q constraint=%q: %#v %v", endpoint, constraint, response, err)
 			}
+			bucketRegion := constraint
+			if bucketRegion == "" {
+				bucketRegion = "us-east-1"
+			} else if bucketRegion == "EU" {
+				bucketRegion = "eu-west-1"
+			}
+			location := "/location-fuzz"
+			if bucketRegion != "us-east-1" {
+				location = "http://location-fuzz.s3.amazonaws.com/"
+			}
+			if got := response.Headers.Get("Location"); got != location {
+				t.Fatalf("endpoint=%q constraint=%q location=%q want=%q", endpoint, constraint, got, location)
+			}
 			return
 		}
 		want := "IllegalLocationConstraintException"

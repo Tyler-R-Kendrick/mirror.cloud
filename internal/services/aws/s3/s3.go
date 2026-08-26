@@ -623,6 +623,14 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 		setChecksumHeaders(h, meta)
 	}
 	setReplicationHeaders(h, meta)
+	notModified, conditionErr := checkReadPreconditions(req, etag, mtime)
+	if conditionErr != nil || notModified {
+		_ = rc.Close()
+		if conditionErr != nil {
+			return nil, conditionErr
+		}
+		return &spi.Response{Status: http.StatusNotModified, Headers: h}, nil
+	}
 	data, _ := io.ReadAll(rc)
 	_ = rc.Close()
 	start, length, count, requested, err := objectPartRange(req, meta, int64(len(data)))
@@ -641,19 +649,6 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 		}
 	}
 	if req.HTTP != nil {
-		if im := req.HTTP.Header.Get("If-Match"); im != "" && im != etag && im != strings.Trim(etag, `"`) {
-			return nil, &spi.Fault{Code: "PreconditionFailed", HTTPStatus: 412, Fault: "client"}
-		}
-		if inm := req.HTTP.Header.Get("If-None-Match"); inm != "" && (inm == etag || inm == "*" || inm == strings.Trim(etag, `"`)) {
-			return &spi.Response{Status: 304, Headers: h}, nil
-		}
-		if ims := req.HTTP.Header.Get("If-Modified-Since"); ims != "" {
-			if since, err := http.ParseTime(ims); err == nil {
-				if mt, err := time.Parse(http.TimeFormat, mtime); err == nil && !mt.After(since) {
-					return &spi.Response{Status: 304, Headers: h}, nil
-				}
-			}
-		}
 		if rng := req.HTTP.Header.Get("Range"); strings.HasPrefix(rng, "bytes=") {
 			data = applyRange(data, rng)
 			h.Set("Content-Length", strconv.Itoa(len(data)))
@@ -698,6 +693,11 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		setChecksumHeaders(h, meta)
 	}
 	setReplicationHeaders(h, meta)
+	if notModified, err := checkReadPreconditions(req, h.Get("ETag"), h.Get("Last-Modified")); err != nil {
+		return nil, err
+	} else if notModified {
+		return &spi.Response{Status: http.StatusNotModified, Headers: h}, nil
+	}
 	start, length, count, requested, err := objectPartRange(req, meta, info.Size)
 	if err != nil {
 		return nil, err
@@ -1601,6 +1601,11 @@ func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Res
 	if version := str(meta["versionId"]); version != "" {
 		h.Set("x-amz-version-id", version)
 	}
+	if notModified, err := checkReadPreconditions(req, str(meta["etag"]), str(meta["mtime"])); err != nil {
+		return nil, err
+	} else if notModified {
+		return &spi.Response{Status: http.StatusNotModified, Headers: h}, nil
+	}
 	return &spi.Response{Headers: h, Output: out}, nil
 }
 
@@ -2101,6 +2106,27 @@ func etagMatches(condition, etag string) bool {
 
 func preconditionFailed() error {
 	return &spi.Fault{Code: "PreconditionFailed", HTTPStatus: 412, Fault: "client"}
+}
+
+func checkReadPreconditions(req *spi.Request, etag, modified string) (bool, error) {
+	if match := requestCondition(req, "IfMatch", "If-Match"); match != "" {
+		if !etagMatches(match, etag) {
+			return false, preconditionFailed()
+		}
+	} else if value := requestCondition(req, "IfUnmodifiedSince", "If-Unmodified-Since"); value != "" {
+		if condition, err := http.ParseTime(value); err == nil && sourceModifiedAfter(modified, condition) {
+			return false, preconditionFailed()
+		}
+	}
+	if noneMatch := requestCondition(req, "IfNoneMatch", "If-None-Match"); noneMatch != "" {
+		return etagMatches(noneMatch, etag), nil
+	}
+	if value := requestCondition(req, "IfModifiedSince", "If-Modified-Since"); value != "" {
+		if condition, err := http.ParseTime(value); err == nil && !sourceModifiedAfter(modified, condition) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (p *Pack) checkWritePreconditions(ctx context.Context, req *spi.Request, bucket, key string) error {

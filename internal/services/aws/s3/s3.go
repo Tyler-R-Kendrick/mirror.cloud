@@ -26,9 +26,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
+	"github.com/zeebo/xxh3"
 )
 
 func init() {
@@ -2544,6 +2546,9 @@ var (
 		{"SHA1", "ChecksumSHA1", "x-amz-checksum-sha1"},
 		{"SHA256", "ChecksumSHA256", "x-amz-checksum-sha256"},
 		{"SHA512", "ChecksumSHA512", "x-amz-checksum-sha512"},
+		{"XXHASH64", "ChecksumXXHASH64", "x-amz-checksum-xxhash64"},
+		{"XXHASH3", "ChecksumXXHASH3", "x-amz-checksum-xxhash3"},
+		{"XXHASH128", "ChecksumXXHASH128", "x-amz-checksum-xxhash128"},
 	}
 )
 
@@ -2557,9 +2562,6 @@ func checksumByAlgorithm(algorithm string) (struct{ algorithm, input, header str
 }
 
 func validateMultipartChecksumContract(req *spi.Request, algorithm, checksumType string) error {
-	if strings.HasPrefix(algorithm, "XXHASH") {
-		return spi.NotImplemented("aws.s3", req.Operation+".ChecksumAlgorithm."+algorithm, "emulate")
-	}
 	if _, ok := checksumByAlgorithm(algorithm); !ok || (checksumType != "COMPOSITE" && checksumType != "FULL_OBJECT") {
 		return &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
@@ -2573,15 +2575,6 @@ func validateMultipartChecksumContract(req *spi.Request, algorithm, checksumType
 }
 
 func validateMultipartPartChecksum(req *spi.Request, selected struct{ algorithm, input, header string }, body []byte) error {
-	for _, unsupported := range []struct{ input, header string }{
-		{"ChecksumXXHASH64", "x-amz-checksum-xxhash64"},
-		{"ChecksumXXHASH3", "x-amz-checksum-xxhash3"},
-		{"ChecksumXXHASH128", "x-amz-checksum-xxhash128"},
-	} {
-		if requestCondition(req, unsupported.input, unsupported.header) != "" {
-			return &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-		}
-	}
 	for _, checksum := range checksums {
 		if value := requestCondition(req, checksum.input, checksum.header); value != "" {
 			if checksum.algorithm != selected.algorithm {
@@ -2619,20 +2612,20 @@ func checksumValue(input string, body []byte) string {
 	case "ChecksumSHA512":
 		value := sha512.Sum512(body)
 		sum = value[:]
+	case "ChecksumXXHASH64":
+		sum = make([]byte, 8)
+		binary.BigEndian.PutUint64(sum, xxhash.Sum64(body))
+	case "ChecksumXXHASH3":
+		sum = make([]byte, 8)
+		binary.BigEndian.PutUint64(sum, xxh3.Hash(body))
+	case "ChecksumXXHASH128":
+		value := xxh3.Hash128(body).Bytes()
+		sum = value[:]
 	}
 	return base64.StdEncoding.EncodeToString(sum)
 }
 
 func validateChecksum(req *spi.Request, body []byte) error {
-	for _, checksum := range []struct{ input, header string }{
-		{"ChecksumXXHASH64", "x-amz-checksum-xxhash64"},
-		{"ChecksumXXHASH3", "x-amz-checksum-xxhash3"},
-		{"ChecksumXXHASH128", "x-amz-checksum-xxhash128"},
-	} {
-		if requestCondition(req, checksum.input, checksum.header) != "" {
-			return spi.NotImplemented("aws.s3", req.Operation+"."+checksum.input, "emulate")
-		}
-	}
 	for _, checksum := range append([]struct{ algorithm, input, header string }{{"MD5", "ContentMD5", "Content-MD5"}}, checksums...) {
 		if value := requestCondition(req, checksum.input, checksum.header); value != "" {
 			input := checksum.input

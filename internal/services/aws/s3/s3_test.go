@@ -1660,11 +1660,15 @@ func TestWriteChecksumValidation(t *testing.T) {
 		"ChecksumSHA1":      b64(sha1sum[:]),
 		"ChecksumSHA256":    b64(sha256sum[:]),
 		"ChecksumSHA512":    b64(sha512sum[:]),
+		"ChecksumXXHASH64":  "jLhB20DmroM=",
+		"ChecksumXXHASH3":   "ctyxi2ehff8=",
+		"ChecksumXXHASH128": "MxGUd+3l3NXpcWQnaB1YYA==",
 	}
 	responseHeaders := map[string]string{
 		"ChecksumMD5": "x-amz-checksum-md5", "ChecksumCRC32": "x-amz-checksum-crc32", "ChecksumCRC32C": "x-amz-checksum-crc32c",
 		"ChecksumCRC64NVME": "x-amz-checksum-crc64nvme", "ChecksumSHA1": "x-amz-checksum-sha1",
-		"ChecksumSHA256": "x-amz-checksum-sha256", "ChecksumSHA512": "x-amz-checksum-sha512",
+		"ChecksumSHA256": "x-amz-checksum-sha256", "ChecksumSHA512": "x-amz-checksum-sha512", "ChecksumXXHASH64": "x-amz-checksum-xxhash64",
+		"ChecksumXXHASH3": "x-amz-checksum-xxhash3", "ChecksumXXHASH128": "x-amz-checksum-xxhash128",
 	}
 	for name, value := range checksums {
 		put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": name, name: value}, body)
@@ -1690,11 +1694,6 @@ func TestWriteChecksumValidation(t *testing.T) {
 	if fault := asFault(t, err); fault.Code != "BadDigest" {
 		t.Fatalf("malformed checksum fault = %#v", fault)
 	}
-	_, err = invoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "xxhash", "ChecksumXXHASH64": "AA=="}, body)
-	if fault := asFault(t, err); fault.Code != "MirrorNotImplemented" || fault.HTTPStatus != http.StatusNotImplemented {
-		t.Fatalf("xxhash checksum fault = %#v", fault)
-	}
-
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "multipart", "ChecksumAlgorithm": "MD5"}, nil)
 	uploadID := created.Output["UploadId"].(string)
 	_, err = invoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 1, "ChecksumMD5": "AA=="}, body)
@@ -1743,7 +1742,7 @@ func TestMultipartChecksumContract(t *testing.T) {
 	wantCreateFault(map[string]any{"ChecksumAlgorithm": "SHA256", "ChecksumType": "FULL_OBJECT"}, "InvalidRequest")
 	wantCreateFault(map[string]any{"ChecksumAlgorithm": "CRC64NVME", "ChecksumType": "COMPOSITE"}, "InvalidRequest")
 	wantCreateFault(map[string]any{"ChecksumAlgorithm": "CRC32", "ChecksumType": "invalid"}, "InvalidArgument")
-	wantCreateFault(map[string]any{"ChecksumAlgorithm": "XXHASH64"}, "MirrorNotImplemented")
+	wantCreateFault(map[string]any{"ChecksumAlgorithm": "XXHASH64", "ChecksumType": "FULL_OBJECT"}, "InvalidRequest")
 
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "full", "ChecksumAlgorithm": "CRC32", "ChecksumType": "FULL_OBJECT"}, nil)
 	if created.Headers.Get("x-amz-checksum-algorithm") != "CRC32" || created.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
@@ -1801,6 +1800,42 @@ func TestMultipartChecksumContract(t *testing.T) {
 	_, err = invoke(t, p, "CompleteMultipartUpload", completeInput(compositeID, completedPart(2, second)), nil)
 	if fault := asFault(t, err); fault.Code != "InternalError" || fault.HTTPStatus != http.StatusInternalServerError {
 		t.Fatalf("nonconsecutive composite fault = %#v", fault)
+	}
+}
+
+func TestXXHashMultipartChecksums(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	body := []byte("123456789")
+	for _, tc := range []struct {
+		algorithm, input, header, part, composite string
+	}{
+		{"XXHASH64", "ChecksumXXHASH64", "x-amz-checksum-xxhash64", "jLhB20DmroM=", "aIYCMYPSWcc=-1"},
+		{"XXHASH3", "ChecksumXXHASH3", "x-amz-checksum-xxhash3", "ctyxi2ehff8=", "ksPmtVIgSbU=-1"},
+		{"XXHASH128", "ChecksumXXHASH128", "x-amz-checksum-xxhash128", "MxGUd+3l3NXpcWQnaB1YYA==", "qhtapxAN/tUuBHXli2H9nQ==-1"},
+	} {
+		t.Run(tc.algorithm, func(t *testing.T) {
+			_, err := invoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": tc.algorithm + "-full", "ChecksumAlgorithm": tc.algorithm, "ChecksumType": "FULL_OBJECT"}, nil)
+			if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+				t.Fatalf("full-object fault = %#v", fault)
+			}
+			created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": tc.algorithm, "ChecksumAlgorithm": tc.algorithm}, nil)
+			id := created.Output["UploadId"].(string)
+			part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": tc.algorithm, "UploadId": id, "PartNumber": 1, tc.input: tc.part}, body)
+			if part.Headers.Get(tc.header) != tc.part {
+				t.Fatalf("part headers = %v", part.Headers)
+			}
+			complete := completeInput(id, completedPart(1, part))
+			complete[tc.input] = tc.composite
+			done := mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
+			if done.Output[tc.input] != tc.composite || done.Output["ChecksumType"] != "COMPOSITE" {
+				t.Fatalf("complete output = %#v", done.Output)
+			}
+			head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": tc.algorithm, "ChecksumMode": "ENABLED"}, nil)
+			if head.Headers.Get(tc.header) != tc.composite || head.Headers.Get("x-amz-checksum-type") != "COMPOSITE" {
+				t.Fatalf("head headers = %v", head.Headers)
+			}
+		})
 	}
 }
 

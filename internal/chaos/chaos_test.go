@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 
@@ -105,7 +106,7 @@ func TestConcurrentArchiveRestoresConverge(t *testing.T) {
 	}
 }
 
-func TestConcurrentInvalidStorageClassesLeaveNoObject(t *testing.T) {
+func TestConcurrentInvalidWritesLeaveNoObject(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)
 	ctx := context.Background()
@@ -114,26 +115,39 @@ func TestConcurrentInvalidStorageClassesLeaveNoObject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	errs := make(chan error, 32)
+	type result struct {
+		err  error
+		want string
+	}
+	results := make(chan result, 32)
 	var wg sync.WaitGroup
-	for i := 0; i < cap(errs); i++ {
+	for i := 0; i < cap(results); i++ {
 		wg.Add(1)
-		go func() {
+		go func(n int) {
 			defer wg.Done()
-			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "classes", "Key": "object", "StorageClass": "INVALID"}, Body: io.NopCloser(bytes.NewReader([]byte("bad")))})
-			errs <- err
-		}()
+			input := map[string]any{"Bucket": "classes", "Key": "object", "StorageClass": "INVALID"}
+			want := "InvalidStorageClass"
+			if n%2 != 0 {
+				input = map[string]any{"Bucket": "classes", "Key": strings.Repeat("x", 1025)}
+				want = "KeyTooLongError"
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: input, Body: io.NopCloser(bytes.NewReader([]byte("bad")))})
+			results <- result{err: err, want: want}
+		}(i)
 	}
 	wg.Wait()
-	close(errs)
-	for err := range errs {
+	close(results)
+	for result := range results {
 		var fault *spi.Fault
-		if !errors.As(err, &fault) || fault.Code != "InvalidStorageClass" {
-			t.Fatalf("invalid storage class: %v", err)
+		if !errors.As(result.err, &fault) || fault.Code != result.want {
+			t.Fatalf("invalid write want %s: %v", result.want, result.err)
 		}
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "HeadObject", Input: map[string]any{"Bucket": "classes", "Key": "object"}}); err == nil {
 		t.Fatal("invalid storage classes created an object")
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "HeadObject", Input: map[string]any{"Bucket": "classes", "Key": strings.Repeat("x", 1025)}}); err == nil {
+		t.Fatal("oversized keys created an object")
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "classes", "Key": "object", "StorageClass": "STANDARD_IA"}, Body: io.NopCloser(bytes.NewReader([]byte("good")))}); err != nil {
 		t.Fatalf("valid write after invalid load: %v", err)

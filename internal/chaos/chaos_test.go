@@ -154,6 +154,56 @@ func TestConcurrentInvalidWritesLeaveNoObject(t *testing.T) {
 	}
 }
 
+func TestConcurrentXXHashValidationPreservesObject(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "xxhash"}}); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("123456789")
+	results := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(results); i++ {
+		wg.Add(1)
+		go func(valid bool) {
+			defer wg.Done()
+			checksum := "AA=="
+			if valid {
+				checksum = "jLhB20DmroM="
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "xxhash", "Key": "object", "ChecksumXXHASH64": checksum}, Body: io.NopCloser(bytes.NewReader(body))})
+			results <- err
+		}(i%2 == 0)
+	}
+	wg.Wait()
+	close(results)
+	succeeded, rejected := 0, 0
+	for err := range results {
+		if err == nil {
+			succeeded++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "BadDigest" {
+			t.Fatalf("concurrent put: %v", err)
+		}
+		rejected++
+	}
+	if succeeded != 16 || rejected != 16 {
+		t.Fatalf("successful=%d rejected=%d", succeeded, rejected)
+	}
+	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{"Bucket": "xxhash", "Key": "object", "ChecksumMode": "ENABLED"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := io.ReadAll(got.Stream)
+	_ = got.Stream.Close()
+	if !bytes.Equal(stored, body) || got.Headers.Get("x-amz-checksum-xxhash64") != "jLhB20DmroM=" {
+		t.Fatalf("stored body=%q headers=%v", stored, got.Headers)
+	}
+}
+
 func TestConcurrentNonEmptyBucketDeletesAreRejected(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

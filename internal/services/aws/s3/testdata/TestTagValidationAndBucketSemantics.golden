@@ -1,0 +1,21 @@
+{
+  "DeleteBucketTaggingMissingBucket": "NoSuchBucket",
+  "GetBucketTaggingMissingBucket": "NoSuchBucket",
+  "PutBucketTaggingMissingBucket": "NoSuchBucket",
+  "duplicate-key": "InvalidTag",
+  "empty-key": "InvalidTag",
+  "invalid-key": "InvalidTag",
+  "long-key": "InvalidTag",
+  "long-value": "InvalidTag",
+  "missing-tag-set": "MalformedXML",
+  "missing-value": "MalformedXML",
+  "reserved-key": "InvalidTag",
+  "storedTags": [
+    {
+      "Key": "team α",
+      "Value": ""
+    }
+  ],
+  "too-many-object-tags": "InvalidTag",
+  "untaggedBucket": "NoSuchTagSet"
+}

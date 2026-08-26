@@ -130,16 +130,21 @@ func TestCopyObjectTaggingDirective(t *testing.T) {
 
 func TestTagValidationAndBucketSemantics(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
+	characterization := map[string]any{}
 	for _, operation := range []string{"PutBucketTagging", "GetBucketTagging", "DeleteBucketTagging"} {
 		_, err := invoke(t, p, operation, map[string]any{"Bucket": "missing", "TagSet": []any{}}, nil)
-		if fault := asFault(t, err); fault.Code != "NoSuchBucket" || fault.HTTPStatus != http.StatusNotFound {
+		fault := asFault(t, err)
+		if fault.Code != "NoSuchBucket" || fault.HTTPStatus != http.StatusNotFound {
 			t.Fatalf("%s missing bucket = %#v", operation, fault)
 		}
+		characterization[operation+"MissingBucket"] = fault.Code
 	}
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
-	if _, err := invoke(t, p, "GetBucketTagging", map[string]any{"Bucket": "b"}, nil); asFault(t, err).Code != "NoSuchTagSet" {
+	_, err := invoke(t, p, "GetBucketTagging", map[string]any{"Bucket": "b"}, nil)
+	if asFault(t, err).Code != "NoSuchTagSet" {
 		t.Fatalf("untagged bucket = %v", err)
 	}
+	characterization["untaggedBucket"] = asFault(t, err).Code
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "source"}, []byte("body"))
 	valid := []any{map[string]any{"Key": "team α", "Value": ""}}
 	mustInvoke(t, p, "PutObjectTagging", map[string]any{"Bucket": "b", "Key": "source", "TagSet": valid}, nil)
@@ -168,9 +173,11 @@ func TestTagValidationAndBucketSemantics(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := invoke(t, p, "PutObjectTagging", map[string]any{"Bucket": "b", "Key": "source", "TagSet": test.set}, nil)
-			if fault := asFault(t, err); fault.Code != test.code || fault.HTTPStatus != http.StatusBadRequest {
+			fault := asFault(t, err)
+			if fault.Code != test.code || fault.HTTPStatus != http.StatusBadRequest {
 				t.Fatalf("fault = %#v", fault)
 			}
+			characterization[test.name] = fault.Code
 			got := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "b", "Key": "source"}, nil)
 			if set := asSliceForTest(got.Output["TagSet"]); len(set) != 1 || asMapForTest(set[0])["Key"] != "team α" {
 				t.Fatalf("rejected write changed tags: %#v", got.Output)
@@ -186,7 +193,7 @@ func TestTagValidationAndBucketSemantics(t *testing.T) {
 			t.Fatalf("%s duplicate header = %#v", operation, fault)
 		}
 	}
-	_, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": "copy", "CopySource": "b/source", "TaggingDirective": "REPLACE", "Tagging": "key=one&key=two"}, nil)
+	_, err = invoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": "copy", "CopySource": "b/source", "TaggingDirective": "REPLACE", "Tagging": "key=one&key=two"}, nil)
 	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("copy duplicate header = %#v", fault)
 	}
@@ -195,6 +202,8 @@ func TestTagValidationAndBucketSemantics(t *testing.T) {
 			t.Fatalf("rejected %s created object: %v", key, err)
 		}
 	}
+	characterization["storedTags"] = mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "b", "Key": "source"}, nil).Output["TagSet"]
+	golden.AssertJSON(t, characterization)
 }
 
 func TestCopyObjectConditions(t *testing.T) {

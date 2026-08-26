@@ -158,6 +158,46 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given an account regional namespace When creating a bucket Then it stays in that account and Region", func(t *testing.T) {
+		create := func(account, region, name string) (int, []byte, string) {
+			t.Helper()
+			var body io.Reader
+			if region != "us-east-1" {
+				body = strings.NewReader("<CreateBucketConfiguration><LocationConstraint>" + region + "</LocationConstraint></CreateBucketConfiguration>")
+			}
+			req, err := http.NewRequest(http.MethodPut, ts.URL+"/"+name, body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", auth)
+			req.Header.Set("X-Mirror-Account-Id", account)
+			req.Header.Set("X-Mirror-Region", region)
+			req.Header.Set("x-amz-bucket-namespace", "account-regional")
+			res, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			return res.StatusCode, response, res.Header.Get("Location")
+		}
+
+		eastName := "behavior-111111111111-us-east-1-an"
+		if status, body, location := create("111111111111", "us-east-1", eastName); status != http.StatusOK || location != "/"+eastName {
+			t.Fatalf("east create %d %s location=%q", status, body, location)
+		}
+		if status, body, _ := create("111111111111", "us-east-1", eastName); status != http.StatusConflict || !bytes.Contains(body, []byte("BucketAlreadyOwnedByYou")) {
+			t.Fatalf("east recreate %d %s", status, body)
+		}
+		if status, body, _ := create("222222222222", "us-east-1", eastName); status != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidBucketName")) {
+			t.Fatalf("foreign suffix %d %s", status, body)
+		}
+		westName := "behavior-111111111111-us-west-2-an"
+		if status, body, location := create("111111111111", "us-west-2", westName); status != http.StatusOK || location != "/"+westName {
+			t.Fatalf("west create %d %s location=%q", status, body, location)
+		}
+	})
+
 	t.Run("Given a bucket When versioning changes Then its state matches AWS", func(t *testing.T) {
 		res := do(http.MethodPut, "/versioning-state", nil, "")
 		res.Body.Close()

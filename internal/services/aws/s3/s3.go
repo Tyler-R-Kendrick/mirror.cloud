@@ -187,7 +187,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		"PutBucketIntelligentTieringConfiguration", "GetBucketIntelligentTieringConfiguration", "DeleteBucketIntelligentTieringConfiguration", "ListBucketIntelligentTieringConfigurations":
 		return p.namedCfg(ctx, req)
 	case "ListParts":
-		return p.listParts(req)
+		return p.listParts(ctx, req)
 	case "ListMultipartUploads":
 		return p.listMultipartUploads(ctx, req)
 	case "ListObjectVersions":
@@ -786,6 +786,9 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 }
 
 func (p *Pack) deleteObjects(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if err := p.requireBucket(ctx, req, str(req.Input["Bucket"])); err != nil {
+		return nil, err
+	}
 	objs, _ := req.Input["Objects"].([]any)
 	if objs == nil {
 		if d, ok := req.Input["Delete"].(map[string]any); ok {
@@ -902,6 +905,9 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 }
 
 func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if err := p.requireBucket(ctx, req, str(req.Input["Bucket"])); err != nil {
+		return nil, err
+	}
 	source, err := p.openCopySource(ctx, req)
 	if err != nil {
 		return nil, err
@@ -980,6 +986,9 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 }
 
 func (p *Pack) uploadPartCopy(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if err := p.requireMultipartBucket(ctx, req); err != nil {
+		return nil, err
+	}
 	source, err := p.openCopySource(ctx, req)
 	if err != nil {
 		return nil, err
@@ -1005,6 +1014,9 @@ func (p *Pack) uploadPartCopy(ctx context.Context, req *spi.Request) (*spi.Respo
 }
 
 func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if err := p.requireMultipartBucket(ctx, req); err != nil {
+		return nil, err
+	}
 	id := mpuID(req)
 	pn := partNumber(req)
 	if pn < 1 || pn > 10000 {
@@ -1050,6 +1062,9 @@ func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response,
 }
 
 func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if err := p.requireMultipartBucket(ctx, req); err != nil {
+		return nil, err
+	}
 	id := mpuID(req)
 	p.mu.Lock()
 	u := p.mpu[id]
@@ -1149,7 +1164,10 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	return resp, nil
 }
 
-func (p *Pack) listParts(req *spi.Request) (*spi.Response, error) {
+func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if err := p.requireMultipartBucket(ctx, req); err != nil {
+		return nil, err
+	}
 	id := mpuID(req)
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
 	marker := asInt(req.Input["PartNumberMarker"])
@@ -1392,6 +1410,9 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 }
 
 func (p *Pack) abortMPU(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if err := p.requireMultipartBucket(ctx, req); err != nil {
+		return nil, err
+	}
 	id := mpuID(req)
 	p.mu.Lock()
 	if !matchesMultipartUpload(p.mpu[id], req) {
@@ -1410,6 +1431,9 @@ func matchesMultipartUpload(upload *mpu, req *spi.Request) bool {
 
 func (p *Pack) versioning(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b := str(req.Input["Bucket"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
 	if req.Operation == "PutBucketVersioning" {
 		st := str(req.Input["Status"])
 		if st == "" {
@@ -1973,6 +1997,13 @@ func (p *Pack) namedCfg(ctx context.Context, req *spi.Request) (*spi.Response, e
 func (p *Pack) requireBucket(ctx context.Context, req *spi.Request, b string) error {
 	expected := requestCondition(req, "ExpectedBucketOwner", "x-amz-expected-bucket-owner")
 	return p.requireBucketOwner(ctx, req, b, expected)
+}
+
+func (p *Pack) requireMultipartBucket(ctx context.Context, req *spi.Request) error {
+	if bucket := str(req.Input["Bucket"]); bucket != "" {
+		return p.requireBucket(ctx, req, bucket)
+	}
+	return nil
 }
 
 func (p *Pack) requireBucketOwner(ctx context.Context, req *spi.Request, b, expected string) error {

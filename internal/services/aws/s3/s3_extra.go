@@ -55,6 +55,9 @@ func (p *Pack) renameObject(ctx context.Context, req *spi.Request) (*spi.Respons
 
 func (p *Pack) selectObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
 	rc, _, err := p.deps.Blobs.Get(ctx, blobKey(req, b, key))
 	if err != nil {
 		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
@@ -235,6 +238,9 @@ func recGet(rec map[string]string, col string) string {
 
 func (p *Pack) objectTorrent(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
 	raw, ok, _ := p.col(req, "objects").Get(ctx, b+"/"+key)
 	if !ok {
 		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
@@ -281,6 +287,9 @@ func (p *Pack) updateObjectEncryption(ctx context.Context, req *spi.Request) (*s
 
 func (p *Pack) objectAnnotation(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
 	id := str(req.Input["AnnotationId"])
 	if id == "" {
 		id = "default"

@@ -1395,7 +1395,11 @@ func TestMultipartOperationsRejectMissingUpload(t *testing.T) {
 				input["MultipartUpload"] = map[string]any{"Parts": []any{}}
 			}
 			_, err := invoke(t, p, operation, input, []byte("part"))
-			if fault := asFault(t, err); fault.Code != "NoSuchUpload" || fault.HTTPStatus != http.StatusNotFound {
+			expected := "NoSuchUpload"
+			if input["Bucket"] == "wrong" {
+				expected = "NoSuchBucket"
+			}
+			if fault := asFault(t, err); fault.Code != expected || fault.HTTPStatus != http.StatusNotFound {
 				t.Fatalf("%s fault = %#v", operation, fault)
 			}
 		}

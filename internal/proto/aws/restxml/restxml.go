@@ -563,6 +563,22 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	}
 	fmt.Fprintf(&b, "<%s>", root)
 	switch op.Name {
+	case "ListBuckets":
+		top := make(map[string]any, len(resp.Output)-1)
+		for key, value := range resp.Output {
+			if key != "Buckets" {
+				top[key] = value
+			}
+		}
+		write(top, &b)
+		b.WriteString("<Buckets>")
+		buckets, _ := resp.Output["Buckets"].([]any)
+		for _, item := range buckets {
+			b.WriteString("<Bucket>")
+			write(item, &b)
+			b.WriteString("</Bucket>")
+		}
+		b.WriteString("</Buckets>")
 	case "ListParts":
 		writeFlattened(resp.Output, &b, [][2]string{{"Parts", "Part"}})
 	case "ListMultipartUploads":

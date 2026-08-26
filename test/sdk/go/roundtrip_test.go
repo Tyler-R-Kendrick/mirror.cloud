@@ -101,6 +101,36 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-invalid-location"), CreateBucketConfiguration: &s3types.CreateBucketConfiguration{LocationConstraint: s3types.BucketLocationConstraint("moon-west-1")}}); err == nil || !strings.Contains(err.Error(), "InvalidLocationConstraint") {
 		t.Fatalf("invalid location constraint: %v", err)
 	}
+	unpaginatedBuckets, err := s3c.ListBuckets(context.Background(), &s3.ListBucketsInput{})
+	if err != nil || len(unpaginatedBuckets.Buckets) != 3 {
+		t.Fatalf("unpaginated buckets: %#v %v", unpaginatedBuckets, err)
+	}
+	for _, bucket := range unpaginatedBuckets.Buckets {
+		if bucket.CreationDate == nil || bucket.BucketRegion != nil {
+			t.Fatalf("unpaginated bucket: %#v", bucket)
+		}
+	}
+	paginator := s3.NewListBucketsPaginator(s3c, &s3.ListBucketsInput{MaxBuckets: aws.Int32(1), Prefix: aws.String("sdk")})
+	var pagedNames []string
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(context.Background())
+		if err != nil || aws.ToString(page.Prefix) != "sdk" {
+			t.Fatalf("paginated buckets: %#v %v", page, err)
+		}
+		for _, bucket := range page.Buckets {
+			if aws.ToString(bucket.BucketRegion) == "" {
+				t.Fatalf("paginated bucket: %#v", bucket)
+			}
+			pagedNames = append(pagedNames, aws.ToString(bucket.Name))
+		}
+	}
+	if got := strings.Join(pagedNames, ","); got != "sdk,sdk-account-000000000000-us-east-1-an,sdk-west" {
+		t.Fatalf("paginated bucket names = %s", got)
+	}
+	regionalBuckets, err := west.ListBuckets(context.Background(), &s3.ListBucketsInput{BucketRegion: aws.String("us-west-2"), Prefix: aws.String("sdk")})
+	if err != nil || len(regionalBuckets.Buckets) != 1 || aws.ToString(regionalBuckets.Buckets[0].Name) != "sdk-west" || aws.ToString(regionalBuckets.Buckets[0].BucketRegion) != "us-west-2" {
+		t.Fatalf("regional buckets: %#v %v", regionalBuckets, err)
+	}
 	if _, err := s3c.GetBucketTagging(context.Background(), &s3.GetBucketTaggingInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchTagSet") {
 		t.Fatalf("untagged bucket: %v", err)
 	}

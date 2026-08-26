@@ -499,6 +499,9 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	if err != nil {
 		return nil, err
 	}
+	if err := validateObjectKey(key); err != nil {
+		return nil, err
+	}
 	if err := p.checkWritePreconditions(ctx, req, b, key); err != nil {
 		return nil, err
 	}
@@ -916,6 +919,9 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 }
 
 func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if err := validateObjectKey(str(req.Input["Key"])); err != nil {
+		return nil, err
+	}
 	if err := p.requireBucket(ctx, req, str(req.Input["Bucket"])); err != nil {
 		return nil, err
 	}
@@ -981,6 +987,9 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	storageClass, err := requestStorageClass(req)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateObjectKey(key); err != nil {
 		return nil, err
 	}
 	if _, err := requestTags(req); err != nil {
@@ -2154,6 +2163,13 @@ func requestStorageClass(req *spi.Request) (string, error) {
 	default:
 		return "", &spi.Fault{Code: "InvalidStorageClass", Message: "The storage class you specified is not valid", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"StorageClassRequested": storageClass}}
 	}
+}
+
+func validateObjectKey(key string) error {
+	if len(key) <= 1024 {
+		return nil
+	}
+	return &spi.Fault{Code: "KeyTooLongError", Message: "Your key is too long", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"MaxSizeAllowed": "1024", "Size": strconv.Itoa(len(key))}}
 }
 
 func parseCopySource(req *spi.Request) (bucket, key, version string, err error) {

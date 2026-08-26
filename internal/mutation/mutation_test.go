@@ -94,17 +94,9 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesTestStateItemReaderData",
 		},
 		{
-			name: "states-ignore-test-state-reader-pointer",
-			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  "items, valid = readerData, validReaderData\n\t\t\t\treader, _ := state[\"ItemReader\"].(map[string]any)",
-			new:  "items, valid = readerData, validReaderData\n\t\t\t\treader := map[string]any{}",
-			pkg:  "./internal/services/aws/states",
-			run:  "TestStatesTestStateItemReaderData",
-		},
-		{
 			name: "states-hide-test-state-reader-source",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `itemSource = "JSON"`,
+			old:  `itemSource = inputType`,
 			new:  `itemSource = "STATE_DATA"`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesTestStateItemReaderData",
@@ -536,10 +528,10 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-test-state-map-reader-data",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `"mapItemReaderData", "MapItemReaderData"`,
-			new:  `"missingReaderData", "MissingReaderData"`,
+			old:  `if value, exists := inputValue(configuration, "mapItemReaderData", "MapItemReaderData"); exists {`,
+			new:  `if false {`,
 			pkg:  "./internal/services/aws/states",
-			run:  "TestStatesLifecycleAndWalkerUnits",
+			run:  "TestStatesTestStateItemReaderData",
 		},
 		{
 			name: "states-accept-aggregate-error-without-source",
@@ -560,10 +552,10 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-test-state-items-pointer",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if pointer := first(readerConfig, "ItemsPointer"); valid && pointer != "" {`,
+			old:  `if pointer, configured := config["ItemsPointer"].(string); configured {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/states",
-			run:  "TestStatesLifecycleAndWalkerUnits",
+			run:  "TestStatesTestStateItemReaderData",
 		},
 		{
 			name: "states-ignore-test-state-items-path",

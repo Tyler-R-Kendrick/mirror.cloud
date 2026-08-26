@@ -3180,6 +3180,11 @@ func TestStatesTestStateItemReaderData(t *testing.T) {
 	if err != nil || inspection["afterItemsPointer"] != `[1,2]` || inspection["afterItemSelector"] != `[{"source":"JSON","value":1},{"source":"JSON","value":2}]` {
 		t.Fatalf("TestState JSONPath ItemReader data %#v, %v", response, err)
 	}
+	request.Input["stateConfiguration"] = map[string]any{"mapItemReaderData": true}
+	if _, err := p.Invoke(context.Background(), request); err == nil {
+		t.Fatal("TestState accepted non-string ItemReader data")
+	}
+	request.Input["stateConfiguration"] = map[string]any{"mapItemReaderData": `{"records":[1,2]}`}
 	for _, definition := range []string{
 		`{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}`,
 		`{"Type":"Map","ItemReader":{"Resource":"reader"},"ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}`,

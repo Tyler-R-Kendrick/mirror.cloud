@@ -318,6 +318,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestWriteChecksumValidation",
 		},
 		{
+			name: "s3-accept-unsupported-xxhash-checksum",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if requestCondition(req, checksum.input, checksum.header) != "" {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestWriteChecksumValidation",
+		},
+		{
 			name: "mock-reset-crud-records-on-create",
 			file: filepath.Join("internal", "mock", "mock.go"),
 			old:  `if p.crud["rec"] == nil {`,

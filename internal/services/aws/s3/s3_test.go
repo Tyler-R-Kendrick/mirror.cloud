@@ -256,8 +256,9 @@ func TestObjectReadConditions(t *testing.T) {
 			{"IfMatch": `"wrong", ` + etag, "IfUnmodifiedSince": past},
 			{"IfNoneMatch": `"wrong"`, "IfModifiedSince": future},
 		} {
-			if _, err := call(operation, conditions); err != nil {
-				t.Fatalf("%s precedence %#v: %v", operation, conditions, err)
+			response, err := call(operation, conditions)
+			if err != nil || response.Status == http.StatusNotModified {
+				t.Fatalf("%s precedence %#v: %#v %v", operation, conditions, response, err)
 			}
 		}
 	}

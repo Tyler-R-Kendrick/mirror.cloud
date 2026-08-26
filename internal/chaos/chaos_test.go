@@ -227,6 +227,39 @@ func TestConcurrentBucketCreationHasOneOwner(t *testing.T) {
 	}
 }
 
+func TestConcurrentAccountRegionalBucketCreationHasOneWinner(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-west-2"}
+	input := map[string]any{"Bucket": "regional-111111111111-us-west-2-an", "BucketNamespace": "account-regional", "LocationConstraint": id.Region}
+	errCh := make(chan error, 32)
+	var wg sync.WaitGroup
+	for range cap(errCh) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: input})
+			errCh <- err
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	winners := 0
+	for err := range errCh {
+		if err == nil {
+			winners++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "BucketAlreadyOwnedByYou" {
+			t.Fatalf("concurrent create: %v", err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("successful creates = %d, want 1", winners)
+	}
+}
+
 func TestConcurrentInvalidBucketLocationsDoNotReserveName(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

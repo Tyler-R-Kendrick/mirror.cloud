@@ -142,14 +142,35 @@ func TestBootedServerS3VersioningPaginationPresign(t *testing.T) {
 		}
 	}
 
-	if code, b, _ := do(http.MethodPut, "/holes/ims", "body", map[string]string{"Authorization": auth}); code >= 300 {
+	code, b, conditionHeaders := do(http.MethodPut, "/holes/ims", "body", map[string]string{"Authorization": auth})
+	if code >= 300 {
 		t.Fatalf("put ims %d %s", code, b)
 	}
+	etag := conditionHeaders.Get("ETag")
 	if code, _, _ := do(http.MethodGet, "/holes/ims", "", map[string]string{"Authorization": auth, "If-Modified-Since": "Mon, 01 Jan 2099 00:00:00 GMT"}); code != 304 {
 		t.Fatalf("If-Modified-Since future %d", code)
 	}
 	if code, b, _ := do(http.MethodGet, "/holes/ims", "", map[string]string{"Authorization": auth, "If-Modified-Since": "Mon, 01 Jan 1990 00:00:00 GMT"}); code != 200 || string(b) != "body" {
 		t.Fatalf("If-Modified-Since past %d %s", code, b)
+	}
+	for _, request := range []struct {
+		method, path string
+		headers      map[string]string
+		status       int
+	}{
+		{http.MethodHead, "/holes/ims", map[string]string{"If-None-Match": etag}, http.StatusNotModified},
+		{http.MethodHead, "/holes/ims", map[string]string{"If-Match": `"wrong"`}, http.StatusPreconditionFailed},
+		{http.MethodHead, "/holes/ims", map[string]string{"If-Match": etag, "If-Unmodified-Since": "Mon, 01 Jan 1990 00:00:00 GMT"}, http.StatusOK},
+		{http.MethodGet, "/holes/ims?attributes", map[string]string{"x-amz-object-attributes": "ETag", "If-None-Match": etag}, http.StatusNotModified},
+		{http.MethodGet, "/holes/ims?attributes", map[string]string{"x-amz-object-attributes": "ETag", "If-Unmodified-Since": "Mon, 01 Jan 1990 00:00:00 GMT"}, http.StatusPreconditionFailed},
+	} {
+		headers := map[string]string{"Authorization": auth}
+		for key, value := range request.headers {
+			headers[key] = value
+		}
+		if code, body, _ := do(request.method, request.path, "", headers); code != request.status {
+			t.Fatalf("%s %s conditions %#v = %d %s", request.method, request.path, request.headers, code, body)
+		}
 	}
 
 	q := "/holes/ims?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test/20200101/us-east-1/s3/aws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=00"

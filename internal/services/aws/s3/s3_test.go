@@ -206,6 +206,63 @@ func TestCopyObjectConditions(t *testing.T) {
 	}
 }
 
+func TestObjectReadConditions(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "conditional"}, []byte("body"))
+	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "conditional"}, nil)
+	modified, err := http.ParseTime(head.Headers.Get("Last-Modified"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	past, future := modified.Add(-time.Hour).Format(http.TimeFormat), modified.Add(time.Hour).Format(http.TimeFormat)
+	etag := put.Headers.Get("ETag")
+	call := func(operation string, conditions map[string]any) (*spi.Response, error) {
+		t.Helper()
+		input := map[string]any{"Bucket": "b", "Key": "conditional"}
+		if operation == "GetObjectAttributes" {
+			input["ObjectAttributes"] = []string{"ETag"}
+		}
+		for key, value := range conditions {
+			input[key] = value
+		}
+		response, err := invoke(t, p, operation, input, nil)
+		if response != nil && response.Stream != nil {
+			_ = response.Stream.Close()
+		}
+		return response, err
+	}
+	for _, operation := range []string{"GetObject", "HeadObject", "GetObjectAttributes"} {
+		for _, conditions := range []map[string]any{
+			{"IfMatch": `"wrong"`},
+			{"IfUnmodifiedSince": past},
+		} {
+			_, err := call(operation, conditions)
+			if fault := asFault(t, err); fault.Code != "PreconditionFailed" || fault.HTTPStatus != http.StatusPreconditionFailed {
+				t.Fatalf("%s %#v fault = %#v", operation, conditions, fault)
+			}
+		}
+		for _, conditions := range []map[string]any{
+			{"IfNoneMatch": etag},
+			{"IfNoneMatch": "*"},
+			{"IfModifiedSince": future},
+		} {
+			response, err := call(operation, conditions)
+			if err != nil || response.Status != http.StatusNotModified {
+				t.Fatalf("%s %#v = %#v %v", operation, conditions, response, err)
+			}
+		}
+		for _, conditions := range []map[string]any{
+			{"IfMatch": `"wrong", ` + etag, "IfUnmodifiedSince": past},
+			{"IfNoneMatch": `"wrong"`, "IfModifiedSince": future},
+		} {
+			if _, err := call(operation, conditions); err != nil {
+				t.Fatalf("%s precedence %#v: %v", operation, conditions, err)
+			}
+		}
+	}
+}
+
 func TestCopyObjectSourceVersions(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

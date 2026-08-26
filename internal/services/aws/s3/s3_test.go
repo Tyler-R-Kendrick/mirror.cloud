@@ -119,7 +119,7 @@ func TestObjectMetadata(t *testing.T) {
 	first := mustInvoke(t, p, "PutObject", map[string]any{
 		"Bucket": "b", "Key": "source", "CacheControl": "max-age=60", "ContentDisposition": `attachment; filename="one.txt"`,
 		"ContentEncoding": "gzip", "ContentLanguage": "en-US", "ContentType": "text/plain", "Expires": "Wed, 21 Oct 2026 07:28:00 GMT",
-		"Metadata": map[string]any{"Owner": "mirror", "Empty": ""},
+		"Metadata": map[string]any{"Owner": "mirror", "Empty": ""}, "WebsiteRedirectLocation": "/old",
 	}, []byte("first"))
 	assert := func(name string, response *spi.Response, contentType, owner string) {
 		t.Helper()
@@ -129,14 +129,22 @@ func TestObjectMetadata(t *testing.T) {
 	}
 	get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "source", "VersionId": first.Headers.Get("x-amz-version-id")}, nil)
 	assert("get", get, "text/plain", "mirror")
-	if get.Headers.Get("Cache-Control") != "max-age=60" || get.Headers.Get("Content-Disposition") != `attachment; filename="one.txt"` || get.Headers.Get("Content-Encoding") != "gzip" || get.Headers.Get("Content-Language") != "en-US" || get.Headers.Get("Expires") != "Wed, 21 Oct 2026 07:28:00 GMT" {
+	if get.Headers.Get("Cache-Control") != "max-age=60" || get.Headers.Get("Content-Disposition") != `attachment; filename="one.txt"` || get.Headers.Get("Content-Encoding") != "gzip" || get.Headers.Get("Content-Language") != "en-US" || get.Headers.Get("Expires") != "Wed, 21 Oct 2026 07:28:00 GMT" || get.Headers.Get("x-amz-website-redirect-location") != "/old" {
 		t.Fatalf("get system metadata = %v", get.Headers)
 	}
 	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "source", "VersionId": first.Headers.Get("x-amz-version-id")}, nil)
 	assert("head", head, "text/plain", "mirror")
 
 	mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": "copied", "CopySource": "b/source"}, nil)
-	assert("copied", mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "copied"}, nil), "text/plain", "mirror")
+	copied := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "copied"}, nil)
+	assert("copied", copied, "text/plain", "mirror")
+	if copied.Headers.Get("x-amz-website-redirect-location") != "" {
+		t.Fatalf("copy inherited website redirect = %v", copied.Headers)
+	}
+	mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": "redirected", "CopySource": "b/source", "WebsiteRedirectLocation": "/new"}, nil)
+	if redirected := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "redirected"}, nil); redirected.Headers.Get("x-amz-website-redirect-location") != "/new" {
+		t.Fatalf("explicit copy redirect = %v", redirected.Headers)
+	}
 	mustInvoke(t, p, "CopyObject", map[string]any{
 		"Bucket": "b", "Key": "replaced", "CopySource": "b/source", "MetadataDirective": "REPLACE",
 		"ContentType": "application/json", "Metadata": map[string]any{"Owner": "new"},
@@ -151,7 +159,7 @@ func TestObjectMetadata(t *testing.T) {
 	defaultHead := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "default"}, nil)
 	assert("default", defaultHead, "binary/octet-stream", "")
 	golden.AssertJSON(t, map[string]any{
-		"get":      map[string]any{"contentType": get.Headers.Get("Content-Type"), "cacheControl": get.Headers.Get("Cache-Control"), "owner": get.Headers.Get("x-amz-meta-owner")},
+		"get":      map[string]any{"contentType": get.Headers.Get("Content-Type"), "cacheControl": get.Headers.Get("Cache-Control"), "owner": get.Headers.Get("x-amz-meta-owner"), "redirect": get.Headers.Get("x-amz-website-redirect-location")},
 		"head":     map[string]any{"contentType": head.Headers.Get("Content-Type"), "owner": head.Headers.Get("x-amz-meta-owner")},
 		"replaced": map[string]any{"contentType": replaced.Headers.Get("Content-Type"), "cacheControl": replaced.Headers.Get("Cache-Control"), "owner": replaced.Headers.Get("x-amz-meta-owner")},
 		"default":  map[string]any{"contentType": defaultHead.Headers.Get("Content-Type")},

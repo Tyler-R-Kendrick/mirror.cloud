@@ -5,7 +5,8 @@
   "get": {
     "cacheControl": "max-age=60",
     "contentType": "text/plain",
-    "owner": "mirror"
+    "owner": "mirror",
+    "redirect": "/old"
   },
   "head": {
     "contentType": "text/plain",

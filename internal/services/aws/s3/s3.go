@@ -495,6 +495,10 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
+	storageClass, err := requestStorageClass(req)
+	if err != nil {
+		return nil, err
+	}
 	if err := p.checkWritePreconditions(ctx, req, b, key); err != nil {
 		return nil, err
 	}
@@ -525,10 +529,6 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		etag = `"` + info.MD5 + `"`
 	}
 	mtime := p.deps.Clock.Now().UTC().Format(http.TimeFormat)
-	storageClass := requestCondition(req, "StorageClass", "x-amz-storage-class")
-	if storageClass == "" {
-		storageClass = "STANDARD"
-	}
 	vid := ""
 	if p.versioningEnabled(ctx, req, b) {
 		vid = p.deps.Rand.Hex(8)
@@ -979,6 +979,10 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
+	storageClass, err := requestStorageClass(req)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := requestTags(req); err != nil {
 		return nil, err
 	}
@@ -991,10 +995,6 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	if err := validateMultipartChecksumContract(req, algorithm, checksumType); err != nil {
 		return nil, err
-	}
-	storageClass := requestCondition(req, "StorageClass", "x-amz-storage-class")
-	if storageClass == "" {
-		storageClass = "STANDARD"
 	}
 	id := p.deps.Rand.Hex(16)
 	p.mu.Lock()
@@ -2141,6 +2141,19 @@ func requestCondition(req *spi.Request, input, header string) string {
 		return req.HTTP.Header.Get(header)
 	}
 	return ""
+}
+
+func requestStorageClass(req *spi.Request) (string, error) {
+	storageClass := requestCondition(req, "StorageClass", "x-amz-storage-class")
+	if storageClass == "" {
+		return "STANDARD", nil
+	}
+	switch storageClass {
+	case "STANDARD", "REDUCED_REDUNDANCY", "STANDARD_IA", "ONEZONE_IA", "INTELLIGENT_TIERING", "GLACIER", "DEEP_ARCHIVE", "GLACIER_IR", "SNOW", "EXPRESS_ONEZONE":
+		return storageClass, nil
+	default:
+		return "", &spi.Fault{Code: "InvalidStorageClass", Message: "The storage class you specified is not valid", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"StorageClassRequested": storageClass}}
+	}
 }
 
 func parseCopySource(req *spi.Request) (bucket, key, version string, err error) {

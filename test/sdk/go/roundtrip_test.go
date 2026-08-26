@@ -76,8 +76,8 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := west.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-west-missing")}); err == nil || !strings.Contains(err.Error(), "IllegalLocationConstraintException") {
 		t.Fatalf("missing regional location constraint: %v", err)
 	}
-	if _, err := west.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-west"), CreateBucketConfiguration: &s3types.CreateBucketConfiguration{LocationConstraint: s3types.BucketLocationConstraintUsWest2}}); err != nil {
-		t.Fatalf("matching regional location constraint: %v", err)
+	if created, err := west.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-west"), CreateBucketConfiguration: &s3types.CreateBucketConfiguration{LocationConstraint: s3types.BucketLocationConstraintUsWest2}}); err != nil || aws.ToString(created.Location) != ts.URL+"/sdk-west/" {
+		t.Fatalf("matching regional location constraint: %#v %v", created, err)
 	}
 	if location, err := west.GetBucketLocation(context.Background(), &s3.GetBucketLocationInput{Bucket: aws.String("sdk-west")}); err != nil || location.LocationConstraint != s3types.BucketLocationConstraintUsWest2 {
 		t.Fatalf("stored regional location: %#v %v", location, err)

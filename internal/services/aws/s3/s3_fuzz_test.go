@@ -346,3 +346,108 @@ func FuzzXXHashChecksums(f *testing.F) {
 		}
 	})
 }
+
+func FuzzListBucketsPagination(f *testing.F) {
+	for _, seed := range []struct {
+		max                   int64
+		prefix, token, region string
+		setToken, setRegion   bool
+	}{
+		{1, "team-", "", "", false, false},
+		{2, "team-", base64.URLEncoding.EncodeToString([]byte("team-alpha")), "", true, false},
+		{10000, "team-", "", "us-west-2", false, true},
+		{0, "", "", "", false, false},
+		{10001, "", "", "", false, false},
+		{1, "", "!", "", true, false},
+	} {
+		f.Add(seed.max, seed.prefix, seed.token, seed.region, seed.setToken, seed.setRegion)
+	}
+	f.Fuzz(func(t *testing.T, max int64, prefix, token, region string, setToken, setRegion bool) {
+		if len(prefix) > 64 {
+			prefix = prefix[:64]
+		}
+		if len(token) > 1025 {
+			token = token[:1025]
+		}
+		if len(region) > 64 {
+			region = region[:64]
+		}
+		p := s3.New(spitest.Deps(t))
+		east := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		west := spi.Identity{Account: east.Account, Region: "us-west-2"}
+		other := spi.Identity{Account: "999999999999", Region: east.Region}
+		for _, bucket := range []struct {
+			id   spi.Identity
+			name string
+		}{
+			{east, "alpha-bucket"},
+			{east, "team-alpha"},
+			{west, "team-beta"},
+			{west, "team-charlie"},
+			{other, "team-private"},
+		} {
+			input := map[string]any{"Bucket": bucket.name}
+			if bucket.id.Region != "us-east-1" {
+				input["LocationConstraint"] = bucket.id.Region
+			}
+			mustInvokeAs(t, p, bucket.id, "CreateBucket", input, nil)
+		}
+
+		input := map[string]any{"MaxBuckets": max, "Prefix": prefix}
+		if setToken {
+			input["ContinuationToken"] = token
+		}
+		if setRegion {
+			input["BucketRegion"] = region
+		}
+		page, err := invokeAs(t, p, east, "ListBuckets", input, nil)
+		if max < 1 || max > 10000 {
+			if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+				t.Fatalf("max %d = %#v", max, fault)
+			}
+			return
+		}
+		after := ""
+		if setToken && token != "" {
+			decoded, decodeErr := base64.URLEncoding.DecodeString(token)
+			if len(token) > 1024 || decodeErr != nil {
+				if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+					t.Fatalf("token %q = %#v", token, fault)
+				}
+				return
+			}
+			after = string(decoded)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		type bucket struct{ name, region string }
+		all := []bucket{{"alpha-bucket", "us-east-1"}, {"team-alpha", "us-east-1"}, {"team-beta", "us-west-2"}, {"team-charlie", "us-west-2"}}
+		var want []bucket
+		for _, bucket := range all {
+			if strings.HasPrefix(bucket.name, prefix) && bucket.name > after && (!setRegion || bucket.region == region) {
+				want = append(want, bucket)
+			}
+		}
+		wantToken := ""
+		if len(want) > int(max) {
+			want = want[:int(max)]
+			wantToken = base64.URLEncoding.EncodeToString([]byte(want[len(want)-1].name))
+		}
+		items := page.Output["Buckets"].([]any)
+		if len(items) != len(want) || page.Output["Prefix"] != prefix {
+			t.Fatalf("page=%#v want=%#v", page.Output, want)
+		}
+		for i, item := range items {
+			got := item.(map[string]any)
+			if got["Name"] != want[i].name || got["BucketRegion"] != want[i].region {
+				t.Fatalf("bucket %d = %#v want=%#v", i, got, want[i])
+			}
+		}
+		gotToken, _ := page.Output["ContinuationToken"].(string)
+		if gotToken != wantToken {
+			t.Fatalf("token = %q want %q", gotToken, wantToken)
+		}
+	})
+}

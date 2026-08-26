@@ -56,7 +56,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		t.Fatalf("enable versioning: %v", err)
 	}
 	put, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{
-		Bucket: aws.String("sdk"), Key: aws.String("k"), Body: bytes.NewReader([]byte("hello-sdk")),
+		Bucket: aws.String("sdk"), Key: aws.String("k"), Body: bytes.NewReader([]byte("hello-sdk")), ChecksumAlgorithm: s3types.ChecksumAlgorithmCrc32,
 	})
 	if err != nil {
 		t.Fatalf("put: %v", err)
@@ -69,6 +69,15 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	_ = got.Body.Close()
 	if string(body) != "hello-sdk" {
 		t.Fatalf("s3 body %q", body)
+	}
+	verified, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), ChecksumMode: s3types.ChecksumModeEnabled})
+	if err != nil {
+		t.Fatalf("get checksum: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, verified.Body)
+	_ = verified.Body.Close()
+	if aws.ToString(put.ChecksumCRC32) == "" || aws.ToString(verified.ChecksumCRC32) != aws.ToString(put.ChecksumCRC32) {
+		t.Fatalf("get checksum %q want %q", aws.ToString(verified.ChecksumCRC32), aws.ToString(put.ChecksumCRC32))
 	}
 	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{
 		Bucket: aws.String("sdk"), Key: aws.String("copied"), CopySource: aws.String("sdk/k"), CopySourceIfMatch: got.ETag,

@@ -2,6 +2,8 @@ package spine
 
 import (
 	"bytes"
+	"crypto/md5"
+	"encoding/base64"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -218,7 +220,14 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	if code, b, _ := do(http.MethodPost, "/qb/m?uploadId="+uploadID, comp, map[string]string{"x-amz-mp-object-size": strconv.Itoa(size - 1)}); code != http.StatusBadRequest || !bytes.Contains(b, []byte("InvalidRequest")) {
 		t.Fatalf("complete mpu size mismatch %d %s", code, b)
 	}
-	if code, b, h := do(http.MethodPost, "/qb/m?uploadId="+uploadID, comp, map[string]string{"x-amz-mp-object-size": strconv.Itoa(size)}); code >= 300 {
+	if code, b, _ := do(http.MethodPost, "/qb/m?uploadId="+uploadID, comp, map[string]string{"x-amz-mp-object-size": strconv.Itoa(size), "x-amz-checksum-md5": "AA=="}); code != http.StatusBadRequest || !bytes.Contains(b, []byte("BadDigest")) {
+		t.Fatalf("complete mpu checksum mismatch %d %s", code, b)
+	}
+	digest := md5.New()
+	_, _ = io.WriteString(digest, strings.Repeat("A", 5<<20))
+	_, _ = io.WriteString(digest, "SRC-BYTES")
+	headers := map[string]string{"x-amz-mp-object-size": strconv.Itoa(size), "x-amz-checksum-md5": base64.StdEncoding.EncodeToString(digest.Sum(nil))}
+	if code, b, h := do(http.MethodPost, "/qb/m?uploadId="+uploadID, comp, headers); code >= 300 {
 		t.Fatalf("complete mpu %d %s", code, b)
 	} else if !bytes.Contains(b, []byte("-2")) && !strings.Contains(h.Get("ETag"), "-2") {
 		t.Fatalf("multipart etag %s %v", b, h)

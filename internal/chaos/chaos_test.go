@@ -227,6 +227,37 @@ func TestConcurrentBucketCreationHasOneOwner(t *testing.T) {
 	}
 }
 
+func TestConcurrentInvalidBucketLocationsDoNotReserveName(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-west-2"}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			input := map[string]any{"Bucket": "regional-name"}
+			if n%2 != 0 {
+				input["LocationConstraint"] = "eu-west-1"
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: input})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "IllegalLocationConstraintException" {
+			t.Fatalf("invalid regional create: %v", err)
+		}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "regional-name", "LocationConstraint": "us-west-2"}}); err != nil {
+		t.Fatalf("valid create after invalid load: %v", err)
+	}
+}
+
 func TestTwoAccountsNeverSeeEachOtherUnderLoad(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

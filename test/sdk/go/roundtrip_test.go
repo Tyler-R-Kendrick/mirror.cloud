@@ -73,6 +73,18 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := west.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk"), CreateBucketConfiguration: &s3types.CreateBucketConfiguration{LocationConstraint: s3types.BucketLocationConstraintUsWest2}}); err == nil || !strings.Contains(err.Error(), "BucketAlreadyOwnedByYou") {
 		t.Fatalf("cross-region bucket collision: %v", err)
 	}
+	if _, err := west.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-west-missing")}); err == nil || !strings.Contains(err.Error(), "IllegalLocationConstraintException") {
+		t.Fatalf("missing regional location constraint: %v", err)
+	}
+	if _, err := west.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-west"), CreateBucketConfiguration: &s3types.CreateBucketConfiguration{LocationConstraint: s3types.BucketLocationConstraintUsWest2}}); err != nil {
+		t.Fatalf("matching regional location constraint: %v", err)
+	}
+	if location, err := west.GetBucketLocation(context.Background(), &s3.GetBucketLocationInput{Bucket: aws.String("sdk-west")}); err != nil || location.LocationConstraint != s3types.BucketLocationConstraintUsWest2 {
+		t.Fatalf("stored regional location: %#v %v", location, err)
+	}
+	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-invalid-location"), CreateBucketConfiguration: &s3types.CreateBucketConfiguration{LocationConstraint: s3types.BucketLocationConstraint("moon-west-1")}}); err == nil || !strings.Contains(err.Error(), "InvalidLocationConstraint") {
+		t.Fatalf("invalid location constraint: %v", err)
+	}
 	if _, err := s3c.GetBucketTagging(context.Background(), &s3.GetBucketTaggingInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchTagSet") {
 		t.Fatalf("untagged bucket: %v", err)
 	}

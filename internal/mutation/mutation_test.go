@@ -1040,8 +1040,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-copy-skip-destination-owner",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tif err := p.requireBucket(ctx, req, str(req.Input[\"Bucket\"])); err != nil {",
-			new:  "func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tif err := p.requireBucket(ctx, req, str(req.Input[\"Bucket\"])); err != nil && false {",
+			old:  "func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tif err := validateObjectKey(str(req.Input[\"Key\"])); err != nil {\n\t\treturn nil, err\n\t}\n\tif err := p.requireBucket(ctx, req, str(req.Input[\"Bucket\"])); err != nil {",
+			new:  "func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tif err := validateObjectKey(str(req.Input[\"Key\"])); err != nil {\n\t\treturn nil, err\n\t}\n\tif err := p.requireBucket(ctx, req, str(req.Input[\"Bucket\"])); err != nil && false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestExpectedBucketOwnerAcrossBucketScopedOperations",
 		},

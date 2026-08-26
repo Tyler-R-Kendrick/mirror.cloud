@@ -52,6 +52,27 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk")}); err != nil {
 		t.Fatalf("create bucket: %v", err)
 	}
+	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk")}); err != nil {
+		t.Fatalf("recreate us-east-1 bucket: %v", err)
+	}
+	otherCfg := awscfg
+	otherCfg.Credentials = aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider("999999999999", "test", ""))
+	other := s3.NewFromConfig(otherCfg, func(o *s3.Options) {
+		o.BaseEndpoint = aws.String(ts.URL)
+		o.UsePathStyle = true
+	})
+	if _, err := other.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "BucketAlreadyExists") {
+		t.Fatalf("cross-account bucket collision: %v", err)
+	}
+	westCfg := awscfg
+	westCfg.Region = "us-west-2"
+	west := s3.NewFromConfig(westCfg, func(o *s3.Options) {
+		o.BaseEndpoint = aws.String(ts.URL)
+		o.UsePathStyle = true
+	})
+	if _, err := west.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk"), CreateBucketConfiguration: &s3types.CreateBucketConfiguration{LocationConstraint: s3types.BucketLocationConstraintUsWest2}}); err == nil || !strings.Contains(err.Error(), "BucketAlreadyOwnedByYou") {
+		t.Fatalf("cross-region bucket collision: %v", err)
+	}
 	if _, err := s3c.GetBucketTagging(context.Background(), &s3.GetBucketTaggingInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchTagSet") {
 		t.Fatalf("untagged bucket: %v", err)
 	}

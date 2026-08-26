@@ -1,0 +1,13 @@
+{
+  "unversioned": {
+    "code": "BucketNotEmpty",
+    "message": "The bucket you tried to delete is not empty",
+    "preserved": true,
+    "status": 409
+  },
+  "versioned": {
+    "code": "BucketNotEmpty",
+    "message": "The bucket you tried to delete is not empty. You must delete all versions in the bucket.",
+    "status": 409
+  }
+}

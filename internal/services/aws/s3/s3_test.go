@@ -174,6 +174,7 @@ func TestDeleteBucketRequiresEmptyBucket(t *testing.T) {
 	input := map[string]any{"Bucket": "non-empty-bucket"}
 	mustInvoke(t, p, "CreateBucket", input, nil)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "non-empty-bucket", "Key": "object"}, []byte("body"))
+	characterization := map[string]any{}
 
 	_, err := invoke(t, p, "DeleteBucket", input, nil)
 	fault := asFault(t, err)
@@ -183,6 +184,7 @@ func TestDeleteBucketRequiresEmptyBucket(t *testing.T) {
 	if got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "non-empty-bucket", "Key": "object"}, nil); string(readStream(t, got)) != "body" {
 		t.Fatal("failed bucket deletion changed object")
 	}
+	characterization["unversioned"] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "preserved": true}
 
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "non-empty-bucket", "Status": "Enabled"}, nil)
 	_, err = invoke(t, p, "DeleteBucket", input, nil)
@@ -190,6 +192,8 @@ func TestDeleteBucketRequiresEmptyBucket(t *testing.T) {
 	if fault.Message != "The bucket you tried to delete is not empty. You must delete all versions in the bucket." {
 		t.Fatalf("versioned delete = %#v", fault)
 	}
+	characterization["versioned"] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus}
+	golden.AssertJSON(t, characterization)
 }
 
 func TestObjectMetadata(t *testing.T) {

@@ -901,19 +901,22 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	if err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta["mtime"])); err != nil {
 		return nil, err
 	}
-	directive := str(req.Input["TaggingDirective"])
-	if directive == "" && req.HTTP != nil {
-		directive = req.HTTP.Header.Get("x-amz-tagging-directive")
+	directive, err := copyDirective(req, "TaggingDirective", "x-amz-tagging-directive")
+	if err != nil {
+		return nil, err
 	}
-	if !strings.EqualFold(directive, "REPLACE") {
+	if directive != "REPLACE" {
 		values := url.Values{}
 		for key, value := range p.storedTags(ctx, req, source.bucket, source.key, source.version) {
 			values.Set(key, value)
 		}
 		req.Input["Tagging"] = values.Encode()
 	}
-	metadataDirective := requestCondition(req, "MetadataDirective", "x-amz-metadata-directive")
-	if !strings.EqualFold(metadataDirective, "REPLACE") {
+	metadataDirective, err := copyDirective(req, "MetadataDirective", "x-amz-metadata-directive")
+	if err != nil {
+		return nil, err
+	}
+	if metadataDirective != "REPLACE" {
 		req.Input["_ObjectMetadata"] = source.meta["objectMetadata"]
 	}
 	req.Body = source.body
@@ -922,6 +925,17 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		response.Headers.Set("x-amz-copy-source-version-id", source.version)
 	}
 	return response, err
+}
+
+func copyDirective(req *spi.Request, input, header string) (string, error) {
+	directive := requestCondition(req, input, header)
+	if directive == "" {
+		return "COPY", nil
+	}
+	if directive != "COPY" && directive != "REPLACE" {
+		return "", &spi.Fault{Code: "InvalidArgument", Message: "Unknown metadata directive", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": header, "ArgumentValue": directive}}
+	}
+	return directive, nil
 }
 
 func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, error) {

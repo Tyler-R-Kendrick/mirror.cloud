@@ -1,15 +1,19 @@
 package s3_test
 
 import (
+	"encoding/base64"
+	"encoding/binary"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
+	"github.com/zeebo/xxh3"
 )
 
 func FuzzArchiveRestore(f *testing.F) {
@@ -287,6 +291,58 @@ func FuzzAccountRegionalBucketNames(f *testing.F) {
 		}
 		if fault := asFault(t, err); fault.Code != "InvalidBucketName" || fault.HTTPStatus != http.StatusBadRequest {
 			t.Fatalf("invalid name %q = %#v", name, fault)
+		}
+	})
+}
+
+func FuzzXXHashChecksums(f *testing.F) {
+	for _, seed := range [][]byte{nil, []byte("123456789"), []byte("arbitrary body\x00bytes")} {
+		for algorithm := uint8(0); algorithm < 3; algorithm++ {
+			f.Add(seed, algorithm, false)
+			f.Add(seed, algorithm, true)
+		}
+	}
+	inputs := []string{"ChecksumXXHASH64", "ChecksumXXHASH3", "ChecksumXXHASH128"}
+	headers := []string{"x-amz-checksum-xxhash64", "x-amz-checksum-xxhash3", "x-amz-checksum-xxhash128"}
+	f.Fuzz(func(t *testing.T, body []byte, algorithm uint8, corrupt bool) {
+		if len(body) > 1<<16 {
+			body = body[:1<<16]
+		}
+		index := int(algorithm % 3)
+		var sum []byte
+		switch index {
+		case 0:
+			sum = make([]byte, 8)
+			binary.BigEndian.PutUint64(sum, xxhash.Sum64(body))
+		case 1:
+			sum = make([]byte, 8)
+			binary.BigEndian.PutUint64(sum, xxh3.Hash(body))
+		case 2:
+			value := xxh3.Hash128(body).Bytes()
+			sum = value[:]
+		}
+		checksum := base64.StdEncoding.EncodeToString(sum)
+		if corrupt {
+			checksum = "AA=="
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "xxhash-fuzz"}, nil)
+		response, err := invoke(t, p, "PutObject", map[string]any{"Bucket": "xxhash-fuzz", "Key": "object", inputs[index]: checksum}, body)
+		if corrupt {
+			if fault := asFault(t, err); fault.Code != "BadDigest" || fault.HTTPStatus != http.StatusBadRequest {
+				t.Fatalf("corrupt algorithm=%d = %#v", index, fault)
+			}
+			if _, err := invoke(t, p, "HeadObject", map[string]any{"Bucket": "xxhash-fuzz", "Key": "object"}, nil); err == nil {
+				t.Fatal("corrupt checksum created object")
+			}
+			return
+		}
+		if err != nil || response.Headers.Get(headers[index]) != checksum {
+			t.Fatalf("valid algorithm=%d response=%#v err=%v", index, response, err)
+		}
+		got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "xxhash-fuzz", "Key": "object", "ChecksumMode": "ENABLED"}, nil)
+		if stored := readStream(t, got); string(stored) != string(body) || got.Headers.Get(headers[index]) != checksum {
+			t.Fatalf("algorithm=%d body=%q headers=%v", index, stored, got.Headers)
 		}
 	})
 }

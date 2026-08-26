@@ -1429,6 +1429,15 @@ var (
 )
 
 func validateChecksum(req *spi.Request, body []byte) error {
+	for _, checksum := range []struct{ input, header string }{
+		{"ChecksumXXHASH64", "x-amz-checksum-xxhash64"},
+		{"ChecksumXXHASH3", "x-amz-checksum-xxhash3"},
+		{"ChecksumXXHASH128", "x-amz-checksum-xxhash128"},
+	} {
+		if requestCondition(req, checksum.input, checksum.header) != "" {
+			return spi.NotImplemented("aws.s3", req.Operation+"."+checksum.input, "emulate")
+		}
+	}
 	md5sum := md5.Sum(body)
 	sha1sum := sha1.Sum(body)
 	sha256sum := sha256.Sum256(body)

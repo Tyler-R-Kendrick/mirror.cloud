@@ -389,6 +389,10 @@ func TestWriteChecksumValidation(t *testing.T) {
 	if fault := asFault(t, err); fault.Code != "BadDigest" {
 		t.Fatalf("malformed checksum fault = %#v", fault)
 	}
+	_, err = invoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "xxhash", "ChecksumXXHASH64": "AA=="}, body)
+	if fault := asFault(t, err); fault.Code != "MirrorNotImplemented" || fault.HTTPStatus != http.StatusNotImplemented {
+		t.Fatalf("xxhash checksum fault = %#v", fault)
+	}
 
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "multipart"}, nil)
 	uploadID := created.Output["UploadId"].(string)

@@ -491,6 +491,9 @@ func TestInvokeAPIDestinationBasicAuth(t *testing.T) {
 	if _, err := mergeConnectionBody([]byte(`{}`), []any{map[string]any{"Key": "value", "Value": strings.Repeat("x", 64<<10)}}); err == nil {
 		t.Fatal("connection body parameters exceeded the 64 KB payload limit")
 	}
+	if _, err := mergeConnectionBody([]byte(strings.Repeat("x", (64<<10)+1)), nil); err == nil {
+		t.Fatal("unmerged API destination body exceeded the 64 KB payload limit")
+	}
 	if !apiDestinationRetryable(401) || !apiDestinationRetryable(500) || apiDestinationRetryable(400) || apiDestinationRetryable(302) {
 		t.Fatal("API destination retry classification changed")
 	}

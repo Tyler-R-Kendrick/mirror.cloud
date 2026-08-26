@@ -1,7 +1,8 @@
 {
   "collisions": {
     "other-account": "BucketAlreadyExists",
-    "owner-other-region": "BucketAlreadyOwnedByYou"
+    "owner-other-region": "BucketAlreadyOwnedByYou",
+    "owner-stored-other-region": "BucketAlreadyOwnedByYou"
   },
   "recreate": {
     "object": "preserved",

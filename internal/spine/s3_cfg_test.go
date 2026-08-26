@@ -33,6 +33,9 @@ func TestBootedServerS3BucketConfigsRoundTrip(t *testing.T) {
 		}
 		req, _ := http.NewRequest(method, ts.URL+path, rdr)
 		req.Header.Set("Authorization", auth)
+		if strings.Contains(path, "?attributes") {
+			req.Header.Set("x-amz-object-attributes", "ETag,ObjectSize")
+		}
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)

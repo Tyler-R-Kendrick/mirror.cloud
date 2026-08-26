@@ -1,4 +1,5 @@
 {
+  "historical-only-version": "BucketNotEmpty",
   "unversioned": {
     "code": "BucketNotEmpty",
     "message": "The bucket you tried to delete is not empty",

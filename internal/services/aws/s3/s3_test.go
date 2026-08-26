@@ -170,7 +170,8 @@ func TestCreateBucketGlobalCollisions(t *testing.T) {
 }
 
 func TestDeleteBucketRequiresEmptyBucket(t *testing.T) {
-	p := s3.New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
 	input := map[string]any{"Bucket": "non-empty-bucket"}
 	mustInvoke(t, p, "CreateBucket", input, nil)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "non-empty-bucket", "Key": "object"}, []byte("body"))
@@ -193,6 +194,18 @@ func TestDeleteBucketRequiresEmptyBucket(t *testing.T) {
 		t.Fatalf("versioned delete = %#v", fault)
 	}
 	characterization["versioned"] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus}
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "non-empty-bucket", "Key": "historical"}, []byte("version"))
+	if err := deps.Store.Scope(ident().Account, ident().Region).Collection("objects").Delete(context.Background(), "non-empty-bucket/historical"); err != nil {
+		t.Fatal(err)
+	}
+	if err := deps.Store.Scope(ident().Account, ident().Region).Collection("objects").Delete(context.Background(), "non-empty-bucket/object"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = invoke(t, p, "DeleteBucket", input, nil)
+	if fault := asFault(t, err); fault.Code != "BucketNotEmpty" {
+		t.Fatalf("historical-only version delete = %#v", fault)
+	}
+	characterization["historical-only-version"] = "BucketNotEmpty"
 	golden.AssertJSON(t, characterization)
 }
 

@@ -56,8 +56,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-test-state-mocked-error",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old: "mocked, exists := st[\"_TestStateMockError\"].(map[string]any)\n\t\t\tif !exists {",
-			new: "mocked, exists := st[\"_TestStateMockError\"].(map[string]any)\n\t\t\tif true {",
+			old:  "mocked, exists := st[\"_TestStateMockError\"].(map[string]any)\n\t\t\tif !exists {",
+			new:  "mocked, exists := st[\"_TestStateMockError\"].(map[string]any)\n\t\t\tif true {",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
@@ -584,8 +584,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-accept-invalid-test-state-reveal-secrets",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old: "revealSecrets, valid = value.(bool)\n\t\t\tif !valid {",
-			new: "revealSecrets, valid = value.(bool)\n\t\t\tif false {",
+			old:  "revealSecrets, valid = value.(bool)\n\t\t\tif !valid {",
+			new:  "revealSecrets, valid = value.(bool)\n\t\t\tif false {",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
@@ -1376,8 +1376,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-reuse-parent-context-for-map-child",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old: "copy.Input[\"_executionDeadline\"] = executionDeadline(string(idef), executionType, p.deps.Clock.Now())\n\t\t\t\t\t\t\t\t\t\twalkRequest = &copy",
-			new: "copy.Input[\"_executionDeadline\"] = executionDeadline(string(idef), executionType, p.deps.Clock.Now())\n\t\t\t\t\t\t\t\t\t\twalkRequest = req",
+			old:  "copy.Input[\"_executionDeadline\"] = executionDeadline(string(idef), executionType, p.deps.Clock.Now())\n\t\t\t\t\t\t\t\t\t\twalkRequest = &copy",
+			new:  "copy.Input[\"_executionDeadline\"] = executionDeadline(string(idef), executionType, p.deps.Clock.Now())\n\t\t\t\t\t\t\t\t\t\twalkRequest = req",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesJSONataErrorsAndFields",
 		},

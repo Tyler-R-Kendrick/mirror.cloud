@@ -1,0 +1,24 @@
+{
+  "EU": {
+    "reported": "EU",
+    "stored_region": "eu-west-1"
+  },
+  "default": "",
+  "invalid": {
+    "code": "InvalidLocationConstraint",
+    "field": "moon-west-1",
+    "message": "The specified location-constraint is not valid",
+    "status": 400
+  },
+  "matching": "us-west-2",
+  "mismatch": {
+    "code": "IllegalLocationConstraintException",
+    "message": "The eu-west-1 location constraint is incompatible for the region specific endpoint this request was sent to.",
+    "status": 400
+  },
+  "missing": {
+    "code": "IllegalLocationConstraintException",
+    "message": "The unspecified location constraint is incompatible for the region specific endpoint this request was sent to.",
+    "status": 400
+  }
+}

@@ -177,10 +177,13 @@ func TestCreateBucketLocationConstraints(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	east := ident()
 	west := spi.Identity{Account: east.Account, Region: "us-west-2"}
+	characterization := map[string]any{}
 
 	mustInvokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "east-location"}, nil)
 	if got := mustInvokeAs(t, p, east, "GetBucketLocation", map[string]any{"Bucket": "east-location"}, nil); got.Output["LocationConstraint"] != "" {
 		t.Fatalf("default location = %#v", got.Output)
+	} else {
+		characterization["default"] = got.Output["LocationConstraint"]
 	}
 
 	for name, input := range map[string]map[string]any{
@@ -195,23 +198,31 @@ func TestCreateBucketLocationConstraints(t *testing.T) {
 		if _, err := invokeAs(t, p, west, "HeadBucket", map[string]any{"Bucket": input["Bucket"]}, nil); asFault(t, err).Code != "NoSuchBucket" {
 			t.Fatalf("%s created bucket: %v", name, err)
 		}
+		characterization[name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus}
 	}
 
 	mustInvokeAs(t, p, west, "CreateBucket", map[string]any{"Bucket": "west-match", "CreateBucketConfiguration": map[string]any{"LocationConstraint": "us-west-2"}}, nil)
 	if got := mustInvokeAs(t, p, west, "GetBucketLocation", map[string]any{"Bucket": "west-match"}, nil); got.Output["LocationConstraint"] != "us-west-2" {
 		t.Fatalf("west location = %#v", got.Output)
+	} else {
+		characterization["matching"] = got.Output["LocationConstraint"]
 	}
 
 	_, err := invokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "invalid-location", "LocationConstraint": "moon-west-1"}, nil)
 	if fault := asFault(t, err); fault.Code != "InvalidLocationConstraint" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["LocationConstraint"] != "moon-west-1" {
 		t.Fatalf("invalid constraint = %#v", fault)
+	} else {
+		characterization["invalid"] = map[string]any{"code": fault.Code, "field": fault.Fields["LocationConstraint"], "message": fault.Message, "status": fault.HTTPStatus}
 	}
 
 	mustInvokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "eu-alias", "LocationConstraint": "EU"}, nil)
 	europe := spi.Identity{Account: east.Account, Region: "eu-west-1"}
 	if got := mustInvokeAs(t, p, europe, "GetBucketLocation", map[string]any{"Bucket": "eu-alias"}, nil); got.Output["LocationConstraint"] != "EU" {
 		t.Fatalf("EU alias = %#v", got.Output)
+	} else {
+		characterization["EU"] = map[string]any{"reported": got.Output["LocationConstraint"], "stored_region": europe.Region}
 	}
+	golden.AssertJSON(t, characterization)
 }
 
 func TestDeleteBucketRequiresEmptyBucket(t *testing.T) {

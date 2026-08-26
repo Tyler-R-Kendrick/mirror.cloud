@@ -88,6 +88,15 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.GetBucketTagging(context.Background(), &s3.GetBucketTaggingInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchTagSet") {
 		t.Fatalf("untagged bucket: %v", err)
 	}
+	if versioning, err := s3c.GetBucketVersioning(context.Background(), &s3.GetBucketVersioningInput{Bucket: aws.String("sdk")}); err != nil || versioning.Status != "" || versioning.MFADelete != "" {
+		t.Fatalf("unset versioning: %#v %v", versioning, err)
+	}
+	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String("sdk"), VersioningConfiguration: &s3types.VersioningConfiguration{}}); err == nil || !strings.Contains(err.Error(), "IllegalVersioningConfigurationException") {
+		t.Fatalf("missing versioning status: %v", err)
+	}
+	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String("sdk"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatus("Invalid")}}); err == nil || !strings.Contains(err.Error(), "MalformedXML") {
+		t.Fatalf("invalid versioning status: %v", err)
+	}
 	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{
 		Bucket: aws.String("sdk"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusEnabled},
 	}); err != nil {

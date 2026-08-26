@@ -226,10 +226,16 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	digest := md5.New()
 	_, _ = io.WriteString(digest, strings.Repeat("A", 5<<20))
 	_, _ = io.WriteString(digest, "SRC-BYTES")
-	headers := map[string]string{"x-amz-mp-object-size": strconv.Itoa(size), "x-amz-checksum-md5": base64.StdEncoding.EncodeToString(digest.Sum(nil))}
+	checksum := base64.StdEncoding.EncodeToString(digest.Sum(nil))
+	headers := map[string]string{"x-amz-mp-object-size": strconv.Itoa(size), "x-amz-checksum-md5": checksum}
 	if code, b, h := do(http.MethodPost, "/qb/m?uploadId="+uploadID, comp, headers); code >= 300 {
 		t.Fatalf("complete mpu %d %s", code, b)
 	} else if !bytes.Contains(b, []byte("-2")) && !strings.Contains(h.Get("ETag"), "-2") {
 		t.Fatalf("multipart etag %s %v", b, h)
+	} else if !bytes.Contains(b, []byte(checksum)) {
+		t.Fatalf("multipart checksum output %s", b)
+	}
+	if code, b, h := do(http.MethodGet, "/qb/m", "", map[string]string{"x-amz-checksum-mode": "ENABLED"}); code != http.StatusOK || h.Get("x-amz-checksum-md5") != checksum || h.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+		t.Fatalf("get multipart checksum %d %s %v", code, b, h)
 	}
 }

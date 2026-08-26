@@ -257,3 +257,36 @@ func FuzzBucketNames(f *testing.F) {
 		}
 	})
 }
+
+func FuzzAccountRegionalBucketNames(f *testing.F) {
+	for _, name := range []string{
+		"a-123456789012-us-east-1-an",
+		"bucket-123456789012-us-east-1-an",
+		"bucket-999999999999-us-east-1-an",
+		"bucket-123456789012-us-west-2-an",
+		"Bucket-123456789012-us-east-1-an",
+		strings.Repeat("a", 38) + "-123456789012-us-east-1-an",
+	} {
+		f.Add(name)
+	}
+	pattern := regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*-123456789012-us-east-1-an$`)
+	prefixes := []string{"xn--", "sthree-", "amzn-s3-demo-"}
+	f.Fuzz(func(t *testing.T, name string) {
+		valid := len(name) <= 63 && pattern.MatchString(name) && !strings.Contains(name, "..")
+		for _, prefix := range prefixes {
+			valid = valid && !strings.HasPrefix(name, prefix)
+		}
+
+		p := s3.New(spitest.Deps(t))
+		response, err := invoke(t, p, "CreateBucket", map[string]any{"Bucket": name, "BucketNamespace": "account-regional"}, nil)
+		if valid {
+			if err != nil || response.Status != http.StatusOK || response.Headers.Get("Location") != "/"+name {
+				t.Fatalf("valid name %q: %#v %v", name, response, err)
+			}
+			return
+		}
+		if fault := asFault(t, err); fault.Code != "InvalidBucketName" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("invalid name %q = %#v", name, fault)
+		}
+	})
+}

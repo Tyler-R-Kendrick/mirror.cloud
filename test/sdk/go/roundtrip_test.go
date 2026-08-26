@@ -60,6 +60,17 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk")}); err != nil {
 		t.Fatalf("recreate us-east-1 bucket: %v", err)
 	}
+	accountRegional := "sdk-account-000000000000-us-east-1-an"
+	accountRegionalInput := &s3.CreateBucketInput{Bucket: aws.String(accountRegional), BucketNamespace: s3types.BucketNamespaceAccountRegional}
+	if created, err := s3c.CreateBucket(context.Background(), accountRegionalInput); err != nil || aws.ToString(created.Location) != "/"+accountRegional {
+		t.Fatalf("create account-regional bucket: %#v %v", created, err)
+	}
+	if _, err := s3c.CreateBucket(context.Background(), accountRegionalInput); err == nil || !strings.Contains(err.Error(), "BucketAlreadyOwnedByYou") {
+		t.Fatalf("recreate account-regional bucket: %v", err)
+	}
+	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-account-999999999999-us-east-1-an"), BucketNamespace: s3types.BucketNamespaceAccountRegional}); err == nil || !strings.Contains(err.Error(), "InvalidBucketName") {
+		t.Fatalf("foreign account-regional suffix: %v", err)
+	}
 	otherCfg := awscfg
 	otherCfg.Credentials = aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider("999999999999", "test", ""))
 	other := s3.NewFromConfig(otherCfg, func(o *s3.Options) {

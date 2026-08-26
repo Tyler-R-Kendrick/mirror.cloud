@@ -42,3 +42,24 @@ func FuzzArchiveRestore(f *testing.F) {
 		}
 	})
 }
+
+func FuzzStorageClassValidation(f *testing.F) {
+	for _, class := range []string{"", "STANDARD", "GLACIER", "EXPRESS_ONEZONE", "OUTPOSTS", "standard", "INVALID"} {
+		f.Add(class)
+	}
+	valid := map[string]bool{"": true, "STANDARD": true, "REDUCED_REDUNDANCY": true, "STANDARD_IA": true, "ONEZONE_IA": true, "INTELLIGENT_TIERING": true, "GLACIER": true, "DEEP_ARCHIVE": true, "GLACIER_IR": true, "SNOW": true, "EXPRESS_ONEZONE": true}
+	f.Fuzz(func(t *testing.T, class string) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "classes"}, nil)
+		_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": "classes", "Key": "object", "StorageClass": class}, []byte("body"))
+		if valid[class] {
+			if err != nil {
+				t.Fatalf("valid storage class %q: %v", class, err)
+			}
+			return
+		}
+		if fault := asFault(t, err); fault.Code != "InvalidStorageClass" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["StorageClassRequested"] != class {
+			t.Fatalf("invalid storage class %q = %#v", class, fault)
+		}
+	})
+}

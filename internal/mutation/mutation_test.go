@@ -270,6 +270,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesHTTPTaskAndTrace",
 		},
 		{
+			name: "http-allow-oversized-unmerged-request",
+			file: filepath.Join("internal", "services", "aws", "eventhttp", "eventhttp.go"),
+			old:  `if limit > 0 && int64(len(body)) > limit {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/eventhttp",
+			run:  "TestMergeBodyLimitWithoutConnectionParameters",
+		},
+		{
 			name: "states-expose-http-task-form-secrets",
 			file: filepath.Join("internal", "services", "aws", "eventhttp", "eventhttp.go"),
 			old:  `traceBody = call.Body`,

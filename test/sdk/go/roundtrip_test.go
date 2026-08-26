@@ -116,6 +116,34 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("missing-source"), CopySource: aws.String("missing/k")}); err == nil || !strings.Contains(err.Error(), "NoSuchBucket") {
 		t.Fatalf("copy missing source bucket: %v", err)
 	}
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("archive"), Body: bytes.NewReader([]byte("cold")), StorageClass: s3types.StorageClassGlacier}); err != nil {
+		t.Fatalf("put archive: %v", err)
+	}
+	archiveHead, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String("archive")})
+	if err != nil || archiveHead.StorageClass != s3types.StorageClassGlacier || aws.ToString(archiveHead.Restore) != "" {
+		t.Fatalf("head unrestored archive: %#v %v", archiveHead, err)
+	}
+	if _, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("archive")}); err == nil || !strings.Contains(err.Error(), "InvalidObjectState") {
+		t.Fatalf("get unrestored archive: %v", err)
+	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("archive-copy"), CopySource: aws.String("sdk/archive")}); err == nil || !strings.Contains(err.Error(), "InvalidObjectState") {
+		t.Fatalf("copy unrestored archive: %v", err)
+	}
+	if _, err := s3c.RestoreObject(context.Background(), &s3.RestoreObjectInput{Bucket: aws.String("sdk"), Key: aws.String("archive"), RestoreRequest: &s3types.RestoreRequest{Days: aws.Int32(1)}}); err != nil {
+		t.Fatalf("restore archive: %v", err)
+	}
+	restoredArchive, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("archive")})
+	if err != nil {
+		t.Fatalf("get restored archive: %v", err)
+	}
+	archiveBody, _ := io.ReadAll(restoredArchive.Body)
+	_ = restoredArchive.Body.Close()
+	if string(archiveBody) != "cold" || aws.ToString(restoredArchive.Restore) == "" {
+		t.Fatalf("restored archive body=%q restore=%q", archiveBody, aws.ToString(restoredArchive.Restore))
+	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("archive-copy"), CopySource: aws.String("sdk/archive")}); err != nil {
+		t.Fatalf("copy restored archive: %v", err)
+	}
 	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{
 		Bucket: aws.String("sdk"), Key: aws.String("rejected"), CopySource: aws.String("sdk/k"), CopySourceIfMatch: aws.String(`"wrong"`),
 	}); err == nil {

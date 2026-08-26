@@ -263,7 +263,14 @@ func TestExpectedSourceBucketOwnerAndCopyBoundary(t *testing.T) {
 	upload := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "destination", "Key": "multipart"}, nil)
 	uploadID := upload.Output["UploadId"].(string)
 	mustInvoke(t, p, "UploadPartCopy", map[string]any{"Bucket": "destination", "Key": "multipart", "UploadId": uploadID, "PartNumber": 1, "CopySource": "source/key", "ExpectedSourceBucketOwner": ident().Account}, nil)
-	httpReq := httptest.NewRequest(http.MethodPut, "/destination/header-copy", nil)
+	httpReq := httptest.NewRequest(http.MethodPut, "/destination/header-denied", nil)
+	httpReq.Header.Set("x-amz-copy-source", "source/key")
+	httpReq.Header.Set("x-amz-source-expected-bucket-owner", "999999999999")
+	if _, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "CopyObject", Identity: ident(), HTTP: httpReq, Input: map[string]any{"Bucket": "destination", "Key": "header-denied", "CopySource": "source/key"}}); asFault(t, err).Code != "AccessDenied" {
+		t.Fatalf("mismatched source owner header: %v", err)
+	}
+	httpReq = httptest.NewRequest(http.MethodPut, "/destination/header-copy", nil)
+	httpReq.Header.Set("x-amz-copy-source", "source/key")
 	httpReq.Header.Set("x-amz-source-expected-bucket-owner", ident().Account)
 	if _, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "CopyObject", Identity: ident(), HTTP: httpReq, Input: map[string]any{"Bucket": "destination", "Key": "header-copy", "CopySource": "source/key"}}); err != nil {
 		t.Fatalf("matching source owner header: %v", err)
@@ -307,8 +314,10 @@ func TestExpectedSourceBucketOwnerAndCopyBoundary(t *testing.T) {
 		}
 		errors[test.operation+"Missing"] = fault.Code
 	}
-	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "destination", "Key": "denied"}, nil); asFault(t, err).Code != "NoSuchKey" {
-		t.Fatalf("denied copy created object: %v", err)
+	for _, key := range []string{"denied", "header-denied"} {
+		if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "destination", "Key": key}, nil); asFault(t, err).Code != "NoSuchKey" {
+			t.Fatalf("denied copy %q created object: %v", key, err)
+		}
 	}
 	if parts := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "destination", "Key": "multipart", "UploadId": uploadID}, nil).Output["Parts"].([]any); len(parts) != 1 {
 		t.Fatalf("rejected part mutated upload: %#v", parts)

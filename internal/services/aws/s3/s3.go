@@ -1972,6 +1972,10 @@ func (p *Pack) namedCfg(ctx context.Context, req *spi.Request) (*spi.Response, e
 
 func (p *Pack) requireBucket(ctx context.Context, req *spi.Request, b string) error {
 	expected := requestCondition(req, "ExpectedBucketOwner", "x-amz-expected-bucket-owner")
+	return p.requireBucketOwner(ctx, req, b, expected)
+}
+
+func (p *Pack) requireBucketOwner(ctx context.Context, req *spi.Request, b, expected string) error {
 	if expected != "" {
 		if len(expected) != 12 {
 			return &spi.Fault{Code: "InvalidBucketOwnerAWSAccountID", Message: "The value of the expected bucket owner parameter must be an AWS Account ID", HTTPStatus: http.StatusBadRequest, Fault: "client"}
@@ -2081,6 +2085,9 @@ func parseCopySource(req *spi.Request) (bucket, key, version string, err error) 
 func (p *Pack) openCopySource(ctx context.Context, req *spi.Request) (*copySource, error) {
 	bucket, key, version, err := parseCopySource(req)
 	if err != nil {
+		return nil, err
+	}
+	if err := p.requireBucketOwner(ctx, req, bucket, requestCondition(req, "ExpectedSourceBucketOwner", "x-amz-source-expected-bucket-owner")); err != nil {
 		return nil, err
 	}
 	blob := blobKey(req, bucket, key)

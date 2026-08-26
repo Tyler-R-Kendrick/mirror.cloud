@@ -339,7 +339,7 @@ func TestExpectedBucketOwnerAcrossBucketScopedOperations(t *testing.T) {
 		{"CopyObject", map[string]any{"Bucket": "b", "Key": "copy", "CopySource": "b/k"}, nil},
 		{"DeleteObjects", map[string]any{"Bucket": "b", "Objects": []any{map[string]any{"Key": "k"}}}, nil},
 		{"UploadPart", map[string]any{"Bucket": "b", "Key": "multipart", "UploadId": uploadID, "PartNumber": 1}, []byte("part")},
-		{"UploadPartCopy", map[string]any{"Bucket": "b", "Key": "multipart", "UploadId": uploadID, "PartNumber": 1, "CopySource": "b/k"}, nil},
+		{"UploadPartCopy", map[string]any{"Bucket": "b", "Key": "multipart", "UploadId": uploadID, "PartNumber": 1, "CopySource": "missing/k"}, nil},
 		{"CompleteMultipartUpload", map[string]any{"Bucket": "b", "Key": "multipart", "UploadId": uploadID, "MultipartUpload": map[string]any{"Parts": []any{}}}, nil},
 		{"AbortMultipartUpload", map[string]any{"Bucket": "b", "Key": "multipart", "UploadId": uploadID}, nil},
 		{"ListParts", map[string]any{"Bucket": "b", "Key": "multipart", "UploadId": uploadID}, nil},

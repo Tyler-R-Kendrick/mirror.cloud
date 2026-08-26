@@ -159,41 +159,41 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 		return res.StatusCode, b, res.Header
 	}
 
-	if code, b, _ := do(http.MethodPut, "/qb", "", nil); code >= 300 {
+	if code, b, _ := do(http.MethodPut, "/bucket-q", "", nil); code >= 300 {
 		t.Fatalf("create bucket %d %s", code, b)
 	}
-	if code, b, h := do(http.MethodPut, "/qb/k", "keep-me", nil); code >= 300 {
+	if code, b, h := do(http.MethodPut, "/bucket-q/k", "keep-me", nil); code >= 300 {
 		t.Fatalf("put k %d %s", code, b)
 	} else if h.Get("x-mirror-fidelity") != "emulate" {
 		t.Fatalf("put fidelity %q", h.Get("x-mirror-fidelity"))
 	}
-	if code, b, _ := do(http.MethodPut, "/qb/src", "SRC-BYTES", nil); code >= 300 {
+	if code, b, _ := do(http.MethodPut, "/bucket-q/src", "SRC-BYTES", nil); code >= 300 {
 		t.Fatalf("put src %d %s", code, b)
 	}
 
 	tagXML := `<Tagging><TagSet><Tag><Key>env</Key><Value>test</Value></Tag></TagSet></Tagging>`
-	if code, b, h := do(http.MethodPut, "/qb?tagging", tagXML, nil); code >= 300 {
+	if code, b, h := do(http.MethodPut, "/bucket-q?tagging", tagXML, nil); code >= 300 {
 		t.Fatalf("put tagging %d %s", code, b)
 	} else if h.Get("x-mirror-fidelity") != "emulate" {
 		t.Fatalf("tag put fidelity %q", h.Get("x-mirror-fidelity"))
 	}
-	if code, b, _ := do(http.MethodGet, "/qb?tagging", "", nil); code != 200 {
+	if code, b, _ := do(http.MethodGet, "/bucket-q?tagging", "", nil); code != 200 {
 		t.Fatalf("get tagging %d %s", code, b)
 	} else if !bytes.Contains(b, []byte("env")) || !bytes.Contains(b, []byte("test")) {
 		t.Fatalf("tagging round-trip %s", b)
 	}
 
 	delXML := `<Delete><Object><Key>k</Key></Object></Delete>`
-	if code, b, h := do(http.MethodPost, "/qb?delete", delXML, nil); code >= 300 {
+	if code, b, h := do(http.MethodPost, "/bucket-q?delete", delXML, nil); code >= 300 {
 		t.Fatalf("delete objects %d %s", code, b)
 	} else if h.Get("x-mirror-fidelity") != "emulate" {
 		t.Fatalf("delete fidelity %q", h.Get("x-mirror-fidelity"))
 	}
-	if code, b, _ := do(http.MethodGet, "/qb/k", "", nil); code != 404 {
+	if code, b, _ := do(http.MethodGet, "/bucket-q/k", "", nil); code != 404 {
 		t.Fatalf("deleted key still there %d %s", code, b)
 	}
 
-	code, b, createHeaders := do(http.MethodPost, "/qb/m?uploads", "", map[string]string{"x-amz-checksum-algorithm": "CRC32", "x-amz-checksum-type": "FULL_OBJECT", "x-amz-storage-class": "STANDARD_IA", "x-amz-tagging": "env=test&team=storage"})
+	code, b, createHeaders := do(http.MethodPost, "/bucket-q/m?uploads", "", map[string]string{"x-amz-checksum-algorithm": "CRC32", "x-amz-checksum-type": "FULL_OBJECT", "x-amz-storage-class": "STANDARD_IA", "x-amz-tagging": "env=test&team=storage"})
 	if code >= 300 {
 		t.Fatalf("create mpu %d %s", code, b)
 	} else if createHeaders.Get("x-amz-checksum-algorithm") != "CRC32" || createHeaders.Get("x-amz-checksum-type") != "FULL_OBJECT" {
@@ -206,7 +206,7 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	uploadID := string(uid[1])
 	startUpload := func(key string) string {
 		t.Helper()
-		code, body, _ := do(http.MethodPost, "/qb/"+key+"?uploads", "", nil)
+		code, body, _ := do(http.MethodPost, "/bucket-q/"+key+"?uploads", "", nil)
 		id := regexp.MustCompile(`<UploadId>([^<]+)</UploadId>`).FindSubmatch(body)
 		if code >= 300 || id == nil {
 			t.Fatalf("create %s upload %d %s", key, code, body)
@@ -217,45 +217,45 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	startUpload("a")
 	startUpload("photos/2026/x")
 	secondM := startUpload("m")
-	if code, body, _ := do(http.MethodGet, "/qb?uploads&max-uploads=2", "", nil); code != 200 {
+	if code, body, _ := do(http.MethodGet, "/bucket-q?uploads&max-uploads=2", "", nil); code != 200 {
 		t.Fatalf("list uploads page 1 %d %s", code, body)
 	} else if bytes.Count(body, []byte("<Upload>")) != 2 || bytes.Contains(body, []byte("<member>")) || !bytes.Contains(body, []byte("<Key>a</Key>")) || !bytes.Contains(body, []byte("<Key>m</Key>")) || !bytes.Contains(body, []byte("<IsTruncated>true</IsTruncated>")) || !bytes.Contains(body, []byte("<NextKeyMarker>m</NextKeyMarker>")) || !bytes.Contains(body, []byte("<NextUploadIdMarker>"+uploadID+"</NextUploadIdMarker>")) {
 		t.Fatalf("list uploads page 1 %s", body)
 	}
-	if code, body, _ := do(http.MethodGet, "/qb?uploads&key-marker=m&upload-id-marker="+uploadID+"&max-uploads=3", "", nil); code != 200 {
+	if code, body, _ := do(http.MethodGet, "/bucket-q?uploads&key-marker=m&upload-id-marker="+uploadID+"&max-uploads=3", "", nil); code != 200 {
 		t.Fatalf("list uploads page 2 %d %s", code, body)
 	} else if !bytes.Contains(body, []byte("<UploadId>"+secondM+"</UploadId>")) || !bytes.Contains(body, []byte("<Key>photos/2026/x</Key>")) || !bytes.Contains(body, []byte("<Key>z</Key>")) || !bytes.Contains(body, []byte("<IsTruncated>false</IsTruncated>")) {
 		t.Fatalf("list uploads page 2 %s", body)
 	}
-	if code, body, _ := do(http.MethodGet, "/qb?uploads&prefix=photos/&delimiter=/", "", nil); code != 200 || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>photos/2026/</Prefix></CommonPrefixes>")) {
+	if code, body, _ := do(http.MethodGet, "/bucket-q?uploads&prefix=photos/&delimiter=/", "", nil); code != 200 || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>photos/2026/</Prefix></CommonPrefixes>")) {
 		t.Fatalf("list grouped uploads %d %s", code, body)
 	}
 	for _, number := range []string{"0", "10001", "invalid"} {
-		if code, body, _ := do(http.MethodPut, "/qb/m?partNumber="+number+"&uploadId="+uploadID, "part", nil); code != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidArgument")) {
+		if code, body, _ := do(http.MethodPut, "/bucket-q/m?partNumber="+number+"&uploadId="+uploadID, "part", nil); code != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidArgument")) {
 			t.Fatalf("upload part %s %d %s", number, code, body)
 		}
 	}
-	code, b, part1Headers := do(http.MethodPut, "/qb/m?partNumber=1&uploadId="+uploadID, strings.Repeat("A", 5<<20), nil)
+	code, b, part1Headers := do(http.MethodPut, "/bucket-q/m?partNumber=1&uploadId="+uploadID, strings.Repeat("A", 5<<20), nil)
 	if code >= 300 {
 		t.Fatalf("upload part %d %s", code, b)
 	}
-	code, b, part2Headers := do(http.MethodPut, "/qb/m?partNumber=2&uploadId="+uploadID, "", map[string]string{"x-amz-copy-source": "qb/src"})
+	code, b, part2Headers := do(http.MethodPut, "/bucket-q/m?partNumber=2&uploadId="+uploadID, "", map[string]string{"x-amz-copy-source": "bucket-q/src"})
 	if code >= 300 {
 		t.Fatalf("upload part copy %d %s", code, b)
 	} else if part2Headers.Get("x-mirror-fidelity") != "emulate" {
 		t.Fatalf("part copy fidelity %q", part2Headers.Get("x-mirror-fidelity"))
 	}
-	if code, b, _ := do(http.MethodGet, "/qb/m?uploadId="+uploadID+"&max-parts=1", "", nil); code != 200 {
+	if code, b, _ := do(http.MethodGet, "/bucket-q/m?uploadId="+uploadID+"&max-parts=1", "", nil); code != 200 {
 		t.Fatalf("list parts page 1 %d %s", code, b)
 	} else if !bytes.Contains(b, []byte("<Part><ChecksumCRC32>")) || bytes.Contains(b, []byte("<member>")) || !bytes.Contains(b, []byte("<PartNumber>1</PartNumber>")) || !bytes.Contains(b, []byte("<IsTruncated>true</IsTruncated>")) || !bytes.Contains(b, []byte("<NextPartNumberMarker>1</NextPartNumberMarker>")) || !bytes.Contains(b, []byte("<ChecksumAlgorithm>CRC32</ChecksumAlgorithm>")) || !bytes.Contains(b, []byte("<ChecksumType>FULL_OBJECT</ChecksumType>")) {
 		t.Fatalf("list parts page 1 %s", b)
 	}
-	if code, b, _ := do(http.MethodGet, "/qb/m?uploadId="+uploadID+"&part-number-marker=1&max-parts=1", "", nil); code != 200 {
+	if code, b, _ := do(http.MethodGet, "/bucket-q/m?uploadId="+uploadID+"&part-number-marker=1&max-parts=1", "", nil); code != 200 {
 		t.Fatalf("list parts page 2 %d %s", code, b)
 	} else if !bytes.Contains(b, []byte("<PartNumber>2</PartNumber>")) || !bytes.Contains(b, []byte("<IsTruncated>false</IsTruncated>")) {
 		t.Fatalf("list parts page 2 %s", b)
 	}
-	if code, b, _ := do(http.MethodGet, "/qb/m?uploadId=missing", "", nil); code != http.StatusNotFound || !bytes.Contains(b, []byte("NoSuchUpload")) {
+	if code, b, _ := do(http.MethodGet, "/bucket-q/m?uploadId=missing", "", nil); code != http.StatusNotFound || !bytes.Contains(b, []byte("NoSuchUpload")) {
 		t.Fatalf("list missing upload %d %s", code, b)
 	}
 	for _, request := range []struct{ method, body string }{
@@ -263,7 +263,7 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 		{http.MethodPost, `<CompleteMultipartUpload/>`},
 		{http.MethodDelete, ""},
 	} {
-		path := "/qb/m?uploadId=missing"
+		path := "/bucket-q/m?uploadId=missing"
 		if request.method == http.MethodPut {
 			path += "&partNumber=1"
 		}
@@ -273,44 +273,44 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	}
 	comp := `<CompleteMultipartUpload><Part><ETag>` + part1Headers.Get("ETag") + `</ETag><PartNumber>1</PartNumber></Part><Part><ETag>` + part2Headers.Get("ETag") + `</ETag><PartNumber>2</PartNumber></Part></CompleteMultipartUpload>`
 	size := 5<<20 + len("SRC-BYTES")
-	if code, b, _ := do(http.MethodPost, "/qb/m?uploadId="+uploadID, comp, map[string]string{"x-amz-mp-object-size": strconv.Itoa(size - 1)}); code != http.StatusBadRequest || !bytes.Contains(b, []byte("InvalidRequest")) {
+	if code, b, _ := do(http.MethodPost, "/bucket-q/m?uploadId="+uploadID, comp, map[string]string{"x-amz-mp-object-size": strconv.Itoa(size - 1)}); code != http.StatusBadRequest || !bytes.Contains(b, []byte("InvalidRequest")) {
 		t.Fatalf("complete mpu size mismatch %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodPost, "/qb/m?uploadId="+uploadID, comp, map[string]string{"x-amz-mp-object-size": strconv.Itoa(size), "x-amz-checksum-crc32": "AA=="}); code != http.StatusBadRequest || !bytes.Contains(b, []byte("BadDigest")) {
+	if code, b, _ := do(http.MethodPost, "/bucket-q/m?uploadId="+uploadID, comp, map[string]string{"x-amz-mp-object-size": strconv.Itoa(size), "x-amz-checksum-crc32": "AA=="}); code != http.StatusBadRequest || !bytes.Contains(b, []byte("BadDigest")) {
 		t.Fatalf("complete mpu checksum mismatch %d %s", code, b)
 	}
 	checksumBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(checksumBytes, crc32.ChecksumIEEE(append(bytes.Repeat([]byte("A"), 5<<20), []byte("SRC-BYTES")...)))
 	checksum := base64.StdEncoding.EncodeToString(checksumBytes)
 	headers := map[string]string{"x-amz-mp-object-size": strconv.Itoa(size), "x-amz-checksum-crc32": checksum, "x-amz-checksum-type": "FULL_OBJECT"}
-	if code, b, h := do(http.MethodPost, "/qb/m?uploadId="+uploadID, comp, headers); code >= 300 {
+	if code, b, h := do(http.MethodPost, "/bucket-q/m?uploadId="+uploadID, comp, headers); code >= 300 {
 		t.Fatalf("complete mpu %d %s", code, b)
 	} else if !bytes.Contains(b, []byte("-2")) && !strings.Contains(h.Get("ETag"), "-2") {
 		t.Fatalf("multipart etag %s %v", b, h)
 	} else if !bytes.Contains(b, []byte(checksum)) {
 		t.Fatalf("multipart checksum output %s", b)
 	}
-	if code, b, h := do(http.MethodGet, "/qb/m", "", map[string]string{"x-amz-checksum-mode": "ENABLED"}); code != http.StatusOK || h.Get("x-amz-checksum-crc32") != checksum || h.Get("x-amz-checksum-type") != "FULL_OBJECT" || h.Get("x-amz-storage-class") != "STANDARD_IA" {
+	if code, b, h := do(http.MethodGet, "/bucket-q/m", "", map[string]string{"x-amz-checksum-mode": "ENABLED"}); code != http.StatusOK || h.Get("x-amz-checksum-crc32") != checksum || h.Get("x-amz-checksum-type") != "FULL_OBJECT" || h.Get("x-amz-storage-class") != "STANDARD_IA" {
 		t.Fatalf("get multipart checksum %d %s %v", code, b, h)
 	}
 	partRange := fmt.Sprintf("bytes %d-%d/%d", 5<<20, size-1, size)
-	if code, b, h := do(http.MethodGet, "/qb/m?partNumber=2", "", map[string]string{"x-amz-checksum-mode": "ENABLED"}); code != http.StatusPartialContent || string(b) != "SRC-BYTES" || h.Get("Content-Length") != strconv.Itoa(len("SRC-BYTES")) || h.Get("Content-Range") != partRange || h.Get("x-amz-mp-parts-count") != "2" || h.Get("x-amz-checksum-crc32") != "" {
+	if code, b, h := do(http.MethodGet, "/bucket-q/m?partNumber=2", "", map[string]string{"x-amz-checksum-mode": "ENABLED"}); code != http.StatusPartialContent || string(b) != "SRC-BYTES" || h.Get("Content-Length") != strconv.Itoa(len("SRC-BYTES")) || h.Get("Content-Range") != partRange || h.Get("x-amz-mp-parts-count") != "2" || h.Get("x-amz-checksum-crc32") != "" {
 		t.Fatalf("get multipart part %d %q %v", code, b, h)
 	}
-	if code, b, h := do(http.MethodHead, "/qb/m?partNumber=2", "", nil); code != http.StatusPartialContent || len(b) != 0 || h.Get("Content-Length") != strconv.Itoa(len("SRC-BYTES")) || h.Get("Content-Range") != partRange || h.Get("x-amz-mp-parts-count") != "2" {
+	if code, b, h := do(http.MethodHead, "/bucket-q/m?partNumber=2", "", nil); code != http.StatusPartialContent || len(b) != 0 || h.Get("Content-Length") != strconv.Itoa(len("SRC-BYTES")) || h.Get("Content-Range") != partRange || h.Get("x-amz-mp-parts-count") != "2" {
 		t.Fatalf("head multipart part %d %q %v", code, b, h)
 	}
-	if code, b, _ := do(http.MethodGet, "/qb/m?partNumber=3", "", nil); code != http.StatusRequestedRangeNotSatisfiable || !bytes.Contains(b, []byte("InvalidPartNumber")) {
+	if code, b, _ := do(http.MethodGet, "/bucket-q/m?partNumber=3", "", nil); code != http.StatusRequestedRangeNotSatisfiable || !bytes.Contains(b, []byte("InvalidPartNumber")) {
 		t.Fatalf("invalid multipart part %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodGet, "/qb/m?partNumber=1", "", map[string]string{"Range": "bytes=0-1"}); code != http.StatusBadRequest || !bytes.Contains(b, []byte("InvalidRequest")) {
+	if code, b, _ := do(http.MethodGet, "/bucket-q/m?partNumber=1", "", map[string]string{"Range": "bytes=0-1"}); code != http.StatusBadRequest || !bytes.Contains(b, []byte("InvalidRequest")) {
 		t.Fatalf("part and range %d %s", code, b)
 	}
 	attributeHeaders := map[string]string{"x-amz-object-attributes": "ETag,Checksum,ObjectParts,StorageClass,ObjectSize", "x-amz-max-parts": "1"}
-	if code, b, h := do(http.MethodGet, "/qb/m?attributes", "", attributeHeaders); code != http.StatusOK || !bytes.Contains(b, []byte("<GetObjectAttributesResponse>")) || !bytes.Contains(b, []byte("<Checksum><ChecksumCRC32>"+checksum+"</ChecksumCRC32><ChecksumType>FULL_OBJECT</ChecksumType></Checksum>")) || !bytes.Contains(b, []byte("<ObjectParts><PartsCount>2</PartsCount></ObjectParts>")) || !bytes.Contains(b, []byte("<ObjectSize>"+strconv.Itoa(size)+"</ObjectSize>")) || !bytes.Contains(b, []byte("<StorageClass>STANDARD_IA</StorageClass>")) || bytes.Contains(b, []byte("<member>")) || h.Get("Last-Modified") == "" {
+	if code, b, h := do(http.MethodGet, "/bucket-q/m?attributes", "", attributeHeaders); code != http.StatusOK || !bytes.Contains(b, []byte("<GetObjectAttributesResponse>")) || !bytes.Contains(b, []byte("<Checksum><ChecksumCRC32>"+checksum+"</ChecksumCRC32><ChecksumType>FULL_OBJECT</ChecksumType></Checksum>")) || !bytes.Contains(b, []byte("<ObjectParts><PartsCount>2</PartsCount></ObjectParts>")) || !bytes.Contains(b, []byte("<ObjectSize>"+strconv.Itoa(size)+"</ObjectSize>")) || !bytes.Contains(b, []byte("<StorageClass>STANDARD_IA</StorageClass>")) || bytes.Contains(b, []byte("<member>")) || h.Get("Last-Modified") == "" {
 		t.Fatalf("get object attributes %d %s %v", code, b, h)
 	}
-	if code, b, _ := do(http.MethodGet, "/qb/m?tagging", "", nil); code != http.StatusOK || bytes.Contains(b, []byte("<member>")) || !bytes.Contains(b, []byte("<TagSet><Tag><Key>env</Key><Value>test</Value></Tag><Tag><Key>team</Key><Value>storage</Value></Tag></TagSet>")) {
+	if code, b, _ := do(http.MethodGet, "/bucket-q/m?tagging", "", nil); code != http.StatusOK || bytes.Contains(b, []byte("<member>")) || !bytes.Contains(b, []byte("<TagSet><Tag><Key>env</Key><Value>test</Value></Tag><Tag><Key>team</Key><Value>storage</Value></Tag></TagSet>")) {
 		t.Fatalf("get multipart tags %d %s", code, b)
 	}
 }

@@ -256,14 +256,14 @@ func TestBootedServerS3NotificationToSQS(t *testing.T) {
 		return res.StatusCode, b
 	}
 	sqsJSON("CreateQueue", `{"QueueName":"nq"}`)
-	if code, b := do(http.MethodPut, "/nb", ""); code >= 300 {
+	if code, b := do(http.MethodPut, "/bucket-n", ""); code >= 300 {
 		t.Fatalf("bucket %d %s", code, b)
 	}
 	nxml := `<NotificationConfiguration><QueueConfiguration><Queue>arn:aws:sqs:us-east-1:000000000000:nq</Queue><Event>s3:ObjectCreated:Put</Event></QueueConfiguration></NotificationConfiguration>`
-	if code, b := do(http.MethodPut, "/nb?notification", nxml); code >= 300 {
+	if code, b := do(http.MethodPut, "/bucket-n?notification", nxml); code >= 300 {
 		t.Fatalf("notify cfg %d %s", code, b)
 	}
-	if code, b := do(http.MethodPut, "/nb/obj", "payload"); code >= 300 {
+	if code, b := do(http.MethodPut, "/bucket-n/obj", "payload"); code >= 300 {
 		t.Fatalf("put %d %s", code, b)
 	}
 	recv := sqsJSON("ReceiveMessage", `{"QueueName":"nq","WaitTimeSeconds":0,"MaxNumberOfMessages":10}`)

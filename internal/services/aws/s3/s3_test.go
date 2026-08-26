@@ -592,6 +592,7 @@ func TestMultipartOperationsRejectMissingUpload(t *testing.T) {
 		for _, input := range []map[string]any{
 			{"Bucket": "b", "Key": "k", "UploadId": "missing", "PartNumber": 1},
 			{"Bucket": "b", "Key": "wrong", "UploadId": uploadID, "PartNumber": 1},
+			{"Bucket": "wrong", "Key": "k", "UploadId": uploadID, "PartNumber": 1},
 		} {
 			if operation == "CompleteMultipartUpload" {
 				input["MultipartUpload"] = map[string]any{"Parts": []any{}}

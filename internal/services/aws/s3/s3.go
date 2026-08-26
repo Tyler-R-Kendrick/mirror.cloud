@@ -916,6 +916,16 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	if err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta["mtime"])); err != nil {
 		return nil, err
 	}
+	_, bucketEncrypted, _ := p.col(req, "bktcfg").Get(ctx, source.bucket+"/encryption")
+	_, sourceRestored, _ := p.col(req, "objlock").Get(ctx, source.bucket+"/"+source.key+"/restore")
+	if source.bucket == str(req.Input["Bucket"]) && source.key == str(req.Input["Key"]) &&
+		requestCondition(req, "StorageClass", "x-amz-storage-class") == "" &&
+		requestCondition(req, "ServerSideEncryption", "x-amz-server-side-encryption") == "" &&
+		requestCondition(req, "SSECustomerKeyMD5", "x-amz-server-side-encryption-customer-key-MD5") == "" &&
+		requestCondition(req, "MetadataDirective", "x-amz-metadata-directive") != "REPLACE" &&
+		requestCondition(req, "WebsiteRedirectLocation", "x-amz-website-redirect-location") == "" && !bucketEncrypted && !sourceRestored {
+		return nil, &spi.Fault{Code: "InvalidRequest", Message: "This copy request is illegal because it is trying to copy an object to itself without changing the object's metadata, storage class, website redirect location or encryption attributes.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
 	directive, err := copyDirective(req, "TaggingDirective", "x-amz-tagging-directive")
 	if err != nil {
 		return nil, err

@@ -103,6 +103,14 @@ func createBucketRegion(endpoint, constraint string) (string, error) {
 }
 
 func validBucketName(name string) bool {
+	return validBucketNameRules(name) && !strings.HasSuffix(name, "-an")
+}
+
+func validAccountRegionalBucketName(name, account, region string) bool {
+	return validBucketNameRules(name) && strings.HasSuffix(name, "-"+account+"-"+region+"-an")
+}
+
+func validBucketNameRules(name string) bool {
 	if len(name) < 3 || len(name) > 63 || !bucketNameEdge(name[0]) || !bucketNameEdge(name[len(name)-1]) || strings.Contains(name, "..") {
 		return false
 	}
@@ -120,7 +128,7 @@ func validBucketName(name string) bool {
 			return false
 		}
 	}
-	for _, suffix := range []string{"-s3alias", "--ol-s3", ".mrap", "--x-s3", "--table-s3", "-an"} {
+	for _, suffix := range []string{"-s3alias", "--ol-s3", ".mrap", "--x-s3", "--table-s3"} {
 		if strings.HasSuffix(name, suffix) {
 			return false
 		}
@@ -528,7 +536,12 @@ func (p *Pack) col(req *spi.Request, name string) spi.Collection {
 
 func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b := str(req.Input["Bucket"])
-	if !validBucketName(b) {
+	namespace := requestCondition(req, "BucketNamespace", "x-amz-bucket-namespace")
+	if namespace != "" && namespace != "global" && namespace != "account-regional" {
+		return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid bucket namespace", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-bucket-namespace", "ArgumentValue": namespace}}
+	}
+	accountRegional := namespace == "account-regional"
+	if !accountRegional && !validBucketName(b) {
 		return nil, &spi.Fault{Code: "InvalidBucketName", Message: "The specified bucket is not valid.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"BucketName": b}}
 	}
 	constraint := str(req.Input["LocationConstraint"])
@@ -539,8 +552,26 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 	if err != nil {
 		return nil, err
 	}
+	if accountRegional && !validAccountRegionalBucketName(b, req.Identity.Account, bucketRegion) {
+		return nil, &spi.Fault{Code: "InvalidBucketName", Message: "The specified bucket is not valid.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"BucketName": b}}
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	buckets := p.deps.Store.Scope(req.Identity.Account, bucketRegion).Collection("buckets")
+	if accountRegional {
+		if _, exists, err := buckets.Get(ctx, b); err != nil {
+			return nil, err
+		} else if exists {
+			return nil, &spi.Fault{Code: "BucketAlreadyOwnedByYou", Message: "Your previous request to create the named bucket succeeded and you already own it.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"BucketName": b}}
+		}
+		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "namespace": namespace})
+		if err := buckets.Put(ctx, b, meta); err != nil {
+			return nil, err
+		}
+		h := http.Header{}
+		h.Set("Location", "/"+b)
+		return &spi.Response{Status: 200, Headers: h, Output: map[string]any{}}, nil
+	}
 	global := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets")
 	raw, exists, err := global.Get(ctx, b)
 	if err != nil {
@@ -561,7 +592,6 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 			return nil, &spi.Fault{Code: "BucketAlreadyOwnedByYou", Message: "Your previous request to create the named bucket succeeded and you already own it.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"BucketName": b}}
 		}
 	} else {
-		buckets := p.deps.Store.Scope(req.Identity.Account, bucketRegion).Collection("buckets")
 		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint})
 		if err := buckets.Put(ctx, b, meta); err != nil {
 			return nil, err

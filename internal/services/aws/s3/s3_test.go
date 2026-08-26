@@ -174,6 +174,41 @@ func TestCreateBucketGlobalCollisions(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"collisions": collisions, "recreate": map[string]any{"status": http.StatusOK, "object": preserved}, "reuse_after_delete": "created"})
 }
 
+func TestCreateBucketAccountRegionalNamespace(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	east := ident()
+	name := "team-" + east.Account + "-" + east.Region + "-an"
+	input := map[string]any{"Bucket": name, "BucketNamespace": "account-regional"}
+	if got, err := invokeAs(t, p, east, "CreateBucket", input, nil); err != nil || got.Headers.Get("Location") != "/"+name {
+		t.Fatalf("create = %#v %v", got, err)
+	}
+	if _, err := invokeAs(t, p, east, "CreateBucket", input, nil); asFault(t, err).Code != "BucketAlreadyOwnedByYou" {
+		t.Fatalf("recreate = %v", err)
+	}
+	mustInvokeAs(t, p, east, "PutObject", map[string]any{"Bucket": name, "Key": "key"}, []byte("value"))
+
+	other := spi.Identity{Account: "999999999999", Region: east.Region}
+	if _, err := invokeAs(t, p, other, "CreateBucket", input, nil); asFault(t, err).Code != "InvalidBucketName" {
+		t.Fatalf("foreign suffix = %v", err)
+	}
+	if _, err := invokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": name, "BucketNamespace": "global"}, nil); asFault(t, err).Code != "InvalidBucketName" {
+		t.Fatalf("global -an name = %v", err)
+	}
+	if _, err := invokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "bucket", "BucketNamespace": "regional"}, nil); asFault(t, err).Code != "InvalidArgument" {
+		t.Fatalf("unknown namespace = %v", err)
+	}
+
+	west := spi.Identity{Account: east.Account, Region: "us-west-2"}
+	westName := "team-" + west.Account + "-" + west.Region + "-an"
+	westInput := map[string]any{"Bucket": westName, "BucketNamespace": "account-regional", "LocationConstraint": west.Region}
+	if got, err := invokeAs(t, p, west, "CreateBucket", westInput, nil); err != nil || got.Headers.Get("Location") != "/"+westName {
+		t.Fatalf("west create = %#v %v", got, err)
+	}
+	if got := mustInvokeAs(t, p, west, "GetBucketLocation", map[string]any{"Bucket": westName}, nil); got.Output["LocationConstraint"] != west.Region {
+		t.Fatalf("west location = %#v", got.Output)
+	}
+}
+
 func TestCreateBucketLocationConstraints(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	east := ident()

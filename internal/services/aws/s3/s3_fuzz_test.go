@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
@@ -82,6 +83,31 @@ func FuzzObjectKeyLength(f *testing.F) {
 		}
 		if fault := asFault(t, err); fault.Code != "KeyTooLongError" || fault.Fields["Size"] != strconv.Itoa(len(key)) {
 			t.Fatalf("invalid %d-byte key = %#v", len(key), fault)
+		}
+	})
+}
+
+func FuzzCreateBucketCollisions(f *testing.F) {
+	for _, seed := range []struct{ account, region string }{{"123456789012", "us-east-1"}, {"123456789012", "us-west-2"}, {"999999999999", "us-east-1"}} {
+		f.Add(seed.account, seed.region)
+	}
+	f.Fuzz(func(t *testing.T, account, region string) {
+		p := s3.New(spitest.Deps(t))
+		owner := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		mustInvokeAs(t, p, owner, "CreateBucket", map[string]any{"Bucket": "global-name"}, nil)
+		_, err := invokeAs(t, p, spi.Identity{Account: account, Region: region}, "CreateBucket", map[string]any{"Bucket": "global-name"}, nil)
+		if account == owner.Account && region == owner.Region {
+			if err != nil {
+				t.Fatalf("idempotent create: %v", err)
+			}
+			return
+		}
+		want := "BucketAlreadyExists"
+		if account == owner.Account {
+			want = "BucketAlreadyOwnedByYou"
+		}
+		if fault := asFault(t, err); fault.Code != want || fault.HTTPStatus != http.StatusConflict {
+			t.Fatalf("account=%q region=%q want=%s got=%#v", account, region, want, fault)
 		}
 	})
 }

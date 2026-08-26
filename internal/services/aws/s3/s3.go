@@ -500,6 +500,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	if err != nil {
 		return nil, err
 	}
+	objectMetadata := requestObjectMetadata(req)
 	var body []byte
 	if req.Body != nil {
 		body, _ = io.ReadAll(req.Body)
@@ -529,7 +530,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	if p.versioningEnabled(ctx, req, b) {
 		vid = p.deps.Rand.Hex(8)
 		_, _ = p.deps.Blobs.Put(ctx, blobKey(req, b, key)+"@"+vid, bytes.NewReader(body))
-		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "mtime": mtime, "key": key, "storageClass": storageClass}
+		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata}
 		if len(parts) > 0 {
 			versionMeta["parts"] = parts
 		}
@@ -540,7 +541,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		vm, _ := json.Marshal(versionMeta)
 		_ = p.col(req, "versions").Put(ctx, b+"/"+key+"/"+vid, vm)
 	}
-	metaDoc := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "versionId": vid, "deleteMarker": false, "storageClass": storageClass}
+	metaDoc := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "versionId": vid, "deleteMarker": false, "storageClass": storageClass, "objectMetadata": objectMetadata}
 	if len(parts) > 0 {
 		metaDoc["parts"] = parts
 	}
@@ -607,6 +608,7 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	etag := objectETag(meta, info.MD5)
 	h.Set("ETag", etag)
 	h.Set("Accept-Ranges", "bytes")
+	setObjectMetadataHeaders(h, meta)
 	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
 	mtime := str(meta["mtime"])
 	if mtime == "" {
@@ -694,6 +696,7 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	h := http.Header{}
 	h.Set("ETag", objectETag(meta, info.MD5))
 	h.Set("Accept-Ranges", "bytes")
+	setObjectMetadataHeaders(h, meta)
 	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
 	h.Set("Last-Modified", str(meta["mtime"]))
 	if version := str(meta["versionId"]); version != "" {
@@ -907,6 +910,10 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 			values.Set(key, value)
 		}
 		req.Input["Tagging"] = values.Encode()
+	}
+	metadataDirective := requestCondition(req, "MetadataDirective", "x-amz-metadata-directive")
+	if !strings.EqualFold(metadataDirective, "REPLACE") {
+		req.Input["_ObjectMetadata"] = source.meta["objectMetadata"]
 	}
 	req.Body = source.body
 	response, err := p.putObject(ctx, req, "", "", nil)
@@ -1800,6 +1807,62 @@ func validTagText(value string) bool {
 		}
 	}
 	return true
+}
+
+func requestObjectMetadata(req *spi.Request) map[string]any {
+	if copied := asMap(req.Input["_ObjectMetadata"]); len(copied) > 0 {
+		return cloneMap(copied)
+	}
+	metadata := map[string]any{}
+	for _, field := range []struct{ key, input, header string }{
+		{"cacheControl", "CacheControl", "Cache-Control"},
+		{"contentDisposition", "ContentDisposition", "Content-Disposition"},
+		{"contentEncoding", "ContentEncoding", "Content-Encoding"},
+		{"contentLanguage", "ContentLanguage", "Content-Language"},
+		{"contentType", "ContentType", "Content-Type"},
+		{"expires", "Expires", "Expires"},
+	} {
+		if value := requestCondition(req, field.input, field.header); value != "" {
+			metadata[field.key] = value
+		}
+	}
+	if str(metadata["contentType"]) == "" {
+		metadata["contentType"] = "binary/octet-stream"
+	}
+	user := map[string]any{}
+	for key, value := range asMap(req.Input["Metadata"]) {
+		user[strings.ToLower(key)] = str(value)
+	}
+	if req.HTTP != nil {
+		for key, values := range req.HTTP.Header {
+			if name, ok := strings.CutPrefix(strings.ToLower(key), "x-amz-meta-"); ok && len(values) > 0 {
+				user[name] = strings.Join(values, ",")
+			}
+		}
+	}
+	if len(user) > 0 {
+		metadata["user"] = user
+	}
+	return metadata
+}
+
+func setObjectMetadataHeaders(headers http.Header, meta map[string]any) {
+	metadata := asMap(meta["objectMetadata"])
+	for _, field := range []struct{ key, header string }{
+		{"cacheControl", "Cache-Control"},
+		{"contentDisposition", "Content-Disposition"},
+		{"contentEncoding", "Content-Encoding"},
+		{"contentLanguage", "Content-Language"},
+		{"contentType", "Content-Type"},
+		{"expires", "Expires"},
+	} {
+		if value := str(metadata[field.key]); value != "" {
+			headers.Set(field.header, value)
+		}
+	}
+	for key, value := range asMap(metadata["user"]) {
+		headers.Set("x-amz-meta-"+key, str(value))
+	}
 }
 
 func (p *Pack) objectLockExtras(ctx context.Context, req *spi.Request) (*spi.Response, error) {

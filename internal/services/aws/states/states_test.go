@@ -1302,7 +1302,7 @@ func TestStatesDurableWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	var execution map[string]any
-	for range 100 {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
 		execution = invoke("DescribeExecution", map[string]any{"executionArn": executionARN})
 		if execution["status"] == "SUCCEEDED" {
 			break

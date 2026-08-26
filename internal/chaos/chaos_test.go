@@ -258,6 +258,34 @@ func TestConcurrentInvalidBucketLocationsDoNotReserveName(t *testing.T) {
 	}
 }
 
+func TestConcurrentInvalidBucketNamesDoNotReserveState(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	names := []string{"ab", "UPPERCASE", "192.168.5.4", "reserved--x-s3"}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": names[n%len(names)]}})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "InvalidBucketName" {
+			t.Fatalf("invalid bucket create: %v", err)
+		}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "valid-after-invalid-names"}}); err != nil {
+		t.Fatalf("valid create after invalid load: %v", err)
+	}
+}
+
 func TestConcurrentInvalidVersioningWritesDoNotChangeState(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

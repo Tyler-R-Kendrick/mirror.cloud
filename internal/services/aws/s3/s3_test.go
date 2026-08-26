@@ -253,6 +253,69 @@ func TestExpectedBucketOwnerAndDeleteBoundary(t *testing.T) {
 	golden.AssertJSON(t, errors)
 }
 
+func TestExpectedSourceBucketOwnerAndCopyBoundary(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "source"}, nil)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "destination"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "source", "Key": "key"}, []byte("body"))
+	mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "destination", "Key": "copy", "CopySource": "source/key", "ExpectedSourceBucketOwner": ident().Account}, nil)
+
+	upload := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "destination", "Key": "multipart"}, nil)
+	uploadID := upload.Output["UploadId"].(string)
+	mustInvoke(t, p, "UploadPartCopy", map[string]any{"Bucket": "destination", "Key": "multipart", "UploadId": uploadID, "PartNumber": 1, "CopySource": "source/key", "ExpectedSourceBucketOwner": ident().Account}, nil)
+	httpReq := httptest.NewRequest(http.MethodPut, "/destination/header-copy", nil)
+	httpReq.Header.Set("x-amz-source-expected-bucket-owner", ident().Account)
+	if _, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "CopyObject", Identity: ident(), HTTP: httpReq, Input: map[string]any{"Bucket": "destination", "Key": "header-copy", "CopySource": "source/key"}}); err != nil {
+		t.Fatalf("matching source owner header: %v", err)
+	}
+
+	errors := map[string]any{}
+	for _, expected := range []string{"12345678901", "12345678901x"} {
+		_, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "destination", "Key": "invalid-" + expected, "CopySource": "source/key", "ExpectedSourceBucketOwner": expected}, nil)
+		fault := asFault(t, err)
+		if fault.Code != "InvalidBucketOwnerAWSAccountID" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("expected source owner %q = %#v", expected, fault)
+		}
+		errors[expected] = fault.Code
+	}
+	for _, test := range []struct {
+		operation string
+		input     map[string]any
+	}{
+		{"CopyObject", map[string]any{"Bucket": "destination", "Key": "denied", "CopySource": "source/key"}},
+		{"UploadPartCopy", map[string]any{"Bucket": "destination", "Key": "multipart", "UploadId": uploadID, "PartNumber": 2, "CopySource": "source/key"}},
+	} {
+		test.input["ExpectedSourceBucketOwner"] = "999999999999"
+		_, err := invoke(t, p, test.operation, test.input, nil)
+		fault := asFault(t, err)
+		if fault.Code != "AccessDenied" || fault.HTTPStatus != http.StatusForbidden {
+			t.Fatalf("%s mismatch = %#v", test.operation, fault)
+		}
+		errors[test.operation] = fault.Code
+	}
+	for _, test := range []struct {
+		operation string
+		input     map[string]any
+	}{
+		{"CopyObject", map[string]any{"Bucket": "destination", "Key": "missing", "CopySource": "missing/key"}},
+		{"UploadPartCopy", map[string]any{"Bucket": "destination", "Key": "multipart", "UploadId": uploadID, "PartNumber": 2, "CopySource": "missing/key"}},
+	} {
+		_, err := invoke(t, p, test.operation, test.input, nil)
+		fault := asFault(t, err)
+		if fault.Code != "NoSuchBucket" || fault.HTTPStatus != http.StatusNotFound {
+			t.Fatalf("%s missing source = %#v", test.operation, fault)
+		}
+		errors[test.operation+"Missing"] = fault.Code
+	}
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "destination", "Key": "denied"}, nil); asFault(t, err).Code != "NoSuchKey" {
+		t.Fatalf("denied copy created object: %v", err)
+	}
+	if parts := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "destination", "Key": "multipart", "UploadId": uploadID}, nil).Output["Parts"].([]any); len(parts) != 1 {
+		t.Fatalf("rejected part mutated upload: %#v", parts)
+	}
+	golden.AssertJSON(t, errors)
+}
+
 func TestTagValidationAndBucketSemantics(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	characterization := map[string]any{}

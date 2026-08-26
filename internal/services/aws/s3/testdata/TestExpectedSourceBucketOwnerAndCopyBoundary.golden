@@ -1,0 +1,8 @@
+{
+  "12345678901": "InvalidBucketOwnerAWSAccountID",
+  "12345678901x": "InvalidBucketOwnerAWSAccountID",
+  "CopyObject": "AccessDenied",
+  "CopyObjectMissing": "NoSuchBucket",
+  "UploadPartCopy": "AccessDenied",
+  "UploadPartCopyMissing": "NoSuchBucket"
+}

@@ -40,6 +40,13 @@ type mpu struct {
 	parts                 map[int][]byte
 }
 
+type copySource struct {
+	bucket, key, version string
+	body                 io.ReadSeekCloser
+	info                 spi.BlobInfo
+	meta                 map[string]any
+}
+
 // New constructs the pack.
 func New(d spi.Deps) *Pack { return &Pack{deps: d, mpu: map[string]*mpu{}} }
 
@@ -744,30 +751,12 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 }
 
 func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	sourceBucket, sourceKey, sourceVersion, err := parseCopySource(req)
+	source, err := p.openCopySource(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	metaKey := sourceBucket + "/" + sourceKey
-	blob := blobKey(req, sourceBucket, sourceKey)
-	collection := "objects"
-	if sourceVersion != "" {
-		metaKey += "/" + sourceVersion
-		blob += "@" + sourceVersion
-		collection = "versions"
-	}
-	metaRaw, exists, _ := p.col(req, collection).Get(ctx, metaKey)
-	var meta map[string]any
-	_ = json.Unmarshal(metaRaw, &meta)
-	if !exists || truthy(meta["deleteMarker"]) {
-		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
-	}
-	rc, info, err := p.deps.Blobs.Get(ctx, blob)
-	if err != nil {
-		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
-	}
-	defer rc.Close()
-	if err := checkCopySourcePreconditions(req, `"`+info.MD5+`"`, str(meta["mtime"])); err != nil {
+	defer source.body.Close()
+	if err := checkCopySourcePreconditions(req, `"`+source.info.MD5+`"`, str(source.meta["mtime"])); err != nil {
 		return nil, err
 	}
 	directive := str(req.Input["TaggingDirective"])
@@ -776,15 +765,15 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	}
 	if !strings.EqualFold(directive, "REPLACE") {
 		values := url.Values{}
-		for key, value := range p.storedTags(ctx, req, sourceBucket, sourceKey) {
+		for key, value := range p.storedTags(ctx, req, source.bucket, source.key) {
 			values.Set(key, value)
 		}
 		req.Input["Tagging"] = values.Encode()
 	}
-	req.Body = rc
+	req.Body = source.body
 	response, err := p.putObject(ctx, req)
-	if err == nil && sourceVersion != "" {
-		response.Headers.Set("x-amz-copy-source-version-id", sourceVersion)
+	if err == nil && source.version != "" {
+		response.Headers.Set("x-amz-copy-source-version-id", source.version)
 	}
 	return response, err
 }
@@ -799,23 +788,26 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 }
 
 func (p *Pack) uploadPartCopy(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	sourceBucket, sourceKey, sourceVersion, err := parseCopySource(req)
+	source, err := p.openCopySource(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	blob := blobKey(req, sourceBucket, sourceKey)
-	if sourceVersion != "" {
-		blob += "@" + sourceVersion
+	defer source.body.Close()
+	if err := checkCopySourcePreconditions(req, `"`+source.info.MD5+`"`, str(source.meta["mtime"])); err != nil {
+		return nil, err
 	}
-	rc, _, err := p.deps.Blobs.Get(ctx, blob)
-	if err != nil {
-		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
+	req.Body = source.body
+	if rawRange := requestCondition(req, "CopySourceRange", "x-amz-copy-source-range"); rawRange != "" {
+		body, _ := io.ReadAll(source.body)
+		body, err = applyCopySourceRange(body, rawRange)
+		if err != nil {
+			return nil, err
+		}
+		req.Body = io.NopCloser(bytes.NewReader(body))
 	}
-	defer rc.Close()
-	req.Body = rc
 	response, err := p.uploadPart(ctx, req)
-	if err == nil && sourceVersion != "" {
-		response.Headers.Set("x-amz-copy-source-version-id", sourceVersion)
+	if err == nil && source.version != "" {
+		response.Headers.Set("x-amz-copy-source-version-id", source.version)
 	}
 	return response, err
 }
@@ -1320,6 +1312,58 @@ func parseCopySource(req *spi.Request) (bucket, key, version string, err error) 
 		}
 	}
 	return parts[0], parts[1], version, nil
+}
+
+func (p *Pack) openCopySource(ctx context.Context, req *spi.Request) (*copySource, error) {
+	bucket, key, version, err := parseCopySource(req)
+	if err != nil {
+		return nil, err
+	}
+	metaKey := bucket + "/" + key
+	blob := blobKey(req, bucket, key)
+	collection := "objects"
+	if version != "" {
+		metaKey += "/" + version
+		blob += "@" + version
+		collection = "versions"
+	}
+	metaRaw, exists, _ := p.col(req, collection).Get(ctx, metaKey)
+	var meta map[string]any
+	_ = json.Unmarshal(metaRaw, &meta)
+	if !exists {
+		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
+	}
+	if truthy(meta["deleteMarker"]) {
+		if version != "" {
+			return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: 400, Fault: "client"}
+		}
+		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
+	}
+	body, info, err := p.deps.Blobs.Get(ctx, blob)
+	if err != nil {
+		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
+	}
+	return &copySource{bucket: bucket, key: key, version: version, body: body, info: info, meta: meta}, nil
+}
+
+func applyCopySourceRange(body []byte, value string) ([]byte, error) {
+	raw, ok := strings.CutPrefix(value, "bytes=")
+	startRaw, endRaw, found := strings.Cut(raw, "-")
+	start, startErr := strconv.Atoi(startRaw)
+	end, endErr := strconv.Atoi(endRaw)
+	if !ok || !found || startErr != nil || endErr != nil || start < 0 || end < start {
+		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: 400, Fault: "client"}
+	}
+	if len(body) <= 5<<20 {
+		return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: 400, Fault: "client"}
+	}
+	if start >= len(body) {
+		return nil, &spi.Fault{Code: "InvalidRange", HTTPStatus: 416, Fault: "client"}
+	}
+	if end >= len(body) {
+		end = len(body) - 1
+	}
+	return body[start : end+1], nil
 }
 
 func etagMatches(condition, etag string) bool {

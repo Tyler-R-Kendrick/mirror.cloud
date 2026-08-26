@@ -264,6 +264,50 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given an XXHash checksum When PUT and GET object Then the checksum round trips", func(t *testing.T) {
+		res := do(http.MethodPut, "/xxhash-behavior", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		request := func(method, path string, body []byte, checksum string) *http.Response {
+			t.Helper()
+			req, err := http.NewRequest(method, ts.URL+path, bytes.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", auth)
+			if checksum != "" {
+				req.Header.Set("x-amz-checksum-xxhash64", checksum)
+			} else if method == http.MethodGet {
+				req.Header.Set("x-amz-checksum-mode", "ENABLED")
+			}
+			response, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return response
+		}
+		checksum := "jLhB20DmroM="
+		res = request(http.MethodPut, "/xxhash-behavior/object", []byte("123456789"), checksum)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-checksum-xxhash64") != checksum || res.Header.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+			t.Fatalf("put xxhash %d %v", res.StatusCode, res.Header)
+		}
+		res = request(http.MethodGet, "/xxhash-behavior/object", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(body) != "123456789" || res.Header.Get("x-amz-checksum-xxhash64") != checksum || res.Header.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+			t.Fatalf("get xxhash %d %q %v", res.StatusCode, body, res.Header)
+		}
+		res = request(http.MethodPut, "/xxhash-behavior/bad", []byte("123456789"), "AA==")
+		fault, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("BadDigest")) {
+			t.Fatalf("bad xxhash %d %s", res.StatusCode, fault)
+		}
+	})
+
 	t.Run("Given an oversized object key When PUT object Then it is rejected", func(t *testing.T) {
 		res := do(http.MethodPut, "/key-limits", nil, "")
 		res.Body.Close()

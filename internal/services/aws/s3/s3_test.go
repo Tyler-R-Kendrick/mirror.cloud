@@ -82,6 +82,14 @@ func readStream(t *testing.T, resp *spi.Response) []byte {
 	return b
 }
 
+func completedPart(number int, response *spi.Response) any {
+	return map[string]any{"PartNumber": number, "ETag": response.Headers.Get("ETag")}
+}
+
+func completeInput(uploadID string, parts ...any) map[string]any {
+	return map[string]any{"UploadId": uploadID, "MultipartUpload": map[string]any{"Parts": parts}}
+}
+
 func TestCreatePutGetBytesMatch(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
@@ -217,10 +225,10 @@ func TestCopyObjectSourceVersions(t *testing.T) {
 
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "part-copy"}, nil)
 	uploadID := created.Output["UploadId"].(string)
-	mustInvoke(t, p, "UploadPartCopy", map[string]any{
+	part := mustInvoke(t, p, "UploadPartCopy", map[string]any{
 		"UploadId": uploadID, "PartNumber": 1, "CopySource": source + "?versionId=" + url.PathEscape(firstVersion),
 	}, nil)
-	mustInvoke(t, p, "CompleteMultipartUpload", map[string]any{"UploadId": uploadID}, nil)
+	mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
 	if got := readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "part-copy"}, nil)); string(got) != "first" {
 		t.Fatalf("version part copy = %q", got)
 	}
@@ -266,11 +274,11 @@ func TestUploadPartCopyConditionsAndRange(t *testing.T) {
 	}
 
 	uploadID := createUpload("range")
-	mustInvoke(t, p, "UploadPartCopy", map[string]any{
+	part := mustInvoke(t, p, "UploadPartCopy", map[string]any{
 		"UploadId": uploadID, "PartNumber": 1, "CopySource": "b/large",
 		"CopySourceIfMatch": source.Headers.Get("ETag"), "CopySourceRange": "bytes=10-19",
 	}, nil)
-	mustInvoke(t, p, "CompleteMultipartUpload", map[string]any{"UploadId": uploadID}, nil)
+	mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
 	if got := readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "range"}, nil)); string(got) != "0123456789" {
 		t.Fatalf("range copy = %q", got)
 	}
@@ -325,17 +333,60 @@ func TestMultipartETagForm(t *testing.T) {
 	if id == "" {
 		t.Fatal("missing UploadId")
 	}
-	mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 1}, []byte("AAA"))
-	mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 2}, []byte("BBB"))
-	done := mustInvoke(t, p, "CompleteMultipartUpload", map[string]any{"UploadId": id}, nil)
+	firstBody := bytes.Repeat([]byte("A"), 5<<20)
+	first := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 1}, firstBody)
+	second := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 2}, []byte("BBB"))
+	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, first), completedPart(2, second)), nil)
 	etag, _ := done.Output["ETag"].(string)
 	if !regexp.MustCompile(`^"[0-9a-f]{32}-2"$`).MatchString(etag) {
 		t.Fatalf("multipart etag form: %q", etag)
 	}
 	got := readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "k"}, nil))
-	if string(got) != "AAABBB" {
-		t.Fatalf("assembled %q", got)
+	if len(got) != len(firstBody)+3 || !bytes.Equal(got[:len(firstBody)], firstBody) || string(got[len(firstBody):]) != "BBB" {
+		t.Fatalf("assembled %d bytes", len(got))
 	}
+}
+
+func TestCompleteMultipartUploadManifest(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	create := func(key string) string {
+		t.Helper()
+		return mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": key}, nil).Output["UploadId"].(string)
+	}
+	wantFault := func(uploadID, code string, parts ...any) {
+		t.Helper()
+		_, err := invoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, parts...), nil)
+		if fault := asFault(t, err); fault.Code != code || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("complete fault = %#v want %s", fault, code)
+		}
+	}
+
+	noncontiguous := create("noncontiguous")
+	mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": noncontiguous, "PartNumber": 1}, []byte("omitted"))
+	third := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": noncontiguous, "PartNumber": 3}, []byte("third"))
+	mustInvoke(t, p, "CompleteMultipartUpload", completeInput(noncontiguous, completedPart(3, third)), nil)
+	if got := readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "noncontiguous"}, nil)); string(got) != "third" {
+		t.Fatalf("noncontiguous completion = %q", got)
+	}
+
+	wrongETag := create("wrong-etag")
+	mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": wrongETag, "PartNumber": 1}, []byte("one"))
+	wantFault(wrongETag, "InvalidPart", map[string]any{"PartNumber": 1, "ETag": `"wrong"`})
+	missing := create("missing")
+	wantFault(missing, "InvalidPart", map[string]any{"PartNumber": 9, "ETag": `"missing"`})
+
+	badOrder := create("order")
+	large := bytes.Repeat([]byte("A"), 5<<20)
+	second := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": badOrder, "PartNumber": 2}, large)
+	first := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": badOrder, "PartNumber": 1}, []byte("last"))
+	wantFault(badOrder, "InvalidPartOrder", completedPart(2, second), completedPart(1, first))
+
+	tooSmall := create("small")
+	smallFirst := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": tooSmall, "PartNumber": 1}, []byte("small"))
+	smallLast := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": tooSmall, "PartNumber": 2}, []byte("last"))
+	wantFault(tooSmall, "EntityTooSmall", completedPart(1, smallFirst), completedPart(2, smallLast))
+	wantFault(create("empty"), "InvalidPart")
 }
 
 func TestListPartsAndMultipartUploads(t *testing.T) {
@@ -343,7 +394,7 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "k"}, nil)
 	id, _ := created.Output["UploadId"].(string)
-	mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "b", "Key": "k", "UploadId": id, "PartNumber": 1}, []byte("AAA"))
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "b", "Key": "k", "UploadId": id, "PartNumber": 1}, []byte("AAA"))
 	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "b", "Key": "k", "UploadId": id}, nil)
 	parts, _ := listed.Output["Parts"].([]any)
 	if len(parts) != 1 {
@@ -354,7 +405,7 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	if len(uploads) != 1 {
 		t.Fatalf("ListMultipartUploads %v", ups.Output)
 	}
-	mustInvoke(t, p, "CompleteMultipartUpload", map[string]any{"Bucket": "b", "Key": "k", "UploadId": id}, nil)
+	mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, part)), nil)
 	after := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "b"}, nil)
 	uploads, _ = after.Output["Uploads"].([]any)
 	if len(uploads) != 0 {

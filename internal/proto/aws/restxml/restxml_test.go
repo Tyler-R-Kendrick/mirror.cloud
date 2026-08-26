@@ -117,6 +117,19 @@ func TestDecodeDeleteObjectsXML(t *testing.T) {
 	}
 }
 
+func TestDecodeCompleteMultipartUploadXML(t *testing.T) {
+	body := `<CompleteMultipartUpload><Part><ETag>"first"</ETag><PartNumber>1</PartNumber></Part><Part><ETag>"third"</ETag><PartNumber>3</PartNumber></Part></CompleteMultipartUpload>`
+	r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/b/k?uploadId=id", strings.NewReader(body))
+	req, err := Codec{}.Decode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "CompleteMultipartUpload"}, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := req.Input["MultipartUpload"].(map[string]any)["Parts"].([]any)
+	if len(parts) != 2 || parts[1].(map[string]any)["PartNumber"] != 3 || parts[1].(map[string]any)["ETag"] != `"third"` {
+		t.Fatalf("parts = %#v", parts)
+	}
+}
+
 func TestDecodeTaggingXML(t *testing.T) {
 	body := `<Tagging><TagSet><Tag><Key>a</Key><Value>b</Value></Tag></TagSet></Tagging>`
 	r := httptest.NewRequest(http.MethodPut, "http://127.0.0.1/b?tagging", strings.NewReader(body))

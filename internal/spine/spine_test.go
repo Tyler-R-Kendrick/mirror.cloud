@@ -197,20 +197,22 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 		t.Fatalf("no UploadId in %s", b)
 	}
 	uploadID := string(uid[1])
-	if code, b, _ := do(http.MethodPut, "/qb/m?partNumber=1&uploadId="+uploadID, "AB", nil); code >= 300 {
+	code, b, part1Headers := do(http.MethodPut, "/qb/m?partNumber=1&uploadId="+uploadID, strings.Repeat("A", 5<<20), nil)
+	if code >= 300 {
 		t.Fatalf("upload part %d %s", code, b)
 	}
-	if code, b, h := do(http.MethodPut, "/qb/m?partNumber=2&uploadId="+uploadID, "", map[string]string{"x-amz-copy-source": "qb/src"}); code >= 300 {
+	code, b, part2Headers := do(http.MethodPut, "/qb/m?partNumber=2&uploadId="+uploadID, "", map[string]string{"x-amz-copy-source": "qb/src"})
+	if code >= 300 {
 		t.Fatalf("upload part copy %d %s", code, b)
-	} else if h.Get("x-mirror-fidelity") != "emulate" {
-		t.Fatalf("part copy fidelity %q", h.Get("x-mirror-fidelity"))
+	} else if part2Headers.Get("x-mirror-fidelity") != "emulate" {
+		t.Fatalf("part copy fidelity %q", part2Headers.Get("x-mirror-fidelity"))
 	}
 	if code, b, _ := do(http.MethodGet, "/qb/m?uploadId="+uploadID, "", nil); code != 200 {
 		t.Fatalf("list parts %d %s", code, b)
 	} else if !bytes.Contains(b, []byte("PartNumber")) {
 		t.Fatalf("list parts empty %s", b)
 	}
-	comp := `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber></Part><Part><PartNumber>2</PartNumber></Part></CompleteMultipartUpload>`
+	comp := `<CompleteMultipartUpload><Part><ETag>` + part1Headers.Get("ETag") + `</ETag><PartNumber>1</PartNumber></Part><Part><ETag>` + part2Headers.Get("ETag") + `</ETag><PartNumber>2</PartNumber></Part></CompleteMultipartUpload>`
 	if code, b, h := do(http.MethodPost, "/qb/m?uploadId="+uploadID, comp, nil); code >= 300 {
 		t.Fatalf("complete mpu %d %s", code, b)
 	} else if !bytes.Contains(b, []byte("-2")) && !strings.Contains(h.Get("ETag"), "-2") {

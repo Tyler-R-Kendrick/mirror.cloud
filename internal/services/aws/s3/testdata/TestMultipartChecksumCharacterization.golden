@@ -1,0 +1,18 @@
+{
+  "complete": {
+    "checksum": "lqO4Pw4bCAVpiCS4ITdT8Pwb+k8gptYqB2Yqy6oE9/s=-1",
+    "type": "COMPOSITE"
+  },
+  "create": {
+    "algorithm": "SHA256",
+    "type": "COMPOSITE"
+  },
+  "list": {
+    "algorithm": "SHA256",
+    "part": "FqDusHkbbJJFH9KE3Z9Zngp9vn9uvqbi0tBsf3SuwRI=",
+    "type": "COMPOSITE"
+  },
+  "part": {
+    "checksum": "FqDusHkbbJJFH9KE3Z9Zngp9vn9uvqbi0tBsf3SuwRI="
+  }
+}

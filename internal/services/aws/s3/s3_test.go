@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -430,7 +431,7 @@ func TestWriteChecksumValidation(t *testing.T) {
 		t.Fatalf("xxhash checksum fault = %#v", fault)
 	}
 
-	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "multipart"}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "multipart", "ChecksumAlgorithm": "MD5"}, nil)
 	uploadID := created.Output["UploadId"].(string)
 	_, err = invoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 1, "ChecksumMD5": "AA=="}, body)
 	if fault := asFault(t, err); fault.Code != "BadDigest" {
@@ -446,11 +447,113 @@ func TestWriteChecksumValidation(t *testing.T) {
 	if fault := asFault(t, err); fault.Code != "BadDigest" {
 		t.Fatalf("complete checksum fault = %#v", fault)
 	}
-	complete["ChecksumMD5"] = checksums["ChecksumMD5"]
+	partDigest := md5.Sum(body)
+	compositeDigest := md5.Sum(partDigest[:])
+	composite := base64.StdEncoding.EncodeToString(compositeDigest[:]) + "-1"
+	complete["ChecksumMD5"] = composite
 	done := mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
-	if done.Output["ChecksumMD5"] != checksums["ChecksumMD5"] || done.Output["ChecksumType"] != "FULL_OBJECT" {
+	if done.Output["ChecksumMD5"] != composite || done.Output["ChecksumType"] != "COMPOSITE" {
 		t.Fatalf("complete checksum output = %#v", done.Output)
 	}
+	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "multipart", "ChecksumMode": "ENABLED"}, nil)
+	if head.Headers.Get("x-amz-checksum-md5") != composite || head.Headers.Get("x-amz-checksum-type") != "COMPOSITE" {
+		t.Fatalf("multipart checksum metadata = %v", head.Headers)
+	}
+}
+
+func TestMultipartChecksumContract(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	_, err := invoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "missing", "Key": "k"}, nil)
+	if fault := asFault(t, err); fault.Code != "NoSuchBucket" || fault.HTTPStatus != http.StatusNotFound {
+		t.Fatalf("create missing bucket fault = %#v", fault)
+	}
+	wantCreateFault := func(input map[string]any, code string) {
+		t.Helper()
+		input["Bucket"], input["Key"] = "b", code
+		_, err := invoke(t, p, "CreateMultipartUpload", input, nil)
+		if fault := asFault(t, err); fault.Code != code || fault.HTTPStatus < http.StatusBadRequest {
+			t.Fatalf("create checksum fault = %#v want %s", fault, code)
+		}
+	}
+	wantCreateFault(map[string]any{"ChecksumAlgorithm": "SHA256", "ChecksumType": "FULL_OBJECT"}, "InvalidRequest")
+	wantCreateFault(map[string]any{"ChecksumAlgorithm": "CRC64NVME", "ChecksumType": "COMPOSITE"}, "InvalidRequest")
+	wantCreateFault(map[string]any{"ChecksumAlgorithm": "CRC32", "ChecksumType": "invalid"}, "InvalidArgument")
+	wantCreateFault(map[string]any{"ChecksumAlgorithm": "XXHASH64"}, "MirrorNotImplemented")
+
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "full", "ChecksumAlgorithm": "CRC32", "ChecksumType": "FULL_OBJECT"}, nil)
+	if created.Headers.Get("x-amz-checksum-algorithm") != "CRC32" || created.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+		t.Fatalf("create checksum headers = %v", created.Headers)
+	}
+	id := created.Output["UploadId"].(string)
+	body := []byte("full object")
+	_, err = invoke(t, p, "UploadPart", map[string]any{"Bucket": "b", "Key": "full", "UploadId": id, "PartNumber": 1, "ChecksumAlgorithm": "SHA1"}, body)
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" {
+		t.Fatalf("requested part algorithm fault = %#v", fault)
+	}
+	_, err = invoke(t, p, "UploadPart", map[string]any{"Bucket": "b", "Key": "full", "UploadId": id, "PartNumber": 1, "ChecksumSHA1": "AA=="}, body)
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" {
+		t.Fatalf("part algorithm fault = %#v", fault)
+	}
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "b", "Key": "full", "UploadId": id, "PartNumber": 1}, body)
+	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "b", "Key": "full", "UploadId": id}, nil)
+	if listed.Output["ChecksumAlgorithm"] != "CRC32" || listed.Output["ChecksumType"] != "FULL_OBJECT" || listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumCRC32"] == "" {
+		t.Fatalf("listed checksum contract = %#v", listed.Output)
+	}
+	complete := completeInput(id, completedPart(1, part))
+	complete["MultipartUpload"].(map[string]any)["Parts"].([]any)[0].(map[string]any)["ChecksumCRC32"] = "AA=="
+	_, err = invoke(t, p, "CompleteMultipartUpload", complete, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidPart" {
+		t.Fatalf("manifest checksum fault = %#v", fault)
+	}
+	delete(complete["MultipartUpload"].(map[string]any)["Parts"].([]any)[0].(map[string]any), "ChecksumCRC32")
+	complete["ChecksumType"] = "COMPOSITE"
+	_, err = invoke(t, p, "CompleteMultipartUpload", complete, nil)
+	if fault := asFault(t, err); fault.Code != "BadDigest" {
+		t.Fatalf("complete checksum type fault = %#v", fault)
+	}
+	complete["ChecksumType"] = "FULL_OBJECT"
+	complete["ChecksumCRC32"] = "AA=="
+	_, err = invoke(t, p, "CompleteMultipartUpload", complete, nil)
+	if fault := asFault(t, err); fault.Code != "BadDigest" {
+		t.Fatalf("complete checksum fault = %#v", fault)
+	}
+	sum := make([]byte, 4)
+	binary.BigEndian.PutUint32(sum, crc32.ChecksumIEEE(body))
+	want := base64.StdEncoding.EncodeToString(sum)
+	complete["ChecksumCRC32"] = want
+	done := mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
+	if done.Output["ChecksumCRC32"] != want || done.Output["ChecksumType"] != "FULL_OBJECT" {
+		t.Fatalf("complete checksum = %#v", done.Output)
+	}
+	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "full", "ChecksumMode": "ENABLED"}, nil)
+	if head.Headers.Get("x-amz-checksum-crc32") != want || head.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+		t.Fatalf("stored checksum = %v", head.Headers)
+	}
+
+	composite := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "gap", "ChecksumAlgorithm": "SHA256"}, nil)
+	compositeID := composite.Output["UploadId"].(string)
+	second := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "b", "Key": "gap", "UploadId": compositeID, "PartNumber": 2}, []byte("second"))
+	_, err = invoke(t, p, "CompleteMultipartUpload", completeInput(compositeID, completedPart(2, second)), nil)
+	if fault := asFault(t, err); fault.Code != "InternalError" || fault.HTTPStatus != http.StatusInternalServerError {
+		t.Fatalf("nonconsecutive composite fault = %#v", fault)
+	}
+}
+
+func TestMultipartChecksumCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "snapshot", "ChecksumAlgorithm": "SHA256"}, nil)
+	id := created.Output["UploadId"].(string)
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "b", "Key": "snapshot", "UploadId": id, "PartNumber": 1}, []byte("snapshot"))
+	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "b", "Key": "snapshot", "UploadId": id}, nil)
+	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, part)), nil)
+	golden.AssertJSON(t, map[string]any{
+		"create":   map[string]any{"algorithm": created.Output["ChecksumAlgorithm"], "type": created.Output["ChecksumType"]},
+		"part":     map[string]any{"checksum": part.Headers.Get("x-amz-checksum-sha256")},
+		"list":     map[string]any{"algorithm": listed.Output["ChecksumAlgorithm"], "type": listed.Output["ChecksumType"], "part": listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumSHA256"]},
+		"complete": map[string]any{"checksum": done.Output["ChecksumSHA256"], "type": done.Output["ChecksumType"]},
+	})
 }
 
 func TestCompleteMultipartUploadManifest(t *testing.T) {
@@ -532,10 +635,10 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "b", "Key": "k", "UploadId": id, "PartNumber": 1}, []byte("AAA"))
 	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "b", "Key": "k", "UploadId": id}, nil)
 	parts, _ := listed.Output["Parts"].([]any)
-	if len(parts) != 1 {
+	if len(parts) != 1 || listed.Output["ChecksumAlgorithm"] != "CRC64NVME" || listed.Output["ChecksumType"] != "FULL_OBJECT" {
 		t.Fatalf("ListParts %v", listed.Output)
 	}
-	paged := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "paged", "StorageClass": "STANDARD_IA"}, nil)
+	paged := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "paged", "StorageClass": "STANDARD_IA", "ChecksumAlgorithm": "CRC32"}, nil)
 	pagedID := paged.Output["UploadId"].(string)
 	for _, number := range []int{3, 1, 2} {
 		input := map[string]any{"Bucket": "b", "Key": "paged", "UploadId": pagedID, "PartNumber": number}
@@ -548,7 +651,7 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	}
 	firstPage := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "b", "Key": "paged", "UploadId": pagedID, "MaxParts": 2}, nil)
 	firstParts := firstPage.Output["Parts"].([]any)
-	if len(firstParts) != 2 || firstParts[0].(map[string]any)["PartNumber"] != 1 || firstParts[1].(map[string]any)["PartNumber"] != 2 || firstPage.Output["IsTruncated"] != true || firstPage.Output["NextPartNumberMarker"] != 2 || firstPage.Output["StorageClass"] != "STANDARD_IA" {
+	if len(firstParts) != 2 || firstParts[0].(map[string]any)["PartNumber"] != 1 || firstParts[1].(map[string]any)["PartNumber"] != 2 || firstPage.Output["IsTruncated"] != true || firstPage.Output["NextPartNumberMarker"] != 2 || firstPage.Output["StorageClass"] != "STANDARD_IA" || firstPage.Output["ChecksumAlgorithm"] != "CRC32" || firstPage.Output["ChecksumType"] != "COMPOSITE" {
 		t.Fatalf("ListParts first page %v", firstPage.Output)
 	}
 	secondPage := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "b", "Key": "paged", "UploadId": pagedID, "PartNumberMarker": 2, "MaxParts": 2}, nil)

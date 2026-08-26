@@ -43,9 +43,10 @@ type Pack struct {
 }
 
 type mpu struct {
-	bucket, key, uploadID   string
-	storageClass, initiated string
-	parts                   map[int]multipartPart
+	bucket, key, uploadID           string
+	storageClass, initiated         string
+	checksumAlgorithm, checksumType string
+	parts                           map[int]multipartPart
 }
 
 type multipartPart struct {
@@ -127,7 +128,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "GetBucketLocation":
 		return p.getBucketLocation(ctx, req)
 	case "PutObject":
-		return p.putObject(ctx, req, "")
+		return p.putObject(ctx, req, "", "")
 	case "GetObject":
 		return p.getObject(ctx, req)
 	case "HeadObject":
@@ -484,7 +485,7 @@ func (p *Pack) getBucketLocation(ctx context.Context, req *spi.Request) (*spi.Re
 	return &spi.Response{Output: map[string]any{"LocationConstraint": req.Identity.Region}}, nil
 }
 
-func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag string) (*spi.Response, error) {
+func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumType string) (*spi.Response, error) {
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
@@ -496,8 +497,13 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag string) (*s
 	if req.Body != nil {
 		body, _ = io.ReadAll(req.Body)
 	}
-	if err := validateChecksum(req, body); err != nil {
-		return nil, err
+	if checksumType == "" {
+		checksumType = "FULL_OBJECT"
+	}
+	if checksumType == "FULL_OBJECT" {
+		if err := validateChecksum(req, body); err != nil {
+			return nil, err
+		}
 	}
 	provided := providedChecksums(req)
 	info, err := p.deps.Blobs.Put(ctx, blobKey(req, b, key), bytes.NewReader(body))
@@ -519,6 +525,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag string) (*s
 		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "mtime": mtime, "key": key, "storageClass": storageClass}
 		if len(provided) > 0 {
 			versionMeta["checksums"] = provided
+			versionMeta["checksumType"] = checksumType
 		}
 		vm, _ := json.Marshal(versionMeta)
 		_ = p.col(req, "versions").Put(ctx, b+"/"+key+"/"+vid, vm)
@@ -526,6 +533,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag string) (*s
 	metaDoc := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "versionId": vid, "deleteMarker": false, "storageClass": storageClass}
 	if len(provided) > 0 {
 		metaDoc["checksums"] = provided
+		metaDoc["checksumType"] = checksumType
 	}
 	meta, _ := json.Marshal(metaDoc)
 	_ = p.col(req, "objects").Put(ctx, b+"/"+key, meta)
@@ -542,7 +550,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag string) (*s
 		h.Set(header, value)
 	}
 	if len(provided) > 0 {
-		h.Set("x-amz-checksum-type", "FULL_OBJECT")
+		h.Set("x-amz-checksum-type", checksumType)
 	}
 	if status := p.replicateObject(ctx, req, b, key, body, metaDoc); status != "" {
 		metaDoc["replicationStatus"] = status
@@ -815,7 +823,7 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		req.Input["Tagging"] = values.Encode()
 	}
 	req.Body = source.body
-	response, err := p.putObject(ctx, req, "")
+	response, err := p.putObject(ctx, req, "", "")
 	if err == nil && source.version != "" {
 		response.Headers.Set("x-amz-copy-source-version-id", source.version)
 	}
@@ -823,16 +831,32 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 }
 
 func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	id := p.deps.Rand.Hex(16)
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
+	algorithm := strings.ToUpper(requestCondition(req, "ChecksumAlgorithm", "x-amz-checksum-algorithm"))
+	checksumType := strings.ToUpper(requestCondition(req, "ChecksumType", "x-amz-checksum-type"))
+	if algorithm == "" {
+		algorithm, checksumType = "CRC64NVME", "FULL_OBJECT"
+	} else if checksumType == "" {
+		checksumType = "COMPOSITE"
+	}
+	if err := validateMultipartChecksumContract(req, algorithm, checksumType); err != nil {
+		return nil, err
+	}
 	storageClass := str(req.Input["StorageClass"])
 	if storageClass == "" {
 		storageClass = "STANDARD"
 	}
+	id := p.deps.Rand.Hex(16)
 	p.mu.Lock()
-	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), parts: map[int]multipartPart{}}
+	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), checksumAlgorithm: algorithm, checksumType: checksumType, parts: map[int]multipartPart{}}
 	p.mu.Unlock()
-	return &spi.Response{Output: map[string]any{"Bucket": b, "Key": key, "UploadId": id}}, nil
+	h := http.Header{}
+	h.Set("x-amz-checksum-algorithm", algorithm)
+	h.Set("x-amz-checksum-type", checksumType)
+	return &spi.Response{Headers: h, Output: map[string]any{"Bucket": b, "Key": key, "UploadId": id, "ChecksumAlgorithm": algorithm, "ChecksumType": checksumType}}, nil
 }
 
 func (p *Pack) uploadPartCopy(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -870,22 +894,36 @@ func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response,
 	if req.Body != nil {
 		body, _ = io.ReadAll(req.Body)
 	}
-	if err := validateChecksum(req, body); err != nil {
-		return nil, err
-	}
 	p.mu.Lock()
 	u := p.mpu[id]
 	if !matchesMultipartUpload(u, req) {
 		p.mu.Unlock()
 		return nil, &spi.Fault{Code: "NoSuchUpload", HTTPStatus: http.StatusNotFound, Fault: "client"}
 	}
-	u.parts[pn] = multipartPart{body: body, modified: p.deps.Clock.Now().UTC().Format(time.RFC3339), checksums: providedChecksums(req)}
+	algorithm := u.checksumAlgorithm
+	p.mu.Unlock()
+	if requested := strings.ToUpper(requestCondition(req, "ChecksumAlgorithm", "x-amz-sdk-checksum-algorithm")); requested != "" && requested != algorithm {
+		return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	checksum, _ := checksumByAlgorithm(algorithm)
+	if err := validateMultipartPartChecksum(req, checksum, body); err != nil {
+		return nil, err
+	}
+	value := checksumValue(checksum.input, body)
+	provided := map[string]string{checksum.header: value}
+	p.mu.Lock()
+	u = p.mpu[id]
+	if !matchesMultipartUpload(u, req) {
+		p.mu.Unlock()
+		return nil, &spi.Fault{Code: "NoSuchUpload", HTTPStatus: http.StatusNotFound, Fault: "client"}
+	}
+	u.parts[pn] = multipartPart{body: body, modified: p.deps.Clock.Now().UTC().Format(time.RFC3339), checksums: provided}
 	p.mu.Unlock()
 	sum := md5.Sum(body)
 	etag := `"` + hex.EncodeToString(sum[:]) + `"`
 	h := http.Header{}
 	h.Set("ETag", etag)
-	for header, value := range providedChecksums(req) {
+	for header, value := range provided {
 		h.Set(header, value)
 	}
 	return &spi.Response{Headers: h, Output: map[string]any{"ETag": etag}}, nil
@@ -896,11 +934,11 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	p.mu.Lock()
 	u := p.mpu[id]
 	var bucket, key string
-	stored := map[int][]byte{}
+	stored := map[int]multipartPart{}
 	if u != nil {
 		bucket, key = u.bucket, u.key
 		for number, part := range u.parts {
-			stored[number] = part.body
+			stored[number] = part
 		}
 	}
 	p.mu.Unlock()
@@ -913,7 +951,12 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	}
 	var buf bytes.Buffer
 	var md5s []byte
+	var partChecksums []byte
 	previous := 0
+	checksum, _ := checksumByAlgorithm(u.checksumAlgorithm)
+	if requestedType := strings.ToUpper(requestCondition(req, "ChecksumType", "x-amz-checksum-type")); requestedType != "" && requestedType != u.checksumType {
+		return nil, &spi.Fault{Code: "BadDigest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
 	for index, completed := range parts {
 		item := asMap(completed)
 		number := asInt(item["PartNumber"])
@@ -924,14 +967,23 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 			return nil, &spi.Fault{Code: "InvalidPartOrder", HTTPStatus: 400, Fault: "client"}
 		}
 		part, exists := stored[number]
-		s := md5.Sum(part)
+		s := md5.Sum(part.body)
 		if !exists || strings.Trim(strings.TrimSpace(str(item["ETag"])), `"`) != hex.EncodeToString(s[:]) {
 			return nil, &spi.Fault{Code: "InvalidPart", HTTPStatus: 400, Fault: "client"}
 		}
-		if index < len(parts)-1 && len(part) < 5<<20 {
+		if index < len(parts)-1 && len(part.body) < 5<<20 {
 			return nil, &spi.Fault{Code: "EntityTooSmall", HTTPStatus: 400, Fault: "client"}
 		}
-		buf.Write(part)
+		if u.checksumType == "COMPOSITE" && number != index+1 {
+			return nil, &spi.Fault{Code: "InternalError", HTTPStatus: http.StatusInternalServerError, Fault: "server"}
+		}
+		partChecksum := part.checksums[checksum.header]
+		if supplied := str(item[checksum.input]); supplied != "" && supplied != partChecksum {
+			return nil, &spi.Fault{Code: "InvalidPart", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		decoded, _ := base64.StdEncoding.DecodeString(partChecksum)
+		partChecksums = append(partChecksums, decoded...)
+		buf.Write(part.body)
 		md5s = append(md5s, s[:]...)
 		previous = number
 	}
@@ -943,9 +995,22 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	}
 	sum := md5.Sum(md5s)
 	etag := fmt.Sprintf(`"%s-%d"`, hex.EncodeToString(sum[:]), len(parts))
+	objectChecksum := checksumValue(checksum.input, buf.Bytes())
+	if u.checksumType == "COMPOSITE" {
+		objectChecksum = checksumValue(checksum.input, partChecksums) + fmt.Sprintf("-%d", len(parts))
+	}
+	if supplied := requestCondition(req, checksum.input, checksum.header); supplied != "" && supplied != objectChecksum {
+		return nil, &spi.Fault{Code: "BadDigest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	for _, other := range checksums {
+		if other.algorithm != checksum.algorithm && requestCondition(req, other.input, other.header) != "" {
+			return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+	}
+	req.Input[checksum.input], req.Input["ChecksumType"] = objectChecksum, u.checksumType
 	req.Input["Bucket"], req.Input["Key"] = bucket, key
 	req.Body = io.NopCloser(&buf)
-	resp, err := p.putObject(ctx, req, etag)
+	resp, err := p.putObject(ctx, req, etag, u.checksumType)
 	if err != nil {
 		return nil, err
 	}
@@ -954,12 +1019,8 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	}
 	resp.Headers.Set("ETag", etag)
 	resp.Output = map[string]any{"Bucket": bucket, "Key": key, "ETag": etag}
-	for _, checksum := range checksums {
-		if value := requestCondition(req, checksum.input, checksum.header); value != "" {
-			resp.Output[checksum.input] = value
-			resp.Output["ChecksumType"] = "FULL_OBJECT"
-		}
-	}
+	resp.Output[checksum.input] = objectChecksum
+	resp.Output["ChecksumType"] = u.checksumType
 	p.mu.Lock()
 	delete(p.mpu, id)
 	p.mu.Unlock()
@@ -1025,6 +1086,7 @@ func (p *Pack) listParts(req *spi.Request) (*spi.Response, error) {
 	out := map[string]any{
 		"Bucket": b, "Key": key, "UploadId": id, "PartNumberMarker": marker,
 		"MaxParts": maxParts, "IsTruncated": truncated, "Parts": parts, "StorageClass": u.storageClass,
+		"ChecksumAlgorithm": u.checksumAlgorithm, "ChecksumType": u.checksumType,
 	}
 	if truncated {
 		out["NextPartNumberMarker"] = marker
@@ -1680,16 +1742,92 @@ func objectETag(meta map[string]any, md5sum string) string {
 var (
 	crc32C    = crc32.MakeTable(crc32.Castagnoli)
 	crc64NVME = crc64.MakeTable(0x9a6c9329ac4bc9b5)
-	checksums = []struct{ input, header string }{
-		{"ChecksumMD5", "x-amz-checksum-md5"},
-		{"ChecksumCRC32", "x-amz-checksum-crc32"},
-		{"ChecksumCRC32C", "x-amz-checksum-crc32c"},
-		{"ChecksumCRC64NVME", "x-amz-checksum-crc64nvme"},
-		{"ChecksumSHA1", "x-amz-checksum-sha1"},
-		{"ChecksumSHA256", "x-amz-checksum-sha256"},
-		{"ChecksumSHA512", "x-amz-checksum-sha512"},
+	checksums = []struct{ algorithm, input, header string }{
+		{"MD5", "ChecksumMD5", "x-amz-checksum-md5"},
+		{"CRC32", "ChecksumCRC32", "x-amz-checksum-crc32"},
+		{"CRC32C", "ChecksumCRC32C", "x-amz-checksum-crc32c"},
+		{"CRC64NVME", "ChecksumCRC64NVME", "x-amz-checksum-crc64nvme"},
+		{"SHA1", "ChecksumSHA1", "x-amz-checksum-sha1"},
+		{"SHA256", "ChecksumSHA256", "x-amz-checksum-sha256"},
+		{"SHA512", "ChecksumSHA512", "x-amz-checksum-sha512"},
 	}
 )
+
+func checksumByAlgorithm(algorithm string) (struct{ algorithm, input, header string }, bool) {
+	for _, checksum := range checksums {
+		if checksum.algorithm == algorithm {
+			return checksum, true
+		}
+	}
+	return struct{ algorithm, input, header string }{}, false
+}
+
+func validateMultipartChecksumContract(req *spi.Request, algorithm, checksumType string) error {
+	if strings.HasPrefix(algorithm, "XXHASH") {
+		return spi.NotImplemented("aws.s3", req.Operation+".ChecksumAlgorithm."+algorithm, "emulate")
+	}
+	if _, ok := checksumByAlgorithm(algorithm); !ok || (checksumType != "COMPOSITE" && checksumType != "FULL_OBJECT") {
+		return &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if checksumType == "FULL_OBJECT" && algorithm != "CRC64NVME" && algorithm != "CRC32" && algorithm != "CRC32C" {
+		return &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if checksumType == "COMPOSITE" && algorithm == "CRC64NVME" {
+		return &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	return nil
+}
+
+func validateMultipartPartChecksum(req *spi.Request, selected struct{ algorithm, input, header string }, body []byte) error {
+	for _, unsupported := range []struct{ input, header string }{
+		{"ChecksumXXHASH64", "x-amz-checksum-xxhash64"},
+		{"ChecksumXXHASH3", "x-amz-checksum-xxhash3"},
+		{"ChecksumXXHASH128", "x-amz-checksum-xxhash128"},
+	} {
+		if requestCondition(req, unsupported.input, unsupported.header) != "" {
+			return &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+	}
+	for _, checksum := range checksums {
+		if value := requestCondition(req, checksum.input, checksum.header); value != "" {
+			if checksum.algorithm != selected.algorithm {
+				return &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			if value != checksumValue(checksum.input, body) {
+				return &spi.Fault{Code: "BadDigest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+		}
+	}
+	return nil
+}
+
+func checksumValue(input string, body []byte) string {
+	var sum []byte
+	switch input {
+	case "ChecksumMD5":
+		value := md5.Sum(body)
+		sum = value[:]
+	case "ChecksumCRC32":
+		sum = make([]byte, 4)
+		binary.BigEndian.PutUint32(sum, crc32.ChecksumIEEE(body))
+	case "ChecksumCRC32C":
+		sum = make([]byte, 4)
+		binary.BigEndian.PutUint32(sum, crc32.Checksum(body, crc32C))
+	case "ChecksumCRC64NVME":
+		sum = make([]byte, 8)
+		binary.BigEndian.PutUint64(sum, crc64.Checksum(body, crc64NVME))
+	case "ChecksumSHA1":
+		value := sha1.Sum(body)
+		sum = value[:]
+	case "ChecksumSHA256":
+		value := sha256.Sum256(body)
+		sum = value[:]
+	case "ChecksumSHA512":
+		value := sha512.Sum512(body)
+		sum = value[:]
+	}
+	return base64.StdEncoding.EncodeToString(sum)
+}
 
 func validateChecksum(req *spi.Request, body []byte) error {
 	for _, checksum := range []struct{ input, header string }{
@@ -1701,24 +1839,13 @@ func validateChecksum(req *spi.Request, body []byte) error {
 			return spi.NotImplemented("aws.s3", req.Operation+"."+checksum.input, "emulate")
 		}
 	}
-	md5sum := md5.Sum(body)
-	sha1sum := sha1.Sum(body)
-	sha256sum := sha256.Sum256(body)
-	sha512sum := sha512.Sum512(body)
-	crc32sum, crc32csum := make([]byte, 4), make([]byte, 4)
-	crc64sum := make([]byte, 8)
-	binary.BigEndian.PutUint32(crc32sum, crc32.ChecksumIEEE(body))
-	binary.BigEndian.PutUint32(crc32csum, crc32.Checksum(body, crc32C))
-	binary.BigEndian.PutUint64(crc64sum, crc64.Checksum(body, crc64NVME))
-	sums := map[string][]byte{
-		"ContentMD5": md5sum[:], "ChecksumMD5": md5sum[:],
-		"ChecksumCRC32": crc32sum, "ChecksumCRC32C": crc32csum, "ChecksumCRC64NVME": crc64sum,
-		"ChecksumSHA1": sha1sum[:], "ChecksumSHA256": sha256sum[:], "ChecksumSHA512": sha512sum[:],
-	}
-	for _, checksum := range append([]struct{ input, header string }{{"ContentMD5", "Content-MD5"}}, checksums...) {
+	for _, checksum := range append([]struct{ algorithm, input, header string }{{"MD5", "ContentMD5", "Content-MD5"}}, checksums...) {
 		if value := requestCondition(req, checksum.input, checksum.header); value != "" {
-			decoded, err := base64.StdEncoding.DecodeString(value)
-			if err != nil || !bytes.Equal(decoded, sums[checksum.input]) {
+			input := checksum.input
+			if input == "ContentMD5" {
+				input = "ChecksumMD5"
+			}
+			if value != checksumValue(input, body) {
 				return &spi.Fault{Code: "BadDigest", HTTPStatus: 400, Fault: "client"}
 			}
 		}
@@ -1742,7 +1869,11 @@ func setChecksumHeaders(headers http.Header, meta map[string]any) {
 		headers.Set(header, str(value))
 	}
 	if len(stored) > 0 {
-		headers.Set("x-amz-checksum-type", "FULL_OBJECT")
+		checksumType := str(meta["checksumType"])
+		if checksumType == "" {
+			checksumType = "FULL_OBJECT"
+		}
+		headers.Set("x-amz-checksum-type", checksumType)
 	}
 }
 

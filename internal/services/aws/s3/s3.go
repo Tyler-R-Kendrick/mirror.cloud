@@ -5,9 +5,16 @@ import (
 	"bytes"
 	"context"
 	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash/crc32"
+	"hash/crc64"
 	"io"
 	"net/http"
 	"net/url"
@@ -482,6 +489,9 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag string) (*s
 	if req.Body != nil {
 		body, _ = io.ReadAll(req.Body)
 	}
+	if err := validateChecksum(req, body); err != nil {
+		return nil, err
+	}
 	info, err := p.deps.Blobs.Put(ctx, blobKey(req, b, key), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -824,6 +834,9 @@ func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response,
 	var body []byte
 	if req.Body != nil {
 		body, _ = io.ReadAll(req.Body)
+	}
+	if err := validateChecksum(req, body); err != nil {
+		return nil, err
 	}
 	p.mu.Lock()
 	u := p.mpu[id]
@@ -1408,6 +1421,44 @@ func objectETag(meta map[string]any, md5sum string) string {
 		return etag
 	}
 	return `"` + md5sum + `"`
+}
+
+var (
+	crc32C    = crc32.MakeTable(crc32.Castagnoli)
+	crc64NVME = crc64.MakeTable(0x9a6c9329ac4bc9b5)
+)
+
+func validateChecksum(req *spi.Request, body []byte) error {
+	md5sum := md5.Sum(body)
+	sha1sum := sha1.Sum(body)
+	sha256sum := sha256.Sum256(body)
+	sha512sum := sha512.Sum512(body)
+	crc32sum, crc32csum := make([]byte, 4), make([]byte, 4)
+	crc64sum := make([]byte, 8)
+	binary.BigEndian.PutUint32(crc32sum, crc32.ChecksumIEEE(body))
+	binary.BigEndian.PutUint32(crc32csum, crc32.Checksum(body, crc32C))
+	binary.BigEndian.PutUint64(crc64sum, crc64.Checksum(body, crc64NVME))
+	for _, checksum := range []struct {
+		input, header string
+		sum           []byte
+	}{
+		{"ContentMD5", "Content-MD5", md5sum[:]},
+		{"ChecksumMD5", "x-amz-checksum-md5", md5sum[:]},
+		{"ChecksumCRC32", "x-amz-checksum-crc32", crc32sum},
+		{"ChecksumCRC32C", "x-amz-checksum-crc32c", crc32csum},
+		{"ChecksumCRC64NVME", "x-amz-checksum-crc64nvme", crc64sum},
+		{"ChecksumSHA1", "x-amz-checksum-sha1", sha1sum[:]},
+		{"ChecksumSHA256", "x-amz-checksum-sha256", sha256sum[:]},
+		{"ChecksumSHA512", "x-amz-checksum-sha512", sha512sum[:]},
+	} {
+		if value := requestCondition(req, checksum.input, checksum.header); value != "" {
+			decoded, err := base64.StdEncoding.DecodeString(value)
+			if err != nil || !bytes.Equal(decoded, checksum.sum) {
+				return &spi.Fault{Code: "BadDigest", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+	}
+	return nil
 }
 
 func etagMatches(condition, etag string) bool {

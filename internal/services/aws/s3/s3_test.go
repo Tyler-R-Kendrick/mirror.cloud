@@ -3,6 +3,13 @@ package s3_test
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/base64"
+	"encoding/binary"
+	"hash/crc32"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -350,6 +357,54 @@ func TestMultipartETagForm(t *testing.T) {
 	if len(got) != len(firstBody)+3 || !bytes.Equal(got[:len(firstBody)], firstBody) || string(got[len(firstBody):]) != "BBB" {
 		t.Fatalf("assembled %d bytes", len(got))
 	}
+}
+
+func TestWriteChecksumValidation(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	body := []byte("123456789")
+	md5sum, sha1sum, sha256sum, sha512sum := md5.Sum(body), sha1.Sum(body), sha256.Sum256(body), sha512.Sum512(body)
+	crc32sum, crc32csum := make([]byte, 4), make([]byte, 4)
+	binary.BigEndian.PutUint32(crc32sum, crc32.ChecksumIEEE(body))
+	binary.BigEndian.PutUint32(crc32csum, crc32.Checksum(body, crc32.MakeTable(crc32.Castagnoli)))
+	b64 := func(sum []byte) string { return base64.StdEncoding.EncodeToString(sum) }
+	checksums := map[string]string{
+		"ContentMD5":        b64(md5sum[:]),
+		"ChecksumMD5":       b64(md5sum[:]),
+		"ChecksumCRC32":     b64(crc32sum),
+		"ChecksumCRC32C":    b64(crc32csum),
+		"ChecksumCRC64NVME": "rosUhgp5mIg=",
+		"ChecksumSHA1":      b64(sha1sum[:]),
+		"ChecksumSHA256":    b64(sha256sum[:]),
+		"ChecksumSHA512":    b64(sha512sum[:]),
+	}
+	for name, value := range checksums {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": name, name: value}, body)
+		_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": name + "-bad", name: "AA=="}, body)
+		if fault := asFault(t, err); fault.Code != "BadDigest" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("%s fault = %#v", name, fault)
+		}
+	}
+	_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "malformed", "ChecksumMD5": "!"}, body)
+	if fault := asFault(t, err); fault.Code != "BadDigest" {
+		t.Fatalf("malformed checksum fault = %#v", fault)
+	}
+
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "multipart"}, nil)
+	uploadID := created.Output["UploadId"].(string)
+	_, err = invoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 1, "ChecksumMD5": "AA=="}, body)
+	if fault := asFault(t, err); fault.Code != "BadDigest" {
+		t.Fatalf("upload checksum fault = %#v", fault)
+	}
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 1, "ChecksumMD5": checksums["ChecksumMD5"]}, body)
+	complete := completeInput(uploadID, completedPart(1, part))
+	complete["ChecksumMD5"] = "AA=="
+	_, err = invoke(t, p, "CompleteMultipartUpload", complete, nil)
+	if fault := asFault(t, err); fault.Code != "BadDigest" {
+		t.Fatalf("complete checksum fault = %#v", fault)
+	}
+	complete["ChecksumMD5"] = checksums["ChecksumMD5"]
+	mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
 }
 
 func TestCompleteMultipartUploadManifest(t *testing.T) {

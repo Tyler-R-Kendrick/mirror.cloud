@@ -159,7 +159,7 @@ func TestCreateBucketGlobalCollisions(t *testing.T) {
 	} else {
 		collisions["owner-non-us-east-recreate"] = fault.Code
 	}
-	_, err = invokeAs(t, p, owner, "CreateBucket", western, nil)
+	_, err = invokeAs(t, p, owner, "CreateBucket", map[string]any{"Bucket": "western-bucket"}, nil)
 	if fault := asFault(t, err); fault.Code != "BucketAlreadyOwnedByYou" || fault.HTTPStatus != http.StatusConflict {
 		t.Fatalf("stored region collision = %#v", fault)
 	} else {

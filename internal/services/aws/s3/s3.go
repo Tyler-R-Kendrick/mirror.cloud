@@ -490,6 +490,23 @@ func (p *Pack) deleteBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
+	objects, _, err := p.col(req, "objects").List(ctx, b+"/", "", 1)
+	if err != nil {
+		return nil, err
+	}
+	versions, _, err := p.col(req, "versions").List(ctx, b+"/", "", 1)
+	if err != nil {
+		return nil, err
+	}
+	if len(objects) != 0 || len(versions) != 0 {
+		message := "The bucket you tried to delete is not empty"
+		if _, ok, err := p.col(req, "versioning").Get(ctx, b); err != nil {
+			return nil, err
+		} else if ok {
+			message += ". You must delete all versions in the bucket."
+		}
+		return nil, &spi.Fault{Code: "BucketNotEmpty", Message: message, HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"BucketName": b}}
+	}
 	_ = p.col(req, "buckets").Delete(ctx, b)
 	_ = p.deps.Store.Scope("_mirror", "global").Collection("s3buckets").Delete(ctx, b)
 	return &spi.Response{Status: 204}, nil

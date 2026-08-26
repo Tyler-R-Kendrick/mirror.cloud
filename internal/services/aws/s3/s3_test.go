@@ -169,6 +169,29 @@ func TestCreateBucketGlobalCollisions(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"collisions": collisions, "recreate": map[string]any{"status": http.StatusOK, "object": preserved}, "reuse_after_delete": "created"})
 }
 
+func TestDeleteBucketRequiresEmptyBucket(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	input := map[string]any{"Bucket": "non-empty-bucket"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "non-empty-bucket", "Key": "object"}, []byte("body"))
+
+	_, err := invoke(t, p, "DeleteBucket", input, nil)
+	fault := asFault(t, err)
+	if fault.Code != "BucketNotEmpty" || fault.HTTPStatus != http.StatusConflict || fault.Message != "The bucket you tried to delete is not empty" || fault.Fields["BucketName"] != "non-empty-bucket" {
+		t.Fatalf("unversioned delete = %#v", fault)
+	}
+	if got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "non-empty-bucket", "Key": "object"}, nil); string(readStream(t, got)) != "body" {
+		t.Fatal("failed bucket deletion changed object")
+	}
+
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "non-empty-bucket", "Status": "Enabled"}, nil)
+	_, err = invoke(t, p, "DeleteBucket", input, nil)
+	fault = asFault(t, err)
+	if fault.Message != "The bucket you tried to delete is not empty. You must delete all versions in the bucket." {
+		t.Fatalf("versioned delete = %#v", fault)
+	}
+}
+
 func TestObjectMetadata(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)

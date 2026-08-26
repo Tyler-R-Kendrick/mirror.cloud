@@ -143,3 +143,35 @@ func FuzzDeleteBucketEmptiness(f *testing.F) {
 		}
 	})
 }
+
+func FuzzCreateBucketLocations(f *testing.F) {
+	for endpoint := uint8(0); endpoint < 4; endpoint++ {
+		for constraint := uint8(0); constraint < 6; constraint++ {
+			f.Add(endpoint, constraint)
+		}
+	}
+	endpoints := []string{"us-east-1", "us-west-2", "eu-west-1", "ap-east-1"}
+	constraints := []string{"", "us-west-2", "eu-west-1", "EU", "ap-east-1", "moon-west-1"}
+	f.Fuzz(func(t *testing.T, endpointSeed, constraintSeed uint8) {
+		endpoint := endpoints[int(endpointSeed)%len(endpoints)]
+		constraint := constraints[int(constraintSeed)%len(constraints)]
+		p := s3.New(spitest.Deps(t))
+		identity := spi.Identity{Account: "123456789012", Region: endpoint}
+		response, err := invokeAs(t, p, identity, "CreateBucket", map[string]any{"Bucket": "location-fuzz", "LocationConstraint": constraint}, nil)
+
+		valid := endpoint == "us-east-1" && constraint != "moon-west-1" || endpoint == "eu-west-1" && (constraint == "EU" || constraint == endpoint) || endpoint != "us-east-1" && endpoint != "eu-west-1" && constraint == endpoint
+		if valid {
+			if err != nil || response.Status != http.StatusOK {
+				t.Fatalf("valid endpoint=%q constraint=%q: %#v %v", endpoint, constraint, response, err)
+			}
+			return
+		}
+		want := "IllegalLocationConstraintException"
+		if endpoint == "us-east-1" {
+			want = "InvalidLocationConstraint"
+		}
+		if fault := asFault(t, err); fault.Code != want || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("endpoint=%q constraint=%q want=%s got=%#v", endpoint, constraint, want, fault)
+		}
+	})
+}

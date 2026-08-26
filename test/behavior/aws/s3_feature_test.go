@@ -93,7 +93,11 @@ func TestS3ObjectLifecycle(t *testing.T) {
 	t.Run("Given a globally owned bucket When another identity creates it Then ownership errors are returned", func(t *testing.T) {
 		create := func(account, region string) (int, []byte) {
 			t.Helper()
-			req, err := http.NewRequest(http.MethodPut, ts.URL+"/global-name", nil)
+			var requestBody io.Reader
+			if region != "us-east-1" {
+				requestBody = strings.NewReader("<CreateBucketConfiguration><LocationConstraint>" + region + "</LocationConstraint></CreateBucketConfiguration>")
+			}
+			req, err := http.NewRequest(http.MethodPut, ts.URL+"/global-name", requestBody)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -119,6 +123,38 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		if status, body := create("111111111111", "us-west-2"); status != http.StatusConflict || !bytes.Contains(body, []byte("BucketAlreadyOwnedByYou")) {
 			t.Fatalf("cross-region create %d %s", status, body)
+		}
+	})
+
+	t.Run("Given a regional endpoint When creating a bucket Then its location constraint must match", func(t *testing.T) {
+		request := func(method, bucket, region, constraint string) (int, []byte) {
+			t.Helper()
+			var body io.Reader
+			if constraint != "" {
+				body = strings.NewReader("<CreateBucketConfiguration><LocationConstraint>" + constraint + "</LocationConstraint></CreateBucketConfiguration>")
+			}
+			req, err := http.NewRequest(method, ts.URL+"/"+bucket, body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", auth)
+			req.Header.Set("X-Mirror-Region", region)
+			res, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			return res.StatusCode, response
+		}
+		if status, body := request(http.MethodPut, "regional-missing", "us-west-2", ""); status != http.StatusBadRequest || !bytes.Contains(body, []byte("IllegalLocationConstraintException")) {
+			t.Fatalf("missing constraint %d %s", status, body)
+		}
+		if status, body := request(http.MethodPut, "regional-match", "us-west-2", "us-west-2"); status != http.StatusOK {
+			t.Fatalf("matching constraint %d %s", status, body)
+		}
+		if status, body := request(http.MethodGet, "regional-match?location", "us-west-2", ""); status != http.StatusOK || !bytes.Contains(body, []byte(">us-west-2</LocationConstraint>")) {
+			t.Fatalf("reported location %d %s", status, body)
 		}
 	})
 

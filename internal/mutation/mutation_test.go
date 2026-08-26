@@ -30,6 +30,46 @@ func TestMutantsAreKilled(t *testing.T) {
 	}
 	mutants := []mutant{
 		{
+			name: "s3-skip-write-preconditions",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if err := p.checkWritePreconditions(ctx, req, b, key); err != nil {`,
+			new:  `if err := p.checkWritePreconditions(ctx, req, b, key); false && err != nil {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestCopyObjectConditions",
+		},
+		{
+			name: "s3-ignore-copy-source-match",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if !etagMatches(match, etag) {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestCopyObjectConditions",
+		},
+		{
+			name: "s3-ignore-copy-source-none-match",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if etagMatches(noneMatch, etag) {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestCopyObjectConditions",
+		},
+		{
+			name: "s3-ignore-copy-source-unmodified-time",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `err != nil || sourceModifiedAfter(modified, condition)`,
+			new:  `err != nil && sourceModifiedAfter(modified, condition)`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestCopyObjectConditions",
+		},
+		{
+			name: "s3-ignore-copy-source-modified-time",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `err != nil || !sourceModifiedAfter(modified, condition)`,
+			new:  `err != nil && !sourceModifiedAfter(modified, condition)`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestCopyObjectConditions",
+		},
+		{
 			name: "mock-reset-crud-records-on-create",
 			file: filepath.Join("internal", "mock", "mock.go"),
 			old:  `if p.crud["rec"] == nil {`,

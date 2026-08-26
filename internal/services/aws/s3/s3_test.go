@@ -225,7 +225,7 @@ func TestCopyObjectSourceVersions(t *testing.T) {
 		t.Fatalf("version part copy = %q", got)
 	}
 
-	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "b", "Key": key}, nil)
+	deleted := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "b", "Key": key}, nil)
 	if _, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": "deleted", "CopySource": source}, nil); asFault(t, err).Code != "NoSuchKey" {
 		t.Fatal("copied current delete marker")
 	}
@@ -238,11 +238,61 @@ func TestCopyObjectSourceVersions(t *testing.T) {
 		{"b/bad%zz", "InvalidArgument"},
 		{source + "?versionId=missing", "NoSuchKey"},
 		{source + "?versionId=", "InvalidArgument"},
+		{source + "?versionId=" + deleted.Headers.Get("x-amz-version-id"), "InvalidRequest"},
 	} {
 		_, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": "invalid", "CopySource": invalid.source}, nil)
 		if fault := asFault(t, err); fault.Code != invalid.code {
 			t.Fatalf("%q fault = %#v", invalid.source, fault)
 		}
+	}
+}
+
+func TestUploadPartCopyConditionsAndRange(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	body := bytes.Repeat([]byte("0123456789"), 600000)
+	source := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "large"}, body)
+	createUpload := func(key string) string {
+		t.Helper()
+		response := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": key}, nil)
+		return response.Output["UploadId"].(string)
+	}
+
+	_, err := invoke(t, p, "UploadPartCopy", map[string]any{
+		"UploadId": createUpload("rejected"), "PartNumber": 1, "CopySource": "b/large", "CopySourceIfMatch": `"wrong"`,
+	}, nil)
+	if fault := asFault(t, err); fault.Code != "PreconditionFailed" {
+		t.Fatalf("condition fault = %#v", fault)
+	}
+
+	uploadID := createUpload("range")
+	mustInvoke(t, p, "UploadPartCopy", map[string]any{
+		"UploadId": uploadID, "PartNumber": 1, "CopySource": "b/large",
+		"CopySourceIfMatch": source.Headers.Get("ETag"), "CopySourceRange": "bytes=10-19",
+	}, nil)
+	mustInvoke(t, p, "CompleteMultipartUpload", map[string]any{"UploadId": uploadID}, nil)
+	if got := readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "range"}, nil)); string(got) != "0123456789" {
+		t.Fatalf("range copy = %q", got)
+	}
+
+	_, err = invoke(t, p, "UploadPartCopy", map[string]any{
+		"UploadId": createUpload("invalid-range"), "PartNumber": 1, "CopySource": "b/large", "CopySourceRange": "bytes=7000000-7000001",
+	}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidRange" || fault.HTTPStatus != http.StatusRequestedRangeNotSatisfiable {
+		t.Fatalf("range fault = %#v", fault)
+	}
+	_, err = invoke(t, p, "UploadPartCopy", map[string]any{
+		"UploadId": createUpload("malformed-range"), "PartNumber": 1, "CopySource": "b/large", "CopySourceRange": "0-1",
+	}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" {
+		t.Fatalf("malformed range fault = %#v", fault)
+	}
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "small"}, []byte("small"))
+	_, err = invoke(t, p, "UploadPartCopy", map[string]any{
+		"UploadId": createUpload("too-small"), "PartNumber": 1, "CopySource": "b/small", "CopySourceRange": "bytes=0-1",
+	}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" {
+		t.Fatalf("small range fault = %#v", fault)
 	}
 }
 

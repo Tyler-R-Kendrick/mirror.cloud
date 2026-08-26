@@ -103,6 +103,41 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if string(versionedBody) != "hello-sdk" {
 		t.Fatalf("version copy body %q", versionedBody)
 	}
+	large := bytes.Repeat([]byte("0123456789"), 600000)
+	largePut, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{
+		Bucket: aws.String("sdk"), Key: aws.String("large"), Body: bytes.NewReader(large),
+	})
+	if err != nil {
+		t.Fatalf("put large source: %v", err)
+	}
+	upload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{
+		Bucket: aws.String("sdk"), Key: aws.String("range-copy"),
+	})
+	if err != nil {
+		t.Fatalf("create multipart copy: %v", err)
+	}
+	part, err := s3c.UploadPartCopy(context.Background(), &s3.UploadPartCopyInput{
+		Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, PartNumber: aws.Int32(1),
+		CopySource: aws.String("sdk/large"), CopySourceIfMatch: largePut.ETag, CopySourceRange: aws.String("bytes=10-19"),
+	})
+	if err != nil {
+		t.Fatalf("upload part copy: %v", err)
+	}
+	if _, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{
+		Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId,
+		MultipartUpload: &s3types.CompletedMultipartUpload{Parts: []s3types.CompletedPart{{PartNumber: aws.Int32(1), ETag: part.CopyPartResult.ETag}}},
+	}); err != nil {
+		t.Fatalf("complete multipart copy: %v", err)
+	}
+	rangeCopy, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy")})
+	if err != nil {
+		t.Fatalf("get range copy: %v", err)
+	}
+	rangeBody, _ := io.ReadAll(rangeCopy.Body)
+	_ = rangeCopy.Body.Close()
+	if string(rangeBody) != "0123456789" {
+		t.Fatalf("range copy body %q", rangeBody)
+	}
 
 	ddb := dynamodb.NewFromConfig(awscfg, func(o *dynamodb.Options) { o.BaseEndpoint = aws.String(ts.URL) })
 	if _, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{

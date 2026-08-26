@@ -620,9 +620,16 @@ func TestListMultipartUploadsPaginationAndDelimiter(t *testing.T) {
 	if encoded.Output["Uploads"].([]any)[0].(map[string]any)["Key"] != "space%20key" || encoded.Output["EncodingType"] != "url" {
 		t.Fatalf("encoded multipart uploads = %v", encoded.Output)
 	}
-	for _, input := range []map[string]any{{"Bucket": "missing"}, {"Bucket": "b", "MaxUploads": 0}} {
-		_, err := invoke(t, p, "ListMultipartUploads", input, nil)
-		if fault := asFault(t, err); fault.HTTPStatus != http.StatusNotFound && fault.Code != "InvalidArgument" {
+	for _, test := range []struct {
+		input      map[string]any
+		code       string
+		httpStatus int
+	}{
+		{map[string]any{"Bucket": "missing"}, "NoSuchBucket", http.StatusNotFound},
+		{map[string]any{"Bucket": "b", "MaxUploads": 0}, "InvalidArgument", http.StatusBadRequest},
+	} {
+		_, err := invoke(t, p, "ListMultipartUploads", test.input, nil)
+		if fault := asFault(t, err); fault.Code != test.code || fault.HTTPStatus != test.httpStatus {
 			t.Fatalf("invalid multipart listing fault = %#v", fault)
 		}
 	}

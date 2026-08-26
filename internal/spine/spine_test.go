@@ -212,14 +212,15 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	startUpload("z")
 	startUpload("a")
 	startUpload("photos/2026/x")
+	secondM := startUpload("m")
 	if code, body, _ := do(http.MethodGet, "/qb?uploads&max-uploads=2", "", nil); code != 200 {
 		t.Fatalf("list uploads page 1 %d %s", code, body)
 	} else if bytes.Count(body, []byte("<Upload>")) != 2 || bytes.Contains(body, []byte("<member>")) || !bytes.Contains(body, []byte("<Key>a</Key>")) || !bytes.Contains(body, []byte("<Key>m</Key>")) || !bytes.Contains(body, []byte("<IsTruncated>true</IsTruncated>")) || !bytes.Contains(body, []byte("<NextKeyMarker>m</NextKeyMarker>")) || !bytes.Contains(body, []byte("<NextUploadIdMarker>"+uploadID+"</NextUploadIdMarker>")) {
 		t.Fatalf("list uploads page 1 %s", body)
 	}
-	if code, body, _ := do(http.MethodGet, "/qb?uploads&key-marker=m&upload-id-marker="+uploadID+"&max-uploads=2", "", nil); code != 200 {
+	if code, body, _ := do(http.MethodGet, "/qb?uploads&key-marker=m&upload-id-marker="+uploadID+"&max-uploads=3", "", nil); code != 200 {
 		t.Fatalf("list uploads page 2 %d %s", code, body)
-	} else if !bytes.Contains(body, []byte("<Key>photos/2026/x</Key>")) || !bytes.Contains(body, []byte("<Key>z</Key>")) || !bytes.Contains(body, []byte("<IsTruncated>false</IsTruncated>")) {
+	} else if !bytes.Contains(body, []byte("<UploadId>"+secondM+"</UploadId>")) || !bytes.Contains(body, []byte("<Key>photos/2026/x</Key>")) || !bytes.Contains(body, []byte("<Key>z</Key>")) || !bytes.Contains(body, []byte("<IsTruncated>false</IsTruncated>")) {
 		t.Fatalf("list uploads page 2 %s", body)
 	}
 	if code, body, _ := do(http.MethodGet, "/qb?uploads&prefix=photos/&delimiter=/", "", nil); code != 200 || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>photos/2026/</Prefix></CommonPrefixes>")) {

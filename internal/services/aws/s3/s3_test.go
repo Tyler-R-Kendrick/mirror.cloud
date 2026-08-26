@@ -125,9 +125,13 @@ func TestCreateBucketGlobalCollisions(t *testing.T) {
 	if response, err := invokeAs(t, p, owner, "CreateBucket", input, nil); err != nil || response.Status != http.StatusOK {
 		t.Fatalf("us-east-1 recreate = %#v %v", response, err)
 	}
+	preserved := ""
 	if got := mustInvokeAs(t, p, owner, "GetObject", map[string]any{"Bucket": "shared-bucket", "Key": "object"}, nil); string(readStream(t, got)) != "preserved" {
 		t.Fatal("us-east-1 recreation replaced bucket contents")
+	} else {
+		preserved = "preserved"
 	}
+	collisions := map[string]any{}
 	for name, identity := range map[string]spi.Identity{"owner-other-region": west, "other-account": other} {
 		_, err := invokeAs(t, p, identity, "CreateBucket", input, nil)
 		fault := asFault(t, err)
@@ -141,12 +145,14 @@ func TestCreateBucketGlobalCollisions(t *testing.T) {
 		if _, err := invokeAs(t, p, identity, "HeadBucket", input, nil); asFault(t, err).Code != "NoSuchBucket" {
 			t.Fatalf("%s collision created local bucket: %v", name, err)
 		}
+		collisions[name] = fault.Code
 	}
 	mustInvokeAs(t, p, owner, "DeleteObject", map[string]any{"Bucket": "shared-bucket", "Key": "object"}, nil)
 	mustInvokeAs(t, p, owner, "DeleteBucket", input, nil)
 	if _, err := invokeAs(t, p, other, "CreateBucket", input, nil); err != nil {
 		t.Fatalf("create after delete: %v", err)
 	}
+	golden.AssertJSON(t, map[string]any{"collisions": collisions, "recreate": map[string]any{"status": http.StatusOK, "object": preserved}, "reuse_after_delete": "created"})
 }
 
 func TestObjectMetadata(t *testing.T) {

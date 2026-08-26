@@ -593,7 +593,7 @@ func TestObjectByteRanges(t *testing.T) {
 			t.Fatalf("range %q checksum headers = %v", test.value, response.Headers)
 		}
 	}
-	for _, value := range []string{"items=0-1", "bytes=bad", "bytes=5-2", "bytes=0-1,3-4"} {
+	for _, value := range []string{"2-5", "items=0-1", "bytes=bad", "bytes=5-2", "bytes=0-1,3-4"} {
 		response, got, err := get(value)
 		if err != nil || response.Status != http.StatusOK || string(got) != string(body) || response.Headers.Get("Content-Range") != "" {
 			t.Fatalf("ignored range %q = %q %#v %v", value, got, response, err)

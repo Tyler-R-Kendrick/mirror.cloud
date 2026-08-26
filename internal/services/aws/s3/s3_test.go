@@ -553,7 +553,7 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	}
 	secondPage := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "b", "Key": "paged", "UploadId": pagedID, "PartNumberMarker": 2, "MaxParts": 2}, nil)
 	last := secondPage.Output["Parts"].([]any)[0].(map[string]any)
-	if last["PartNumber"] != 3 || last["LastModified"] == "" || last["ChecksumCRC32"] == "" || secondPage.Output["IsTruncated"] != false || secondPage.Output["PartNumberMarker"] != 2 {
+	if last["PartNumber"] != 3 || last["LastModified"] == "" || last["ChecksumCRC32"] == nil || secondPage.Output["IsTruncated"] != false || secondPage.Output["PartNumberMarker"] != 2 {
 		t.Fatalf("ListParts second page %v", secondPage.Output)
 	}
 	for _, input := range []map[string]any{

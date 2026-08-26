@@ -17,6 +17,7 @@ import (
 	"hash/crc64"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strconv"
@@ -101,6 +102,34 @@ func createBucketRegion(endpoint, constraint string) (string, error) {
 	}
 	return constraint, nil
 }
+
+func validBucketName(name string) bool {
+	if len(name) < 3 || len(name) > 63 || !bucketNameEdge(name[0]) || !bucketNameEdge(name[len(name)-1]) || strings.Contains(name, "..") {
+		return false
+	}
+	for i := range len(name) {
+		c := name[i]
+		if !bucketNameEdge(c) && c != '.' && c != '-' {
+			return false
+		}
+	}
+	if _, err := netip.ParseAddr(name); err == nil {
+		return false
+	}
+	for _, prefix := range []string{"xn--", "sthree-", "amzn-s3-demo-"} {
+		if strings.HasPrefix(name, prefix) {
+			return false
+		}
+	}
+	for _, suffix := range []string{"-s3alias", "--ol-s3", ".mrap", "--x-s3", "--table-s3", "-an"} {
+		if strings.HasSuffix(name, suffix) {
+			return false
+		}
+	}
+	return true
+}
+
+func bucketNameEdge(c byte) bool { return c >= 'a' && c <= 'z' || c >= '0' && c <= '9' }
 
 // New constructs the pack.
 func New(d spi.Deps) *Pack { return &Pack{deps: d, mpu: map[string]*mpu{}} }
@@ -482,8 +511,8 @@ func (p *Pack) col(req *spi.Request, name string) spi.Collection {
 
 func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b := str(req.Input["Bucket"])
-	if b == "" {
-		return nil, &spi.Fault{Code: "InvalidBucketName", HTTPStatus: 400, Fault: "client"}
+	if !validBucketName(b) {
+		return nil, &spi.Fault{Code: "InvalidBucketName", Message: "The specified bucket is not valid.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"BucketName": b}}
 	}
 	constraint := str(req.Input["LocationConstraint"])
 	if constraint == "" {

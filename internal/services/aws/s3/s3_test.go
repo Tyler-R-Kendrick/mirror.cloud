@@ -241,6 +241,23 @@ func TestCreateBucketLocationConstraints(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestCreateBucketValidatesGlobalNames(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	invalid := []string{"", "ab", strings.Repeat("a", 64), "Uppercase", "under_score", "-starts", "ends-", "adjacent..dots", "192.168.5.4", "xn--reserved", "sthree-reserved", "amzn-s3-demo-reserved", "reserved-s3alias", "reserved--ol-s3", "reserved.mrap", "reserved--x-s3", "reserved--table-s3", "reserved-an"}
+	for _, name := range invalid {
+		_, err := invoke(t, p, "CreateBucket", map[string]any{"Bucket": name}, nil)
+		fault := asFault(t, err)
+		if fault.Code != "InvalidBucketName" || fault.Message != "The specified bucket is not valid." || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["BucketName"] != name {
+			t.Fatalf("name %q = %#v", name, fault)
+		}
+	}
+	for _, name := range []string{"abc", "bucket-name", "example.com", strings.Repeat("a", 63)} {
+		if _, err := invoke(t, p, "CreateBucket", map[string]any{"Bucket": name}, nil); err != nil {
+			t.Fatalf("valid name %q: %v", name, err)
+		}
+	}
+}
+
 func TestDeleteBucketRequiresEmptyBucket(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

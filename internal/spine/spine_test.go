@@ -410,4 +410,16 @@ func TestBootedServerS3VersionedTaggingContract(t *testing.T) {
 			t.Fatalf("%s %d %s", test.header, code, body)
 		}
 	}
+	if code, body, _ := do(http.MethodHead, "/tags/metadata", "", map[string]string{"x-amz-expected-bucket-owner": "999999999999"}); code != http.StatusForbidden {
+		t.Fatalf("mismatched expected owner %d %s", code, body)
+	}
+	if code, body, _ := do(http.MethodHead, "/tags/metadata", "", map[string]string{"x-amz-expected-bucket-owner": "invalid"}); code != http.StatusBadRequest {
+		t.Fatalf("invalid expected owner %d %s", code, body)
+	}
+	if code, body, _ := do(http.MethodHead, "/tags/metadata", "", map[string]string{"x-amz-expected-bucket-owner": "000000000000"}); code != http.StatusOK {
+		t.Fatalf("matching expected owner %d %s", code, body)
+	}
+	if code, body, _ := do(http.MethodDelete, "/missing/object", "", nil); code != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchBucket")) {
+		t.Fatalf("delete missing bucket %d %s", code, body)
+	}
 }

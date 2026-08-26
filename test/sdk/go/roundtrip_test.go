@@ -78,6 +78,15 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if aws.ToString(got.ContentType) != "text/plain" || aws.ToString(got.CacheControl) != "max-age=60" || got.Metadata["owner"] != "mirror" || aws.ToString(got.WebsiteRedirectLocation) != "/old" {
 		t.Fatalf("s3 metadata %#v", got)
 	}
+	if _, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), ExpectedBucketOwner: aws.String("000000000000")}); err != nil {
+		t.Fatalf("matching expected owner: %v", err)
+	}
+	if _, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), ExpectedBucketOwner: aws.String("999999999999")}); err == nil || !strings.Contains(err.Error(), "StatusCode: 403") {
+		t.Fatalf("mismatched expected owner: %v", err)
+	}
+	if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("missing"), Key: aws.String("k")}); err == nil || !strings.Contains(err.Error(), "NoSuchBucket") {
+		t.Fatalf("delete missing bucket: %v", err)
+	}
 	verified, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), ChecksumMode: s3types.ChecksumModeEnabled})
 	if err != nil {
 		t.Fatalf("get checksum: %v", err)

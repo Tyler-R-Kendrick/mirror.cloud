@@ -207,6 +207,51 @@ func TestCopyObjectDirectiveValidation(t *testing.T) {
 	golden.AssertJSON(t, errors)
 }
 
+func TestExpectedBucketOwnerAndDeleteBoundary(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "k"}, []byte("body"))
+	if _, err := invoke(t, p, "HeadBucket", map[string]any{"Bucket": "b", "ExpectedBucketOwner": ident().Account}, nil); err != nil {
+		t.Fatalf("matching owner: %v", err)
+	}
+	errors := map[string]any{}
+	for _, expected := range []string{"short", "12345678901x"} {
+		_, err := invoke(t, p, "HeadBucket", map[string]any{"Bucket": "b", "ExpectedBucketOwner": expected}, nil)
+		fault := asFault(t, err)
+		if fault.Code != "InvalidBucketOwnerAWSAccountID" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("expected owner %q = %#v", expected, fault)
+		}
+		errors[expected] = fault.Code
+	}
+	for _, test := range []struct {
+		operation string
+		input     map[string]any
+	}{
+		{"HeadBucket", map[string]any{"Bucket": "b"}},
+		{"GetObject", map[string]any{"Bucket": "b", "Key": "k"}},
+		{"PutObjectTagging", map[string]any{"Bucket": "b", "Key": "k", "TagSet": []any{}}},
+		{"DeleteObject", map[string]any{"Bucket": "b", "Key": "k"}},
+	} {
+		test.input["ExpectedBucketOwner"] = "999999999999"
+		_, err := invoke(t, p, test.operation, test.input, nil)
+		fault := asFault(t, err)
+		if fault.Code != "AccessDenied" || fault.HTTPStatus != http.StatusForbidden {
+			t.Fatalf("%s mismatch = %#v", test.operation, fault)
+		}
+		errors[test.operation] = fault.Code
+	}
+	for _, operation := range []string{"DeleteObject", "DeleteObjects", "GetObjectTagging"} {
+		input := map[string]any{"Bucket": "missing", "Key": "k", "Objects": []any{map[string]any{"Key": "k"}}}
+		_, err := invoke(t, p, operation, input, nil)
+		fault := asFault(t, err)
+		if fault.Code != "NoSuchBucket" || fault.HTTPStatus != http.StatusNotFound {
+			t.Fatalf("%s missing bucket = %#v", operation, fault)
+		}
+		errors[operation+"Missing"] = fault.Code
+	}
+	golden.AssertJSON(t, errors)
+}
+
 func TestTagValidationAndBucketSemantics(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	characterization := map[string]any{}

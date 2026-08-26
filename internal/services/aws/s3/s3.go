@@ -1601,11 +1601,10 @@ func (p *Pack) versioning(ctx context.Context, req *spi.Request) (*spi.Response,
 		return &spi.Response{Status: 200, Output: map[string]any{"Status": st}}, nil
 	}
 	raw, ok, _ := p.col(req, "versioning").Get(ctx, b)
-	st := "Suspended"
-	if ok && len(raw) > 0 {
-		st = string(raw)
+	if !ok || len(raw) == 0 {
+		return &spi.Response{Output: map[string]any{}}, nil
 	}
-	return &spi.Response{Output: map[string]any{"Status": st}}, nil
+	return &spi.Response{Output: map[string]any{"Status": string(raw)}}, nil
 }
 
 func putGetDel(method, put, get, del string) string {

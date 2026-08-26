@@ -817,8 +817,8 @@ func TestExpectedBucketOwnerAcrossBucketScopedOperations(t *testing.T) {
 		}
 		errors[test.operation+"Missing"] = fault.Code
 	}
-	if versioning := mustInvoke(t, p, "GetBucketVersioning", map[string]any{"Bucket": "b"}, nil).Output["Status"]; versioning != "Suspended" {
-		t.Fatalf("rejected versioning persisted: %v", versioning)
+	if versioning := mustInvoke(t, p, "GetBucketVersioning", map[string]any{"Bucket": "b"}, nil).Output; len(versioning) != 0 {
+		t.Fatalf("rejected versioning persisted: %#v", versioning)
 	}
 	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "copy"}, nil); asFault(t, err).Code != "NoSuchKey" {
 		t.Fatalf("rejected copy persisted: %v", err)

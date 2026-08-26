@@ -217,6 +217,23 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || aws.ToString(checksumHead.ChecksumSHA256) != aws.ToString(checksumComplete.ChecksumSHA256) || checksumHead.StorageClass != s3types.StorageClassStandardIa {
 		t.Fatalf("head checksum multipart: %#v %v", checksumHead, err)
 	}
+	checksumPartGet, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{
+		Bucket: aws.String("sdk"), Key: aws.String("checksum-multipart"), PartNumber: aws.Int32(1), ChecksumMode: s3types.ChecksumModeEnabled,
+	})
+	if err != nil {
+		t.Fatalf("get multipart part: %v", err)
+	}
+	checksumPartBody, _ := io.ReadAll(checksumPartGet.Body)
+	_ = checksumPartGet.Body.Close()
+	if string(checksumPartBody) != "checksum-sdk" || aws.ToInt32(checksumPartGet.PartsCount) != 1 || aws.ToString(checksumPartGet.ContentRange) != "bytes 0-11/12" || aws.ToString(checksumPartGet.ChecksumSHA256) != aws.ToString(checksumPart.ChecksumSHA256) {
+		t.Fatalf("get multipart part: %#v body=%q", checksumPartGet, checksumPartBody)
+	}
+	checksumPartHead, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{
+		Bucket: aws.String("sdk"), Key: aws.String("checksum-multipart"), PartNumber: aws.Int32(1), ChecksumMode: s3types.ChecksumModeEnabled,
+	})
+	if err != nil || aws.ToInt32(checksumPartHead.PartsCount) != 1 || aws.ToInt64(checksumPartHead.ContentLength) != 12 || aws.ToString(checksumPartHead.ChecksumSHA256) != aws.ToString(checksumPart.ChecksumSHA256) {
+		t.Fatalf("head multipart part: %#v %v", checksumPartHead, err)
+	}
 	checksumTags, err := s3c.GetObjectTagging(context.Background(), &s3.GetObjectTaggingInput{Bucket: aws.String("sdk"), Key: aws.String("checksum-multipart")})
 	if err != nil || len(checksumTags.TagSet) != 2 || aws.ToString(checksumTags.TagSet[0].Key) != "env" || aws.ToString(checksumTags.TagSet[0].Value) != "test" || aws.ToString(checksumTags.TagSet[1].Key) != "team" || aws.ToString(checksumTags.TagSet[1].Value) != "storage" {
 		t.Fatalf("multipart creation tags: %#v %v", checksumTags, err)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	"io"
 	"net/http"
@@ -291,6 +292,19 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	}
 	if code, b, h := do(http.MethodGet, "/qb/m", "", map[string]string{"x-amz-checksum-mode": "ENABLED"}); code != http.StatusOK || h.Get("x-amz-checksum-crc32") != checksum || h.Get("x-amz-checksum-type") != "FULL_OBJECT" || h.Get("x-amz-storage-class") != "STANDARD_IA" {
 		t.Fatalf("get multipart checksum %d %s %v", code, b, h)
+	}
+	partRange := fmt.Sprintf("bytes %d-%d/%d", 5<<20, size-1, size)
+	if code, b, h := do(http.MethodGet, "/qb/m?partNumber=2", "", map[string]string{"x-amz-checksum-mode": "ENABLED"}); code != http.StatusPartialContent || string(b) != "SRC-BYTES" || h.Get("Content-Length") != strconv.Itoa(len("SRC-BYTES")) || h.Get("Content-Range") != partRange || h.Get("x-amz-mp-parts-count") != "2" || h.Get("x-amz-checksum-crc32") != "" {
+		t.Fatalf("get multipart part %d %q %v", code, b, h)
+	}
+	if code, b, h := do(http.MethodHead, "/qb/m?partNumber=2", "", nil); code != http.StatusPartialContent || len(b) != 0 || h.Get("Content-Length") != strconv.Itoa(len("SRC-BYTES")) || h.Get("Content-Range") != partRange || h.Get("x-amz-mp-parts-count") != "2" {
+		t.Fatalf("head multipart part %d %q %v", code, b, h)
+	}
+	if code, b, _ := do(http.MethodGet, "/qb/m?partNumber=3", "", nil); code != http.StatusRequestedRangeNotSatisfiable || !bytes.Contains(b, []byte("InvalidPartNumber")) {
+		t.Fatalf("invalid multipart part %d %s", code, b)
+	}
+	if code, b, _ := do(http.MethodGet, "/qb/m?partNumber=1", "", map[string]string{"Range": "bytes=0-1"}); code != http.StatusBadRequest || !bytes.Contains(b, []byte("InvalidRequest")) {
+		t.Fatalf("part and range %d %s", code, b)
 	}
 	if code, b, _ := do(http.MethodGet, "/qb/m?tagging", "", nil); code != http.StatusOK || bytes.Contains(b, []byte("<member>")) || !bytes.Contains(b, []byte("<TagSet><Tag><Key>env</Key><Value>test</Value></Tag><Tag><Key>team</Key><Value>storage</Value></Tag></TagSet>")) {
 		t.Fatalf("get multipart tags %d %s", code, b)

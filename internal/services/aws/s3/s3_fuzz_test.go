@@ -111,3 +111,35 @@ func FuzzCreateBucketCollisions(f *testing.F) {
 		}
 	})
 }
+
+func FuzzDeleteBucketEmptiness(f *testing.F) {
+	for _, seed := range []struct {
+		versioned bool
+		objects   uint8
+	}{{false, 0}, {false, 1}, {true, 1}, {true, 3}} {
+		f.Add(seed.versioned, seed.objects)
+	}
+	f.Fuzz(func(t *testing.T, versioned bool, objectSeed uint8) {
+		p := s3.New(spitest.Deps(t))
+		input := map[string]any{"Bucket": "fuzz-delete"}
+		mustInvoke(t, p, "CreateBucket", input, nil)
+		if versioned {
+			mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "fuzz-delete", "Status": "Enabled"}, nil)
+		}
+		objects := int(objectSeed % 4)
+		for i := 0; i < objects; i++ {
+			mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "fuzz-delete", "Key": strconv.Itoa(i)}, []byte("body"))
+		}
+
+		response, err := invoke(t, p, "DeleteBucket", input, nil)
+		if objects == 0 {
+			if err != nil || response.Status != http.StatusNoContent {
+				t.Fatalf("empty versioned=%v: %#v %v", versioned, response, err)
+			}
+			return
+		}
+		if fault := asFault(t, err); fault.Code != "BucketNotEmpty" || fault.HTTPStatus != http.StatusConflict {
+			t.Fatalf("non-empty versioned=%v objects=%d: %#v", versioned, objects, fault)
+		}
+	})
+}

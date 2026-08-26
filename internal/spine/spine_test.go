@@ -2,8 +2,9 @@ package spine
 
 import (
 	"bytes"
-	"crypto/md5"
 	"encoding/base64"
+	"encoding/binary"
+	"hash/crc32"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -191,9 +192,11 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 		t.Fatalf("deleted key still there %d %s", code, b)
 	}
 
-	code, b, _ := do(http.MethodPost, "/qb/m?uploads", "", nil)
+	code, b, createHeaders := do(http.MethodPost, "/qb/m?uploads", "", map[string]string{"x-amz-checksum-algorithm": "CRC32", "x-amz-checksum-type": "FULL_OBJECT"})
 	if code >= 300 {
 		t.Fatalf("create mpu %d %s", code, b)
+	} else if createHeaders.Get("x-amz-checksum-algorithm") != "CRC32" || createHeaders.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+		t.Fatalf("create mpu checksum headers %v", createHeaders)
 	}
 	uid := regexp.MustCompile(`<UploadId>([^<]+)</UploadId>`).FindSubmatch(b)
 	if uid == nil {
@@ -243,7 +246,7 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	}
 	if code, b, _ := do(http.MethodGet, "/qb/m?uploadId="+uploadID+"&max-parts=1", "", nil); code != 200 {
 		t.Fatalf("list parts page 1 %d %s", code, b)
-	} else if !bytes.Contains(b, []byte("<Part><ETag>")) || bytes.Contains(b, []byte("<member>")) || !bytes.Contains(b, []byte("<PartNumber>1</PartNumber>")) || !bytes.Contains(b, []byte("<IsTruncated>true</IsTruncated>")) || !bytes.Contains(b, []byte("<NextPartNumberMarker>1</NextPartNumberMarker>")) {
+	} else if !bytes.Contains(b, []byte("<Part><ChecksumCRC32>")) || bytes.Contains(b, []byte("<member>")) || !bytes.Contains(b, []byte("<PartNumber>1</PartNumber>")) || !bytes.Contains(b, []byte("<IsTruncated>true</IsTruncated>")) || !bytes.Contains(b, []byte("<NextPartNumberMarker>1</NextPartNumberMarker>")) || !bytes.Contains(b, []byte("<ChecksumAlgorithm>CRC32</ChecksumAlgorithm>")) || !bytes.Contains(b, []byte("<ChecksumType>FULL_OBJECT</ChecksumType>")) {
 		t.Fatalf("list parts page 1 %s", b)
 	}
 	if code, b, _ := do(http.MethodGet, "/qb/m?uploadId="+uploadID+"&part-number-marker=1&max-parts=1", "", nil); code != 200 {
@@ -272,14 +275,13 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	if code, b, _ := do(http.MethodPost, "/qb/m?uploadId="+uploadID, comp, map[string]string{"x-amz-mp-object-size": strconv.Itoa(size - 1)}); code != http.StatusBadRequest || !bytes.Contains(b, []byte("InvalidRequest")) {
 		t.Fatalf("complete mpu size mismatch %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodPost, "/qb/m?uploadId="+uploadID, comp, map[string]string{"x-amz-mp-object-size": strconv.Itoa(size), "x-amz-checksum-md5": "AA=="}); code != http.StatusBadRequest || !bytes.Contains(b, []byte("BadDigest")) {
+	if code, b, _ := do(http.MethodPost, "/qb/m?uploadId="+uploadID, comp, map[string]string{"x-amz-mp-object-size": strconv.Itoa(size), "x-amz-checksum-crc32": "AA=="}); code != http.StatusBadRequest || !bytes.Contains(b, []byte("BadDigest")) {
 		t.Fatalf("complete mpu checksum mismatch %d %s", code, b)
 	}
-	digest := md5.New()
-	_, _ = io.WriteString(digest, strings.Repeat("A", 5<<20))
-	_, _ = io.WriteString(digest, "SRC-BYTES")
-	checksum := base64.StdEncoding.EncodeToString(digest.Sum(nil))
-	headers := map[string]string{"x-amz-mp-object-size": strconv.Itoa(size), "x-amz-checksum-md5": checksum}
+	checksumBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(checksumBytes, crc32.ChecksumIEEE(append(bytes.Repeat([]byte("A"), 5<<20), []byte("SRC-BYTES")...)))
+	checksum := base64.StdEncoding.EncodeToString(checksumBytes)
+	headers := map[string]string{"x-amz-mp-object-size": strconv.Itoa(size), "x-amz-checksum-crc32": checksum, "x-amz-checksum-type": "FULL_OBJECT"}
 	if code, b, h := do(http.MethodPost, "/qb/m?uploadId="+uploadID, comp, headers); code >= 300 {
 		t.Fatalf("complete mpu %d %s", code, b)
 	} else if !bytes.Contains(b, []byte("-2")) && !strings.Contains(h.Get("ETag"), "-2") {
@@ -287,7 +289,7 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	} else if !bytes.Contains(b, []byte(checksum)) {
 		t.Fatalf("multipart checksum output %s", b)
 	}
-	if code, b, h := do(http.MethodGet, "/qb/m", "", map[string]string{"x-amz-checksum-mode": "ENABLED"}); code != http.StatusOK || h.Get("x-amz-checksum-md5") != checksum || h.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+	if code, b, h := do(http.MethodGet, "/qb/m", "", map[string]string{"x-amz-checksum-mode": "ENABLED"}); code != http.StatusOK || h.Get("x-amz-checksum-crc32") != checksum || h.Get("x-amz-checksum-type") != "FULL_OBJECT" {
 		t.Fatalf("get multipart checksum %d %s %v", code, b, h)
 	}
 }

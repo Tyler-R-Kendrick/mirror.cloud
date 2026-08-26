@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -182,6 +183,38 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		Bucket: aws.String("sdk"), Key: aws.String("multipart-copy"), CopySource: aws.String("sdk/range-copy"), CopySourceIfMatch: completed.ETag,
 	}); err != nil {
 		t.Fatalf("copy multipart ETag: %v", err)
+	}
+	checksumUpload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{
+		Bucket: aws.String("sdk"), Key: aws.String("checksum-multipart"), ChecksumAlgorithm: s3types.ChecksumAlgorithmSha256,
+	})
+	if err != nil {
+		t.Fatalf("create checksum multipart: %v", err)
+	}
+	checksumPart, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{
+		Bucket: aws.String("sdk"), Key: aws.String("checksum-multipart"), UploadId: checksumUpload.UploadId,
+		PartNumber: aws.Int32(1), Body: bytes.NewReader([]byte("checksum-sdk")), ChecksumAlgorithm: s3types.ChecksumAlgorithmSha256,
+	})
+	if err != nil || aws.ToString(checksumPart.ChecksumSHA256) == "" {
+		t.Fatalf("upload checksum part: %#v %v", checksumPart, err)
+	}
+	checksumParts, err := s3c.ListParts(context.Background(), &s3.ListPartsInput{
+		Bucket: aws.String("sdk"), Key: aws.String("checksum-multipart"), UploadId: checksumUpload.UploadId,
+	})
+	if err != nil || checksumParts.ChecksumAlgorithm != s3types.ChecksumAlgorithmSha256 || len(checksumParts.Parts) != 1 || aws.ToString(checksumParts.Parts[0].ChecksumSHA256) != aws.ToString(checksumPart.ChecksumSHA256) {
+		t.Fatalf("list checksum parts: %#v %v", checksumParts, err)
+	}
+	checksumComplete, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{
+		Bucket: aws.String("sdk"), Key: aws.String("checksum-multipart"), UploadId: checksumUpload.UploadId,
+		MultipartUpload: &s3types.CompletedMultipartUpload{Parts: []s3types.CompletedPart{{PartNumber: aws.Int32(1), ETag: checksumPart.ETag, ChecksumSHA256: checksumPart.ChecksumSHA256}}},
+	})
+	if err != nil || !strings.HasSuffix(aws.ToString(checksumComplete.ChecksumSHA256), "-1") {
+		t.Fatalf("complete checksum multipart: %#v %v", checksumComplete, err)
+	}
+	checksumHead, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{
+		Bucket: aws.String("sdk"), Key: aws.String("checksum-multipart"), ChecksumMode: s3types.ChecksumModeEnabled,
+	})
+	if err != nil || aws.ToString(checksumHead.ChecksumSHA256) != aws.ToString(checksumComplete.ChecksumSHA256) {
+		t.Fatalf("head checksum multipart: %#v %v", checksumHead, err)
 	}
 
 	ddb := dynamodb.NewFromConfig(awscfg, func(o *dynamodb.Options) { o.BaseEndpoint = aws.String(ts.URL) })

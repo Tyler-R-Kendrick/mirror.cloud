@@ -84,6 +84,9 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), ExpectedBucketOwner: aws.String("999999999999")}); err == nil || !strings.Contains(err.Error(), "StatusCode: 403") {
 		t.Fatalf("mismatched expected owner: %v", err)
 	}
+	if _, err := s3c.GetBucketVersioning(context.Background(), &s3.GetBucketVersioningInput{Bucket: aws.String("sdk"), ExpectedBucketOwner: aws.String("999999999999")}); err == nil || !strings.Contains(err.Error(), "AccessDenied") {
+		t.Fatalf("versioning mismatched expected owner: %v", err)
+	}
 	if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("missing"), Key: aws.String("k")}); err == nil || !strings.Contains(err.Error(), "NoSuchBucket") {
 		t.Fatalf("delete missing bucket: %v", err)
 	}
@@ -220,6 +223,9 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	})
 	if err != nil || len(listedUploads.Uploads) != 1 || aws.ToString(listedUploads.Uploads[0].Key) != "range-copy" || aws.ToString(listedUploads.Uploads[0].UploadId) != aws.ToString(upload.UploadId) {
 		t.Fatalf("list multipart uploads: %#v %v", listedUploads, err)
+	}
+	if _, err := s3c.ListParts(context.Background(), &s3.ListPartsInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, ExpectedBucketOwner: aws.String("999999999999")}); err == nil || !strings.Contains(err.Error(), "AccessDenied") {
+		t.Fatalf("list parts mismatched expected owner: %v", err)
 	}
 	if _, err := s3c.UploadPartCopy(context.Background(), &s3.UploadPartCopyInput{
 		Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, PartNumber: aws.Int32(1), CopySource: aws.String("sdk/large"), ExpectedSourceBucketOwner: aws.String("999999999999"),

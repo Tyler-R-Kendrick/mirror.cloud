@@ -413,6 +413,9 @@ func TestBootedServerS3VersionedTaggingContract(t *testing.T) {
 	if code, body, _ := do(http.MethodHead, "/tags/metadata", "", map[string]string{"x-amz-expected-bucket-owner": "999999999999"}); code != http.StatusForbidden {
 		t.Fatalf("mismatched expected owner %d %s", code, body)
 	}
+	if code, body, _ := do(http.MethodGet, "/tags?versioning", "", map[string]string{"x-amz-expected-bucket-owner": "999999999999"}); code != http.StatusForbidden || !bytes.Contains(body, []byte("AccessDenied")) {
+		t.Fatalf("versioning mismatched expected owner %d %s", code, body)
+	}
 	if code, body, _ := do(http.MethodHead, "/tags/metadata", "", map[string]string{"x-amz-expected-bucket-owner": "invalid"}); code != http.StatusBadRequest {
 		t.Fatalf("invalid expected owner %d %s", code, body)
 	}

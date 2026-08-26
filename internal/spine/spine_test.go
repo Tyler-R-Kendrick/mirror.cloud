@@ -374,4 +374,20 @@ func TestBootedServerS3VersionedTaggingContract(t *testing.T) {
 	if code, _, headers := do(http.MethodHead, "/tags/object", "", nil); code != http.StatusOK || headers.Get("x-amz-tagging-count") != "1" {
 		t.Fatalf("tagged current head %d %v", code, headers)
 	}
+	if code, body, _ := do(http.MethodGet, "/tags?tagging", "", nil); code != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchTagSet")) {
+		t.Fatalf("untagged bucket %d %s", code, body)
+	}
+	if code, body, _ := do(http.MethodPut, "/tags?tagging", `<Tagging/>`, nil); code != http.StatusBadRequest || !bytes.Contains(body, []byte("MalformedXML")) {
+		t.Fatalf("missing bucket TagSet %d %s", code, body)
+	}
+	duplicate := `<Tagging><TagSet><Tag><Key>stage</Key><Value>one</Value></Tag><Tag><Key>stage</Key><Value>two</Value></Tag></TagSet></Tagging>`
+	if code, body, _ := do(http.MethodPut, "/tags/object?tagging", duplicate, nil); code != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidTag")) {
+		t.Fatalf("duplicate object tags %d %s", code, body)
+	}
+	if code, body, _ := do(http.MethodPut, "/tags/rejected", "body", map[string]string{"x-amz-tagging": "stage=one&stage=two"}); code != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidArgument")) {
+		t.Fatalf("duplicate tagging header %d %s", code, body)
+	}
+	if code, body, _ := do(http.MethodHead, "/tags/rejected", "", nil); code != http.StatusNotFound {
+		t.Fatalf("rejected tagged put persisted %d %s", code, body)
+	}
 }

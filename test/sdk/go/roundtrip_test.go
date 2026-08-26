@@ -52,6 +52,9 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk")}); err != nil {
 		t.Fatalf("create bucket: %v", err)
 	}
+	if _, err := s3c.GetBucketTagging(context.Background(), &s3.GetBucketTaggingInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchTagSet") {
+		t.Fatalf("untagged bucket: %v", err)
+	}
 	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{
 		Bucket: aws.String("sdk"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusEnabled},
 	}); err != nil {
@@ -147,6 +150,11 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	})
 	if err != nil || aws.ToString(tagged.VersionId) != aws.ToString(newer.VersionId) {
 		t.Fatalf("tag newer version: %#v %v", tagged, err)
+	}
+	if _, err := s3c.PutObjectTagging(context.Background(), &s3.PutObjectTaggingInput{
+		Bucket: aws.String("sdk"), Key: aws.String("k"), Tagging: &s3types.Tagging{TagSet: []s3types.Tag{{Key: aws.String("duplicate"), Value: aws.String("one")}, {Key: aws.String("duplicate"), Value: aws.String("two")}}},
+	}); err == nil || !strings.Contains(err.Error(), "InvalidTag") {
+		t.Fatalf("duplicate object tags: %v", err)
 	}
 	versionCopy, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{
 		Bucket: aws.String("sdk"), Key: aws.String("version-copy"), CopySource: aws.String("sdk/k?versionId=" + aws.ToString(put.VersionId)),

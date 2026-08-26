@@ -9,6 +9,7 @@ import (
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	"io"
 	"net/http"
@@ -124,6 +125,75 @@ func TestCopyObjectTaggingDirective(t *testing.T) {
 	replaced := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "b", "Key": "replaced"}, nil)
 	if tags := replaced.Output["TagSet"].([]any); len(tags) != 1 || tags[0].(map[string]any)["Key"] != "owner" {
 		t.Fatalf("replaced tags = %#v", tags)
+	}
+}
+
+func TestTagValidationAndBucketSemantics(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	for _, operation := range []string{"PutBucketTagging", "GetBucketTagging", "DeleteBucketTagging"} {
+		_, err := invoke(t, p, operation, map[string]any{"Bucket": "missing", "TagSet": []any{}}, nil)
+		if fault := asFault(t, err); fault.Code != "NoSuchBucket" || fault.HTTPStatus != http.StatusNotFound {
+			t.Fatalf("%s missing bucket = %#v", operation, fault)
+		}
+	}
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	if _, err := invoke(t, p, "GetBucketTagging", map[string]any{"Bucket": "b"}, nil); asFault(t, err).Code != "NoSuchTagSet" {
+		t.Fatalf("untagged bucket = %v", err)
+	}
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "source"}, []byte("body"))
+	valid := []any{map[string]any{"Key": "team α", "Value": ""}}
+	mustInvoke(t, p, "PutObjectTagging", map[string]any{"Bucket": "b", "Key": "source", "TagSet": valid}, nil)
+
+	tags := func(count int) []any {
+		out := make([]any, count)
+		for i := range out {
+			out[i] = map[string]any{"Key": fmt.Sprintf("key%d", i), "Value": "value"}
+		}
+		return out
+	}
+	for _, test := range []struct {
+		name string
+		set  any
+		code string
+	}{
+		{"missing-tag-set", nil, "MalformedXML"},
+		{"missing-value", []any{map[string]any{"Key": "key"}}, "MalformedXML"},
+		{"duplicate-key", []any{map[string]any{"Key": "key", "Value": "one"}, map[string]any{"Key": "key", "Value": "two"}}, "InvalidTag"},
+		{"reserved-key", []any{map[string]any{"Key": "aws:team", "Value": "one"}}, "InvalidTag"},
+		{"empty-key", []any{map[string]any{"Key": "", "Value": "one"}}, "InvalidTag"},
+		{"long-key", []any{map[string]any{"Key": strings.Repeat("k", 129), "Value": "one"}}, "InvalidTag"},
+		{"invalid-key", []any{map[string]any{"Key": "team?", "Value": "one"}}, "InvalidTag"},
+		{"long-value", []any{map[string]any{"Key": "team", "Value": strings.Repeat("v", 257)}}, "InvalidTag"},
+		{"too-many-object-tags", tags(11), "InvalidTag"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := invoke(t, p, "PutObjectTagging", map[string]any{"Bucket": "b", "Key": "source", "TagSet": test.set}, nil)
+			if fault := asFault(t, err); fault.Code != test.code || fault.HTTPStatus != http.StatusBadRequest {
+				t.Fatalf("fault = %#v", fault)
+			}
+			got := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "b", "Key": "source"}, nil)
+			if set := asSliceForTest(got.Output["TagSet"]); len(set) != 1 || asMapForTest(set[0])["Key"] != "team α" {
+				t.Fatalf("rejected write changed tags: %#v", got.Output)
+			}
+		})
+	}
+	if _, err := invoke(t, p, "PutBucketTagging", map[string]any{"Bucket": "b", "TagSet": tags(51)}, nil); asFault(t, err).Code != "InvalidTag" {
+		t.Fatalf("too many bucket tags = %v", err)
+	}
+	for _, operation := range []string{"PutObject", "CreateMultipartUpload"} {
+		_, err := invoke(t, p, operation, map[string]any{"Bucket": "b", "Key": operation, "Tagging": "key=one&key=two"}, []byte("body"))
+		if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("%s duplicate header = %#v", operation, fault)
+		}
+	}
+	_, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": "copy", "CopySource": "b/source", "TaggingDirective": "REPLACE", "Tagging": "key=one&key=two"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("copy duplicate header = %#v", fault)
+	}
+	for _, key := range []string{"PutObject", "copy"} {
+		if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": key}, nil); asFault(t, err).Code != "NoSuchKey" {
+			t.Fatalf("rejected %s created object: %v", key, err)
+		}
 	}
 }
 

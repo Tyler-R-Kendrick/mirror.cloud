@@ -142,6 +142,14 @@ func TestDecodeTaggingXML(t *testing.T) {
 	if len(tags) != 1 || str(tags[0].(map[string]any)["Key"]) != "a" {
 		t.Fatalf("TagSet %v", req.Input)
 	}
+	r = httptest.NewRequest(http.MethodPut, "http://127.0.0.1/b?tagging", strings.NewReader(`<Tagging/>`))
+	req, err = Codec{}.Decode(&model.Service{ID: "aws.s3"}, op, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := req.Input["TagSet"]; ok {
+		t.Fatalf("missing TagSet decoded as %#v", req.Input["TagSet"])
+	}
 }
 
 func TestRESTXMLServiceRoutes(t *testing.T) {

@@ -244,7 +244,7 @@ func TestCreateBucketLocationConstraints(t *testing.T) {
 func TestCreateBucketValidatesGlobalNames(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	characterization := map[string]any{"invalid": map[string]any{}, "valid": map[string]any{}}
-	invalid := []string{"", "ab", strings.Repeat("a", 64), "Uppercase", "under_score", "-starts", "ends-", "adjacent..dots", "192.168.5.4", "xn--reserved", "sthree-reserved", "amzn-s3-demo-reserved", "reserved-s3alias", "reserved--ol-s3", "reserved.mrap", "reserved--x-s3", "reserved--table-s3", "reserved-an"}
+	invalid := []string{"", "ab", strings.Repeat("a", 64), "Uppercase", "under_score", "-starts", "ends-", "adjacent..dots", "192.168.5.4", "999.999.999.999", "192.168.005.4", "xn--reserved", "sthree-reserved", "amzn-s3-demo-reserved", "reserved-s3alias", "reserved--ol-s3", "reserved.mrap", "reserved--x-s3", "reserved--table-s3", "reserved-an"}
 	for _, name := range invalid {
 		_, err := invoke(t, p, "CreateBucket", map[string]any{"Bucket": name}, nil)
 		fault := asFault(t, err)

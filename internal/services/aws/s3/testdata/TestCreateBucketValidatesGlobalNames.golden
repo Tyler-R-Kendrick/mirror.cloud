@@ -2,7 +2,9 @@
   "invalid": {
     "": "InvalidBucketName",
     "-starts": "InvalidBucketName",
+    "192.168.005.4": "InvalidBucketName",
     "192.168.5.4": "InvalidBucketName",
+    "999.999.999.999": "InvalidBucketName",
     "Uppercase": "InvalidBucketName",
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "InvalidBucketName",
     "ab": "InvalidBucketName",

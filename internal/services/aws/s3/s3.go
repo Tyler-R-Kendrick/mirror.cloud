@@ -17,7 +17,6 @@ import (
 	"hash/crc64"
 	"io"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"sort"
 	"strconv"
@@ -113,7 +112,7 @@ func validBucketName(name string) bool {
 			return false
 		}
 	}
-	if _, err := netip.ParseAddr(name); err == nil {
+	if looksLikeIPv4(name) {
 		return false
 	}
 	for _, prefix := range []string{"xn--", "sthree-", "amzn-s3-demo-"} {
@@ -130,6 +129,24 @@ func validBucketName(name string) bool {
 }
 
 func bucketNameEdge(c byte) bool { return c >= 'a' && c <= 'z' || c >= '0' && c <= '9' }
+
+func looksLikeIPv4(name string) bool {
+	parts := strings.Split(name, ".")
+	if len(parts) != 4 {
+		return false
+	}
+	for _, part := range parts {
+		if len(part) < 1 || len(part) > 3 {
+			return false
+		}
+		for i := range len(part) {
+			if part[i] < '0' || part[i] > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
 
 // New constructs the pack.
 func New(d spi.Deps) *Pack { return &Pack{deps: d, mpu: map[string]*mpu{}} }

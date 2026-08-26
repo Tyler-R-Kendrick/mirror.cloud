@@ -200,6 +200,31 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 		t.Fatalf("no UploadId in %s", b)
 	}
 	uploadID := string(uid[1])
+	startUpload := func(key string) string {
+		t.Helper()
+		code, body, _ := do(http.MethodPost, "/qb/"+key+"?uploads", "", nil)
+		id := regexp.MustCompile(`<UploadId>([^<]+)</UploadId>`).FindSubmatch(body)
+		if code >= 300 || id == nil {
+			t.Fatalf("create %s upload %d %s", key, code, body)
+		}
+		return string(id[1])
+	}
+	startUpload("z")
+	startUpload("a")
+	startUpload("photos/2026/x")
+	if code, body, _ := do(http.MethodGet, "/qb?uploads&max-uploads=2", "", nil); code != 200 {
+		t.Fatalf("list uploads page 1 %d %s", code, body)
+	} else if bytes.Count(body, []byte("<Upload>")) != 2 || bytes.Contains(body, []byte("<member>")) || !bytes.Contains(body, []byte("<Key>a</Key>")) || !bytes.Contains(body, []byte("<Key>m</Key>")) || !bytes.Contains(body, []byte("<IsTruncated>true</IsTruncated>")) || !bytes.Contains(body, []byte("<NextKeyMarker>m</NextKeyMarker>")) || !bytes.Contains(body, []byte("<NextUploadIdMarker>"+uploadID+"</NextUploadIdMarker>")) {
+		t.Fatalf("list uploads page 1 %s", body)
+	}
+	if code, body, _ := do(http.MethodGet, "/qb?uploads&key-marker=m&upload-id-marker="+uploadID+"&max-uploads=2", "", nil); code != 200 {
+		t.Fatalf("list uploads page 2 %d %s", code, body)
+	} else if !bytes.Contains(body, []byte("<Key>photos/2026/x</Key>")) || !bytes.Contains(body, []byte("<Key>z</Key>")) || !bytes.Contains(body, []byte("<IsTruncated>false</IsTruncated>")) {
+		t.Fatalf("list uploads page 2 %s", body)
+	}
+	if code, body, _ := do(http.MethodGet, "/qb?uploads&prefix=photos/&delimiter=/", "", nil); code != 200 || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>photos/2026/</Prefix></CommonPrefixes>")) {
+		t.Fatalf("list grouped uploads %d %s", code, body)
+	}
 	code, b, part1Headers := do(http.MethodPut, "/qb/m?partNumber=1&uploadId="+uploadID, strings.Repeat("A", 5<<20), nil)
 	if code >= 300 {
 		t.Fatalf("upload part %d %s", code, b)

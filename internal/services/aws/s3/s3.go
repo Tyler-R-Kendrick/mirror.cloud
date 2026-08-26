@@ -43,9 +43,9 @@ type Pack struct {
 }
 
 type mpu struct {
-	bucket, key, uploadID string
-	storageClass          string
-	parts                 map[int]multipartPart
+	bucket, key, uploadID   string
+	storageClass, initiated string
+	parts                   map[int]multipartPart
 }
 
 type multipartPart struct {
@@ -185,7 +185,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "ListParts":
 		return p.listParts(req)
 	case "ListMultipartUploads":
-		return p.listMultipartUploads(req)
+		return p.listMultipartUploads(ctx, req)
 	case "ListObjectVersions":
 		return p.listObjectVersions(ctx, req)
 	case "UploadPartCopy":
@@ -830,7 +830,7 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 		storageClass = "STANDARD"
 	}
 	p.mu.Lock()
-	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, parts: map[int]multipartPart{}}
+	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339), parts: map[int]multipartPart{}}
 	p.mu.Unlock()
 	return &spi.Response{Output: map[string]any{"Bucket": b, "Key": key, "UploadId": id}}, nil
 }
@@ -1029,17 +1029,141 @@ func (p *Pack) listParts(req *spi.Request) (*spi.Response, error) {
 	return &spi.Response{Output: out}, nil
 }
 
-func (p *Pack) listMultipartUploads(req *spi.Request) (*spi.Response, error) {
-	b := str(req.Input["Bucket"])
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	var ups []any
-	for id, u := range p.mpu {
-		if b == "" || u.bucket == b {
-			ups = append(ups, map[string]any{"UploadId": id, "Key": u.key, "Bucket": u.bucket})
+func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	bucket := str(req.Input["Bucket"])
+	if err := p.requireBucket(ctx, req, bucket); err != nil {
+		return nil, err
+	}
+	parameter := func(input, query string) string {
+		if value := str(req.Input[input]); value != "" {
+			return value
+		}
+		if req.HTTP != nil {
+			return req.HTTP.URL.Query().Get(query)
+		}
+		return ""
+	}
+	prefix := parameter("Prefix", "prefix")
+	delimiter := parameter("Delimiter", "delimiter")
+	keyMarker := parameter("KeyMarker", "key-marker")
+	uploadMarker := parameter("UploadIdMarker", "upload-id-marker")
+	encoding := parameter("EncodingType", "encoding-type")
+	maxUploads := 1000
+	if _, provided := req.Input["MaxUploads"]; provided {
+		maxUploads = asInt(req.Input["MaxUploads"])
+	}
+	if raw := parameter("", "max-uploads"); raw != "" {
+		var err error
+		maxUploads, err = strconv.Atoi(raw)
+		if err != nil {
+			return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
 	}
-	return &spi.Response{Output: map[string]any{"Uploads": ups}}, nil
+	if maxUploads < 1 || maxUploads > 1000 {
+		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+
+	type uploadListing struct{ key, id, initiated, storageClass string }
+	p.mu.Lock()
+	uploads := make([]uploadListing, 0, len(p.mpu))
+	for id, upload := range p.mpu {
+		if upload.bucket == bucket && strings.HasPrefix(upload.key, prefix) {
+			uploads = append(uploads, uploadListing{upload.key, id, upload.initiated, upload.storageClass})
+		}
+	}
+	p.mu.Unlock()
+	sort.Slice(uploads, func(i, j int) bool {
+		if uploads[i].key != uploads[j].key {
+			return uploads[i].key < uploads[j].key
+		}
+		if uploads[i].initiated != uploads[j].initiated {
+			return uploads[i].initiated < uploads[j].initiated
+		}
+		return uploads[i].id < uploads[j].id
+	})
+
+	type entry struct {
+		key, uploadID string
+		row           map[string]any
+		common        bool
+	}
+	entries := make([]entry, 0, len(uploads))
+	common := map[string]bool{}
+	markerPassed := keyMarker == ""
+	for _, upload := range uploads {
+		if !markerPassed {
+			switch {
+			case upload.key > keyMarker:
+				markerPassed = true
+			case upload.key == keyMarker && uploadMarker != "" && upload.id == uploadMarker:
+				markerPassed = true
+				continue
+			default:
+				continue
+			}
+		}
+		if delimiter != "" {
+			remainder := strings.TrimPrefix(upload.key, prefix)
+			if index := strings.Index(remainder, delimiter); index >= 0 {
+				value := prefix + remainder[:index+len(delimiter)]
+				if value <= keyMarker || common[value] {
+					continue
+				}
+				common[value] = true
+				entries = append(entries, entry{key: value, row: map[string]any{"Prefix": value}, common: true})
+				continue
+			}
+		}
+		identity := map[string]any{"ID": req.Identity.Account}
+		entries = append(entries, entry{key: upload.key, uploadID: upload.id, row: map[string]any{
+			"Key": upload.key, "UploadId": upload.id, "Initiated": upload.initiated,
+			"StorageClass": upload.storageClass, "Initiator": identity, "Owner": identity,
+		}})
+	}
+	truncated := len(entries) > maxUploads
+	if truncated {
+		entries = entries[:maxUploads]
+	}
+	listed, prefixes := []any{}, []any{}
+	for _, item := range entries {
+		if item.common {
+			prefixes = append(prefixes, item.row)
+		} else {
+			listed = append(listed, item.row)
+		}
+	}
+	out := map[string]any{
+		"Bucket": bucket, "Prefix": prefix, "KeyMarker": keyMarker, "UploadIdMarker": uploadMarker,
+		"MaxUploads": maxUploads, "IsTruncated": truncated, "Uploads": listed, "CommonPrefixes": prefixes,
+	}
+	if delimiter != "" {
+		out["Delimiter"] = delimiter
+	}
+	if truncated {
+		last := entries[len(entries)-1]
+		out["NextKeyMarker"] = last.key
+		if last.uploadID != "" {
+			out["NextUploadIdMarker"] = last.uploadID
+		}
+	}
+	if encoding == "url" {
+		encode := func(value string) string { return strings.ReplaceAll(url.QueryEscape(value), "+", "%20") }
+		for _, item := range append(listed, prefixes...) {
+			row := asMap(item)
+			for _, field := range []string{"Key", "Prefix"} {
+				if value := str(row[field]); value != "" {
+					row[field] = encode(value)
+				}
+			}
+		}
+		for _, field := range []string{"Prefix", "Delimiter", "KeyMarker", "NextKeyMarker"} {
+			if value := str(out[field]); value != "" {
+				out[field] = encode(value)
+			}
+		}
+		out["EncodingType"] = "url"
+	}
+	return &spi.Response{Output: out}, nil
 }
 
 func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.Response, error) {

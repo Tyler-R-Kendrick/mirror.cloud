@@ -529,27 +529,35 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		root = "ListBucketResult"
 	}
 	fmt.Fprintf(&b, "<%s>", root)
-	if op.Name == "ListParts" {
-		top := make(map[string]any, len(resp.Output)-1)
-		for key, value := range resp.Output {
-			if key != "Parts" {
-				top[key] = value
-			}
-		}
-		write(top, &b)
-		if parts, ok := resp.Output["Parts"].([]any); ok {
-			for _, part := range parts {
-				b.WriteString("<Part>")
-				write(part, &b)
-				b.WriteString("</Part>")
-			}
-		}
-	} else {
+	switch op.Name {
+	case "ListParts":
+		writeFlattened(resp.Output, &b, [][2]string{{"Parts", "Part"}})
+	case "ListMultipartUploads":
+		writeFlattened(resp.Output, &b, [][2]string{{"Uploads", "Upload"}, {"CommonPrefixes", "CommonPrefixes"}})
+	default:
 		write(resp.Output, &b)
 	}
 	fmt.Fprintf(&b, "</%s>", root)
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+func writeFlattened(output map[string]any, b *strings.Builder, members [][2]string) {
+	top := make(map[string]any, len(output)-len(members))
+	for key, value := range output {
+		top[key] = value
+	}
+	for _, member := range members {
+		delete(top, member[0])
+	}
+	write(top, b)
+	for _, member := range members {
+		for _, item := range output[member[0]].([]any) {
+			fmt.Fprintf(b, "<%s>", member[1])
+			write(item, b)
+			fmt.Fprintf(b, "</%s>", member[1])
+		}
+	}
 }
 
 func write(v any, b *strings.Builder) {

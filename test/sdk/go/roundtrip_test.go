@@ -104,6 +104,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("conditional copy: %v", err)
 	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("copied"), CopySource: aws.String("sdk/copied")}); err == nil || !strings.Contains(err.Error(), "InvalidRequest") {
+		t.Fatalf("unchanged self-copy: %v", err)
+	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("copied"), CopySource: aws.String("sdk/copied"), MetadataDirective: s3types.MetadataDirectiveReplace, Metadata: map[string]string{"owner": "self"}}); err != nil {
+		t.Fatalf("metadata-replacing self-copy: %v", err)
+	}
 	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("source-owner-denied"), CopySource: aws.String("sdk/k"), ExpectedSourceBucketOwner: aws.String("999999999999")}); err == nil || !strings.Contains(err.Error(), "AccessDenied") {
 		t.Fatalf("mismatched expected source owner: %v", err)
 	}

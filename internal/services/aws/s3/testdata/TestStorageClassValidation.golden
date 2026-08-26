@@ -1,0 +1,25 @@
+{
+  "allowed": {
+    "DEEP_ARCHIVE": "DEEP_ARCHIVE",
+    "EXPRESS_ONEZONE": "EXPRESS_ONEZONE",
+    "GLACIER": "GLACIER",
+    "GLACIER_IR": "GLACIER_IR",
+    "INTELLIGENT_TIERING": "INTELLIGENT_TIERING",
+    "ONEZONE_IA": "ONEZONE_IA",
+    "REDUCED_REDUNDANCY": "REDUCED_REDUNDANCY",
+    "SNOW": "SNOW",
+    "STANDARD": "",
+    "STANDARD_IA": "STANDARD_IA"
+  },
+  "default": "STANDARD",
+  "invalid": {
+    " STANDARD": "InvalidStorageClass",
+    "INVALID": "InvalidStorageClass",
+    "OUTPOSTS": "InvalidStorageClass",
+    "standard": "InvalidStorageClass"
+  },
+  "operations": {
+    "copy": "InvalidStorageClass",
+    "multipart": "InvalidStorageClass"
+  }
+}

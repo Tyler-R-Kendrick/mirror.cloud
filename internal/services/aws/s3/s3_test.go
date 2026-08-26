@@ -372,6 +372,66 @@ func TestArchiveRestoreCharacterization(t *testing.T) {
 	})
 }
 
+func TestStorageClassValidation(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "classes"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "classes", "Key": "source"}, []byte("source"))
+	allowed := map[string]any{}
+	for _, storageClass := range []string{"STANDARD", "REDUCED_REDUNDANCY", "STANDARD_IA", "ONEZONE_IA", "INTELLIGENT_TIERING", "GLACIER", "DEEP_ARCHIVE", "GLACIER_IR", "SNOW", "EXPRESS_ONEZONE"} {
+		key := "allowed-" + storageClass
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "classes", "Key": key, "StorageClass": storageClass}, []byte(storageClass))
+		head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "classes", "Key": key}, nil)
+		header := head.Headers.Get("x-amz-storage-class")
+		if storageClass == "STANDARD" {
+			if header != "" {
+				t.Fatalf("STANDARD header = %q", header)
+			}
+		} else if header != storageClass {
+			t.Fatalf("%s header = %q", storageClass, header)
+		}
+		allowed[storageClass] = header
+	}
+	defaulted := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "classes", "Key": "defaulted"}, []byte("default"))
+	if head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "classes", "Key": "defaulted"}, nil); defaulted.Headers.Get("x-amz-storage-class") != "" || head.Headers.Get("x-amz-storage-class") != "" {
+		t.Fatalf("default storage class headers put=%v head=%v", defaulted.Headers, head.Headers)
+	}
+
+	invalid := map[string]any{}
+	for _, storageClass := range []string{"INVALID", "standard", "OUTPOSTS", " STANDARD"} {
+		key := "invalid-" + storageClass
+		_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": "classes", "Key": key, "StorageClass": storageClass}, []byte("rejected"))
+		fault := asFault(t, err)
+		if fault.Code != "InvalidStorageClass" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["StorageClassRequested"] != storageClass {
+			t.Fatalf("put %q = %#v", storageClass, fault)
+		}
+		if _, err := invoke(t, p, "HeadObject", map[string]any{"Bucket": "classes", "Key": key}, nil); asFault(t, err).Code != "NoSuchKey" {
+			t.Fatalf("invalid put %q created object: %v", storageClass, err)
+		}
+		invalid[storageClass] = fault.Code
+	}
+	_, err := invoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "classes", "Key": "multipart", "StorageClass": "OUTPOSTS"}, nil)
+	mpuFault := asFault(t, err)
+	uploads := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "classes"}, nil)
+	if mpuFault.Code != "InvalidStorageClass" || len(uploads.Output["Uploads"].([]any)) != 0 {
+		t.Fatalf("invalid multipart = %#v uploads=%#v", mpuFault, uploads.Output)
+	}
+	_, err = invoke(t, p, "CopyObject", map[string]any{"Bucket": "classes", "Key": "copy", "CopySource": "classes/source", "StorageClass": "invalid"}, nil)
+	copyFault := asFault(t, err)
+	if copyFault.Code != "InvalidStorageClass" {
+		t.Fatalf("invalid copy = %#v", copyFault)
+	}
+	if _, err := invoke(t, p, "HeadObject", map[string]any{"Bucket": "classes", "Key": "copy"}, nil); asFault(t, err).Code != "NoSuchKey" {
+		t.Fatalf("invalid copy created object: %v", err)
+	}
+
+	golden.AssertJSON(t, map[string]any{
+		"allowed":    allowed,
+		"default":    "STANDARD",
+		"invalid":    invalid,
+		"operations": map[string]any{"copy": copyFault.Code, "multipart": mpuFault.Code},
+	})
+}
+
 func TestExpectedBucketOwnerAndDeleteBoundary(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)

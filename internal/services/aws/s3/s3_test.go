@@ -185,28 +185,34 @@ func TestCreateBucketAccountRegionalNamespace(t *testing.T) {
 	} else {
 		characterization["east-location"] = got.Headers.Get("Location")
 	}
-	if _, err := invokeAs(t, p, east, "CreateBucket", input, nil); asFault(t, err).Code != "BucketAlreadyOwnedByYou" {
-		t.Fatalf("recreate = %v", err)
-	} else {
-		characterization["recreate"] = asFault(t, err).Code
+	_, err := invokeAs(t, p, east, "CreateBucket", input, nil)
+	fault := asFault(t, err)
+	if fault.Code != "BucketAlreadyOwnedByYou" || fault.HTTPStatus != http.StatusConflict || fault.Fields["BucketName"] != name {
+		t.Fatalf("recreate = %#v", fault)
 	}
+	characterization["recreate"] = fault.Code
 	mustInvokeAs(t, p, east, "PutObject", map[string]any{"Bucket": name, "Key": "key"}, []byte("value"))
 
 	other := spi.Identity{Account: "999999999999", Region: east.Region}
-	if _, err := invokeAs(t, p, other, "CreateBucket", input, nil); asFault(t, err).Code != "InvalidBucketName" {
-		t.Fatalf("foreign suffix = %v", err)
-	} else {
-		characterization["foreign-suffix"] = asFault(t, err).Code
+	_, err = invokeAs(t, p, other, "CreateBucket", input, nil)
+	fault = asFault(t, err)
+	if fault.Code != "InvalidBucketName" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["BucketName"] != name {
+		t.Fatalf("foreign suffix = %#v", fault)
 	}
+	characterization["foreign-suffix"] = fault.Code
 	if _, err := invokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": name, "BucketNamespace": "global"}, nil); asFault(t, err).Code != "InvalidBucketName" {
 		t.Fatalf("global -an name = %v", err)
 	} else {
 		characterization["global-an"] = asFault(t, err).Code
 	}
-	if _, err := invokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "bucket", "BucketNamespace": "regional"}, nil); asFault(t, err).Code != "InvalidArgument" {
-		t.Fatalf("unknown namespace = %v", err)
-	} else {
-		characterization["unknown"] = asFault(t, err).Code
+	_, err = invokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "bucket", "BucketNamespace": "regional"}, nil)
+	fault = asFault(t, err)
+	if fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "x-amz-bucket-namespace" || fault.Fields["ArgumentValue"] != "regional" {
+		t.Fatalf("unknown namespace = %#v", fault)
+	}
+	characterization["unknown"] = fault.Code
+	if _, err := invokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "explicit-global", "BucketNamespace": "global"}, nil); err != nil {
+		t.Fatalf("explicit global namespace: %v", err)
 	}
 
 	west := spi.Identity{Account: east.Account, Region: "us-west-2"}

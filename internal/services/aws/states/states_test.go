@@ -3127,6 +3127,28 @@ func TestStatesTestStateMapFailureCounts(t *testing.T) {
 	}
 }
 
+func TestStatesTestStatePatternMocks(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	for _, resource := range []string{
+		"arn:aws:states:us-east-1:1:activity:test",
+		"arn:aws:states:::batch:submitJob.sync",
+		"arn:aws:states:::states:startExecution.sync:2",
+		"arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+	} {
+		definition := fmt.Sprintf(`{"Type":"Task","Resource":%q,"End":true}`, resource)
+		request := &spi.Request{Identity: spi.Identity{Account: "1", Region: "us-east-1"}, Operation: "TestState", Input: map[string]any{"definition": definition}}
+		if _, err := p.Invoke(ctx, request); err == nil {
+			t.Fatalf("TestState accepted %s without a mock", resource)
+		}
+		request.Input["mock"] = map[string]any{"result": `{}`, "fieldValidationMode": "NONE"}
+		response, err := p.Invoke(ctx, request)
+		if err != nil || response.Output["status"] != "SUCCEEDED" {
+			t.Fatalf("TestState rejected mocked %s: %#v, %v", resource, response, err)
+		}
+	}
+}
+
 func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

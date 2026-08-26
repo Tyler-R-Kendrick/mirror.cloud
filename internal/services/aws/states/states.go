@@ -7811,7 +7811,7 @@ func testDefinition(definition, stateName string, input any, mock, configuration
 	if !supportedStateType(first(state, "Type")) {
 		return "", "", testStateSelection{}, fmt.Errorf("state does not have a supported Type")
 	}
-	if typ := first(state, "Type"); mock == nil && (typ == "Parallel" || typ == "Map" || typ == "Task" && strings.Contains(first(state, "Resource"), ":activity:")) {
+	if typ, resource := first(state, "Type"), first(state, "Resource"); mock == nil && (typ == "Parallel" || typ == "Map" || typ == "Task" && (strings.Contains(resource, ":activity:") || strings.HasSuffix(resource, ".sync") || strings.HasSuffix(resource, ".sync:2") || strings.HasSuffix(resource, ".waitForTaskToken"))) {
 		return "", "", testStateSelection{}, fmt.Errorf("state requires a mock")
 	}
 	if mock != nil && !slices.Contains([]string{"Task", "Map", "Parallel"}, first(state, "Type")) {

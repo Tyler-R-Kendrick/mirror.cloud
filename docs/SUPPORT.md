@@ -159,6 +159,8 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.managedblockchain` | `awsJson1_1` | 6 | 0 |
 | `aws.kinesisanalyticsv2` | `awsJson1_1` | 6 | 0 |
 
+S3 GetObjectAttributes honors requested ETag, checksum, object-parts, storage-class, and size fields for current or explicit versions, with composite part checksums and marker/limit pagination; full-object checksums return only the total part count.
+
 IAM evaluates user, group, role, and Organizations SCP policies: explicit Deny, then Allow. A principal with policies and no matching Allow is denied; no policies still allows. Access keys and `X-Mirror-Role` select principals. SimulatePrincipalPolicy/SimulateCustomPolicy use the same evaluator. Ops not in pack Operations() are mock-tier (or 501 under --strict), not leftover-KV sold as emulate.
 SSM `SecureString` uses a reversible local encoding, not real encryption. Leftover SSM ops (activations, sessions, inventory, patch groups, compliance, …) are control-plane records only — no SSM agent.
 Lambda CreateFunction/Invoke run a local python3 or node handler when that interpreter exists; other runtimes return `MirrorNotImplemented`.

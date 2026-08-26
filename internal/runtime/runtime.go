@@ -631,6 +631,7 @@ func SupportMatrix() string {
 	for _, r := range SupportRows() {
 		fmt.Fprintf(&sb, "| `%s` | `%s` | %d | %d |\n", r.ID, r.Protocol, r.Emulate, r.Mock)
 	}
+	sb.WriteString("\nS3 GetObjectAttributes honors requested ETag, checksum, object-parts, storage-class, and size fields for current or explicit versions, with composite part checksums and marker/limit pagination; full-object checksums return only the total part count.\n")
 	sb.WriteString("\nIAM evaluates user, group, role, and Organizations SCP policies: explicit Deny, then Allow. A principal with policies and no matching Allow is denied; no policies still allows. Access keys and `X-Mirror-Role` select principals. SimulatePrincipalPolicy/SimulateCustomPolicy use the same evaluator. Ops not in pack Operations() are mock-tier (or 501 under --strict), not leftover-KV sold as emulate.\n")
 	sb.WriteString("SSM `SecureString` uses a reversible local encoding, not real encryption. Leftover SSM ops (activations, sessions, inventory, patch groups, compliance, …) are control-plane records only — no SSM agent.\n")
 	sb.WriteString("Lambda CreateFunction/Invoke run a local python3 or node handler when that interpreter exists; other runtimes return `MirrorNotImplemented`.\n")

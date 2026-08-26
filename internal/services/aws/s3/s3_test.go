@@ -7,6 +7,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
@@ -213,6 +214,11 @@ func TestCreateBucketLocationConstraints(t *testing.T) {
 	} else {
 		characterization["matching"] = got.Output["LocationConstraint"]
 	}
+	secure, secureErr := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "CreateBucket", Identity: west, Input: map[string]any{"Bucket": "secure-location", "LocationConstraint": "us-west-2"}, HTTP: &http.Request{Method: http.MethodPut, URL: &url.URL{Path: "/secure-location"}, Host: "s3.test", TLS: &tls.ConnectionState{}}})
+	if secureErr != nil || secure.Headers.Get("Location") != "https://s3.test/secure-location/" {
+		t.Fatalf("secure create location = %#v %v", secure, secureErr)
+	}
+	characterization["secure-header"] = secure.Headers.Get("Location")
 
 	_, err := invokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "invalid-location", "LocationConstraint": "moon-west-1"}, nil)
 	if fault := asFault(t, err); fault.Code != "InvalidLocationConstraint" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["LocationConstraint"] != "moon-west-1" {

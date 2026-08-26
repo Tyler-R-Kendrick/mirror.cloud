@@ -583,6 +583,51 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	}
 }
 
+func TestListMultipartUploadsPaginationAndDelimiter(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	create := func(key, storageClass string) string {
+		t.Helper()
+		response := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": key, "StorageClass": storageClass}, nil)
+		_ = deps.Clock.Advance(time.Second)
+		return response.Output["UploadId"].(string)
+	}
+	create("photos/2026/b.jpg", "STANDARD")
+	firstSame := create("same", "STANDARD_IA")
+	create("alpha", "STANDARD")
+	secondSame := create("same", "STANDARD")
+	create("space key", "STANDARD")
+
+	firstPage := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "b", "MaxUploads": 3}, nil)
+	first := firstPage.Output["Uploads"].([]any)
+	if len(first) != 3 || first[0].(map[string]any)["Key"] != "alpha" || first[1].(map[string]any)["Key"] != "photos/2026/b.jpg" || first[2].(map[string]any)["UploadId"] != firstSame || first[2].(map[string]any)["StorageClass"] != "STANDARD_IA" || first[2].(map[string]any)["Initiated"] == "" || firstPage.Output["IsTruncated"] != true || firstPage.Output["NextKeyMarker"] != "same" || firstPage.Output["NextUploadIdMarker"] != firstSame {
+		t.Fatalf("first multipart page = %v", firstPage.Output)
+	}
+	secondPage := mustInvoke(t, p, "ListMultipartUploads", map[string]any{
+		"Bucket": "b", "KeyMarker": "same", "UploadIdMarker": firstSame, "MaxUploads": 3,
+	}, nil)
+	second := secondPage.Output["Uploads"].([]any)
+	if len(second) != 2 || second[0].(map[string]any)["UploadId"] != secondSame || second[1].(map[string]any)["Key"] != "space key" || secondPage.Output["IsTruncated"] != false {
+		t.Fatalf("second multipart page = %v", secondPage.Output)
+	}
+	grouped := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "b", "Prefix": "photos/", "Delimiter": "/"}, nil)
+	groups := grouped.Output["CommonPrefixes"].([]any)
+	if len(grouped.Output["Uploads"].([]any)) != 0 || len(groups) != 1 || groups[0].(map[string]any)["Prefix"] != "photos/2026/" {
+		t.Fatalf("grouped multipart uploads = %v", grouped.Output)
+	}
+	encoded := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "b", "Prefix": "space", "EncodingType": "url"}, nil)
+	if encoded.Output["Uploads"].([]any)[0].(map[string]any)["Key"] != "space%20key" || encoded.Output["EncodingType"] != "url" {
+		t.Fatalf("encoded multipart uploads = %v", encoded.Output)
+	}
+	for _, input := range []map[string]any{{"Bucket": "missing"}, {"Bucket": "b", "MaxUploads": 0}} {
+		_, err := invoke(t, p, "ListMultipartUploads", input, nil)
+		if fault := asFault(t, err); fault.HTTPStatus != http.StatusNotFound && fault.Code != "InvalidArgument" {
+			t.Fatalf("invalid multipart listing fault = %#v", fault)
+		}
+	}
+}
+
 func TestMultipartOperationsRejectMissingUpload(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)

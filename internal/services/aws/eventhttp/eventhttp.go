@@ -75,6 +75,9 @@ func Invoke(ctx context.Context, connection map[string]any, call Call) (Result, 
 		}
 		traceBody, _ = EncodeForm(traceBody, call.FormArrayFormat)
 	}
+	if call.MaxRequestBytes > 0 && int64(len(body)) > call.MaxRequestBytes {
+		return Result{}, &spi.Fault{Code: "TargetInvocationFailed", Message: "HTTP request exceeds its maximum size.", HTTPStatus: 400, Fault: "client"}
+	}
 	request, err := http.NewRequestWithContext(ctx, call.Method, call.Endpoint, bytes.NewReader(body))
 	if err != nil {
 		return Result{}, err

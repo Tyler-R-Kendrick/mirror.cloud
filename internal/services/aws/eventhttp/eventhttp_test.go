@@ -2,6 +2,7 @@ package eventhttp
 
 import (
 	"bytes"
+	"context"
 	"testing"
 )
 
@@ -29,5 +30,13 @@ func TestMergeBodyLimitWithoutConnectionParameters(t *testing.T) {
 	}
 	if body, err := MergeBody(bytes.Repeat([]byte{'x'}, 4), nil, 4); err != nil || len(body) != 4 {
 		t.Fatalf("rejected body at limit: %d, %v", len(body), err)
+	}
+}
+
+func TestInvokeChecksTransformedBodyLimit(t *testing.T) {
+	body := []byte(`{"value":"////"}`)
+	connection := map[string]any{"ConnectionState": "AUTHORIZED", "AuthorizationType": "BASIC", "AuthParameters": map[string]any{"BasicAuthParameters": map[string]any{}}}
+	if _, err := Invoke(context.Background(), connection, Call{Endpoint: "http://example.invalid", Method: "POST", Body: body, MaxRequestBytes: int64(len(body)), FormArrayFormat: "INDICES"}); err == nil {
+		t.Fatal("accepted URL-encoded body expanded beyond request limit")
 	}
 }

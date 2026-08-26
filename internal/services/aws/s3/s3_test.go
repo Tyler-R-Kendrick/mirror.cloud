@@ -328,6 +328,10 @@ func TestVersionedObjectTaggingCharacterization(t *testing.T) {
 	}
 
 	marker := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "b", "Key": "source"}, nil).Headers.Get("x-amz-version-id")
+	retained := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "b", "Key": "source", "VersionId": secondVersion}, nil)
+	if tags := asSliceForTest(retained.Output["TagSet"]); len(tags) != 1 || asMapForTest(tags[0])["Value"] != "second" {
+		t.Fatalf("delete marker lost version tags: %#v", retained.Output)
+	}
 	_, currentErr := invoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "b", "Key": "source"}, nil)
 	_, markerErr := invoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "b", "Key": "source", "VersionId": marker}, nil)
 	for _, operation := range []string{"GetObjectTagging", "PutObjectTagging", "DeleteObjectTagging"} {
@@ -340,6 +344,7 @@ func TestVersionedObjectTaggingCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{
 		"firstVersionTags": firstTags.Output["TagSet"],
 		"currentTags":      current.Output["TagSet"],
+		"retainedTags":     retained.Output["TagSet"],
 		"copiedTags":       copiedTags.Output["TagSet"],
 		"currentMarker":    asFault(t, currentErr).Code,
 		"explicitMarker":   asFault(t, markerErr).Code,
@@ -1104,6 +1109,18 @@ func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	}
 	if _, err := invokeAs(t, p, west, "GetObject", map[string]any{"Bucket": "destination", "Key": "logs/batch"}, nil); asFault(t, err).Code != "NoSuchKey" {
 		t.Fatalf("batch replica delete marker not visible: %v", err)
+	}
+
+	mustInvoke(t, p, "PutBucketReplication", map[string]any{
+		"Bucket": "source", "ReplicationConfiguration": map[string]any{"Rules": []any{map[string]any{
+			"Status": "Enabled", "Filter": map[string]any{"Prefix": "plain/"},
+			"Destination": map[string]any{"Bucket": "arn:aws:s3:::destination"},
+		}}},
+	}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "source", "Key": "plain/file", "Tagging": "owner=mirror"}, []byte("tagged"))
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "source", "Key": "plain/file"}, []byte("untagged"))
+	if tags := asSliceForTest(mustInvokeAs(t, p, west, "GetObjectTagging", map[string]any{"Bucket": "destination", "Key": "plain/file"}, nil).Output["TagSet"]); len(tags) != 0 {
+		t.Fatalf("replica inherited overwritten tags: %#v", tags)
 	}
 }
 

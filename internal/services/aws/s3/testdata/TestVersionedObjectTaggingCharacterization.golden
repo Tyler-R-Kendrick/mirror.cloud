@@ -22,5 +22,11 @@
       "Key": "team",
       "Value": "storage"
     }
+  ],
+  "retainedTags": [
+    {
+      "Key": "stage",
+      "Value": "second"
+    }
   ]
 }

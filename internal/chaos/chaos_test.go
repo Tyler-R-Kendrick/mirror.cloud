@@ -105,6 +105,41 @@ func TestConcurrentArchiveRestoresConverge(t *testing.T) {
 	}
 }
 
+func TestConcurrentInvalidStorageClassesLeaveNoObject(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "classes"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "classes", "Key": "object", "StorageClass": "INVALID"}, Body: io.NopCloser(bytes.NewReader([]byte("bad")))})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "InvalidStorageClass" {
+			t.Fatalf("invalid storage class: %v", err)
+		}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "HeadObject", Input: map[string]any{"Bucket": "classes", "Key": "object"}}); err == nil {
+		t.Fatal("invalid storage classes created an object")
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "classes", "Key": "object", "StorageClass": "STANDARD_IA"}, Body: io.NopCloser(bytes.NewReader([]byte("good")))}); err != nil {
+		t.Fatalf("valid write after invalid load: %v", err)
+	}
+}
+
 func TestTwoAccountsNeverSeeEachOtherUnderLoad(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

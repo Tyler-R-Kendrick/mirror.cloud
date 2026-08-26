@@ -1,0 +1,22 @@
+{
+  "invalid": {
+    "ascii": {
+      "code": "KeyTooLongError",
+      "max": "1024",
+      "size": "1025"
+    },
+    "utf8": {
+      "code": "KeyTooLongError",
+      "max": "1024",
+      "size": "1026"
+    }
+  },
+  "operations": {
+    "CopyObject": "KeyTooLongError",
+    "CreateMultipartUpload": "KeyTooLongError"
+  },
+  "valid_bytes": {
+    "ascii": 1024,
+    "utf8": 1024
+  }
+}

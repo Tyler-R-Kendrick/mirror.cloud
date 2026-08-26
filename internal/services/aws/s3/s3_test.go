@@ -435,12 +435,15 @@ func TestStorageClassValidation(t *testing.T) {
 func TestObjectKeyLengthValidation(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "keys"}, nil)
+	valid := map[string]any{}
 	for name, key := range map[string]string{"ascii": strings.Repeat("a", 1024), "utf8": strings.Repeat("é", 512)} {
 		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "keys", "Key": key}, []byte(name))
 		if got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "keys", "Key": key}, nil); string(readStream(t, got)) != name {
 			t.Fatalf("%s boundary key was not stored", name)
 		}
+		valid[name] = len(key)
 	}
+	invalid := map[string]any{}
 	for name, key := range map[string]string{"ascii": strings.Repeat("a", 1025), "utf8": strings.Repeat("é", 513)} {
 		_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": "keys", "Key": key}, []byte("rejected"))
 		fault := asFault(t, err)
@@ -450,20 +453,25 @@ func TestObjectKeyLengthValidation(t *testing.T) {
 		if _, err := invoke(t, p, "HeadObject", map[string]any{"Bucket": "keys", "Key": key}, nil); asFault(t, err).Code != "NoSuchKey" {
 			t.Fatalf("%s oversized key created object: %v", name, err)
 		}
+		invalid[name] = map[string]any{"code": fault.Code, "max": fault.Fields["MaxSizeAllowed"], "size": fault.Fields["Size"]}
 	}
 	longKey := strings.Repeat("x", 1025)
+	operations := map[string]any{}
 	for operation, input := range map[string]map[string]any{
 		"CopyObject":            {"Bucket": "keys", "Key": longKey, "CopySource": "missing/source"},
 		"CreateMultipartUpload": {"Bucket": "keys", "Key": longKey},
 	} {
 		_, err := invoke(t, p, operation, input, nil)
-		if fault := asFault(t, err); fault.Code != "KeyTooLongError" {
+		fault := asFault(t, err)
+		if fault.Code != "KeyTooLongError" {
 			t.Fatalf("%s oversized key = %#v", operation, fault)
 		}
+		operations[operation] = fault.Code
 	}
 	if uploads := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "keys"}, nil); len(uploads.Output["Uploads"].([]any)) != 0 {
 		t.Fatalf("oversized key created multipart upload: %#v", uploads.Output)
 	}
+	golden.AssertJSON(t, map[string]any{"valid_bytes": valid, "invalid": invalid, "operations": operations})
 }
 
 func TestExpectedBucketOwnerAndDeleteBoundary(t *testing.T) {

@@ -177,25 +177,36 @@ func TestCreateBucketGlobalCollisions(t *testing.T) {
 func TestCreateBucketAccountRegionalNamespace(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	east := ident()
+	characterization := map[string]any{}
 	name := "team-" + east.Account + "-" + east.Region + "-an"
 	input := map[string]any{"Bucket": name, "BucketNamespace": "account-regional"}
 	if got, err := invokeAs(t, p, east, "CreateBucket", input, nil); err != nil || got.Headers.Get("Location") != "/"+name {
 		t.Fatalf("create = %#v %v", got, err)
+	} else {
+		characterization["east-location"] = got.Headers.Get("Location")
 	}
 	if _, err := invokeAs(t, p, east, "CreateBucket", input, nil); asFault(t, err).Code != "BucketAlreadyOwnedByYou" {
 		t.Fatalf("recreate = %v", err)
+	} else {
+		characterization["recreate"] = asFault(t, err).Code
 	}
 	mustInvokeAs(t, p, east, "PutObject", map[string]any{"Bucket": name, "Key": "key"}, []byte("value"))
 
 	other := spi.Identity{Account: "999999999999", Region: east.Region}
 	if _, err := invokeAs(t, p, other, "CreateBucket", input, nil); asFault(t, err).Code != "InvalidBucketName" {
 		t.Fatalf("foreign suffix = %v", err)
+	} else {
+		characterization["foreign-suffix"] = asFault(t, err).Code
 	}
 	if _, err := invokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": name, "BucketNamespace": "global"}, nil); asFault(t, err).Code != "InvalidBucketName" {
 		t.Fatalf("global -an name = %v", err)
+	} else {
+		characterization["global-an"] = asFault(t, err).Code
 	}
 	if _, err := invokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "bucket", "BucketNamespace": "regional"}, nil); asFault(t, err).Code != "InvalidArgument" {
 		t.Fatalf("unknown namespace = %v", err)
+	} else {
+		characterization["unknown"] = asFault(t, err).Code
 	}
 
 	west := spi.Identity{Account: east.Account, Region: "us-west-2"}
@@ -203,10 +214,15 @@ func TestCreateBucketAccountRegionalNamespace(t *testing.T) {
 	westInput := map[string]any{"Bucket": westName, "BucketNamespace": "account-regional", "LocationConstraint": west.Region}
 	if got, err := invokeAs(t, p, west, "CreateBucket", westInput, nil); err != nil || got.Headers.Get("Location") != "/"+westName {
 		t.Fatalf("west create = %#v %v", got, err)
+	} else {
+		characterization["west-location"] = got.Headers.Get("Location")
 	}
 	if got := mustInvokeAs(t, p, west, "GetBucketLocation", map[string]any{"Bucket": westName}, nil); got.Output["LocationConstraint"] != west.Region {
 		t.Fatalf("west location = %#v", got.Output)
+	} else {
+		characterization["west-constraint"] = got.Output["LocationConstraint"]
 	}
+	golden.AssertJSON(t, characterization)
 }
 
 func TestCreateBucketLocationConstraints(t *testing.T) {

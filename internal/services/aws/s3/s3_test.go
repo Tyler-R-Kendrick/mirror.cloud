@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"testing"
 	"time"
@@ -185,6 +186,63 @@ func TestCopyObjectConditions(t *testing.T) {
 	}
 	if got := readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "destination"}, nil)); string(got) != "source" {
 		t.Fatalf("conditional copy = %q", got)
+	}
+}
+
+func TestCopyObjectSourceVersions(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "b", "Status": "Enabled"}, nil)
+	key := "reports/a b+c?.json"
+	first := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": key}, []byte("first"))
+	firstVersion := first.Headers.Get("x-amz-version-id")
+	_ = deps.Clock.Advance(time.Second)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": key}, []byte("second"))
+	source := "b/" + url.PathEscape(key)
+
+	copyVersion := mustInvoke(t, p, "CopyObject", map[string]any{
+		"Bucket": "b", "Key": "version-copy", "CopySource": source + "?versionId=" + url.PathEscape(firstVersion),
+	}, nil)
+	if got := copyVersion.Headers.Get("x-amz-copy-source-version-id"); got != firstVersion {
+		t.Fatalf("source version header = %q want %q", got, firstVersion)
+	}
+	if got := readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "version-copy"}, nil)); string(got) != "first" {
+		t.Fatalf("version copy = %q", got)
+	}
+	mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": "current-copy", "CopySource": source}, nil)
+	if got := readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "current-copy"}, nil)); string(got) != "second" {
+		t.Fatalf("current copy = %q", got)
+	}
+
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "part-copy"}, nil)
+	uploadID := created.Output["UploadId"].(string)
+	mustInvoke(t, p, "UploadPartCopy", map[string]any{
+		"UploadId": uploadID, "PartNumber": 1, "CopySource": source + "?versionId=" + url.PathEscape(firstVersion),
+	}, nil)
+	mustInvoke(t, p, "CompleteMultipartUpload", map[string]any{"UploadId": uploadID}, nil)
+	if got := readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "part-copy"}, nil)); string(got) != "first" {
+		t.Fatalf("version part copy = %q", got)
+	}
+
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "b", "Key": key}, nil)
+	if _, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": "deleted", "CopySource": source}, nil); asFault(t, err).Code != "NoSuchKey" {
+		t.Fatal("copied current delete marker")
+	}
+	mustInvoke(t, p, "CopyObject", map[string]any{
+		"Bucket": "b", "Key": "restored", "CopySource": source + "?versionId=" + url.PathEscape(firstVersion),
+	}, nil)
+	for _, invalid := range []struct {
+		source, code string
+	}{
+		{"b/bad%zz", "InvalidArgument"},
+		{source + "?versionId=missing", "NoSuchKey"},
+		{source + "?versionId=", "InvalidArgument"},
+	} {
+		_, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": "invalid", "CopySource": invalid.source}, nil)
+		if fault := asFault(t, err); fault.Code != invalid.code {
+			t.Fatalf("%q fault = %#v", invalid.source, fault)
+		}
 	}
 }
 

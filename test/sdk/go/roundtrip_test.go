@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 
 	mcfg "github.com/tyler-r-kendrick/mirror.cloud/internal/config"
@@ -49,9 +50,15 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk")}); err != nil {
 		t.Fatalf("create bucket: %v", err)
 	}
-	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{
-		Bucket: aws.String("sdk"), Key: aws.String("k"), Body: bytes.NewReader([]byte("hello-sdk")),
+	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{
+		Bucket: aws.String("sdk"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusEnabled},
 	}); err != nil {
+		t.Fatalf("enable versioning: %v", err)
+	}
+	put, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{
+		Bucket: aws.String("sdk"), Key: aws.String("k"), Body: bytes.NewReader([]byte("hello-sdk")),
+	})
+	if err != nil {
 		t.Fatalf("put: %v", err)
 	}
 	got, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k")})
@@ -72,6 +79,29 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		Bucket: aws.String("sdk"), Key: aws.String("rejected"), CopySource: aws.String("sdk/k"), CopySourceIfMatch: aws.String(`"wrong"`),
 	}); err == nil {
 		t.Fatal("conditional copy with wrong ETag succeeded")
+	}
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{
+		Bucket: aws.String("sdk"), Key: aws.String("k"), Body: bytes.NewReader([]byte("newer")),
+	}); err != nil {
+		t.Fatalf("put newer version: %v", err)
+	}
+	versionCopy, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{
+		Bucket: aws.String("sdk"), Key: aws.String("version-copy"), CopySource: aws.String("sdk/k?versionId=" + aws.ToString(put.VersionId)),
+	})
+	if err != nil {
+		t.Fatalf("copy version: %v", err)
+	}
+	if aws.ToString(versionCopy.CopySourceVersionId) != aws.ToString(put.VersionId) {
+		t.Fatalf("copy source version %q want %q", aws.ToString(versionCopy.CopySourceVersionId), aws.ToString(put.VersionId))
+	}
+	versioned, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("version-copy")})
+	if err != nil {
+		t.Fatalf("get version copy: %v", err)
+	}
+	versionedBody, _ := io.ReadAll(versioned.Body)
+	_ = versioned.Body.Close()
+	if string(versionedBody) != "hello-sdk" {
+		t.Fatalf("version copy body %q", versionedBody)
 	}
 
 	ddb := dynamodb.NewFromConfig(awscfg, func(o *dynamodb.Options) { o.BaseEndpoint = aws.String(ts.URL) })

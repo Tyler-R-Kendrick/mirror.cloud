@@ -179,8 +179,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		"PutBucketTagging", "PutBucketNotificationConfiguration", "PutObjectTagging",
 		"DeleteBucketTagging", "DeleteObjectTagging":
 		return p.emptyOK(ctx, req)
-	case "PutObjectLegalHold", "GetObjectLegalHold", "PutObjectRetention", "GetObjectRetention", "RestoreObject":
+	case "PutObjectLegalHold", "GetObjectLegalHold", "PutObjectRetention", "GetObjectRetention":
 		return p.objectLockExtras(ctx, req)
+	case "RestoreObject":
+		return p.restoreObject(ctx, req)
 	case "PutBucketAnalyticsConfiguration", "GetBucketAnalyticsConfiguration", "DeleteBucketAnalyticsConfiguration", "ListBucketAnalyticsConfigurations",
 		"PutBucketInventoryConfiguration", "GetBucketInventoryConfiguration", "DeleteBucketInventoryConfiguration", "ListBucketInventoryConfigurations",
 		"PutBucketMetricsConfiguration", "GetBucketMetricsConfiguration", "DeleteBucketMetricsConfiguration", "ListBucketMetricsConfigurations",
@@ -600,6 +602,9 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if truthy(meta["deleteMarker"]) {
 		return nil, deleteMarkerReadFault(meta, wantVer != "")
 	}
+	if err := p.requireRestored(ctx, req, b, key, meta); err != nil {
+		return nil, err
+	}
 	bk := blobKey(req, b, key)
 	if wantVer != "" {
 		bk = bk + "@" + wantVer
@@ -613,6 +618,9 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	h.Set("ETag", etag)
 	h.Set("Accept-Ranges", "bytes")
 	setObjectMetadataHeaders(h, meta)
+	if restore, ok := p.restoreState(ctx, req, b, key, meta); ok {
+		h.Set("x-amz-restore", restore)
+	}
 	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
 	mtime := str(meta["mtime"])
 	if mtime == "" {
@@ -704,6 +712,9 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	h.Set("ETag", objectETag(meta, info.MD5))
 	h.Set("Accept-Ranges", "bytes")
 	setObjectMetadataHeaders(h, meta)
+	if restore, ok := p.restoreState(ctx, req, b, key, meta); ok {
+		h.Set("x-amz-restore", restore)
+	}
 	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
 	h.Set("Last-Modified", str(meta["mtime"]))
 	if version := str(meta["versionId"]); version != "" {
@@ -917,7 +928,7 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		return nil, err
 	}
 	_, bucketEncrypted, _ := p.col(req, "bktcfg").Get(ctx, source.bucket+"/encryption")
-	_, sourceRestored, _ := p.col(req, "objlock").Get(ctx, source.bucket+"/"+source.key+"/restore")
+	_, sourceRestored := p.restoreState(ctx, req, source.bucket, source.key, source.meta)
 	if source.bucket == str(req.Input["Bucket"]) && source.key == str(req.Input["Key"]) &&
 		requestCondition(req, "StorageClass", "x-amz-storage-class") == "" &&
 		requestCondition(req, "ServerSideEncryption", "x-amz-server-side-encryption") == "" &&
@@ -1938,11 +1949,8 @@ func (p *Pack) objectLockExtras(ctx context.Context, req *spi.Request) (*spi.Res
 	if strings.Contains(req.Operation, "Retention") {
 		kind = "retention"
 	}
-	if strings.Contains(req.Operation, "Restore") {
-		kind = "restore"
-	}
 	ck := b + "/" + key + "/" + kind
-	if strings.HasPrefix(req.Operation, "Put") || req.Operation == "RestoreObject" {
+	if strings.HasPrefix(req.Operation, "Put") {
 		raw, _ := json.Marshal(req.Input)
 		_ = p.col(req, "objlock").Put(ctx, ck, raw)
 		p.syncReplicaObjectLock(ctx, req, b, key, kind, raw)
@@ -1955,6 +1963,45 @@ func (p *Pack) objectLockExtras(ctx context.Context, req *spi.Request) (*spi.Res
 	var doc map[string]any
 	_ = json.Unmarshal(raw, &doc)
 	return &spi.Response{Status: 200, Output: doc}, nil
+}
+
+func (p *Pack) restoreObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
+	version := str(req.Input["VersionId"])
+	if version == "" {
+		version = str(req.Input["versionId"])
+	}
+	meta, exists := p.objectMetadata(ctx, req, b, key, version)
+	if !exists {
+		return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client"}
+	}
+	if truthy(meta["deleteMarker"]) {
+		return nil, deleteMarkerReadFault(meta, version != "")
+	}
+	storageClass := archiveStorageClass(meta)
+	if storageClass == "" {
+		return nil, &spi.Fault{Code: "InvalidObjectState", HTTPStatus: http.StatusForbidden, Fault: "client", Fields: map[string]any{"StorageClass": str(meta["storageClass"])}}
+	}
+	days := asInt(req.Input["Days"])
+	if days == 0 {
+		days = asInt(asMap(req.Input["RestoreRequest"])["Days"])
+	}
+	if days == 0 {
+		return &spi.Response{Status: http.StatusOK, Output: map[string]any{}}, nil
+	}
+	_, restored := p.restoreState(ctx, req, b, key, meta)
+	now := p.deps.Clock.Now().UTC()
+	expires := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, days+1)
+	restore := fmt.Sprintf(`ongoing-request="false", expiry-date="%s"`, expires.Format(http.TimeFormat))
+	_ = p.col(req, "objlock").Put(ctx, objectRestoreKey(b, key, meta), []byte(restore))
+	status := http.StatusAccepted
+	if restored {
+		status = http.StatusOK
+	}
+	return &spi.Response{Status: status, Output: map[string]any{}}, nil
 }
 
 func (p *Pack) namedCfg(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -2145,11 +2192,45 @@ func (p *Pack) openCopySource(ctx context.Context, req *spi.Request) (*copySourc
 		}
 		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
 	}
+	if err := p.requireRestored(ctx, req, bucket, key, meta); err != nil {
+		return nil, err
+	}
 	body, info, err := p.deps.Blobs.Get(ctx, blob)
 	if err != nil {
 		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
 	}
 	return &copySource{bucket: bucket, key: key, version: version, body: body, info: info, meta: meta}, nil
+}
+
+func archiveStorageClass(meta map[string]any) string {
+	storageClass := str(meta["storageClass"])
+	if storageClass == "GLACIER" || storageClass == "DEEP_ARCHIVE" {
+		return storageClass
+	}
+	return ""
+}
+
+func objectRestoreKey(bucket, key string, meta map[string]any) string {
+	if version := str(meta["versionId"]); version != "" {
+		return bucket + "/" + key + "/" + version + "/restore"
+	}
+	return bucket + "/" + key + "/restore"
+}
+
+func (p *Pack) restoreState(ctx context.Context, req *spi.Request, bucket, key string, meta map[string]any) (string, bool) {
+	raw, ok, _ := p.col(req, "objlock").Get(ctx, objectRestoreKey(bucket, key, meta))
+	return string(raw), ok
+}
+
+func (p *Pack) requireRestored(ctx context.Context, req *spi.Request, bucket, key string, meta map[string]any) error {
+	storageClass := archiveStorageClass(meta)
+	if storageClass == "" {
+		return nil
+	}
+	if _, ok := p.restoreState(ctx, req, bucket, key, meta); ok {
+		return nil
+	}
+	return &spi.Fault{Code: "InvalidObjectState", Message: "The operation is not valid for the object's storage class", HTTPStatus: http.StatusForbidden, Fault: "client", Fields: map[string]any{"StorageClass": storageClass}}
 }
 
 func (p *Pack) objectMetadata(ctx context.Context, req *spi.Request, bucket, key, version string) (map[string]any, bool) {

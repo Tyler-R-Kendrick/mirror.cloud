@@ -424,6 +424,16 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 			parts = append(parts, map[string]any{"ETag": part.ETag, "PartNumber": part.PartNumber})
 		}
 		in["MultipartUpload"] = map[string]any{"Parts": parts}
+	case "RestoreObject":
+		var restore struct {
+			Days int `xml:"Days"`
+		}
+		if xml.Unmarshal(raw, &restore) != nil {
+			in["_body"] = string(raw)
+			return
+		}
+		in["Days"] = restore.Days
+		in["RestoreRequest"] = map[string]any{"Days": restore.Days}
 	case "PutBucketTagging", "PutObjectTagging":
 		var t struct {
 			TagSet *struct {

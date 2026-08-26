@@ -268,7 +268,7 @@ func TestCopyObjectRejectsUnchangedSelfCopy(t *testing.T) {
 	characterization["bucketEncryption"] = "allowed"
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "restored"}, nil)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "restored", "Key": "k", "StorageClass": "GLACIER"}, []byte("body"))
-	mustInvoke(t, p, "RestoreObject", map[string]any{"Bucket": "restored", "Key": "k"}, nil)
+	mustInvoke(t, p, "RestoreObject", map[string]any{"Bucket": "restored", "Key": "k", "RestoreRequest": map[string]any{"Days": 1}}, nil)
 	if _, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "restored", "Key": "k", "CopySource": "restored/k"}, nil); err != nil {
 		t.Fatalf("restored source self-copy: %v", err)
 	}

@@ -4744,6 +4744,19 @@ func (p *Pack) invokeHTTPTask(ctx context.Context, req *spi.Request, payload any
 			return inspectedTaskResult{}, &spi.Fault{Code: "States.Runtime", Message: "HTTP Task header is not allowed.", HTTPStatus: 400, Fault: "client"}
 		}
 	}
+	transform, transformValid := optionalObject(input, "Transform")
+	encoding := first(transform, "RequestBodyEncoding")
+	if encoding == "" {
+		encoding = "NONE"
+	}
+	options, optionsValid := optionalObject(transform, "RequestEncodingOptions")
+	arrayFormat := first(options, "ArrayFormat")
+	if arrayFormat == "" {
+		arrayFormat = "INDICES"
+	}
+	if !transformValid || !optionsValid || !slices.Contains([]string{"NONE", "URL_ENCODED"}, encoding) || !slices.Contains([]string{"INDICES", "REPEAT", "COMMAS", "BRACKETS"}, arrayFormat) {
+		return inspectedTaskResult{}, &spi.Fault{Code: "States.Runtime", Message: "HTTP Task transform is invalid.", HTTPStatus: 400, Fault: "client"}
+	}
 	var body []byte
 	if requestBody, exists := input["RequestBody"]; exists {
 		body, parseErr = json.Marshal(requestBody)
@@ -4755,11 +4768,25 @@ func (p *Pack) invokeHTTPTask(ctx context.Context, req *spi.Request, payload any
 			headers["Content-Type"] = "application/json; charset=UTF-8"
 		}
 	}
+	formArrayFormat := ""
+	if encoding == "URL_ENCODED" {
+		formArrayFormat = arrayFormat
+		contentType := ""
+		for name, value := range headers {
+			if strings.EqualFold(name, "Content-Type") {
+				contentType, _ = value.(string)
+			}
+		}
+		if !strings.EqualFold(contentType, "application/x-www-form-urlencoded") {
+			return inspectedTaskResult{}, &spi.Fault{Code: "States.Runtime", Message: "URL-encoded HTTP Task bodies require form content type.", HTTPStatus: 400, Fault: "client"}
+		}
+	}
 	result, err := eventhttp.Invoke(ctx, connection, eventhttp.Call{
 		Endpoint: endpoint, Method: method, Headers: headers, Query: query, Body: body,
 		Timeout: 60 * time.Second, MaxRequestBytes: 262144, MaxResponseBytes: 262144,
 		UserAgent: "Amazon|StepFunctions|HttpInvoke|" + req.Identity.Region, Range: "bytes=0-262144",
-		RevealSecrets: toBool(req.Input["_testStateRevealSecrets"]),
+		RevealSecrets:   toBool(req.Input["_testStateRevealSecrets"]),
+		FormArrayFormat: formArrayFormat,
 	})
 	inspected := inspectedTaskResult{inspection: result.Inspection}
 	if err != nil {
@@ -4801,7 +4828,11 @@ func optionalObject(input map[string]any, key string) (map[string]any, bool) {
 }
 
 func forbiddenHTTPTaskHeader(name string) bool {
-	switch strings.ToLower(name) {
+	name = strings.ToLower(name)
+	if strings.HasPrefix(name, "x-forwarded-") || strings.HasPrefix(name, "x-amz-") || strings.HasPrefix(name, "x-amzn-") {
+		return true
+	}
+	switch name {
 	case "a-im", "accept-charset", "accept-datetime", "accept-encoding", "authorization", "cache-control", "connection", "content-encoding", "content-md5", "date", "expect", "forwarded", "from", "host", "http2-settings", "if-match", "if-modified-since", "if-none-match", "if-range", "if-unmodified-since", "max-forwards", "origin", "pragma", "proxy-authorization", "referer", "server", "te", "trailer", "transfer-encoding", "upgrade", "via", "warning":
 		return true
 	default:

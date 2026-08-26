@@ -5,9 +5,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +26,7 @@ type Call struct {
 	Timeout                            time.Duration
 	MaxRequestBytes, MaxResponseBytes  int64
 	RevealSecrets                      bool
+	FormArrayFormat                    string
 }
 
 // Result contains the raw response and TestState-compatible request/response inspection data.
@@ -60,6 +64,17 @@ func Invoke(ctx context.Context, connection map[string]any, call Call) (Result, 
 	if err != nil {
 		return Result{}, err
 	}
+	traceBody := body
+	if !call.RevealSecrets {
+		traceBody = call.Body
+	}
+	if call.FormArrayFormat != "" {
+		body, err = EncodeForm(body, call.FormArrayFormat)
+		if err != nil {
+			return Result{}, err
+		}
+		traceBody, _ = EncodeForm(traceBody, call.FormArrayFormat)
+	}
 	request, err := http.NewRequestWithContext(ctx, call.Method, call.Endpoint, bytes.NewReader(body))
 	if err != nil {
 		return Result{}, err
@@ -81,7 +96,7 @@ func Invoke(ctx context.Context, connection map[string]any, call Call) (Result, 
 	if err := authorize(ctx, client, request, authorizationType, auth); err != nil {
 		return Result{}, err
 	}
-	requestTrace := traceRequest(request, body, invocation, auth, authorizationType, call.RevealSecrets)
+	requestTrace := traceRequest(request, traceBody, invocation, auth, authorizationType, call.RevealSecrets)
 	response, err := client.Do(request)
 	if err != nil {
 		return Result{Inspection: map[string]any{"request": requestTrace}}, err
@@ -133,6 +148,50 @@ func MergeBody(body []byte, raw any, limit int64) ([]byte, error) {
 		return nil, &spi.Fault{Code: "TargetInvocationFailed", Message: "HTTP request exceeds its maximum size.", HTTPStatus: 400, Fault: "client"}
 	}
 	return merged, nil
+}
+
+// EncodeForm converts a JSON object to Step Functions URL-encoded request syntax.
+func EncodeForm(body []byte, arrayFormat string) ([]byte, error) {
+	var object map[string]any
+	if json.Unmarshal(body, &object) != nil || object == nil {
+		return nil, &spi.Fault{Code: "States.Runtime", Message: "URL-encoded HTTP Task bodies must be objects.", HTTPStatus: 400, Fault: "client"}
+	}
+	values := url.Values{}
+	var add func(string, any)
+	add = func(key string, value any) {
+		switch value := value.(type) {
+		case map[string]any:
+			for _, child := range slices.Sorted(maps.Keys(value)) {
+				add(key+"["+child+"]", value[child])
+			}
+		case []any:
+			if arrayFormat == "COMMAS" {
+				items := make([]string, len(value))
+				for index := range value {
+					items[index] = fmt.Sprint(value[index])
+				}
+				values.Add(key, strings.Join(items, ","))
+				return
+			}
+			for index, item := range value {
+				arrayKey := key
+				if arrayFormat == "INDICES" {
+					arrayKey += "[" + strconv.Itoa(index) + "]"
+				} else if arrayFormat == "BRACKETS" {
+					arrayKey += "[]"
+				}
+				add(arrayKey, item)
+			}
+		case nil:
+			values.Add(key, "")
+		default:
+			values.Add(key, fmt.Sprint(value))
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(object)) {
+		add(key, object[key])
+	}
+	return []byte(values.Encode()), nil
 }
 
 func authorize(ctx context.Context, client *http.Client, request *http.Request, authorizationType string, auth map[string]any) error {
@@ -237,16 +296,6 @@ func traceRequest(request *http.Request, body []byte, invocation, auth map[strin
 			headers.Del(stringValue(apiKey["ApiKeyName"]))
 		} else {
 			headers.Del("Authorization")
-		}
-		if parameters := sliceValue(invocation["BodyParameters"]); len(parameters) != 0 {
-			var object map[string]any
-			if json.Unmarshal(body, &object) == nil {
-				for _, raw := range parameters {
-					parameter, _ := raw.(map[string]any)
-					delete(object, stringValue(parameter["Key"]))
-				}
-				traceBody, _ = json.Marshal(object)
-			}
 		}
 	}
 	encodedHeaders, _ := json.Marshal(headers)

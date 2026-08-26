@@ -1022,6 +1022,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestExpectedBucketOwnerAndDeleteBoundary",
 		},
 		{
+			name: "s3-copy-skip-source-owner",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if err := p.requireBucketOwner(ctx, req, bucket, requestCondition(req, "ExpectedSourceBucketOwner", "x-amz-source-expected-bucket-owner")); err != nil {`,
+			new:  `if err := p.requireBucketOwner(ctx, req, bucket, requestCondition(req, "ExpectedSourceBucketOwner", "x-amz-source-expected-bucket-owner")); err != nil && false {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestExpectedSourceBucketOwnerAndCopyBoundary",
+		},
+		{
+			name: "s3-copy-ignore-expected-source-owner",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `requestCondition(req, "ExpectedSourceBucketOwner", "x-amz-source-expected-bucket-owner")`,
+			new:  `""`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestExpectedSourceBucketOwnerAndCopyBoundary",
+		},
+		{
 			name: "s3-copy-current-delete-marker",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  "if !exists {\n\t\treturn nil, &spi.Fault{Code: \"NoSuchKey\", HTTPStatus: 404, Fault: \"client\"}\n\t}\n\tif truthy(meta[\"deleteMarker\"]) {",

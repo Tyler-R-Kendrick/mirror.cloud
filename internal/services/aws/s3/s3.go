@@ -863,6 +863,9 @@ func (p *Pack) uploadPartCopy(ctx context.Context, req *spi.Request) (*spi.Respo
 func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	id := mpuID(req)
 	pn := partNumber(req)
+	if pn < 1 || pn > 10000 {
+		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
 	var body []byte
 	if req.Body != nil {
 		body, _ = io.ReadAll(req.Body)
@@ -914,6 +917,9 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	for index, completed := range parts {
 		item := asMap(completed)
 		number := asInt(item["PartNumber"])
+		if number < 1 || number > 10000 {
+			return nil, &spi.Fault{Code: "InvalidPart", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
 		if number <= previous {
 			return nil, &spi.Fault{Code: "InvalidPartOrder", HTTPStatus: 400, Fault: "client"}
 		}
@@ -1845,19 +1851,17 @@ func mpuID(req *spi.Request) string {
 }
 
 func partNumber(req *spi.Request) int {
-	if n := asInt(req.Input["PartNumber"]); n > 0 {
-		return n
+	if value, ok := req.Input["PartNumber"]; ok {
+		return asInt(value)
 	}
-	if n := asInt(req.Input["partNumber"]); n > 0 {
-		return n
+	if value, ok := req.Input["partNumber"]; ok {
+		return asInt(value)
 	}
 	if req.HTTP != nil {
 		n, _ := strconv.Atoi(req.HTTP.URL.Query().Get("partNumber"))
-		if n > 0 {
-			return n
-		}
+		return n
 	}
-	return 1
+	return 0
 }
 
 func asInt(v any) int {

@@ -3155,6 +3155,28 @@ func TestStatesTestStatePatternMocks(t *testing.T) {
 	}
 }
 
+func TestStatesTestStateItemReaderData(t *testing.T) {
+	p := New(spitest.Deps(t))
+	request := &spi.Request{Identity: spi.Identity{Account: "1", Region: "us-east-1"}, Operation: "TestState", Input: map[string]any{
+		"definition": `{"QueryLanguage":"JSONata","Type":"Map","ItemReader":{"Resource":"arn:aws:states:::s3:getObject","ReaderConfig":{"InputType":"JSON","ItemsPointer":"/records"}},"ItemSelector":{"source":"{% $states.context.Map.Item.Source %}","value":"{% $states.context.Map.Item.Value %}"},"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}`,
+		"input":      `{"ignored":true}`, "mock": map[string]any{"result": `[]`}, "inspectionLevel": "DEBUG",
+		"stateConfiguration": map[string]any{"mapItemReaderData": `{"records":[1,2]}`},
+	}}
+	response, err := p.Invoke(context.Background(), request)
+	if err != nil || response.Output["inspectionData"].(map[string]any)["afterItemSelector"] != `[{"source":"JSON","value":1},{"source":"JSON","value":2}]` {
+		t.Fatalf("TestState JSONata ItemReader data %#v, %v", response, err)
+	}
+	for _, definition := range []string{
+		`{"Type":"Task","Resource":"arn:aws:states:::unknown","End":true}`,
+		`{"Type":"Map","ItemReader":{"Resource":"reader"},"ItemProcessor":{"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}`,
+	} {
+		request.Input["definition"] = definition
+		if _, err := p.Invoke(context.Background(), request); err == nil {
+			t.Fatalf("TestState accepted ItemReader data for %s", definition)
+		}
+	}
+}
+
 func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

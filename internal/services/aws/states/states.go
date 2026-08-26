@@ -1270,6 +1270,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		var testMachine map[string]any
 		_ = json.Unmarshal([]byte(wrapped), &testMachine)
 		testedState, _ := testMachine["States"].(map[string]any)["TestState"].(map[string]any)
+		if _, configured := inputValue(configuration, "mapItemReaderData", "MapItemReaderData"); configured {
+			_, hasReader := testedState["ItemReader"].(map[string]any)
+			processor, _ := testedState["ItemProcessor"].(map[string]any)
+			processorConfig, _ := processor["ProcessorConfig"].(map[string]any)
+			if first(testedState, "Type") != "Map" || !hasReader || first(processorConfig, "Mode") != "DISTRIBUTED" {
+				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+			}
+		}
 		if result, mockedResult := mock["Result"]; mockedResult && !validTestStateMock(testedState, result, first(mock, "FieldValidationMode")) {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
@@ -7438,6 +7446,16 @@ func inspectTestState(state map[string]any, input any, context, variables, mock,
 			inspection[key] = string(data)
 		}
 	}
+	readerData, hasReaderData, validReaderData, itemSource := any(nil), false, true, "STATE_DATA"
+	if raw := first(configuration, "mapItemReaderData", "MapItemReaderData"); raw != "" {
+		reader, _ := state["ItemReader"].(map[string]any)
+		readerConfig, _ := reader["ReaderConfig"].(map[string]any)
+		if inputType := first(readerConfig, "InputType"); inputType == "" || inputType == "JSON" {
+			hasReaderData = true
+			itemSource = "JSON"
+			validReaderData = json.Unmarshal([]byte(raw), &readerData) == nil
+		}
+	}
 	encode("input", input)
 	if first(state, "QueryLanguage") == "JSONata" {
 		if arguments, exists := state["Arguments"]; exists {
@@ -7451,6 +7469,14 @@ func inspectTestState(state map[string]any, input any, context, variables, mock,
 		if first(state, "Type") == "Map" {
 			scope := jsonataScope{input: input, context: context, variables: variables, random: random}
 			items, valid := input, true
+			if hasReaderData {
+				items, valid = readerData, validReaderData
+				reader, _ := state["ItemReader"].(map[string]any)
+				readerConfig, _ := reader["ReaderConfig"].(map[string]any)
+				if pointer := first(readerConfig, "ItemsPointer"); valid && pointer != "" {
+					items, valid = resolveJSONPointer(items, pointer)
+				}
+			}
 			if configured, exists := state["Items"]; exists {
 				items, valid = evalJSONataValue(configured, scope)
 			}
@@ -7459,7 +7485,7 @@ func inspectTestState(state map[string]any, input any, context, variables, mock,
 			selected = append([]any(nil), selected...)
 			if selector, exists := state["ItemSelector"]; valid && exists {
 				for index, item := range selected {
-					itemContext := map[string]any{"Map": map[string]any{"Item": map[string]any{"Index": float64(index), "Value": item, "Source": "STATE_DATA"}}}
+					itemContext := map[string]any{"Map": map[string]any{"Item": map[string]any{"Index": float64(index), "Value": item, "Source": itemSource}}}
 					selected[index], valid = evalJSONataValue(selector, jsonataScope{input: input, context: mergeJSONataContext(context, itemContext), variables: variables, random: random})
 					if !valid {
 						break
@@ -7499,17 +7525,15 @@ func inspectTestState(state map[string]any, input any, context, variables, mock,
 			}
 		case "Map":
 			dataset := afterInputPath
-			if raw := first(configuration, "mapItemReaderData", "MapItemReaderData"); raw != "" {
+			if hasReaderData {
+				dataset, valid = readerData, validReaderData
 				reader, _ := state["ItemReader"].(map[string]any)
 				readerConfig, _ := reader["ReaderConfig"].(map[string]any)
-				if inputType := first(readerConfig, "InputType"); inputType == "" || inputType == "JSON" {
-					valid = json.Unmarshal([]byte(raw), &dataset) == nil
-					if pointer := first(readerConfig, "ItemsPointer"); valid && pointer != "" {
-						dataset, valid = resolveJSONPointer(dataset, pointer)
-					}
-					if valid {
-						encode("afterItemsPointer", dataset)
-					}
+				if pointer := first(readerConfig, "ItemsPointer"); valid && pointer != "" {
+					dataset, valid = resolveJSONPointer(dataset, pointer)
+				}
+				if valid {
+					encode("afterItemsPointer", dataset)
 				}
 			}
 			if path := first(state, "ItemsPath"); valid && path != "" {
@@ -7526,7 +7550,7 @@ func inspectTestState(state map[string]any, input any, context, variables, mock,
 				selector = state["Parameters"]
 			}
 			for index, item := range selected {
-				itemContext := map[string]any{"Map": map[string]any{"Item": map[string]any{"Index": float64(index), "Value": item, "Source": "STATE_DATA"}}}
+				itemContext := map[string]any{"Map": map[string]any{"Item": map[string]any{"Index": float64(index), "Value": item, "Source": itemSource}}}
 				if configured, exists := selector.(map[string]any); exists {
 					selected[index], valid = applyParamsValidated(configured, afterInputPath, mergeJSONataContext(context, itemContext), random, variables)
 					if !valid {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -213,7 +214,11 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 		t.Fatalf("list parts empty %s", b)
 	}
 	comp := `<CompleteMultipartUpload><Part><ETag>` + part1Headers.Get("ETag") + `</ETag><PartNumber>1</PartNumber></Part><Part><ETag>` + part2Headers.Get("ETag") + `</ETag><PartNumber>2</PartNumber></Part></CompleteMultipartUpload>`
-	if code, b, h := do(http.MethodPost, "/qb/m?uploadId="+uploadID, comp, nil); code >= 300 {
+	size := 5<<20 + len("SRC-BYTES")
+	if code, b, _ := do(http.MethodPost, "/qb/m?uploadId="+uploadID, comp, map[string]string{"x-amz-mp-object-size": strconv.Itoa(size - 1)}); code != http.StatusBadRequest || !bytes.Contains(b, []byte("InvalidRequest")) {
+		t.Fatalf("complete mpu size mismatch %d %s", code, b)
+	}
+	if code, b, h := do(http.MethodPost, "/qb/m?uploadId="+uploadID, comp, map[string]string{"x-amz-mp-object-size": strconv.Itoa(size)}); code >= 300 {
 		t.Fatalf("complete mpu %d %s", code, b)
 	} else if !bytes.Contains(b, []byte("-2")) && !strings.Contains(h.Get("ETag"), "-2") {
 		t.Fatalf("multipart etag %s %v", b, h)

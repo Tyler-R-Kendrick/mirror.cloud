@@ -501,6 +501,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		return nil, err
 	}
 	objectMetadata := requestObjectMetadata(req)
+	websiteRedirectLocation := requestCondition(req, "WebsiteRedirectLocation", "x-amz-website-redirect-location")
 	var body []byte
 	if req.Body != nil {
 		body, _ = io.ReadAll(req.Body)
@@ -530,7 +531,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	if p.versioningEnabled(ctx, req, b) {
 		vid = p.deps.Rand.Hex(8)
 		_, _ = p.deps.Blobs.Put(ctx, blobKey(req, b, key)+"@"+vid, bytes.NewReader(body))
-		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata}
+		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation}
 		if len(parts) > 0 {
 			versionMeta["parts"] = parts
 		}
@@ -541,7 +542,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		vm, _ := json.Marshal(versionMeta)
 		_ = p.col(req, "versions").Put(ctx, b+"/"+key+"/"+vid, vm)
 	}
-	metaDoc := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "versionId": vid, "deleteMarker": false, "storageClass": storageClass, "objectMetadata": objectMetadata}
+	metaDoc := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "versionId": vid, "deleteMarker": false, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation}
 	if len(parts) > 0 {
 		metaDoc["parts"] = parts
 	}
@@ -1862,6 +1863,9 @@ func setObjectMetadataHeaders(headers http.Header, meta map[string]any) {
 	}
 	for key, value := range asMap(metadata["user"]) {
 		headers.Set("x-amz-meta-"+key, str(value))
+	}
+	if redirect := str(meta["websiteRedirectLocation"]); redirect != "" {
+		headers.Set("x-amz-website-redirect-location", redirect)
 	}
 }
 

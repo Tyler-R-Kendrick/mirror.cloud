@@ -54,7 +54,7 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		mpu := inv("CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "m"}, nil, "")
 		uid := str(mpu.Output["UploadId"])
 		inv("UploadPart", map[string]any{"Bucket": "b", "Key": "m", "UploadId": uid, "PartNumber": float64(1)}, bytes.NewReader([]byte("AB")), "")
-		inv("UploadPartCopy", map[string]any{"Bucket": "b", "Key": "m", "UploadId": uid, "PartNumber": float64(2), "CopySource": "b/src"}, nil, "")
+		copied := inv("UploadPartCopy", map[string]any{"Bucket": "b", "Key": "m", "UploadId": uid, "PartNumber": float64(2), "CopySource": "b/src"}, nil, "")
 		parts := inv("ListParts", map[string]any{"Bucket": "b", "Key": "m", "UploadId": uid}, nil, "")
 		if n := len(asSlice(parts.Output["Parts"])); n != 2 {
 			t.Fatalf("ListParts %v", parts.Output)
@@ -63,7 +63,10 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		if n := len(asSlice(mlist.Output["Uploads"])); n < 1 {
 			t.Fatalf("ListMultipartUploads %v", mlist.Output)
 		}
-		inv("CompleteMultipartUpload", map[string]any{"Bucket": "b", "Key": "m", "UploadId": uid}, nil, "")
+		inv("CompleteMultipartUpload", map[string]any{
+			"Bucket": "b", "Key": "m", "UploadId": uid,
+			"MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 2, "ETag": copied.Headers.Get("ETag")}}},
+		}, nil, "")
 		inv("PutBucketVersioning", map[string]any{"Bucket": "b", "Status": "Enabled"}, nil, "")
 		inv("PutBucketTagging", map[string]any{"Bucket": "b", "TagSet": []any{map[string]any{"Key": "a", "Value": "b"}}}, nil, "")
 		inv("PutObjectTagging", map[string]any{"Bucket": "b", "Key": "k", "TagSet": []any{}}, nil, "")

@@ -1,0 +1,26 @@
+{
+  "copiedTags": [
+    {
+      "Key": "stage",
+      "Value": "retagged"
+    }
+  ],
+  "currentMarker": "NoSuchKey",
+  "currentTags": [
+    {
+      "Key": "stage",
+      "Value": "second"
+    }
+  ],
+  "explicitMarker": "MethodNotAllowed",
+  "firstVersionTags": [
+    {
+      "Key": "stage",
+      "Value": "first"
+    },
+    {
+      "Key": "team",
+      "Value": "storage"
+    }
+  ]
+}

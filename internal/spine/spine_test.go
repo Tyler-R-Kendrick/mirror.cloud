@@ -314,3 +314,64 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 		t.Fatalf("get multipart tags %d %s", code, b)
 	}
 }
+
+func TestBootedServerS3VersionedTaggingContract(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	cfg.Seed = "spine-versioned-tags"
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=00"
+	do := func(method, path, body string, headers map[string]string) (int, []byte, http.Header) {
+		t.Helper()
+		req, _ := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+		req.Header.Set("Authorization", auth)
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		return res.StatusCode, data, res.Header
+	}
+	if code, body, _ := do(http.MethodPut, "/tags", "", nil); code != http.StatusOK {
+		t.Fatalf("create bucket %d %s", code, body)
+	}
+	versioning := `<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`
+	if code, body, _ := do(http.MethodPut, "/tags?versioning", versioning, nil); code != http.StatusOK {
+		t.Fatalf("enable versioning %d %s", code, body)
+	}
+	code, body, firstHeaders := do(http.MethodPut, "/tags/object", "first", map[string]string{"x-amz-tagging": "stage=first&team=storage"})
+	firstVersion := firstHeaders.Get("x-amz-version-id")
+	if code != http.StatusOK || firstVersion == "" {
+		t.Fatalf("put tagged version %d %s %v", code, body, firstHeaders)
+	}
+	code, body, secondHeaders := do(http.MethodPut, "/tags/object", "second", nil)
+	secondVersion := secondHeaders.Get("x-amz-version-id")
+	if code != http.StatusOK || secondVersion == "" {
+		t.Fatalf("put untagged version %d %s %v", code, body, secondHeaders)
+	}
+	if code, _, headers := do(http.MethodHead, "/tags/object", "", nil); code != http.StatusOK || headers.Get("x-amz-tagging-count") != "" {
+		t.Fatalf("untagged current head %d %v", code, headers)
+	}
+	if code, _, headers := do(http.MethodGet, "/tags/object?versionId="+firstVersion, "", nil); code != http.StatusOK || headers.Get("x-amz-tagging-count") != "2" || headers.Get("x-amz-version-id") != firstVersion {
+		t.Fatalf("tagged version get %d %v", code, headers)
+	}
+	if code, body, headers := do(http.MethodGet, "/tags/object?tagging&versionId="+firstVersion, "", nil); code != http.StatusOK || headers.Get("x-amz-version-id") != firstVersion || !bytes.Contains(body, []byte("<Key>stage</Key><Value>first</Value>")) || !bytes.Contains(body, []byte("<Key>team</Key><Value>storage</Value>")) {
+		t.Fatalf("get version tags %d %s %v", code, body, headers)
+	}
+	tagging := `<Tagging><TagSet><Tag><Key>stage</Key><Value>second</Value></Tag></TagSet></Tagging>`
+	if code, body, headers := do(http.MethodPut, "/tags/object?tagging", tagging, nil); code != http.StatusOK || headers.Get("x-amz-version-id") != secondVersion {
+		t.Fatalf("tag current version %d %s %v", code, body, headers)
+	}
+	if code, _, headers := do(http.MethodHead, "/tags/object", "", nil); code != http.StatusOK || headers.Get("x-amz-tagging-count") != "1" {
+		t.Fatalf("tagged current head %d %v", code, headers)
+	}
+}

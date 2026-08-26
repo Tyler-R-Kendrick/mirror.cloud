@@ -282,6 +282,70 @@ func TestCopyObjectSourceVersions(t *testing.T) {
 	}
 }
 
+func TestVersionedObjectTaggingCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "b", "Status": "Enabled"}, nil)
+	first := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "source", "Tagging": "stage=first&team=storage"}, []byte("first"))
+	firstVersion := first.Headers.Get("x-amz-version-id")
+	second := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "source"}, []byte("second"))
+	secondVersion := second.Headers.Get("x-amz-version-id")
+
+	firstTags := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "b", "Key": "source", "VersionId": firstVersion}, nil)
+	if firstTags.Headers.Get("x-amz-version-id") != firstVersion || len(asSliceForTest(firstTags.Output["TagSet"])) != 2 {
+		t.Fatalf("first version tags = %#v headers %v", firstTags.Output, firstTags.Headers)
+	}
+	if current := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "source"}, nil); current.Headers.Get("x-amz-tagging-count") != "" {
+		t.Fatalf("new untagged version inherited tags: %v", current.Headers)
+	}
+	if old := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "source", "VersionId": firstVersion}, nil); old.Headers.Get("x-amz-tagging-count") != "2" {
+		t.Fatalf("old version tag count = %v", old.Headers)
+	} else {
+		_ = old.Stream.Close()
+	}
+
+	currentTag := []any{map[string]any{"Key": "stage", "Value": "second"}}
+	putCurrent := mustInvoke(t, p, "PutObjectTagging", map[string]any{"Bucket": "b", "Key": "source", "TagSet": currentTag}, nil)
+	if putCurrent.Headers.Get("x-amz-version-id") != secondVersion {
+		t.Fatalf("current tag version = %v", putCurrent.Headers)
+	}
+	explicitTag := []any{map[string]any{"Key": "stage", "Value": "retagged"}}
+	mustInvoke(t, p, "PutObjectTagging", map[string]any{"Bucket": "b", "Key": "source", "VersionId": firstVersion, "TagSet": explicitTag}, nil)
+
+	mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": "copied", "CopySource": "b/source?versionId=" + firstVersion}, nil)
+	copiedTags := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "b", "Key": "copied"}, nil)
+	if tags := asSliceForTest(copiedTags.Output["TagSet"]); len(tags) != 1 || asMapForTest(tags[0])["Value"] != "retagged" {
+		t.Fatalf("version copy tags = %#v", copiedTags.Output)
+	}
+
+	deletedTags := mustInvoke(t, p, "DeleteObjectTagging", map[string]any{"Bucket": "b", "Key": "source", "VersionId": firstVersion}, nil)
+	if deletedTags.Headers.Get("x-amz-version-id") != firstVersion || len(asSliceForTest(mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "b", "Key": "source", "VersionId": firstVersion}, nil).Output["TagSet"])) != 0 {
+		t.Fatalf("deleted version tags = %v", deletedTags.Headers)
+	}
+	current := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "b", "Key": "source"}, nil)
+	if tags := asSliceForTest(current.Output["TagSet"]); current.Headers.Get("x-amz-version-id") != secondVersion || len(tags) != 1 || asMapForTest(tags[0])["Value"] != "second" {
+		t.Fatalf("current tags changed with old version: %#v headers %v", current.Output, current.Headers)
+	}
+
+	marker := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "b", "Key": "source"}, nil).Headers.Get("x-amz-version-id")
+	_, currentErr := invoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "b", "Key": "source"}, nil)
+	_, markerErr := invoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "b", "Key": "source", "VersionId": marker}, nil)
+	for _, operation := range []string{"GetObjectTagging", "PutObjectTagging", "DeleteObjectTagging"} {
+		_, err := invoke(t, p, operation, map[string]any{"Bucket": "b", "Key": "missing", "TagSet": currentTag}, nil)
+		if fault := asFault(t, err); fault.Code != "NoSuchKey" || fault.HTTPStatus != http.StatusNotFound {
+			t.Fatalf("%s missing object fault = %#v", operation, fault)
+		}
+	}
+
+	golden.AssertJSON(t, map[string]any{
+		"firstVersionTags": firstTags.Output["TagSet"],
+		"currentTags":      current.Output["TagSet"],
+		"copiedTags":       copiedTags.Output["TagSet"],
+		"currentMarker":    asFault(t, currentErr).Code,
+		"explicitMarker":   asFault(t, markerErr).Code,
+	})
+}
+
 func TestUploadPartCopyConditionsAndRange(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
@@ -1045,5 +1109,10 @@ func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 
 func asMapForTest(value any) map[string]any {
 	result, _ := value.(map[string]any)
+	return result
+}
+
+func asSliceForTest(value any) []any {
+	result, _ := value.([]any)
 	return result
 }

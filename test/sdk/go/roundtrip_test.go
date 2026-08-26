@@ -57,7 +57,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		t.Fatalf("enable versioning: %v", err)
 	}
 	put, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{
-		Bucket: aws.String("sdk"), Key: aws.String("k"), Body: bytes.NewReader([]byte("hello-sdk")), ChecksumAlgorithm: s3types.ChecksumAlgorithmCrc32,
+		Bucket: aws.String("sdk"), Key: aws.String("k"), Body: bytes.NewReader([]byte("hello-sdk")), ChecksumAlgorithm: s3types.ChecksumAlgorithmCrc32, Tagging: aws.String("stage=original"),
 	})
 	if err != nil {
 		t.Fatalf("put: %v", err)
@@ -90,9 +90,10 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}); err == nil {
 		t.Fatal("conditional copy with wrong ETag succeeded")
 	}
-	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{
+	newer, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{
 		Bucket: aws.String("sdk"), Key: aws.String("k"), Body: bytes.NewReader([]byte("newer")),
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("put newer version: %v", err)
 	}
 	original, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{
@@ -109,6 +110,16 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	head, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), VersionId: put.VersionId, ChecksumMode: s3types.ChecksumModeEnabled})
 	if err != nil || aws.ToString(head.VersionId) != aws.ToString(put.VersionId) || aws.ToString(head.ETag) != aws.ToString(put.ETag) || aws.ToString(head.ChecksumCRC32) != aws.ToString(put.ChecksumCRC32) {
 		t.Fatalf("head original version: %#v %v", head, err)
+	}
+	originalTags, err := s3c.GetObjectTagging(context.Background(), &s3.GetObjectTaggingInput{Bucket: aws.String("sdk"), Key: aws.String("k"), VersionId: put.VersionId})
+	if err != nil || aws.ToString(originalTags.VersionId) != aws.ToString(put.VersionId) || len(originalTags.TagSet) != 1 || aws.ToString(originalTags.TagSet[0].Key) != "stage" || aws.ToString(originalTags.TagSet[0].Value) != "original" {
+		t.Fatalf("get original tags: %#v %v", originalTags, err)
+	}
+	tagged, err := s3c.PutObjectTagging(context.Background(), &s3.PutObjectTaggingInput{
+		Bucket: aws.String("sdk"), Key: aws.String("k"), Tagging: &s3types.Tagging{TagSet: []s3types.Tag{{Key: aws.String("stage"), Value: aws.String("newer")}}},
+	})
+	if err != nil || aws.ToString(tagged.VersionId) != aws.ToString(newer.VersionId) {
+		t.Fatalf("tag newer version: %#v %v", tagged, err)
 	}
 	versionCopy, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{
 		Bucket: aws.String("sdk"), Key: aws.String("version-copy"), CopySource: aws.String("sdk/k?versionId=" + aws.ToString(put.VersionId)),
@@ -127,6 +138,10 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	_ = versioned.Body.Close()
 	if string(versionedBody) != "hello-sdk" {
 		t.Fatalf("version copy body %q", versionedBody)
+	}
+	versionCopyTags, err := s3c.GetObjectTagging(context.Background(), &s3.GetObjectTaggingInput{Bucket: aws.String("sdk"), Key: aws.String("version-copy")})
+	if err != nil || len(versionCopyTags.TagSet) != 1 || aws.ToString(versionCopyTags.TagSet[0].Value) != "original" {
+		t.Fatalf("version copy tags: %#v %v", versionCopyTags, err)
 	}
 	large := bytes.Repeat([]byte("0123456789"), 600000)
 	largePut, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{

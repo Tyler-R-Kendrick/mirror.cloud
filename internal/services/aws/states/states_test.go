@@ -344,7 +344,7 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	p := New(deps)
 	storage := s3.New(deps)
 	ctx := context.Background()
-	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	id := spi.Identity{Account: "000000000001", Region: "us-east-1"}
 	invoke := func(handler spi.Handler, operation string, input map[string]any, body []byte) map[string]any {
 		t.Helper()
 		request := &spi.Request{Identity: id, Operation: operation, Input: input}
@@ -464,7 +464,7 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	}
 	ownerState := map[string]any{
 		"Type": "Map", "ItemProcessor": processor, "End": true,
-		"ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": "items.json", "ExpectedBucketOwner": "1"}, "ReaderConfig": map[string]any{"InputType": "JSON"}},
+		"ItemReader": map[string]any{"Resource": "arn:aws:states:::s3:getObject", "Parameters": map[string]any{"Bucket": "items", "Key": "items.json", "ExpectedBucketOwner": id.Account}, "ReaderConfig": map[string]any{"InputType": "JSON"}},
 	}
 	ownerDefinition, _ := json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": ownerState}})
 	ownerMachine := invoke(p, "CreateStateMachine", map[string]any{"name": "reader-expected-owner", "definition": string(ownerDefinition), "roleArn": testRoleARN}, nil)
@@ -472,7 +472,7 @@ func TestDistributedMapS3ItemReader(t *testing.T) {
 	if execution := invoke(p, "DescribeExecution", map[string]any{"executionArn": ownerStarted["executionArn"]}, nil); execution["status"] != "SUCCEEDED" {
 		t.Fatalf("matching ExpectedBucketOwner execution %#v", execution)
 	}
-	ownerState["ItemReader"].(map[string]any)["Parameters"].(map[string]any)["ExpectedBucketOwner"] = "2"
+	ownerState["ItemReader"].(map[string]any)["Parameters"].(map[string]any)["ExpectedBucketOwner"] = "000000000002"
 	ownerDefinition, _ = json.Marshal(map[string]any{"StartAt": "Read", "States": map[string]any{"Read": ownerState}})
 	ownerMachine = invoke(p, "CreateStateMachine", map[string]any{"name": "reader-wrong-owner", "definition": string(ownerDefinition), "roleArn": testRoleARN}, nil)
 	ownerStarted = invoke(p, "StartExecution", map[string]any{"stateMachineArn": ownerMachine["stateMachineArn"]}, nil)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -307,6 +308,68 @@ func TestConcurrentAccountRegionalBucketCreationHasOneWinner(t *testing.T) {
 	}
 	if winners != 1 {
 		t.Fatalf("successful creates = %d, want 1", winners)
+	}
+}
+
+func TestConcurrentCrossRegionBucketsPaginateWithoutAccountLeaks(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	accounts := []string{"111111111111", "222222222222"}
+	regions := []string{"us-east-1", "us-west-2"}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			account, region := accounts[n%2], regions[(n/2)%2]
+			input := map[string]any{"Bucket": fmt.Sprintf("list-%c-%02d", 'a'+rune(n%2), n/2)}
+			if region != "us-east-1" {
+				input["LocationConstraint"] = region
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: account, Region: region}, Operation: "CreateBucket", Input: input})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent create: %v", err)
+		}
+	}
+
+	id := spi.Identity{Account: accounts[0], Region: regions[0]}
+	token := ""
+	seen := map[string]bool{}
+	for {
+		input := map[string]any{"MaxBuckets": 3, "Prefix": "list-"}
+		if token != "" {
+			input["ContinuationToken"] = token
+		}
+		page, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListBuckets", Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range page.Output["Buckets"].([]any) {
+			bucket := item.(map[string]any)
+			name, region := bucket["Name"].(string), bucket["BucketRegion"].(string)
+			if !strings.HasPrefix(name, "list-a-") || (region != "us-east-1" && region != "us-west-2") || seen[name] {
+				t.Fatalf("leaked or duplicate bucket: %#v", bucket)
+			}
+			seen[name] = true
+		}
+		next, _ := page.Output["ContinuationToken"].(string)
+		if next == "" {
+			break
+		}
+		if next == token {
+			t.Fatalf("pagination did not advance: %q", token)
+		}
+		token = next
+	}
+	if len(seen) != 16 {
+		t.Fatalf("listed %d buckets, want 16", len(seen))
 	}
 }
 

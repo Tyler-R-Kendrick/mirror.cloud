@@ -250,6 +250,11 @@ func (s *Server) fault(w http.ResponseWriter, codec proto.Codec, svc *model.Serv
 	if !ok {
 		f = &spi.Fault{Code: "InternalError", Message: err.Error(), HTTPStatus: 500, Fault: "server"}
 	}
+	for key, values := range f.Headers {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
 	if w.Header().Get("x-mirror-fidelity") == "" {
 		w.Header().Set("x-mirror-fidelity", "mock")
 	}

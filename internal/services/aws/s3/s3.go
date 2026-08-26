@@ -551,8 +551,11 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
 	wantVer := str(req.Input["VersionId"])
 	meta, exists := p.objectMetadata(ctx, req, b, key, wantVer)
-	if !exists || truthy(meta["deleteMarker"]) {
+	if !exists {
 		return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: 404, Fault: "client"}
+	}
+	if truthy(meta["deleteMarker"]) {
+		return nil, deleteMarkerReadFault(meta, wantVer != "")
 	}
 	bk := blobKey(req, b, key)
 	if wantVer != "" {
@@ -613,8 +616,11 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
 	wantVer := str(req.Input["VersionId"])
 	meta, exists := p.objectMetadata(ctx, req, b, key, wantVer)
-	if !exists || truthy(meta["deleteMarker"]) {
+	if !exists {
 		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
+	}
+	if truthy(meta["deleteMarker"]) {
+		return nil, deleteMarkerReadFault(meta, wantVer != "")
 	}
 	bk := blobKey(req, b, key)
 	if wantVer != "" {
@@ -1423,6 +1429,19 @@ func (p *Pack) objectMetadata(ctx context.Context, req *spi.Request, bucket, key
 	var meta map[string]any
 	_ = json.Unmarshal(raw, &meta)
 	return meta, exists
+}
+
+func deleteMarkerReadFault(meta map[string]any, explicit bool) *spi.Fault {
+	headers := http.Header{}
+	headers.Set("x-amz-delete-marker", "true")
+	if version := str(meta["versionId"]); version != "" {
+		headers.Set("x-amz-version-id", version)
+	}
+	if explicit {
+		headers.Set("Last-Modified", str(meta["mtime"]))
+		return &spi.Fault{Code: "MethodNotAllowed", HTTPStatus: http.StatusMethodNotAllowed, Fault: "client", Headers: headers}
+	}
+	return &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client", Headers: headers}
 }
 
 func applyCopySourceRange(body []byte, value string) ([]byte, error) {

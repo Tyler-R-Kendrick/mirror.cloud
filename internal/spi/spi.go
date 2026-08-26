@@ -73,6 +73,7 @@ type Fault struct {
 	HTTPStatus int
 	Fault      string         // "client" | "server"
 	Fields     map[string]any // extra members on the error shape
+	Headers    http.Header    // protocol-level additions required on an error response
 }
 
 func (f *Fault) Error() string {

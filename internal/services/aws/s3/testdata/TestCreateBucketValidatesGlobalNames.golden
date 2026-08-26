@@ -22,6 +22,7 @@
     "xn--reserved": "InvalidBucketName"
   },
   "valid": {
+    "123": "/123",
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "abc": "/abc",
     "abc.def.ghi.jkl": "/abc.def.ghi.jkl",

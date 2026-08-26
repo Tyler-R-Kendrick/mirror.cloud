@@ -253,7 +253,7 @@ func TestCreateBucketValidatesGlobalNames(t *testing.T) {
 		}
 		characterization["invalid"].(map[string]any)[name] = fault.Code
 	}
-	for _, name := range []string{"abc", "bucket-name", "example.com", "abc.def.ghi.jkl", strings.Repeat("a", 63)} {
+	for _, name := range []string{"123", "abc", "bucket-name", "example.com", "abc.def.ghi.jkl", strings.Repeat("a", 63)} {
 		response, err := invoke(t, p, "CreateBucket", map[string]any{"Bucket": name}, nil)
 		if err != nil {
 			t.Fatalf("valid name %q: %v", name, err)

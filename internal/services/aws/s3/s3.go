@@ -176,7 +176,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		"GetObjectTagging",
 		"PutBucketTagging", "PutBucketNotificationConfiguration", "PutObjectTagging",
 		"DeleteBucketTagging", "DeleteObjectTagging":
-		return p.emptyOK(req)
+		return p.emptyOK(ctx, req)
 	case "PutObjectLegalHold", "GetObjectLegalHold", "PutObjectRetention", "GetObjectRetention", "RestoreObject":
 		return p.objectLockExtras(ctx, req)
 	case "PutBucketAnalyticsConfiguration", "GetBucketAnalyticsConfiguration", "DeleteBucketAnalyticsConfiguration", "ListBucketAnalyticsConfigurations",
@@ -544,9 +544,20 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	}
 	meta, _ := json.Marshal(metaDoc)
 	_ = p.col(req, "objects").Put(ctx, b+"/"+key, meta)
-	if tags := requestTags(req); len(tags) > 0 {
+	tags := requestTags(req)
+	tagKeys := []string{objectTagKey(b, key, "")}
+	if vid != "" {
+		tagKeys = append(tagKeys, objectTagKey(b, key, vid))
+	}
+	if len(tags) > 0 {
 		raw, _ := json.Marshal(tagSet(tags))
-		_ = p.col(req, "tags").Put(ctx, b+"/"+key, raw)
+		for _, tagKey := range tagKeys {
+			_ = p.col(req, "tags").Put(ctx, tagKey, raw)
+		}
+	} else {
+		for _, tagKey := range tagKeys {
+			_ = p.col(req, "tags").Delete(ctx, tagKey)
+		}
 	}
 	h := http.Header{}
 	h.Set("ETag", etag)
@@ -598,6 +609,9 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	h.Set("Last-Modified", mtime)
 	if vid := str(meta["versionId"]); vid != "" {
 		h.Set("x-amz-version-id", vid)
+	}
+	if count := len(p.storedTags(ctx, req, b, key, wantVer)); count > 0 {
+		h.Set("x-amz-tagging-count", strconv.Itoa(count))
 	}
 	if encryption := str(meta["serverSideEncryption"]); encryption != "" {
 		h.Set("x-amz-server-side-encryption", encryption)
@@ -677,6 +691,9 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	if version := str(meta["versionId"]); version != "" {
 		h.Set("x-amz-version-id", version)
 	}
+	if count := len(p.storedTags(ctx, req, b, key, wantVer)); count > 0 {
+		h.Set("x-amz-tagging-count", strconv.Itoa(count))
+	}
 	if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
 		setChecksumHeaders(h, meta)
 	}
@@ -715,15 +732,18 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		if status := p.replicateDeleteMarker(ctx, req, b, key, meta); status != "" {
 			h.Set("x-amz-replication-status", status)
 		}
+		_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, ""))
 		return &spi.Response{Status: 204, Headers: h}, nil
 	}
 	if wantVer != "" {
 		_ = p.deps.Blobs.Delete(ctx, blobKey(req, b, key)+"@"+wantVer)
 		_ = p.col(req, "versions").Delete(ctx, b+"/"+key+"/"+wantVer)
+		_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, wantVer))
 		return &spi.Response{Status: 204}, nil
 	}
 	_ = p.deps.Blobs.Delete(ctx, blobKey(req, b, key))
 	_ = p.col(req, "objects").Delete(ctx, b+"/"+key)
+	_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, ""))
 	return &spi.Response{Status: 204}, nil
 }
 
@@ -858,7 +878,7 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	}
 	if !strings.EqualFold(directive, "REPLACE") {
 		values := url.Values{}
-		for key, value := range p.storedTags(ctx, req, source.bucket, source.key) {
+		for key, value := range p.storedTags(ctx, req, source.bucket, source.key, source.version) {
 			values.Set(key, value)
 		}
 		req.Input["Tagging"] = values.Encode()
@@ -1584,22 +1604,48 @@ func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Res
 	return &spi.Response{Headers: h, Output: out}, nil
 }
 
-func (p *Pack) emptyOK(req *spi.Request) (*spi.Response, error) {
-	ctx := context.Background()
+func (p *Pack) objectTagTarget(ctx context.Context, req *spi.Request) (string, string, error) {
+	b, key, version := str(req.Input["Bucket"]), str(req.Input["Key"]), str(req.Input["VersionId"])
+	meta, ok := p.objectMetadata(ctx, req, b, key, version)
+	if !ok {
+		return "", "", &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: 404, Fault: "client"}
+	}
+	if truthy(meta["deleteMarker"]) {
+		return "", "", deleteMarkerReadFault(meta, version != "")
+	}
+	return objectTagKey(b, key, version), str(meta["versionId"]), nil
+}
+
+func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b := str(req.Input["Bucket"])
 	key := str(req.Input["Key"])
 	switch req.Operation {
 	case "DeleteBucketTagging", "DeleteObjectTagging":
 		tagKey := b
+		objectVersion := ""
 		if req.Operation == "DeleteObjectTagging" {
-			tagKey = b + "/" + key
+			var err error
+			if tagKey, objectVersion, err = p.objectTagTarget(ctx, req); err != nil {
+				return nil, err
+			}
+			if str(req.Input["VersionId"]) == "" && objectVersion != "" {
+				_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, objectVersion))
+			}
 		}
 		_ = p.col(req, "tags").Delete(ctx, tagKey)
-		return &spi.Response{Status: 204, Output: map[string]any{}}, nil
+		h := http.Header{}
+		if objectVersion != "" {
+			h.Set("x-amz-version-id", objectVersion)
+		}
+		return &spi.Response{Status: 204, Headers: h, Output: map[string]any{}}, nil
 	case "PutBucketTagging", "PutObjectTagging":
 		tagKey := b
+		objectVersion := ""
 		if req.Operation == "PutObjectTagging" {
-			tagKey = b + "/" + key
+			var err error
+			if tagKey, objectVersion, err = p.objectTagTarget(ctx, req); err != nil {
+				return nil, err
+			}
 		}
 		raw, _ := json.Marshal(req.Input["TagSet"])
 		if len(raw) == 0 || string(raw) == "null" {
@@ -1607,24 +1653,41 @@ func (p *Pack) emptyOK(req *spi.Request) (*spi.Response, error) {
 		}
 		_ = p.col(req, "tags").Put(ctx, tagKey, raw)
 		if req.Operation == "PutObjectTagging" {
-			p.syncReplicaTags(ctx, req, b, key, raw)
+			if str(req.Input["VersionId"]) == "" {
+				if objectVersion != "" {
+					_ = p.col(req, "tags").Put(ctx, objectTagKey(b, key, objectVersion), raw)
+				}
+				p.syncReplicaTags(ctx, req, b, key, raw)
+			}
 		}
-		return &spi.Response{Status: 200, Output: map[string]any{"TagSet": json.RawMessage(raw)}}, nil
+		h := http.Header{}
+		if objectVersion != "" {
+			h.Set("x-amz-version-id", objectVersion)
+		}
+		return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"TagSet": json.RawMessage(raw)}}, nil
 	case "GetBucketTagging", "GetObjectTagging":
 		tagKey := b
+		objectVersion := ""
 		if req.Operation == "GetObjectTagging" {
-			tagKey = b + "/" + key
+			var err error
+			if tagKey, objectVersion, err = p.objectTagTarget(ctx, req); err != nil {
+				return nil, err
+			}
 		}
 		raw, ok, _ := p.col(req, "tags").Get(ctx, tagKey)
+		h := http.Header{}
+		if objectVersion != "" {
+			h.Set("x-amz-version-id", objectVersion)
+		}
 		if !ok {
-			return &spi.Response{Status: 200, Output: map[string]any{"TagSet": []any{}}}, nil
+			return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"TagSet": []any{}}}, nil
 		}
 		var tags any
 		_ = json.Unmarshal(raw, &tags)
 		if tags == nil {
 			tags = []any{}
 		}
-		return &spi.Response{Status: 200, Output: map[string]any{"TagSet": tags}}, nil
+		return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"TagSet": tags}}, nil
 	case "PutBucketNotificationConfiguration":
 		raw, _ := json.Marshal(req.Input)
 		_ = p.col(req, "notify").Put(ctx, b, raw)

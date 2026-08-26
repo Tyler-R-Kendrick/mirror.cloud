@@ -22,10 +22,6 @@ type replicaRef struct {
 func (p *Pack) replicateObject(ctx context.Context, req *spi.Request, bucket, key string, body []byte, meta map[string]any) string {
 	rules := p.replicationRules(ctx, req, bucket)
 	tags := requestTags(req)
-	if len(tags) > 0 {
-		raw, _ := json.Marshal(tagSet(tags))
-		_ = p.col(req, "tags").Put(ctx, bucket+"/"+key, raw)
-	}
 	matched, copied := false, false
 	for _, rule := range rules {
 		if !ruleMatches(rule, key, tags) {
@@ -55,6 +51,8 @@ func (p *Pack) replicateObject(ctx context.Context, req *spi.Request, bucket, ke
 		if len(tags) > 0 {
 			tagRaw, _ := json.Marshal(tagSet(tags))
 			_ = scope.Collection("tags").Put(ctx, ref.Bucket+"/"+key, tagRaw)
+		} else {
+			_ = scope.Collection("tags").Delete(ctx, ref.Bucket+"/"+key)
 		}
 		p.rememberReplica(ctx, req, bucket, key, ref)
 		copied = true
@@ -70,7 +68,7 @@ func (p *Pack) replicateObject(ctx context.Context, req *spi.Request, bucket, ke
 
 func (p *Pack) replicateDeleteMarker(ctx context.Context, req *spi.Request, bucket, key string, sourceMeta []byte) string {
 	matched, copied := false, false
-	tags := p.storedTags(ctx, req, bucket, key)
+	tags := p.storedTags(ctx, req, bucket, key, "")
 	for _, rule := range p.replicationRules(ctx, req, bucket) {
 		deleteCfg := asMap(rule["DeleteMarkerReplication"])
 		if !strings.EqualFold(str(deleteCfg["Status"]), "Enabled") || !ruleMatches(rule, key, tags) {
@@ -101,8 +99,8 @@ func (p *Pack) replicateDeleteMarker(ctx context.Context, req *spi.Request, buck
 	return ""
 }
 
-func (p *Pack) storedTags(ctx context.Context, req *spi.Request, bucket, key string) map[string]string {
-	raw, ok, _ := p.col(req, "tags").Get(ctx, bucket+"/"+key)
+func (p *Pack) storedTags(ctx context.Context, req *spi.Request, bucket, key, version string) map[string]string {
+	raw, ok, _ := p.col(req, "tags").Get(ctx, objectTagKey(bucket, key, version))
 	if !ok {
 		return nil
 	}
@@ -114,6 +112,14 @@ func (p *Pack) storedTags(ctx context.Context, req *spi.Request, bucket, key str
 		tags[str(tag["Key"])] = str(tag["Value"])
 	}
 	return tags
+}
+
+func objectTagKey(bucket, key, version string) string {
+	tagKey := bucket + "/" + key
+	if version != "" {
+		tagKey += "/" + version
+	}
+	return tagKey
 }
 
 func (p *Pack) replicationRules(ctx context.Context, req *spi.Request, bucket string) []map[string]any {

@@ -154,32 +154,70 @@ func TestConcurrentInvalidWritesLeaveNoObject(t *testing.T) {
 	}
 }
 
+func TestConcurrentBucketCreationHasOneOwner(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	ctx := context.Background()
+	accounts := []string{"111111111111", "222222222222"}
+	type result struct {
+		account string
+		err     error
+	}
+	results := make(chan result, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(results); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			account := accounts[n%len(accounts)]
+			_, err := p.Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: account, Region: "us-east-1"}, Operation: "CreateBucket", Input: map[string]any{"Bucket": "global-name"}})
+			results <- result{account: account, err: err}
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+	winners := map[string]bool{}
+	for result := range results {
+		if result.err == nil {
+			winners[result.account] = true
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(result.err, &fault) || fault.Code != "BucketAlreadyExists" {
+			t.Fatalf("create %s: %v", result.account, result.err)
+		}
+	}
+	if len(winners) != 1 {
+		t.Fatalf("bucket owners = %#v", winners)
+	}
+}
+
 func TestTwoAccountsNeverSeeEachOtherUnderLoad(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)
 	ctx := context.Background()
 	a := spi.Identity{Account: "111111111111", Region: "us-east-1"}
 	b := spi.Identity{Account: "222222222222", Region: "us-east-1"}
-	_, _ = p.Invoke(ctx, &spi.Request{Identity: a, Operation: "CreateBucket", Input: map[string]any{"Bucket": "shared-name"}})
-	_, _ = p.Invoke(ctx, &spi.Request{Identity: b, Operation: "CreateBucket", Input: map[string]any{"Bucket": "shared-name"}})
+	_, _ = p.Invoke(ctx, &spi.Request{Identity: a, Operation: "CreateBucket", Input: map[string]any{"Bucket": "account-a"}})
+	_, _ = p.Invoke(ctx, &spi.Request{Identity: b, Operation: "CreateBucket", Input: map[string]any{"Bucket": "account-b"}})
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			_, _ = p.Invoke(ctx, &spi.Request{Identity: a, Operation: "PutObject", Input: map[string]any{"Bucket": "shared-name", "Key": "k"}, Body: io.NopCloser(bytes.NewReader([]byte("A")))})
+			_, _ = p.Invoke(ctx, &spi.Request{Identity: a, Operation: "PutObject", Input: map[string]any{"Bucket": "account-a", "Key": "k"}, Body: io.NopCloser(bytes.NewReader([]byte("A")))})
 		}()
 		go func() {
 			defer wg.Done()
-			_, _ = p.Invoke(ctx, &spi.Request{Identity: b, Operation: "PutObject", Input: map[string]any{"Bucket": "shared-name", "Key": "k"}, Body: io.NopCloser(bytes.NewReader([]byte("B")))})
+			_, _ = p.Invoke(ctx, &spi.Request{Identity: b, Operation: "PutObject", Input: map[string]any{"Bucket": "account-b", "Key": "k"}, Body: io.NopCloser(bytes.NewReader([]byte("B")))})
 		}()
 	}
 	wg.Wait()
-	ga, err := p.Invoke(ctx, &spi.Request{Identity: a, Operation: "GetObject", Input: map[string]any{"Bucket": "shared-name", "Key": "k"}})
+	ga, err := p.Invoke(ctx, &spi.Request{Identity: a, Operation: "GetObject", Input: map[string]any{"Bucket": "account-a", "Key": "k"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	gb, err := p.Invoke(ctx, &spi.Request{Identity: b, Operation: "GetObject", Input: map[string]any{"Bucket": "shared-name", "Key": "k"}})
+	gb, err := p.Invoke(ctx, &spi.Request{Identity: b, Operation: "GetObject", Input: map[string]any{"Bucket": "account-b", "Key": "k"}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1160,8 +1160,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-skip-upload-part-copy-conditions",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "func (p *Pack) uploadPartCopy(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tsource, err := p.openCopySource(ctx, req)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tdefer source.body.Close()\n\tif err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta[\"mtime\"])); err != nil {",
-			new:  "func (p *Pack) uploadPartCopy(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tsource, err := p.openCopySource(ctx, req)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tdefer source.body.Close()\n\tif err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta[\"mtime\"])); false && err != nil {",
+			old:  "func (p *Pack) uploadPartCopy(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tif err := p.requireMultipartBucket(ctx, req); err != nil {\n\t\treturn nil, err\n\t}\n\tsource, err := p.openCopySource(ctx, req)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tdefer source.body.Close()\n\tif err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta[\"mtime\"])); err != nil {",
+			new:  "func (p *Pack) uploadPartCopy(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tif err := p.requireMultipartBucket(ctx, req); err != nil {\n\t\treturn nil, err\n\t}\n\tsource, err := p.openCopySource(ctx, req)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tdefer source.body.Close()\n\tif err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta[\"mtime\"])); false && err != nil {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestUploadPartCopyConditionsAndRange",
 		},

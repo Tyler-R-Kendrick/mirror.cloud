@@ -856,8 +856,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-copy-drop-object-metadata",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if !strings.EqualFold(metadataDirective, "REPLACE") {`,
-			new:  `if false {`,
+			old:  "metadataDirective, err := copyDirective(req, \"MetadataDirective\", \"x-amz-metadata-directive\")\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tif metadataDirective != \"REPLACE\" {",
+			new:  "metadataDirective, err := copyDirective(req, \"MetadataDirective\", \"x-amz-metadata-directive\")\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tif false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestObjectMetadata",
 		},
@@ -9544,8 +9544,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-copy-replace-to-copy",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `strings.EqualFold(directive, "REPLACE")`,
-			new:  `strings.EqualFold(directive, "COPY")`,
+			old:  `if directive != "REPLACE" {`,
+			new:  `if directive != "COPY" {`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCopyObjectTaggingDirective",
 		},

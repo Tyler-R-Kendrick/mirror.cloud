@@ -1376,8 +1376,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-bucket-collision-drop-name",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `Fields: map[string]any{"BucketName": b}`,
-			new:  `Fields: map[string]any{}`,
+			old:  `return nil, &spi.Fault{Code: "BucketAlreadyExists", Message: "The requested bucket name is not available. The bucket namespace is shared by all users of the system. Select a different name and try again.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"BucketName": b}}`,
+			new:  `return nil, &spi.Fault{Code: "BucketAlreadyExists", Message: "The requested bucket name is not available. The bucket namespace is shared by all users of the system. Select a different name and try again.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{}}`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCreateBucketGlobalCollisions",
 		},

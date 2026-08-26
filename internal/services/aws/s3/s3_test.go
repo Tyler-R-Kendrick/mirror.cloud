@@ -112,6 +112,43 @@ func TestCreatePutGetBytesMatch(t *testing.T) {
 	}
 }
 
+func TestCreateBucketGlobalCollisions(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	owner := ident()
+	other := spi.Identity{Account: "999999999999", Region: owner.Region}
+	west := spi.Identity{Account: owner.Account, Region: "us-west-2"}
+	input := map[string]any{"Bucket": "shared-bucket"}
+	if response, err := invokeAs(t, p, owner, "CreateBucket", input, nil); err != nil || response.Status != http.StatusOK || response.Headers.Get("Location") != "/shared-bucket" {
+		t.Fatalf("initial create = %#v %v", response, err)
+	}
+	mustInvokeAs(t, p, owner, "PutObject", map[string]any{"Bucket": "shared-bucket", "Key": "object"}, []byte("preserved"))
+	if response, err := invokeAs(t, p, owner, "CreateBucket", input, nil); err != nil || response.Status != http.StatusOK {
+		t.Fatalf("us-east-1 recreate = %#v %v", response, err)
+	}
+	if got := mustInvokeAs(t, p, owner, "GetObject", map[string]any{"Bucket": "shared-bucket", "Key": "object"}, nil); string(readStream(t, got)) != "preserved" {
+		t.Fatal("us-east-1 recreation replaced bucket contents")
+	}
+	for name, identity := range map[string]spi.Identity{"owner-other-region": west, "other-account": other} {
+		_, err := invokeAs(t, p, identity, "CreateBucket", input, nil)
+		fault := asFault(t, err)
+		want := "BucketAlreadyExists"
+		if identity.Account == owner.Account {
+			want = "BucketAlreadyOwnedByYou"
+		}
+		if fault.Code != want || fault.HTTPStatus != http.StatusConflict || fault.Fields["BucketName"] != "shared-bucket" {
+			t.Fatalf("%s collision = %#v", name, fault)
+		}
+		if _, err := invokeAs(t, p, identity, "HeadBucket", input, nil); asFault(t, err).Code != "NoSuchBucket" {
+			t.Fatalf("%s collision created local bucket: %v", name, err)
+		}
+	}
+	mustInvokeAs(t, p, owner, "DeleteObject", map[string]any{"Bucket": "shared-bucket", "Key": "object"}, nil)
+	mustInvokeAs(t, p, owner, "DeleteBucket", input, nil)
+	if _, err := invokeAs(t, p, other, "CreateBucket", input, nil); err != nil {
+		t.Fatalf("create after delete: %v", err)
+	}
+}
+
 func TestObjectMetadata(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)

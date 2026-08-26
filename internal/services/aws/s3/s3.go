@@ -448,10 +448,38 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 	if b == "" {
 		return nil, &spi.Fault{Code: "InvalidBucketName", HTTPStatus: 400, Fault: "client"}
 	}
-	meta, _ := json.Marshal(map[string]any{"name": b, "region": req.Identity.Region})
-	_ = p.col(req, "buckets").Put(ctx, b, meta)
-	location, _ := json.Marshal(map[string]any{"account": req.Identity.Account, "region": req.Identity.Region})
-	_ = p.deps.Store.Scope("_mirror", "global").Collection("s3buckets").Put(ctx, b, location)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	global := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets")
+	raw, exists, err := global.Get(ctx, b)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		var location struct {
+			Account string `json:"account"`
+			Region  string `json:"region"`
+		}
+		if err := json.Unmarshal(raw, &location); err != nil {
+			return nil, err
+		}
+		if location.Account != req.Identity.Account {
+			return nil, &spi.Fault{Code: "BucketAlreadyExists", Message: "The requested bucket name is not available. The bucket namespace is shared by all users of the system. Select a different name and try again.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"BucketName": b}}
+		}
+		if req.Identity.Region != "us-east-1" || location.Region != req.Identity.Region {
+			return nil, &spi.Fault{Code: "BucketAlreadyOwnedByYou", Message: "Your previous request to create the named bucket succeeded and you already own it.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"BucketName": b}}
+		}
+	} else {
+		meta, _ := json.Marshal(map[string]any{"name": b, "region": req.Identity.Region})
+		if err := p.col(req, "buckets").Put(ctx, b, meta); err != nil {
+			return nil, err
+		}
+		location, _ := json.Marshal(map[string]any{"account": req.Identity.Account, "region": req.Identity.Region})
+		if err := global.Put(ctx, b, location); err != nil {
+			_ = p.col(req, "buckets").Delete(ctx, b)
+			return nil, err
+		}
+	}
 	h := http.Header{}
 	h.Set("Location", "/"+b)
 	return &spi.Response{Status: 200, Headers: h, Output: map[string]any{}}, nil

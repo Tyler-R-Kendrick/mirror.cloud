@@ -3130,6 +3130,7 @@ func TestStatesTestStateMapFailureCounts(t *testing.T) {
 func TestStatesTestStatePatternMocks(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
+	identity := spi.Identity{Account: "1", Region: "us-east-1"}
 	for _, resource := range []string{
 		"arn:aws:states:us-east-1:1:activity:test",
 		"arn:aws:states:::batch:submitJob.sync",
@@ -3137,7 +3138,7 @@ func TestStatesTestStatePatternMocks(t *testing.T) {
 		"arn:aws:states:::sqs:sendMessage.waitForTaskToken",
 	} {
 		definition := fmt.Sprintf(`{"Type":"Task","Resource":%q,"End":true}`, resource)
-		request := &spi.Request{Identity: spi.Identity{Account: "1", Region: "us-east-1"}, Operation: "TestState", Input: map[string]any{"definition": definition}}
+		request := &spi.Request{Identity: identity, Operation: "TestState", Input: map[string]any{"definition": definition}}
 		if _, err := p.Invoke(ctx, request); err == nil {
 			t.Fatalf("TestState accepted %s without a mock", resource)
 		}
@@ -3146,6 +3147,11 @@ func TestStatesTestStatePatternMocks(t *testing.T) {
 		if err != nil || response.Output["status"] != "SUCCEEDED" {
 			t.Fatalf("TestState rejected mocked %s: %#v, %v", resource, response, err)
 		}
+	}
+	definition := `{"StartAt":"Call","States":{"Call":{"Type":"Task","Resource":"arn:aws:states:::batch:submitJob.sync","End":true}}}`
+	request := &spi.Request{Identity: identity, Operation: "TestState", Input: map[string]any{"definition": definition, "stateName": "Call"}}
+	if _, err := p.Invoke(ctx, request); err == nil {
+		t.Fatal("TestState accepted selected .sync state without a mock")
 	}
 }
 

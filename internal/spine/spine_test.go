@@ -210,10 +210,18 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	} else if part2Headers.Get("x-mirror-fidelity") != "emulate" {
 		t.Fatalf("part copy fidelity %q", part2Headers.Get("x-mirror-fidelity"))
 	}
-	if code, b, _ := do(http.MethodGet, "/qb/m?uploadId="+uploadID, "", nil); code != 200 {
-		t.Fatalf("list parts %d %s", code, b)
-	} else if !bytes.Contains(b, []byte("PartNumber")) {
-		t.Fatalf("list parts empty %s", b)
+	if code, b, _ := do(http.MethodGet, "/qb/m?uploadId="+uploadID+"&max-parts=1", "", nil); code != 200 {
+		t.Fatalf("list parts page 1 %d %s", code, b)
+	} else if !bytes.Contains(b, []byte("<PartNumber>1</PartNumber>")) || !bytes.Contains(b, []byte("<IsTruncated>true</IsTruncated>")) || !bytes.Contains(b, []byte("<NextPartNumberMarker>1</NextPartNumberMarker>")) {
+		t.Fatalf("list parts page 1 %s", b)
+	}
+	if code, b, _ := do(http.MethodGet, "/qb/m?uploadId="+uploadID+"&part-number-marker=1&max-parts=1", "", nil); code != 200 {
+		t.Fatalf("list parts page 2 %d %s", code, b)
+	} else if !bytes.Contains(b, []byte("<PartNumber>2</PartNumber>")) || !bytes.Contains(b, []byte("<IsTruncated>false</IsTruncated>")) {
+		t.Fatalf("list parts page 2 %s", b)
+	}
+	if code, b, _ := do(http.MethodGet, "/qb/m?uploadId=missing", "", nil); code != http.StatusNotFound || !bytes.Contains(b, []byte("NoSuchUpload")) {
+		t.Fatalf("list missing upload %d %s", code, b)
 	}
 	comp := `<CompleteMultipartUpload><Part><ETag>` + part1Headers.Get("ETag") + `</ETag><PartNumber>1</PartNumber></Part><Part><ETag>` + part2Headers.Get("ETag") + `</ETag><PartNumber>2</PartNumber></Part></CompleteMultipartUpload>`
 	size := 5<<20 + len("SRC-BYTES")

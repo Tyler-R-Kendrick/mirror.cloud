@@ -422,4 +422,16 @@ func TestBootedServerS3VersionedTaggingContract(t *testing.T) {
 	if code, body, _ := do(http.MethodDelete, "/missing/object", "", nil); code != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchBucket")) {
 		t.Fatalf("delete missing bucket %d %s", code, body)
 	}
+	copyHeaders = map[string]string{"x-amz-copy-source": "tags/metadata", "x-amz-source-expected-bucket-owner": "999999999999"}
+	if code, body, _ := do(http.MethodPut, "/tags/source-owner-denied", "", copyHeaders); code != http.StatusForbidden || !bytes.Contains(body, []byte("AccessDenied")) {
+		t.Fatalf("mismatched expected source owner %d %s", code, body)
+	}
+	copyHeaders["x-amz-source-expected-bucket-owner"] = "000000000000"
+	if code, body, _ := do(http.MethodPut, "/tags/source-owner-copy", "", copyHeaders); code != http.StatusOK {
+		t.Fatalf("matching expected source owner %d %s", code, body)
+	}
+	copyHeaders = map[string]string{"x-amz-copy-source": "missing/metadata"}
+	if code, body, _ := do(http.MethodPut, "/tags/missing-source", "", copyHeaders); code != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchBucket")) {
+		t.Fatalf("copy missing source bucket %d %s", code, body)
+	}
 }

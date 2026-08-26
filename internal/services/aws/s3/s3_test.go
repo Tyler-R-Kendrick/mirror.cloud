@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -102,6 +105,86 @@ func TestCopyObjectTaggingDirective(t *testing.T) {
 	replaced := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "b", "Key": "replaced"}, nil)
 	if tags := replaced.Output["TagSet"].([]any); len(tags) != 1 || tags[0].(map[string]any)["Key"] != "owner" {
 		t.Fatalf("replaced tags = %#v", tags)
+	}
+}
+
+func TestCopyObjectConditions(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	source := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "source"}, []byte("source"))
+	etag := source.Headers.Get("ETag")
+	copyObject := func(key string, input map[string]any, headers map[string]string) (*spi.Response, error) {
+		t.Helper()
+		in := map[string]any{"Bucket": "b", "Key": key, "CopySource": "b/source"}
+		for name, value := range input {
+			in[name] = value
+		}
+		httpReq := httptest.NewRequest(http.MethodPut, "/b/"+key, nil)
+		httpReq.Header.Set("x-amz-copy-source", "b/source")
+		for name, value := range headers {
+			httpReq.Header.Set(name, value)
+		}
+		return p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "CopyObject", Input: in, Identity: ident(), HTTP: httpReq})
+	}
+	wantPrecondition := func(err error) {
+		t.Helper()
+		fault := asFault(t, err)
+		if fault.Code != "PreconditionFailed" || fault.HTTPStatus != http.StatusPreconditionFailed {
+			t.Fatalf("fault = %#v", fault)
+		}
+	}
+
+	_, err := copyObject("wrong-etag", nil, map[string]string{"x-amz-copy-source-if-match": `"wrong"`})
+	wantPrecondition(err)
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "wrong-etag"}, nil); asFault(t, err).Code != "NoSuchKey" {
+		t.Fatal("failed copy wrote destination")
+	}
+
+	before := time.Unix(-1, 0).UTC().Format(http.TimeFormat)
+	after := time.Unix(1, 0).UTC().Format(http.TimeFormat)
+	if _, err := copyObject("matched", nil, map[string]string{
+		"x-amz-copy-source-if-match":            etag,
+		"x-amz-copy-source-if-unmodified-since": before,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = copyObject("none-matched", nil, map[string]string{
+		"x-amz-copy-source-if-none-match":     etag,
+		"x-amz-copy-source-if-modified-since": before,
+	})
+	wantPrecondition(err)
+
+	for _, test := range []struct {
+		name, header, value string
+		ok                  bool
+	}{
+		{"modified", "x-amz-copy-source-if-modified-since", before, true},
+		{"not-modified", "x-amz-copy-source-if-modified-since", after, false},
+		{"unmodified", "x-amz-copy-source-if-unmodified-since", after, true},
+		{"changed", "x-amz-copy-source-if-unmodified-since", before, false},
+	} {
+		_, err := copyObject(test.name, nil, map[string]string{test.header: test.value})
+		if test.ok && err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+		if !test.ok {
+			wantPrecondition(err)
+		}
+	}
+
+	destination := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "destination"}, []byte("old"))
+	_, err = copyObject("destination", map[string]any{"IfNoneMatch": "*"}, nil)
+	wantPrecondition(err)
+	_, err = copyObject("destination", map[string]any{"IfMatch": `"wrong"`}, nil)
+	wantPrecondition(err)
+	if got := readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "destination"}, nil)); string(got) != "old" {
+		t.Fatalf("failed condition replaced destination with %q", got)
+	}
+	if _, err := copyObject("destination", map[string]any{"IfMatch": destination.Headers.Get("ETag")}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "destination"}, nil)); string(got) != "source" {
+		t.Fatalf("conditional copy = %q", got)
 	}
 }
 

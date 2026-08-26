@@ -63,6 +63,16 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if string(body) != "hello-sdk" {
 		t.Fatalf("s3 body %q", body)
 	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{
+		Bucket: aws.String("sdk"), Key: aws.String("copied"), CopySource: aws.String("sdk/k"), CopySourceIfMatch: got.ETag,
+	}); err != nil {
+		t.Fatalf("conditional copy: %v", err)
+	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{
+		Bucket: aws.String("sdk"), Key: aws.String("rejected"), CopySource: aws.String("sdk/k"), CopySourceIfMatch: aws.String(`"wrong"`),
+	}); err == nil {
+		t.Fatal("conditional copy with wrong ETag succeeded")
+	}
 
 	ddb := dynamodb.NewFromConfig(awscfg, func(o *dynamodb.Options) { o.BaseEndpoint = aws.String(ts.URL) })
 	if _, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{

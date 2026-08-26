@@ -401,7 +401,7 @@ func TestStorageClassValidation(t *testing.T) {
 		key := "invalid-" + storageClass
 		_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": "classes", "Key": key, "StorageClass": storageClass}, []byte("rejected"))
 		fault := asFault(t, err)
-		if fault.Code != "InvalidStorageClass" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["StorageClassRequested"] != storageClass {
+		if fault.Code != "InvalidStorageClass" || fault.Message != "The storage class you specified is not valid" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["StorageClassRequested"] != storageClass {
 			t.Fatalf("put %q = %#v", storageClass, fault)
 		}
 		if _, err := invoke(t, p, "HeadObject", map[string]any{"Bucket": "classes", "Key": key}, nil); asFault(t, err).Code != "NoSuchKey" {

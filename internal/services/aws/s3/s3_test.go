@@ -219,6 +219,9 @@ func TestDeleteBucketClearsBucketState(t *testing.T) {
 	mustInvoke(t, p, "PutBucketAnalyticsConfiguration", map[string]any{"Bucket": "recreated-bucket", "Id": "old"}, nil)
 	mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "recreated-bucket", "Key": "unfinished"}, nil)
 	mustInvoke(t, p, "DeleteBucket", input, nil)
+	if _, err := invoke(t, p, "HeadBucket", input, nil); asFault(t, err).Code != "NoSuchBucket" {
+		t.Fatalf("deleted bucket remained registered: %v", err)
+	}
 	mustInvoke(t, p, "CreateBucket", input, nil)
 
 	if got := mustInvoke(t, p, "GetBucketVersioning", input, nil); got.Output["Status"] == "Enabled" {

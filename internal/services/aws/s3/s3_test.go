@@ -325,6 +325,64 @@ func TestExpectedSourceBucketOwnerAndCopyBoundary(t *testing.T) {
 	golden.AssertJSON(t, errors)
 }
 
+func TestExpectedBucketOwnerAcrossBucketScopedOperations(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "k"}, []byte("id,name\n1,Ada\n"))
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "multipart"}, nil).Output["UploadId"].(string)
+	tests := []struct {
+		operation string
+		input     map[string]any
+		body      []byte
+	}{
+		{"PutBucketVersioning", map[string]any{"Bucket": "b", "Status": "Enabled"}, nil},
+		{"CopyObject", map[string]any{"Bucket": "b", "Key": "copy", "CopySource": "b/k"}, nil},
+		{"DeleteObjects", map[string]any{"Bucket": "b", "Objects": []any{map[string]any{"Key": "k"}}}, nil},
+		{"UploadPart", map[string]any{"Bucket": "b", "Key": "multipart", "UploadId": uploadID, "PartNumber": 1}, []byte("part")},
+		{"UploadPartCopy", map[string]any{"Bucket": "b", "Key": "multipart", "UploadId": uploadID, "PartNumber": 1, "CopySource": "b/k"}, nil},
+		{"CompleteMultipartUpload", map[string]any{"Bucket": "b", "Key": "multipart", "UploadId": uploadID, "MultipartUpload": map[string]any{"Parts": []any{}}}, nil},
+		{"AbortMultipartUpload", map[string]any{"Bucket": "b", "Key": "multipart", "UploadId": uploadID}, nil},
+		{"ListParts", map[string]any{"Bucket": "b", "Key": "multipart", "UploadId": uploadID}, nil},
+		{"SelectObjectContent", map[string]any{"Bucket": "b", "Key": "k", "Expression": "SELECT * FROM S3Object"}, nil},
+		{"GetObjectTorrent", map[string]any{"Bucket": "b", "Key": "k"}, nil},
+		{"PutObjectAnnotation", map[string]any{"Bucket": "b", "Key": "k", "AnnotationId": "a"}, nil},
+	}
+	errors := map[string]any{}
+	for _, test := range tests {
+		test.input["ExpectedBucketOwner"] = "999999999999"
+		_, err := invoke(t, p, test.operation, test.input, test.body)
+		fault := asFault(t, err)
+		if fault.Code != "AccessDenied" || fault.HTTPStatus != http.StatusForbidden {
+			t.Fatalf("%s mismatch = %#v", test.operation, fault)
+		}
+		errors[test.operation] = fault.Code
+		delete(test.input, "ExpectedBucketOwner")
+		test.input["Bucket"] = "missing"
+		_, err = invoke(t, p, test.operation, test.input, test.body)
+		fault = asFault(t, err)
+		if fault.Code != "NoSuchBucket" || fault.HTTPStatus != http.StatusNotFound {
+			t.Fatalf("%s missing bucket = %#v", test.operation, fault)
+		}
+		errors[test.operation+"Missing"] = fault.Code
+	}
+	if versioning := mustInvoke(t, p, "GetBucketVersioning", map[string]any{"Bucket": "b"}, nil).Output["Status"]; versioning != "Suspended" {
+		t.Fatalf("rejected versioning persisted: %v", versioning)
+	}
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "copy"}, nil); asFault(t, err).Code != "NoSuchKey" {
+		t.Fatalf("rejected copy persisted: %v", err)
+	}
+	if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "k"}, nil))); body != "id,name\n1,Ada\n" {
+		t.Fatalf("rejected delete changed source: %q", body)
+	}
+	if parts := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "b", "Key": "multipart", "UploadId": uploadID}, nil).Output["Parts"].([]any); len(parts) != 0 {
+		t.Fatalf("rejected multipart operations persisted parts: %#v", parts)
+	}
+	if _, err := invoke(t, p, "GetObjectAnnotation", map[string]any{"Bucket": "b", "Key": "k", "AnnotationId": "a"}, nil); asFault(t, err).Code != "NoSuchAnnotation" {
+		t.Fatalf("rejected annotation persisted: %v", err)
+	}
+	golden.AssertJSON(t, errors)
+}
+
 func TestTagValidationAndBucketSemantics(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	characterization := map[string]any{}

@@ -24,6 +24,7 @@
   "valid": {
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "abc": "/abc",
+    "abc.def.ghi.jkl": "/abc.def.ghi.jkl",
     "bucket-name": "/bucket-name",
     "example.com": "/example.com"
   }

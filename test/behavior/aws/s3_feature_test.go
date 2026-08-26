@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
@@ -90,6 +91,26 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusNotFound {
 			t.Fatalf("invalid storage class created object: %d", res.StatusCode)
+		}
+	})
+
+	t.Run("Given an oversized object key When PUT object Then it is rejected", func(t *testing.T) {
+		res := do(http.MethodPut, "/key-limits", nil, "")
+		res.Body.Close()
+		if res.StatusCode >= 300 {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		path := "/key-limits/" + strings.Repeat("x", 1025)
+		res = do(http.MethodPut, path, []byte("body"), "")
+		fault, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("KeyTooLongError")) {
+			t.Fatalf("oversized object key %d %s", res.StatusCode, fault)
+		}
+		res = do(http.MethodGet, path, nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound {
+			t.Fatalf("oversized object key created object: %d", res.StatusCode)
 		}
 	})
 

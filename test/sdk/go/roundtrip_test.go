@@ -87,6 +87,9 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("put: %v", err)
 	}
+	if _, err := s3c.DeleteBucket(context.Background(), &s3.DeleteBucketInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "BucketNotEmpty") {
+		t.Fatalf("delete non-empty bucket: %v", err)
+	}
 	got, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k")})
 	if err != nil {
 		t.Fatalf("get: %v", err)

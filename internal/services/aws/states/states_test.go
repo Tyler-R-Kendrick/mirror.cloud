@@ -3053,6 +3053,14 @@ func TestStatesHTTPTaskAndTrace(t *testing.T) {
 	if strings.Contains(formInspection, "body-secret") || formInspection != "definitionBody=defined&items=a%2Cb&metadata%5Border%5D=monthly" {
 		t.Fatalf("redacted form inspection %q", formInspection)
 	}
+	var oversizedForm map[string]any
+	_ = json.Unmarshal(formDefinition, &oversizedForm)
+	oversizedForm["Parameters"].(map[string]any)["RequestBody"] = map[string]any{"value": strings.Repeat("/", 90000)}
+	oversizedDefinition, _ := json.Marshal(oversizedForm)
+	oversizedResponse, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "TestState", Input: map[string]any{"definition": string(oversizedDefinition)}})
+	if err != nil || oversizedResponse.Output["status"] != "FAILED" {
+		t.Fatalf("accepted oversized transformed HTTP body %#v err=%v", oversizedResponse, err)
+	}
 	missingContentType := strings.Replace(string(formDefinition), `"Content-Type":"application/x-www-form-urlencoded"`, `"Content-Type":"application/json"`, 1)
 	invalidForm, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "TestState", Input: map[string]any{"definition": missingContentType}})
 	if err != nil || invalidForm.Output["error"] != "States.Runtime" {

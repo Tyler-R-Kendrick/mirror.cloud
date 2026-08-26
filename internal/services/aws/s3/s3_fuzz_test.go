@@ -2,6 +2,7 @@ package s3_test
 
 import (
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -222,6 +223,37 @@ func FuzzBucketVersioningState(f *testing.F) {
 		}
 		if got := mustInvoke(t, p, "GetBucketVersioning", input, nil).Output; len(got) != 0 {
 			t.Fatalf("invalid status %q persisted: %#v", status, got)
+		}
+	})
+}
+
+func FuzzBucketNames(f *testing.F) {
+	for _, name := range []string{"", "ab", "abc", "bucket-name", "example.com", "adjacent..dots", "192.168.5.4", "999.999.999.999", "reserved--table-s3", strings.Repeat("a", 63), strings.Repeat("a", 64)} {
+		f.Add(name)
+	}
+	pattern := regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
+	ipv4 := regexp.MustCompile(`^[0-9]{1,3}(\.[0-9]{1,3}){3}$`)
+	prefixes := []string{"xn--", "sthree-", "amzn-s3-demo-"}
+	suffixes := []string{"-s3alias", "--ol-s3", ".mrap", "--x-s3", "--table-s3", "-an"}
+	f.Fuzz(func(t *testing.T, name string) {
+		valid := pattern.MatchString(name) && !strings.Contains(name, "..") && !ipv4.MatchString(name)
+		for _, prefix := range prefixes {
+			valid = valid && !strings.HasPrefix(name, prefix)
+		}
+		for _, suffix := range suffixes {
+			valid = valid && !strings.HasSuffix(name, suffix)
+		}
+
+		p := s3.New(spitest.Deps(t))
+		response, err := invoke(t, p, "CreateBucket", map[string]any{"Bucket": name}, nil)
+		if valid {
+			if err != nil || response.Status != http.StatusOK {
+				t.Fatalf("valid name %q: %#v %v", name, response, err)
+			}
+			return
+		}
+		if fault := asFault(t, err); fault.Code != "InvalidBucketName" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("invalid name %q = %#v", name, fault)
 		}
 	})
 }

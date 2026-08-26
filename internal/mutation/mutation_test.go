@@ -1128,8 +1128,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-hide-head-checksum-mode",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "if version := str(meta[\"versionId\"]); version != \"\" {\n\t\th.Set(\"x-amz-version-id\", version)\n\t}\n\tif requestCondition(req, \"ChecksumMode\", \"x-amz-checksum-mode\") == \"ENABLED\" {",
-			new:  "if version := str(meta[\"versionId\"]); version != \"\" {\n\t\th.Set(\"x-amz-version-id\", version)\n\t}\n\tif false {",
+			old:  "if version := str(meta[\"versionId\"]); version != \"\" {\n\t\th.Set(\"x-amz-version-id\", version)\n\t}\n\tif count := len(p.storedTags(ctx, req, b, key, wantVer)); count > 0 {\n\t\th.Set(\"x-amz-tagging-count\", strconv.Itoa(count))\n\t}\n\tif requestCondition(req, \"ChecksumMode\", \"x-amz-checksum-mode\") == \"ENABLED\" {",
+			new:  "if version := str(meta[\"versionId\"]); version != \"\" {\n\t\th.Set(\"x-amz-version-id\", version)\n\t}\n\tif count := len(p.storedTags(ctx, req, b, key, wantVer)); count > 0 {\n\t\th.Set(\"x-amz-tagging-count\", strconv.Itoa(count))\n\t}\n\tif false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestWriteChecksumValidation",
 		},

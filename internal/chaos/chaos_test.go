@@ -253,8 +253,8 @@ func TestConcurrentInvalidBucketLocationsDoNotReserveName(t *testing.T) {
 			t.Fatalf("invalid regional create: %v", err)
 		}
 	}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "regional-name", "LocationConstraint": "us-west-2"}}); err != nil {
-		t.Fatalf("valid create after invalid load: %v", err)
+	if got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "regional-name", "LocationConstraint": "us-west-2"}}); err != nil || got.Headers.Get("Location") != "http://regional-name.s3.amazonaws.com/" {
+		t.Fatalf("valid create after invalid load: %#v %v", got, err)
 	}
 }
 

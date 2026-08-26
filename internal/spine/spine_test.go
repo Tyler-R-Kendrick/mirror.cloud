@@ -223,6 +223,19 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	if code, b, _ := do(http.MethodGet, "/qb/m?uploadId=missing", "", nil); code != http.StatusNotFound || !bytes.Contains(b, []byte("NoSuchUpload")) {
 		t.Fatalf("list missing upload %d %s", code, b)
 	}
+	for _, request := range []struct{ method, body string }{
+		{http.MethodPut, "part"},
+		{http.MethodPost, `<CompleteMultipartUpload/>`},
+		{http.MethodDelete, ""},
+	} {
+		path := "/qb/m?uploadId=missing"
+		if request.method == http.MethodPut {
+			path += "&partNumber=1"
+		}
+		if code, b, _ := do(request.method, path, request.body, nil); code != http.StatusNotFound || !bytes.Contains(b, []byte("NoSuchUpload")) {
+			t.Fatalf("%s missing upload %d %s", request.method, code, b)
+		}
+	}
 	comp := `<CompleteMultipartUpload><Part><ETag>` + part1Headers.Get("ETag") + `</ETag><PartNumber>1</PartNumber></Part><Part><ETag>` + part2Headers.Get("ETag") + `</ETag><PartNumber>2</PartNumber></Part></CompleteMultipartUpload>`
 	size := 5<<20 + len("SRC-BYTES")
 	if code, b, _ := do(http.MethodPost, "/qb/m?uploadId="+uploadID, comp, map[string]string{"x-amz-mp-object-size": strconv.Itoa(size - 1)}); code != http.StatusBadRequest || !bytes.Contains(b, []byte("InvalidRequest")) {

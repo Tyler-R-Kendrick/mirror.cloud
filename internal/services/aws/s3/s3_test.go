@@ -583,6 +583,28 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	}
 }
 
+func TestMultipartOperationsRejectMissingUpload(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "k"}, nil)
+	uploadID := created.Output["UploadId"].(string)
+	for _, operation := range []string{"UploadPart", "CompleteMultipartUpload", "ListParts", "AbortMultipartUpload"} {
+		for _, input := range []map[string]any{
+			{"Bucket": "b", "Key": "k", "UploadId": "missing", "PartNumber": 1},
+			{"Bucket": "b", "Key": "wrong", "UploadId": uploadID, "PartNumber": 1},
+		} {
+			if operation == "CompleteMultipartUpload" {
+				input["MultipartUpload"] = map[string]any{"Parts": []any{}}
+			}
+			_, err := invoke(t, p, operation, input, []byte("part"))
+			if fault := asFault(t, err); fault.Code != "NoSuchUpload" || fault.HTTPStatus != http.StatusNotFound {
+				t.Fatalf("%s fault = %#v", operation, fault)
+			}
+		}
+	}
+	mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "b", "Key": "k", "UploadId": uploadID}, nil)
+}
+
 func TestMissingBucket404(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": "nope", "Key": "k"}, []byte("x"))

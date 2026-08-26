@@ -2921,6 +2921,12 @@ func TestStatesHTTPTaskAndTrace(t *testing.T) {
 			_, _ = w.Write([]byte("binary"))
 			return
 		}
+		if r.URL.Path == "/form" {
+			body, _ := io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"form": string(body)})
+			return
+		}
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		w.Header().Set("Content-Type", "application/json")
@@ -3015,6 +3021,42 @@ func TestStatesHTTPTaskAndTrace(t *testing.T) {
 	forbidden := call(server.URL, false, map[string]any{"Authorization": "defined"})
 	if forbidden["status"] != "FAILED" || forbidden["error"] != "States.Runtime" {
 		t.Fatalf("forbidden HTTP header %#v", forbidden)
+	}
+	for _, header := range []string{"X-Forwarded-Test", "X-Amz-Test", "X-Amzn-Test"} {
+		forbidden = call(server.URL, false, map[string]any{header: "defined"})
+		if forbidden["status"] != "FAILED" || forbidden["error"] != "States.Runtime" {
+			t.Fatalf("forbidden HTTP header %s %#v", header, forbidden)
+		}
+	}
+	formDefinition, _ := json.Marshal(map[string]any{
+		"Type": "Task", "Resource": "arn:aws:states:::http:invoke", "End": true,
+		"Parameters": map[string]any{
+			"ApiEndpoint": server.URL + "/form", "Method": "POST", "Authentication": map[string]any{"ConnectionArn": "arn:aws:events:us-east-1:1:connection/http/id"},
+			"Headers":     map[string]any{"Content-Type": "application/x-www-form-urlencoded"},
+			"RequestBody": map[string]any{"definitionBody": "defined", "items": []any{"a", "b"}, "metadata": map[string]any{"order": "monthly"}},
+			"Transform":   map[string]any{"RequestBodyEncoding": "URL_ENCODED", "RequestEncodingOptions": map[string]any{"ArrayFormat": "COMMAS"}},
+		},
+	})
+	formResponse, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "TestState", Input: map[string]any{
+		"definition": string(formDefinition), "inspectionLevel": "TRACE",
+	}})
+	if err != nil || formResponse.Output["status"] != "SUCCEEDED" {
+		t.Fatalf("form HTTP Task %#v err=%v", formResponse, err)
+	}
+	var formOutput map[string]any
+	_ = json.Unmarshal([]byte(formResponse.Output["output"].(string)), &formOutput)
+	wantForm := "connectionBody=body-secret&definitionBody=defined&items=a%2Cb&metadata%5Border%5D=monthly"
+	if formOutput["form"] != wantForm {
+		t.Fatalf("form body %#v want %s", formOutput, wantForm)
+	}
+	formInspection := formResponse.Output["inspectionData"].(map[string]any)["request"].(map[string]any)["body"].(string)
+	if strings.Contains(formInspection, "body-secret") || formInspection != "definitionBody=defined&items=a%2Cb&metadata%5Border%5D=monthly" {
+		t.Fatalf("redacted form inspection %q", formInspection)
+	}
+	missingContentType := strings.Replace(string(formDefinition), `"Content-Type":"application/x-www-form-urlencoded"`, `"Content-Type":"application/json"`, 1)
+	invalidForm, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "TestState", Input: map[string]any{"definition": missingContentType}})
+	if err != nil || invalidForm.Output["error"] != "States.Runtime" {
+		t.Fatalf("accepted invalid form content type %#v err=%v", invalidForm, err)
 	}
 }
 

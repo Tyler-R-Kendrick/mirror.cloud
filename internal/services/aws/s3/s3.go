@@ -527,7 +527,18 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		}
 	}
 	h := http.Header{}
-	h.Set("Location", "/"+b)
+	location := "/" + b
+	if bucketRegion != "us-east-1" {
+		location = "http://" + b + ".s3.amazonaws.com/"
+		if req.HTTP != nil {
+			scheme := "http"
+			if req.HTTP.TLS != nil {
+				scheme = "https"
+			}
+			location = scheme + "://" + req.HTTP.Host + "/" + b + "/"
+		}
+	}
+	h.Set("Location", location)
 	return &spi.Response{Status: 200, Headers: h, Output: map[string]any{}}, nil
 }
 

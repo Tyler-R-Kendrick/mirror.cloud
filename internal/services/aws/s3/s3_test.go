@@ -179,7 +179,9 @@ func TestCreateBucketLocationConstraints(t *testing.T) {
 	west := spi.Identity{Account: east.Account, Region: "us-west-2"}
 	characterization := map[string]any{}
 
-	mustInvokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "east-location"}, nil)
+	if got := mustInvokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "east-location"}, nil).Headers.Get("Location"); got != "/east-location" {
+		t.Fatalf("default create location = %q", got)
+	}
 	if got := mustInvokeAs(t, p, east, "GetBucketLocation", map[string]any{"Bucket": "east-location"}, nil); got.Output["LocationConstraint"] != "" {
 		t.Fatalf("default location = %#v", got.Output)
 	} else {
@@ -201,7 +203,11 @@ func TestCreateBucketLocationConstraints(t *testing.T) {
 		characterization[name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus}
 	}
 
-	mustInvokeAs(t, p, west, "CreateBucket", map[string]any{"Bucket": "west-match", "CreateBucketConfiguration": map[string]any{"LocationConstraint": "us-west-2"}}, nil)
+	if got := mustInvokeAs(t, p, west, "CreateBucket", map[string]any{"Bucket": "west-match", "CreateBucketConfiguration": map[string]any{"LocationConstraint": "us-west-2"}}, nil).Headers.Get("Location"); got != "http://west-match.s3.amazonaws.com/" {
+		t.Fatalf("regional create location = %q", got)
+	} else {
+		characterization["matching-header"] = got
+	}
 	if got := mustInvokeAs(t, p, west, "GetBucketLocation", map[string]any{"Bucket": "west-match"}, nil); got.Output["LocationConstraint"] != "us-west-2" {
 		t.Fatalf("west location = %#v", got.Output)
 	} else {
@@ -215,7 +221,11 @@ func TestCreateBucketLocationConstraints(t *testing.T) {
 		characterization["invalid"] = map[string]any{"code": fault.Code, "field": fault.Fields["LocationConstraint"], "message": fault.Message, "status": fault.HTTPStatus}
 	}
 
-	mustInvokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "eu-alias", "LocationConstraint": "EU"}, nil)
+	if got := mustInvokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "eu-alias", "LocationConstraint": "EU"}, nil).Headers.Get("Location"); got != "http://eu-alias.s3.amazonaws.com/" {
+		t.Fatalf("EU create location = %q", got)
+	} else {
+		characterization["EU-header"] = got
+	}
 	europe := spi.Identity{Account: east.Account, Region: "eu-west-1"}
 	if got := mustInvokeAs(t, p, europe, "GetBucketLocation", map[string]any{"Bucket": "eu-alias"}, nil); got.Output["LocationConstraint"] != "EU" {
 		t.Fatalf("EU alias = %#v", got.Output)

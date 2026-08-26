@@ -830,7 +830,7 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 		storageClass = "STANDARD"
 	}
 	p.mu.Lock()
-	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339), parts: map[int]multipartPart{}}
+	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), parts: map[int]multipartPart{}}
 	p.mu.Unlock()
 	return &spi.Response{Output: map[string]any{"Bucket": b, "Key": key, "UploadId": id}}, nil
 }

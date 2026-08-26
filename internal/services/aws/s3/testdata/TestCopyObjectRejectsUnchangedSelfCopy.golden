@@ -1,0 +1,12 @@
+{
+  "bucketEncryption": "allowed",
+  "copyMetadata": "InvalidRequest",
+  "customerEncryption": "allowed",
+  "replaceMetadata": "allowed",
+  "replaceTags": "InvalidRequest",
+  "restoredSource": "allowed",
+  "serverEncryption": "allowed",
+  "storageClass": "allowed",
+  "unchanged": "InvalidRequest",
+  "websiteRedirect": "allowed"
+}

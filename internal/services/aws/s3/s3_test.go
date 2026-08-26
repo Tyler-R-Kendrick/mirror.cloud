@@ -207,6 +207,66 @@ func TestCopyObjectDirectiveValidation(t *testing.T) {
 	golden.AssertJSON(t, errors)
 }
 
+func TestCopyObjectRejectsUnchangedSelfCopy(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "k", "Metadata": map[string]any{"owner": "old"}}, []byte("body"))
+	selfCopy := func(input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		input["Bucket"], input["Key"], input["CopySource"] = "b", "k", "b/k"
+		return invoke(t, p, "CopyObject", input, nil)
+	}
+	characterization := map[string]any{}
+	for _, test := range []struct {
+		name  string
+		input map[string]any
+	}{
+		{"unchanged", map[string]any{}},
+		{"copyMetadata", map[string]any{"MetadataDirective": "COPY"}},
+		{"replaceTags", map[string]any{"TaggingDirective": "REPLACE", "Tagging": "stage=new"}},
+	} {
+		_, err := selfCopy(test.input)
+		fault := asFault(t, err)
+		if fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("%s self-copy = %#v", test.name, fault)
+		}
+		characterization[test.name] = fault.Code
+	}
+	if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "k"}, nil))); body != "body" {
+		t.Fatalf("rejected self-copy changed body: %q", body)
+	}
+	for _, test := range []struct {
+		name  string
+		input map[string]any
+	}{
+		{"replaceMetadata", map[string]any{"MetadataDirective": "REPLACE", "Metadata": map[string]any{"owner": "new"}}},
+		{"storageClass", map[string]any{"StorageClass": "STANDARD_IA"}},
+		{"websiteRedirect", map[string]any{"WebsiteRedirectLocation": "/new"}},
+		{"serverEncryption", map[string]any{"ServerSideEncryption": "AES256"}},
+		{"customerEncryption", map[string]any{"SSECustomerKeyMD5": "digest"}},
+	} {
+		if _, err := selfCopy(test.input); err != nil {
+			t.Fatalf("%s self-copy: %v", test.name, err)
+		}
+		characterization[test.name] = "allowed"
+	}
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "encrypted"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "encrypted", "Key": "k"}, []byte("body"))
+	mustInvoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": "encrypted", "Rules": []any{}}, nil)
+	if _, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "encrypted", "Key": "k", "CopySource": "encrypted/k"}, nil); err != nil {
+		t.Fatalf("default-encrypted bucket self-copy: %v", err)
+	}
+	characterization["bucketEncryption"] = "allowed"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "restored"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "restored", "Key": "k", "StorageClass": "GLACIER"}, []byte("body"))
+	mustInvoke(t, p, "RestoreObject", map[string]any{"Bucket": "restored", "Key": "k"}, nil)
+	if _, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "restored", "Key": "k", "CopySource": "restored/k"}, nil); err != nil {
+		t.Fatalf("restored source self-copy: %v", err)
+	}
+	characterization["restoredSource"] = "allowed"
+	golden.AssertJSON(t, characterization)
+}
+
 func TestExpectedBucketOwnerAndDeleteBoundary(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)

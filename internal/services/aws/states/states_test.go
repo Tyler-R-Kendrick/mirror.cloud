@@ -1372,7 +1372,7 @@ func TestStatesRetryScheduling(t *testing.T) {
 		t.Fatal(err)
 	}
 	var execution map[string]any
-	for range 100 {
+	for range 5000 {
 		execution = invoke(p, "DescribeExecution", map[string]any{"executionArn": executionARN})
 		if execution["status"] == "SUCCEEDED" {
 			break

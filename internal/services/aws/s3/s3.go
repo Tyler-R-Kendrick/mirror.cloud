@@ -744,23 +744,29 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 }
 
 func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	src := str(req.Input["CopySource"])
-	if src == "" && req.HTTP != nil {
-		src = req.HTTP.Header.Get("x-amz-copy-source")
+	sourceBucket, sourceKey, sourceVersion, err := parseCopySource(req)
+	if err != nil {
+		return nil, err
 	}
-	src = strings.TrimPrefix(src, "/")
-	parts := strings.SplitN(src, "/", 2)
-	if len(parts) != 2 {
-		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: 400, Fault: "client"}
+	metaKey := sourceBucket + "/" + sourceKey
+	blob := blobKey(req, sourceBucket, sourceKey)
+	collection := "objects"
+	if sourceVersion != "" {
+		metaKey += "/" + sourceVersion
+		blob += "@" + sourceVersion
+		collection = "versions"
 	}
-	rc, info, err := p.deps.Blobs.Get(ctx, blobKey(req, parts[0], parts[1]))
+	metaRaw, exists, _ := p.col(req, collection).Get(ctx, metaKey)
+	var meta map[string]any
+	_ = json.Unmarshal(metaRaw, &meta)
+	if !exists || truthy(meta["deleteMarker"]) {
+		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
+	}
+	rc, info, err := p.deps.Blobs.Get(ctx, blob)
 	if err != nil {
 		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
 	}
 	defer rc.Close()
-	metaRaw, _, _ := p.col(req, "objects").Get(ctx, parts[0]+"/"+parts[1])
-	var meta map[string]any
-	_ = json.Unmarshal(metaRaw, &meta)
 	if err := checkCopySourcePreconditions(req, `"`+info.MD5+`"`, str(meta["mtime"])); err != nil {
 		return nil, err
 	}
@@ -770,13 +776,17 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	}
 	if !strings.EqualFold(directive, "REPLACE") {
 		values := url.Values{}
-		for key, value := range p.storedTags(ctx, req, parts[0], parts[1]) {
+		for key, value := range p.storedTags(ctx, req, sourceBucket, sourceKey) {
 			values.Set(key, value)
 		}
 		req.Input["Tagging"] = values.Encode()
 	}
 	req.Body = rc
-	return p.putObject(ctx, req)
+	response, err := p.putObject(ctx, req)
+	if err == nil && sourceVersion != "" {
+		response.Headers.Set("x-amz-copy-source-version-id", sourceVersion)
+	}
+	return response, err
 }
 
 func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -789,22 +799,25 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 }
 
 func (p *Pack) uploadPartCopy(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	src := str(req.Input["CopySource"])
-	if src == "" && req.HTTP != nil {
-		src = req.HTTP.Header.Get("x-amz-copy-source")
+	sourceBucket, sourceKey, sourceVersion, err := parseCopySource(req)
+	if err != nil {
+		return nil, err
 	}
-	src = strings.TrimPrefix(src, "/")
-	parts := strings.SplitN(src, "/", 2)
-	if len(parts) != 2 {
-		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: 400, Fault: "client"}
+	blob := blobKey(req, sourceBucket, sourceKey)
+	if sourceVersion != "" {
+		blob += "@" + sourceVersion
 	}
-	rc, _, err := p.deps.Blobs.Get(ctx, blobKey(req, parts[0], parts[1]))
+	rc, _, err := p.deps.Blobs.Get(ctx, blob)
 	if err != nil {
 		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
 	}
 	defer rc.Close()
 	req.Body = rc
-	return p.uploadPart(ctx, req)
+	response, err := p.uploadPart(ctx, req)
+	if err == nil && sourceVersion != "" {
+		response.Headers.Set("x-amz-copy-source-version-id", sourceVersion)
+	}
+	return response, err
 }
 
 func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -1280,6 +1293,33 @@ func requestCondition(req *spi.Request, input, header string) string {
 		return req.HTTP.Header.Get(header)
 	}
 	return ""
+}
+
+func parseCopySource(req *spi.Request) (bucket, key, version string, err error) {
+	source := str(req.Input["CopySource"])
+	if source == "" && req.HTTP != nil {
+		source = req.HTTP.Header.Get("x-amz-copy-source")
+	}
+	path, query, _ := strings.Cut(strings.TrimPrefix(source, "/"), "?")
+	path, err = url.PathUnescape(path)
+	if err != nil {
+		return "", "", "", &spi.Fault{Code: "InvalidArgument", HTTPStatus: 400, Fault: "client"}
+	}
+	parts := strings.SplitN(path, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", "", &spi.Fault{Code: "InvalidArgument", HTTPStatus: 400, Fault: "client"}
+	}
+	for _, field := range strings.Split(query, "&") {
+		name, value, found := strings.Cut(field, "=")
+		if found && name == "versionId" {
+			version, err = url.PathUnescape(value)
+			if err != nil || version == "" {
+				return "", "", "", &spi.Fault{Code: "InvalidArgument", HTTPStatus: 400, Fault: "client"}
+			}
+			break
+		}
+	}
+	return parts[0], parts[1], version, nil
 }
 
 func etagMatches(condition, etag string) bool {

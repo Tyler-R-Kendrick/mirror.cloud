@@ -528,12 +528,28 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	if op.Name == "ListObjectsV2" || op.Name == "ListObjects" {
 		root = "ListBucketResult"
 	}
+	if op.Name == "GetObjectAttributes" {
+		root = "GetObjectAttributesResponse"
+	}
 	fmt.Fprintf(&b, "<%s>", root)
 	switch op.Name {
 	case "ListParts":
 		writeFlattened(resp.Output, &b, [][2]string{{"Parts", "Part"}})
 	case "ListMultipartUploads":
 		writeFlattened(resp.Output, &b, [][2]string{{"Uploads", "Upload"}, {"CommonPrefixes", "CommonPrefixes"}})
+	case "GetObjectAttributes":
+		top := make(map[string]any, len(resp.Output)-1)
+		for key, value := range resp.Output {
+			if key != "ObjectParts" {
+				top[key] = value
+			}
+		}
+		write(top, &b)
+		if parts, ok := resp.Output["ObjectParts"].(map[string]any); ok {
+			b.WriteString("<ObjectParts>")
+			writeFlattened(parts, &b, [][2]string{{"Parts", "Part"}})
+			b.WriteString("</ObjectParts>")
+		}
 	case "GetObjectTagging", "GetBucketTagging":
 		b.WriteString("<TagSet>")
 		for _, item := range resp.Output["TagSet"].([]any) {

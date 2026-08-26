@@ -1469,13 +1469,117 @@ func (p *Pack) policyStatus(ctx context.Context, req *spi.Request) (*spi.Respons
 
 func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
-	raw, ok, _ := p.col(req, "objects").Get(ctx, b+"/"+key)
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
+	meta, ok := p.objectMetadata(ctx, req, b, key, str(req.Input["VersionId"]))
 	if !ok {
 		return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: 404, Fault: "client"}
 	}
-	var meta map[string]any
-	_ = json.Unmarshal(raw, &meta)
-	return &spi.Response{Output: map[string]any{"ETag": meta["etag"], "ObjectSize": meta["size"], "LastModified": meta["mtime"]}}, nil
+	if truthy(meta["deleteMarker"]) {
+		return nil, deleteMarkerReadFault(meta, str(req.Input["VersionId"]) != "")
+	}
+	requested := map[string]bool{}
+	add := func(value string) {
+		for _, attr := range strings.Split(value, ",") {
+			requested[strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(attr), "_", ""))] = true
+		}
+	}
+	switch attrs := req.Input["ObjectAttributes"].(type) {
+	case []any:
+		for _, attr := range attrs {
+			add(str(attr))
+		}
+	case []string:
+		for _, attr := range attrs {
+			add(attr)
+		}
+	case string:
+		add(attrs)
+	}
+	if req.HTTP != nil {
+		add(req.HTTP.Header.Get("x-amz-object-attributes"))
+	}
+	out := map[string]any{}
+	if requested["ETAG"] {
+		out["ETag"] = meta["etag"]
+	}
+	if requested["OBJECTSIZE"] {
+		out["ObjectSize"] = meta["size"]
+	}
+	if requested["STORAGECLASS"] && str(meta["storageClass"]) != "STANDARD" {
+		out["StorageClass"] = meta["storageClass"]
+	}
+	parts := asSlice(meta["parts"])
+	if requested["CHECKSUM"] && len(asMap(meta["checksums"])) > 0 {
+		values := map[string]any{"ChecksumType": meta["checksumType"]}
+		for _, checksum := range checksums {
+			if value := str(asMap(meta["checksums"])[checksum.header]); value != "" {
+				if len(parts) > 0 {
+					value = strings.SplitN(value, "-", 2)[0]
+				}
+				values[checksum.input] = value
+			}
+		}
+		out["Checksum"] = values
+	}
+	if requested["OBJECTPARTS"] && len(parts) > 0 {
+		objectParts := map[string]any{"TotalPartsCount": len(parts)}
+		if str(meta["checksumType"]) == "COMPOSITE" {
+			readInt := func(input, header string, fallback int) (int, error) {
+				value := ""
+				if raw, ok := req.Input[input]; ok {
+					value = fmt.Sprint(raw)
+				} else if req.HTTP != nil {
+					value = req.HTTP.Header.Get(header)
+				}
+				if value == "" {
+					return fallback, nil
+				}
+				return strconv.Atoi(value)
+			}
+			marker, markerErr := readInt("PartNumberMarker", "x-amz-part-number-marker", 0)
+			maxParts, maxErr := readInt("MaxParts", "x-amz-max-parts", 1000)
+			if markerErr != nil || maxErr != nil || marker < 0 || maxParts < 0 || maxParts > 1000 {
+				return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			if maxParts == 0 {
+				maxParts = 1000
+			}
+			sort.Slice(parts, func(i, j int) bool { return asInt(asMap(parts[i])["number"]) < asInt(asMap(parts[j])["number"]) })
+			var listed []any
+			for _, raw := range parts {
+				part := asMap(raw)
+				number := asInt(part["number"])
+				if number <= marker {
+					continue
+				}
+				item := map[string]any{"PartNumber": number, "Size": part["size"]}
+				for _, checksum := range checksums {
+					if value := str(asMap(part["checksums"])[checksum.header]); value != "" {
+						item[checksum.input] = value
+					}
+				}
+				listed = append(listed, item)
+			}
+			truncated := len(listed) > maxParts
+			if truncated {
+				listed = listed[:maxParts]
+			}
+			objectParts["IsTruncated"], objectParts["MaxParts"], objectParts["PartNumberMarker"] = truncated, maxParts, strconv.Itoa(marker)
+			if len(listed) > 0 {
+				objectParts["Parts"] = listed
+				objectParts["NextPartNumberMarker"] = strconv.Itoa(asInt(asMap(listed[len(listed)-1])["PartNumber"]))
+			}
+		}
+		out["ObjectParts"] = objectParts
+	}
+	h := http.Header{}
+	h.Set("Last-Modified", str(meta["mtime"]))
+	if version := str(meta["versionId"]); version != "" {
+		h.Set("x-amz-version-id", version)
+	}
+	return &spi.Response{Headers: h, Output: out}, nil
 }
 
 func (p *Pack) emptyOK(req *spi.Request) (*spi.Response, error) {

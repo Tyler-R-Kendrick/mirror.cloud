@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -429,6 +430,69 @@ func TestMultipartPartReads(t *testing.T) {
 		"get":  map[string]any{"body": "tail", "status": get.Status, "length": get.Headers.Get("Content-Length"), "range": get.Headers.Get("Content-Range"), "parts": get.Headers.Get("x-amz-mp-parts-count"), "checksum": get.Headers.Get("x-amz-checksum-sha256")},
 		"head": map[string]any{"status": head.Status, "length": head.Headers.Get("Content-Length"), "range": head.Headers.Get("Content-Range"), "parts": head.Headers.Get("x-amz-mp-parts-count"), "checksum": head.Headers.Get("x-amz-checksum-sha256")},
 	})
+}
+
+func TestGetObjectAttributesContract(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "b", "Status": "Enabled"}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "composite", "ChecksumAlgorithm": "SHA256", "StorageClass": "STANDARD_IA"}, nil)
+	id := created.Output["UploadId"].(string)
+	first := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 1}, bytes.Repeat([]byte("A"), 5<<20))
+	second := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 2}, bytes.Repeat([]byte("B"), 5<<20))
+	third := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 3}, []byte("tail"))
+	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, first), completedPart(2, second), completedPart(3, third)), nil)
+	version := done.Headers.Get("x-amz-version-id")
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "composite"}, []byte("newer"))
+
+	attrs := []string{"ETag", "Checksum", "ObjectParts", "StorageClass", "ObjectSize"}
+	page := mustInvoke(t, p, "GetObjectAttributes", map[string]any{
+		"Bucket": "b", "Key": "composite", "VersionId": version, "ObjectAttributes": attrs, "MaxParts": 2,
+	}, nil)
+	if page.Output["ETag"] != done.Output["ETag"] || int(page.Output["ObjectSize"].(float64)) != 10<<20+4 || page.Output["StorageClass"] != "STANDARD_IA" || page.Headers.Get("x-amz-version-id") != version || page.Headers.Get("Last-Modified") == "" {
+		t.Fatalf("object attributes = %#v %v", page.Output, page.Headers)
+	}
+	checksum := asMapForTest(page.Output["Checksum"])
+	if checksum["ChecksumSHA256"] != strings.SplitN(done.Output["ChecksumSHA256"].(string), "-", 2)[0] || checksum["ChecksumType"] != "COMPOSITE" {
+		t.Fatalf("object checksum = %#v", checksum)
+	}
+	objectParts := asMapForTest(page.Output["ObjectParts"])
+	listed := objectParts["Parts"].([]any)
+	if objectParts["TotalPartsCount"] != 3 || objectParts["IsTruncated"] != true || objectParts["MaxParts"] != 2 || objectParts["PartNumberMarker"] != "0" || objectParts["NextPartNumberMarker"] != "2" || len(listed) != 2 || asMapForTest(listed[0])["PartNumber"] != 1 || asMapForTest(listed[1])["ChecksumSHA256"] != second.Headers.Get("x-amz-checksum-sha256") {
+		t.Fatalf("object parts page = %#v", objectParts)
+	}
+	lastPage := mustInvoke(t, p, "GetObjectAttributes", map[string]any{
+		"Bucket": "b", "Key": "composite", "VersionId": version, "ObjectAttributes": []any{"ObjectParts"}, "PartNumberMarker": "2", "MaxParts": 2,
+	}, nil).Output
+	lastParts := asMapForTest(lastPage["ObjectParts"])
+	if lastParts["IsTruncated"] != false || lastParts["PartNumberMarker"] != "2" || lastParts["NextPartNumberMarker"] != "3" || len(lastParts["Parts"].([]any)) != 1 || asMapForTest(lastParts["Parts"].([]any)[0])["PartNumber"] != 3 {
+		t.Fatalf("object parts final page = %#v", lastParts)
+	}
+	selected := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": "b", "Key": "composite", "VersionId": version, "ObjectAttributes": []string{"ObjectSize"}}, nil)
+	if len(selected.Output) != 1 || selected.Output["ObjectSize"] == nil {
+		t.Fatalf("selected attributes = %#v", selected.Output)
+	}
+	for field, value := range map[string]any{"MaxParts": 1001, "PartNumberMarker": "invalid"} {
+		_, err := invoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": "b", "Key": "composite", "VersionId": version, "ObjectAttributes": []string{"ObjectParts"}, field: value}, nil)
+		if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("invalid %s fault = %#v", field, fault)
+		}
+	}
+
+	full := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "full", "ChecksumAlgorithm": "CRC32", "ChecksumType": "FULL_OBJECT"}, nil)
+	fullID := full.Output["UploadId"].(string)
+	fullFirst := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": fullID, "PartNumber": 1}, bytes.Repeat([]byte("C"), 5<<20))
+	fullSecond := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": fullID, "PartNumber": 2}, []byte("end"))
+	fullDone := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(fullID, completedPart(1, fullFirst), completedPart(2, fullSecond)), nil)
+	fullAttrs := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": "b", "Key": "full", "ObjectAttributes": []string{"Checksum", "ObjectParts"}}, nil).Output
+	if fullChecksum := asMapForTest(fullAttrs["Checksum"]); fullChecksum["ChecksumCRC32"] != fullDone.Output["ChecksumCRC32"] || fullChecksum["ChecksumType"] != "FULL_OBJECT" {
+		t.Fatalf("full checksum attributes = %#v", fullChecksum)
+	}
+	if fullParts := asMapForTest(fullAttrs["ObjectParts"]); len(fullParts) != 1 || fullParts["TotalPartsCount"] != 2 {
+		t.Fatalf("full object parts = %#v", fullParts)
+	}
+
+	golden.AssertJSON(t, map[string]any{"page": page.Output, "lastPage": lastPage, "full": fullAttrs})
 }
 
 func TestWriteChecksumValidation(t *testing.T) {

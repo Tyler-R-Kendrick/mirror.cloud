@@ -23,6 +23,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
@@ -494,6 +496,10 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	if err := p.checkWritePreconditions(ctx, req, b, key); err != nil {
 		return nil, err
 	}
+	tags, err := requestTags(req)
+	if err != nil {
+		return nil, err
+	}
 	var body []byte
 	if req.Body != nil {
 		body, _ = io.ReadAll(req.Body)
@@ -544,7 +550,6 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	}
 	meta, _ := json.Marshal(metaDoc)
 	_ = p.col(req, "objects").Put(ctx, b+"/"+key, meta)
-	tags := requestTags(req)
 	tagKeys := []string{objectTagKey(b, key, "")}
 	if vid != "" {
 		tagKeys = append(tagKeys, objectTagKey(b, key, vid))
@@ -570,7 +575,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	if len(provided) > 0 {
 		h.Set("x-amz-checksum-type", checksumType)
 	}
-	if status := p.replicateObject(ctx, req, b, key, body, metaDoc); status != "" {
+	if status := p.replicateObject(ctx, req, b, key, body, metaDoc, tags); status != "" {
 		metaDoc["replicationStatus"] = status
 		meta, _ = json.Marshal(metaDoc)
 		_ = p.col(req, "objects").Put(ctx, b+"/"+key, meta)
@@ -914,6 +919,9 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
+	if _, err := requestTags(req); err != nil {
 		return nil, err
 	}
 	algorithm := strings.ToUpper(requestCondition(req, "ChecksumAlgorithm", "x-amz-checksum-algorithm"))
@@ -1645,6 +1653,12 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 	b := str(req.Input["Bucket"])
 	key := str(req.Input["Key"])
 	switch req.Operation {
+	case "PutBucketTagging", "GetBucketTagging", "DeleteBucketTagging":
+		if err := p.requireBucket(ctx, req, b); err != nil {
+			return nil, err
+		}
+	}
+	switch req.Operation {
 	case "DeleteBucketTagging", "DeleteObjectTagging":
 		tagKey := b
 		objectVersion := ""
@@ -1671,6 +1685,13 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 			if tagKey, objectVersion, err = p.objectTagTarget(ctx, req); err != nil {
 				return nil, err
 			}
+		}
+		limit, kind := 50, "bucket"
+		if req.Operation == "PutObjectTagging" {
+			limit, kind = 10, "object"
+		}
+		if err := validateTagSet(req.Input["TagSet"], limit, kind); err != nil {
+			return nil, err
 		}
 		raw, _ := json.Marshal(req.Input["TagSet"])
 		if len(raw) == 0 || string(raw) == "null" {
@@ -1705,6 +1726,9 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 			h.Set("x-amz-version-id", objectVersion)
 		}
 		if !ok {
+			if req.Operation == "GetBucketTagging" {
+				return nil, &spi.Fault{Code: "NoSuchTagSet", Message: "The TagSet does not exist", HTTPStatus: http.StatusNotFound, Fault: "client"}
+			}
 			return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"TagSet": []any{}}}, nil
 		}
 		var tags any
@@ -1728,6 +1752,54 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 	}
 	// Terraform refresh reads: empty document is the documented "not configured" response.
 	return &spi.Response{Status: 200, Output: map[string]any{}}, nil
+}
+
+func validateTagSet(value any, limit int, kind string) error {
+	tags, ok := value.([]any)
+	if !ok {
+		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if len(tags) > limit {
+		return &spi.Fault{Code: "InvalidTag", Message: "The number of tags exceeds the limit", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	keys := make(map[string]struct{}, len(tags))
+	for _, item := range tags {
+		tag, ok := item.(map[string]any)
+		keyValue, hasKey := tag["Key"]
+		valueValue, hasValue := tag["Value"]
+		key, keyOK := keyValue.(string)
+		tagValue, valueOK := valueValue.(string)
+		if !ok || !hasKey || !hasValue || !keyOK || !valueOK || len(tag) != 2 {
+			return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		if _, duplicate := keys[key]; duplicate {
+			return &spi.Fault{Code: "InvalidTag", Message: "Cannot provide multiple Tags with the same key", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"TagKey": key}}
+		}
+		if strings.HasPrefix(key, "aws:") {
+			message := "System tags cannot be added/updated by requester"
+			if kind == "object" {
+				message = "Your TagKey cannot be prefixed with aws:"
+			}
+			return &spi.Fault{Code: "InvalidTag", Message: message, HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"TagKey": key}}
+		}
+		if utf8.RuneCountInString(key) < 1 || utf8.RuneCountInString(key) > 128 || !validTagText(key) {
+			return &spi.Fault{Code: "InvalidTag", Message: "The TagKey you have provided is invalid", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"TagKey": key}}
+		}
+		if utf8.RuneCountInString(tagValue) > 256 || !validTagText(tagValue) {
+			return &spi.Fault{Code: "InvalidTag", Message: "The TagValue you have provided is invalid", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"TagKey": key, "TagValue": tagValue}}
+		}
+		keys[key] = struct{}{}
+	}
+	return nil
+}
+
+func validTagText(value string) bool {
+	for _, r := range value {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.IsSpace(r) && !strings.ContainsRune("_.:/=+-@", r) {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *Pack) objectLockExtras(ctx context.Context, req *spi.Request) (*spi.Response, error) {

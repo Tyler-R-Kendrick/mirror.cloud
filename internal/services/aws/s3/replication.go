@@ -19,9 +19,8 @@ type replicaRef struct {
 	Key     string `json:"key"`
 }
 
-func (p *Pack) replicateObject(ctx context.Context, req *spi.Request, bucket, key string, body []byte, meta map[string]any) string {
+func (p *Pack) replicateObject(ctx context.Context, req *spi.Request, bucket, key string, body []byte, meta map[string]any, tags map[string]string) string {
 	rules := p.replicationRules(ctx, req, bucket)
-	tags := requestTags(req)
 	matched, copied := false, false
 	for _, rule := range rules {
 		if !ruleMatches(rule, key, tags) {
@@ -207,17 +206,32 @@ func (p *Pack) replicationDestination(ctx context.Context, req *spi.Request, rul
 	return replicaRef{Account: account, Region: region, Bucket: bucket, Key: key}, str(dst["StorageClass"])
 }
 
-func requestTags(req *spi.Request) map[string]string {
+func requestTags(req *spi.Request) (map[string]string, error) {
 	tagging := str(req.Input["Tagging"])
 	if tagging == "" && req.HTTP != nil {
 		tagging = req.HTTP.Header.Get("x-amz-tagging")
 	}
-	values, _ := url.ParseQuery(tagging)
-	tags := make(map[string]string, len(values))
-	for key := range values {
-		tags[key] = values.Get(key)
+	values, err := url.ParseQuery(tagging)
+	if err != nil {
+		return nil, invalidTaggingHeader(tagging)
 	}
-	return tags
+	tags := make(map[string]string, len(values))
+	tagSet := make([]any, 0, len(values))
+	for key, value := range values {
+		if len(value) != 1 {
+			return nil, invalidTaggingHeader(tagging)
+		}
+		tags[key] = value[0]
+		tagSet = append(tagSet, map[string]any{"Key": key, "Value": value[0]})
+	}
+	if err := validateTagSet(tagSet, 10, "object"); err != nil {
+		return nil, invalidTaggingHeader(tagging)
+	}
+	return tags, nil
+}
+
+func invalidTaggingHeader(value string) error {
+	return &spi.Fault{Code: "InvalidArgument", Message: "The header 'x-amz-tagging' shall be encoded as UTF-8 then URLEncoded URL query parameters without tag name duplicates.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-tagging", "ArgumentValue": value}}
 }
 
 func tagSet(tags map[string]string) []any {

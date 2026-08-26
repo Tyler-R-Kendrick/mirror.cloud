@@ -426,7 +426,7 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 		in["MultipartUpload"] = map[string]any{"Parts": parts}
 	case "PutBucketTagging", "PutObjectTagging":
 		var t struct {
-			TagSet struct {
+			TagSet *struct {
 				Tag []struct {
 					Key   string `xml:"Key"`
 					Value string `xml:"Value"`
@@ -435,6 +435,9 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 		}
 		if xml.Unmarshal(raw, &t) != nil {
 			in["_body"] = string(raw)
+			return
+		}
+		if t.TagSet == nil {
 			return
 		}
 		tags := make([]any, 0, len(t.TagSet.Tag))

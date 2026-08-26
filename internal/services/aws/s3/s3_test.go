@@ -248,6 +248,17 @@ func TestCopyObjectSourceVersions(t *testing.T) {
 	}
 
 	deleted := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "b", "Key": key}, nil)
+	markerVersion := deleted.Headers.Get("x-amz-version-id")
+	for _, operation := range []string{"GetObject", "HeadObject"} {
+		_, err := invoke(t, p, operation, map[string]any{"Bucket": "b", "Key": key}, nil)
+		if fault := asFault(t, err); fault.HTTPStatus != http.StatusNotFound || fault.Headers.Get("x-amz-delete-marker") != "true" || fault.Headers.Get("x-amz-version-id") != markerVersion {
+			t.Fatalf("%s current marker fault = %#v", operation, fault)
+		}
+		_, err = invoke(t, p, operation, map[string]any{"Bucket": "b", "Key": key, "VersionId": markerVersion}, nil)
+		if fault := asFault(t, err); fault.Code != "MethodNotAllowed" || fault.HTTPStatus != http.StatusMethodNotAllowed || fault.Headers.Get("Last-Modified") == "" || fault.Headers.Get("x-amz-delete-marker") != "true" || fault.Headers.Get("x-amz-version-id") != markerVersion {
+			t.Fatalf("%s explicit marker fault = %#v", operation, fault)
+		}
+	}
 	if _, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": "deleted", "CopySource": source}, nil); asFault(t, err).Code != "NoSuchKey" {
 		t.Fatal("copied current delete marker")
 	}
@@ -260,7 +271,7 @@ func TestCopyObjectSourceVersions(t *testing.T) {
 		{"b/bad%zz", "InvalidArgument"},
 		{source + "?versionId=missing", "NoSuchKey"},
 		{source + "?versionId=", "InvalidArgument"},
-		{source + "?versionId=" + deleted.Headers.Get("x-amz-version-id"), "InvalidRequest"},
+		{source + "?versionId=" + markerVersion, "InvalidRequest"},
 	} {
 		_, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": "invalid", "CopySource": invalid.source}, nil)
 		if fault := asFault(t, err); fault.Code != invalid.code {

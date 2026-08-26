@@ -91,13 +91,22 @@ func TestBootedServerS3VersioningPaginationPresign(t *testing.T) {
 			t.Fatalf("version body %q", b)
 		}
 	}
+	markerVersion := ""
 	if code, b, h := do(http.MethodDelete, "/holes/k", "", map[string]string{"Authorization": auth}); code >= 300 {
 		t.Fatalf("delete marker %d %s", code, b)
 	} else if h.Get("x-amz-delete-marker") != "true" {
 		t.Fatalf("no delete marker header %v %s", h, b)
+	} else {
+		markerVersion = h.Get("x-amz-version-id")
 	}
-	if code, b, _ := do(http.MethodGet, "/holes/k", "", map[string]string{"Authorization": auth}); code != 404 {
+	if code, b, h := do(http.MethodGet, "/holes/k", "", map[string]string{"Authorization": auth}); code != 404 || h.Get("x-amz-delete-marker") != "true" || h.Get("x-amz-version-id") != markerVersion {
 		t.Fatalf("deleted latest %d %s", code, b)
+	}
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		code, b, h := do(method, "/holes/k?versionId="+markerVersion, "", map[string]string{"Authorization": auth})
+		if code != http.StatusMethodNotAllowed || h.Get("Last-Modified") == "" || h.Get("x-amz-delete-marker") != "true" || h.Get("x-amz-version-id") != markerVersion {
+			t.Fatalf("%s explicit marker %d %v %s", method, code, h, b)
+		}
 	}
 	if code, b, _ := do(http.MethodGet, "/holes?versions", "", map[string]string{"Authorization": auth}); code != 200 || !bytes.Contains(b, []byte("DeleteMarker")) && !bytes.Contains(b, []byte("delete")) {
 		// restxml encodes DeleteMarkers key

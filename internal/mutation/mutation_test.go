@@ -112,8 +112,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-ignore-copy-source-match",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if !etagMatches(match, etag) {`,
-			new:  `if false {`,
+			old:  "func checkCopySourcePreconditions(req *spi.Request, etag, modified string) error {\n\tmatch := requestCondition(req, \"CopySourceIfMatch\", \"x-amz-copy-source-if-match\")\n\tif match != \"\" {\n\t\tif !etagMatches(match, etag) {",
+			new:  "func checkCopySourcePreconditions(req *spi.Request, etag, modified string) error {\n\tmatch := requestCondition(req, \"CopySourceIfMatch\", \"x-amz-copy-source-if-match\")\n\tif match != \"\" {\n\t\tif false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCopyObjectConditions",
 		},

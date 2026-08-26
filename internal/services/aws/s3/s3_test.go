@@ -276,6 +276,102 @@ func TestCopyObjectRejectsUnchangedSelfCopy(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestArchiveRestoreCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "archive"}, nil)
+	for key, storageClass := range map[string]string{"glacier": "GLACIER", "deep": "DEEP_ARCHIVE", "instant": "GLACIER_IR", "standard": "STANDARD"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "archive", "Key": key, "StorageClass": storageClass}, []byte(key))
+	}
+
+	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "archive", "Key": "glacier"}, nil)
+	if head.Headers.Get("x-amz-storage-class") != "GLACIER" || head.Headers.Get("x-amz-restore") != "" {
+		t.Fatalf("archived head before restore = %v", head.Headers)
+	}
+	before := map[string]any{"head": "allowed"}
+	for _, key := range []string{"glacier", "deep"} {
+		_, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "archive", "Key": key}, nil)
+		fault := asFault(t, err)
+		if fault.Code != "InvalidObjectState" || fault.HTTPStatus != http.StatusForbidden || fault.Fields["StorageClass"] != map[string]string{"glacier": "GLACIER", "deep": "DEEP_ARCHIVE"}[key] {
+			t.Fatalf("%s before restore = %#v", key, fault)
+		}
+		before[key] = fault.Code
+	}
+	instant := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "archive", "Key": "instant"}, nil)
+	_ = instant.Stream.Close()
+	before["instant"] = "allowed"
+
+	_, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "archive", "Key": "rejected-copy", "CopySource": "archive/glacier"}, nil)
+	copyFault := asFault(t, err)
+	if copyFault.Code != "InvalidObjectState" {
+		t.Fatalf("unrestored copy = %#v", copyFault)
+	}
+	mpu := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "archive", "Key": "multipart-copy"}, nil)
+	uploadID := mpu.Output["UploadId"].(string)
+	_, err = invoke(t, p, "UploadPartCopy", map[string]any{"Bucket": "archive", "Key": "multipart-copy", "UploadId": uploadID, "PartNumber": 1, "CopySource": "archive/glacier"}, nil)
+	partFault := asFault(t, err)
+	parts := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "archive", "Key": "multipart-copy", "UploadId": uploadID}, nil)
+	if partFault.Code != "InvalidObjectState" || len(parts.Output["Parts"].([]any)) != 0 {
+		t.Fatalf("unrestored part copy = %#v parts=%#v", partFault, parts.Output)
+	}
+
+	_, err = invoke(t, p, "RestoreObject", map[string]any{"Bucket": "archive", "Key": "missing", "RestoreRequest": map[string]any{"Days": 1}}, nil)
+	missing := asFault(t, err)
+	_, err = invoke(t, p, "RestoreObject", map[string]any{"Bucket": "archive", "Key": "standard", "RestoreRequest": map[string]any{"Days": 1}}, nil)
+	standard := asFault(t, err)
+	if missing.Code != "NoSuchKey" || standard.Code != "InvalidObjectState" || standard.Fields["StorageClass"] != "STANDARD" {
+		t.Fatalf("restore boundaries missing=%#v standard=%#v", missing, standard)
+	}
+	withoutDays := mustInvoke(t, p, "RestoreObject", map[string]any{"Bucket": "archive", "Key": "glacier"}, nil)
+	if withoutDays.Status != http.StatusOK {
+		t.Fatalf("restore without days = %d", withoutDays.Status)
+	}
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "archive", "Key": "glacier"}, nil); asFault(t, err).Code != "InvalidObjectState" {
+		t.Fatalf("restore without days unlocked object: %v", err)
+	}
+	first := mustInvoke(t, p, "RestoreObject", map[string]any{"Bucket": "archive", "Key": "glacier", "RestoreRequest": map[string]any{"Days": 2}}, nil)
+	second := mustInvoke(t, p, "RestoreObject", map[string]any{"Bucket": "archive", "Key": "glacier", "Days": 2}, nil)
+	if first.Status != http.StatusAccepted || second.Status != http.StatusOK {
+		t.Fatalf("restore statuses = %d, %d", first.Status, second.Status)
+	}
+	restoredHead := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "archive", "Key": "glacier"}, nil)
+	restoreHeader := restoredHead.Headers.Get("x-amz-restore")
+	if restoreHeader != `ongoing-request="false", expiry-date="Sun, 04 Jan 1970 00:00:00 GMT"` {
+		t.Fatalf("restore header = %q", restoreHeader)
+	}
+	restoredGet := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "archive", "Key": "glacier"}, nil)
+	if body := string(readStream(t, restoredGet)); body != "glacier" || restoredGet.Headers.Get("x-amz-restore") != restoreHeader {
+		t.Fatalf("restored get body=%q headers=%v", body, restoredGet.Headers)
+	}
+	if _, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "archive", "Key": "copied", "CopySource": "archive/glacier"}, nil); err != nil {
+		t.Fatalf("restored copy: %v", err)
+	}
+	if _, err := invoke(t, p, "UploadPartCopy", map[string]any{"Bucket": "archive", "Key": "multipart-copy", "UploadId": uploadID, "PartNumber": 1, "CopySource": "archive/glacier"}, nil); err != nil {
+		t.Fatalf("restored part copy: %v", err)
+	}
+
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "archive", "Status": "Enabled"}, nil)
+	old := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "archive", "Key": "versioned", "StorageClass": "GLACIER"}, []byte("old"))
+	oldVersion := old.Headers.Get("x-amz-version-id")
+	mustInvoke(t, p, "RestoreObject", map[string]any{"Bucket": "archive", "Key": "versioned", "RestoreRequest": map[string]any{"Days": 1}}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "archive", "Key": "versioned", "StorageClass": "GLACIER"}, []byte("new"))
+	_, err = invoke(t, p, "GetObject", map[string]any{"Bucket": "archive", "Key": "versioned"}, nil)
+	currentFault := asFault(t, err)
+	oldGet := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "archive", "Key": "versioned", "VersionId": oldVersion}, nil)
+	if body := string(readStream(t, oldGet)); body != "old" || oldGet.Headers.Get("x-amz-restore") == "" || currentFault.Code != "InvalidObjectState" {
+		t.Fatalf("version restore body=%q header=%q current=%#v", body, oldGet.Headers.Get("x-amz-restore"), currentFault)
+	}
+
+	golden.AssertJSON(t, map[string]any{
+		"before": before,
+		"copy":   map[string]any{"object": copyFault.Code, "part": partFault.Code, "partsWritten": 0},
+		"restore": map[string]any{
+			"missing": missing.Code, "standard": standard.Code, "withoutDays": withoutDays.Status,
+			"first": first.Status, "second": second.Status, "header": restoreHeader,
+		},
+		"version": map[string]any{"current": currentFault.Code, "old": "allowed"},
+	})
+}
+
 func TestExpectedBucketOwnerAndDeleteBoundary(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)

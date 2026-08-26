@@ -101,9 +101,6 @@ func TestBootedServerS3BucketConfigsRoundTrip(t *testing.T) {
 	if code, b := do(http.MethodPut, "/cfgb/k?retention", `<Retention><Mode>GOVERNANCE</Mode></Retention>`); code >= 300 {
 		t.Fatalf("retention %d %s", code, b)
 	}
-	if code, b := do(http.MethodPost, "/cfgb/k?restore", `<RestoreRequest><Days>1</Days></RestoreRequest>`); code >= 300 {
-		t.Fatalf("restore %d %s", code, b)
-	}
 	if code, b := do(http.MethodPut, "/cfgb?analytics&id=a1", `<AnalyticsConfiguration><Id>a1</Id></AnalyticsConfiguration>`); code >= 300 {
 		t.Fatalf("put analytics %d %s", code, b)
 	}

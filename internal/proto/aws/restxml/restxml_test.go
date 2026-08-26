@@ -130,6 +130,18 @@ func TestDecodeCompleteMultipartUploadXML(t *testing.T) {
 	}
 }
 
+func TestDecodeRestoreObjectXML(t *testing.T) {
+	body := `<RestoreRequest><Days>3</Days></RestoreRequest>`
+	r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/b/k?restore", strings.NewReader(body))
+	req, err := Codec{}.Decode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "RestoreObject"}, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Input["Days"] != 3 || req.Input["RestoreRequest"].(map[string]any)["Days"] != 3 {
+		t.Fatalf("restore request = %#v", req.Input)
+	}
+}
+
 func TestDecodeTaggingXML(t *testing.T) {
 	body := `<Tagging><TagSet><Tag><Key>a</Key><Value>b</Value></Tag></TagSet></Tagging>`
 	r := httptest.NewRequest(http.MethodPut, "http://127.0.0.1/b?tagging", strings.NewReader(body))

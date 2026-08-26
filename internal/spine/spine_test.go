@@ -226,6 +226,11 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	if code, body, _ := do(http.MethodGet, "/qb?uploads&prefix=photos/&delimiter=/", "", nil); code != 200 || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>photos/2026/</Prefix></CommonPrefixes>")) {
 		t.Fatalf("list grouped uploads %d %s", code, body)
 	}
+	for _, number := range []string{"0", "10001", "invalid"} {
+		if code, body, _ := do(http.MethodPut, "/qb/m?partNumber="+number+"&uploadId="+uploadID, "part", nil); code != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidArgument")) {
+			t.Fatalf("upload part %s %d %s", number, code, body)
+		}
+	}
 	code, b, part1Headers := do(http.MethodPut, "/qb/m?partNumber=1&uploadId="+uploadID, strings.Repeat("A", 5<<20), nil)
 	if code >= 300 {
 		t.Fatalf("upload part %d %s", code, b)

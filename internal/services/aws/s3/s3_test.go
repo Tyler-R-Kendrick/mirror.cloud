@@ -658,6 +658,36 @@ func TestMultipartOperationsRejectMissingUpload(t *testing.T) {
 	mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "b", "Key": "k", "UploadId": uploadID}, nil)
 }
 
+func TestMultipartPartNumberBounds(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "k"}, nil)
+	uploadID := created.Output["UploadId"].(string)
+	for _, input := range []map[string]any{
+		{"UploadId": uploadID},
+		{"UploadId": uploadID, "PartNumber": -1},
+		{"UploadId": uploadID, "PartNumber": 0},
+		{"UploadId": uploadID, "PartNumber": 10001},
+	} {
+		_, err := invoke(t, p, "UploadPart", input, []byte("part"))
+		if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("UploadPart %#v fault = %#v", input, fault)
+		}
+	}
+	last := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 10000}, []byte("last"))
+	for _, number := range []int{0, 10001} {
+		input := completeInput(uploadID, map[string]any{"PartNumber": number, "ETag": last.Headers.Get("ETag")})
+		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		if fault := asFault(t, err); fault.Code != "InvalidPart" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("complete part %d fault = %#v", number, fault)
+		}
+	}
+	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "b", "Key": "k", "UploadId": uploadID}, nil)
+	if listed.Output["Parts"].([]any)[0].(map[string]any)["PartNumber"] != 10000 {
+		t.Fatalf("valid boundary part = %v", listed.Output)
+	}
+}
+
 func TestMissingBucket404(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": "nope", "Key": "k"}, []byte("x"))

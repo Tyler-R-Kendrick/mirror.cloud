@@ -154,6 +154,41 @@ func TestConcurrentInvalidWritesLeaveNoObject(t *testing.T) {
 	}
 }
 
+func TestConcurrentNonEmptyBucketDeletesAreRejected(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "non-empty"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "non-empty", "Key": "object"}, Body: io.NopCloser(bytes.NewReader([]byte("body")))}); err != nil {
+		t.Fatal(err)
+	}
+
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteBucket", Input: map[string]any{"Bucket": "non-empty"}})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "BucketNotEmpty" {
+			t.Fatalf("concurrent delete: %v", err)
+		}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{"Bucket": "non-empty", "Key": "object"}}); err != nil {
+		t.Fatalf("object after concurrent deletes: %v", err)
+	}
+}
+
 func TestConcurrentBucketCreationHasOneOwner(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

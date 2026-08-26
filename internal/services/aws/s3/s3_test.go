@@ -235,6 +235,15 @@ func TestCopyObjectRejectsUnchangedSelfCopy(t *testing.T) {
 	if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": "k"}, nil))); body != "body" {
 		t.Fatalf("rejected self-copy changed body: %q", body)
 	}
+	if _, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": "other", "CopySource": "b/k"}, nil); err != nil {
+		t.Fatalf("same-bucket copy to a different key: %v", err)
+	}
+	characterization["differentKey"] = "allowed"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "destination"}, nil)
+	if _, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "destination", "Key": "k", "CopySource": "b/k"}, nil); err != nil {
+		t.Fatalf("cross-bucket copy to the same key: %v", err)
+	}
+	characterization["differentBucket"] = "allowed"
 	for _, test := range []struct {
 		name  string
 		input map[string]any

@@ -2,6 +2,8 @@
   "bucketEncryption": "allowed",
   "copyMetadata": "InvalidRequest",
   "customerEncryption": "allowed",
+  "differentBucket": "allowed",
+  "differentKey": "allowed",
   "replaceMetadata": "allowed",
   "replaceTags": "InvalidRequest",
   "restoredSource": "allowed",

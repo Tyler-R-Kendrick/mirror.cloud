@@ -535,12 +535,47 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	if len(parts) != 1 {
 		t.Fatalf("ListParts %v", listed.Output)
 	}
+	paged := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "paged", "StorageClass": "STANDARD_IA"}, nil)
+	pagedID := paged.Output["UploadId"].(string)
+	for _, number := range []int{3, 1, 2} {
+		input := map[string]any{"Bucket": "b", "Key": "paged", "UploadId": pagedID, "PartNumber": number}
+		if number == 3 {
+			sum := make([]byte, 4)
+			binary.BigEndian.PutUint32(sum, crc32.ChecksumIEEE([]byte("CCC")))
+			input["ChecksumCRC32"] = base64.StdEncoding.EncodeToString(sum)
+		}
+		mustInvoke(t, p, "UploadPart", input, bytes.Repeat([]byte{byte('A' + number - 1)}, 3))
+	}
+	firstPage := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "b", "Key": "paged", "UploadId": pagedID, "MaxParts": 2}, nil)
+	firstParts := firstPage.Output["Parts"].([]any)
+	if len(firstParts) != 2 || firstParts[0].(map[string]any)["PartNumber"] != 1 || firstParts[1].(map[string]any)["PartNumber"] != 2 || firstPage.Output["IsTruncated"] != true || firstPage.Output["NextPartNumberMarker"] != 2 || firstPage.Output["StorageClass"] != "STANDARD_IA" {
+		t.Fatalf("ListParts first page %v", firstPage.Output)
+	}
+	secondPage := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "b", "Key": "paged", "UploadId": pagedID, "PartNumberMarker": 2, "MaxParts": 2}, nil)
+	last := secondPage.Output["Parts"].([]any)[0].(map[string]any)
+	if last["PartNumber"] != 3 || last["LastModified"] == "" || last["ChecksumCRC32"] == "" || secondPage.Output["IsTruncated"] != false || secondPage.Output["PartNumberMarker"] != 2 {
+		t.Fatalf("ListParts second page %v", secondPage.Output)
+	}
+	for _, input := range []map[string]any{
+		{"Bucket": "b", "Key": "paged", "UploadId": "missing"},
+		{"Bucket": "b", "Key": "wrong", "UploadId": pagedID},
+	} {
+		_, err := invoke(t, p, "ListParts", input, nil)
+		if fault := asFault(t, err); fault.Code != "NoSuchUpload" || fault.HTTPStatus != http.StatusNotFound {
+			t.Fatalf("ListParts missing upload fault = %#v", fault)
+		}
+	}
+	_, err := invoke(t, p, "ListParts", map[string]any{"Bucket": "b", "Key": "paged", "UploadId": pagedID, "MaxParts": 1001}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" {
+		t.Fatalf("ListParts max fault = %#v", fault)
+	}
 	ups := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "b"}, nil)
 	uploads, _ := ups.Output["Uploads"].([]any)
-	if len(uploads) != 1 {
+	if len(uploads) != 2 {
 		t.Fatalf("ListMultipartUploads %v", ups.Output)
 	}
 	mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, part)), nil)
+	mustInvoke(t, p, "AbortMultipartUpload", map[string]any{"Bucket": "b", "Key": "paged", "UploadId": pagedID}, nil)
 	after := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "b"}, nil)
 	uploads, _ = after.Output["Uploads"].([]any)
 	if len(uploads) != 0 {

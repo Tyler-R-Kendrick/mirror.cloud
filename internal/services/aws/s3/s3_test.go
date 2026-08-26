@@ -189,15 +189,36 @@ func TestTagValidationAndBucketSemantics(t *testing.T) {
 	}
 	for _, operation := range []string{"PutObject", "CreateMultipartUpload"} {
 		_, err := invoke(t, p, operation, map[string]any{"Bucket": "b", "Key": operation, "Tagging": "key=one&key=two"}, []byte("body"))
-		if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+		fault := asFault(t, err)
+		if fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
 			t.Fatalf("%s duplicate header = %#v", operation, fault)
 		}
+		characterization[operation+"DuplicateHeader"] = fault.Code
+	}
+	headerTags := url.Values{}
+	for i := range 11 {
+		headerTags.Set(fmt.Sprintf("key%d", i), "value")
+	}
+	rejectedKeys := []string{"PutObject", "copy"}
+	for _, test := range []struct{ name, tagging string }{
+		{"malformed-header", "%zz=value"},
+		{"invalid-header-key", "team%3F=value"},
+		{"too-many-header-tags", headerTags.Encode()},
+	} {
+		key := "rejected-" + test.name
+		_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": key, "Tagging": test.tagging}, []byte("body"))
+		fault := asFault(t, err)
+		if fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("%s = %#v", test.name, fault)
+		}
+		characterization[test.name] = fault.Code
+		rejectedKeys = append(rejectedKeys, key)
 	}
 	_, err = invoke(t, p, "CopyObject", map[string]any{"Bucket": "b", "Key": "copy", "CopySource": "b/source", "TaggingDirective": "REPLACE", "Tagging": "key=one&key=two"}, nil)
 	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("copy duplicate header = %#v", fault)
 	}
-	for _, key := range []string{"PutObject", "copy"} {
+	for _, key := range rejectedKeys {
 		if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "b", "Key": key}, nil); asFault(t, err).Code != "NoSuchKey" {
 			t.Fatalf("rejected %s created object: %v", key, err)
 		}

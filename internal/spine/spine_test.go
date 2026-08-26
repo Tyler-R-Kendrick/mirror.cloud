@@ -306,6 +306,10 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	if code, b, _ := do(http.MethodGet, "/qb/m?partNumber=1", "", map[string]string{"Range": "bytes=0-1"}); code != http.StatusBadRequest || !bytes.Contains(b, []byte("InvalidRequest")) {
 		t.Fatalf("part and range %d %s", code, b)
 	}
+	attributeHeaders := map[string]string{"x-amz-object-attributes": "ETag,Checksum,ObjectParts,StorageClass,ObjectSize", "x-amz-max-parts": "1"}
+	if code, b, h := do(http.MethodGet, "/qb/m?attributes", "", attributeHeaders); code != http.StatusOK || !bytes.Contains(b, []byte("<GetObjectAttributesResponse>")) || !bytes.Contains(b, []byte("<Checksum><ChecksumCRC32>"+checksum+"</ChecksumCRC32><ChecksumType>FULL_OBJECT</ChecksumType></Checksum>")) || !bytes.Contains(b, []byte("<ObjectParts><PartsCount>2</PartsCount></ObjectParts>")) || !bytes.Contains(b, []byte("<ObjectSize>"+strconv.Itoa(size)+"</ObjectSize>")) || !bytes.Contains(b, []byte("<StorageClass>STANDARD_IA</StorageClass>")) || bytes.Contains(b, []byte("<member>")) || h.Get("Last-Modified") == "" {
+		t.Fatalf("get object attributes %d %s %v", code, b, h)
+	}
 	if code, b, _ := do(http.MethodGet, "/qb/m?tagging", "", nil); code != http.StatusOK || bytes.Contains(b, []byte("<member>")) || !bytes.Contains(b, []byte("<TagSet><Tag><Key>env</Key><Value>test</Value></Tag><Tag><Key>team</Key><Value>storage</Value></Tag></TagSet>")) {
 		t.Fatalf("get multipart tags %d %s", code, b)
 	}

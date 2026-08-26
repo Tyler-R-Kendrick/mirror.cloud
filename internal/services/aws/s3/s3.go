@@ -1498,14 +1498,16 @@ func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Res
 		add(attrs)
 	}
 	if req.HTTP != nil {
-		add(req.HTTP.Header.Get("x-amz-object-attributes"))
+		for _, value := range req.HTTP.Header.Values("x-amz-object-attributes") {
+			add(value)
+		}
 	}
 	out := map[string]any{}
 	if requested["ETAG"] {
 		out["ETag"] = meta["etag"]
 	}
 	if requested["OBJECTSIZE"] {
-		out["ObjectSize"] = meta["size"]
+		out["ObjectSize"] = asInt(meta["size"])
 	}
 	if requested["STORAGECLASS"] && str(meta["storageClass"]) != "STANDARD" {
 		out["StorageClass"] = meta["storageClass"]
@@ -1554,7 +1556,7 @@ func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Res
 				if number <= marker {
 					continue
 				}
-				item := map[string]any{"PartNumber": number, "Size": part["size"]}
+				item := map[string]any{"PartNumber": number, "Size": asInt(part["size"])}
 				for _, checksum := range checksums {
 					if value := str(asMap(part["checksums"])[checksum.header]); value != "" {
 						item[checksum.input] = value

@@ -547,7 +547,15 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		write(top, &b)
 		if parts, ok := resp.Output["ObjectParts"].(map[string]any); ok {
 			b.WriteString("<ObjectParts>")
-			writeFlattened(parts, &b, [][2]string{{"Parts", "Part"}})
+			encoded := make(map[string]any, len(parts))
+			for key, value := range parts {
+				encoded[key] = value
+			}
+			if count, ok := encoded["TotalPartsCount"]; ok {
+				delete(encoded, "TotalPartsCount")
+				encoded["PartsCount"] = count
+			}
+			writeFlattened(encoded, &b, [][2]string{{"Parts", "Part"}})
 			b.WriteString("</ObjectParts>")
 		}
 	case "GetObjectTagging", "GetBucketTagging":
@@ -576,7 +584,8 @@ func writeFlattened(output map[string]any, b *strings.Builder, members [][2]stri
 	}
 	write(top, b)
 	for _, member := range members {
-		for _, item := range output[member[0]].([]any) {
+		items, _ := output[member[0]].([]any)
+		for _, item := range items {
 			fmt.Fprintf(b, "<%s>", member[1])
 			write(item, b)
 			fmt.Fprintf(b, "</%s>", member[1])

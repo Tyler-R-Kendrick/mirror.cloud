@@ -449,7 +449,7 @@ func TestGetObjectAttributesContract(t *testing.T) {
 	page := mustInvoke(t, p, "GetObjectAttributes", map[string]any{
 		"Bucket": "b", "Key": "composite", "VersionId": version, "ObjectAttributes": attrs, "MaxParts": 2,
 	}, nil)
-	if page.Output["ETag"] != done.Output["ETag"] || int(page.Output["ObjectSize"].(float64)) != 10<<20+4 || page.Output["StorageClass"] != "STANDARD_IA" || page.Headers.Get("x-amz-version-id") != version || page.Headers.Get("Last-Modified") == "" {
+	if page.Output["ETag"] != done.Output["ETag"] || page.Output["ObjectSize"] != 10<<20+4 || page.Output["StorageClass"] != "STANDARD_IA" || page.Headers.Get("x-amz-version-id") != version || page.Headers.Get("Last-Modified") == "" {
 		t.Fatalf("object attributes = %#v %v", page.Output, page.Headers)
 	}
 	checksum := asMapForTest(page.Output["Checksum"])

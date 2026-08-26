@@ -127,7 +127,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 	})
 
 	t.Run("Given a regional endpoint When creating a bucket Then its location constraint must match", func(t *testing.T) {
-		request := func(method, bucket, region, constraint string) (int, []byte) {
+		request := func(method, bucket, region, constraint string) (int, []byte, string) {
 			t.Helper()
 			var body io.Reader
 			if constraint != "" {
@@ -145,15 +145,15 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			}
 			response, _ := io.ReadAll(res.Body)
 			res.Body.Close()
-			return res.StatusCode, response
+			return res.StatusCode, response, res.Header.Get("Location")
 		}
-		if status, body := request(http.MethodPut, "regional-missing", "us-west-2", ""); status != http.StatusBadRequest || !bytes.Contains(body, []byte("IllegalLocationConstraintException")) {
+		if status, body, _ := request(http.MethodPut, "regional-missing", "us-west-2", ""); status != http.StatusBadRequest || !bytes.Contains(body, []byte("IllegalLocationConstraintException")) {
 			t.Fatalf("missing constraint %d %s", status, body)
 		}
-		if status, body := request(http.MethodPut, "regional-match", "us-west-2", "us-west-2"); status != http.StatusOK {
-			t.Fatalf("matching constraint %d %s", status, body)
+		if status, body, location := request(http.MethodPut, "regional-match", "us-west-2", "us-west-2"); status != http.StatusOK || location != ts.URL+"/regional-match/" {
+			t.Fatalf("matching constraint %d %s location=%q", status, body, location)
 		}
-		if status, body := request(http.MethodGet, "regional-match?location", "us-west-2", ""); status != http.StatusOK || !bytes.Contains(body, []byte(">us-west-2</LocationConstraint>")) {
+		if status, body, _ := request(http.MethodGet, "regional-match?location", "us-west-2", ""); status != http.StatusOK || !bytes.Contains(body, []byte(">us-west-2</LocationConstraint>")) {
 			t.Fatalf("reported location %d %s", status, body)
 		}
 	})

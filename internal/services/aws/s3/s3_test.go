@@ -214,6 +214,14 @@ func TestCreateBucketAccountRegionalNamespace(t *testing.T) {
 	if _, err := invokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "explicit-global", "BucketNamespace": "global"}, nil); err != nil {
 		t.Fatalf("explicit global namespace: %v", err)
 	}
+	for _, region := range []string{"me-central-1", "me-south-1"} {
+		id := spi.Identity{Account: east.Account, Region: region}
+		bucket := "team-" + id.Account + "-" + region + "-an"
+		_, err := invokeAs(t, p, id, "CreateBucket", map[string]any{"Bucket": bucket, "BucketNamespace": "account-regional", "LocationConstraint": region}, nil)
+		if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("unsupported region %s = %#v", region, fault)
+		}
+	}
 
 	west := spi.Identity{Account: east.Account, Region: "us-west-2"}
 	westName := "team-" + west.Account + "-" + west.Region + "-an"

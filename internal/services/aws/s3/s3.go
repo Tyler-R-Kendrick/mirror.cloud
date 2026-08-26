@@ -552,6 +552,9 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 	if err != nil {
 		return nil, err
 	}
+	if accountRegional && (bucketRegion == "me-central-1" || bucketRegion == "me-south-1") {
+		return nil, &spi.Fault{Code: "InvalidRequest", Message: "Account regional namespace is not supported in this region.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
 	if accountRegional && !validAccountRegionalBucketName(b, req.Identity.Account, bucketRegion) {
 		return nil, &spi.Fault{Code: "InvalidBucketName", Message: "The specified bucket is not valid.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"BucketName": b}}
 	}

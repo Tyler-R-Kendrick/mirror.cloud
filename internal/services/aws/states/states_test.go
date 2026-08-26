@@ -3185,6 +3185,7 @@ func TestStatesTestStateItemReaderData(t *testing.T) {
 
 func TestStatesTestStateReaderDataFormats(t *testing.T) {
 	p := New(spitest.Deps(t))
+	identity := spi.Identity{Account: "1", Region: "us-east-1"}
 	for _, test := range []struct {
 		inputType, data, want string
 	}{
@@ -3192,7 +3193,7 @@ func TestStatesTestStateReaderDataFormats(t *testing.T) {
 		{"CSV", "id,name\n1,one\n2,two\n", `[{"source":"CSV","value":{"id":"1","name":"one"}},{"source":"CSV","value":{"id":"2","name":"two"}}]`},
 	} {
 		definition := fmt.Sprintf(`{"QueryLanguage":"JSONata","Type":"Map","ItemReader":{"Resource":"arn:aws:states:::s3:getObject","ReaderConfig":{"InputType":%q}},"ItemSelector":{"source":"{%% $states.context.Map.Item.Source %%}","value":"{%% $states.context.Map.Item.Value %%}"},"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}`, test.inputType)
-		response, err := p.Invoke(context.Background(), &spi.Request{Identity: spi.Identity{Account: "1", Region: "us-east-1"}, Operation: "TestState", Input: map[string]any{
+		response, err := p.Invoke(context.Background(), &spi.Request{Identity: identity, Operation: "TestState", Input: map[string]any{
 			"definition": definition, "mock": map[string]any{"result": `[]`}, "inspectionLevel": "DEBUG",
 			"stateConfiguration": map[string]any{"mapItemReaderData": test.data},
 		}})
@@ -3201,6 +3202,14 @@ func TestStatesTestStateReaderDataFormats(t *testing.T) {
 		if err != nil || inspection["afterItemSelector"] != test.want || hasItemsPointer {
 			t.Fatalf("TestState %s ItemReader data %#v, %v", test.inputType, response, err)
 		}
+	}
+	response, err := p.Invoke(context.Background(), &spi.Request{Identity: identity, Operation: "TestState", Input: map[string]any{
+		"definition": `{"Type":"Map","ItemReader":{"Resource":"arn:aws:states:::s3:getObject","ReaderConfig":{"InputType":"CSV","CSVDelimiter":"PIPE","CSVHeaderLocation":"GIVEN","CSVHeaders":["id","name"]}},"ItemSelector":{"source.$":"$$.Map.Item.Source","value.$":"$$.Map.Item.Value"},"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}`,
+		"mock":       map[string]any{"result": `[]`}, "inspectionLevel": "DEBUG",
+		"stateConfiguration": map[string]any{"mapItemReaderData": "1|one\n2|two\n"},
+	}})
+	if err != nil || response.Output["inspectionData"].(map[string]any)["afterItemSelector"] != `[{"source":"CSV","value":{"id":"1","name":"one"}},{"source":"CSV","value":{"id":"2","name":"two"}}]` {
+		t.Fatalf("TestState configured CSV ItemReader data %#v, %v", response, err)
 	}
 }
 

@@ -95,8 +95,14 @@ func FuzzCreateBucketCollisions(f *testing.F) {
 		p := s3.New(spitest.Deps(t))
 		owner := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		mustInvokeAs(t, p, owner, "CreateBucket", map[string]any{"Bucket": "global-name"}, nil)
-		_, err := invokeAs(t, p, spi.Identity{Account: account, Region: region}, "CreateBucket", map[string]any{"Bucket": "global-name"}, nil)
-		if account == owner.Account && region == owner.Region {
+		requestRegion := owner.Region
+		input := map[string]any{"Bucket": "global-name"}
+		if region != owner.Region {
+			requestRegion = "us-west-2"
+			input["LocationConstraint"] = requestRegion
+		}
+		_, err := invokeAs(t, p, spi.Identity{Account: account, Region: requestRegion}, "CreateBucket", input, nil)
+		if account == owner.Account && requestRegion == owner.Region {
 			if err != nil {
 				t.Fatalf("idempotent create: %v", err)
 			}

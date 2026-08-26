@@ -1972,7 +1972,7 @@ func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	west.Region = "us-west-2"
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "source"}, nil)
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "source", "Status": "Enabled"}, nil)
-	mustInvokeAs(t, p, west, "CreateBucket", map[string]any{"Bucket": "destination"}, nil)
+	mustInvokeAs(t, p, west, "CreateBucket", map[string]any{"Bucket": "destination", "LocationConstraint": "us-west-2"}, nil)
 	mustInvokeAs(t, p, west, "PutBucketVersioning", map[string]any{"Bucket": "destination", "Status": "Enabled"}, nil)
 	mustInvoke(t, p, "PutBucketReplication", map[string]any{
 		"Bucket": "source",

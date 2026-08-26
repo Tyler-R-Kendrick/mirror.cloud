@@ -315,6 +315,7 @@ func TestListBucketsPaginationAndFilters(t *testing.T) {
 			t.Fatalf("invalid input %#v = %#v", input, fault)
 		}
 	}
+	golden.AssertJSON(t, map[string]any{"all": all.Output, "page": page.Output, "last": last.Output, "regional": regional.Output})
 }
 
 func TestCreateBucketLocationConstraints(t *testing.T) {

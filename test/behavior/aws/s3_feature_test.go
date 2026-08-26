@@ -74,6 +74,25 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given an invalid storage class When PUT object Then it is rejected", func(t *testing.T) {
+		res := do(http.MethodPut, "/classes", nil, "")
+		res.Body.Close()
+		if res.StatusCode >= 300 {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		res = do(http.MethodPut, "/classes/object", []byte("body"), "glacier")
+		fault, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("InvalidStorageClass")) {
+			t.Fatalf("invalid storage class %d %s", res.StatusCode, fault)
+		}
+		res = do(http.MethodGet, "/classes/object", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound {
+			t.Fatalf("invalid storage class created object: %d", res.StatusCode)
+		}
+	})
+
 	t.Run("Given an archived object When restored Then reads become available", func(t *testing.T) {
 		res := do(http.MethodPut, "/cold", nil, "")
 		res.Body.Close()

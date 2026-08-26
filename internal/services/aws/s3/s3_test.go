@@ -148,7 +148,14 @@ func TestObjectMetadata(t *testing.T) {
 	}
 
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "default"}, []byte("body"))
-	assert("default", mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "default"}, nil), "binary/octet-stream", "")
+	defaultHead := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "b", "Key": "default"}, nil)
+	assert("default", defaultHead, "binary/octet-stream", "")
+	golden.AssertJSON(t, map[string]any{
+		"get":      map[string]any{"contentType": get.Headers.Get("Content-Type"), "cacheControl": get.Headers.Get("Cache-Control"), "owner": get.Headers.Get("x-amz-meta-owner")},
+		"head":     map[string]any{"contentType": head.Headers.Get("Content-Type"), "owner": head.Headers.Get("x-amz-meta-owner")},
+		"replaced": map[string]any{"contentType": replaced.Headers.Get("Content-Type"), "cacheControl": replaced.Headers.Get("Cache-Control"), "owner": replaced.Headers.Get("x-amz-meta-owner")},
+		"default":  map[string]any{"contentType": defaultHead.Headers.Get("Content-Type")},
+	})
 }
 
 func TestCopyObjectTaggingDirective(t *testing.T) {

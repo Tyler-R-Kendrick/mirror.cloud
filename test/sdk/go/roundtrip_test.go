@@ -61,7 +61,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		t.Fatalf("enable versioning: %v", err)
 	}
 	put, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{
-		Bucket: aws.String("sdk"), Key: aws.String("k"), Body: bytes.NewReader([]byte("hello-sdk")), ChecksumAlgorithm: s3types.ChecksumAlgorithmCrc32, Tagging: aws.String("stage=original"),
+		Bucket: aws.String("sdk"), Key: aws.String("k"), Body: bytes.NewReader([]byte("hello-sdk")), ChecksumAlgorithm: s3types.ChecksumAlgorithmCrc32, Tagging: aws.String("stage=original"), ContentType: aws.String("text/plain"), CacheControl: aws.String("max-age=60"), Metadata: map[string]string{"owner": "mirror"},
 	})
 	if err != nil {
 		t.Fatalf("put: %v", err)
@@ -74,6 +74,9 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	_ = got.Body.Close()
 	if string(body) != "hello-sdk" {
 		t.Fatalf("s3 body %q", body)
+	}
+	if aws.ToString(got.ContentType) != "text/plain" || aws.ToString(got.CacheControl) != "max-age=60" || got.Metadata["owner"] != "mirror" {
+		t.Fatalf("s3 metadata %#v", got)
 	}
 	verified, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), ChecksumMode: s3types.ChecksumModeEnabled})
 	if err != nil {

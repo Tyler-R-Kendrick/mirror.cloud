@@ -390,4 +390,18 @@ func TestBootedServerS3VersionedTaggingContract(t *testing.T) {
 	if code, body, _ := do(http.MethodHead, "/tags/rejected", "", nil); code != http.StatusNotFound {
 		t.Fatalf("rejected tagged put persisted %d %s", code, body)
 	}
+	metadataHeaders := map[string]string{"Content-Type": "text/plain", "Cache-Control": "max-age=60", "x-amz-meta-owner": "mirror"}
+	if code, body, _ := do(http.MethodPut, "/tags/metadata", "metadata", metadataHeaders); code != http.StatusOK {
+		t.Fatalf("put metadata %d %s", code, body)
+	}
+	if code, _, headers := do(http.MethodHead, "/tags/metadata", "", nil); code != http.StatusOK || headers.Get("Content-Type") != "text/plain" || headers.Get("Cache-Control") != "max-age=60" || headers.Get("x-amz-meta-owner") != "mirror" {
+		t.Fatalf("head metadata %d %v", code, headers)
+	}
+	copyHeaders := map[string]string{"x-amz-copy-source": "tags/metadata"}
+	if code, body, _ := do(http.MethodPut, "/tags/metadata-copy", "", copyHeaders); code != http.StatusOK {
+		t.Fatalf("copy metadata %d %s", code, body)
+	}
+	if code, _, headers := do(http.MethodHead, "/tags/metadata-copy", "", nil); code != http.StatusOK || headers.Get("Content-Type") != "text/plain" || headers.Get("x-amz-meta-owner") != "mirror" {
+		t.Fatalf("head copied metadata %d %v", code, headers)
+	}
 }

@@ -1,0 +1,19 @@
+{
+  "default": {
+    "contentType": "binary/octet-stream"
+  },
+  "get": {
+    "cacheControl": "max-age=60",
+    "contentType": "text/plain",
+    "owner": "mirror"
+  },
+  "head": {
+    "contentType": "text/plain",
+    "owner": "mirror"
+  },
+  "replaced": {
+    "cacheControl": "",
+    "contentType": "application/json",
+    "owner": "new"
+  }
+}

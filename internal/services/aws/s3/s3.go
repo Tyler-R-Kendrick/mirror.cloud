@@ -347,14 +347,23 @@ func (p *Pack) route(req *spi.Request) string {
 		return a
 	}
 	has := func(k string) bool { _, ok := q[k]; return ok }
+	if has("max-buckets") {
+		req.Input["MaxBuckets"] = q.Get("max-buckets")
+	}
+	if has("bucket-region") {
+		req.Input["BucketRegion"] = q.Get("bucket-region")
+	}
+	if has("prefix") {
+		req.Input["Prefix"] = q.Get("prefix")
+	}
 	if v := q.Get("versionId"); v != "" {
 		req.Input["VersionId"] = v
 	}
 	if v := q.Get("max-keys"); v != "" {
 		req.Input["MaxKeys"] = v
 	}
-	if v := q.Get("continuation-token"); v != "" {
-		req.Input["ContinuationToken"] = v
+	if has("continuation-token") {
+		req.Input["ContinuationToken"] = q.Get("continuation-token")
 	}
 	if v := q.Get("start-after"); v != "" {
 		req.Input["StartAfter"] = v
@@ -569,7 +578,7 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		} else if exists {
 			return nil, &spi.Fault{Code: "BucketAlreadyOwnedByYou", Message: "Your previous request to create the named bucket succeeded and you already own it.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"BucketName": b}}
 		}
-		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "namespace": namespace})
+		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "namespace": namespace, "creationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")})
 		if err := buckets.Put(ctx, b, meta); err != nil {
 			return nil, err
 		}
@@ -597,7 +606,7 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 			return nil, &spi.Fault{Code: "BucketAlreadyOwnedByYou", Message: "Your previous request to create the named bucket succeeded and you already own it.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"BucketName": b}}
 		}
 	} else {
-		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint})
+		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "creationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")})
 		if err := buckets.Put(ctx, b, meta); err != nil {
 			return nil, err
 		}
@@ -686,12 +695,85 @@ func (p *Pack) headBucket(ctx context.Context, req *spi.Request) (*spi.Response,
 }
 
 func (p *Pack) listBuckets(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	kvs, _, _ := p.col(req, "buckets").List(ctx, "", "", 0)
-	var buckets []any
-	for _, kv := range kvs {
-		buckets = append(buckets, map[string]any{"Name": kv.Key, "CreationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")})
+	prefix, prefixSet := req.Input["Prefix"].(string)
+	region, regionSet := req.Input["BucketRegion"].(string)
+	token, tokenSet := req.Input["ContinuationToken"].(string)
+	_, maxSet := req.Input["MaxBuckets"]
+	maxBuckets := 0
+	if maxSet {
+		maxBuckets = asInt(req.Input["MaxBuckets"])
+		if maxBuckets < 1 || maxBuckets > 10000 {
+			return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid max-buckets value", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+	} else if prefixSet || regionSet || tokenSet {
+		maxBuckets = 10000
 	}
-	return &spi.Response{Output: map[string]any{"Buckets": buckets, "Owner": map[string]any{"ID": req.Identity.Account, "DisplayName": "mirror"}}}, nil
+	after := ""
+	if tokenSet && token != "" {
+		if len(token) > 1024 {
+			return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid continuation token", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		decoded, err := base64.URLEncoding.DecodeString(token)
+		if err != nil {
+			return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid continuation token", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		after = string(decoded)
+	}
+	type listedBucket struct{ name, region, created string }
+	var listed []listedBucket
+	scopes, err := p.deps.Store.Scopes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, scope := range scopes {
+		if scope.Account != req.Identity.Account {
+			continue
+		}
+		kvs, _, err := p.deps.Store.Scope(scope.Account, scope.Region).Collection("buckets").List(ctx, prefix, "", 0)
+		if err != nil {
+			return nil, err
+		}
+		for _, kv := range kvs {
+			var meta map[string]any
+			if err := json.Unmarshal(kv.Value, &meta); err != nil {
+				return nil, err
+			}
+			bucketRegion := str(meta["region"])
+			if bucketRegion == "" {
+				bucketRegion = scope.Region
+			}
+			if (regionSet && bucketRegion != region) || kv.Key <= after {
+				continue
+			}
+			created := str(meta["creationDate"])
+			if created == "" {
+				created = p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+			}
+			listed = append(listed, listedBucket{name: kv.Key, region: bucketRegion, created: created})
+		}
+	}
+	sort.Slice(listed, func(i, j int) bool { return listed[i].name < listed[j].name })
+	truncated := maxBuckets > 0 && len(listed) > maxBuckets
+	if truncated {
+		listed = listed[:maxBuckets]
+	}
+	buckets := make([]any, 0, len(listed))
+	paginated := prefixSet || regionSet || tokenSet || maxSet
+	for _, bucket := range listed {
+		item := map[string]any{"Name": bucket.name, "CreationDate": bucket.created}
+		if paginated {
+			item["BucketRegion"] = bucket.region
+		}
+		buckets = append(buckets, item)
+	}
+	out := map[string]any{"Buckets": buckets, "Owner": map[string]any{"ID": req.Identity.Account, "DisplayName": "mirror"}}
+	if prefixSet {
+		out["Prefix"] = prefix
+	}
+	if truncated {
+		out["ContinuationToken"] = base64.URLEncoding.EncodeToString([]byte(listed[len(listed)-1].name))
+	}
+	return &spi.Response{Output: out}, nil
 }
 
 func (p *Pack) getBucketLocation(ctx context.Context, req *spi.Request) (*spi.Response, error) {

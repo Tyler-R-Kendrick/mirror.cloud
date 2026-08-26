@@ -239,6 +239,84 @@ func TestCreateBucketAccountRegionalNamespace(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestListBucketsPaginationAndFilters(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	east := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	west := spi.Identity{Account: east.Account, Region: "us-west-2"}
+	other := spi.Identity{Account: "999999999999", Region: east.Region}
+	create := func(id spi.Identity, name string) {
+		t.Helper()
+		input := map[string]any{"Bucket": name}
+		if id.Region != "us-east-1" {
+			input["LocationConstraint"] = id.Region
+		}
+		mustInvokeAs(t, p, id, "CreateBucket", input, nil)
+		if err := deps.Clock.Advance(time.Second); err != nil {
+			t.Fatal(err)
+		}
+	}
+	create(east, "alpha-bucket")
+	create(east, "team-alpha")
+	create(west, "team-beta")
+	create(west, "team-charlie")
+	create(other, "team-private")
+	stringValue := func(value any) string { text, _ := value.(string); return text }
+	names := func(response *spi.Response) []string {
+		t.Helper()
+		var got []string
+		for _, item := range response.Output["Buckets"].([]any) {
+			got = append(got, stringValue(asMapForTest(item)["Name"]))
+		}
+		return got
+	}
+
+	all := mustInvokeAs(t, p, east, "ListBuckets", map[string]any{}, nil)
+	if got := strings.Join(names(all), ","); got != "alpha-bucket,team-alpha,team-beta,team-charlie" {
+		t.Fatalf("all buckets = %s", got)
+	}
+	firstCreated := stringValue(asMapForTest(all.Output["Buckets"].([]any)[0])["CreationDate"])
+	if firstCreated == "" || asMapForTest(all.Output["Buckets"].([]any)[0])["BucketRegion"] != nil {
+		t.Fatalf("unpaginated bucket = %#v", all.Output["Buckets"].([]any)[0])
+	}
+	if err := deps.Clock.Advance(time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	listedAgain := mustInvokeAs(t, p, east, "ListBuckets", map[string]any{}, nil)
+	if created := stringValue(asMapForTest(listedAgain.Output["Buckets"].([]any)[0])["CreationDate"]); created != firstCreated {
+		t.Fatalf("creation date changed from %q to %q", firstCreated, created)
+	}
+
+	page := mustInvokeAs(t, p, east, "ListBuckets", map[string]any{"MaxBuckets": 2, "Prefix": "team-"}, nil)
+	if got := strings.Join(names(page), ","); got != "team-alpha,team-beta" || page.Output["Prefix"] != "team-" {
+		t.Fatalf("first page = %#v", page.Output)
+	}
+	for _, item := range page.Output["Buckets"].([]any) {
+		if asMapForTest(item)["BucketRegion"] == "" {
+			t.Fatalf("paginated bucket = %#v", item)
+		}
+	}
+	token := stringValue(page.Output["ContinuationToken"])
+	if token == "" || token == "team-beta" {
+		t.Fatalf("continuation token = %q", token)
+	}
+	last := mustInvokeAs(t, p, east, "ListBuckets", map[string]any{"MaxBuckets": 2, "Prefix": "team-", "ContinuationToken": token}, nil)
+	if got := strings.Join(names(last), ","); got != "team-charlie" || last.Output["ContinuationToken"] != nil {
+		t.Fatalf("last page = %#v", last.Output)
+	}
+	regional := mustInvokeAs(t, p, west, "ListBuckets", map[string]any{"BucketRegion": west.Region, "Prefix": "team-"}, nil)
+	if got := strings.Join(names(regional), ","); got != "team-beta,team-charlie" {
+		t.Fatalf("regional buckets = %#v", regional.Output)
+	}
+
+	for _, input := range []map[string]any{{"MaxBuckets": 0}, {"MaxBuckets": 10001}, {"MaxBuckets": "invalid"}, {"ContinuationToken": "!"}, {"ContinuationToken": strings.Repeat("a", 1025)}} {
+		_, err := invokeAs(t, p, east, "ListBuckets", input, nil)
+		if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("invalid input %#v = %#v", input, fault)
+		}
+	}
+}
+
 func TestCreateBucketLocationConstraints(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	east := ident()

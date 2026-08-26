@@ -42,83 +42,83 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv := func(op string, in map[string]any, body io.Reader, copySrc string) *spi.Response {
 			return call(t, p, ctx, id, seen, op, in, body, copySrc)
 		}
-		inv("CreateBucket", map[string]any{"Bucket": "b"}, nil, "")
-		inv("PutObject", map[string]any{"Bucket": "b", "Key": "k"}, bytes.NewReader([]byte("v1")), "")
-		inv("PutObject", map[string]any{"Bucket": "b", "Key": "src"}, bytes.NewReader([]byte("SRC")), "")
-		inv("CopyObject", map[string]any{"Bucket": "b", "Key": "dst", "CopySource": "b/src"}, nil, "")
-		got := inv("GetObject", map[string]any{"Bucket": "b", "Key": "dst"}, nil, "")
+		inv("CreateBucket", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutObject", map[string]any{"Bucket": "bucket", "Key": "k"}, bytes.NewReader([]byte("v1")), "")
+		inv("PutObject", map[string]any{"Bucket": "bucket", "Key": "src"}, bytes.NewReader([]byte("SRC")), "")
+		inv("CopyObject", map[string]any{"Bucket": "bucket", "Key": "dst", "CopySource": "bucket/src"}, nil, "")
+		got := inv("GetObject", map[string]any{"Bucket": "bucket", "Key": "dst"}, nil, "")
 		raw, _ := io.ReadAll(got.Stream)
 		if string(raw) != "SRC" {
 			t.Fatalf("copy %q", raw)
 		}
-		mpu := inv("CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "m"}, nil, "")
+		mpu := inv("CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "m"}, nil, "")
 		uid := str(mpu.Output["UploadId"])
-		inv("UploadPart", map[string]any{"Bucket": "b", "Key": "m", "UploadId": uid, "PartNumber": float64(1)}, bytes.NewReader([]byte("AB")), "")
-		copied := inv("UploadPartCopy", map[string]any{"Bucket": "b", "Key": "m", "UploadId": uid, "PartNumber": float64(2), "CopySource": "b/src"}, nil, "")
-		parts := inv("ListParts", map[string]any{"Bucket": "b", "Key": "m", "UploadId": uid}, nil, "")
+		inv("UploadPart", map[string]any{"Bucket": "bucket", "Key": "m", "UploadId": uid, "PartNumber": float64(1)}, bytes.NewReader([]byte("AB")), "")
+		copied := inv("UploadPartCopy", map[string]any{"Bucket": "bucket", "Key": "m", "UploadId": uid, "PartNumber": float64(2), "CopySource": "bucket/src"}, nil, "")
+		parts := inv("ListParts", map[string]any{"Bucket": "bucket", "Key": "m", "UploadId": uid}, nil, "")
 		if n := len(asSlice(parts.Output["Parts"])); n != 2 {
 			t.Fatalf("ListParts %v", parts.Output)
 		}
-		mlist := inv("ListMultipartUploads", map[string]any{"Bucket": "b"}, nil, "")
+		mlist := inv("ListMultipartUploads", map[string]any{"Bucket": "bucket"}, nil, "")
 		if n := len(asSlice(mlist.Output["Uploads"])); n < 1 {
 			t.Fatalf("ListMultipartUploads %v", mlist.Output)
 		}
 		inv("CompleteMultipartUpload", map[string]any{
-			"Bucket": "b", "Key": "m", "UploadId": uid,
+			"Bucket": "bucket", "Key": "m", "UploadId": uid,
 			"MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 2, "ETag": copied.Headers.Get("ETag")}}},
 		}, nil, "")
-		inv("PutBucketVersioning", map[string]any{"Bucket": "b", "Status": "Enabled"}, nil, "")
-		inv("PutBucketTagging", map[string]any{"Bucket": "b", "TagSet": []any{map[string]any{"Key": "a", "Value": "b"}}}, nil, "")
-		inv("PutObjectTagging", map[string]any{"Bucket": "b", "Key": "k", "TagSet": []any{}}, nil, "")
-		inv("PutBucketNotificationConfiguration", map[string]any{"Bucket": "b"}, nil, "")
-		inv("PutBucketAcl", map[string]any{"Bucket": "b"}, nil, "")
-		inv("PutObjectAcl", map[string]any{"Bucket": "b", "Key": "k"}, nil, "")
-		inv("PutBucketPolicy", map[string]any{"Bucket": "b", "Policy": `{"Version":"2012-10-17"}`}, nil, "")
-		inv("DeleteBucketPolicy", map[string]any{"Bucket": "b"}, nil, "")
-		inv("PutBucketCors", map[string]any{"Bucket": "b"}, nil, "")
-		inv("DeleteBucketCors", map[string]any{"Bucket": "b"}, nil, "")
-		inv("PutBucketWebsite", map[string]any{"Bucket": "b"}, nil, "")
-		inv("DeleteBucketWebsite", map[string]any{"Bucket": "b"}, nil, "")
-		inv("PutBucketLogging", map[string]any{"Bucket": "b"}, nil, "")
-		inv("PutBucketLifecycleConfiguration", map[string]any{"Bucket": "b"}, nil, "")
-		inv("DeleteBucketLifecycle", map[string]any{"Bucket": "b"}, nil, "")
-		inv("PutBucketReplication", map[string]any{"Bucket": "b"}, nil, "")
-		inv("PutBucketEncryption", map[string]any{"Bucket": "b"}, nil, "")
-		inv("DeleteBucketEncryption", map[string]any{"Bucket": "b"}, nil, "")
-		inv("PutBucketObjectLockConfiguration", map[string]any{"Bucket": "b"}, nil, "")
-		inv("PutBucketRequestPayment", map[string]any{"Bucket": "b"}, nil, "")
-		inv("PutBucketAccelerateConfiguration", map[string]any{"Bucket": "b"}, nil, "")
-		inv("PutPublicAccessBlock", map[string]any{"Bucket": "b"}, nil, "")
-		inv("DeletePublicAccessBlock", map[string]any{"Bucket": "b"}, nil, "")
-		inv("PutBucketOwnershipControls", map[string]any{"Bucket": "b"}, nil, "")
-		inv("DeleteBucketOwnershipControls", map[string]any{"Bucket": "b"}, nil, "")
-		inv("DeleteBucketTagging", map[string]any{"Bucket": "b"}, nil, "")
-		inv("DeleteObjectTagging", map[string]any{"Bucket": "b", "Key": "k"}, nil, "")
-		inv("PutObjectLegalHold", map[string]any{"Bucket": "b", "Key": "k"}, nil, "")
-		inv("PutObjectRetention", map[string]any{"Bucket": "b", "Key": "k"}, nil, "")
-		inv("PutObject", map[string]any{"Bucket": "b", "Key": "archive", "StorageClass": "GLACIER"}, bytes.NewReader([]byte("cold")), "")
-		inv("RestoreObject", map[string]any{"Bucket": "b", "Key": "archive", "RestoreRequest": map[string]any{"Days": 1}}, nil, "")
-		inv("PutBucketAnalyticsConfiguration", map[string]any{"Bucket": "b", "Id": "a"}, nil, "")
-		inv("DeleteBucketAnalyticsConfiguration", map[string]any{"Bucket": "b", "Id": "a"}, nil, "")
-		inv("PutBucketInventoryConfiguration", map[string]any{"Bucket": "b", "Id": "i"}, nil, "")
-		inv("DeleteBucketInventoryConfiguration", map[string]any{"Bucket": "b", "Id": "i"}, nil, "")
-		inv("PutBucketMetricsConfiguration", map[string]any{"Bucket": "b", "Id": "m"}, nil, "")
-		inv("DeleteBucketMetricsConfiguration", map[string]any{"Bucket": "b", "Id": "m"}, nil, "")
-		inv("PutBucketIntelligentTieringConfiguration", map[string]any{"Bucket": "b", "Id": "t"}, nil, "")
-		inv("DeleteBucketIntelligentTieringConfiguration", map[string]any{"Bucket": "b", "Id": "t"}, nil, "")
-		del := inv("DeleteObjects", map[string]any{"Bucket": "b", "Objects": []any{map[string]any{"Key": "k"}}}, nil, "")
+		inv("PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Enabled"}, nil, "")
+		inv("PutBucketTagging", map[string]any{"Bucket": "bucket", "TagSet": []any{map[string]any{"Key": "a", "Value": "bucket"}}}, nil, "")
+		inv("PutObjectTagging", map[string]any{"Bucket": "bucket", "Key": "k", "TagSet": []any{}}, nil, "")
+		inv("PutBucketNotificationConfiguration", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutBucketAcl", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutObjectAcl", map[string]any{"Bucket": "bucket", "Key": "k"}, nil, "")
+		inv("PutBucketPolicy", map[string]any{"Bucket": "bucket", "Policy": `{"Version":"2012-10-17"}`}, nil, "")
+		inv("DeleteBucketPolicy", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutBucketCors", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("DeleteBucketCors", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutBucketWebsite", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("DeleteBucketWebsite", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutBucketLogging", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutBucketLifecycleConfiguration", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("DeleteBucketLifecycle", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutBucketReplication", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutBucketEncryption", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("DeleteBucketEncryption", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutBucketObjectLockConfiguration", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutBucketRequestPayment", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutBucketAccelerateConfiguration", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutPublicAccessBlock", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("DeletePublicAccessBlock", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutBucketOwnershipControls", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("DeleteBucketOwnershipControls", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("DeleteBucketTagging", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("DeleteObjectTagging", map[string]any{"Bucket": "bucket", "Key": "k"}, nil, "")
+		inv("PutObjectLegalHold", map[string]any{"Bucket": "bucket", "Key": "k"}, nil, "")
+		inv("PutObjectRetention", map[string]any{"Bucket": "bucket", "Key": "k"}, nil, "")
+		inv("PutObject", map[string]any{"Bucket": "bucket", "Key": "archive", "StorageClass": "GLACIER"}, bytes.NewReader([]byte("cold")), "")
+		inv("RestoreObject", map[string]any{"Bucket": "bucket", "Key": "archive", "RestoreRequest": map[string]any{"Days": 1}}, nil, "")
+		inv("PutBucketAnalyticsConfiguration", map[string]any{"Bucket": "bucket", "Id": "a"}, nil, "")
+		inv("DeleteBucketAnalyticsConfiguration", map[string]any{"Bucket": "bucket", "Id": "a"}, nil, "")
+		inv("PutBucketInventoryConfiguration", map[string]any{"Bucket": "bucket", "Id": "i"}, nil, "")
+		inv("DeleteBucketInventoryConfiguration", map[string]any{"Bucket": "bucket", "Id": "i"}, nil, "")
+		inv("PutBucketMetricsConfiguration", map[string]any{"Bucket": "bucket", "Id": "m"}, nil, "")
+		inv("DeleteBucketMetricsConfiguration", map[string]any{"Bucket": "bucket", "Id": "m"}, nil, "")
+		inv("PutBucketIntelligentTieringConfiguration", map[string]any{"Bucket": "bucket", "Id": "t"}, nil, "")
+		inv("DeleteBucketIntelligentTieringConfiguration", map[string]any{"Bucket": "bucket", "Id": "t"}, nil, "")
+		del := inv("DeleteObjects", map[string]any{"Bucket": "bucket", "Objects": []any{map[string]any{"Key": "k"}}}, nil, "")
 		if n := len(del.Output["Deleted"].([]any)); n != 1 {
 			t.Fatalf("DeleteObjects %v", del.Output)
 		}
-		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{"Bucket": "b", "Key": "k"}}); err == nil {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{"Bucket": "bucket", "Key": "k"}}); err == nil {
 			t.Fatal("DeleteObjects left k")
 		}
-		mpu2 := inv("CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "abort"}, nil, "")
-		inv("AbortMultipartUpload", map[string]any{"Bucket": "b", "Key": "abort", "UploadId": str(mpu2.Output["UploadId"])}, nil, "")
-		inv("DeleteObject", map[string]any{"Bucket": "b", "Key": "src"}, nil, "")
+		mpu2 := inv("CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "abort"}, nil, "")
+		inv("AbortMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "abort", "UploadId": str(mpu2.Output["UploadId"])}, nil, "")
+		inv("DeleteObject", map[string]any{"Bucket": "bucket", "Key": "src"}, nil, "")
 		inv("CreateBucket", map[string]any{"Bucket": "gone"}, nil, "")
 		inv("DeleteBucket", map[string]any{"Bucket": "gone"}, nil, "")
-		fatS3 := map[string]any{"Bucket": "b", "Key": "k"}
+		fatS3 := map[string]any{"Bucket": "bucket", "Key": "k"}
 		for _, op := range p.Operations() {
 			if isWriteOp(op) && !seen[op] {
 				inv(op, fatS3, nil, "")
@@ -135,7 +135,7 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		}
 		inv("CreateQueue", map[string]any{"QueueName": "q"})
 		inv("SendMessage", map[string]any{"QueueName": "q", "MessageBody": "a"})
-		inv("SendMessageBatch", map[string]any{"QueueName": "q", "Entries": []any{map[string]any{"Id": "1", "MessageBody": "b"}}})
+		inv("SendMessageBatch", map[string]any{"QueueName": "q", "Entries": []any{map[string]any{"Id": "1", "MessageBody": "bucket"}}})
 		recv := inv("ReceiveMessage", map[string]any{"QueueName": "q"})
 		msgs, _ := recv.Output["Messages"].([]any)
 		if len(msgs) == 0 {
@@ -199,7 +199,7 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv("UpdateContinuousBackups", map[string]any{"TableName": "T", "PointInTimeRecoverySpecification": map[string]any{"PointInTimeRecoveryEnabled": true}})
 		inv("PutResourcePolicy", map[string]any{"ResourceArn": "arn:t", "Policy": "{}"})
 		inv("DeleteResourcePolicy", map[string]any{"ResourceArn": "arn:t"})
-		bak := inv("CreateBackup", map[string]any{"TableName": "T", "BackupName": "b"})
+		bak := inv("CreateBackup", map[string]any{"TableName": "T", "BackupName": "bucket"})
 		bArn := str(asMap(bak.Output["BackupDetails"])["BackupArn"])
 		inv("RestoreTableFromBackup", map[string]any{"BackupArn": bArn, "TargetTableName": "Tr"})
 		inv("DeleteBackup", map[string]any{"BackupArn": bArn})
@@ -209,7 +209,7 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv("DeleteTable", map[string]any{"TableName": "gone"})
 		fat := map[string]any{"TableName": "T", "GlobalTableName": "GT", "ExportArn": "arn:e", "ImportArn": "arn:i",
 			"Statement": "SELECT * FROM T", "ReplicationGroup": []any{map[string]any{"RegionName": "us-east-1"}},
-			"ContributorInsightsAction": "ENABLE", "S3Bucket": "b", "SourceTableName": "T", "TargetTableName": "Tpitr",
+			"ContributorInsightsAction": "ENABLE", "S3Bucket": "bucket", "SourceTableName": "T", "TargetTableName": "Tpitr",
 			"TableCreationParameters": map[string]any{"TableName": "Timp"}, "StreamArn": "arn:k"}
 		for _, op := range p.Operations() {
 			if isWriteOp(op) && !seen[op] {

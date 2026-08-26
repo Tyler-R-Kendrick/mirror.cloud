@@ -31,7 +31,7 @@ func TestConcurrentPutsSameKey(t *testing.T) {
 	p := s3.New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "b"}})
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "bucket"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,13 +43,13 @@ func TestConcurrentPutsSameKey(t *testing.T) {
 			body := bytes.Repeat([]byte{byte(n)}, 16)
 			_, _ = p.Invoke(ctx, &spi.Request{
 				Identity: id, Operation: "PutObject",
-				Input: map[string]any{"Bucket": "b", "Key": "k"},
+				Input: map[string]any{"Bucket": "bucket", "Key": "k"},
 				Body:  io.NopCloser(bytes.NewReader(body)),
 			})
 		}(i)
 	}
 	wg.Wait()
-	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{"Bucket": "b", "Key": "k"}})
+	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{"Bucket": "bucket", "Key": "k"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,8 +339,8 @@ func TestBlobFailureSurfaces(t *testing.T) {
 	p := s3.New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "b"}})
-	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "b", "Key": "k"}, Body: io.NopCloser(bytes.NewReader([]byte("x")))})
+	_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "bucket"}})
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "bucket", "Key": "k"}, Body: io.NopCloser(bytes.NewReader([]byte("x")))})
 	if err == nil {
 		t.Fatal("expected injected failure")
 	}

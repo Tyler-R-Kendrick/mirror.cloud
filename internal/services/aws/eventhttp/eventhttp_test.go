@@ -1,6 +1,9 @@
 package eventhttp
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestEncodeFormArrayFormats(t *testing.T) {
 	body := []byte(`{"array":["a","b"],"metadata":{"order":"monthly"}}`)
@@ -17,5 +20,14 @@ func TestEncodeFormArrayFormats(t *testing.T) {
 	}
 	if _, err := EncodeForm([]byte(`[]`), "INDICES"); err == nil {
 		t.Fatal("encoded non-object form body")
+	}
+}
+
+func TestMergeBodyLimitWithoutConnectionParameters(t *testing.T) {
+	if _, err := MergeBody(bytes.Repeat([]byte{'x'}, 5), nil, 4); err == nil {
+		t.Fatal("accepted oversized unmerged HTTP body")
+	}
+	if body, err := MergeBody(bytes.Repeat([]byte{'x'}, 4), nil, 4); err != nil || len(body) != 4 {
+		t.Fatalf("rejected body at limit: %d, %v", len(body), err)
 	}
 }

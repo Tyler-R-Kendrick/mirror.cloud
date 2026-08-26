@@ -133,6 +133,9 @@ func Invoke(ctx context.Context, connection map[string]any, call Call) (Result, 
 func MergeBody(body []byte, raw any, limit int64) ([]byte, error) {
 	parameters := sliceValue(raw)
 	if len(parameters) == 0 {
+		if limit > 0 && int64(len(body)) > limit {
+			return nil, &spi.Fault{Code: "TargetInvocationFailed", Message: "HTTP request exceeds its maximum size.", HTTPStatus: 400, Fault: "client"}
+		}
 		return body, nil
 	}
 	if len(body) == 0 {

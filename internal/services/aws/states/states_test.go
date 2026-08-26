@@ -3183,6 +3183,27 @@ func TestStatesTestStateItemReaderData(t *testing.T) {
 	}
 }
 
+func TestStatesTestStateReaderDataFormats(t *testing.T) {
+	p := New(spitest.Deps(t))
+	for _, test := range []struct {
+		inputType, data, want string
+	}{
+		{"JSONL", "{\"id\":1}\n{\"id\":2}\n", `[{"source":"JSONL","value":{"id":1}},{"source":"JSONL","value":{"id":2}}]`},
+		{"CSV", "id,name\n1,one\n2,two\n", `[{"source":"CSV","value":{"id":"1","name":"one"}},{"source":"CSV","value":{"id":"2","name":"two"}}]`},
+	} {
+		definition := fmt.Sprintf(`{"QueryLanguage":"JSONata","Type":"Map","ItemReader":{"Resource":"arn:aws:states:::s3:getObject","ReaderConfig":{"InputType":%q}},"ItemSelector":{"source":"{%% $states.context.Map.Item.Source %%}","value":"{%% $states.context.Map.Item.Value %%}"},"ItemProcessor":{"ProcessorConfig":{"Mode":"DISTRIBUTED"},"StartAt":"Done","States":{"Done":{"Type":"Succeed"}}},"End":true}`, test.inputType)
+		response, err := p.Invoke(context.Background(), &spi.Request{Identity: spi.Identity{Account: "1", Region: "us-east-1"}, Operation: "TestState", Input: map[string]any{
+			"definition": definition, "mock": map[string]any{"result": `[]`}, "inspectionLevel": "DEBUG",
+			"stateConfiguration": map[string]any{"mapItemReaderData": test.data},
+		}})
+		inspection := response.Output["inspectionData"].(map[string]any)
+		_, hasItemsPointer := inspection["afterItemsPointer"]
+		if err != nil || inspection["afterItemSelector"] != test.want || hasItemsPointer {
+			t.Fatalf("TestState %s ItemReader data %#v, %v", test.inputType, response, err)
+		}
+	}
+}
+
 func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

@@ -3733,75 +3733,10 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 	}
 	source := s3Source(input)
 	switch inputType {
-	case "JSON":
-		var items any
-		if json.Unmarshal(body, &items) != nil {
+	case "JSON", "JSONL", "CSV":
+		items, valid := decodeTextMapReaderData(body, inputType, config)
+		if !valid {
 			return nil, "", false
-		}
-		if pointer, configured := config["ItemsPointer"].(string); configured {
-			tokens, pointerValid := jsonPointerTokens(pointer)
-			offset, found := jsonPointerOffset(body, tokens)
-			if !pointerValid || !found || offset >= 16*1024*1024 {
-				return nil, "", false
-			}
-			var valid bool
-			items, valid = resolveJSONPointer(items, pointer)
-			if !valid {
-				return nil, "", false
-			}
-		}
-		switch items.(type) {
-		case []any, map[string]any:
-		default:
-			return nil, "", false
-		}
-		return limitReaderItems(items, source, config, data, scope, variables...)
-	case "JSONL":
-		decoder := json.NewDecoder(strings.NewReader(string(body)))
-		items := []any{}
-		for {
-			var item any
-			if err := decoder.Decode(&item); errors.Is(err, io.EOF) {
-				return limitReaderItems(items, source, config, data, scope, variables...)
-			} else if err != nil {
-				return nil, "", false
-			}
-			items = append(items, item)
-		}
-	case "CSV":
-		parser := csv.NewReader(strings.NewReader(string(body)))
-		parser.FieldsPerRecord = -1
-		parser.LazyQuotes = true
-		delimiters := map[string]rune{"COMMA": ',', "PIPE": '|', "SEMICOLON": ';', "SPACE": ' ', "TAB": '\t'}
-		if delimiter := first(config, "CSVDelimiter"); delimiter != "" {
-			parser.Comma = delimiters[delimiter]
-			if parser.Comma == 0 {
-				return nil, "", false
-			}
-		}
-		records, err := parser.ReadAll()
-		if err != nil || len(records) == 0 {
-			return nil, "", false
-		}
-		headers := records[0]
-		if first(config, "CSVHeaderLocation") == "GIVEN" {
-			headers = nil
-			for _, header := range asSlice(config["CSVHeaders"]) {
-				headers = append(headers, fmt.Sprint(header))
-			}
-		} else {
-			records = records[1:]
-		}
-		items := make([]any, 0, len(records))
-		for _, record := range records {
-			item := map[string]any{}
-			for index, header := range headers {
-				item[header] = ""
-				if index < len(record) {
-					item[header] = unescapeCSVField(record[index])
-				}
-			}
-			items = append(items, item)
 		}
 		return limitReaderItems(items, source, config, data, scope, variables...)
 	case "PARQUET":
@@ -3830,6 +3765,84 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 		return limitReaderItems(items, source, config, data, scope, variables...)
 	default:
 		return nil, "", false
+	}
+}
+
+func decodeTextMapReaderData(body []byte, inputType string, config map[string]any) (any, bool) {
+	switch inputType {
+	case "JSON":
+		var items any
+		if json.Unmarshal(body, &items) != nil {
+			return nil, false
+		}
+		if pointer, configured := config["ItemsPointer"].(string); configured {
+			tokens, pointerValid := jsonPointerTokens(pointer)
+			offset, found := jsonPointerOffset(body, tokens)
+			if !pointerValid || !found || offset >= 16*1024*1024 {
+				return nil, false
+			}
+			var valid bool
+			items, valid = resolveJSONPointer(items, pointer)
+			if !valid {
+				return nil, false
+			}
+		}
+		switch items.(type) {
+		case []any, map[string]any:
+			return items, true
+		default:
+			return nil, false
+		}
+	case "JSONL":
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		items := []any{}
+		for {
+			var item any
+			if err := decoder.Decode(&item); errors.Is(err, io.EOF) {
+				return items, true
+			} else if err != nil {
+				return nil, false
+			}
+			items = append(items, item)
+		}
+	case "CSV":
+		parser := csv.NewReader(bytes.NewReader(body))
+		parser.FieldsPerRecord = -1
+		parser.LazyQuotes = true
+		delimiters := map[string]rune{"COMMA": ',', "PIPE": '|', "SEMICOLON": ';', "SPACE": ' ', "TAB": '\t'}
+		if delimiter := first(config, "CSVDelimiter"); delimiter != "" {
+			parser.Comma = delimiters[delimiter]
+			if parser.Comma == 0 {
+				return nil, false
+			}
+		}
+		records, err := parser.ReadAll()
+		if err != nil || len(records) == 0 {
+			return nil, false
+		}
+		headers := records[0]
+		if first(config, "CSVHeaderLocation") == "GIVEN" {
+			headers = nil
+			for _, header := range asSlice(config["CSVHeaders"]) {
+				headers = append(headers, fmt.Sprint(header))
+			}
+		} else {
+			records = records[1:]
+		}
+		items := make([]any, 0, len(records))
+		for _, record := range records {
+			item := map[string]any{}
+			for index, header := range headers {
+				item[header] = ""
+				if index < len(record) {
+					item[header] = unescapeCSVField(record[index])
+				}
+			}
+			items = append(items, item)
+		}
+		return items, true
+	default:
+		return nil, false
 	}
 }
 
@@ -7446,14 +7459,19 @@ func inspectTestState(state map[string]any, input any, context, variables, mock,
 			inspection[key] = string(data)
 		}
 	}
-	readerData, hasReaderData, validReaderData, itemSource := any(nil), false, true, "STATE_DATA"
+	readerData, hasReaderData, validReaderData, hasItemsPointer, itemSource := any(nil), false, true, false, "STATE_DATA"
 	if raw := first(configuration, "mapItemReaderData", "MapItemReaderData"); raw != "" {
 		reader, _ := state["ItemReader"].(map[string]any)
 		readerConfig, _ := reader["ReaderConfig"].(map[string]any)
-		if inputType := first(readerConfig, "InputType"); inputType == "" || inputType == "JSON" {
+		inputType := first(readerConfig, "InputType")
+		if inputType == "" {
+			inputType = "JSON"
+		}
+		if slices.Contains([]string{"CSV", "JSON", "JSONL"}, inputType) {
 			hasReaderData = true
-			itemSource = "JSON"
-			validReaderData = json.Unmarshal([]byte(raw), &readerData) == nil
+			hasItemsPointer = first(readerConfig, "ItemsPointer") != ""
+			itemSource = inputType
+			readerData, validReaderData = decodeTextMapReaderData([]byte(raw), inputType, readerConfig)
 		}
 	}
 	encode("input", input)
@@ -7471,11 +7489,6 @@ func inspectTestState(state map[string]any, input any, context, variables, mock,
 			items, valid := input, true
 			if hasReaderData {
 				items, valid = readerData, validReaderData
-				reader, _ := state["ItemReader"].(map[string]any)
-				readerConfig, _ := reader["ReaderConfig"].(map[string]any)
-				if pointer := first(readerConfig, "ItemsPointer"); valid && pointer != "" {
-					items, valid = resolveJSONPointer(items, pointer)
-				}
 			}
 			if configured, exists := state["Items"]; exists {
 				items, valid = evalJSONataValue(configured, scope)
@@ -7527,12 +7540,7 @@ func inspectTestState(state map[string]any, input any, context, variables, mock,
 			dataset := afterInputPath
 			if hasReaderData {
 				dataset, valid = readerData, validReaderData
-				reader, _ := state["ItemReader"].(map[string]any)
-				readerConfig, _ := reader["ReaderConfig"].(map[string]any)
-				if pointer := first(readerConfig, "ItemsPointer"); valid && pointer != "" {
-					dataset, valid = resolveJSONPointer(dataset, pointer)
-				}
-				if valid {
+				if valid && hasItemsPointer {
 					encode("afterItemsPointer", dataset)
 				}
 			}

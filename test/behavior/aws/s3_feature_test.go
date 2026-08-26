@@ -2,9 +2,11 @@ package behavior
 
 import (
 	"bytes"
+	"encoding/xml"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -195,6 +197,59 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		westName := "behavior-111111111111-us-west-2-an"
 		if status, body, location := create("111111111111", "us-west-2", westName); status != http.StatusOK || location != "/"+westName {
 			t.Fatalf("west create %d %s location=%q", status, body, location)
+		}
+	})
+
+	t.Run("Given buckets in multiple Regions When listing pages Then filters and cursors are honored", func(t *testing.T) {
+		request := func(method, path, region, body string) *http.Response {
+			t.Helper()
+			req, err := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", auth)
+			req.Header.Set("X-Mirror-Region", region)
+			res, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return res
+		}
+		for _, bucket := range []struct{ name, region, body string }{
+			{"list-behavior-east", "us-east-1", ""},
+			{"list-behavior-west", "us-west-2", "<CreateBucketConfiguration><LocationConstraint>us-west-2</LocationConstraint></CreateBucketConfiguration>"},
+		} {
+			res := request(http.MethodPut, "/"+bucket.name, bucket.region, bucket.body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("create %s: %d", bucket.name, res.StatusCode)
+			}
+		}
+		type page struct {
+			Buckets []struct {
+				Name         string `xml:"Name"`
+				BucketRegion string `xml:"BucketRegion"`
+			} `xml:"Buckets>Bucket"`
+			Prefix            string `xml:"Prefix"`
+			ContinuationToken string `xml:"ContinuationToken"`
+		}
+		list := func(path string) page {
+			t.Helper()
+			res := request(http.MethodGet, path, "us-east-1", "")
+			defer res.Body.Close()
+			var got page
+			if err := xml.NewDecoder(res.Body).Decode(&got); err != nil || res.StatusCode != http.StatusOK {
+				t.Fatalf("list %s: %d %#v %v", path, res.StatusCode, got, err)
+			}
+			return got
+		}
+		first := list("/?max-buckets=1&prefix=list-behavior")
+		if len(first.Buckets) != 1 || first.Buckets[0].Name != "list-behavior-east" || first.Buckets[0].BucketRegion != "us-east-1" || first.Prefix != "list-behavior" || first.ContinuationToken == "" {
+			t.Fatalf("first page: %#v", first)
+		}
+		second := list("/?max-buckets=1&prefix=list-behavior&continuation-token=" + url.QueryEscape(first.ContinuationToken))
+		if len(second.Buckets) != 1 || second.Buckets[0].Name != "list-behavior-west" || second.Buckets[0].BucketRegion != "us-west-2" || second.ContinuationToken != "" {
+			t.Fatalf("second page: %#v", second)
 		}
 	})
 

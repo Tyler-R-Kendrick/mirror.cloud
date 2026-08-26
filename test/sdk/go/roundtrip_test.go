@@ -123,10 +123,11 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upload part copy: %v", err)
 	}
-	if _, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{
+	completed, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{
 		Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId,
 		MultipartUpload: &s3types.CompletedMultipartUpload{Parts: []s3types.CompletedPart{{PartNumber: aws.Int32(1), ETag: part.CopyPartResult.ETag}}},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("complete multipart copy: %v", err)
 	}
 	rangeCopy, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy")})
@@ -137,6 +138,14 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	_ = rangeCopy.Body.Close()
 	if string(rangeBody) != "0123456789" {
 		t.Fatalf("range copy body %q", rangeBody)
+	}
+	if aws.ToString(rangeCopy.ETag) != aws.ToString(completed.ETag) {
+		t.Fatalf("persisted multipart ETag %q want %q", aws.ToString(rangeCopy.ETag), aws.ToString(completed.ETag))
+	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{
+		Bucket: aws.String("sdk"), Key: aws.String("multipart-copy"), CopySource: aws.String("sdk/range-copy"), CopySourceIfMatch: completed.ETag,
+	}); err != nil {
+		t.Fatalf("copy multipart ETag: %v", err)
 	}
 
 	ddb := dynamodb.NewFromConfig(awscfg, func(o *dynamodb.Options) { o.BaseEndpoint = aws.String(ts.URL) })

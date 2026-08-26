@@ -65,6 +65,43 @@ type copySource struct {
 	meta                 map[string]any
 }
 
+const bucketLocationConstraints = "|EU|af-south-1|ap-east-1|ap-east-2|ap-northeast-1|ap-northeast-2|ap-northeast-3|ap-south-1|ap-south-2|ap-southeast-1|ap-southeast-2|ap-southeast-3|ap-southeast-4|ap-southeast-5|ap-southeast-6|ap-southeast-7|ca-central-1|ca-west-1|cn-north-1|cn-northwest-1|eu-central-1|eu-central-2|eu-north-1|eu-south-1|eu-south-2|eu-west-1|eu-west-2|eu-west-3|il-central-1|me-central-1|me-south-1|mx-central-1|sa-east-1|us-east-2|us-gov-east-1|us-gov-west-1|us-west-1|us-west-2|"
+
+func createBucketRegion(endpoint, constraint string) (string, error) {
+	illegal := func() error {
+		value := constraint
+		if value == "" {
+			value = "unspecified"
+		}
+		return &spi.Fault{Code: "IllegalLocationConstraintException", Message: "The " + value + " location constraint is incompatible for the region specific endpoint this request was sent to.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if constraint == "" {
+		if endpoint != "us-east-1" {
+			return "", illegal()
+		}
+		return "us-east-1", nil
+	}
+	if endpoint == "us-east-1" {
+		if !strings.Contains(bucketLocationConstraints, "|"+constraint+"|") {
+			return "", &spi.Fault{Code: "InvalidLocationConstraint", Message: "The specified location-constraint is not valid", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"LocationConstraint": constraint}}
+		}
+		if constraint == "EU" {
+			return "eu-west-1", nil
+		}
+		return constraint, nil
+	}
+	if endpoint == "eu-west-1" {
+		if constraint != "EU" && constraint != endpoint {
+			return "", illegal()
+		}
+		return "eu-west-1", nil
+	}
+	if endpoint != constraint {
+		return "", illegal()
+	}
+	return constraint, nil
+}
+
 // New constructs the pack.
 func New(d spi.Deps) *Pack { return &Pack{deps: d, mpu: map[string]*mpu{}} }
 
@@ -448,6 +485,14 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 	if b == "" {
 		return nil, &spi.Fault{Code: "InvalidBucketName", HTTPStatus: 400, Fault: "client"}
 	}
+	constraint := str(req.Input["LocationConstraint"])
+	if constraint == "" {
+		constraint = str(asMap(req.Input["CreateBucketConfiguration"])["LocationConstraint"])
+	}
+	bucketRegion, err := createBucketRegion(req.Identity.Region, constraint)
+	if err != nil {
+		return nil, err
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	global := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets")
@@ -466,17 +511,18 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		if location.Account != req.Identity.Account {
 			return nil, &spi.Fault{Code: "BucketAlreadyExists", Message: "The requested bucket name is not available. The bucket namespace is shared by all users of the system. Select a different name and try again.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"BucketName": b}}
 		}
-		if req.Identity.Region != "us-east-1" || location.Region != req.Identity.Region {
+		if bucketRegion != "us-east-1" || location.Region != bucketRegion {
 			return nil, &spi.Fault{Code: "BucketAlreadyOwnedByYou", Message: "Your previous request to create the named bucket succeeded and you already own it.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"BucketName": b}}
 		}
 	} else {
-		meta, _ := json.Marshal(map[string]any{"name": b, "region": req.Identity.Region})
-		if err := p.col(req, "buckets").Put(ctx, b, meta); err != nil {
+		buckets := p.deps.Store.Scope(req.Identity.Account, bucketRegion).Collection("buckets")
+		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint})
+		if err := buckets.Put(ctx, b, meta); err != nil {
 			return nil, err
 		}
-		location, _ := json.Marshal(map[string]any{"account": req.Identity.Account, "region": req.Identity.Region})
+		location, _ := json.Marshal(map[string]any{"account": req.Identity.Account, "region": bucketRegion})
 		if err := global.Put(ctx, b, location); err != nil {
-			_ = p.col(req, "buckets").Delete(ctx, b)
+			_ = buckets.Delete(ctx, b)
 			return nil, err
 		}
 	}
@@ -557,10 +603,19 @@ func (p *Pack) listBuckets(ctx context.Context, req *spi.Request) (*spi.Response
 }
 
 func (p *Pack) getBucketLocation(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	if err := p.requireBucket(ctx, req, str(req.Input["Bucket"])); err != nil {
+	b := str(req.Input["Bucket"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
-	return &spi.Response{Output: map[string]any{"LocationConstraint": req.Identity.Region}}, nil
+	raw, _, err := p.col(req, "buckets").Get(ctx, b)
+	if err != nil {
+		return nil, err
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return nil, err
+	}
+	return &spi.Response{Output: map[string]any{"LocationConstraint": str(meta["locationConstraint"])}}, nil
 }
 
 func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumType string, parts []any) (*spi.Response, error) {

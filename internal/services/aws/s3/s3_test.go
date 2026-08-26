@@ -133,7 +133,11 @@ func TestCreateBucketGlobalCollisions(t *testing.T) {
 	}
 	collisions := map[string]any{}
 	for name, identity := range map[string]spi.Identity{"owner-other-region": west, "other-account": other} {
-		_, err := invokeAs(t, p, identity, "CreateBucket", input, nil)
+		collisionInput := input
+		if identity.Region != "us-east-1" {
+			collisionInput = map[string]any{"Bucket": "shared-bucket", "LocationConstraint": identity.Region}
+		}
+		_, err := invokeAs(t, p, identity, "CreateBucket", collisionInput, nil)
 		fault := asFault(t, err)
 		want := "BucketAlreadyExists"
 		if identity.Account == owner.Account {
@@ -147,7 +151,7 @@ func TestCreateBucketGlobalCollisions(t *testing.T) {
 		}
 		collisions[name] = fault.Code
 	}
-	western := map[string]any{"Bucket": "western-bucket"}
+	western := map[string]any{"Bucket": "western-bucket", "LocationConstraint": "us-west-2"}
 	mustInvokeAs(t, p, west, "CreateBucket", western, nil)
 	_, err := invokeAs(t, p, west, "CreateBucket", western, nil)
 	if fault := asFault(t, err); fault.Code != "BucketAlreadyOwnedByYou" || fault.HTTPStatus != http.StatusConflict {
@@ -167,6 +171,47 @@ func TestCreateBucketGlobalCollisions(t *testing.T) {
 		t.Fatalf("create after delete: %v", err)
 	}
 	golden.AssertJSON(t, map[string]any{"collisions": collisions, "recreate": map[string]any{"status": http.StatusOK, "object": preserved}, "reuse_after_delete": "created"})
+}
+
+func TestCreateBucketLocationConstraints(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	east := ident()
+	west := spi.Identity{Account: east.Account, Region: "us-west-2"}
+
+	mustInvokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "east-location"}, nil)
+	if got := mustInvokeAs(t, p, east, "GetBucketLocation", map[string]any{"Bucket": "east-location"}, nil); got.Output["LocationConstraint"] != "" {
+		t.Fatalf("default location = %#v", got.Output)
+	}
+
+	for name, input := range map[string]map[string]any{
+		"missing":  {"Bucket": "west-missing"},
+		"mismatch": {"Bucket": "west-mismatch", "LocationConstraint": "eu-west-1"},
+	} {
+		_, err := invokeAs(t, p, west, "CreateBucket", input, nil)
+		fault := asFault(t, err)
+		if fault.Code != "IllegalLocationConstraintException" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("%s constraint = %#v", name, fault)
+		}
+		if _, err := invokeAs(t, p, west, "HeadBucket", map[string]any{"Bucket": input["Bucket"]}, nil); asFault(t, err).Code != "NoSuchBucket" {
+			t.Fatalf("%s created bucket: %v", name, err)
+		}
+	}
+
+	mustInvokeAs(t, p, west, "CreateBucket", map[string]any{"Bucket": "west-match", "CreateBucketConfiguration": map[string]any{"LocationConstraint": "us-west-2"}}, nil)
+	if got := mustInvokeAs(t, p, west, "GetBucketLocation", map[string]any{"Bucket": "west-match"}, nil); got.Output["LocationConstraint"] != "us-west-2" {
+		t.Fatalf("west location = %#v", got.Output)
+	}
+
+	_, err := invokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "invalid-location", "LocationConstraint": "moon-west-1"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidLocationConstraint" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["LocationConstraint"] != "moon-west-1" {
+		t.Fatalf("invalid constraint = %#v", fault)
+	}
+
+	mustInvokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "eu-alias", "LocationConstraint": "EU"}, nil)
+	europe := spi.Identity{Account: east.Account, Region: "eu-west-1"}
+	if got := mustInvokeAs(t, p, europe, "GetBucketLocation", map[string]any{"Bucket": "eu-alias"}, nil); got.Output["LocationConstraint"] != "EU" {
+		t.Fatalf("EU alias = %#v", got.Output)
+	}
 }
 
 func TestDeleteBucketRequiresEmptyBucket(t *testing.T) {

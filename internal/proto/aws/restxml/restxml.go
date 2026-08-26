@@ -392,6 +392,16 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 
 func parseXMLInput(op string, raw []byte, in map[string]any) {
 	switch op {
+	case "CreateBucket":
+		var cfg struct {
+			LocationConstraint string `xml:"LocationConstraint"`
+		}
+		if xml.Unmarshal(raw, &cfg) != nil {
+			in["_body"] = string(raw)
+			return
+		}
+		in["LocationConstraint"] = cfg.LocationConstraint
+		in["CreateBucketConfiguration"] = map[string]any{"LocationConstraint": cfg.LocationConstraint}
 	case "DeleteObjects":
 		var d struct {
 			Object []struct {

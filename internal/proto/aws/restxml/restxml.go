@@ -544,6 +544,13 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	// Simple XML object encoder.
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
+	if op.Name == "GetBucketLocation" {
+		b.WriteString(`<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
+		_ = xml.EscapeText(&b, []byte(fmt.Sprint(resp.Output["LocationConstraint"])))
+		b.WriteString(`</LocationConstraint>`)
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
 	root := op.Name + "Result"
 	if op.Name == "ListBuckets" {
 		root = "ListAllMyBucketsResult"

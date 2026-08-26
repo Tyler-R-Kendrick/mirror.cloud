@@ -246,6 +246,7 @@ func TestRESTXMLServiceDecodeContracts(t *testing.T) {
 		t.Fatalf("stream body %q", body)
 	}
 	for _, test := range []struct{ operation, body, key, want string }{
+		{"CreateBucket", `<CreateBucketConfiguration><LocationConstraint>us-west-2</LocationConstraint></CreateBucketConfiguration>`, "LocationConstraint", "us-west-2"},
 		{"PutBucketPolicy", `{"allow":true}`, "Policy", `{"allow":true}`},
 		{"PutBucketCors", `<Cors/>`, "Document", `<Cors/>`},
 		{"PutBucketVersioning", `<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`, "Status", "Enabled"},
@@ -295,6 +296,10 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 		if err != nil || !strings.Contains(w.Body.String(), "<"+test.root+">") || !strings.Contains(w.Body.String(), "a&amp;&lt;b&gt;") || !strings.Contains(w.Body.String(), "<member><Key>one</Key></member>") {
 			t.Errorf("%s response %v %s", test.operation, err, w.Body.String())
 		}
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(svc, &model.Operation{Name: "GetBucketLocation"}, w, &spi.Response{Output: map[string]any{"LocationConstraint": "EU"}}); err != nil || !strings.Contains(w.Body.String(), `<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>`) {
+		t.Fatalf("bucket location response %v %s", err, w.Body.String())
 	}
 	w = httptest.NewRecorder()
 	if err := codec.EncodeFault(svc, &model.Operation{Name: "Missing"}, w, spi.NotImplemented(svc.ID, "Missing", "emulate"), "r<&"); err != nil {

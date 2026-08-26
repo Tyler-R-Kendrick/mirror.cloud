@@ -468,6 +468,9 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
+	if err := p.checkWritePreconditions(ctx, req, b, key); err != nil {
+		return nil, err
+	}
 	var body []byte
 	if req.Body != nil {
 		body, _ = io.ReadAll(req.Body)
@@ -750,11 +753,17 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	if len(parts) != 2 {
 		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: 400, Fault: "client"}
 	}
-	rc, _, err := p.deps.Blobs.Get(ctx, blobKey(req, parts[0], parts[1]))
+	rc, info, err := p.deps.Blobs.Get(ctx, blobKey(req, parts[0], parts[1]))
 	if err != nil {
 		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
 	}
 	defer rc.Close()
+	metaRaw, _, _ := p.col(req, "objects").Get(ctx, parts[0]+"/"+parts[1])
+	var meta map[string]any
+	_ = json.Unmarshal(metaRaw, &meta)
+	if err := checkCopySourcePreconditions(req, `"`+info.MD5+`"`, str(meta["mtime"])); err != nil {
+		return nil, err
+	}
 	directive := str(req.Input["TaggingDirective"])
 	if directive == "" && req.HTTP != nil {
 		directive = req.HTTP.Header.Get("x-amz-tagging-directive")
@@ -1261,6 +1270,79 @@ func blobKey(req *spi.Request, b, k string) string {
 func str(v any) string {
 	s, _ := v.(string)
 	return s
+}
+
+func requestCondition(req *spi.Request, input, header string) string {
+	if value := str(req.Input[input]); value != "" {
+		return value
+	}
+	if req.HTTP != nil {
+		return req.HTTP.Header.Get(header)
+	}
+	return ""
+}
+
+func etagMatches(condition, etag string) bool {
+	for _, value := range strings.Split(condition, ",") {
+		value = strings.TrimSpace(value)
+		if value == "*" || strings.Trim(value, `"`) == strings.Trim(etag, `"`) {
+			return true
+		}
+	}
+	return false
+}
+
+func preconditionFailed() error {
+	return &spi.Fault{Code: "PreconditionFailed", HTTPStatus: 412, Fault: "client"}
+}
+
+func (p *Pack) checkWritePreconditions(ctx context.Context, req *spi.Request, bucket, key string) error {
+	match := requestCondition(req, "IfMatch", "If-Match")
+	noneMatch := requestCondition(req, "IfNoneMatch", "If-None-Match")
+	if match == "" && noneMatch == "" {
+		return nil
+	}
+	raw, exists, _ := p.col(req, "objects").Get(ctx, bucket+"/"+key)
+	var meta map[string]any
+	_ = json.Unmarshal(raw, &meta)
+	exists = exists && !truthy(meta["deleteMarker"])
+	etag := str(meta["etag"])
+	if match != "" && (!exists || !etagMatches(match, etag)) {
+		return preconditionFailed()
+	}
+	if noneMatch != "" && exists && etagMatches(noneMatch, etag) {
+		return preconditionFailed()
+	}
+	return nil
+}
+
+func checkCopySourcePreconditions(req *spi.Request, etag, modified string) error {
+	match := requestCondition(req, "CopySourceIfMatch", "x-amz-copy-source-if-match")
+	if match != "" {
+		if !etagMatches(match, etag) {
+			return preconditionFailed()
+		}
+	} else if value := requestCondition(req, "CopySourceIfUnmodifiedSince", "x-amz-copy-source-if-unmodified-since"); value != "" {
+		if condition, err := http.ParseTime(value); err != nil || sourceModifiedAfter(modified, condition) {
+			return preconditionFailed()
+		}
+	}
+	noneMatch := requestCondition(req, "CopySourceIfNoneMatch", "x-amz-copy-source-if-none-match")
+	if noneMatch != "" {
+		if etagMatches(noneMatch, etag) {
+			return preconditionFailed()
+		}
+	} else if value := requestCondition(req, "CopySourceIfModifiedSince", "x-amz-copy-source-if-modified-since"); value != "" {
+		if condition, err := http.ParseTime(value); err != nil || !sourceModifiedAfter(modified, condition) {
+			return preconditionFailed()
+		}
+	}
+	return nil
+}
+
+func sourceModifiedAfter(modified string, condition time.Time) bool {
+	mtime, err := http.ParseTime(modified)
+	return err == nil && mtime.After(condition)
 }
 
 func asMap(v any) map[string]any {

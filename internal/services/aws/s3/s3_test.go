@@ -301,8 +301,11 @@ func TestBucketVersioningState(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	input := map[string]any{"Bucket": "versioning-bucket"}
 	mustInvoke(t, p, "CreateBucket", input, nil)
+	characterization := map[string]any{}
 	if got := mustInvoke(t, p, "GetBucketVersioning", input, nil).Output; len(got) != 0 {
 		t.Fatalf("unset versioning = %#v", got)
+	} else {
+		characterization["unset"] = got
 	}
 
 	for _, test := range []struct {
@@ -318,6 +321,7 @@ func TestBucketVersioningState(t *testing.T) {
 		if fault.Code != test.code || fault.Message != test.message || fault.HTTPStatus != http.StatusBadRequest {
 			t.Fatalf("status %q = %#v", test.status, fault)
 		}
+		characterization["rejected-"+test.code] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus}
 		if got := mustInvoke(t, p, "GetBucketVersioning", input, nil).Output; len(got) != 0 {
 			t.Fatalf("status %q persisted: %#v", test.status, got)
 		}
@@ -329,8 +333,11 @@ func TestBucketVersioningState(t *testing.T) {
 		}
 		if got := mustInvoke(t, p, "GetBucketVersioning", input, nil).Output["Status"]; got != status {
 			t.Fatalf("get %s = %v", status, got)
+		} else {
+			characterization[status] = got
 		}
 	}
+	golden.AssertJSON(t, characterization)
 }
 
 func TestObjectMetadata(t *testing.T) {

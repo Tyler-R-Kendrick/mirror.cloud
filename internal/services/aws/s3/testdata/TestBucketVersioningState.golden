@@ -1,0 +1,15 @@
+{
+  "Enabled": "Enabled",
+  "Suspended": "Suspended",
+  "rejected-IllegalVersioningConfigurationException": {
+    "code": "IllegalVersioningConfigurationException",
+    "message": "The Versioning element must be specified",
+    "status": 400
+  },
+  "rejected-MalformedXML": {
+    "code": "MalformedXML",
+    "message": "",
+    "status": 400
+  },
+  "unset": {}
+}

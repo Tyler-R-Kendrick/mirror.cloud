@@ -435,6 +435,14 @@ func TestMultipartPartReads(t *testing.T) {
 func TestGetObjectAttributesContract(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "b"}, nil)
+	_, err := invoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": "missing", "Key": "k", "ObjectAttributes": []string{"ETag"}}, nil)
+	if fault := asFault(t, err); fault.Code != "NoSuchBucket" || fault.HTTPStatus != http.StatusNotFound {
+		t.Fatalf("missing attributes bucket = %#v", fault)
+	}
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "b", "Key": "standard"}, []byte("body"))
+	if standard := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": "b", "Key": "standard", "ObjectAttributes": []string{"StorageClass"}}, nil); len(standard.Output) != 0 {
+		t.Fatalf("standard storage class attributes = %#v", standard.Output)
+	}
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "b", "Status": "Enabled"}, nil)
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "b", "Key": "composite", "ChecksumAlgorithm": "SHA256", "StorageClass": "STANDARD_IA"}, nil)
 	id := created.Output["UploadId"].(string)

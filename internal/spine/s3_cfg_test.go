@@ -150,8 +150,8 @@ func TestBootedServerS3BucketConfigsRoundTrip(t *testing.T) {
 
 func TestS3HTTPProvenOps(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 114 {
-		t.Fatalf("s3 Operations() %d want 114", n)
+	if n := len(p.Operations()); n != 115 {
+		t.Fatalf("s3 Operations() %d want 115", n)
 	}
 }
 

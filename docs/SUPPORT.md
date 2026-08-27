@@ -6,7 +6,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 
 | Service | Protocol | Emulate ops | Mock ops |
 |---|---|---|---|
-| `aws.s3` | `restXml` | 114 | 0 |
+| `aws.s3` | `restXml` | 115 | 0 |
 | `aws.dynamodb` | `awsJson1_0` | 62 | 0 |
 | `aws.sqs` | `awsJson1_0` | 23 | 0 |
 | `aws.sns` | `awsQuery` | 42 | 0 |

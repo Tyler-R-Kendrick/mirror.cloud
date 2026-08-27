@@ -306,7 +306,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 				t.Fatalf("version %s: %d", bucket, res.StatusCode)
 			}
 		}
-		configuration := `<ReplicationConfiguration><Role>arn:aws:iam::000000000000:role/replication</Role><Rule><Status>Enabled</Status><Filter><Prefix>logs/</Prefix></Filter><Destination><Bucket>arn:aws:s3:::replication-destination</Bucket></Destination></Rule></ReplicationConfiguration>`
+		configuration := `<ReplicationConfiguration><Role>arn:aws:iam::000000000000:role/replication</Role><Rule><Status>Enabled</Status><Filter><And><Prefix>logs/</Prefix><Tag><Key>environment</Key><Value>test</Value></Tag></And></Filter><Destination><Bucket>arn:aws:s3:::replication-destination</Bucket></Destination></Rule></ReplicationConfiguration>`
 		res := do(http.MethodPut, "/replication-source?replication", []byte(configuration), "")
 		res.Body.Close()
 		if res.StatusCode != http.StatusOK {
@@ -315,10 +315,19 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodGet, "/replication-source?replication", nil, "")
 		gotConfiguration, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || !bytes.Contains(gotConfiguration, []byte("<ReplicationConfiguration")) || !bytes.Contains(gotConfiguration, []byte("<Rule>")) || !bytes.Contains(gotConfiguration, []byte("<Prefix>logs/</Prefix>")) {
+		if res.StatusCode != http.StatusOK || !bytes.Contains(gotConfiguration, []byte("<ReplicationConfiguration")) || !bytes.Contains(gotConfiguration, []byte("<Rule>")) || !bytes.Contains(gotConfiguration, []byte("<Prefix>logs/</Prefix>")) || !bytes.Contains(gotConfiguration, []byte("<Tag><Key>environment</Key><Value>test</Value></Tag>")) || bytes.Contains(gotConfiguration, []byte("<member>")) {
 			t.Fatalf("get replication: %d %s", res.StatusCode, gotConfiguration)
 		}
-		res = do(http.MethodPut, "/replication-source/logs/key", []byte("replicated-version"), "")
+		req, err := http.NewRequest(http.MethodPut, ts.URL+"/replication-source/logs/key", strings.NewReader("replicated-version"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", auth)
+		req.Header.Set("x-amz-tagging", "environment=test")
+		res, err = http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
 		res.Body.Close()
 		version := res.Header.Get("x-amz-version-id")
 		if res.StatusCode != http.StatusOK || version == "" || res.Header.Get("x-amz-replication-status") != "COMPLETED" {

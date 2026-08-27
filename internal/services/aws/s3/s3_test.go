@@ -1569,6 +1569,11 @@ func TestObjectLockBucketGuards(t *testing.T) {
 	if bypassFault.Code != "InvalidArgument" {
 		t.Fatalf("bypass without bucket configuration: %v", err)
 	}
+	_, err = invoke(t, p, "PutBucketObjectLockConfiguration", map[string]any{"Bucket": "plain", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled"}}, nil)
+	plainConfigurationFault := asFault(t, err)
+	if plainConfigurationFault.Code != "InvalidBucketState" {
+		t.Fatalf("configure object lock without versioning: %v", err)
+	}
 
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "locked", "ObjectLockEnabledForBucket": true}, nil)
 	versioning := mustInvoke(t, p, "GetBucketVersioning", map[string]any{"Bucket": "locked"}, nil)
@@ -1596,15 +1601,22 @@ func TestObjectLockBucketGuards(t *testing.T) {
 	}
 	mustInvoke(t, p, "PutBucketObjectLockConfiguration", map[string]any{"Bucket": "configured", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "GOVERNANCE", "Days": 1}}}}, nil)
 	configured := mustInvoke(t, p, "GetBucketObjectLockConfiguration", map[string]any{"Bucket": "configured"}, nil)
+	_, err = invoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "configured", "Status": "Suspended"}, nil)
+	configuredSuspendFault := asFault(t, err)
+	if configuredSuspendFault.Code != "InvalidBucketState" {
+		t.Fatalf("suspend configured object-lock versioning: %v", err)
+	}
 	golden.AssertJSON(t, map[string]any{
 		"plainLegalHold":       legalHoldFault.Code,
 		"plainBypass":          bypassFault.Code,
+		"plainConfiguration":   plainConfigurationFault.Code,
 		"lockedVersion":        versioning.Output,
 		"lockedConfiguration":  defaultConfiguration.Output,
 		"lockedSuspend":        suspendFault.Code,
 		"regionalVersion":      regionalVersioning.Output,
 		"invalidConfiguration": invalidConfigurationFault.Code,
 		"configured":           configured.Output,
+		"configuredSuspend":    configuredSuspendFault.Code,
 	})
 }
 

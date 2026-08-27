@@ -10,6 +10,7 @@
       }
     }
   },
+  "configuredSuspend": "InvalidBucketState",
   "invalidConfiguration": "MalformedXML",
   "lockedConfiguration": {
     "ObjectLockConfiguration": {
@@ -21,6 +22,7 @@
     "Status": "Enabled"
   },
   "plainBypass": "InvalidArgument",
+  "plainConfiguration": "InvalidBucketState",
   "plainLegalHold": "InvalidRequest",
   "regionalVersion": {
     "Status": "Enabled"

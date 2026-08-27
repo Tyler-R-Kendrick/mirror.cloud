@@ -2742,6 +2742,7 @@ func TestPostObjectMultipartUpload(t *testing.T) {
 	if response.Status != http.StatusCreated || response.Output["Key"] != "uploads/hello world.txt" || response.Headers.Get("ETag") == "" {
 		t.Fatalf("post response: %#v", response)
 	}
+	golden.AssertJSON(t, map[string]any{"status": response.Status, "headers": response.Headers, "output": response.Output})
 	got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "post-object", "Key": "uploads/hello world.txt"}, nil)
 	if body := string(readStream(t, got)); body != "browser upload" || got.Headers.Get("Content-Type") != "text/plain" || got.Headers.Get("x-amz-meta-owner") != "mirror" {
 		t.Fatalf("stored body=%q headers=%v", body, got.Headers)

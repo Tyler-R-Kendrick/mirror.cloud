@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -132,6 +133,28 @@ func TestEncodeDeleteObjectsXML(t *testing.T) {
 	want := `<?xml version="1.0" encoding="UTF-8"?><DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Deleted><Key>k</Key><VersionId>v1</VersionId></Deleted><Error><Code>NoSuchVersion</Code><Key>missing</Key></Error></DeleteResult>`
 	if w.Body.String() != want {
 		t.Fatalf("body %q want %q", w.Body.String(), want)
+	}
+}
+
+func TestDecodeObjectLockXML(t *testing.T) {
+	tests := []struct {
+		op, body, field string
+		want            map[string]any
+	}{
+		{"PutObjectLegalHold", `<LegalHold><Status>ON</Status></LegalHold>`, "LegalHold", map[string]any{"Status": "ON"}},
+		{"PutObjectRetention", `<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00Z</RetainUntilDate></Retention>`, "Retention", map[string]any{"Mode": "GOVERNANCE", "RetainUntilDate": "2030-01-01T00:00:00Z"}},
+	}
+	for _, test := range tests {
+		t.Run(test.op, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPut, "http://127.0.0.1/b/k?versionId=v1", strings.NewReader(test.body))
+			req, err := Codec{}.Decode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: test.op}, r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(req.Input[test.field], test.want) || req.Input["VersionId"] != "v1" {
+				t.Fatalf("input %#v", req.Input)
+			}
+		})
 	}
 }
 

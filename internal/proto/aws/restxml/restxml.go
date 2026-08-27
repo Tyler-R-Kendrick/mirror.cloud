@@ -372,6 +372,9 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 	for k, vs := range r.URL.Query() {
 		in[k] = vs[0]
 	}
+	if versionID := r.URL.Query().Get("versionId"); versionID != "" {
+		in["VersionId"] = versionID
+	}
 	if src := r.Header.Get("x-amz-copy-source"); src != "" {
 		in["CopySource"] = strings.TrimPrefix(src, "/")
 	}
@@ -475,6 +478,25 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 			tags = append(tags, map[string]any{"Key": tg.Key, "Value": tg.Value})
 		}
 		in["TagSet"] = tags
+	case "PutObjectLegalHold":
+		var hold struct {
+			Status string `xml:"Status"`
+		}
+		if xml.Unmarshal(raw, &hold) != nil {
+			in["_body"] = string(raw)
+			return
+		}
+		in["LegalHold"] = map[string]any{"Status": hold.Status}
+	case "PutObjectRetention":
+		var retention struct {
+			Mode            string `xml:"Mode"`
+			RetainUntilDate string `xml:"RetainUntilDate"`
+		}
+		if xml.Unmarshal(raw, &retention) != nil {
+			in["_body"] = string(raw)
+			return
+		}
+		in["Retention"] = map[string]any{"Mode": retention.Mode, "RetainUntilDate": retention.RetainUntilDate}
 	case "PutBucketPolicy":
 		in["Policy"] = string(raw)
 	case "PutBucketCors", "PutBucketWebsite", "PutBucketLogging",

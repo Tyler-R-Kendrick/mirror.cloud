@@ -928,8 +928,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-list-uploads-skip-bucket-check",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if err := p.requireBucket(ctx, req, bucket); err != nil {`,
-			new:  `if err := p.requireBucket(ctx, req, bucket); false {`,
+			old:  "func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tbucket := str(req.Input[\"Bucket\"])\n\tif err := p.requireBucket(ctx, req, bucket); err != nil {",
+			new:  "func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tbucket := str(req.Input[\"Bucket\"])\n\tif err := p.requireBucket(ctx, req, bucket); false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestListMultipartUploadsPaginationAndDelimiter",
 		},

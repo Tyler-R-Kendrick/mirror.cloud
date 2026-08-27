@@ -801,3 +801,42 @@ func FuzzPostObjectTagging(f *testing.F) {
 		}
 	})
 }
+
+func FuzzPostObjectExpires(f *testing.F) {
+	f.Add("Thu, 27 Aug 2026 12:00:00 GMT")
+	f.Add("tomorrow")
+	f.Add("")
+	f.Fuzz(func(t *testing.T, expires string) {
+		if len(expires) > 512 || !utf8.ValidString(expires) || strings.IndexFunc(expires, func(r rune) bool { return r < ' ' || r == 0x7f }) >= 0 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "post-expires-fuzz"}, nil)
+		var payload bytes.Buffer
+		writer := multipart.NewWriter(&payload)
+		_ = writer.WriteField("key", "fuzz-expires")
+		_ = writer.WriteField("Expires", expires)
+		file, _ := writer.CreateFormFile("file", "file.txt")
+		_, _ = file.Write([]byte("body"))
+		_ = writer.Close()
+		httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/post-expires-fuzz", &payload)
+		httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+		_, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": "post-expires-fuzz"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest})
+		_, parseErr := time.Parse(http.TimeFormat, expires)
+		if expires != "" && parseErr != nil {
+			if fault := asFault(t, err); fault.Code != "InvalidArgument" {
+				t.Fatalf("fault = %+v", fault)
+			}
+			if _, getErr := invoke(t, p, "GetObject", map[string]any{"Bucket": "post-expires-fuzz", "Key": "fuzz-expires"}, nil); asFault(t, getErr).Code != "NoSuchKey" {
+				t.Fatal("invalid Expires stored object")
+			}
+			return
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "post-expires-fuzz", "Key": "fuzz-expires"}, nil).Headers.Get("Expires"); got != expires {
+			t.Fatalf("Expires = %q, want %q", got, expires)
+		}
+	})
+}

@@ -429,7 +429,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || defaultRetention.Retention == nil || defaultRetention.Retention.Mode != s3types.ObjectLockRetentionModeGovernance || defaultRetention.Retention.RetainUntilDate == nil || time.Until(*defaultRetention.Retention.RetainUntilDate) < 6*24*time.Hour {
 		t.Fatalf("default object retention: %#v %v", defaultRetention, err)
 	}
-	explicitUntil := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
+	explicitUntil := defaultRetention.Retention.RetainUntilDate.Add(-6 * 24 * time.Hour)
 	explicitVersion, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-lock"), Key: aws.String("explicit-lock"), Body: bytes.NewReader([]byte("locked")), ObjectLockMode: s3types.ObjectLockModeCompliance, ObjectLockRetainUntilDate: &explicitUntil, ObjectLockLegalHoldStatus: s3types.ObjectLockLegalHoldStatusOn})
 	if err != nil {
 		t.Fatalf("put explicitly locked object: %v", err)

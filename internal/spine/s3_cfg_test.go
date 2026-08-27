@@ -203,6 +203,9 @@ func TestBootedServerS3ExtraEngines(t *testing.T) {
 	if code, b, fid := do(http.MethodPost, "/bucket-x?session", "", nil); code >= 300 || fid != "emulate" || !bytes.Contains(b, []byte("AccessKeyId")) {
 		t.Fatalf("session %d %s fid %s", code, b, fid)
 	}
+	if code, b, _ := do(http.MethodPut, "/bucket-x?versioning", `<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`, nil); code >= 300 {
+		t.Fatalf("enable versioning %d %s", code, b)
+	}
 	lock := `<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>`
 	if code, b, _ := do(http.MethodPut, "/bucket-x?object-lock", lock, nil); code >= 300 {
 		t.Fatalf("put lock %d %s", code, b)

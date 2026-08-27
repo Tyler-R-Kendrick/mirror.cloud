@@ -2661,6 +2661,17 @@ func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	if _, err := invokeAs(t, p, west, "GetObject", map[string]any{"Bucket": "destination", "Key": "logs/file", "VersionId": deleteVersion}, nil); asFault(t, err).Code != "MethodNotAllowed" {
 		t.Fatalf("replica delete-marker version not visible: %v", err)
 	}
+	listed := mustInvokeAs(t, p, west, "ListObjectVersions", map[string]any{"Bucket": "destination"}, nil)
+	if len(asSliceForTest(listed.Output["Versions"])) != 1 || len(asSliceForTest(listed.Output["DeleteMarkers"])) != 1 {
+		t.Fatalf("replica versions %#v", listed.Output)
+	}
+	mustInvokeAs(t, p, west, "DeleteObject", map[string]any{"Bucket": "destination", "Key": "logs/file", "VersionId": deleteVersion}, nil)
+	restored := mustInvokeAs(t, p, west, "GetObject", map[string]any{"Bucket": "destination", "Key": "logs/file"}, nil)
+	restoredBody := string(readStream(t, restored))
+	if restoredBody != "replicated" || restored.Headers.Get("x-amz-version-id") != version {
+		t.Fatalf("restored replica body=%q headers=%v", restoredBody, restored.Headers)
+	}
+	golden.AssertJSON(t, map[string]any{"objectVersion": version, "deleteVersion": deleteVersion, "listed": listed.Output, "restoredBody": restoredBody})
 
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "source", "Key": "logs/batch", "Tagging": "environment=test"}, []byte("batch"))
 	deleted := mustInvoke(t, p, "DeleteObjects", map[string]any{"Bucket": "source", "Objects": []any{map[string]any{"Key": "logs/batch"}}}, nil)

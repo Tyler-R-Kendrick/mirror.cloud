@@ -2617,6 +2617,7 @@ func TestReplicationTargetsVersionMetadata(t *testing.T) {
 
 func TestReplicationConfigurationValidation(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
+	characterization := map[string]any{}
 	for _, bucket := range []string{"source", "destination"} {
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
 	}
@@ -2627,6 +2628,8 @@ func TestReplicationConfigurationValidation(t *testing.T) {
 	_, err := invoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": legacy}, nil)
 	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("replication without versioning: %+v", fault)
+	} else {
+		characterization["versioning disabled"] = map[string]any{"code": fault.Code, "status": fault.HTTPStatus}
 	}
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "source", "Status": "Enabled"}, nil)
 
@@ -2652,6 +2655,8 @@ func TestReplicationConfigurationValidation(t *testing.T) {
 			_, err := invoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": tc.configuration}, nil)
 			if fault := asFault(t, err); fault.Code != tc.code || fault.HTTPStatus != http.StatusBadRequest {
 				t.Fatalf("fault=%+v want=%s/400", fault, tc.code)
+			} else {
+				characterization[tc.name] = map[string]any{"code": fault.Code, "status": fault.HTTPStatus}
 			}
 		})
 	}
@@ -2662,6 +2667,8 @@ func TestReplicationConfigurationValidation(t *testing.T) {
 			"DeleteMarkerReplication": map[string]any{"Status": "Disabled"}, "Destination": map[string]any{"Bucket": "destination"},
 		}},
 	}}, nil)
+	characterization["valid"] = mustInvoke(t, p, "GetBucketReplication", map[string]any{"Bucket": "source"}, nil).Output
+	golden.AssertJSON(t, characterization)
 }
 
 func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {

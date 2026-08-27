@@ -1,0 +1,65 @@
+{
+  "filter missing delete marker setting": {
+    "code": "MalformedXML",
+    "status": 400
+  },
+  "filter missing priority": {
+    "code": "MalformedXML",
+    "status": 400
+  },
+  "invalid delete marker status": {
+    "code": "MalformedXML",
+    "status": 400
+  },
+  "invalid status": {
+    "code": "MalformedXML",
+    "status": 400
+  },
+  "missing destination": {
+    "code": "MalformedXML",
+    "status": 400
+  },
+  "missing role": {
+    "code": "MalformedXML",
+    "status": 400
+  },
+  "missing rules": {
+    "code": "MalformedXML",
+    "status": 400
+  },
+  "tag filter replicates delete markers": {
+    "code": "InvalidRequest",
+    "status": 400
+  },
+  "too many rules": {
+    "code": "MalformedXML",
+    "status": 400
+  },
+  "valid": {
+    "ReplicationConfiguration": {
+      "Role": "arn:aws:iam::000000000000:role/replication",
+      "Rules": [
+        {
+          "DeleteMarkerReplication": {
+            "Status": "Disabled"
+          },
+          "Destination": {
+            "Bucket": "destination"
+          },
+          "Filter": {
+            "Tag": {
+              "Key": "environment",
+              "Value": "test"
+            }
+          },
+          "Priority": 1,
+          "Status": "Enabled"
+        }
+      ]
+    }
+  },
+  "versioning disabled": {
+    "code": "InvalidRequest",
+    "status": 400
+  }
+}

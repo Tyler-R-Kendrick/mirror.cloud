@@ -1960,8 +1960,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-bucket-location-header-ignore-request-host",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if req.HTTP != nil {`,
-			new:  `if false {`,
+			old:  "location = \"http://\" + b + \".s3.amazonaws.com/\"\n\t\tif req.HTTP != nil {",
+			new:  "location = \"http://\" + b + \".s3.amazonaws.com/\"\n\t\tif false {",
 			pkg:  "./test/behavior/aws",
 			run:  "TestS3ObjectLifecycle/Given_a_regional_endpoint",
 		},

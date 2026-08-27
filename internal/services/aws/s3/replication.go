@@ -275,7 +275,7 @@ func (p *Pack) syncReplicaTags(ctx context.Context, req *spi.Request, bucket, ke
 	}
 }
 
-func (p *Pack) syncReplicaObjectLock(ctx context.Context, req *spi.Request, bucket, key, kind string, value []byte) {
+func (p *Pack) syncReplicaObjectLock(ctx context.Context, req *spi.Request, bucket, key, version, kind string, value []byte) {
 	raw, ok, _ := p.col(req, "replicas").Get(ctx, bucket+"/"+key)
 	if !ok {
 		return
@@ -283,7 +283,7 @@ func (p *Pack) syncReplicaObjectLock(ctx context.Context, req *spi.Request, buck
 	var refs []replicaRef
 	_ = json.Unmarshal(raw, &refs)
 	for _, ref := range refs {
-		_ = p.deps.Store.Scope(ref.Account, ref.Region).Collection("objlock").Put(ctx, ref.Bucket+"/"+ref.Key+"/"+kind, value)
+		_ = p.deps.Store.Scope(ref.Account, ref.Region).Collection("objlock").Put(ctx, objectLockKey(ref.Bucket, ref.Key, version, kind), value)
 	}
 }
 

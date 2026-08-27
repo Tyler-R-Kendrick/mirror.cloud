@@ -1507,6 +1507,40 @@ func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
 	})
 }
 
+func TestObjectLockPreventsPermanentDeletion(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Enabled"}, nil)
+	first := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("first")).Headers.Get("x-amz-version-id")
+	second := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("second")).Headers.Get("x-amz-version-id")
+	mustInvoke(t, p, "PutObjectLegalHold", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": first, "LegalHold": map[string]any{"Status": "ON"}}, nil)
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": second}, nil)
+	if _, err := invoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": first}, nil); asFault(t, err).Code != "AccessDenied" {
+		t.Fatalf("legal hold delete: %v", err)
+	}
+	if marker := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil); marker.Headers.Get("x-amz-delete-marker") != "true" {
+		t.Fatalf("simple delete did not create marker: %#v", marker.Headers)
+	}
+
+	mustInvoke(t, p, "PutObjectLegalHold", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": first, "LegalHold": map[string]any{"Status": "OFF"}}, nil)
+	mustInvoke(t, p, "PutObjectRetention", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": first, "Retention": map[string]any{"Mode": "GOVERNANCE", "RetainUntilDate": "9999-01-01T00:00:00Z"}}, nil)
+	locked := mustInvoke(t, p, "DeleteObjects", map[string]any{"Bucket": "bucket", "Objects": []any{map[string]any{"Key": "key", "VersionId": first}}}, nil)
+	if failure := locked.Output["Errors"].([]any)[0].(map[string]any); failure["Code"] != "AccessDenied" {
+		t.Fatalf("governance delete: %#v", failure)
+	}
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": first, "BypassGovernanceRetention": true}, nil)
+
+	compliance := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "compliance"}, []byte("locked")).Headers.Get("x-amz-version-id")
+	mustInvoke(t, p, "PutObjectRetention", map[string]any{"Bucket": "bucket", "Key": "compliance", "VersionId": compliance, "Retention": map[string]any{"Mode": "COMPLIANCE", "RetainUntilDate": "9999-01-01T00:00:00Z"}}, nil)
+	if _, err := invoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "compliance", "VersionId": compliance, "BypassGovernanceRetention": true}, nil); asFault(t, err).Code != "AccessDenied" {
+		t.Fatalf("compliance bypass: %v", err)
+	}
+
+	expired := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "expired"}, []byte("expired")).Headers.Get("x-amz-version-id")
+	mustInvoke(t, p, "PutObjectRetention", map[string]any{"Bucket": "bucket", "Key": "expired", "VersionId": expired, "Retention": map[string]any{"Mode": "GOVERNANCE", "RetainUntilDate": "1960-01-01T00:00:00Z"}}, nil)
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "expired", "VersionId": expired}, nil)
+}
+
 func TestVersionedObjectTaggingCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

@@ -1115,10 +1115,15 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		if !exists {
 			return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid version id specified", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "versionId", "ArgumentValue": wantVer}}
 		}
+		if p.objectVersionLocked(ctx, req, b, key, wantVer) {
+			return nil, &spi.Fault{Code: "AccessDenied", Message: "Access Denied", HTTPStatus: http.StatusForbidden, Fault: "client"}
+		}
 		current, currentExists := p.objectMetadata(ctx, req, b, key, "")
 		_ = p.deps.Blobs.Delete(ctx, blobKey(req, b, key)+"@"+wantVer)
 		_ = p.col(req, "versions").Delete(ctx, b+"/"+key+"/"+wantVer)
 		_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, wantVer))
+		_ = p.col(req, "objlock").Delete(ctx, objectLockKey(b, key, wantVer, "legalhold"))
+		_ = p.col(req, "objlock").Delete(ctx, objectLockKey(b, key, wantVer, "retention"))
 		order := p.objectVersionOrder(ctx, req, b, key, current)
 		kept := order[:0]
 		for _, version := range order {
@@ -2360,15 +2365,27 @@ func (p *Pack) objectLockExtras(ctx context.Context, req *spi.Request) (*spi.Res
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
+	requestedVersion := str(req.Input["VersionId"])
+	meta, ok := p.objectMetadata(ctx, req, b, key, requestedVersion)
+	if !ok {
+		return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client"}
+	}
+	if truthy(meta["deleteMarker"]) {
+		return nil, deleteMarkerReadFault(meta, requestedVersion != "")
+	}
+	version := str(meta["versionId"])
+	if version == "null" {
+		version = ""
+	}
 	kind := "legalhold"
 	if strings.Contains(req.Operation, "Retention") {
 		kind = "retention"
 	}
-	ck := b + "/" + key + "/" + kind
+	ck := objectLockKey(b, key, version, kind)
 	if strings.HasPrefix(req.Operation, "Put") {
 		raw, _ := json.Marshal(req.Input)
 		_ = p.col(req, "objlock").Put(ctx, ck, raw)
-		p.syncReplicaObjectLock(ctx, req, b, key, kind, raw)
+		p.syncReplicaObjectLock(ctx, req, b, key, version, kind, raw)
 		return &spi.Response{Status: 200, Output: map[string]any{}}, nil
 	}
 	raw, ok, _ := p.col(req, "objlock").Get(ctx, ck)
@@ -2378,6 +2395,41 @@ func (p *Pack) objectLockExtras(ctx context.Context, req *spi.Request) (*spi.Res
 	var doc map[string]any
 	_ = json.Unmarshal(raw, &doc)
 	return &spi.Response{Status: 200, Output: doc}, nil
+}
+
+func objectLockKey(bucket, key, version, kind string) string {
+	return objectTagKey(bucket, key, version) + "/" + kind
+}
+
+func (p *Pack) objectVersionLocked(ctx context.Context, req *spi.Request, bucket, key, version string) bool {
+	var doc map[string]any
+	raw, ok, _ := p.col(req, "objlock").Get(ctx, objectLockKey(bucket, key, version, "legalhold"))
+	if ok {
+		_ = json.Unmarshal(raw, &doc)
+		if strings.EqualFold(str(asMap(doc["LegalHold"])["Status"]), "ON") {
+			return true
+		}
+	}
+	raw, ok, _ = p.col(req, "objlock").Get(ctx, objectLockKey(bucket, key, version, "retention"))
+	if !ok {
+		return false
+	}
+	doc = nil
+	_ = json.Unmarshal(raw, &doc)
+	retention := asMap(doc["Retention"])
+	until := str(retention["RetainUntilDate"])
+	if until == "" {
+		return false
+	}
+	deadline, err := time.Parse(time.RFC3339, until)
+	if err == nil && !p.deps.Clock.Now().Before(deadline) {
+		return false
+	}
+	bypass := truthy(req.Input["BypassGovernanceRetention"])
+	if req.HTTP != nil {
+		bypass = bypass || strings.EqualFold(req.HTTP.Header.Get("x-amz-bypass-governance-retention"), "true")
+	}
+	return !bypass || !strings.EqualFold(str(retention["Mode"]), "GOVERNANCE")
 }
 
 func (p *Pack) restoreObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {

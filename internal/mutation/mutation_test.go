@@ -3232,8 +3232,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "restxml-nest-tagging-in-members",
 			file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-			old:  `b.WriteString("<Tag>")`,
-			new:  `b.WriteString("<member>")`,
+			old:  "case \"GetObjectTagging\", \"GetBucketTagging\":\n\t\tb.WriteString(\"<TagSet>\")\n\t\tfor _, item := range resp.Output[\"TagSet\"].([]any) {\n\t\t\tb.WriteString(\"<Tag>\")",
+			new:  "case \"GetObjectTagging\", \"GetBucketTagging\":\n\t\tb.WriteString(\"<TagSet>\")\n\t\tfor _, item := range resp.Output[\"TagSet\"].([]any) {\n\t\t\tb.WriteString(\"<member>\")",
 			pkg:  "./internal/spine",
 			run:  "TestBootedServerS3QuerySemantics",
 		},

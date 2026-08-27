@@ -57,6 +57,7 @@ type Pack struct {
 	done          chan struct{}
 	retryOnce     sync.Once
 	closeOnce     sync.Once
+	searchMu      sync.Mutex
 	cancelKinesis func()
 	cancelMSK     func()
 }
@@ -3197,6 +3198,8 @@ func (p *Pack) writeSearchPayload(ctx context.Context, req *spi.Request, stream,
 }
 
 func (p *Pack) runSearchWork(ctx context.Context) time.Time {
+	p.searchMu.Lock()
+	defer p.searchMu.Unlock()
 	if p.deps.Store == nil || p.deps.Clock == nil {
 		return time.Time{}
 	}

@@ -284,6 +284,39 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given object versions When current version is deleted Then previous version is current", func(t *testing.T) {
+		for _, request := range []struct {
+			method, path, body string
+		}{
+			{http.MethodPut, "/version-restore", ""},
+			{http.MethodPut, "/version-restore?versioning", "<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"},
+			{http.MethodPut, "/version-restore/key", "old"},
+		} {
+			res := do(request.method, request.path, []byte(request.body), "")
+			io.Copy(io.Discard, res.Body)
+			res.Body.Close()
+			if res.StatusCode >= 300 {
+				t.Fatalf("%s %s = %d", request.method, request.path, res.StatusCode)
+			}
+		}
+		newer := do(http.MethodPut, "/version-restore/key", []byte("new"), "")
+		io.Copy(io.Discard, newer.Body)
+		newer.Body.Close()
+		version := newer.Header.Get("x-amz-version-id")
+		deleted := do(http.MethodDelete, "/version-restore/key?versionId="+url.QueryEscape(version), nil, "")
+		io.Copy(io.Discard, deleted.Body)
+		deleted.Body.Close()
+		if deleted.StatusCode != http.StatusNoContent || deleted.Header.Get("x-amz-version-id") != version {
+			t.Fatalf("delete version = %d %v", deleted.StatusCode, deleted.Header)
+		}
+		restored := do(http.MethodGet, "/version-restore/key", nil, "")
+		body, _ := io.ReadAll(restored.Body)
+		restored.Body.Close()
+		if restored.StatusCode != http.StatusOK || string(body) != "old" || restored.Header.Get("x-amz-version-id") == version {
+			t.Fatalf("restored = %d %q %v", restored.StatusCode, body, restored.Header)
+		}
+	})
+
 	t.Run("Given an invalid bucket name When creating it Then it is rejected", func(t *testing.T) {
 		for _, name := range []string{"ab", "192.168.5.4", "reserved--table-s3"} {
 			res := do(http.MethodPut, "/"+name, nil, "")

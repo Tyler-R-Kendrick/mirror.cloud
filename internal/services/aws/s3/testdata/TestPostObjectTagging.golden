@@ -1,5 +1,15 @@
 {
+  "duplicate": [
+    {
+      "Key": "same",
+      "Value": "last"
+    }
+  ],
   "malformed": {
+    "code": "MalformedXML",
+    "status": 400
+  },
+  "missing value": {
     "code": "MalformedXML",
     "status": 400
   },

@@ -2948,13 +2948,23 @@ func TestPostObjectTagging(t *testing.T) {
 		t.Fatalf("tags = %#v", tags)
 	}
 	characterization := map[string]any{"valid": tags}
-	if err := post("wrong-root", "<InvalidXmlTagging></InvalidXmlTagging>"); err != nil {
+	wrongRoot := "<InvalidXmlTagging><TagSet><Tag><Key>ignored</Key><Value>tag</Value></Tag></TagSet></InvalidXmlTagging>"
+	if err := post("wrong-root", wrongRoot); err != nil {
 		t.Fatal(err)
 	}
 	if tags := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "post-tags", "Key": "wrong-root"}, nil).Output["TagSet"].([]any); len(tags) != 0 {
 		t.Fatalf("wrong-root tags = %#v", tags)
 	} else {
 		characterization["wrong root"] = tags
+	}
+	duplicate := "<Tagging><TagSet><Tag><Key>same</Key><Value>first</Value></Tag><Tag><Key>same</Key><Value>last</Value></Tag></TagSet></Tagging>"
+	if err := post("duplicate", duplicate); err != nil {
+		t.Fatal(err)
+	}
+	if tags := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "post-tags", "Key": "duplicate"}, nil).Output["TagSet"].([]any); len(tags) != 1 || asMapForTest(tags[0])["Value"] != "last" {
+		t.Fatalf("duplicate tags = %#v", tags)
+	} else {
+		characterization["duplicate"] = tags
 	}
 	if fault := asFault(t, post("malformed", "not-xml")); fault.Code != "MalformedXML" || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("fault = %+v", fault)
@@ -2963,6 +2973,15 @@ func TestPostObjectTagging(t *testing.T) {
 	}
 	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "post-tags", "Key": "malformed"}, nil); asFault(t, err).Code != "NoSuchKey" {
 		t.Fatal("malformed tagging stored object")
+	}
+	missingValue := "<Tagging><TagSet><Tag><Key>key</Key></Tag></TagSet></Tagging>"
+	if fault := asFault(t, post("missing-value", missingValue)); fault.Code != "MalformedXML" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("missing value fault = %+v", fault)
+	} else {
+		characterization["missing value"] = map[string]any{"code": fault.Code, "status": fault.HTTPStatus}
+	}
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "post-tags", "Key": "missing-value"}, nil); asFault(t, err).Code != "NoSuchKey" {
+		t.Fatal("missing tag value stored object")
 	}
 	golden.AssertJSON(t, characterization)
 }

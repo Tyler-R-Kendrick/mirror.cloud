@@ -590,6 +590,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestReplicationFiltersStatusMetadataAndDeleteMarker",
 		},
 		{
+			name: "s3-drop-source-version-replication-status",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  "if vid != \"\" {\n\t\t\t_ = p.col(req, \"versions\").Put(ctx, b+\"/\"+key+\"/\"+vid, meta)\n\t\t}\n\t\th.Set(\"x-amz-replication-status\", status)",
+			new:  "if false {\n\t\t\t_ = p.col(req, \"versions\").Put(ctx, b+\"/\"+key+\"/\"+vid, meta)\n\t\t}\n\t\th.Set(\"x-amz-replication-status\", status)",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestReplicationFiltersStatusMetadataAndDeleteMarker",
+		},
+		{
 			name: "edge-drop-fault-response-headers",
 			file: filepath.Join("internal", "edge", "edge.go"),
 			old:  `for key, values := range f.Headers {`,

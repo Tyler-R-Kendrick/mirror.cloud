@@ -3,6 +3,10 @@
     "key": "uploads/item",
     "size": 4
   },
+  "accepted legacy": {
+    "key": "uploads/legacy",
+    "size": 6
+  },
   "expired": {
     "code": "AccessDenied",
     "fields": null,

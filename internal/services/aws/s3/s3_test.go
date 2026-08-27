@@ -2873,7 +2873,18 @@ func TestPostObjectPolicyValidation(t *testing.T) {
 	if got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "post-policy", "Key": "uploads/item"}, nil); string(readStream(t, got)) != "body" {
 		t.Fatal("valid policy did not store object")
 	}
-	characterization := map[string]any{"accepted": map[string]any{"key": "uploads/item", "size": 4}}
+	legacy := map[string]string{
+		"AWSAccessKeyId": "test",
+		"signature":      "signature",
+		"policy":         encodePolicy(deps.Clock.Now().Add(time.Hour).Format(time.RFC3339Nano), []any{map[string]any{"bucket": "post-policy"}}),
+	}
+	if _, err := post("uploads/legacy", legacy, "legacy"); err != nil {
+		t.Fatal(err)
+	}
+	characterization := map[string]any{
+		"accepted":        map[string]any{"key": "uploads/item", "size": 4},
+		"accepted legacy": map[string]any{"key": "uploads/legacy", "size": 6},
+	}
 
 	missingSignature := policyFields(encodePolicy(deps.Clock.Now().Add(time.Hour).Format(time.RFC3339Nano), nil))
 	delete(missingSignature, "x-amz-date")

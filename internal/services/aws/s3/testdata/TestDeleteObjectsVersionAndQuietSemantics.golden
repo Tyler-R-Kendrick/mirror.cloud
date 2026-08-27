@@ -1,0 +1,22 @@
+{
+  "empty": "MalformedXML",
+  "quiet": {
+    "Errors": [
+      {
+        "Code": "NoSuchVersion",
+        "Key": "key",
+        "Message": "The specified version does not exist.",
+        "VersionId": "missing"
+      }
+    ]
+  },
+  "restoredBody": "first",
+  "verbose": {
+    "Deleted": [
+      {
+        "Key": "key",
+        "VersionId": "5f59f223"
+      }
+    ]
+  }
+}

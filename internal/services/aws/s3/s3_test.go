@@ -1441,7 +1441,8 @@ func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
 		t.Fatalf("deleted version %#v", item)
 	}
 	restored := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil)
-	if restored.Headers.Get("x-amz-version-id") != first.Headers.Get("x-amz-version-id") || string(readStream(t, restored)) != "first" {
+	restoredBody := string(readStream(t, restored))
+	if restored.Headers.Get("x-amz-version-id") != first.Headers.Get("x-amz-version-id") || restoredBody != "first" {
 		t.Fatalf("restored version %#v", restored)
 	}
 
@@ -1460,9 +1461,17 @@ func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
 	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "quiet", "VersionId": quietVersion}, nil); asFault(t, err).Code != "NoSuchKey" {
 		t.Fatalf("quiet delete did not run: %v", err)
 	}
-	if _, err := invoke(t, p, "DeleteObjects", map[string]any{"Bucket": "bucket", "Objects": []any{}}, nil); asFault(t, err).Code != "MalformedXML" {
+	_, err := invoke(t, p, "DeleteObjects", map[string]any{"Bucket": "bucket", "Objects": []any{}}, nil)
+	emptyFault := asFault(t, err)
+	if emptyFault.Code != "MalformedXML" {
 		t.Fatalf("empty delete: %v", err)
 	}
+	golden.AssertJSON(t, map[string]any{
+		"verbose":      deleted.Output,
+		"quiet":        result.Output,
+		"restoredBody": restoredBody,
+		"empty":        emptyFault.Code,
+	})
 }
 
 func TestVersionedObjectTaggingCharacterization(t *testing.T) {

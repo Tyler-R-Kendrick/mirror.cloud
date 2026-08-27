@@ -353,6 +353,30 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given default retention When writing Then the new version is protected", func(t *testing.T) {
+		configuration := []byte("<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>3</Days></DefaultRetention></Rule></ObjectLockConfiguration>")
+		configured := do(http.MethodPut, "/object-lock?object-lock", configuration, "")
+		configured.Body.Close()
+		if configured.StatusCode != http.StatusOK {
+			t.Fatalf("configure default retention = %d", configured.StatusCode)
+		}
+		put := do(http.MethodPut, "/object-lock/default-retention", []byte("locked"), "")
+		put.Body.Close()
+		version := put.Header.Get("x-amz-version-id")
+		retention := do(http.MethodGet, "/object-lock/default-retention?retention&versionId="+url.QueryEscape(version), nil, "")
+		body, _ := io.ReadAll(retention.Body)
+		retention.Body.Close()
+		if retention.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Mode>GOVERNANCE</Mode>")) || !bytes.Contains(body, []byte("<RetainUntilDate>1970-01-04T00:00:00Z</RetainUntilDate>")) {
+			t.Fatalf("default retention = %d %s", retention.StatusCode, body)
+		}
+		deleted := do(http.MethodDelete, "/object-lock/default-retention?versionId="+url.QueryEscape(version), nil, "")
+		fault, _ := io.ReadAll(deleted.Body)
+		deleted.Body.Close()
+		if deleted.StatusCode != http.StatusForbidden || !bytes.Contains(fault, []byte("AccessDenied")) {
+			t.Fatalf("delete retained version = %d %s", deleted.StatusCode, fault)
+		}
+	})
+
 	t.Run("Given object versions When multi-delete is quiet Then only errors are returned", func(t *testing.T) {
 		for _, request := range []struct {
 			method, path, body string

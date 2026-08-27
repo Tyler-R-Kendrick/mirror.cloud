@@ -31,6 +31,15 @@
     "message": "The request signature we calculated does not match the signature you provided.",
     "status": 403
   },
+  "missing legacy signature field": {
+    "code": "InvalidArgument",
+    "fields": {
+      "ArgumentName": "AWSAccessKeyId",
+      "ArgumentValue": ""
+    },
+    "message": "Bucket POST must contain a field named 'AWSAccessKeyId'. If it is specified, please check the order of the fields.",
+    "status": 400
+  },
   "missing signature field": {
     "code": "InvalidArgument",
     "fields": {

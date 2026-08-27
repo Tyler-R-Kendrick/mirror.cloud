@@ -2888,6 +2888,8 @@ func TestPostObjectPolicyValidation(t *testing.T) {
 
 	missingSignature := policyFields(encodePolicy(deps.Clock.Now().Add(time.Hour).Format(time.RFC3339Nano), nil))
 	delete(missingSignature, "x-amz-date")
+	missingLegacySignature := maps.Clone(legacy)
+	delete(missingLegacySignature, "AWSAccessKeyId")
 	cases := []struct {
 		name   string
 		fields map[string]string
@@ -2895,6 +2897,7 @@ func TestPostObjectPolicyValidation(t *testing.T) {
 	}{
 		{"expired", policyFields(encodePolicy(deps.Clock.Now().Add(-time.Second).Format(time.RFC3339Nano), nil)), "AccessDenied"},
 		{"missing signature field", missingSignature, "InvalidArgument"},
+		{"missing legacy signature field", missingLegacySignature, "InvalidArgument"},
 		{"no signature fields", map[string]string{"policy": encodePolicy(deps.Clock.Now().Add(time.Hour).Format(time.RFC3339Nano), nil)}, "AccessDenied"},
 		{"malformed policy", policyFields("not-base64"), "SignatureDoesNotMatch"},
 		{"failed condition", policyFields(encodePolicy(deps.Clock.Now().Add(time.Hour).Format(time.RFC3339Nano), []any{map[string]any{"bucket": "wrong"}})), "AccessDenied"},

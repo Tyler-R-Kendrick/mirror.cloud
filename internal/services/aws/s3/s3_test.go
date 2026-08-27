@@ -2947,18 +2947,24 @@ func TestPostObjectTagging(t *testing.T) {
 	if len(tags) != 2 || asMapForTest(tags[0])["Key"] != "one" || asMapForTest(tags[1])["Key"] != "two" {
 		t.Fatalf("tags = %#v", tags)
 	}
+	characterization := map[string]any{"valid": tags}
 	if err := post("wrong-root", "<InvalidXmlTagging></InvalidXmlTagging>"); err != nil {
 		t.Fatal(err)
 	}
 	if tags := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "post-tags", "Key": "wrong-root"}, nil).Output["TagSet"].([]any); len(tags) != 0 {
 		t.Fatalf("wrong-root tags = %#v", tags)
+	} else {
+		characterization["wrong root"] = tags
 	}
 	if fault := asFault(t, post("malformed", "not-xml")); fault.Code != "MalformedXML" || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("fault = %+v", fault)
+	} else {
+		characterization["malformed"] = map[string]any{"code": fault.Code, "status": fault.HTTPStatus}
 	}
 	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "post-tags", "Key": "malformed"}, nil); asFault(t, err).Code != "NoSuchKey" {
 		t.Fatal("malformed tagging stored object")
 	}
+	golden.AssertJSON(t, characterization)
 }
 
 func TestObjectCreatedEventNames(t *testing.T) {

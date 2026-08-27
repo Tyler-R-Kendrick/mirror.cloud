@@ -306,8 +306,15 @@ func TestS3ObjectLifecycle(t *testing.T) {
 				t.Fatalf("version %s: %d", bucket, res.StatusCode)
 			}
 		}
+		invalidConfiguration := `<ReplicationConfiguration><Role>arn:aws:iam::000000000000:role/replication</Role><Rule><Priority>1</Priority><Status>Enabled</Status><Filter><Tag><Key>environment</Key><Value>test</Value></Tag></Filter><DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication><Destination><Bucket>arn:aws:s3:::replication-destination</Bucket></Destination></Rule></ReplicationConfiguration>`
+		res := do(http.MethodPut, "/replication-source?replication", []byte(invalidConfiguration), "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidRequest</Code>")) {
+			t.Fatalf("tag delete-marker validation: %d %s", res.StatusCode, body)
+		}
 		configuration := `<ReplicationConfiguration><Role>arn:aws:iam::000000000000:role/replication</Role><Rule><Priority>1</Priority><Status>Enabled</Status><Filter><And><Prefix>logs/</Prefix><Tag><Key>environment</Key><Value>test</Value></Tag></And></Filter><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication><Destination><Bucket>arn:aws:s3:::replication-destination</Bucket></Destination></Rule></ReplicationConfiguration>`
-		res := do(http.MethodPut, "/replication-source?replication", []byte(configuration), "")
+		res = do(http.MethodPut, "/replication-source?replication", []byte(configuration), "")
 		res.Body.Close()
 		if res.StatusCode != http.StatusOK {
 			t.Fatalf("configure replication: %d", res.StatusCode)
@@ -334,7 +341,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			t.Fatalf("put replicated version: %d %v", res.StatusCode, res.Header)
 		}
 		res = do(http.MethodGet, "/replication-destination/logs/key?versionId="+url.QueryEscape(version), nil, "")
-		body, _ := io.ReadAll(res.Body)
+		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
 		if res.StatusCode != http.StatusOK || string(body) != "replicated-version" || res.Header.Get("x-amz-version-id") != version || res.Header.Get("x-amz-replication-status") != "REPLICA" {
 			t.Fatalf("get replicated version: %d %q %v", res.StatusCode, body, res.Header)

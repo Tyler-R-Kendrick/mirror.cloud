@@ -2672,6 +2672,42 @@ func TestReplicationConfigurationValidation(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestReplicationDestinationValidationAndRuleIDs(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "source"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "source", "Status": "Enabled"}, nil)
+	configuration := func(destination string) map[string]any {
+		return map[string]any{
+			"Role":  "arn:aws:iam::000000000000:role/replication",
+			"Rules": []any{map[string]any{"Status": "Enabled", "Destination": map[string]any{"Bucket": "arn:aws:s3:::" + destination}}},
+		}
+	}
+	put := func(destination string) *spi.Fault {
+		_, err := invoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": configuration(destination)}, nil)
+		return asFault(t, err)
+	}
+	if fault := put("destination"); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("missing destination: %+v", fault)
+	}
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "destination"}, nil)
+	if fault := put("destination"); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("unversioned destination: %+v", fault)
+	}
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "destination", "Status": "Enabled"}, nil)
+	mustInvoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": configuration("destination")}, nil)
+	stored := asMapForTest(mustInvoke(t, p, "GetBucketReplication", map[string]any{"Bucket": "source"}, nil).Output["ReplicationConfiguration"])
+	rule := asMapForTest(asSliceForTest(stored["Rules"])[0])
+	if id, _ := rule["ID"].(string); len(id) != 8 {
+		t.Fatalf("generated rule ID %q", id)
+	}
+	rule["ID"] = "explicit"
+	mustInvoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": stored}, nil)
+	stored = asMapForTest(mustInvoke(t, p, "GetBucketReplication", map[string]any{"Bucket": "source"}, nil).Output["ReplicationConfiguration"])
+	if got := asMapForTest(asSliceForTest(stored["Rules"])[0])["ID"]; got != "explicit" {
+		t.Fatalf("explicit rule ID = %v", got)
+	}
+}
+
 func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	west := ident()

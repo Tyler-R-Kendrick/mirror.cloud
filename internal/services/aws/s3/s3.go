@@ -920,6 +920,9 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		metaDoc["replicationStatus"] = status
 		meta, _ = json.Marshal(metaDoc)
 		_ = p.col(req, "objects").Put(ctx, b+"/"+key, meta)
+		if vid != "" {
+			_ = p.col(req, "versions").Put(ctx, b+"/"+key+"/"+vid, meta)
+		}
 		h.Set("x-amz-replication-status", status)
 	}
 	for kind, raw := range lockDocs {

@@ -51,7 +51,13 @@ func TestStatesHTTPProvenOps(t *testing.T) {
 }
 
 func TestStrictMockValidationRejectsMissingShape(t *testing.T) {
-	service := &model.Service{Shapes: map[string]model.Shape{}}
+	service := &model.Service{Operations: []model.Operation{{Name: "MissingOutput"}}, Shapes: map[string]model.Shape{}}
+	if validTestStateMockResult(service, "MissingOutput", map[string]any{}, "STRICT") {
+		t.Fatal("STRICT validation accepted a missing output model")
+	}
+	if !validTestStateMockResult(service, "MissingOutput", map[string]any{}, "PRESENT") {
+		t.Fatal("PRESENT validation rejected a missing output model")
+	}
 	if validModelValue(service, "missing", map[string]any{}, true, 0) {
 		t.Fatal("STRICT validation accepted a missing model shape")
 	}
@@ -3610,13 +3616,6 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		}
 	}
 	modeledTask := `{"Type":"Task","Resource":"arn:aws:states:::aws-sdk:dynamodb:describeEndpoints","End":true}`
-	missingOutputModelTask := `{"Type":"Task","Resource":"arn:aws:states:::aws-sdk:dynamodb:describeLimits","End":true}`
-	if _, err := call("TestState", map[string]any{"definition": missingOutputModelTask, "mock": map[string]any{"result": `{}`}}); err == nil {
-		t.Fatal("accepted STRICT mock without an output model")
-	}
-	if result := must("TestState", map[string]any{"definition": missingOutputModelTask, "mock": map[string]any{"result": `{}`, "fieldValidationMode": "PRESENT"}}).Output; result["status"] != "SUCCEEDED" {
-		t.Fatalf("rejected PRESENT mock without an output model %#v", result)
-	}
 	if _, err := call("TestState", map[string]any{"definition": modeledTask, "mock": map[string]any{"result": `{}`}}); err == nil {
 		t.Fatal("accepted STRICT mock missing modeled required fields")
 	}

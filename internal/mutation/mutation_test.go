@@ -3571,7 +3571,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  `return mode != "STRICT"`,
 			new:  `return true`,
 			pkg:  "./internal/services/aws/states",
-			run:  "TestStatesLifecycleAndWalkerUnits",
+			run:  "TestStrictMockValidationRejectsMissingShape",
 		},
 		{
 			name: "states-accept-strict-test-state-mock-without-shape-model",

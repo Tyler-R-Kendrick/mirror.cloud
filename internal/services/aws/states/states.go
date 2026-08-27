@@ -7684,14 +7684,18 @@ func validTestStateMock(state map[string]any, result any, mode string) bool {
 			if !matchesTaskService(candidate.ID, service) {
 				continue
 			}
-			op := candidate.OperationByName(operation)
-			if op == nil || op.Output == "" {
-				return mode != "STRICT"
-			}
-			return validModelValue(candidate, op.Output, result, mode == "STRICT", 0)
+			return validTestStateMockResult(candidate, operation, result, mode)
 		}
 	}
 	return true
+}
+
+func validTestStateMockResult(service *model.Service, operation string, result any, mode string) bool {
+	op := service.OperationByName(operation)
+	if op == nil || op.Output == "" {
+		return mode != "STRICT"
+	}
+	return validModelValue(service, op.Output, result, mode == "STRICT", 0)
 }
 
 func validModelValue(service *model.Service, shapeID string, value any, requireFields bool, depth int) bool {

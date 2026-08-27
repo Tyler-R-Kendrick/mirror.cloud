@@ -2584,6 +2584,37 @@ func TestMissingBucket404(t *testing.T) {
 	}
 }
 
+func TestReplicationTargetsVersionMetadata(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	for _, bucket := range []string{"source", "destination"} {
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket, "ObjectLockEnabledForBucket": true}, nil)
+	}
+	mustInvoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": map[string]any{"Rules": []any{map[string]any{
+		"Status": "Enabled", "Destination": map[string]any{"Bucket": "arn:aws:s3:::destination"},
+	}}}}, nil)
+	first := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "source", "Key": "key", "Tagging": "stage=first"}, []byte("first")).Headers.Get("x-amz-version-id")
+	second := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "source", "Key": "key", "Tagging": "stage=second"}, []byte("second")).Headers.Get("x-amz-version-id")
+	mustInvoke(t, p, "PutObjectTagging", map[string]any{"Bucket": "source", "Key": "key", "TagSet": []any{map[string]any{"Key": "stage", "Value": "updated"}}}, nil)
+	mustInvoke(t, p, "PutObjectLegalHold", map[string]any{"Bucket": "source", "Key": "key", "LegalHold": map[string]any{"Status": "ON"}}, nil)
+
+	for _, tc := range []struct {
+		version, body, tag, hold string
+	}{{first, "first", "first", ""}, {second, "second", "updated", "ON"}} {
+		got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "destination", "Key": "key", "VersionId": tc.version}, nil)
+		if body := string(readStream(t, got)); body != tc.body {
+			t.Fatalf("version %s body=%q want=%q", tc.version, body, tc.body)
+		}
+		tags := asSliceForTest(mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "destination", "Key": "key", "VersionId": tc.version}, nil).Output["TagSet"])
+		if len(tags) != 1 || asMapForTest(tags[0])["Value"] != tc.tag {
+			t.Fatalf("version %s tags=%#v", tc.version, tags)
+		}
+		hold := asMapForTest(mustInvoke(t, p, "GetObjectLegalHold", map[string]any{"Bucket": "destination", "Key": "key", "VersionId": tc.version}, nil).Output["LegalHold"])
+		if status, _ := hold["Status"].(string); status != tc.hold {
+			t.Fatalf("version %s legal hold=%#v", tc.version, hold)
+		}
+	}
+}
+
 func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	west := ident()

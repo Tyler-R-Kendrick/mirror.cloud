@@ -83,12 +83,22 @@ func TestRejectedReplicationConfigurationPreservesCurrent(t *testing.T) {
 	if _, err := call("PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": valid}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "destination", "Status": "Suspended"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := call("PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": valid})
+	var fault *spi.Fault
+	if !errors.As(err, &fault) || fault.Code != "InvalidRequest" {
+		t.Fatalf("unversioned replacement: %v", err)
+	}
+	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "destination", "Status": "Enabled"}); err != nil {
+		t.Fatal(err)
+	}
 	invalid := map[string]any{"Role": "role", "Rules": []any{map[string]any{
 		"Priority": 1, "Status": "Enabled", "Filter": map[string]any{"Tag": map[string]any{"Key": "stage", "Value": "test"}},
 		"DeleteMarkerReplication": map[string]any{"Status": "Enabled"}, "Destination": map[string]any{"Bucket": "destination"},
 	}}}
-	_, err := call("PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": invalid})
-	var fault *spi.Fault
+	_, err = call("PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": invalid})
 	if !errors.As(err, &fault) || fault.Code != "InvalidRequest" {
 		t.Fatalf("invalid replacement: %v", err)
 	}

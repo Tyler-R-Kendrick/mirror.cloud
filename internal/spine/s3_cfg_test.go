@@ -241,7 +241,7 @@ func TestBootedServerS3ExtraEngines(t *testing.T) {
 		_ = sel
 		t.Fatalf("select filter %s", b)
 	}
-	if code, b, _ := do(http.MethodPut, "/bucket-x?replication", `<ReplicationConfiguration><Role>arn:aws:iam::000000000000:role/r</Role></ReplicationConfiguration>`, nil); code >= 300 {
+	if code, b, _ := do(http.MethodPut, "/bucket-x?replication", `<ReplicationConfiguration><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::bucket-x</Bucket></Destination></Rule></ReplicationConfiguration>`, nil); code >= 300 {
 		t.Fatalf("put repl %d %s", code, b)
 	}
 	if code, b, _ := do(http.MethodDelete, "/bucket-x?replication", "", nil); code >= 300 && code != 204 {

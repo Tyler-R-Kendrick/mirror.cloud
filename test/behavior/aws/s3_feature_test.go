@@ -99,6 +99,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		_ = writer.WriteField("key", "forms/${filename}")
 		_ = writer.WriteField("success_action_status", "201")
 		_ = writer.WriteField("tagging", "<Tagging><TagSet><Tag><Key>source</Key><Value>browser</Value></Tag></TagSet></Tagging>")
+		_ = writer.WriteField("Expires", "Thu, 27 Aug 2026 12:00:00 GMT")
 		file, err := writer.CreateFormFile("file", "report.txt")
 		if err != nil {
 			t.Fatal(err)
@@ -125,7 +126,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodGet, "/post-form/forms/report.txt", nil, "")
 		stored, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || string(stored) != "from browser" {
+		if res.StatusCode != http.StatusOK || string(stored) != "from browser" || res.Header.Get("Expires") != "Thu, 27 Aug 2026 12:00:00 GMT" {
 			t.Fatalf("stored form object %d %q", res.StatusCode, stored)
 		}
 		res = do(http.MethodGet, "/post-form/forms/report.txt?tagging", nil, "")

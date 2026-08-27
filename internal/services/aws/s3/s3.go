@@ -1933,6 +1933,15 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	col := p.col(req, "bktcfg")
 	if strings.HasPrefix(req.Operation, "Put") {
+		if req.Operation == "PutBucketObjectLockConfiguration" {
+			if !p.versioningEnabled(ctx, req, b) {
+				return nil, &spi.Fault{Code: "InvalidBucketState", Message: "Versioning must be 'Enabled' on the bucket to apply a Object Lock configuration", HTTPStatus: http.StatusConflict, Fault: "client"}
+			}
+			if err := validateObjectLockConfiguration(req.Input["ObjectLockConfiguration"]); err != nil {
+				return nil, err
+			}
+			p.setBucketObjectLockEnabled(ctx, req, b)
+		}
 		doc := map[string]any{}
 		for k, v := range req.Input {
 			if k == "Bucket" || k == "Key" {
@@ -1950,6 +1959,9 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	raw, ok, _ := col.Get(ctx, key)
 	if !ok {
+		if req.Operation == "GetBucketObjectLockConfiguration" && p.bucketObjectLockEnabled(ctx, req, b) {
+			return &spi.Response{Output: map[string]any{"ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled"}}}, nil
+		}
 		if req.Operation == "GetBucketAcl" || req.Operation == "GetObjectAcl" {
 			return &spi.Response{Output: map[string]any{
 				"Owner":  map[string]any{"ID": req.Identity.Account, "DisplayName": "mirror"},
@@ -1973,6 +1985,28 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	var doc map[string]any
 	_ = json.Unmarshal(raw, &doc)
 	return &spi.Response{Status: 200, Output: doc}, nil
+}
+
+func validateObjectLockConfiguration(value any) error {
+	configuration := asMap(value)
+	malformed := func() error {
+		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if str(configuration["ObjectLockEnabled"]) != "Enabled" {
+		return malformed()
+	}
+	rule, exists := configuration["Rule"]
+	if !exists {
+		return nil
+	}
+	retention := asMap(asMap(rule)["DefaultRetention"])
+	mode := str(retention["Mode"])
+	_, days := retention["Days"]
+	_, years := retention["Years"]
+	if (mode != "GOVERNANCE" && mode != "COMPLIANCE") || days == years {
+		return malformed()
+	}
+	return nil
 }
 
 func cfgKind(op string) (string, *spi.Fault) {
@@ -2468,6 +2502,18 @@ func (p *Pack) bucketObjectLockEnabled(ctx context.Context, req *spi.Request, bu
 	var meta map[string]any
 	_ = json.Unmarshal(raw, &meta)
 	return truthy(meta["objectLockEnabled"])
+}
+
+func (p *Pack) setBucketObjectLockEnabled(ctx context.Context, req *spi.Request, bucket string) {
+	raw, ok, _ := p.col(req, "buckets").Get(ctx, bucket)
+	if !ok {
+		return
+	}
+	var meta map[string]any
+	_ = json.Unmarshal(raw, &meta)
+	meta["objectLockEnabled"] = true
+	raw, _ = json.Marshal(meta)
+	_ = p.col(req, "buckets").Put(ctx, bucket, raw)
 }
 
 func (p *Pack) restoreObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {

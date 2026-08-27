@@ -1575,6 +1575,7 @@ func TestObjectLockBucketGuards(t *testing.T) {
 	if versioning.Output["Status"] != "Enabled" {
 		t.Fatalf("object lock did not enable versioning: %#v", versioning.Output)
 	}
+	defaultConfiguration := mustInvoke(t, p, "GetBucketObjectLockConfiguration", map[string]any{"Bucket": "locked"}, nil)
 	_, err = invoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "locked", "Status": "Suspended"}, nil)
 	suspendFault := asFault(t, err)
 	if suspendFault.Code != "InvalidBucketState" {
@@ -1586,12 +1587,24 @@ func TestObjectLockBucketGuards(t *testing.T) {
 	if regionalVersioning.Output["Status"] != "Enabled" {
 		t.Fatalf("account-regional object lock did not enable versioning: %#v", regionalVersioning.Output)
 	}
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "configured"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "configured", "Status": "Enabled"}, nil)
+	_, err = invoke(t, p, "PutBucketObjectLockConfiguration", map[string]any{"Bucket": "configured", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "GOVERNANCE", "Days": 1, "Years": 1}}}}, nil)
+	invalidConfigurationFault := asFault(t, err)
+	if invalidConfigurationFault.Code != "MalformedXML" {
+		t.Fatalf("invalid object lock configuration: %v", err)
+	}
+	mustInvoke(t, p, "PutBucketObjectLockConfiguration", map[string]any{"Bucket": "configured", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "GOVERNANCE", "Days": 1}}}}, nil)
+	configured := mustInvoke(t, p, "GetBucketObjectLockConfiguration", map[string]any{"Bucket": "configured"}, nil)
 	golden.AssertJSON(t, map[string]any{
-		"plainLegalHold":  legalHoldFault.Code,
-		"plainBypass":     bypassFault.Code,
-		"lockedVersion":   versioning.Output,
-		"lockedSuspend":   suspendFault.Code,
-		"regionalVersion": regionalVersioning.Output,
+		"plainLegalHold":       legalHoldFault.Code,
+		"plainBypass":          bypassFault.Code,
+		"lockedVersion":        versioning.Output,
+		"lockedConfiguration":  defaultConfiguration.Output,
+		"lockedSuspend":        suspendFault.Code,
+		"regionalVersion":      regionalVersioning.Output,
+		"invalidConfiguration": invalidConfigurationFault.Code,
+		"configured":           configured.Output,
 	})
 }
 

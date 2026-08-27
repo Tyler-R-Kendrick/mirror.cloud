@@ -323,6 +323,40 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a legal hold When deleting Then only a delete marker is allowed", func(t *testing.T) {
+		for _, request := range []struct {
+			path, body string
+		}{
+			{"/object-lock", ""},
+			{"/object-lock?versioning", "<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"},
+		} {
+			res := do(http.MethodPut, request.path, []byte(request.body), "")
+			res.Body.Close()
+			if res.StatusCode >= 300 {
+				t.Fatalf("PUT %s = %d", request.path, res.StatusCode)
+			}
+		}
+		put := do(http.MethodPut, "/object-lock/key", []byte("locked"), "")
+		put.Body.Close()
+		version := put.Header.Get("x-amz-version-id")
+		hold := do(http.MethodPut, "/object-lock/key?legal-hold&versionId="+url.QueryEscape(version), []byte("<LegalHold><Status>ON</Status></LegalHold>"), "")
+		hold.Body.Close()
+		if hold.StatusCode != http.StatusOK {
+			t.Fatalf("put legal hold = %d", hold.StatusCode)
+		}
+		permanent := do(http.MethodDelete, "/object-lock/key?versionId="+url.QueryEscape(version), nil, "")
+		body, _ := io.ReadAll(permanent.Body)
+		permanent.Body.Close()
+		if permanent.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("AccessDenied")) {
+			t.Fatalf("permanent delete = %d %s", permanent.StatusCode, body)
+		}
+		marker := do(http.MethodDelete, "/object-lock/key", nil, "")
+		marker.Body.Close()
+		if marker.StatusCode != http.StatusNoContent || marker.Header.Get("x-amz-delete-marker") != "true" {
+			t.Fatalf("simple delete = %d %v", marker.StatusCode, marker.Header)
+		}
+	})
+
 	t.Run("Given object versions When multi-delete is quiet Then only errors are returned", func(t *testing.T) {
 		for _, request := range []struct {
 			method, path, body string

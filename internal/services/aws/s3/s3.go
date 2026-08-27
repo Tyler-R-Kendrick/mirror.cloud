@@ -52,6 +52,7 @@ type mpu struct {
 	storageClass, initiated         string
 	tagging                         string
 	checksumAlgorithm, checksumType string
+	lockDocs                        map[string][]byte
 	parts                           map[int]multipartPart
 }
 
@@ -225,7 +226,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "GetBucketLocation":
 		return p.getBucketLocation(ctx, req)
 	case "PutObject":
-		return p.putObject(ctx, req, "", "", nil)
+		return p.putObject(ctx, req, "", "", nil, nil)
 	case "GetObject":
 		return p.getObject(ctx, req)
 	case "HeadObject":
@@ -803,7 +804,7 @@ func (p *Pack) getBucketLocation(ctx context.Context, req *spi.Request) (*spi.Re
 	return &spi.Response{Output: map[string]any{"LocationConstraint": str(meta["locationConstraint"])}}, nil
 }
 
-func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumType string, parts []any) (*spi.Response, error) {
+func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumType string, parts []any, lockDocs map[string][]byte) (*spi.Response, error) {
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
@@ -818,9 +819,11 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	if err := p.checkWritePreconditions(ctx, req, b, key); err != nil {
 		return nil, err
 	}
-	lockDocs, err := p.objectLockForWrite(ctx, req, b)
-	if err != nil {
-		return nil, err
+	if lockDocs == nil {
+		lockDocs, err = p.objectLockForWrite(ctx, req, b)
+		if err != nil {
+			return nil, err
+		}
 	}
 	tags, err := requestTags(req)
 	if err != nil {
@@ -1394,7 +1397,7 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		req.Input["_ObjectMetadata"] = source.meta["objectMetadata"]
 	}
 	req.Body = source.body
-	response, err := p.putObject(ctx, req, "", "", nil)
+	response, err := p.putObject(ctx, req, "", "", nil, nil)
 	if err == nil && source.version != "" {
 		response.Headers.Set("x-amz-copy-source-version-id", source.version)
 	}
@@ -1427,6 +1430,10 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if _, err := requestTags(req); err != nil {
 		return nil, err
 	}
+	lockDocs, err := p.objectLockForWrite(ctx, req, b)
+	if err != nil {
+		return nil, err
+	}
 	algorithm := strings.ToUpper(requestCondition(req, "ChecksumAlgorithm", "x-amz-checksum-algorithm"))
 	checksumType := strings.ToUpper(requestCondition(req, "ChecksumType", "x-amz-checksum-type"))
 	if algorithm == "" {
@@ -1439,7 +1446,7 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	id := p.deps.Rand.Hex(16)
 	p.mu.Lock()
-	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), tagging: requestCondition(req, "Tagging", "x-amz-tagging"), checksumAlgorithm: algorithm, checksumType: checksumType, parts: map[int]multipartPart{}}
+	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), tagging: requestCondition(req, "Tagging", "x-amz-tagging"), checksumAlgorithm: algorithm, checksumType: checksumType, lockDocs: lockDocs, parts: map[int]multipartPart{}}
 	p.mu.Unlock()
 	h := http.Header{}
 	h.Set("x-amz-checksum-algorithm", algorithm)
@@ -1609,7 +1616,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	req.Input[checksum.input], req.Input["ChecksumType"] = objectChecksum, u.checksumType
 	req.Input["Bucket"], req.Input["Key"], req.Input["StorageClass"], req.Input["Tagging"] = bucket, key, u.storageClass, u.tagging
 	req.Body = io.NopCloser(&buf)
-	resp, err := p.putObject(ctx, req, etag, u.checksumType, completedParts)
+	resp, err := p.putObject(ctx, req, etag, u.checksumType, completedParts, u.lockDocs)
 	if err != nil {
 		return nil, err
 	}

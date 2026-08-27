@@ -1583,9 +1583,11 @@ func TestObjectLockAppliesRetentionOnWrite(t *testing.T) {
 	}
 
 	_, err = invoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "invalid", "ObjectLockMode": "GOVERNANCE"}, nil)
-	if fault := asFault(t, err); fault.Code != "InvalidArgument" {
+	invalidFault := asFault(t, err)
+	if invalidFault.Code != "InvalidArgument" {
 		t.Fatalf("unpaired retention headers: %v", err)
 	}
+	golden.AssertJSON(t, map[string]any{"default": retention.Output, "explicit": explicitRetention.Output, "legalHold": legalHold.Output, "unpaired": invalidFault.Code})
 }
 
 func TestObjectLockCapturesMultipartRetentionAtInitiation(t *testing.T) {

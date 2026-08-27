@@ -1,0 +1,8 @@
+{
+  "lockedSuspend": "InvalidBucketState",
+  "lockedVersion": {
+    "Status": "Enabled"
+  },
+  "plainBypass": "InvalidArgument",
+  "plainLegalHold": "InvalidRequest"
+}

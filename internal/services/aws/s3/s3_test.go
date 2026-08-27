@@ -1559,10 +1559,14 @@ func TestObjectLockBucketGuards(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "plain"}, nil)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "plain", "Key": "key"}, []byte("plain"))
-	if _, err := invoke(t, p, "PutObjectLegalHold", map[string]any{"Bucket": "plain", "Key": "key", "LegalHold": map[string]any{"Status": "ON"}}, nil); asFault(t, err).Code != "InvalidRequest" {
+	_, err := invoke(t, p, "PutObjectLegalHold", map[string]any{"Bucket": "plain", "Key": "key", "LegalHold": map[string]any{"Status": "ON"}}, nil)
+	legalHoldFault := asFault(t, err)
+	if legalHoldFault.Code != "InvalidRequest" {
 		t.Fatalf("legal hold without bucket configuration: %v", err)
 	}
-	if _, err := invoke(t, p, "DeleteObject", map[string]any{"Bucket": "plain", "Key": "key", "BypassGovernanceRetention": false}, nil); asFault(t, err).Code != "InvalidArgument" {
+	_, err = invoke(t, p, "DeleteObject", map[string]any{"Bucket": "plain", "Key": "key", "BypassGovernanceRetention": false}, nil)
+	bypassFault := asFault(t, err)
+	if bypassFault.Code != "InvalidArgument" {
 		t.Fatalf("bypass without bucket configuration: %v", err)
 	}
 
@@ -1571,9 +1575,17 @@ func TestObjectLockBucketGuards(t *testing.T) {
 	if versioning.Output["Status"] != "Enabled" {
 		t.Fatalf("object lock did not enable versioning: %#v", versioning.Output)
 	}
-	if _, err := invoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "locked", "Status": "Suspended"}, nil); asFault(t, err).Code != "InvalidBucketState" {
+	_, err = invoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "locked", "Status": "Suspended"}, nil)
+	suspendFault := asFault(t, err)
+	if suspendFault.Code != "InvalidBucketState" {
 		t.Fatalf("suspend object-lock versioning: %v", err)
 	}
+	golden.AssertJSON(t, map[string]any{
+		"plainLegalHold": legalHoldFault.Code,
+		"plainBypass":    bypassFault.Code,
+		"lockedVersion":  versioning.Output,
+		"lockedSuspend":  suspendFault.Code,
+	})
 }
 
 func TestVersionedObjectTaggingCharacterization(t *testing.T) {

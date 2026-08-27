@@ -401,6 +401,25 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || len(quietDeleted.Deleted) != 0 || len(quietDeleted.Errors) != 1 || aws.ToString(quietDeleted.Errors[0].Code) != "NoSuchVersion" || aws.ToString(quietDeleted.Errors[0].VersionId) != "missing" {
 		t.Fatalf("quiet multi-delete: %#v %v", quietDeleted, err)
 	}
+	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-lock"), ObjectLockEnabledForBucket: aws.Bool(true)}); err != nil {
+		t.Fatalf("create object-lock bucket: %v", err)
+	}
+	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String("sdk-lock"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusEnabled}}); err != nil {
+		t.Fatalf("enable object-lock bucket versioning: %v", err)
+	}
+	lockedVersion, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-lock"), Key: aws.String("locked"), Body: bytes.NewReader([]byte("locked"))})
+	if err != nil {
+		t.Fatalf("put locked object: %v", err)
+	}
+	if _, err := s3c.PutObjectLegalHold(context.Background(), &s3.PutObjectLegalHoldInput{Bucket: aws.String("sdk-lock"), Key: aws.String("locked"), VersionId: lockedVersion.VersionId, LegalHold: &s3types.ObjectLockLegalHold{Status: s3types.ObjectLockLegalHoldStatusOn}}); err != nil {
+		t.Fatalf("put legal hold: %v", err)
+	}
+	if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk-lock"), Key: aws.String("locked"), VersionId: lockedVersion.VersionId}); err == nil || !strings.Contains(err.Error(), "AccessDenied") {
+		t.Fatalf("delete legal-held version: %v", err)
+	}
+	if marker, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk-lock"), Key: aws.String("locked")}); err != nil || !aws.ToBool(marker.DeleteMarker) {
+		t.Fatalf("delete-marker over legal hold: %#v %v", marker, err)
+	}
 	tooMany := make([]s3types.ObjectIdentifier, 1001)
 	for index := range tooMany {
 		tooMany[index].Key = aws.String(fmt.Sprintf("too-many-%d", index))

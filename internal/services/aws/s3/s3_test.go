@@ -1577,6 +1577,11 @@ func TestObjectLockAppliesRetentionOnWrite(t *testing.T) {
 	if got := asMapForTest(yearRetention.Output["Retention"]); got["Mode"] != "COMPLIANCE" || got["RetainUntilDate"] != "1971-01-01T00:00:00Z" {
 		t.Fatalf("year retention: %#v", yearRetention.Output)
 	}
+	copyVersion := mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "bucket", "Key": "copy", "CopySource": "bucket/year"}, nil).Headers.Get("x-amz-version-id")
+	copyRetention := mustInvoke(t, p, "GetObjectRetention", map[string]any{"Bucket": "bucket", "Key": "copy", "VersionId": copyVersion}, nil)
+	if got := asMapForTest(copyRetention.Output["Retention"]); got["Mode"] != "COMPLIANCE" || got["RetainUntilDate"] != "1971-01-01T00:00:00Z" {
+		t.Fatalf("copy retention: %#v", copyRetention.Output)
+	}
 
 	explicit := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "explicit", "ObjectLockMode": "COMPLIANCE", "ObjectLockRetainUntilDate": "1970-01-02T00:00:00Z", "ObjectLockLegalHoldStatus": "ON"}, []byte("locked")).Headers.Get("x-amz-version-id")
 	explicitRetention := mustInvoke(t, p, "GetObjectRetention", map[string]any{"Bucket": "bucket", "Key": "explicit", "VersionId": explicit}, nil)
@@ -1616,7 +1621,7 @@ func TestObjectLockAppliesRetentionOnWrite(t *testing.T) {
 	if fault := asFault(t, err); fault.Code != "InvalidRequest" {
 		t.Fatalf("retention on plain bucket: %v", err)
 	}
-	golden.AssertJSON(t, map[string]any{"default": retention.Output, "year": yearRetention.Output, "explicit": explicitRetention.Output, "legalHold": legalHold.Output, "unpaired": invalidFault.Code, "invalidLegalHold": invalidLegalFault.Code, "invalidMode": invalidModeFault.Code})
+	golden.AssertJSON(t, map[string]any{"default": retention.Output, "year": yearRetention.Output, "copy": copyRetention.Output, "explicit": explicitRetention.Output, "legalHold": legalHold.Output, "unpaired": invalidFault.Code, "invalidLegalHold": invalidLegalFault.Code, "invalidMode": invalidModeFault.Code})
 }
 
 func TestObjectLockCapturesMultipartRetentionAtInitiation(t *testing.T) {
@@ -2587,6 +2592,7 @@ func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "source", "Status": "Enabled"}, nil)
 	mustInvokeAs(t, p, west, "CreateBucket", map[string]any{"Bucket": "destination", "LocationConstraint": "us-west-2", "ObjectLockEnabledForBucket": true}, nil)
 	mustInvokeAs(t, p, west, "PutBucketVersioning", map[string]any{"Bucket": "destination", "Status": "Enabled"}, nil)
+	mustInvoke(t, p, "PutObjectLockConfiguration", map[string]any{"Bucket": "source", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "GOVERNANCE", "Days": 2}}}}, nil)
 	mustInvoke(t, p, "PutBucketReplication", map[string]any{
 		"Bucket": "source",
 		"ReplicationConfiguration": map[string]any{"Rules": []any{map[string]any{
@@ -2618,6 +2624,10 @@ func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	}
 	if got := dst.Headers.Get("x-amz-storage-class"); got != "STANDARD_IA" {
 		t.Fatalf("destination storage class %q", got)
+	}
+	replicatedRetention := mustInvokeAs(t, p, west, "GetObjectRetention", map[string]any{"Bucket": "destination", "Key": "logs/file"}, nil)
+	if got := asMapForTest(replicatedRetention.Output["Retention"]); got["Mode"] != "GOVERNANCE" || got["RetainUntilDate"] != "1970-01-03T00:00:00Z" {
+		t.Fatalf("replica retention %v", replicatedRetention.Output)
 	}
 
 	mustInvoke(t, p, "PutObjectTagging", map[string]any{"Bucket": "source", "Key": "logs/file", "TagSet": []any{

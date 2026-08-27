@@ -1,4 +1,10 @@
 {
+  "copy": {
+    "Retention": {
+      "Mode": "COMPLIANCE",
+      "RetainUntilDate": "1971-01-01T00:00:00Z"
+    }
+  },
   "default": {
     "Retention": {
       "Mode": "GOVERNANCE",

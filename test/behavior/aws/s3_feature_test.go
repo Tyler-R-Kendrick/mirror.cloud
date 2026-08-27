@@ -327,17 +327,10 @@ func TestS3ObjectLifecycle(t *testing.T) {
 	})
 
 	t.Run("Given a legal hold When deleting Then only a delete marker is allowed", func(t *testing.T) {
-		for _, request := range []struct {
-			path, body string
-		}{
-			{"/object-lock", ""},
-			{"/object-lock?versioning", "<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"},
-		} {
-			res := do(http.MethodPut, request.path, []byte(request.body), "")
-			res.Body.Close()
-			if res.StatusCode >= 300 {
-				t.Fatalf("PUT %s = %d", request.path, res.StatusCode)
-			}
+		res := do(http.MethodPut, "/object-lock", nil, "")
+		res.Body.Close()
+		if res.StatusCode >= 300 {
+			t.Fatalf("create object-lock bucket = %d", res.StatusCode)
 		}
 		put := do(http.MethodPut, "/object-lock/key", []byte("locked"), "")
 		put.Body.Close()

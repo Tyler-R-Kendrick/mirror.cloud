@@ -425,6 +425,19 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("put locked object: %v", err)
 	}
+	defaultRetention, err := s3c.GetObjectRetention(context.Background(), &s3.GetObjectRetentionInput{Bucket: aws.String("sdk-lock"), Key: aws.String("locked"), VersionId: lockedVersion.VersionId})
+	if err != nil || defaultRetention.Retention == nil || defaultRetention.Retention.Mode != s3types.ObjectLockRetentionModeGovernance || defaultRetention.Retention.RetainUntilDate == nil || time.Until(*defaultRetention.Retention.RetainUntilDate) < 6*24*time.Hour {
+		t.Fatalf("default object retention: %#v %v", defaultRetention, err)
+	}
+	explicitUntil := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
+	explicitVersion, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-lock"), Key: aws.String("explicit-lock"), Body: bytes.NewReader([]byte("locked")), ObjectLockMode: s3types.ObjectLockModeCompliance, ObjectLockRetainUntilDate: &explicitUntil, ObjectLockLegalHoldStatus: s3types.ObjectLockLegalHoldStatusOn})
+	if err != nil {
+		t.Fatalf("put explicitly locked object: %v", err)
+	}
+	explicitRetention, err := s3c.GetObjectRetention(context.Background(), &s3.GetObjectRetentionInput{Bucket: aws.String("sdk-lock"), Key: aws.String("explicit-lock"), VersionId: explicitVersion.VersionId})
+	if err != nil || explicitRetention.Retention == nil || explicitRetention.Retention.Mode != s3types.ObjectLockRetentionModeCompliance || explicitRetention.Retention.RetainUntilDate == nil || !explicitRetention.Retention.RetainUntilDate.Equal(explicitUntil) {
+		t.Fatalf("explicit object retention: %#v %v", explicitRetention, err)
+	}
 	if _, err := s3c.PutObjectLegalHold(context.Background(), &s3.PutObjectLegalHoldInput{Bucket: aws.String("sdk-lock"), Key: aws.String("locked"), VersionId: lockedVersion.VersionId, LegalHold: &s3types.ObjectLockLegalHold{Status: s3types.ObjectLockLegalHoldStatusOn}}); err != nil {
 		t.Fatalf("put legal hold: %v", err)
 	}

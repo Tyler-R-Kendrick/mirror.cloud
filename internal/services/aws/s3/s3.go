@@ -1953,6 +1953,14 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	col := p.col(req, "bktcfg")
 	if strings.HasPrefix(req.Operation, "Put") {
+		if req.Operation == "PutBucketReplication" {
+			if !p.versioningEnabled(ctx, req, b) {
+				return nil, &spi.Fault{Code: "InvalidRequest", Message: "Versioning must be 'Enabled' on the bucket to apply a replication configuration", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			if err := validateReplicationConfiguration(req.Input["ReplicationConfiguration"]); err != nil {
+				return nil, err
+			}
+		}
 		if req.Operation == "PutBucketObjectLockConfiguration" || req.Operation == "PutObjectLockConfiguration" {
 			if !p.versioningEnabled(ctx, req, b) {
 				return nil, &spi.Fault{Code: "InvalidBucketState", Message: "Versioning must be 'Enabled' on the bucket to apply a Object Lock configuration", HTTPStatus: http.StatusConflict, Fault: "client"}

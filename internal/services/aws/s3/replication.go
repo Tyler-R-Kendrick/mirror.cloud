@@ -151,6 +151,18 @@ func (p *Pack) replicationRules(ctx context.Context, req *spi.Request, bucket st
 	}
 	var doc map[string]any
 	_ = json.Unmarshal(raw, &doc)
+	values := replicationConfigurationRules(doc)
+	rules := make([]map[string]any, 0, len(values))
+	for _, rule := range values {
+		if !strings.EqualFold(str(rule["Status"]), "Disabled") {
+			rules = append(rules, rule)
+		}
+	}
+	return rules
+}
+
+func replicationConfigurationRules(value any) []map[string]any {
+	doc := asMap(value)
 	if nested := asMap(doc["ReplicationConfiguration"]); len(nested) > 0 {
 		doc = nested
 	}
@@ -164,12 +176,46 @@ func (p *Pack) replicationRules(ctx context.Context, req *spi.Request, bucket st
 	}
 	rules := make([]map[string]any, 0, len(values))
 	for _, value := range values {
-		rule := asMap(value)
-		if !strings.EqualFold(str(rule["Status"]), "Disabled") {
-			rules = append(rules, rule)
-		}
+		rules = append(rules, asMap(value))
 	}
 	return rules
+}
+
+func validateReplicationConfiguration(value any) error {
+	configuration := asMap(value)
+	rules := replicationConfigurationRules(configuration)
+	malformed := func() error {
+		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if str(configuration["Role"]) == "" || len(rules) < 1 || len(rules) > 1000 {
+		return malformed()
+	}
+	for _, rule := range rules {
+		if status := str(rule["Status"]); status != "Enabled" && status != "Disabled" {
+			return malformed()
+		}
+		if str(asMap(rule["Destination"])["Bucket"]) == "" {
+			return malformed()
+		}
+		deleteMarker, hasDeleteMarker := rule["DeleteMarkerReplication"]
+		deleteStatus := str(asMap(deleteMarker)["Status"])
+		if hasDeleteMarker && deleteStatus != "Enabled" && deleteStatus != "Disabled" {
+			return malformed()
+		}
+		filter, hasFilter := rule["Filter"]
+		if !hasFilter {
+			continue
+		}
+		if _, hasPriority := rule["Priority"]; !hasPriority || !hasDeleteMarker {
+			return malformed()
+		}
+		filterDoc := asMap(filter)
+		and := asMap(filterDoc["And"])
+		if deleteStatus == "Enabled" && (len(asMap(filterDoc["Tag"])) > 0 || len(asMap(and["Tag"])) > 0 || len(asSlice(and["Tags"])) > 0) {
+			return &spi.Fault{Code: "InvalidRequest", Message: "Delete marker replication cannot be enabled for tag-based rules", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+	}
+	return nil
 }
 
 func ruleMatches(rule map[string]any, key string, tags map[string]string) bool {

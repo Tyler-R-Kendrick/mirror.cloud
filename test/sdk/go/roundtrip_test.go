@@ -411,6 +411,16 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String("sdk-lock"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusSuspended}}); err == nil || !strings.Contains(err.Error(), "InvalidBucketState") {
 		t.Fatalf("suspend object-lock bucket versioning: %v", err)
 	}
+	if _, err := s3c.PutObjectLockConfiguration(context.Background(), &s3.PutObjectLockConfigurationInput{Bucket: aws.String("sdk-lock"), ObjectLockConfiguration: &s3types.ObjectLockConfiguration{ObjectLockEnabled: s3types.ObjectLockEnabledEnabled, Rule: &s3types.ObjectLockRule{DefaultRetention: &s3types.DefaultRetention{Mode: s3types.ObjectLockRetentionModeGovernance, Days: aws.Int32(7)}}}}); err != nil {
+		t.Fatalf("put object-lock configuration: %v", err)
+	}
+	lockConfiguration, err := s3c.GetObjectLockConfiguration(context.Background(), &s3.GetObjectLockConfigurationInput{Bucket: aws.String("sdk-lock")})
+	if err != nil || lockConfiguration.ObjectLockConfiguration == nil {
+		t.Fatalf("get object-lock configuration: %#v %v", lockConfiguration, err)
+	}
+	if got := lockConfiguration.ObjectLockConfiguration; got.ObjectLockEnabled != s3types.ObjectLockEnabledEnabled || got.Rule == nil || got.Rule.DefaultRetention == nil || aws.ToInt32(got.Rule.DefaultRetention.Days) != 7 {
+		t.Fatalf("get object-lock configuration: %#v", got)
+	}
 	lockedVersion, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-lock"), Key: aws.String("locked"), Body: bytes.NewReader([]byte("locked"))})
 	if err != nil {
 		t.Fatalf("put locked object: %v", err)

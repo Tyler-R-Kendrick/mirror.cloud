@@ -293,6 +293,45 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given versioned replication When an object is written Then its version is readable from the replica", func(t *testing.T) {
+		for _, bucket := range []string{"replication-source", "replication-destination"} {
+			res := do(http.MethodPut, "/"+bucket, nil, "")
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("create %s: %d", bucket, res.StatusCode)
+			}
+			res = do(http.MethodPut, "/"+bucket+"?versioning", []byte("<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"), "")
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("version %s: %d", bucket, res.StatusCode)
+			}
+		}
+		configuration := `<ReplicationConfiguration><Role>arn:aws:iam::000000000000:role/replication</Role><Rule><Status>Enabled</Status><Filter><Prefix>logs/</Prefix></Filter><Destination><Bucket>arn:aws:s3:::replication-destination</Bucket></Destination></Rule></ReplicationConfiguration>`
+		res := do(http.MethodPut, "/replication-source?replication", []byte(configuration), "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("configure replication: %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/replication-source?replication", nil, "")
+		gotConfiguration, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(gotConfiguration, []byte("<Rule>")) || !bytes.Contains(gotConfiguration, []byte("<Prefix>logs/</Prefix>")) {
+			t.Fatalf("get replication: %d %s", res.StatusCode, gotConfiguration)
+		}
+		res = do(http.MethodPut, "/replication-source/logs/key", []byte("replicated-version"), "")
+		res.Body.Close()
+		version := res.Header.Get("x-amz-version-id")
+		if res.StatusCode != http.StatusOK || version == "" || res.Header.Get("x-amz-replication-status") != "COMPLETED" {
+			t.Fatalf("put replicated version: %d %v", res.StatusCode, res.Header)
+		}
+		res = do(http.MethodGet, "/replication-destination/logs/key?versionId="+url.QueryEscape(version), nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(body) != "replicated-version" || res.Header.Get("x-amz-version-id") != version || res.Header.Get("x-amz-replication-status") != "REPLICA" {
+			t.Fatalf("get replicated version: %d %q %v", res.StatusCode, body, res.Header)
+		}
+	})
+
 	t.Run("Given object versions When current version is deleted Then previous version is current", func(t *testing.T) {
 		for _, request := range []struct {
 			method, path, body string

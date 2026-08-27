@@ -2615,6 +2615,55 @@ func TestReplicationTargetsVersionMetadata(t *testing.T) {
 	}
 }
 
+func TestReplicationConfigurationValidation(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	for _, bucket := range []string{"source", "destination"} {
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	}
+	legacy := map[string]any{
+		"Role":  "arn:aws:iam::000000000000:role/replication",
+		"Rules": []any{map[string]any{"Status": "Enabled", "Destination": map[string]any{"Bucket": "arn:aws:s3:::destination"}}},
+	}
+	_, err := invoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": legacy}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("replication without versioning: %+v", fault)
+	}
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "source", "Status": "Enabled"}, nil)
+
+	manyRules := make([]any, 1001)
+	for i := range manyRules {
+		manyRules[i] = map[string]any{"Status": "Enabled", "Destination": map[string]any{"Bucket": "arn:aws:s3:::destination"}}
+	}
+	for _, tc := range []struct {
+		name, code    string
+		configuration map[string]any
+	}{
+		{"missing role", "MalformedXML", map[string]any{"Rules": legacy["Rules"]}},
+		{"missing rules", "MalformedXML", map[string]any{"Role": legacy["Role"]}},
+		{"too many rules", "MalformedXML", map[string]any{"Role": legacy["Role"], "Rules": manyRules}},
+		{"invalid status", "MalformedXML", map[string]any{"Role": legacy["Role"], "Rules": []any{map[string]any{"Status": "Pending", "Destination": map[string]any{"Bucket": "destination"}}}}},
+		{"missing destination", "MalformedXML", map[string]any{"Role": legacy["Role"], "Rules": []any{map[string]any{"Status": "Enabled", "Destination": map[string]any{}}}}},
+		{"filter missing priority", "MalformedXML", map[string]any{"Role": legacy["Role"], "Rules": []any{map[string]any{"Status": "Enabled", "Filter": map[string]any{"Prefix": "logs/"}, "DeleteMarkerReplication": map[string]any{"Status": "Disabled"}, "Destination": map[string]any{"Bucket": "destination"}}}}},
+		{"filter missing delete marker setting", "MalformedXML", map[string]any{"Role": legacy["Role"], "Rules": []any{map[string]any{"Priority": 1, "Status": "Enabled", "Filter": map[string]any{"Prefix": "logs/"}, "Destination": map[string]any{"Bucket": "destination"}}}}},
+		{"invalid delete marker status", "MalformedXML", map[string]any{"Role": legacy["Role"], "Rules": []any{map[string]any{"Priority": 1, "Status": "Enabled", "Filter": map[string]any{"Prefix": "logs/"}, "DeleteMarkerReplication": map[string]any{"Status": "Pending"}, "Destination": map[string]any{"Bucket": "destination"}}}}},
+		{"tag filter replicates delete markers", "InvalidRequest", map[string]any{"Role": legacy["Role"], "Rules": []any{map[string]any{"Priority": 1, "Status": "Enabled", "Filter": map[string]any{"Tag": map[string]any{"Key": "environment", "Value": "test"}}, "DeleteMarkerReplication": map[string]any{"Status": "Enabled"}, "Destination": map[string]any{"Bucket": "destination"}}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := invoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": tc.configuration}, nil)
+			if fault := asFault(t, err); fault.Code != tc.code || fault.HTTPStatus != http.StatusBadRequest {
+				t.Fatalf("fault=%+v want=%s/400", fault, tc.code)
+			}
+		})
+	}
+	mustInvoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": legacy}, nil)
+	mustInvoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": map[string]any{
+		"Role": legacy["Role"], "Rules": []any{map[string]any{
+			"Priority": 1, "Status": "Enabled", "Filter": map[string]any{"Tag": map[string]any{"Key": "environment", "Value": "test"}},
+			"DeleteMarkerReplication": map[string]any{"Status": "Disabled"}, "Destination": map[string]any{"Bucket": "destination"},
+		}},
+	}}, nil)
+}
+
 func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	west := ident()

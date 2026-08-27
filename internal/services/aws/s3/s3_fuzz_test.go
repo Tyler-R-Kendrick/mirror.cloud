@@ -554,3 +554,46 @@ func FuzzDeleteObjectsVersionSemantics(f *testing.F) {
 		}
 	})
 }
+
+func FuzzReplicationVersions(f *testing.F) {
+	f.Add("key", "first", "second", true)
+	f.Add("nested/key", "", "same", false)
+	f.Fuzz(func(t *testing.T, suffix, first, second string, marker bool) {
+		key := "replica/" + suffix
+		if len([]byte(key)) > 1024 || len(first)+len(second) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		for _, bucket := range []string{"replication-fuzz-source", "replication-fuzz-destination"} {
+			mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+			mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}, nil)
+		}
+		mustInvoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "replication-fuzz-source", "ReplicationConfiguration": map[string]any{"Rules": []any{map[string]any{
+			"Status": "Enabled", "Filter": map[string]any{"Prefix": "replica/"}, "DeleteMarkerReplication": map[string]any{"Status": "Enabled"}, "Destination": map[string]any{"Bucket": "replication-fuzz-destination"},
+		}}}}, nil)
+
+		var currentVersion string
+		for _, body := range []string{first, second} {
+			put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "replication-fuzz-source", "Key": key}, []byte(body))
+			currentVersion = put.Headers.Get("x-amz-version-id")
+			replica := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "replication-fuzz-destination", "Key": key, "VersionId": currentVersion}, nil)
+			if got := string(readStream(t, replica)); got != body || replica.Headers.Get("x-amz-version-id") != currentVersion {
+				t.Fatalf("version=%s body=%q want=%q", currentVersion, got, body)
+			}
+		}
+		if !marker {
+			return
+		}
+		deleted := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "replication-fuzz-source", "Key": key}, nil)
+		markerVersion := deleted.Headers.Get("x-amz-version-id")
+		_, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "replication-fuzz-destination", "Key": key, "VersionId": markerVersion}, nil)
+		if fault := asFault(t, err); fault.Code != "MethodNotAllowed" {
+			t.Fatalf("delete marker version=%s fault=%#v", markerVersion, fault)
+		}
+		mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "replication-fuzz-destination", "Key": key, "VersionId": markerVersion}, nil)
+		restored := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "replication-fuzz-destination", "Key": key}, nil)
+		if got := string(readStream(t, restored)); got != second || restored.Headers.Get("x-amz-version-id") != currentVersion {
+			t.Fatalf("restored body=%q version=%s want=%q %s", got, restored.Headers.Get("x-amz-version-id"), second, currentVersion)
+		}
+	})
+}

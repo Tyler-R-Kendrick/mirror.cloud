@@ -471,6 +471,63 @@ func TestConcurrentInvalidVersioningWritesDoNotChangeState(t *testing.T) {
 	}
 }
 
+func TestConcurrentVersionRestoration(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: io.NopCloser(strings.NewReader(body))})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "version-restore"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "version-restore", "Status": "Enabled"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			key := fmt.Sprintf("key-%d", n)
+			input := map[string]any{"Bucket": "version-restore", "Key": key}
+			if _, err := call("PutObject", input, "old"); err != nil {
+				errs <- err
+				return
+			}
+			newer, err := call("PutObject", input, "new")
+			if err != nil {
+				errs <- err
+				return
+			}
+			input["VersionId"] = newer.Headers.Get("x-amz-version-id")
+			if _, err = call("DeleteObject", input, ""); err != nil {
+				errs <- err
+				return
+			}
+			delete(input, "VersionId")
+			restored, err := call("GetObject", input, "")
+			if err == nil {
+				var body []byte
+				body, err = io.ReadAll(restored.Stream)
+				_ = restored.Stream.Close()
+				if err == nil && string(body) != "old" {
+					err = fmt.Errorf("%s restored %q", key, body)
+				}
+			}
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestTwoAccountsNeverSeeEachOtherUnderLoad(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

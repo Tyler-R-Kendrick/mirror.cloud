@@ -3,6 +3,7 @@ package sdk_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http/httptest"
 	"strings"
@@ -399,6 +400,13 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}}})
 	if err != nil || len(quietDeleted.Deleted) != 0 || len(quietDeleted.Errors) != 1 || aws.ToString(quietDeleted.Errors[0].Code) != "NoSuchVersion" || aws.ToString(quietDeleted.Errors[0].VersionId) != "missing" {
 		t.Fatalf("quiet multi-delete: %#v %v", quietDeleted, err)
+	}
+	tooMany := make([]s3types.ObjectIdentifier, 1001)
+	for index := range tooMany {
+		tooMany[index].Key = aws.String(fmt.Sprintf("too-many-%d", index))
+	}
+	if _, err := s3c.DeleteObjects(context.Background(), &s3.DeleteObjectsInput{Bucket: aws.String("sdk"), Delete: &s3types.Delete{Objects: tooMany}}); err == nil || !strings.Contains(err.Error(), "MalformedXML") {
+		t.Fatalf("oversized multi-delete: %v", err)
 	}
 	if _, err := s3c.PutObjectTagging(context.Background(), &s3.PutObjectTaggingInput{
 		Bucket: aws.String("sdk"), Key: aws.String("k"), Tagging: &s3types.Tagging{TagSet: []s3types.Tag{{Key: aws.String("duplicate"), Value: aws.String("one")}, {Key: aws.String("duplicate"), Value: aws.String("two")}}},

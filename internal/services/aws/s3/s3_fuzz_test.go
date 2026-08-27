@@ -568,8 +568,8 @@ func FuzzReplicationVersions(f *testing.F) {
 			mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
 			mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}, nil)
 		}
-		mustInvoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "replication-fuzz-source", "ReplicationConfiguration": map[string]any{"Rules": []any{map[string]any{
-			"Status": "Enabled", "Filter": map[string]any{"Prefix": "replica/"}, "DeleteMarkerReplication": map[string]any{"Status": "Enabled"}, "Destination": map[string]any{"Bucket": "replication-fuzz-destination"},
+		mustInvoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "replication-fuzz-source", "ReplicationConfiguration": map[string]any{"Role": "arn:aws:iam::000000000000:role/replication", "Rules": []any{map[string]any{
+			"Priority": 1, "Status": "Enabled", "Filter": map[string]any{"Prefix": "replica/"}, "DeleteMarkerReplication": map[string]any{"Status": "Enabled"}, "Destination": map[string]any{"Bucket": "replication-fuzz-destination"},
 		}}}}, nil)
 
 		var currentVersion string

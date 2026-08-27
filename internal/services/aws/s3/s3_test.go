@@ -2589,7 +2589,7 @@ func TestReplicationTargetsVersionMetadata(t *testing.T) {
 	for _, bucket := range []string{"source", "destination"} {
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket, "ObjectLockEnabledForBucket": true}, nil)
 	}
-	mustInvoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": map[string]any{"Rules": []any{map[string]any{
+	mustInvoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": map[string]any{"Role": "arn:aws:iam::000000000000:role/replication", "Rules": []any{map[string]any{
 		"Status": "Enabled", "Destination": map[string]any{"Bucket": "arn:aws:s3:::destination"},
 	}}}}, nil)
 	first := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "source", "Key": "key", "Tagging": "stage=first"}, []byte("first")).Headers.Get("x-amz-version-id")
@@ -2626,13 +2626,13 @@ func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	mustInvoke(t, p, "PutObjectLockConfiguration", map[string]any{"Bucket": "source", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "GOVERNANCE", "Days": 2}}}}, nil)
 	mustInvoke(t, p, "PutBucketReplication", map[string]any{
 		"Bucket": "source",
-		"ReplicationConfiguration": map[string]any{"Rules": []any{map[string]any{
-			"Status": "Enabled",
+		"ReplicationConfiguration": map[string]any{"Role": "arn:aws:iam::000000000000:role/replication", "Rules": []any{map[string]any{
+			"Priority": 1, "Status": "Enabled",
 			"Filter": map[string]any{"And": map[string]any{
 				"Prefix": "logs/",
 				"Tags":   []any{map[string]any{"Key": "environment", "Value": "test"}},
 			}},
-			"DeleteMarkerReplication": map[string]any{"Status": "Enabled"},
+			"DeleteMarkerReplication": map[string]any{"Status": "Disabled"},
 			"Destination":             map[string]any{"Bucket": "arn:aws:s3:::destination", "StorageClass": "STANDARD_IA"},
 		}}},
 	}, nil)
@@ -2686,6 +2686,14 @@ func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 		t.Fatalf("replica legal hold %v", legalHold.Output)
 	}
 
+	mustInvoke(t, p, "PutBucketReplication", map[string]any{
+		"Bucket": "source",
+		"ReplicationConfiguration": map[string]any{"Role": "arn:aws:iam::000000000000:role/replication", "Rules": []any{map[string]any{
+			"Priority": 1, "Status": "Enabled", "Filter": map[string]any{"Prefix": "logs/"},
+			"DeleteMarkerReplication": map[string]any{"Status": "Enabled"},
+			"Destination":             map[string]any{"Bucket": "arn:aws:s3:::destination", "StorageClass": "STANDARD_IA"},
+		}}},
+	}, nil)
 	del := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "source", "Key": "logs/file"}, nil)
 	deleteVersion := del.Headers.Get("x-amz-version-id")
 	if got := del.Headers.Get("x-amz-replication-status"); got != "COMPLETED" {
@@ -2719,9 +2727,10 @@ func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	}
 
 	mustInvoke(t, p, "PutBucketReplication", map[string]any{
-		"Bucket": "source", "ReplicationConfiguration": map[string]any{"Rules": []any{map[string]any{
-			"Status": "Enabled", "Filter": map[string]any{"Prefix": "plain/"},
-			"Destination": map[string]any{"Bucket": "arn:aws:s3:::destination"},
+		"Bucket": "source", "ReplicationConfiguration": map[string]any{"Role": "arn:aws:iam::000000000000:role/replication", "Rules": []any{map[string]any{
+			"Priority": 1, "Status": "Enabled", "Filter": map[string]any{"Prefix": "plain/"},
+			"DeleteMarkerReplication": map[string]any{"Status": "Disabled"},
+			"Destination":             map[string]any{"Bucket": "arn:aws:s3:::destination"},
 		}}},
 	}, nil)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "source", "Key": "plain/file", "Tagging": "owner=mirror"}, []byte("tagged"))

@@ -154,7 +154,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}
 	if _, err := s3c.PutBucketReplication(context.Background(), &s3.PutBucketReplicationInput{Bucket: aws.String("sdk"), ReplicationConfiguration: &s3types.ReplicationConfiguration{
 		Role:  aws.String("arn:aws:iam::000000000000:role/replication"),
-		Rules: []s3types.ReplicationRule{{Status: s3types.ReplicationRuleStatusEnabled, Filter: &s3types.ReplicationRuleFilter{Prefix: aws.String("replica/")}, Destination: &s3types.Destination{Bucket: aws.String("arn:aws:s3:::sdk-west")}}},
+		Rules: []s3types.ReplicationRule{{Priority: aws.Int32(1), Status: s3types.ReplicationRuleStatusEnabled, Filter: &s3types.ReplicationRuleFilter{Prefix: aws.String("replica/")}, DeleteMarkerReplication: &s3types.DeleteMarkerReplication{Status: s3types.DeleteMarkerReplicationStatusDisabled}, Destination: &s3types.Destination{Bucket: aws.String("arn:aws:s3:::sdk-west")}}},
 	}}); err != nil {
 		t.Fatalf("configure replication: %v", err)
 	}

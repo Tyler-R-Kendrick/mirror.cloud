@@ -50,7 +50,7 @@ func TestReplicaVersionBlobFailureLeavesNoPartialCurrent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := call("PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": map[string]any{"Rules": []any{map[string]any{"Status": "Enabled", "Destination": map[string]any{"Bucket": "destination"}}}}}, nil); err != nil {
+	if _, err := call("PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": map[string]any{"Role": "arn:aws:iam::000000000000:role/replication", "Rules": []any{map[string]any{"Status": "Enabled", "Destination": map[string]any{"Bucket": "destination"}}}}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	blobs.failKey = "destination/key@"

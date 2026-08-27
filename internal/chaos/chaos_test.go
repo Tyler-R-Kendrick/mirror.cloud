@@ -17,14 +17,50 @@ import (
 
 type failBlobs struct {
 	spi.BlobStore
-	fail bool
+	fail    bool
+	failKey string
 }
 
 func (f failBlobs) Put(ctx context.Context, key string, r io.Reader) (spi.BlobInfo, error) {
-	if f.fail {
+	if f.fail || f.failKey != "" && strings.Contains(key, f.failKey) {
 		return spi.BlobInfo{}, errors.New("injected blob failure")
 	}
 	return f.BlobStore.Put(ctx, key, r)
+}
+
+func TestReplicaVersionBlobFailureLeavesNoPartialCurrent(t *testing.T) {
+	deps := spitest.Deps(t)
+	blobs := &failBlobs{BlobStore: deps.Blobs}
+	deps.Blobs = blobs
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != nil {
+			stream = io.NopCloser(bytes.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	for _, bucket := range []string{"source", "destination"} {
+		if _, err := call("CreateBucket", map[string]any{"Bucket": bucket}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := call("PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := call("PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": map[string]any{"Rules": []any{map[string]any{"Status": "Enabled", "Destination": map[string]any{"Bucket": "destination"}}}}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	blobs.failKey = "destination/key@"
+	put, err := call("PutObject", map[string]any{"Bucket": "source", "Key": "key"}, []byte("body"))
+	if err != nil || put.Headers.Get("x-amz-replication-status") != "FAILED" {
+		t.Fatalf("source put: %#v %v", put, err)
+	}
+	if _, err := call("GetObject", map[string]any{"Bucket": "destination", "Key": "key"}, nil); err == nil {
+		t.Fatal("failed version replication left a partial current object")
+	}
 }
 
 func TestConcurrentPutsSameKey(t *testing.T) {

@@ -1603,6 +1603,19 @@ func TestObjectLockAppliesRetentionOnWrite(t *testing.T) {
 	if invalidModeFault.Code != "InvalidArgument" {
 		t.Fatalf("invalid retention mode: %v", err)
 	}
+	_, err = invoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "lowercase-mode", "ObjectLockMode": "governance", "ObjectLockRetainUntilDate": "1970-01-02T00:00:00Z"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" {
+		t.Fatalf("lowercase retention mode: %v", err)
+	}
+	_, err = invoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "past", "ObjectLockMode": "GOVERNANCE", "ObjectLockRetainUntilDate": "1960-01-01T00:00:00Z"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" {
+		t.Fatalf("past retention deadline: %v", err)
+	}
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "plain"}, nil)
+	_, err = invoke(t, p, "PutObject", map[string]any{"Bucket": "plain", "Key": "locked", "ObjectLockMode": "GOVERNANCE", "ObjectLockRetainUntilDate": "1970-01-02T00:00:00Z"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" {
+		t.Fatalf("retention on plain bucket: %v", err)
+	}
 	golden.AssertJSON(t, map[string]any{"default": retention.Output, "year": yearRetention.Output, "explicit": explicitRetention.Output, "legalHold": legalHold.Output, "unpaired": invalidFault.Code, "invalidLegalHold": invalidLegalFault.Code, "invalidMode": invalidModeFault.Code})
 }
 
@@ -1670,6 +1683,10 @@ func TestObjectLockBucketGuards(t *testing.T) {
 	invalidConfigurationFault := asFault(t, err)
 	if invalidConfigurationFault.Code != "MalformedXML" {
 		t.Fatalf("invalid object lock configuration: %v", err)
+	}
+	_, err = invoke(t, p, "PutBucketObjectLockConfiguration", map[string]any{"Bucket": "configured", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "GOVERNANCE", "Days": 0}}}}, nil)
+	if fault := asFault(t, err); fault.Code != "MalformedXML" {
+		t.Fatalf("zero object lock duration: %v", err)
 	}
 	mustInvoke(t, p, "PutBucketObjectLockConfiguration", map[string]any{"Bucket": "configured", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "GOVERNANCE", "Days": 1}}}}, nil)
 	configured := mustInvoke(t, p, "GetBucketObjectLockConfiguration", map[string]any{"Bucket": "configured"}, nil)

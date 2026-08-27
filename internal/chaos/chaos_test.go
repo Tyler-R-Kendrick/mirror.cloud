@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -60,6 +61,38 @@ func TestReplicaVersionBlobFailureLeavesNoPartialCurrent(t *testing.T) {
 	}
 	if _, err := call("GetObject", map[string]any{"Bucket": "destination", "Key": "key"}, nil); err == nil {
 		t.Fatal("failed version replication left a partial current object")
+	}
+}
+
+func TestRejectedReplicationConfigurationPreservesCurrent(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "source"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "source", "Status": "Enabled"}); err != nil {
+		t.Fatal(err)
+	}
+	valid := map[string]any{"Role": "role", "Rules": []any{map[string]any{"Status": "Enabled", "Destination": map[string]any{"Bucket": "destination"}}}}
+	if _, err := call("PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": valid}); err != nil {
+		t.Fatal(err)
+	}
+	invalid := map[string]any{"Role": "role", "Rules": []any{map[string]any{
+		"Priority": 1, "Status": "Enabled", "Filter": map[string]any{"Tag": map[string]any{"Key": "stage", "Value": "test"}},
+		"DeleteMarkerReplication": map[string]any{"Status": "Enabled"}, "Destination": map[string]any{"Bucket": "destination"},
+	}}}
+	_, err := call("PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": invalid})
+	var fault *spi.Fault
+	if !errors.As(err, &fault) || fault.Code != "InvalidRequest" {
+		t.Fatalf("invalid replacement: %v", err)
+	}
+	got, err := call("GetBucketReplication", map[string]any{"Bucket": "source"})
+	if err != nil || !reflect.DeepEqual(got.Output["ReplicationConfiguration"], valid) {
+		t.Fatalf("stored configuration changed: %#v %v", got, err)
 	}
 }
 

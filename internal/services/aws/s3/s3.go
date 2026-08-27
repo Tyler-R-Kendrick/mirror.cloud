@@ -2020,7 +2020,7 @@ func validateObjectLockConfiguration(value any) error {
 	mode := str(retention["Mode"])
 	_, days := retention["Days"]
 	_, years := retention["Years"]
-	if (mode != "GOVERNANCE" && mode != "COMPLIANCE") || days == years {
+	if (mode != "GOVERNANCE" && mode != "COMPLIANCE") || days == years || days && asInt(retention["Days"]) < 1 || years && asInt(retention["Years"]) < 1 {
 		return malformed()
 	}
 	return nil
@@ -2472,9 +2472,9 @@ func objectLockKey(bucket, key, version, kind string) string {
 }
 
 func (p *Pack) objectLockForWrite(ctx context.Context, req *spi.Request, bucket string) (map[string][]byte, error) {
-	mode := strings.ToUpper(requestCondition(req, "ObjectLockMode", "x-amz-object-lock-mode"))
+	mode := requestCondition(req, "ObjectLockMode", "x-amz-object-lock-mode")
 	until := requestCondition(req, "ObjectLockRetainUntilDate", "x-amz-object-lock-retain-until-date")
-	legal := strings.ToUpper(requestCondition(req, "ObjectLockLegalHoldStatus", "x-amz-object-lock-legal-hold"))
+	legal := requestCondition(req, "ObjectLockLegalHoldStatus", "x-amz-object-lock-legal-hold")
 	if mode != "" || until != "" || legal != "" {
 		if !p.bucketObjectLockEnabled(ctx, req, bucket) {
 			return nil, &spi.Fault{Code: "InvalidRequest", Message: "Bucket is missing Object Lock Configuration", HTTPStatus: http.StatusBadRequest, Fault: "client"}
@@ -2489,6 +2489,12 @@ func (p *Pack) objectLockForWrite(ctx context.Context, req *spi.Request, bucket 
 	}
 	if mode != "" && mode != "GOVERNANCE" && mode != "COMPLIANCE" {
 		return nil, &spi.Fault{Code: "InvalidArgument", Message: "Unknown wormMode directive.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-object-lock-mode", "ArgumentValue": mode}}
+	}
+	if until != "" {
+		deadline, err := time.Parse(time.RFC3339, until)
+		if err != nil || !p.deps.Clock.Now().Before(deadline) {
+			return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-object-lock-retain-until-date", "ArgumentValue": until}}
+		}
 	}
 	if legal != "" && legal != "ON" && legal != "OFF" {
 		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}

@@ -2626,7 +2626,7 @@ func TestReplicationConfigurationValidation(t *testing.T) {
 		"Rules": []any{map[string]any{"Status": "Enabled", "Destination": map[string]any{"Bucket": "arn:aws:s3:::destination"}}},
 	}
 	_, err := invoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": legacy}, nil)
-	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "Versioning must be 'Enabled' on the bucket to apply a replication configuration" || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("replication without versioning: %+v", fault)
 	} else {
 		characterization["versioning disabled"] = map[string]any{"code": fault.Code, "status": fault.HTTPStatus}

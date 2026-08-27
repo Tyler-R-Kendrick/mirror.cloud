@@ -1957,7 +1957,7 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 			if !p.versioningEnabled(ctx, req, b) {
 				return nil, &spi.Fault{Code: "InvalidRequest", Message: "Versioning must be 'Enabled' on the bucket to apply a replication configuration", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 			}
-			if err := validateReplicationConfiguration(req.Input["ReplicationConfiguration"]); err != nil {
+			if err := p.prepareReplicationConfiguration(ctx, req, req.Input["ReplicationConfiguration"]); err != nil {
 				return nil, err
 			}
 		}

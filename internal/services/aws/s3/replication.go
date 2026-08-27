@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -213,6 +214,28 @@ func validateReplicationConfiguration(value any) error {
 		and := asMap(filterDoc["And"])
 		if deleteStatus == "Enabled" && (len(asMap(filterDoc["Tag"])) > 0 || len(asMap(and["Tag"])) > 0 || len(asSlice(and["Tags"])) > 0) {
 			return &spi.Fault{Code: "InvalidRequest", Message: "Delete marker replication cannot be enabled for tag-based rules", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+	}
+	return nil
+}
+
+func (p *Pack) prepareReplicationConfiguration(ctx context.Context, req *spi.Request, value any) error {
+	if err := validateReplicationConfiguration(value); err != nil {
+		return err
+	}
+	rules := replicationConfigurationRules(value)
+	for _, rule := range rules {
+		ref, _ := p.replicationDestination(ctx, req, rule, "")
+		scope := p.deps.Store.Scope(ref.Account, ref.Region)
+		_, exists, _ := scope.Collection("buckets").Get(ctx, ref.Bucket)
+		versioning, enabled, _ := scope.Collection("versioning").Get(ctx, ref.Bucket)
+		if !exists || !enabled || string(versioning) != "Enabled" {
+			return &spi.Fault{Code: "InvalidRequest", Message: "Destination bucket must have versioning enabled.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+	}
+	for index, rule := range rules {
+		if str(rule["ID"]) == "" {
+			rule["ID"] = p.deps.Rand.Derive("s3-replication-rule:" + req.Identity.Account + ":" + req.Identity.Region + ":" + str(req.Input["Bucket"]) + ":" + strconv.Itoa(index)).Hex(8)
 		}
 	}
 	return nil

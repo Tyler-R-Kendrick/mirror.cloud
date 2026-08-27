@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -2709,6 +2710,41 @@ func TestReplicationDestinationValidationAndRuleIDs(t *testing.T) {
 	stored = asMapForTest(mustInvoke(t, p, "GetBucketReplication", map[string]any{"Bucket": "source"}, nil).Output["ReplicationConfiguration"])
 	if got := asMapForTest(asSliceForTest(stored["Rules"])[0])["ID"]; got != "explicit" {
 		t.Fatalf("explicit rule ID = %v", got)
+	}
+}
+
+func TestPostObjectMultipartUpload(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "post-object"}, nil)
+	var payload bytes.Buffer
+	writer := multipart.NewWriter(&payload)
+	_ = writer.WriteField("key", "uploads/${filename}")
+	_ = writer.WriteField("success_action_status", "201")
+	_ = writer.WriteField("Content-Type", "text/plain")
+	_ = writer.WriteField("x-amz-meta-owner", "mirror")
+	file, err := writer.CreateFormFile("file", "hello world.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = file.Write([]byte("browser upload"))
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/post-object", &payload)
+	httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+	response, err := p.Invoke(context.Background(), &spi.Request{
+		ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": "post-object"},
+		Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Status != http.StatusCreated || response.Output["Key"] != "uploads/hello world.txt" || response.Headers.Get("ETag") == "" {
+		t.Fatalf("post response: %#v", response)
+	}
+	got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "post-object", "Key": "uploads/hello world.txt"}, nil)
+	if body := string(readStream(t, got)); body != "browser upload" || got.Headers.Get("Content-Type") != "text/plain" || got.Headers.Get("x-amz-meta-owner") != "mirror" {
+		t.Fatalf("stored body=%q headers=%v", body, got.Headers)
 	}
 }
 

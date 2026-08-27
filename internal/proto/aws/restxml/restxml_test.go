@@ -332,6 +332,25 @@ func TestRESTXMLServiceDecodeContracts(t *testing.T) {
 	}
 }
 
+func TestPostObjectProtocolContract(t *testing.T) {
+	codec := Codec{}
+	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/bucket", strings.NewReader("multipart"))
+	request.Header.Set("Content-Type", "multipart/form-data; boundary=boundary")
+	op, err := codec.Route(&model.Service{ID: "aws.s3"}, request)
+	if err != nil || op.Name != "PostObject" {
+		t.Fatalf("route %#v %v", op, err)
+	}
+	decoded, err := codec.Decode(&model.Service{ID: "aws.s3"}, op, request)
+	if err != nil || decoded.Body == nil {
+		t.Fatalf("decode %#v %v", decoded, err)
+	}
+	w := httptest.NewRecorder()
+	err = codec.Encode(&model.Service{ID: "aws.s3"}, op, w, &spi.Response{Status: http.StatusCreated, Output: map[string]any{"Location": "http://s3.test/bucket/key", "Bucket": "bucket", "Key": "key", "ETag": `"etag"`}})
+	if err != nil || w.Code != http.StatusCreated || !strings.Contains(w.Body.String(), "<PostResponse>") || !strings.Contains(w.Body.String(), "<Key>key</Key>") {
+		t.Fatalf("encode %d %q %v", w.Code, w.Body.String(), err)
+	}
+}
+
 func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	codec := Codec{}
 	svc := &model.Service{ID: "aws.s3"}

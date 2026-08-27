@@ -182,7 +182,7 @@ func (p *Pack) Operations() []string {
 		"GetBucketObjectLockConfiguration", "PutBucketObjectLockConfiguration",
 		"GetBucketRequestPayment", "PutBucketRequestPayment",
 		"GetBucketAccelerateConfiguration", "PutBucketAccelerateConfiguration",
-		"PutObject", "GetObject", "HeadObject", "DeleteObject", "DeleteObjects", "CopyObject",
+		"PutObject", "PostObject", "GetObject", "HeadObject", "DeleteObject", "DeleteObjects", "CopyObject",
 		"ListObjects", "ListObjectsV2", "ListObjectVersions",
 		"CreateMultipartUpload", "UploadPart", "UploadPartCopy", "CompleteMultipartUpload",
 		"AbortMultipartUpload", "ListParts", "ListMultipartUploads",
@@ -227,6 +227,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.getBucketLocation(ctx, req)
 	case "PutObject":
 		return p.putObject(ctx, req, "", "", nil, nil)
+	case "PostObject":
+		return p.postObject(ctx, req)
 	case "GetObject":
 		return p.getObject(ctx, req)
 	case "HeadObject":
@@ -526,6 +528,8 @@ func (p *Pack) route(req *spi.Request) string {
 		return "CreateBucket"
 	case m == http.MethodDelete && key == "":
 		return "DeleteBucket"
+	case m == http.MethodPost && key == "":
+		return "PostObject"
 	case m == http.MethodPut && key != "":
 		return "PutObject"
 	case m == http.MethodGet && key != "":
@@ -930,6 +934,106 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	}
 	p.notify(ctx, req, b, key, "ObjectCreated:Put")
 	return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"ETag": etag}}, nil
+}
+
+func (p *Pack) postObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	bucket := str(req.Input["Bucket"])
+	if err := p.requireBucket(ctx, req, bucket); err != nil {
+		return nil, err
+	}
+	if req.HTTP == nil || !strings.Contains(req.HTTP.Header.Get("Content-Type"), "multipart/form-data") {
+		return nil, &spi.Fault{Code: "PreconditionFailed", Message: "At least one of the pre-conditions you specified did not hold", HTTPStatus: http.StatusPreconditionFailed, Fault: "client", Fields: map[string]any{"Condition": "Bucket POST must be of the enclosure-type multipart/form-data"}}
+	}
+	reader, err := req.HTTP.MultipartReader()
+	if err != nil {
+		return nil, &spi.Fault{Code: "MalformedPOSTRequest", Message: "The body of your POST request is not well-formed multipart/form-data.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	fields := map[string]string{}
+	var body []byte
+	filename, haveFile := "", false
+	for {
+		part, partErr := reader.NextPart()
+		if partErr == io.EOF {
+			break
+		}
+		if partErr != nil {
+			return nil, &spi.Fault{Code: "MalformedPOSTRequest", Message: "The body of your POST request is not well-formed multipart/form-data.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		value, readErr := io.ReadAll(part)
+		_ = part.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if part.FormName() == "file" {
+			body, filename, haveFile = value, part.FileName(), true
+		} else if part.FormName() != "" {
+			fields[part.FormName()] = string(value)
+		}
+	}
+	key := strings.ReplaceAll(fields["key"], "${filename}", filename)
+	if key == "" || !haveFile {
+		return nil, &spi.Fault{Code: "InvalidArgument", Message: "POST requires both key and file form fields", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	input := map[string]any{"Bucket": bucket, "Key": key, "ContentType": "binary/octet-stream"}
+	for form, member := range map[string]string{
+		"Cache-Control":                   "CacheControl",
+		"Content-Disposition":             "ContentDisposition",
+		"Content-Encoding":                "ContentEncoding",
+		"Content-Type":                    "ContentType",
+		"x-amz-storage-class":             "StorageClass",
+		"x-amz-website-redirect-location": "WebsiteRedirectLocation",
+	} {
+		if value := fields[form]; value != "" {
+			input[member] = value
+		}
+	}
+	metadata := map[string]any{}
+	for field, value := range fields {
+		if name, ok := strings.CutPrefix(strings.ToLower(field), "x-amz-meta-"); ok {
+			metadata[name] = value
+		}
+	}
+	if len(metadata) > 0 {
+		input["Metadata"] = metadata
+	}
+	child := *req
+	child.Operation, child.Input = "PutObject", input
+	child.Body, child.HTTP = io.NopCloser(bytes.NewReader(body)), nil
+	response, err := p.putObject(ctx, &child, "", "", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	headers := response.Headers.Clone()
+	scheme := req.HTTP.URL.Scheme
+	if scheme == "" {
+		scheme = "http"
+		if req.HTTP.TLS != nil {
+			scheme = "https"
+		}
+	}
+	path := "/" + bucket + "/" + key
+	if strings.Contains(req.HTTP.Host, ".s3.") {
+		path = "/" + key
+	}
+	location := (&url.URL{Scheme: scheme, Host: req.HTTP.Host, Path: path}).String()
+	headers.Set("Location", location)
+	status := http.StatusNoContent
+	if value := fields["success_action_status"]; value == "200" || value == "201" {
+		status, _ = strconv.Atoi(value)
+	}
+	if redirect, parseErr := url.Parse(fields["success_action_redirect"]); parseErr == nil && redirect.IsAbs() {
+		query := redirect.Query()
+		query.Set("bucket", bucket)
+		query.Set("key", key)
+		query.Set("etag", str(response.Output["ETag"]))
+		redirect.RawQuery = query.Encode()
+		headers.Set("Location", redirect.String())
+		return &spi.Response{Status: http.StatusSeeOther, Headers: headers}, nil
+	}
+	if status == http.StatusCreated {
+		return &spi.Response{Status: status, Headers: headers, Output: map[string]any{"Location": location, "Bucket": bucket, "Key": key, "ETag": response.Output["ETag"]}}, nil
+	}
+	return &spi.Response{Status: status, Headers: headers}, nil
 }
 
 func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {

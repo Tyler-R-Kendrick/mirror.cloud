@@ -219,6 +219,8 @@ func RouteName(r *http.Request) string {
 		return "CreateBucket"
 	case m == http.MethodDelete && key == "":
 		return "DeleteBucket"
+	case m == http.MethodPost && key == "":
+		return "PostObject"
 	case m == http.MethodPut && key != "":
 		return "PutObject"
 	case m == http.MethodGet && key != "":
@@ -379,7 +381,7 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 		in["CopySource"] = strings.TrimPrefix(src, "/")
 	}
 	req := &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}
-	streamOps := op.Name == "PutObject" || op.Name == "UploadPart"
+	streamOps := op.Name == "PutObject" || op.Name == "UploadPart" || op.Name == "PostObject"
 	if r.Body != nil && streamOps {
 		req.Body = r.Body
 		return req, nil
@@ -764,6 +766,9 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	}
 	if op.Name == "GetObjectAttributes" {
 		root = "GetObjectAttributesResponse"
+	}
+	if op.Name == "PostObject" {
+		root = "PostResponse"
 	}
 	namespace := ""
 	if op.Name == "DeleteObjects" {

@@ -2749,6 +2749,52 @@ func TestPostObjectMultipartUpload(t *testing.T) {
 	}
 }
 
+func TestPostObjectRejectsMalformedForms(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "post-invalid"}, nil)
+	call := func(contentType string, payload []byte) *spi.Fault {
+		t.Helper()
+		httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/post-invalid", bytes.NewReader(payload))
+		if contentType != "" {
+			httpRequest.Header.Set("Content-Type", contentType)
+		}
+		_, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": "post-invalid"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest})
+		return asFault(t, err)
+	}
+	if fault := call("text/plain", []byte("body")); fault.Code != "PreconditionFailed" || fault.HTTPStatus != http.StatusPreconditionFailed {
+		t.Fatalf("non-multipart: %+v", fault)
+	}
+	if fault := call("multipart/form-data", []byte("body")); fault.Code != "MalformedPOSTRequest" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("missing boundary: %+v", fault)
+	}
+	form := func(key string, file bool) (string, []byte) {
+		t.Helper()
+		var payload bytes.Buffer
+		writer := multipart.NewWriter(&payload)
+		if key != "" {
+			_ = writer.WriteField("key", key)
+		}
+		if file {
+			part, _ := writer.CreateFormFile("file", "file.txt")
+			_, _ = part.Write([]byte("body"))
+		}
+		_ = writer.Close()
+		return writer.FormDataContentType(), payload.Bytes()
+	}
+	for _, tc := range []struct {
+		name string
+		key  string
+		file bool
+	}{{"missing key", "", true}, {"missing file", "key", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			contentType, payload := form(tc.key, tc.file)
+			if fault := call(contentType, payload); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+				t.Fatalf("fault: %+v", fault)
+			}
+		})
+	}
+}
+
 func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	west := ident()

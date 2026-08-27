@@ -524,10 +524,88 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 			document["Rule"] = map[string]any{"DefaultRetention": retention}
 		}
 		in["ObjectLockConfiguration"] = document
+	case "PutBucketReplication":
+		type tag struct {
+			Key   string `xml:"Key"`
+			Value string `xml:"Value"`
+		}
+		type filter struct {
+			Prefix string `xml:"Prefix"`
+			Tag    *tag   `xml:"Tag"`
+			And    *struct {
+				Prefix string `xml:"Prefix"`
+				Tags   []tag  `xml:"Tag"`
+			} `xml:"And"`
+		}
+		var configuration struct {
+			Role  string `xml:"Role"`
+			Rules []struct {
+				ID       string  `xml:"ID"`
+				Priority *int    `xml:"Priority"`
+				Status   string  `xml:"Status"`
+				Prefix   string  `xml:"Prefix"`
+				Filter   *filter `xml:"Filter"`
+				Delete   *struct {
+					Status string `xml:"Status"`
+				} `xml:"DeleteMarkerReplication"`
+				Destination struct {
+					Bucket       string `xml:"Bucket"`
+					Account      string `xml:"Account"`
+					StorageClass string `xml:"StorageClass"`
+				} `xml:"Destination"`
+			} `xml:"Rule"`
+		}
+		if xml.Unmarshal(raw, &configuration) != nil {
+			in["_body"] = string(raw)
+			return
+		}
+		rules := make([]any, 0, len(configuration.Rules))
+		for _, source := range configuration.Rules {
+			rule := map[string]any{"Status": source.Status, "Destination": map[string]any{"Bucket": source.Destination.Bucket}}
+			for key, value := range map[string]string{"ID": source.ID, "Prefix": source.Prefix} {
+				if value != "" {
+					rule[key] = value
+				}
+			}
+			if source.Priority != nil {
+				rule["Priority"] = *source.Priority
+			}
+			if source.Filter != nil {
+				value := map[string]any{}
+				if source.Filter.Prefix != "" {
+					value["Prefix"] = source.Filter.Prefix
+				}
+				if source.Filter.Tag != nil {
+					value["Tag"] = map[string]any{"Key": source.Filter.Tag.Key, "Value": source.Filter.Tag.Value}
+				}
+				if source.Filter.And != nil {
+					and := map[string]any{"Prefix": source.Filter.And.Prefix}
+					tags := make([]any, 0, len(source.Filter.And.Tags))
+					for _, item := range source.Filter.And.Tags {
+						tags = append(tags, map[string]any{"Key": item.Key, "Value": item.Value})
+					}
+					and["Tags"] = tags
+					value["And"] = and
+				}
+				rule["Filter"] = value
+			}
+			if source.Delete != nil {
+				rule["DeleteMarkerReplication"] = map[string]any{"Status": source.Delete.Status}
+			}
+			destination := rule["Destination"].(map[string]any)
+			if source.Destination.Account != "" {
+				destination["Account"] = source.Destination.Account
+			}
+			if source.Destination.StorageClass != "" {
+				destination["StorageClass"] = source.Destination.StorageClass
+			}
+			rules = append(rules, rule)
+		}
+		in["ReplicationConfiguration"] = map[string]any{"Role": configuration.Role, "Rules": rules}
 	case "PutBucketPolicy":
 		in["Policy"] = string(raw)
 	case "PutBucketCors", "PutBucketWebsite", "PutBucketLogging",
-		"PutBucketLifecycleConfiguration", "PutBucketReplication",
+		"PutBucketLifecycleConfiguration",
 		"PutBucketEncryption", "PutBucketAcl", "PutObjectAcl",
 		"PutBucketRequestPayment",
 		"PutBucketAccelerateConfiguration":
@@ -620,6 +698,25 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		fmt.Fprintf(&b, `<%s xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`, objectLockRoot)
 		write(resp.Output[objectLockRoot], &b)
 		fmt.Fprintf(&b, "</%s>", objectLockRoot)
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
+	if op.Name == "GetBucketReplication" {
+		configuration, _ := resp.Output["ReplicationConfiguration"].(map[string]any)
+		if configuration == nil {
+			configuration = resp.Output
+		}
+		b.WriteString(`<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
+		if role := configuration["Role"]; role != nil {
+			write(map[string]any{"Role": role}, &b)
+		}
+		rules, _ := configuration["Rules"].([]any)
+		for _, rule := range rules {
+			b.WriteString("<Rule>")
+			write(rule, &b)
+			b.WriteString("</Rule>")
+		}
+		b.WriteString("</ReplicationConfiguration>")
 		_, err := io.WriteString(w, b.String())
 		return err
 	}

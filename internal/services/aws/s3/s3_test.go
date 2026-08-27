@@ -2873,6 +2873,7 @@ func TestPostObjectPolicyValidation(t *testing.T) {
 	if got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "post-policy", "Key": "uploads/item"}, nil); string(readStream(t, got)) != "body" {
 		t.Fatal("valid policy did not store object")
 	}
+	characterization := map[string]any{"accepted": map[string]any{"key": "uploads/item", "size": 4}}
 
 	missingSignature := policyFields(encodePolicy(deps.Clock.Now().Add(time.Hour).Format(time.RFC3339Nano), nil))
 	delete(missingSignature, "x-amz-date")
@@ -2896,12 +2897,15 @@ func TestPostObjectPolicyValidation(t *testing.T) {
 			_, err := post(key, tc.fields, "body")
 			if fault := asFault(t, err); fault.Code != tc.code {
 				t.Fatalf("fault = %+v", fault)
+			} else {
+				characterization[tc.name] = map[string]any{"code": fault.Code, "status": fault.HTTPStatus, "message": fault.Message, "fields": fault.Fields}
 			}
 			if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "post-policy", "Key": key}, nil); asFault(t, err).Code != "NoSuchKey" {
 				t.Fatal("rejected policy stored object")
 			}
 		})
 	}
+	golden.AssertJSON(t, characterization)
 }
 
 func TestObjectCreatedEventNames(t *testing.T) {

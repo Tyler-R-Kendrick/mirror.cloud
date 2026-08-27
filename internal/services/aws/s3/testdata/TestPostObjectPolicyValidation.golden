@@ -1,0 +1,63 @@
+{
+  "accepted": {
+    "key": "uploads/item",
+    "size": 4
+  },
+  "expired": {
+    "code": "AccessDenied",
+    "fields": null,
+    "message": "Invalid according to Policy: Policy expired.",
+    "status": 403
+  },
+  "failed condition": {
+    "code": "AccessDenied",
+    "fields": null,
+    "message": "Invalid according to Policy: Policy Condition failed: {\"bucket\":\"wrong\"}",
+    "status": 403
+  },
+  "invalid simple condition": {
+    "code": "InvalidPolicyDocument",
+    "fields": null,
+    "message": "Invalid Policy: Invalid Simple-Condition: Simple-Conditions must have exactly one property specified.",
+    "status": 400
+  },
+  "malformed policy": {
+    "code": "SignatureDoesNotMatch",
+    "fields": null,
+    "message": "The request signature we calculated does not match the signature you provided.",
+    "status": 403
+  },
+  "missing signature field": {
+    "code": "InvalidArgument",
+    "fields": {
+      "ArgumentName": "X-Amz-Date",
+      "ArgumentValue": ""
+    },
+    "message": "Bucket POST must contain a field named 'X-Amz-Date'. If it is specified, please check the order of the fields.",
+    "status": 400
+  },
+  "no signature fields": {
+    "code": "AccessDenied",
+    "fields": null,
+    "message": "Access Denied",
+    "status": 403
+  },
+  "too large": {
+    "code": "EntityTooLarge",
+    "fields": {
+      "MaxSizeAllowed": 3,
+      "ProposedSize": 4
+    },
+    "message": "Your proposed upload exceeds the maximum allowed size",
+    "status": 400
+  },
+  "too small": {
+    "code": "EntityTooSmall",
+    "fields": {
+      "MinSizeAllowed": 5,
+      "ProposedSize": 4
+    },
+    "message": "Your proposed upload is smaller than the minimum allowed size",
+    "status": 400
+  }
+}

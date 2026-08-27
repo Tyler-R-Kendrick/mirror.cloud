@@ -404,8 +404,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-lock"), ObjectLockEnabledForBucket: aws.Bool(true)}); err != nil {
 		t.Fatalf("create object-lock bucket: %v", err)
 	}
-	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String("sdk-lock"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusEnabled}}); err != nil {
-		t.Fatalf("enable object-lock bucket versioning: %v", err)
+	lockVersioning, err := s3c.GetBucketVersioning(context.Background(), &s3.GetBucketVersioningInput{Bucket: aws.String("sdk-lock")})
+	if err != nil || lockVersioning.Status != s3types.BucketVersioningStatusEnabled {
+		t.Fatalf("object-lock bucket versioning: %#v %v", lockVersioning, err)
+	}
+	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String("sdk-lock"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusSuspended}}); err == nil || !strings.Contains(err.Error(), "InvalidBucketState") {
+		t.Fatalf("suspend object-lock bucket versioning: %v", err)
 	}
 	lockedVersion, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-lock"), Key: aws.String("locked"), Body: bytes.NewReader([]byte("locked"))})
 	if err != nil {

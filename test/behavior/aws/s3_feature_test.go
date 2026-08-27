@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/xml"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -83,6 +84,48 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		// And fidelity is declared
 		if res.Header.Get("x-mirror-fidelity") != "emulate" {
 			t.Fatalf("fidelity %q", res.Header.Get("x-mirror-fidelity"))
+		}
+	})
+
+	t.Run("Given a browser form When POSTing a file Then S3 stores it and returns the requested response", func(t *testing.T) {
+		res := do(http.MethodPut, "/post-form", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode >= 300 {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		var payload bytes.Buffer
+		writer := multipart.NewWriter(&payload)
+		_ = writer.WriteField("key", "forms/${filename}")
+		_ = writer.WriteField("success_action_status", "201")
+		file, err := writer.CreateFormFile("file", "report.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = file.Write([]byte("from browser"))
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		req, err := http.NewRequest(http.MethodPost, ts.URL+"/post-form", &payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", auth)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		res, err = http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusCreated || res.Header.Get("ETag") == "" || !bytes.Contains(response, []byte("<PostResponse>")) || !bytes.Contains(response, []byte("<Key>forms/report.txt</Key>")) {
+			t.Fatalf("post form %d headers=%v body=%s", res.StatusCode, res.Header, response)
+		}
+		res = do(http.MethodGet, "/post-form/forms/report.txt", nil, "")
+		stored, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(stored) != "from browser" {
+			t.Fatalf("stored form object %d %q", res.StatusCode, stored)
 		}
 	})
 

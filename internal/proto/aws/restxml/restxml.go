@@ -713,7 +713,42 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		rules, _ := configuration["Rules"].([]any)
 		for _, rule := range rules {
 			b.WriteString("<Rule>")
-			write(rule, &b)
+			document, _ := rule.(map[string]any)
+			fields := make(map[string]any, len(document))
+			for key, value := range document {
+				if key != "Filter" {
+					fields[key] = value
+				}
+			}
+			write(fields, &b)
+			if filter, ok := document["Filter"].(map[string]any); ok {
+				b.WriteString("<Filter>")
+				filterFields := make(map[string]any, len(filter))
+				for key, value := range filter {
+					if key != "And" {
+						filterFields[key] = value
+					}
+				}
+				write(filterFields, &b)
+				if and, ok := filter["And"].(map[string]any); ok {
+					b.WriteString("<And>")
+					andFields := make(map[string]any, len(and))
+					for key, value := range and {
+						if key != "Tags" {
+							andFields[key] = value
+						}
+					}
+					write(andFields, &b)
+					tags, _ := and["Tags"].([]any)
+					for _, tag := range tags {
+						b.WriteString("<Tag>")
+						write(tag, &b)
+						b.WriteString("</Tag>")
+					}
+					b.WriteString("</And>")
+				}
+				b.WriteString("</Filter>")
+			}
 			b.WriteString("</Rule>")
 		}
 		b.WriteString("</ReplicationConfiguration>")

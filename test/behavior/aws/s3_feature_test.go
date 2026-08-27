@@ -315,7 +315,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodGet, "/replication-source?replication", nil, "")
 		gotConfiguration, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || !bytes.Contains(gotConfiguration, []byte("<Rule>")) || !bytes.Contains(gotConfiguration, []byte("<Prefix>logs/</Prefix>")) {
+		if res.StatusCode != http.StatusOK || !bytes.Contains(gotConfiguration, []byte("<ReplicationConfiguration")) || !bytes.Contains(gotConfiguration, []byte("<Rule>")) || !bytes.Contains(gotConfiguration, []byte("<Prefix>logs/</Prefix>")) {
 			t.Fatalf("get replication: %d %s", res.StatusCode, gotConfiguration)
 		}
 		res = do(http.MethodPut, "/replication-source/logs/key", []byte("replicated-version"), "")

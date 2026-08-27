@@ -7686,7 +7686,7 @@ func validTestStateMock(state map[string]any, result any, mode string) bool {
 			}
 			op := candidate.OperationByName(operation)
 			if op == nil || op.Output == "" {
-				return true
+				return mode != "STRICT"
 			}
 			return validModelValue(candidate, op.Output, result, mode == "STRICT", 0)
 		}
@@ -7700,7 +7700,7 @@ func validModelValue(service *model.Service, shapeID string, value any, requireF
 	}
 	shape, exists := service.Shapes[shapeID]
 	if !exists {
-		return true
+		return !requireFields
 	}
 	switch shape.Kind {
 	case model.KindStructure:

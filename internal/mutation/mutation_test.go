@@ -3438,6 +3438,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
 		{
+			name: "states-accept-strict-test-state-mock-without-output-model",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `return mode != "STRICT"`,
+			new:  `return true`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesLifecycleAndWalkerUnits",
+		},
+		{
+			name: "states-accept-strict-test-state-mock-without-shape-model",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `return !requireFields`,
+			new:  `return true`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStrictMockValidationRejectsMissingShape",
+		},
+		{
 			name: "states-accept-short-test-state-parallel-result",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `return valid && len(values) == len(branches)`,

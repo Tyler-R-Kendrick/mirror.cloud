@@ -21,6 +21,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/parquet-go/parquet-go"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/batch"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/codebuild"
@@ -46,6 +47,16 @@ func TestStatesHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
 	if n := len(p.Operations()); n != 37 {
 		t.Fatalf("states Operations() %d want 37", n)
+	}
+}
+
+func TestStrictMockValidationRejectsMissingShape(t *testing.T) {
+	service := &model.Service{Shapes: map[string]model.Shape{}}
+	if validModelValue(service, "missing", map[string]any{}, true, 0) {
+		t.Fatal("STRICT validation accepted a missing model shape")
+	}
+	if !validModelValue(service, "missing", map[string]any{}, false, 0) {
+		t.Fatal("PRESENT validation rejected a missing model shape")
 	}
 }
 
@@ -3599,6 +3610,13 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		}
 	}
 	modeledTask := `{"Type":"Task","Resource":"arn:aws:states:::aws-sdk:dynamodb:describeEndpoints","End":true}`
+	missingOutputModelTask := `{"Type":"Task","Resource":"arn:aws:states:::aws-sdk:dynamodb:describeLimits","End":true}`
+	if _, err := call("TestState", map[string]any{"definition": missingOutputModelTask, "mock": map[string]any{"result": `{}`}}); err == nil {
+		t.Fatal("accepted STRICT mock without an output model")
+	}
+	if result := must("TestState", map[string]any{"definition": missingOutputModelTask, "mock": map[string]any{"result": `{}`, "fieldValidationMode": "PRESENT"}}).Output; result["status"] != "SUCCEEDED" {
+		t.Fatalf("rejected PRESENT mock without an output model %#v", result)
+	}
 	if _, err := call("TestState", map[string]any{"definition": modeledTask, "mock": map[string]any{"result": `{}`}}); err == nil {
 		t.Fatal("accepted STRICT mock missing modeled required fields")
 	}

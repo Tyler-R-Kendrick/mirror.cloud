@@ -1249,13 +1249,27 @@ func Bundle() *model.Bundle {
 		}
 		return o
 	}
+	ddbService := svc("aws.dynamodb", "dynamodb", model.ProtoAWSJSON10, "DynamoDB_20120810", "", "", mk(ddb))
+	ddbService.OperationByName("DescribeEndpoints").Output = "DescribeEndpointsResponse"
+	ddbService.Shapes = map[string]model.Shape{
+		"DescribeEndpointsResponse": {ID: "DescribeEndpointsResponse", Kind: model.KindStructure, Members: map[string]model.Member{
+			"Endpoints": {Shape: "Endpoints", Required: true},
+		}},
+		"Endpoints": {ID: "Endpoints", Kind: model.KindList, Member: "Endpoint"},
+		"Endpoint": {ID: "Endpoint", Kind: model.KindStructure, Members: map[string]model.Member{
+			"Address":              {Shape: "String", Required: true},
+			"CachePeriodInMinutes": {Shape: "Long", Required: true},
+		}},
+		"String": {ID: "String", Kind: model.KindString},
+		"Long":   {ID: "Long", Kind: model.KindLong},
+	}
 
 	return &model.Bundle{
 		SchemaVersion: "1",
 		Provider:      model.ProviderAWS,
 		Services: []model.Service{
 			svc("aws.s3", "s3", model.ProtoRESTXML, "", "", "http://s3.amazonaws.com/doc/2006-03-01/", s3ops),
-			svc("aws.dynamodb", "dynamodb", model.ProtoAWSJSON10, "DynamoDB_20120810", "", "", mk(ddb)),
+			ddbService,
 			svc("aws.sqs", "sqs", model.ProtoAWSJSON10, "AmazonSQS", "2012-11-05", "", mk(sqs)),
 			svc("aws.sns", "sns", model.ProtoAWSQuery, "", "2010-03-31", "http://sns.amazonaws.com/doc/2010-03-31/", mk(sns)),
 			svc("aws.sts", "sts", model.ProtoAWSQuery, "", "2011-06-15", "https://sts.amazonaws.com/doc/2011-06-15/", mk(sts)),

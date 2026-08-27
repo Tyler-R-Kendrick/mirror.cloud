@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -2821,6 +2822,85 @@ func TestPostObjectSuccessRedirect(t *testing.T) {
 	query := location.Query()
 	if response.Status != http.StatusSeeOther || location.Host != "example.test" || query.Get("state") != "ok" || query.Get("bucket") != "post-redirect" || query.Get("key") != "redirected" || query.Get("etag") == "" {
 		t.Fatalf("redirect response: %#v", response)
+	}
+}
+
+func TestPostObjectPolicyValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "post-policy"}, nil)
+	encodePolicy := func(expiration string, conditions []any) string {
+		raw, _ := json.Marshal(map[string]any{"expiration": expiration, "conditions": conditions})
+		return base64.StdEncoding.EncodeToString(raw)
+	}
+	post := func(key string, fields map[string]string, body string) (*spi.Response, error) {
+		t.Helper()
+		var payload bytes.Buffer
+		writer := multipart.NewWriter(&payload)
+		_ = writer.WriteField("key", key)
+		for field, value := range fields {
+			_ = writer.WriteField(field, value)
+		}
+		file, _ := writer.CreateFormFile("file", "file.txt")
+		_, _ = file.Write([]byte(body))
+		_ = writer.Close()
+		httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/post-policy", &payload)
+		httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+		return p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": "post-policy"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest})
+	}
+	v4 := map[string]string{
+		"x-amz-algorithm":  "AWS4-HMAC-SHA256",
+		"x-amz-credential": "test/20260827/us-east-1/s3/aws4_request",
+		"x-amz-date":       "20260827T000000Z",
+		"x-amz-signature":  "signature",
+		"Content-Type":     "text/plain",
+	}
+	policyFields := func(policy string) map[string]string {
+		fields := maps.Clone(v4)
+		fields["policy"] = policy
+		return fields
+	}
+	fields := maps.Clone(v4)
+	fields["policy"] = encodePolicy(deps.Clock.Now().Add(time.Hour).Format(time.RFC3339Nano), []any{
+		map[string]any{"bucket": "post-policy"},
+		[]any{"eq", "$key", "uploads/item"},
+		[]any{"starts-with", "$Content-Type", "text/"},
+		[]any{"content-length-range", 1, 10},
+	})
+	if _, err := post("uploads/item", fields, "body"); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "post-policy", "Key": "uploads/item"}, nil); string(readStream(t, got)) != "body" {
+		t.Fatal("valid policy did not store object")
+	}
+
+	missingSignature := policyFields(encodePolicy(deps.Clock.Now().Add(time.Hour).Format(time.RFC3339Nano), nil))
+	delete(missingSignature, "x-amz-date")
+	cases := []struct {
+		name   string
+		fields map[string]string
+		code   string
+	}{
+		{"expired", policyFields(encodePolicy(deps.Clock.Now().Add(-time.Second).Format(time.RFC3339Nano), nil)), "AccessDenied"},
+		{"missing signature field", missingSignature, "InvalidArgument"},
+		{"no signature fields", map[string]string{"policy": encodePolicy(deps.Clock.Now().Add(time.Hour).Format(time.RFC3339Nano), nil)}, "AccessDenied"},
+		{"malformed policy", policyFields("not-base64"), "SignatureDoesNotMatch"},
+		{"failed condition", policyFields(encodePolicy(deps.Clock.Now().Add(time.Hour).Format(time.RFC3339Nano), []any{map[string]any{"bucket": "wrong"}})), "AccessDenied"},
+		{"too small", policyFields(encodePolicy(deps.Clock.Now().Add(time.Hour).Format(time.RFC3339Nano), []any{[]any{"content-length-range", 5, 10}})), "EntityTooSmall"},
+		{"too large", policyFields(encodePolicy(deps.Clock.Now().Add(time.Hour).Format(time.RFC3339Nano), []any{[]any{"content-length-range", 0, 3}})), "EntityTooLarge"},
+		{"invalid simple condition", policyFields(encodePolicy(deps.Clock.Now().Add(time.Hour).Format(time.RFC3339Nano), []any{map[string]any{"bucket": "post-policy", "key": "rejected"}})), "InvalidPolicyDocument"},
+	}
+	for index, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			key := fmt.Sprintf("rejected-%d", index)
+			_, err := post(key, tc.fields, "body")
+			if fault := asFault(t, err); fault.Code != tc.code {
+				t.Fatalf("fault = %+v", fault)
+			}
+			if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "post-policy", "Key": key}, nil); asFault(t, err).Code != "NoSuchKey" {
+				t.Fatal("rejected policy stored object")
+			}
+		})
 	}
 }
 

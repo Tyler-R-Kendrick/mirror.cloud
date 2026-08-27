@@ -983,6 +983,9 @@ func (p *Pack) postObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	if key == "" || !haveFile {
 		return nil, &spi.Fault{Code: "InvalidArgument", Message: "POST requires both key and file form fields", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
+	if err := validatePostPolicy(fields, bucket, len(body), p.deps.Clock.Now()); err != nil {
+		return nil, err
+	}
 	input := map[string]any{"Bucket": bucket, "Key": key, "ContentType": "binary/octet-stream"}
 	for form, member := range map[string]string{
 		"Cache-Control":                   "CacheControl",
@@ -1043,6 +1046,130 @@ func (p *Pack) postObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		return &spi.Response{Status: status, Headers: headers, Output: map[string]any{"Location": location, "Bucket": bucket, "Key": key, "ETag": response.Output["ETag"]}}, nil
 	}
 	return &spi.Response{Status: status, Headers: headers}, nil
+}
+
+func validatePostPolicy(fields map[string]string, bucket string, size int, now time.Time) error {
+	form := make(map[string]string, len(fields))
+	for key, value := range fields {
+		form[strings.ToLower(key)] = value
+	}
+	policy := form["policy"]
+	if policy == "" {
+		return nil
+	}
+	complete := func(required []string) (bool, error) {
+		found := false
+		for _, field := range required {
+			if _, ok := form[field]; ok {
+				found = true
+			}
+		}
+		if !found {
+			return false, nil
+		}
+		for _, field := range required {
+			if _, ok := form[field]; !ok {
+				name := http.CanonicalHeaderKey(field)
+				if field == "awsaccesskeyid" {
+					name = "AWSAccessKeyId"
+				}
+				return false, &spi.Fault{Code: "InvalidArgument", Message: "Bucket POST must contain a field named '" + name + "'. If it is specified, please check the order of the fields.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": name, "ArgumentValue": ""}}
+			}
+		}
+		return true, nil
+	}
+	v4, err := complete([]string{"x-amz-signature", "x-amz-algorithm", "x-amz-credential", "x-amz-date"})
+	if err != nil {
+		return err
+	}
+	v2, err := complete([]string{"signature", "awsaccesskeyid"})
+	if err != nil {
+		return err
+	}
+	if !v2 && !v4 {
+		return &spi.Fault{Code: "AccessDenied", Message: "Access Denied", HTTPStatus: http.StatusForbidden, Fault: "client"}
+	}
+	decoded, err := base64.StdEncoding.DecodeString(policy)
+	var document struct {
+		Expiration string `json:"expiration"`
+		Conditions []any  `json:"conditions"`
+	}
+	if err != nil || json.Unmarshal(decoded, &document) != nil {
+		return &spi.Fault{Code: "SignatureDoesNotMatch", Message: "The request signature we calculated does not match the signature you provided.", HTTPStatus: http.StatusForbidden, Fault: "client"}
+	}
+	if document.Expiration != "" {
+		expires, parseErr := time.Parse(time.RFC3339Nano, document.Expiration)
+		if parseErr != nil {
+			return &spi.Fault{Code: "InvalidPolicyDocument", Message: "Invalid Policy: invalid expiration", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		if now.After(expires) {
+			return &spi.Fault{Code: "AccessDenied", Message: "Invalid according to Policy: Policy expired.", HTTPStatus: http.StatusForbidden, Fault: "client"}
+		}
+	}
+	for _, condition := range document.Conditions {
+		ok, conditionErr := verifyPostPolicyCondition(condition, form, bucket, size)
+		if conditionErr != nil {
+			return conditionErr
+		}
+		if !ok {
+			raw, _ := json.Marshal(condition)
+			return &spi.Fault{Code: "AccessDenied", Message: "Invalid according to Policy: Policy Condition failed: " + string(raw), HTTPStatus: http.StatusForbidden, Fault: "client"}
+		}
+	}
+	return nil
+}
+
+func verifyPostPolicyCondition(condition any, form map[string]string, bucket string, size int) (bool, error) {
+	switch value := condition.(type) {
+	case map[string]any:
+		if len(value) > 1 {
+			return false, &spi.Fault{Code: "InvalidPolicyDocument", Message: "Invalid Policy: Invalid Simple-Condition: Simple-Conditions must have exactly one property specified.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		for key, expected := range value {
+			want, ok := expected.(string)
+			if !ok {
+				return false, nil
+			}
+			if strings.EqualFold(key, "bucket") {
+				return bucket == want, nil
+			}
+			return form[strings.ToLower(key)] == want, nil
+		}
+	case []any:
+		if len(value) == 3 {
+			op, _ := value[0].(string)
+			if op == "content-length-range" {
+				minimum, minErr := strconv.ParseInt(fmt.Sprint(value[1]), 10, 64)
+				maximum, maxErr := strconv.ParseInt(fmt.Sprint(value[2]), 10, 64)
+				if minErr != nil || maxErr != nil {
+					return false, nil
+				}
+				if int64(size) < minimum {
+					return false, &spi.Fault{Code: "EntityTooSmall", Message: "Your proposed upload is smaller than the minimum allowed size", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ProposedSize": size, "MinSizeAllowed": minimum}}
+				}
+				if int64(size) > maximum {
+					return false, &spi.Fault{Code: "EntityTooLarge", Message: "Your proposed upload exceeds the maximum allowed size", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ProposedSize": size, "MaxSizeAllowed": maximum}}
+				}
+				return true, nil
+			}
+			field, fieldOK := value[1].(string)
+			expected, expectedOK := value[2].(string)
+			if !fieldOK || !expectedOK || !strings.HasPrefix(field, "$") {
+				return false, nil
+			}
+			actual := form[strings.ToLower(strings.TrimPrefix(field, "$"))]
+			if strings.EqualFold(field, "$bucket") {
+				actual = bucket
+			}
+			switch op {
+			case "eq":
+				return actual == expected, nil
+			case "starts-with":
+				return strings.HasPrefix(actual, expected), nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {

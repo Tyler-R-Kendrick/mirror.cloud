@@ -4,5 +4,8 @@
     "Status": "Enabled"
   },
   "plainBypass": "InvalidArgument",
-  "plainLegalHold": "InvalidRequest"
+  "plainLegalHold": "InvalidRequest",
+  "regionalVersion": {
+    "Status": "Enabled"
+  }
 }

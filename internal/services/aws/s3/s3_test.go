@@ -1580,11 +1580,18 @@ func TestObjectLockBucketGuards(t *testing.T) {
 	if suspendFault.Code != "InvalidBucketState" {
 		t.Fatalf("suspend object-lock versioning: %v", err)
 	}
+	regionalName := "locked-123456789012-us-east-1-an"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": regionalName, "BucketNamespace": "account-regional", "ObjectLockEnabledForBucket": true}, nil)
+	regionalVersioning := mustInvoke(t, p, "GetBucketVersioning", map[string]any{"Bucket": regionalName}, nil)
+	if regionalVersioning.Output["Status"] != "Enabled" {
+		t.Fatalf("account-regional object lock did not enable versioning: %#v", regionalVersioning.Output)
+	}
 	golden.AssertJSON(t, map[string]any{
-		"plainLegalHold": legalHoldFault.Code,
-		"plainBypass":    bypassFault.Code,
-		"lockedVersion":  versioning.Output,
-		"lockedSuspend":  suspendFault.Code,
+		"plainLegalHold":  legalHoldFault.Code,
+		"plainBypass":     bypassFault.Code,
+		"lockedVersion":   versioning.Output,
+		"lockedSuspend":   suspendFault.Code,
+		"regionalVersion": regionalVersioning.Output,
 	})
 }
 

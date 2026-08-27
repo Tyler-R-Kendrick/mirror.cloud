@@ -689,6 +689,7 @@ func TestPostObjectBlobFailureLeavesNoObject(t *testing.T) {
 	var payload bytes.Buffer
 	writer := multipart.NewWriter(&payload)
 	_ = writer.WriteField("key", "object")
+	_ = writer.WriteField("tagging", "<Tagging><TagSet><Tag><Key>source</Key><Value>browser</Value></Tag></TagSet></Tagging>")
 	file, _ := writer.CreateFormFile("file", "object.txt")
 	_, _ = file.Write([]byte("body"))
 	_ = writer.Close()
@@ -699,6 +700,9 @@ func TestPostObjectBlobFailureLeavesNoObject(t *testing.T) {
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{"Bucket": "post-failure", "Key": "object"}}); err == nil {
 		t.Fatal("failed POST left object metadata")
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObjectTagging", Input: map[string]any{"Bucket": "post-failure", "Key": "object"}}); err == nil {
+		t.Fatal("failed POST left object tags")
 	}
 }
 

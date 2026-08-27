@@ -1598,7 +1598,12 @@ func TestObjectLockAppliesRetentionOnWrite(t *testing.T) {
 	if invalidLegalFault.Code != "InvalidArgument" {
 		t.Fatalf("invalid legal hold status: %v", err)
 	}
-	golden.AssertJSON(t, map[string]any{"default": retention.Output, "year": yearRetention.Output, "explicit": explicitRetention.Output, "legalHold": legalHold.Output, "unpaired": invalidFault.Code, "invalidLegalHold": invalidLegalFault.Code})
+	_, err = invoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "invalid-mode", "ObjectLockMode": "INVALID", "ObjectLockRetainUntilDate": "1970-01-02T00:00:00Z"}, nil)
+	invalidModeFault := asFault(t, err)
+	if invalidModeFault.Code != "InvalidArgument" {
+		t.Fatalf("invalid retention mode: %v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"default": retention.Output, "year": yearRetention.Output, "explicit": explicitRetention.Output, "legalHold": legalHold.Output, "unpaired": invalidFault.Code, "invalidLegalHold": invalidLegalFault.Code, "invalidMode": invalidModeFault.Code})
 }
 
 func TestObjectLockCapturesMultipartRetentionAtInitiation(t *testing.T) {

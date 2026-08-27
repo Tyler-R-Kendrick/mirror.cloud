@@ -12,6 +12,7 @@
     }
   },
   "invalidLegalHold": "InvalidArgument",
+  "invalidMode": "InvalidArgument",
   "legalHold": {
     "LegalHold": {
       "Status": "ON"

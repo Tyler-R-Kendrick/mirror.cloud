@@ -98,6 +98,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		writer := multipart.NewWriter(&payload)
 		_ = writer.WriteField("key", "forms/${filename}")
 		_ = writer.WriteField("success_action_status", "201")
+		_ = writer.WriteField("tagging", "<Tagging><TagSet><Tag><Key>source</Key><Value>browser</Value></Tag></TagSet></Tagging>")
 		file, err := writer.CreateFormFile("file", "report.txt")
 		if err != nil {
 			t.Fatal(err)
@@ -126,6 +127,12 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusOK || string(stored) != "from browser" {
 			t.Fatalf("stored form object %d %q", res.StatusCode, stored)
+		}
+		res = do(http.MethodGet, "/post-form/forms/report.txt?tagging", nil, "")
+		tags, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(tags, []byte("<Key>source</Key>")) || !bytes.Contains(tags, []byte("<Value>browser</Value>")) {
+			t.Fatalf("stored form tags %d %s", res.StatusCode, tags)
 		}
 	})
 

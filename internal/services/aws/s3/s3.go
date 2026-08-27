@@ -41,9 +41,10 @@ func init() {
 
 // Pack implements spi.BehaviorPack for S3.
 type Pack struct {
-	deps spi.Deps
-	mu   sync.Mutex
-	mpu  map[string]*mpu
+	deps      spi.Deps
+	mu        sync.Mutex
+	versionMu sync.Mutex // ponytail: global lock; use per-object locks if versioned write throughput matters.
+	mpu       map[string]*mpu
 }
 
 type mpu struct {
@@ -825,6 +826,11 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 			return nil, err
 		}
 	}
+	versioned := p.versioningEnabled(ctx, req, b)
+	if versioned {
+		p.versionMu.Lock()
+		defer p.versionMu.Unlock()
+	}
 	provided := providedChecksums(req)
 	info, err := p.deps.Blobs.Put(ctx, blobKey(req, b, key), bytes.NewReader(body))
 	if err != nil {
@@ -835,10 +841,13 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	}
 	mtime := p.deps.Clock.Now().UTC().Format(http.TimeFormat)
 	vid := ""
-	if p.versioningEnabled(ctx, req, b) {
+	var versionOrder []string
+	if versioned {
 		vid = p.deps.Rand.Hex(8)
+		current, _ := p.objectMetadata(ctx, req, b, key, "")
+		versionOrder = append(p.objectVersionOrder(ctx, req, b, key, current), vid)
 		_, _ = p.deps.Blobs.Put(ctx, blobKey(req, b, key)+"@"+vid, bytes.NewReader(body))
-		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation}
+		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "versionOrder": versionOrder, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation}
 		if len(parts) > 0 {
 			versionMeta["parts"] = parts
 		}
@@ -850,6 +859,9 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		_ = p.col(req, "versions").Put(ctx, b+"/"+key+"/"+vid, vm)
 	}
 	metaDoc := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "versionId": vid, "deleteMarker": false, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation}
+	if versioned {
+		metaDoc["versionOrder"] = versionOrder
+	}
 	if len(parts) > 0 {
 		metaDoc["parts"] = parts
 	}
@@ -1074,10 +1086,19 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		return nil, err
 	}
 	wantVer := str(req.Input["VersionId"])
-	if p.versioningEnabled(ctx, req, b) && wantVer == "" {
+	versioned := p.versioningEnabled(ctx, req, b)
+	if !versioned && wantVer == "null" {
+		wantVer = ""
+	}
+	if versioned || wantVer != "" {
+		p.versionMu.Lock()
+		defer p.versionMu.Unlock()
+	}
+	if versioned && wantVer == "" {
 		vid := p.deps.Rand.Hex(8)
 		mtime := p.deps.Clock.Now().UTC().Format(http.TimeFormat)
-		meta, _ := json.Marshal(map[string]any{"deleteMarker": true, "versionId": vid, "mtime": mtime, "key": key})
+		current, _ := p.objectMetadata(ctx, req, b, key, "")
+		meta, _ := json.Marshal(map[string]any{"deleteMarker": true, "versionId": vid, "versionOrder": append(p.objectVersionOrder(ctx, req, b, key, current), vid), "mtime": mtime, "key": key})
 		_ = p.col(req, "objects").Put(ctx, b+"/"+key, meta)
 		_ = p.col(req, "versions").Put(ctx, b+"/"+key+"/"+vid, meta)
 		h := http.Header{}
@@ -1090,10 +1111,40 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		return &spi.Response{Status: 204, Headers: h}, nil
 	}
 	if wantVer != "" {
+		meta, exists := p.objectMetadata(ctx, req, b, key, wantVer)
+		if !exists {
+			return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid version id specified", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "versionId", "ArgumentValue": wantVer}}
+		}
+		current, currentExists := p.objectMetadata(ctx, req, b, key, "")
 		_ = p.deps.Blobs.Delete(ctx, blobKey(req, b, key)+"@"+wantVer)
 		_ = p.col(req, "versions").Delete(ctx, b+"/"+key+"/"+wantVer)
 		_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, wantVer))
-		return &spi.Response{Status: 204}, nil
+		order := p.objectVersionOrder(ctx, req, b, key, current)
+		kept := order[:0]
+		for _, version := range order {
+			if version != wantVer {
+				kept = append(kept, version)
+			}
+		}
+		if currentExists && str(current["versionId"]) == wantVer {
+			previous := ""
+			if len(kept) > 0 {
+				previous = kept[len(kept)-1]
+			}
+			if err := p.restoreCurrentVersion(ctx, req, b, key, previous, kept); err != nil {
+				return nil, err
+			}
+		} else if currentExists {
+			current["versionOrder"] = kept
+			raw, _ := json.Marshal(current)
+			_ = p.col(req, "objects").Put(ctx, b+"/"+key, raw)
+		}
+		h := http.Header{}
+		h.Set("x-amz-version-id", wantVer)
+		if truthy(meta["deleteMarker"]) {
+			h.Set("x-amz-delete-marker", "true")
+		}
+		return &spi.Response{Status: 204, Headers: h}, nil
 	}
 	_ = p.deps.Blobs.Delete(ctx, blobKey(req, b, key))
 	_ = p.col(req, "objects").Delete(ctx, b+"/"+key)
@@ -2575,6 +2626,67 @@ func (p *Pack) objectMetadata(ctx context.Context, req *spi.Request, bucket, key
 	var meta map[string]any
 	_ = json.Unmarshal(raw, &meta)
 	return meta, exists
+}
+
+func (p *Pack) objectVersionOrder(ctx context.Context, req *spi.Request, bucket, key string, current map[string]any) []string {
+	if raw, recorded := current["versionOrder"].([]any); recorded {
+		order := make([]string, 0, len(raw))
+		for _, version := range raw {
+			order = append(order, str(version))
+		}
+		return order
+	}
+	var order []string
+	kvs, _, _ := p.col(req, "versions").List(ctx, bucket+"/"+key+"/", "", 0)
+	currentID := str(current["versionId"])
+	for _, kv := range kvs {
+		var meta map[string]any
+		_ = json.Unmarshal(kv.Value, &meta)
+		if versionID := str(meta["versionId"]); versionID != "" && versionID != currentID {
+			order = append(order, versionID)
+		}
+	}
+	if currentID != "" {
+		order = append(order, currentID)
+	}
+	return order
+}
+
+func (p *Pack) restoreCurrentVersion(ctx context.Context, req *spi.Request, bucket, key, version string, order []string) error {
+	currentKey := bucket + "/" + key
+	if version == "" {
+		_ = p.col(req, "objects").Delete(ctx, currentKey)
+		_ = p.col(req, "tags").Delete(ctx, objectTagKey(bucket, key, ""))
+		return p.deps.Blobs.Delete(ctx, blobKey(req, bucket, key))
+	}
+	raw, exists, _ := p.col(req, "versions").Get(ctx, currentKey+"/"+version)
+	if !exists {
+		return &spi.Fault{Code: "InternalError", HTTPStatus: http.StatusInternalServerError, Fault: "server"}
+	}
+	var meta map[string]any
+	_ = json.Unmarshal(raw, &meta)
+	meta["versionOrder"] = order
+	current, _ := json.Marshal(meta)
+	_ = p.col(req, "objects").Put(ctx, currentKey, current)
+	if truthy(meta["deleteMarker"]) {
+		_ = p.deps.Blobs.Delete(ctx, blobKey(req, bucket, key))
+	} else {
+		body, _, err := p.deps.Blobs.Get(ctx, blobKey(req, bucket, key)+"@"+version)
+		if err != nil {
+			return err
+		}
+		defer body.Close()
+		if _, err := p.deps.Blobs.Put(ctx, blobKey(req, bucket, key), body); err != nil {
+			return err
+		}
+	}
+	tagKey := objectTagKey(bucket, key, "")
+	if tags, ok, _ := p.col(req, "tags").Get(ctx, objectTagKey(bucket, key, version)); ok {
+		_ = p.col(req, "tags").Put(ctx, tagKey, tags)
+	} else {
+		_ = p.col(req, "tags").Delete(ctx, tagKey)
+	}
+	return nil
 }
 
 func deleteMarkerReadFault(meta map[string]any, explicit bool) *spi.Fault {

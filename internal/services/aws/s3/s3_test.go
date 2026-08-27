@@ -1379,6 +1379,41 @@ func TestCopyObjectSourceVersions(t *testing.T) {
 	}
 }
 
+func TestDeleteObjectRestoresPreviousVersion(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Enabled"}, nil)
+	first := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key", "Tagging": "stage=first"}, []byte("first"))
+	second := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key", "Tagging": "stage=second"}, []byte("second"))
+	third := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key", "Tagging": "stage=third"}, []byte("third"))
+
+	deletedSecond := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": second.Headers.Get("x-amz-version-id")}, nil)
+	if deletedSecond.Headers.Get("x-amz-version-id") != second.Headers.Get("x-amz-version-id") || string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil))) != "third" {
+		t.Fatalf("noncurrent delete = %#v", deletedSecond)
+	}
+
+	deletedThird := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": third.Headers.Get("x-amz-version-id")}, nil)
+	restored := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil)
+	if deletedThird.Headers.Get("x-amz-version-id") != third.Headers.Get("x-amz-version-id") || restored.Headers.Get("x-amz-version-id") != first.Headers.Get("x-amz-version-id") || string(readStream(t, restored)) != "first" {
+		t.Fatalf("restored object = %#v", restored)
+	}
+	tags := asSliceForTest(mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "key"}, nil).Output["TagSet"])
+	if len(tags) != 1 || tags[0].(map[string]any)["Value"] != "first" {
+		t.Fatalf("restored tags = %#v", tags)
+	}
+
+	marker := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil)
+	deletedMarker := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": marker.Headers.Get("x-amz-version-id")}, nil)
+	if deletedMarker.Headers.Get("x-amz-delete-marker") != "true" || deletedMarker.Headers.Get("x-amz-version-id") != marker.Headers.Get("x-amz-version-id") || string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil))) != "first" {
+		t.Fatalf("delete marker restore = %#v", deletedMarker)
+	}
+
+	_, err := invoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": "missing"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Fields["ArgumentName"] != "versionId" {
+		t.Fatalf("missing version fault = %#v", fault)
+	}
+}
+
 func TestVersionedObjectTaggingCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

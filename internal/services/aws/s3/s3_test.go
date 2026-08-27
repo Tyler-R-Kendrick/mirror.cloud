@@ -2795,6 +2795,32 @@ func TestPostObjectRejectsMalformedForms(t *testing.T) {
 	}
 }
 
+func TestPostObjectSuccessRedirect(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "post-redirect"}, nil)
+	var payload bytes.Buffer
+	writer := multipart.NewWriter(&payload)
+	_ = writer.WriteField("key", "redirected")
+	_ = writer.WriteField("success_action_redirect", "https://example.test/done?state=ok")
+	file, _ := writer.CreateFormFile("file", "file.txt")
+	_, _ = file.Write([]byte("body"))
+	_ = writer.Close()
+	httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/post-redirect", &payload)
+	httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+	response, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": "post-redirect"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	location, err := url.Parse(response.Headers.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := location.Query()
+	if response.Status != http.StatusSeeOther || location.Host != "example.test" || query.Get("state") != "ok" || query.Get("bucket") != "post-redirect" || query.Get("key") != "redirected" || query.Get("etag") == "" {
+		t.Fatalf("redirect response: %#v", response)
+	}
+}
+
 func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	west := ident()

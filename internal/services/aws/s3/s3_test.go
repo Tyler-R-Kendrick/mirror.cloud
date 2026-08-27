@@ -1473,7 +1473,9 @@ func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
 	if _, err := invoke(t, p, "DeleteObjects", map[string]any{"Bucket": "bucket", "Quiet": true, "Objects": objects[:1000]}, nil); err != nil {
 		t.Fatalf("maximum delete: %v", err)
 	}
-	if _, err := invoke(t, p, "DeleteObjects", map[string]any{"Bucket": "bucket", "Objects": objects}, nil); asFault(t, err).Code != "MalformedXML" {
+	_, err = invoke(t, p, "DeleteObjects", map[string]any{"Bucket": "bucket", "Objects": objects}, nil)
+	oversizedFault := asFault(t, err)
+	if oversizedFault.Code != "MalformedXML" {
 		t.Fatalf("oversized delete: %v", err)
 	}
 	golden.AssertJSON(t, map[string]any{
@@ -1481,6 +1483,7 @@ func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
 		"quiet":        result.Output,
 		"restoredBody": restoredBody,
 		"empty":        emptyFault.Code,
+		"oversized":    oversizedFault.Code,
 	})
 }
 

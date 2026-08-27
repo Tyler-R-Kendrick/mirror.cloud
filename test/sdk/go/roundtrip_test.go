@@ -156,6 +156,9 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("enable versioning: %v", err)
 	}
+	if _, err := s3c.PutBucketReplication(context.Background(), &s3.PutBucketReplicationInput{Bucket: aws.String("sdk"), ReplicationConfiguration: replicationConfiguration}); err == nil || !strings.Contains(err.Error(), "InvalidRequest") {
+		t.Fatalf("replication to unversioned destination: %v", err)
+	}
 	if _, err := west.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String("sdk-west"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusEnabled}}); err != nil {
 		t.Fatalf("enable replica versioning: %v", err)
 	}

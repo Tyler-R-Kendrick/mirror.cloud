@@ -143,6 +143,7 @@ func TestDecodeObjectLockXML(t *testing.T) {
 	}{
 		{"PutObjectLegalHold", `<LegalHold><Status>ON</Status></LegalHold>`, "LegalHold", map[string]any{"Status": "ON"}},
 		{"PutObjectRetention", `<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00Z</RetainUntilDate></Retention>`, "Retention", map[string]any{"Mode": "GOVERNANCE", "RetainUntilDate": "2030-01-01T00:00:00Z"}},
+		{"PutObjectLockConfiguration", `<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>COMPLIANCE</Mode><Years>2</Years></DefaultRetention></Rule></ObjectLockConfiguration>`, "ObjectLockConfiguration", map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "COMPLIANCE", "Years": 2}}}},
 	}
 	for _, test := range tests {
 		t.Run(test.op, func(t *testing.T) {
@@ -153,6 +154,30 @@ func TestDecodeObjectLockXML(t *testing.T) {
 			}
 			if !reflect.DeepEqual(req.Input[test.field], test.want) || req.Input["VersionId"] != "v1" {
 				t.Fatalf("input %#v", req.Input)
+			}
+		})
+	}
+}
+
+func TestEncodeObjectLockXML(t *testing.T) {
+	tests := []struct {
+		op, root string
+		value    map[string]any
+	}{
+		{"GetObjectLockConfiguration", "ObjectLockConfiguration", map[string]any{"ObjectLockEnabled": "Enabled"}},
+		{"GetObjectLegalHold", "LegalHold", map[string]any{"Status": "ON"}},
+		{"GetObjectRetention", "Retention", map[string]any{"Mode": "GOVERNANCE", "RetainUntilDate": "2030-01-01T00:00:00Z"}},
+	}
+	for _, test := range tests {
+		t.Run(test.op, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			err := (Codec{}).Encode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: test.op}, w, &spi.Response{Output: map[string]any{test.root: test.value}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := `<?xml version="1.0" encoding="UTF-8"?><` + test.root + ` xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`
+			if !strings.HasPrefix(w.Body.String(), want) || !strings.HasSuffix(w.Body.String(), "</"+test.root+">") {
+				t.Fatalf("body %q", w.Body.String())
 			}
 		})
 	}

@@ -497,12 +497,39 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 			return
 		}
 		in["Retention"] = map[string]any{"Mode": retention.Mode, "RetainUntilDate": retention.RetainUntilDate}
+	case "PutBucketObjectLockConfiguration", "PutObjectLockConfiguration":
+		var configuration struct {
+			ObjectLockEnabled string `xml:"ObjectLockEnabled"`
+			Rule              *struct {
+				DefaultRetention *struct {
+					Mode  string `xml:"Mode"`
+					Days  *int   `xml:"Days"`
+					Years *int   `xml:"Years"`
+				} `xml:"DefaultRetention"`
+			} `xml:"Rule"`
+		}
+		if xml.Unmarshal(raw, &configuration) != nil {
+			in["_body"] = string(raw)
+			return
+		}
+		document := map[string]any{"ObjectLockEnabled": configuration.ObjectLockEnabled}
+		if configuration.Rule != nil && configuration.Rule.DefaultRetention != nil {
+			retention := map[string]any{"Mode": configuration.Rule.DefaultRetention.Mode}
+			if configuration.Rule.DefaultRetention.Days != nil {
+				retention["Days"] = *configuration.Rule.DefaultRetention.Days
+			}
+			if configuration.Rule.DefaultRetention.Years != nil {
+				retention["Years"] = *configuration.Rule.DefaultRetention.Years
+			}
+			document["Rule"] = map[string]any{"DefaultRetention": retention}
+		}
+		in["ObjectLockConfiguration"] = document
 	case "PutBucketPolicy":
 		in["Policy"] = string(raw)
 	case "PutBucketCors", "PutBucketWebsite", "PutBucketLogging",
 		"PutBucketLifecycleConfiguration", "PutBucketReplication",
 		"PutBucketEncryption", "PutBucketAcl", "PutObjectAcl",
-		"PutBucketObjectLockConfiguration", "PutBucketRequestPayment",
+		"PutBucketRequestPayment",
 		"PutBucketAccelerateConfiguration":
 		in["_body"] = string(raw)
 		in["Document"] = string(raw)
@@ -580,6 +607,19 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		b.WriteString(`<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
 		_ = xml.EscapeText(&b, []byte(fmt.Sprint(resp.Output["LocationConstraint"])))
 		b.WriteString(`</LocationConstraint>`)
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
+	objectLockRoot := map[string]string{
+		"GetBucketObjectLockConfiguration": "ObjectLockConfiguration",
+		"GetObjectLockConfiguration":       "ObjectLockConfiguration",
+		"GetObjectLegalHold":               "LegalHold",
+		"GetObjectRetention":               "Retention",
+	}[op.Name]
+	if objectLockRoot != "" {
+		fmt.Fprintf(&b, `<%s xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`, objectLockRoot)
+		write(resp.Output[objectLockRoot], &b)
+		fmt.Fprintf(&b, "</%s>", objectLockRoot)
 		_, err := io.WriteString(w, b.String())
 		return err
 	}

@@ -1,0 +1,11 @@
+{
+  "invalid": {
+    "code": "InvalidArgument",
+    "fields": {
+      "ArgumentName": "Expires",
+      "ArgumentValue": "tomorrow"
+    },
+    "status": 400
+  },
+  "valid": "Thu, 27 Aug 2026 12:00:00 GMT"
+}

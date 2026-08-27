@@ -3007,15 +3007,20 @@ func TestPostObjectExpires(t *testing.T) {
 	if err := post("valid", expires); err != nil {
 		t.Fatal(err)
 	}
-	if got := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "post-expires", "Key": "valid"}, nil).Headers.Get("Expires"); got != expires {
+	got := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "post-expires", "Key": "valid"}, nil).Headers.Get("Expires")
+	if got != expires {
 		t.Fatalf("Expires = %q", got)
 	}
-	if fault := asFault(t, post("invalid", "tomorrow")); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "Expires" {
+	characterization := map[string]any{"valid": got}
+	fault := asFault(t, post("invalid", "tomorrow"))
+	if fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "Expires" {
 		t.Fatalf("fault = %+v", fault)
 	}
+	characterization["invalid"] = map[string]any{"code": fault.Code, "status": fault.HTTPStatus, "fields": fault.Fields}
 	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "post-expires", "Key": "invalid"}, nil); asFault(t, err).Code != "NoSuchKey" {
 		t.Fatal("invalid Expires stored object")
 	}
+	golden.AssertJSON(t, characterization)
 }
 
 func TestObjectCreatedEventNames(t *testing.T) {

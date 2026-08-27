@@ -184,7 +184,12 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	}
 
 	delXML := `<Delete><Object><Key>k</Key></Object></Delete>`
-	if code, b, h := do(http.MethodPost, "/bucket-q?delete", delXML, nil); code >= 300 {
+	delChecksum := make([]byte, 4)
+	binary.BigEndian.PutUint32(delChecksum, crc32.ChecksumIEEE([]byte(delXML)))
+	if code, b, h := do(http.MethodPost, "/bucket-q?delete", delXML, map[string]string{
+		"x-amz-checksum-crc32":         base64.StdEncoding.EncodeToString(delChecksum),
+		"x-amz-sdk-checksum-algorithm": "CRC32",
+	}); code >= 300 {
 		t.Fatalf("delete objects %d %s", code, b)
 	} else if h.Get("x-mirror-fidelity") != "emulate" {
 		t.Fatalf("delete fidelity %q", h.Get("x-mirror-fidelity"))

@@ -1933,7 +1933,7 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	col := p.col(req, "bktcfg")
 	if strings.HasPrefix(req.Operation, "Put") {
-		if req.Operation == "PutBucketObjectLockConfiguration" {
+		if req.Operation == "PutBucketObjectLockConfiguration" || req.Operation == "PutObjectLockConfiguration" {
 			if !p.versioningEnabled(ctx, req, b) {
 				return nil, &spi.Fault{Code: "InvalidBucketState", Message: "Versioning must be 'Enabled' on the bucket to apply a Object Lock configuration", HTTPStatus: http.StatusConflict, Fault: "client"}
 			}
@@ -1959,7 +1959,7 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	raw, ok, _ := col.Get(ctx, key)
 	if !ok {
-		if req.Operation == "GetBucketObjectLockConfiguration" && p.bucketObjectLockEnabled(ctx, req, b) {
+		if (req.Operation == "GetBucketObjectLockConfiguration" || req.Operation == "GetObjectLockConfiguration") && p.bucketObjectLockEnabled(ctx, req, b) {
 			return &spi.Response{Output: map[string]any{"ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled"}}}, nil
 		}
 		if req.Operation == "GetBucketAcl" || req.Operation == "GetObjectAcl" {

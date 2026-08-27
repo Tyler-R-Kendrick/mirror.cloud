@@ -42,7 +42,7 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv := func(op string, in map[string]any, body io.Reader, copySrc string) *spi.Response {
 			return call(t, p, ctx, id, seen, op, in, body, copySrc)
 		}
-		inv("CreateBucket", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("CreateBucket", map[string]any{"Bucket": "bucket", "ObjectLockEnabledForBucket": true}, nil, "")
 		inv("PutObject", map[string]any{"Bucket": "bucket", "Key": "k"}, bytes.NewReader([]byte("v1")), "")
 		inv("PutObject", map[string]any{"Bucket": "bucket", "Key": "src"}, bytes.NewReader([]byte("SRC")), "")
 		inv("CopyObject", map[string]any{"Bucket": "bucket", "Key": "dst", "CopySource": "bucket/src"}, nil, "")

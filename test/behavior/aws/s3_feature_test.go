@@ -40,6 +40,9 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 		req.Header.Set("Authorization", auth)
+		if method == http.MethodPut && path == "/object-lock" {
+			req.Header.Set("x-amz-bucket-object-lock-enabled", "true")
+		}
 		if strings.Contains(path, "?delete") {
 			digest := md5.Sum(body)
 			req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(digest[:]))

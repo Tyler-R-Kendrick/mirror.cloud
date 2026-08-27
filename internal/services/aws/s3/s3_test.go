@@ -1509,8 +1509,7 @@ func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
 
 func TestObjectLockPreventsPermanentDeletion(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
-	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
-	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Enabled"}, nil)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket", "ObjectLockEnabledForBucket": true}, nil)
 	first := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("first")).Headers.Get("x-amz-version-id")
 	second := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("second")).Headers.Get("x-amz-version-id")
 	mustInvoke(t, p, "PutObjectLegalHold", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": first, "LegalHold": map[string]any{"Status": "ON"}}, nil)
@@ -1554,6 +1553,27 @@ func TestObjectLockPreventsPermanentDeletion(t *testing.T) {
 		"complianceWithBypass": complianceFault.Code,
 		"expired":              "deleted",
 	})
+}
+
+func TestObjectLockBucketGuards(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "plain"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "plain", "Key": "key"}, []byte("plain"))
+	if _, err := invoke(t, p, "PutObjectLegalHold", map[string]any{"Bucket": "plain", "Key": "key", "LegalHold": map[string]any{"Status": "ON"}}, nil); asFault(t, err).Code != "InvalidRequest" {
+		t.Fatalf("legal hold without bucket configuration: %v", err)
+	}
+	if _, err := invoke(t, p, "DeleteObject", map[string]any{"Bucket": "plain", "Key": "key", "BypassGovernanceRetention": false}, nil); asFault(t, err).Code != "InvalidArgument" {
+		t.Fatalf("bypass without bucket configuration: %v", err)
+	}
+
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "locked", "ObjectLockEnabledForBucket": true}, nil)
+	versioning := mustInvoke(t, p, "GetBucketVersioning", map[string]any{"Bucket": "locked"}, nil)
+	if versioning.Output["Status"] != "Enabled" {
+		t.Fatalf("object lock did not enable versioning: %#v", versioning.Output)
+	}
+	if _, err := invoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "locked", "Status": "Suspended"}, nil); asFault(t, err).Code != "InvalidBucketState" {
+		t.Fatalf("suspend object-lock versioning: %v", err)
+	}
 }
 
 func TestVersionedObjectTaggingCharacterization(t *testing.T) {
@@ -2430,9 +2450,9 @@ func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	west := ident()
 	west.Region = "us-west-2"
-	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "source"}, nil)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "source", "ObjectLockEnabledForBucket": true}, nil)
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "source", "Status": "Enabled"}, nil)
-	mustInvokeAs(t, p, west, "CreateBucket", map[string]any{"Bucket": "destination", "LocationConstraint": "us-west-2"}, nil)
+	mustInvokeAs(t, p, west, "CreateBucket", map[string]any{"Bucket": "destination", "LocationConstraint": "us-west-2", "ObjectLockEnabledForBucket": true}, nil)
 	mustInvokeAs(t, p, west, "PutBucketVersioning", map[string]any{"Bucket": "destination", "Status": "Enabled"}, nil)
 	mustInvoke(t, p, "PutBucketReplication", map[string]any{
 		"Bucket": "source",

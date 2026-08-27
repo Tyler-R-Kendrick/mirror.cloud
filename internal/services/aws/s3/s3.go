@@ -548,6 +548,10 @@ func (p *Pack) col(req *spi.Request, name string) spi.Collection {
 
 func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b := str(req.Input["Bucket"])
+	objectLock := truthy(req.Input["ObjectLockEnabledForBucket"])
+	if req.HTTP != nil {
+		objectLock = objectLock || strings.EqualFold(req.HTTP.Header.Get("x-amz-bucket-object-lock-enabled"), "true")
+	}
 	namespace := requestCondition(req, "BucketNamespace", "x-amz-bucket-namespace")
 	if namespace != "" && namespace != "global" && namespace != "account-regional" {
 		return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid bucket namespace", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-bucket-namespace", "ArgumentValue": namespace}}
@@ -579,9 +583,12 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		} else if exists {
 			return nil, &spi.Fault{Code: "BucketAlreadyOwnedByYou", Message: "Your previous request to create the named bucket succeeded and you already own it.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"BucketName": b}}
 		}
-		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "namespace": namespace, "creationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")})
+		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "namespace": namespace, "objectLockEnabled": objectLock, "creationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")})
 		if err := buckets.Put(ctx, b, meta); err != nil {
 			return nil, err
+		}
+		if objectLock {
+			_ = p.deps.Store.Scope(req.Identity.Account, bucketRegion).Collection("versioning").Put(ctx, b, []byte("Enabled"))
 		}
 		h := http.Header{}
 		h.Set("Location", "/"+b)
@@ -607,7 +614,7 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 			return nil, &spi.Fault{Code: "BucketAlreadyOwnedByYou", Message: "Your previous request to create the named bucket succeeded and you already own it.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"BucketName": b}}
 		}
 	} else {
-		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "creationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")})
+		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "objectLockEnabled": objectLock, "creationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")})
 		if err := buckets.Put(ctx, b, meta); err != nil {
 			return nil, err
 		}
@@ -615,6 +622,9 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		if err := global.Put(ctx, b, location); err != nil {
 			_ = buckets.Delete(ctx, b)
 			return nil, err
+		}
+		if objectLock {
+			_ = p.deps.Store.Scope(req.Identity.Account, bucketRegion).Collection("versioning").Put(ctx, b, []byte("Enabled"))
 		}
 	}
 	h := http.Header{}
@@ -1084,6 +1094,9 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
+	}
+	if bypassSet, _ := governanceBypass(req); bypassSet && !p.bucketObjectLockEnabled(ctx, req, b) {
+		return nil, &spi.Fault{Code: "InvalidArgument", Message: "x-amz-bypass-governance-retention is only applicable to Object Lock enabled buckets.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-bypass-governance-retention"}}
 	}
 	wantVer := str(req.Input["VersionId"])
 	versioned := p.versioningEnabled(ctx, req, b)
@@ -1881,6 +1894,9 @@ func (p *Pack) versioning(ctx context.Context, req *spi.Request) (*spi.Response,
 		if st != "Enabled" && st != "Suspended" {
 			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
+		if st == "Suspended" && p.bucketObjectLockEnabled(ctx, req, b) {
+			return nil, &spi.Fault{Code: "InvalidBucketState", Message: "An Object Lock configuration is present on this bucket, so the versioning state cannot be changed.", HTTPStatus: http.StatusConflict, Fault: "client"}
+		}
 		_ = p.col(req, "versioning").Put(ctx, b, []byte(st))
 		return &spi.Response{Status: 200, Output: map[string]any{}}, nil
 	}
@@ -2365,6 +2381,9 @@ func (p *Pack) objectLockExtras(ctx context.Context, req *spi.Request) (*spi.Res
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
+	if !p.bucketObjectLockEnabled(ctx, req, b) {
+		return nil, &spi.Fault{Code: "InvalidRequest", Message: "Bucket is missing Object Lock Configuration", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
 	requestedVersion := str(req.Input["VersionId"])
 	meta, ok := p.objectMetadata(ctx, req, b, key, requestedVersion)
 	if !ok {
@@ -2425,11 +2444,30 @@ func (p *Pack) objectVersionLocked(ctx context.Context, req *spi.Request, bucket
 	if err == nil && !p.deps.Clock.Now().Before(deadline) {
 		return false
 	}
-	bypass := truthy(req.Input["BypassGovernanceRetention"])
-	if req.HTTP != nil {
-		bypass = bypass || strings.EqualFold(req.HTTP.Header.Get("x-amz-bypass-governance-retention"), "true")
-	}
+	_, bypass := governanceBypass(req)
 	return !bypass || !strings.EqualFold(str(retention["Mode"]), "GOVERNANCE")
+}
+
+func governanceBypass(req *spi.Request) (bool, bool) {
+	if value, ok := req.Input["BypassGovernanceRetention"]; ok {
+		return true, truthy(value)
+	}
+	if req.HTTP != nil {
+		if values, ok := req.HTTP.Header[http.CanonicalHeaderKey("x-amz-bypass-governance-retention")]; ok {
+			return true, len(values) > 0 && strings.EqualFold(values[0], "true")
+		}
+	}
+	return false, false
+}
+
+func (p *Pack) bucketObjectLockEnabled(ctx context.Context, req *spi.Request, bucket string) bool {
+	raw, ok, _ := p.col(req, "buckets").Get(ctx, bucket)
+	if !ok {
+		return false
+	}
+	var meta map[string]any
+	_ = json.Unmarshal(raw, &meta)
+	return truthy(meta["objectLockEnabled"])
 }
 
 func (p *Pack) restoreObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {

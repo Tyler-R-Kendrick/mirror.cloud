@@ -993,6 +993,12 @@ func (p *Pack) postObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	} else if tagging != "" {
 		input["Tagging"] = tagging
 	}
+	if expires := fields["Expires"]; expires != "" {
+		if _, err := time.Parse(http.TimeFormat, expires); err != nil {
+			return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid Expires field", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "Expires", "ArgumentValue": expires}}
+		}
+		input["Expires"] = expires
+	}
 	for form, member := range map[string]string{
 		"Cache-Control":                   "CacheControl",
 		"Content-Disposition":             "ContentDisposition",

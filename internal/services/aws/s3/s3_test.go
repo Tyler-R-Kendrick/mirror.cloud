@@ -2986,6 +2986,38 @@ func TestPostObjectTagging(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestPostObjectExpires(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "post-expires"}, nil)
+	post := func(key, expires string) error {
+		t.Helper()
+		var payload bytes.Buffer
+		writer := multipart.NewWriter(&payload)
+		_ = writer.WriteField("key", key)
+		_ = writer.WriteField("Expires", expires)
+		file, _ := writer.CreateFormFile("file", "file.txt")
+		_, _ = file.Write([]byte("body"))
+		_ = writer.Close()
+		httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/post-expires", &payload)
+		httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+		_, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": "post-expires"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest})
+		return err
+	}
+	expires := "Thu, 27 Aug 2026 12:00:00 GMT"
+	if err := post("valid", expires); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "post-expires", "Key": "valid"}, nil).Headers.Get("Expires"); got != expires {
+		t.Fatalf("Expires = %q", got)
+	}
+	if fault := asFault(t, post("invalid", "tomorrow")); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "Expires" {
+		t.Fatalf("fault = %+v", fault)
+	}
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "post-expires", "Key": "invalid"}, nil); asFault(t, err).Code != "NoSuchKey" {
+		t.Fatal("invalid Expires stored object")
+	}
+}
+
 func TestObjectCreatedEventNames(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

@@ -306,9 +306,21 @@ func TestS3ObjectLifecycle(t *testing.T) {
 				t.Fatalf("version %s: %d", bucket, res.StatusCode)
 			}
 		}
-		invalidConfiguration := `<ReplicationConfiguration><Role>arn:aws:iam::000000000000:role/replication</Role><Rule><Priority>1</Priority><Status>Enabled</Status><Filter><Tag><Key>environment</Key><Value>test</Value></Tag></Filter><DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication><Destination><Bucket>arn:aws:s3:::replication-destination</Bucket></Destination></Rule></ReplicationConfiguration>`
-		res := do(http.MethodPut, "/replication-source?replication", []byte(invalidConfiguration), "")
+		res := do(http.MethodPut, "/replication-unversioned", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create unversioned destination: %d", res.StatusCode)
+		}
+		unversionedConfiguration := `<ReplicationConfiguration><Role>arn:aws:iam::000000000000:role/replication</Role><Rule><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replication-unversioned</Bucket></Destination></Rule></ReplicationConfiguration>`
+		res = do(http.MethodPut, "/replication-source?replication", []byte(unversionedConfiguration), "")
 		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidRequest</Code>")) {
+			t.Fatalf("unversioned destination validation: %d %s", res.StatusCode, body)
+		}
+		invalidConfiguration := `<ReplicationConfiguration><Role>arn:aws:iam::000000000000:role/replication</Role><Rule><Priority>1</Priority><Status>Enabled</Status><Filter><Tag><Key>environment</Key><Value>test</Value></Tag></Filter><DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication><Destination><Bucket>arn:aws:s3:::replication-destination</Bucket></Destination></Rule></ReplicationConfiguration>`
+		res = do(http.MethodPut, "/replication-source?replication", []byte(invalidConfiguration), "")
+		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
 		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidRequest</Code>")) {
 			t.Fatalf("tag delete-marker validation: %d %s", res.StatusCode, body)

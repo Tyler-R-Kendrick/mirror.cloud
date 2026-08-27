@@ -422,10 +422,10 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestBootedServerS3QuerySemantics",
 		},
 		{
-			name: "s3-list-uploads-ignore-http-prefix",
+			name: "s3-list-uploads-ignore-prefix",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `parameter("Prefix", "prefix")`,
-			new:  `parameter("Prefix", "mutated-prefix")`,
+			old:  `prefix := parameter("Prefix", "prefix")`,
+			new:  `prefix := ""`,
 			pkg:  "./internal/spine",
 			run:  "TestBootedServerS3QuerySemantics",
 		},

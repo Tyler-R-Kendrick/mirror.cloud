@@ -11,10 +11,17 @@
       "RetainUntilDate": "1970-01-02T00:00:00Z"
     }
   },
+  "invalidLegalHold": "InvalidArgument",
   "legalHold": {
     "LegalHold": {
       "Status": "ON"
     }
   },
-  "unpaired": "InvalidArgument"
+  "unpaired": "InvalidArgument",
+  "year": {
+    "Retention": {
+      "Mode": "COMPLIANCE",
+      "RetainUntilDate": "1971-01-01T00:00:00Z"
+    }
+  }
 }

@@ -1571,6 +1571,12 @@ func TestObjectLockAppliesRetentionOnWrite(t *testing.T) {
 		t.Fatalf("default retention delete: %v", err)
 	}
 	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "default", "VersionId": version, "BypassGovernanceRetention": true}, nil)
+	mustInvoke(t, p, "PutObjectLockConfiguration", map[string]any{"Bucket": "bucket", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "COMPLIANCE", "Years": 1}}}}, nil)
+	yearVersion := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "year"}, []byte("locked")).Headers.Get("x-amz-version-id")
+	yearRetention := mustInvoke(t, p, "GetObjectRetention", map[string]any{"Bucket": "bucket", "Key": "year", "VersionId": yearVersion}, nil)
+	if got := asMapForTest(yearRetention.Output["Retention"]); got["Mode"] != "COMPLIANCE" || got["RetainUntilDate"] != "1971-01-01T00:00:00Z" {
+		t.Fatalf("year retention: %#v", yearRetention.Output)
+	}
 
 	explicit := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "explicit", "ObjectLockMode": "COMPLIANCE", "ObjectLockRetainUntilDate": "1970-01-02T00:00:00Z", "ObjectLockLegalHoldStatus": "ON"}, []byte("locked")).Headers.Get("x-amz-version-id")
 	explicitRetention := mustInvoke(t, p, "GetObjectRetention", map[string]any{"Bucket": "bucket", "Key": "explicit", "VersionId": explicit}, nil)
@@ -1587,7 +1593,12 @@ func TestObjectLockAppliesRetentionOnWrite(t *testing.T) {
 	if invalidFault.Code != "InvalidArgument" {
 		t.Fatalf("unpaired retention headers: %v", err)
 	}
-	golden.AssertJSON(t, map[string]any{"default": retention.Output, "explicit": explicitRetention.Output, "legalHold": legalHold.Output, "unpaired": invalidFault.Code})
+	_, err = invoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "invalid-legal", "ObjectLockLegalHoldStatus": "MAYBE"}, nil)
+	invalidLegalFault := asFault(t, err)
+	if invalidLegalFault.Code != "InvalidArgument" {
+		t.Fatalf("invalid legal hold status: %v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"default": retention.Output, "year": yearRetention.Output, "explicit": explicitRetention.Output, "legalHold": legalHold.Output, "unpaired": invalidFault.Code, "invalidLegalHold": invalidLegalFault.Code})
 }
 
 func TestObjectLockCapturesMultipartRetentionAtInitiation(t *testing.T) {

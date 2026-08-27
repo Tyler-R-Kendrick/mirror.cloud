@@ -2,7 +2,6 @@ package sqs
 
 import (
 	"context"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +10,17 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
+
+type observedClock struct {
+	spi.Clock
+	after chan time.Duration
+}
+
+func (c *observedClock) After(delay time.Duration) <-chan time.Time {
+	result := c.Clock.After(delay)
+	c.after <- delay
+	return result
+}
 
 func TestCreateSendReceiveDelete(t *testing.T) {
 	p := &Pack{deps: spitest.Deps(t)}
@@ -209,6 +219,8 @@ func TestFIFODedupDLQLongPoll(t *testing.T) {
 	}
 
 	inv("CreateQueue", map[string]any{"QueueName": "empty"})
+	after := make(chan time.Duration, 1)
+	p.deps.Clock = &observedClock{Clock: clk, after: after}
 	done := make(chan *spi.Response, 1)
 	go func() {
 		resp, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "empty", "WaitTimeSeconds": 1}})
@@ -217,18 +229,13 @@ func TestFIFODedupDLQLongPoll(t *testing.T) {
 		}
 		done <- resp
 	}()
-	for i := 0; i < 10000; i++ {
-		select {
-		case resp := <-done:
-			msgs, _ := resp.Output["Messages"].([]any)
-			if len(msgs) != 0 {
-				t.Fatalf("long poll msgs %v", resp.Output)
-			}
-			return
-		default:
-			runtime.Gosched()
-			_ = clk.Advance(time.Second)
-		}
+	if delay := <-after; delay != time.Second {
+		t.Fatalf("long poll delay %v", delay)
 	}
-	t.Fatal("long poll did not return on clock advance")
+	_ = clk.Advance(time.Second)
+	resp := <-done
+	msgs, _ = resp.Output["Messages"].([]any)
+	if len(msgs) != 0 {
+		t.Fatalf("long poll msgs %v", resp.Output)
+	}
 }

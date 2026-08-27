@@ -2693,6 +2693,10 @@ func TestReplicationDestinationValidationAndRuleIDs(t *testing.T) {
 	if fault := put("destination"); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("unversioned destination: %+v", fault)
 	}
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "destination", "Status": "Suspended"}, nil)
+	if fault := put("destination"); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("suspended destination: %+v", fault)
+	}
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "destination", "Status": "Enabled"}, nil)
 	mustInvoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": configuration("destination")}, nil)
 	stored := asMapForTest(mustInvoke(t, p, "GetBucketReplication", map[string]any{"Bucket": "source"}, nil).Output["ReplicationConfiguration"])

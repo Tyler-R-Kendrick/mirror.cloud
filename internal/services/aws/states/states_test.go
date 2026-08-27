@@ -2028,14 +2028,8 @@ func TestStatesExecutionTimeout(t *testing.T) {
 	if err := deps.Clock.Advance(time.Second); err != nil {
 		t.Fatal(err)
 	}
-	var execution map[string]any
-	for range 100 {
-		execution = invoke("DescribeExecution", map[string]any{"executionArn": executionARN})
-		if execution["status"] == "TIMED_OUT" {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
+	p.runDueWaits(ctx)
+	execution := invoke("DescribeExecution", map[string]any{"executionArn": executionARN})
 	if execution["status"] != "TIMED_OUT" || execution["error"] != "States.Timeout" || execution["cause"] != "States.Timeout" {
 		t.Fatalf("execution did not time out %#v", execution)
 	}

@@ -809,19 +809,17 @@ func TestOpenSearchBufferRetryPersistence(t *testing.T) {
 	}
 	var retry searchWork
 	_ = json.Unmarshal(items[0].Value, &retry)
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := deps.Clock.Advance(2 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	wait("failed OpenSearch retry state was not updated", func() bool {
-		items, _, _ := work.List(context.Background(), "retrying/retry/", "", 0)
-		if len(items) != 1 {
-			return false
-		}
-		var retry searchWork
-		return json.Unmarshal(items[0].Value, &retry) == nil && retry.Retries == 1
-	})
-	if err := p.Close(); err != nil {
-		t.Fatal(err)
+	(&Pack{deps: deps}).runSearchWork(context.Background())
+	items, _, _ = work.List(context.Background(), "retrying/retry/", "", 0)
+	var updated searchWork
+	if len(items) != 1 || json.Unmarshal(items[0].Value, &updated) != nil || updated.Retries != 1 {
+		t.Fatalf("failed OpenSearch retry state was not updated: %#v", items)
 	}
 	call(search, "CreateDomain", map[string]any{"DomainName": "retrying"})
 	p = New(deps)

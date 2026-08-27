@@ -2269,7 +2269,7 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 				if objectVersion != "" {
 					_ = p.col(req, "tags").Put(ctx, objectTagKey(b, key, objectVersion), raw)
 				}
-				p.syncReplicaTags(ctx, req, b, key, raw)
+				p.syncReplicaTags(ctx, req, b, key, objectVersion, raw)
 			}
 		}
 		h := http.Header{}

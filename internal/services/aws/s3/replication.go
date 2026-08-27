@@ -17,6 +17,7 @@ type replicaRef struct {
 	Region  string `json:"region"`
 	Bucket  string `json:"bucket"`
 	Key     string `json:"key"`
+	Version string `json:"version,omitempty"`
 }
 
 func (p *Pack) replicateObject(ctx context.Context, req *spi.Request, bucket, key string, body []byte, meta map[string]any, tags map[string]string) string {
@@ -35,7 +36,14 @@ func (p *Pack) replicateObject(ctx context.Context, req *spi.Request, bucket, ke
 		if _, ok, _ := scope.Collection("buckets").Get(ctx, ref.Bucket); !ok {
 			continue
 		}
-		info, err := p.deps.Blobs.Put(ctx, scopedBlobKey(ref.Account, ref.Region, ref.Bucket, key), bytes.NewReader(body))
+		blob := scopedBlobKey(ref.Account, ref.Region, ref.Bucket, key)
+		version := str(meta["versionId"])
+		if version != "" {
+			if _, err := p.deps.Blobs.Put(ctx, blob+"@"+version, bytes.NewReader(body)); err != nil {
+				continue
+			}
+		}
+		info, err := p.deps.Blobs.Put(ctx, blob, bytes.NewReader(body))
 		if err != nil {
 			continue
 		}
@@ -47,11 +55,23 @@ func (p *Pack) replicateObject(ctx context.Context, req *spi.Request, bucket, ke
 		}
 		raw, _ := json.Marshal(dstMeta)
 		_ = scope.Collection("objects").Put(ctx, ref.Bucket+"/"+key, raw)
+		if version != "" {
+			_ = scope.Collection("versions").Put(ctx, ref.Bucket+"/"+key+"/"+version, raw)
+			ref.Version = version
+		}
+		tagKeys := []string{objectTagKey(ref.Bucket, key, "")}
+		if version != "" {
+			tagKeys = append(tagKeys, objectTagKey(ref.Bucket, key, version))
+		}
 		if len(tags) > 0 {
 			tagRaw, _ := json.Marshal(tagSet(tags))
-			_ = scope.Collection("tags").Put(ctx, ref.Bucket+"/"+key, tagRaw)
+			for _, tagKey := range tagKeys {
+				_ = scope.Collection("tags").Put(ctx, tagKey, tagRaw)
+			}
 		} else {
-			_ = scope.Collection("tags").Delete(ctx, ref.Bucket+"/"+key)
+			for _, tagKey := range tagKeys {
+				_ = scope.Collection("tags").Delete(ctx, tagKey)
+			}
 		}
 		p.rememberReplica(ctx, req, bucket, key, ref)
 		copied = true
@@ -87,6 +107,9 @@ func (p *Pack) replicateDeleteMarker(ctx context.Context, req *spi.Request, buck
 		meta["replicationStatus"] = "REPLICA"
 		raw, _ := json.Marshal(meta)
 		_ = scope.Collection("objects").Put(ctx, ref.Bucket+"/"+key, raw)
+		if version := str(meta["versionId"]); version != "" {
+			_ = scope.Collection("versions").Put(ctx, ref.Bucket+"/"+key+"/"+version, raw)
+		}
 		copied = true
 	}
 	if copied {
@@ -263,7 +286,7 @@ func (p *Pack) rememberReplica(ctx context.Context, req *spi.Request, bucket, ke
 	_ = col.Put(ctx, bucket+"/"+key, raw)
 }
 
-func (p *Pack) syncReplicaTags(ctx context.Context, req *spi.Request, bucket, key string, tags []byte) {
+func (p *Pack) syncReplicaTags(ctx context.Context, req *spi.Request, bucket, key, version string, tags []byte) {
 	raw, ok, _ := p.col(req, "replicas").Get(ctx, bucket+"/"+key)
 	if !ok {
 		return
@@ -271,7 +294,14 @@ func (p *Pack) syncReplicaTags(ctx context.Context, req *spi.Request, bucket, ke
 	var refs []replicaRef
 	_ = json.Unmarshal(raw, &refs)
 	for _, ref := range refs {
-		_ = p.deps.Store.Scope(ref.Account, ref.Region).Collection("tags").Put(ctx, ref.Bucket+"/"+ref.Key, tags)
+		if ref.Version != "" && ref.Version != version {
+			continue
+		}
+		col := p.deps.Store.Scope(ref.Account, ref.Region).Collection("tags")
+		_ = col.Put(ctx, objectTagKey(ref.Bucket, ref.Key, ""), tags)
+		if version != "" {
+			_ = col.Put(ctx, objectTagKey(ref.Bucket, ref.Key, version), tags)
+		}
 	}
 }
 
@@ -283,6 +313,9 @@ func (p *Pack) syncReplicaObjectLock(ctx context.Context, req *spi.Request, buck
 	var refs []replicaRef
 	_ = json.Unmarshal(raw, &refs)
 	for _, ref := range refs {
+		if ref.Version != "" && ref.Version != version {
+			continue
+		}
 		_ = p.deps.Store.Scope(ref.Account, ref.Region).Collection("objlock").Put(ctx, objectLockKey(ref.Bucket, ref.Key, version, kind), value)
 	}
 }

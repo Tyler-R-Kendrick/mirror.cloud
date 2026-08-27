@@ -501,8 +501,24 @@ func TestConcurrentVersionRestoration(t *testing.T) {
 				errs <- err
 				return
 			}
-			input["VersionId"] = newer.Headers.Get("x-amz-version-id")
-			if _, err = call("DeleteObject", input, ""); err != nil {
+			versionID := newer.Headers.Get("x-amz-version-id")
+			if n%2 == 0 {
+				input["VersionId"] = versionID
+				_, err = call("DeleteObject", input, "")
+			} else {
+				deleted, deleteErr := call("DeleteObjects", map[string]any{"Bucket": "version-restore", "Quiet": true, "Objects": []any{
+					map[string]any{"Key": key, "VersionId": versionID},
+					map[string]any{"Key": key, "VersionId": "missing"},
+				}}, "")
+				err = deleteErr
+				if err == nil {
+					failures, _ := deleted.Output["Errors"].([]any)
+					if len(failures) != 1 || failures[0].(map[string]any)["Code"] != "NoSuchVersion" || deleted.Output["Deleted"] != nil {
+						err = fmt.Errorf("%s multi-delete %#v", key, deleted.Output)
+					}
+				}
+			}
+			if err != nil {
 				errs <- err
 				return
 			}

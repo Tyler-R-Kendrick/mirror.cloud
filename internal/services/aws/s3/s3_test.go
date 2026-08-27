@@ -1394,7 +1394,8 @@ func TestDeleteObjectRestoresPreviousVersion(t *testing.T) {
 
 	deletedThird := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": third.Headers.Get("x-amz-version-id")}, nil)
 	restored := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil)
-	if deletedThird.Headers.Get("x-amz-version-id") != third.Headers.Get("x-amz-version-id") || restored.Headers.Get("x-amz-version-id") != first.Headers.Get("x-amz-version-id") || string(readStream(t, restored)) != "first" {
+	restoredBody := string(readStream(t, restored))
+	if deletedThird.Headers.Get("x-amz-version-id") != third.Headers.Get("x-amz-version-id") || restored.Headers.Get("x-amz-version-id") != first.Headers.Get("x-amz-version-id") || restoredBody != "first" {
 		t.Fatalf("restored object = %#v", restored)
 	}
 	tags := asSliceForTest(mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "key"}, nil).Output["TagSet"])
@@ -1404,7 +1405,8 @@ func TestDeleteObjectRestoresPreviousVersion(t *testing.T) {
 
 	marker := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil)
 	deletedMarker := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": marker.Headers.Get("x-amz-version-id")}, nil)
-	if deletedMarker.Headers.Get("x-amz-delete-marker") != "true" || deletedMarker.Headers.Get("x-amz-version-id") != marker.Headers.Get("x-amz-version-id") || string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil))) != "first" {
+	markerRestoredBody := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil)))
+	if deletedMarker.Headers.Get("x-amz-delete-marker") != "true" || deletedMarker.Headers.Get("x-amz-version-id") != marker.Headers.Get("x-amz-version-id") || markerRestoredBody != "first" {
 		t.Fatalf("delete marker restore = %#v", deletedMarker)
 	}
 
@@ -1412,6 +1414,16 @@ func TestDeleteObjectRestoresPreviousVersion(t *testing.T) {
 	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Fields["ArgumentName"] != "versionId" {
 		t.Fatalf("missing version fault = %#v", fault)
 	}
+	golden.AssertJSON(t, map[string]any{
+		"deletedNoncurrentVersion": deletedSecond.Headers.Get("x-amz-version-id"),
+		"deletedCurrentVersion":    deletedThird.Headers.Get("x-amz-version-id"),
+		"restoredVersion":          restored.Headers.Get("x-amz-version-id"),
+		"restoredBody":             restoredBody,
+		"restoredTags":             tags,
+		"deletedMarker":            deletedMarker.Headers.Get("x-amz-delete-marker"),
+		"deletedMarkerVersion":     deletedMarker.Headers.Get("x-amz-version-id"),
+		"markerRestoredBody":       markerRestoredBody,
+	})
 }
 
 func TestVersionedObjectTaggingCharacterization(t *testing.T) {

@@ -1,0 +1,15 @@
+{
+  "deletedCurrentVersion": "9c8e2cb0",
+  "deletedMarker": "true",
+  "deletedMarkerVersion": "33f6fc5d",
+  "deletedNoncurrentVersion": "5f59f223",
+  "markerRestoredBody": "first",
+  "restoredBody": "first",
+  "restoredTags": [
+    {
+      "Key": "stage",
+      "Value": "first"
+    }
+  ],
+  "restoredVersion": "7c589129"
+}

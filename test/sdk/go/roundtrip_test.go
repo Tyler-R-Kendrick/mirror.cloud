@@ -359,6 +359,19 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || aws.ToString(tagged.VersionId) != aws.ToString(newer.VersionId) {
 		t.Fatalf("tag newer version: %#v %v", tagged, err)
 	}
+	deletedNewer, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), VersionId: newer.VersionId})
+	if err != nil || aws.ToString(deletedNewer.VersionId) != aws.ToString(newer.VersionId) || aws.ToBool(deletedNewer.DeleteMarker) {
+		t.Fatalf("delete current version: %#v %v", deletedNewer, err)
+	}
+	restoredCurrent, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k")})
+	if err != nil {
+		t.Fatalf("get restored current version: %v", err)
+	}
+	restoredCurrentBody, _ := io.ReadAll(restoredCurrent.Body)
+	_ = restoredCurrent.Body.Close()
+	if string(restoredCurrentBody) != "hello-sdk" || aws.ToString(restoredCurrent.VersionId) != aws.ToString(put.VersionId) {
+		t.Fatalf("restored current version body=%q output=%#v", restoredCurrentBody, restoredCurrent)
+	}
 	if _, err := s3c.PutObjectTagging(context.Background(), &s3.PutObjectTaggingInput{
 		Bucket: aws.String("sdk"), Key: aws.String("k"), Tagging: &s3types.Tagging{TagSet: []s3types.Tag{{Key: aws.String("duplicate"), Value: aws.String("one")}, {Key: aws.String("duplicate"), Value: aws.String("two")}}},
 	}); err == nil || !strings.Contains(err.Error(), "InvalidTag") {

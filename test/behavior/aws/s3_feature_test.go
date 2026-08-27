@@ -317,6 +317,45 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given object versions When multi-delete is quiet Then only errors are returned", func(t *testing.T) {
+		for _, request := range []struct {
+			method, path, body string
+		}{
+			{http.MethodPut, "/multi-delete", ""},
+			{http.MethodPut, "/multi-delete?versioning", "<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"},
+		} {
+			res := do(request.method, request.path, []byte(request.body), "")
+			res.Body.Close()
+			if res.StatusCode >= 300 {
+				t.Fatalf("%s %s = %d", request.method, request.path, res.StatusCode)
+			}
+		}
+		first := do(http.MethodPut, "/multi-delete/key", []byte("old"), "")
+		first.Body.Close()
+		firstVersion := first.Header.Get("x-amz-version-id")
+		second := do(http.MethodPut, "/multi-delete/key", []byte("new"), "")
+		second.Body.Close()
+		secondVersion := second.Header.Get("x-amz-version-id")
+		res := do(http.MethodPost, "/multi-delete?delete", []byte("<Delete><Object><Key>key</Key><VersionId>"+secondVersion+"</VersionId></Object></Delete>"), "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(`<DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)) || !bytes.Contains(body, []byte("<VersionId>"+secondVersion+"</VersionId>")) || bytes.Contains(body, []byte("<DeleteMarker>")) {
+			t.Fatalf("verbose multi-delete = %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/multi-delete/key", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(body) != "old" {
+			t.Fatalf("restored multi-delete = %d %q", res.StatusCode, body)
+		}
+		res = do(http.MethodPost, "/multi-delete?delete", []byte("<Delete><Object><Key>key</Key><VersionId>missing</VersionId></Object><Object><Key>key</Key><VersionId>"+firstVersion+"</VersionId></Object><Quiet>true</Quiet></Delete>"), "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Code>NoSuchVersion</Code>")) || !bytes.Contains(body, []byte("<VersionId>missing</VersionId>")) || bytes.Contains(body, []byte("<Deleted>")) {
+			t.Fatalf("quiet multi-delete = %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given an invalid bucket name When creating it Then it is rejected", func(t *testing.T) {
 		for _, name := range []string{"ab", "192.168.5.4", "reserved--table-s3"} {
 			res := do(http.MethodPut, "/"+name, nil, "")

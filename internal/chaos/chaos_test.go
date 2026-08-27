@@ -71,11 +71,13 @@ func TestRejectedReplicationConfigurationPreservesCurrent(t *testing.T) {
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
 		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
 	}
-	if _, err := call("CreateBucket", map[string]any{"Bucket": "source"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "source", "Status": "Enabled"}); err != nil {
-		t.Fatal(err)
+	for _, bucket := range []string{"source", "destination"} {
+		if _, err := call("CreateBucket", map[string]any{"Bucket": bucket}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := call("PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	valid := map[string]any{"Role": "role", "Rules": []any{map[string]any{"Status": "Enabled", "Destination": map[string]any{"Bucket": "destination"}}}}
 	if _, err := call("PutBucketReplication", map[string]any{"Bucket": "source", "ReplicationConfiguration": valid}); err != nil {

@@ -606,9 +606,15 @@ func FuzzReplicationConfigurationValidation(f *testing.F) {
 	f.Add("role", "Enabled", "destination", "Enabled", true, true)
 	f.Fuzz(func(t *testing.T, role, status, destination, deleteStatus string, filter, tag bool) {
 		p := s3.New(spitest.Deps(t))
-		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "replication-validation-fuzz"}, nil)
-		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "replication-validation-fuzz", "Status": "Enabled"}, nil)
-		rule := map[string]any{"Status": status, "Destination": map[string]any{"Bucket": destination}}
+		for _, bucket := range []string{"replication-validation-fuzz", "replication-validation-destination"} {
+			mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+			mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}, nil)
+		}
+		target := ""
+		if destination != "" {
+			target = "replication-validation-destination"
+		}
+		rule := map[string]any{"Status": status, "Destination": map[string]any{"Bucket": target}}
 		if filter {
 			rule["Priority"] = 1
 			rule["DeleteMarkerReplication"] = map[string]any{"Status": deleteStatus}

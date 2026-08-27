@@ -2632,6 +2632,7 @@ func TestReplicationConfigurationValidation(t *testing.T) {
 		characterization["versioning disabled"] = map[string]any{"code": fault.Code, "status": fault.HTTPStatus}
 	}
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "source", "Status": "Enabled"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "destination", "Status": "Enabled"}, nil)
 
 	manyRules := make([]any, 1001)
 	for i := range manyRules {

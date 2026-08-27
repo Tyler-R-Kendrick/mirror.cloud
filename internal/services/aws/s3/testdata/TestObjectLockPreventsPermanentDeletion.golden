@@ -1,0 +1,18 @@
+{
+  "complianceWithBypass": "AccessDenied",
+  "expired": "deleted",
+  "governance": {
+    "Errors": [
+      {
+        "Code": "AccessDenied",
+        "Key": "key",
+        "Message": "Access Denied",
+        "VersionId": "7c589129"
+      }
+    ]
+  },
+  "governanceWithBypass": "deleted",
+  "legalHold": "AccessDenied",
+  "otherVersion": "deleted",
+  "simpleDeleteMarker": "true"
+}

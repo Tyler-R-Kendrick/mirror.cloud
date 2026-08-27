@@ -1515,10 +1515,13 @@ func TestObjectLockPreventsPermanentDeletion(t *testing.T) {
 	second := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("second")).Headers.Get("x-amz-version-id")
 	mustInvoke(t, p, "PutObjectLegalHold", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": first, "LegalHold": map[string]any{"Status": "ON"}}, nil)
 	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": second}, nil)
-	if _, err := invoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": first}, nil); asFault(t, err).Code != "AccessDenied" {
+	_, err := invoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": first}, nil)
+	legalHoldFault := asFault(t, err)
+	if legalHoldFault.Code != "AccessDenied" {
 		t.Fatalf("legal hold delete: %v", err)
 	}
-	if marker := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil); marker.Headers.Get("x-amz-delete-marker") != "true" {
+	marker := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil)
+	if marker.Headers.Get("x-amz-delete-marker") != "true" {
 		t.Fatalf("simple delete did not create marker: %#v", marker.Headers)
 	}
 
@@ -1532,13 +1535,25 @@ func TestObjectLockPreventsPermanentDeletion(t *testing.T) {
 
 	compliance := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "compliance"}, []byte("locked")).Headers.Get("x-amz-version-id")
 	mustInvoke(t, p, "PutObjectRetention", map[string]any{"Bucket": "bucket", "Key": "compliance", "VersionId": compliance, "Retention": map[string]any{"Mode": "COMPLIANCE", "RetainUntilDate": "9999-01-01T00:00:00Z"}}, nil)
-	if _, err := invoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "compliance", "VersionId": compliance, "BypassGovernanceRetention": true}, nil); asFault(t, err).Code != "AccessDenied" {
+	_, err = invoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "compliance", "VersionId": compliance, "BypassGovernanceRetention": true}, nil)
+	complianceFault := asFault(t, err)
+	if complianceFault.Code != "AccessDenied" {
 		t.Fatalf("compliance bypass: %v", err)
 	}
 
 	expired := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "expired"}, []byte("expired")).Headers.Get("x-amz-version-id")
 	mustInvoke(t, p, "PutObjectRetention", map[string]any{"Bucket": "bucket", "Key": "expired", "VersionId": expired, "Retention": map[string]any{"Mode": "GOVERNANCE", "RetainUntilDate": "1960-01-01T00:00:00Z"}}, nil)
 	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "expired", "VersionId": expired}, nil)
+
+	golden.AssertJSON(t, map[string]any{
+		"legalHold":            legalHoldFault.Code,
+		"otherVersion":         "deleted",
+		"simpleDeleteMarker":   marker.Headers.Get("x-amz-delete-marker"),
+		"governance":           locked.Output,
+		"governanceWithBypass": "deleted",
+		"complianceWithBypass": complianceFault.Code,
+		"expired":              "deleted",
+	})
 }
 
 func TestVersionedObjectTaggingCharacterization(t *testing.T) {

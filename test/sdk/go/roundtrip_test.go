@@ -372,6 +372,34 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if string(restoredCurrentBody) != "hello-sdk" || aws.ToString(restoredCurrent.VersionId) != aws.ToString(put.VersionId) {
 		t.Fatalf("restored current version body=%q output=%#v", restoredCurrentBody, restoredCurrent)
 	}
+	multiFirst, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("multi-delete"), Body: bytes.NewReader([]byte("first"))})
+	if err != nil {
+		t.Fatalf("put first multi-delete version: %v", err)
+	}
+	multiSecond, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("multi-delete"), Body: bytes.NewReader([]byte("second"))})
+	if err != nil {
+		t.Fatalf("put second multi-delete version: %v", err)
+	}
+	multiDeleted, err := s3c.DeleteObjects(context.Background(), &s3.DeleteObjectsInput{Bucket: aws.String("sdk"), Delete: &s3types.Delete{Objects: []s3types.ObjectIdentifier{{Key: aws.String("multi-delete"), VersionId: multiSecond.VersionId}}}})
+	if err != nil || len(multiDeleted.Deleted) != 1 || aws.ToString(multiDeleted.Deleted[0].VersionId) != aws.ToString(multiSecond.VersionId) || aws.ToBool(multiDeleted.Deleted[0].DeleteMarker) {
+		t.Fatalf("multi-delete current version: %#v %v", multiDeleted, err)
+	}
+	multiRestored, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("multi-delete")})
+	if err != nil {
+		t.Fatalf("get multi-delete restored version: %v", err)
+	}
+	multiRestoredBody, _ := io.ReadAll(multiRestored.Body)
+	_ = multiRestored.Body.Close()
+	if string(multiRestoredBody) != "first" || aws.ToString(multiRestored.VersionId) != aws.ToString(multiFirst.VersionId) {
+		t.Fatalf("multi-delete restored body=%q output=%#v", multiRestoredBody, multiRestored)
+	}
+	quietDeleted, err := s3c.DeleteObjects(context.Background(), &s3.DeleteObjectsInput{Bucket: aws.String("sdk"), Delete: &s3types.Delete{Quiet: aws.Bool(true), Objects: []s3types.ObjectIdentifier{
+		{Key: aws.String("multi-delete"), VersionId: aws.String("missing")},
+		{Key: aws.String("multi-delete"), VersionId: multiFirst.VersionId},
+	}}})
+	if err != nil || len(quietDeleted.Deleted) != 0 || len(quietDeleted.Errors) != 1 || aws.ToString(quietDeleted.Errors[0].Code) != "NoSuchVersion" || aws.ToString(quietDeleted.Errors[0].VersionId) != "missing" {
+		t.Fatalf("quiet multi-delete: %#v %v", quietDeleted, err)
+	}
 	if _, err := s3c.PutObjectTagging(context.Background(), &s3.PutObjectTaggingInput{
 		Bucket: aws.String("sdk"), Key: aws.String("k"), Tagging: &s3types.Tagging{TagSet: []s3types.Tag{{Key: aws.String("duplicate"), Value: aws.String("one")}, {Key: aws.String("duplicate"), Value: aws.String("two")}}},
 	}); err == nil || !strings.Contains(err.Error(), "InvalidTag") {

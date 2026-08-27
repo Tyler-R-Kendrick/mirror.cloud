@@ -115,7 +115,7 @@ func TestDecodeDeleteObjectsXML(t *testing.T) {
 	if str(objs[0].(map[string]any)["Key"]) != "k" {
 		t.Fatalf("first key %v", objs[0])
 	}
-	if str(objs[0].(map[string]any)["VersionId"]) != "v1" || req.Input["Quiet"] != true {
+	if str(objs[0].(map[string]any)["VersionId"]) != "v1" || req.Input["Quiet"] != true || req.Input["_body"] != body {
 		t.Fatalf("version and quiet %v", req.Input)
 	}
 }

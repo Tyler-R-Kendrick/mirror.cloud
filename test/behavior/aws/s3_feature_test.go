@@ -2,6 +2,8 @@ package behavior
 
 import (
 	"bytes"
+	"crypto/md5"
+	"encoding/base64"
 	"encoding/xml"
 	"io"
 	"net/http"
@@ -38,6 +40,10 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 		req.Header.Set("Authorization", auth)
+		if strings.Contains(path, "?delete") {
+			digest := md5.Sum(body)
+			req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(digest[:]))
+		}
 		if storageClass != "" {
 			req.Header.Set("x-amz-storage-class", storageClass)
 		}
@@ -336,6 +342,34 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		second := do(http.MethodPut, "/multi-delete/key", []byte("new"), "")
 		second.Body.Close()
 		secondVersion := second.Header.Get("x-amz-version-id")
+		probe := []byte("<Delete><Object><Key>key</Key></Object></Delete>")
+		probeDigest := md5.Sum(probe)
+		for _, test := range []struct{ name, checksum, algorithm, code string }{
+			{"missing", "", "", "MissingContentMD5"},
+			{"mismatched", "AA==", "", "BadDigest"},
+			{"algorithm without value", base64.StdEncoding.EncodeToString(probeDigest[:]), "CRC32", "InvalidRequest"},
+		} {
+			req, err := http.NewRequest(http.MethodPost, ts.URL+"/multi-delete?delete", bytes.NewReader(probe))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", auth)
+			if test.checksum != "" {
+				req.Header.Set("Content-MD5", test.checksum)
+			}
+			if test.algorithm != "" {
+				req.Header.Set("x-amz-sdk-checksum-algorithm", test.algorithm)
+			}
+			res, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte(test.code)) {
+				t.Fatalf("%s checksum = %d %s", test.name, res.StatusCode, body)
+			}
+		}
 		res := do(http.MethodPost, "/multi-delete?delete", []byte("<Delete><Object><Key>key</Key><VersionId>"+secondVersion+"</VersionId></Object></Delete>"), "")
 		body, _ := io.ReadAll(res.Body)
 		res.Body.Close()

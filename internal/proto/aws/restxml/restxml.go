@@ -384,6 +384,9 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 	if r.Body != nil {
 		b, _ := io.ReadAll(r.Body)
 		if len(b) > 0 {
+			if op.Name == "DeleteObjects" {
+				in["_body"] = string(b)
+			}
 			parseXMLInput(op.Name, b, in)
 		}
 	}

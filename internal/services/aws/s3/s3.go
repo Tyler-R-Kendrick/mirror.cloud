@@ -1156,6 +1156,24 @@ func (p *Pack) deleteObjects(ctx context.Context, req *spi.Request) (*spi.Respon
 	if err := p.requireBucket(ctx, req, str(req.Input["Bucket"])); err != nil {
 		return nil, err
 	}
+	if req.HTTP != nil {
+		checksumPresent := requestCondition(req, "ContentMD5", "Content-MD5") != ""
+		for _, checksum := range checksums {
+			checksumPresent = checksumPresent || requestCondition(req, checksum.input, checksum.header) != ""
+		}
+		if !checksumPresent {
+			return nil, &spi.Fault{Code: "MissingContentMD5", Message: "Missing required header for this request: Content-MD5", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		if requested := strings.ToUpper(requestCondition(req, "ChecksumAlgorithm", "x-amz-sdk-checksum-algorithm")); requested != "" {
+			checksum, ok := checksumByAlgorithm(requested)
+			if !ok || requestCondition(req, checksum.input, checksum.header) == "" {
+				return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+		}
+		if err := validateChecksum(req, []byte(str(req.Input["_body"]))); err != nil {
+			return nil, err
+		}
+	}
 	objs, _ := req.Input["Objects"].([]any)
 	if objs == nil {
 		if d, ok := req.Input["Delete"].(map[string]any); ok {

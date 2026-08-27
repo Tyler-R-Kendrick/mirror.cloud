@@ -2612,10 +2612,11 @@ func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	}
 
 	put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "source", "Key": "logs/file", "Tagging": "environment=test"}, []byte("replicated"))
+	version := put.Headers.Get("x-amz-version-id")
 	if got := put.Headers.Get("x-amz-replication-status"); got != "COMPLETED" {
 		t.Fatalf("source replication status %q", got)
 	}
-	dst := mustInvokeAs(t, p, west, "GetObject", map[string]any{"Bucket": "destination", "Key": "logs/file"}, nil)
+	dst := mustInvokeAs(t, p, west, "GetObject", map[string]any{"Bucket": "destination", "Key": "logs/file", "VersionId": version}, nil)
 	if got := string(readStream(t, dst)); got != "replicated" {
 		t.Fatalf("replica body %q", got)
 	}
@@ -2625,7 +2626,7 @@ func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	if got := dst.Headers.Get("x-amz-storage-class"); got != "STANDARD_IA" {
 		t.Fatalf("destination storage class %q", got)
 	}
-	replicatedRetention := mustInvokeAs(t, p, west, "GetObjectRetention", map[string]any{"Bucket": "destination", "Key": "logs/file"}, nil)
+	replicatedRetention := mustInvokeAs(t, p, west, "GetObjectRetention", map[string]any{"Bucket": "destination", "Key": "logs/file", "VersionId": version}, nil)
 	if got := asMapForTest(replicatedRetention.Output["Retention"]); got["Mode"] != "GOVERNANCE" || got["RetainUntilDate"] != "1970-01-03T00:00:00Z" {
 		t.Fatalf("replica retention %v", replicatedRetention.Output)
 	}
@@ -2639,6 +2640,10 @@ func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	if len(gotTags) != 2 || gotTags[1].(map[string]any)["Value"] != "mirror" {
 		t.Fatalf("replica tags %v", gotTags)
 	}
+	versionTags := mustInvokeAs(t, p, west, "GetObjectTagging", map[string]any{"Bucket": "destination", "Key": "logs/file", "VersionId": version}, nil)
+	if got := asSliceForTest(versionTags.Output["TagSet"]); len(got) != 2 || got[1].(map[string]any)["Value"] != "mirror" {
+		t.Fatalf("replica version tags %v", got)
+	}
 	mustInvoke(t, p, "PutObjectLegalHold", map[string]any{"Bucket": "source", "Key": "logs/file", "LegalHold": map[string]any{"Status": "ON"}}, nil)
 	legalHold := mustInvokeAs(t, p, west, "GetObjectLegalHold", map[string]any{"Bucket": "destination", "Key": "logs/file"}, nil)
 	if got := asMapForTest(legalHold.Output["LegalHold"])["Status"]; got != "ON" {
@@ -2646,11 +2651,15 @@ func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	}
 
 	del := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "source", "Key": "logs/file"}, nil)
+	deleteVersion := del.Headers.Get("x-amz-version-id")
 	if got := del.Headers.Get("x-amz-replication-status"); got != "COMPLETED" {
 		t.Fatalf("delete-marker replication status %q", got)
 	}
 	if _, err := invokeAs(t, p, west, "GetObject", map[string]any{"Bucket": "destination", "Key": "logs/file"}, nil); asFault(t, err).Code != "NoSuchKey" {
 		t.Fatalf("replica delete marker not visible: %v", err)
+	}
+	if _, err := invokeAs(t, p, west, "GetObject", map[string]any{"Bucket": "destination", "Key": "logs/file", "VersionId": deleteVersion}, nil); asFault(t, err).Code != "MethodNotAllowed" {
+		t.Fatalf("replica delete-marker version not visible: %v", err)
 	}
 
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "source", "Key": "logs/batch", "Tagging": "environment=test"}, []byte("batch"))

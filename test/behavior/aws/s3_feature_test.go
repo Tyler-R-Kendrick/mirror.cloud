@@ -129,6 +129,44 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given an expired browser policy When POSTing a file Then S3 rejects it without storing the object", func(t *testing.T) {
+		res := do(http.MethodPut, "/post-policy", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode >= 300 {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		var payload bytes.Buffer
+		writer := multipart.NewWriter(&payload)
+		_ = writer.WriteField("key", "forms/expired.txt")
+		_ = writer.WriteField("policy", base64.StdEncoding.EncodeToString([]byte(`{"expiration":"1960-01-01T00:00:00Z","conditions":[]}`)))
+		_ = writer.WriteField("x-amz-algorithm", "AWS4-HMAC-SHA256")
+		_ = writer.WriteField("x-amz-credential", "test/20260827/us-east-1/s3/aws4_request")
+		_ = writer.WriteField("x-amz-date", "20260827T000000Z")
+		_ = writer.WriteField("x-amz-signature", "signature")
+		file, _ := writer.CreateFormFile("file", "expired.txt")
+		_, _ = file.Write([]byte("must not persist"))
+		_ = writer.Close()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/post-policy", &payload)
+		req.Header.Set("Authorization", auth)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		res, err = http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fault, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusForbidden || !bytes.Contains(fault, []byte("AccessDenied")) || !bytes.Contains(fault, []byte("Policy expired")) {
+			t.Fatalf("expired form %d %s", res.StatusCode, fault)
+		}
+		res = do(http.MethodGet, "/post-policy/forms/expired.txt", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound {
+			t.Fatalf("expired form persisted object: %d", res.StatusCode)
+		}
+	})
+
 	t.Run("Given a non-empty bucket When DELETE bucket Then it is rejected and preserved", func(t *testing.T) {
 		res := do(http.MethodDelete, "/demo", nil, "")
 		fault, _ := io.ReadAll(res.Body)

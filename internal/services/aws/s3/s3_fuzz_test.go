@@ -479,3 +479,34 @@ func FuzzDeleteObjectVersionRestoration(f *testing.F) {
 		}
 	})
 }
+
+func FuzzDeleteObjectsVersionSemantics(f *testing.F) {
+	f.Add("key", "first", "second", false)
+	f.Add("nested/key", "", "same", true)
+	f.Fuzz(func(t *testing.T, key, first, second string, quiet bool) {
+		if key == "" || len([]byte(key)) > 1024 || len(first)+len(second) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multi-delete-fuzz"}, nil)
+		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "multi-delete-fuzz", "Status": "Enabled"}, nil)
+		firstPut := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "multi-delete-fuzz", "Key": key}, []byte(first))
+		secondPut := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "multi-delete-fuzz", "Key": key}, []byte(second))
+		result := mustInvoke(t, p, "DeleteObjects", map[string]any{"Bucket": "multi-delete-fuzz", "Quiet": quiet, "Objects": []any{
+			map[string]any{"Key": key, "VersionId": secondPut.Headers.Get("x-amz-version-id")},
+			map[string]any{"Key": key, "VersionId": "missing"},
+		}}, nil)
+		failures, _ := result.Output["Errors"].([]any)
+		if len(failures) != 1 || failures[0].(map[string]any)["Code"] != "NoSuchVersion" {
+			t.Fatalf("errors %#v", result.Output)
+		}
+		deleted, _ := result.Output["Deleted"].([]any)
+		if (quiet && deleted != nil) || (!quiet && (len(deleted) != 1 || deleted[0].(map[string]any)["VersionId"] != secondPut.Headers.Get("x-amz-version-id"))) {
+			t.Fatalf("quiet=%v deleted %#v", quiet, result.Output)
+		}
+		restored := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "multi-delete-fuzz", "Key": key}, nil)
+		if body := string(readStream(t, restored)); body != first || restored.Headers.Get("x-amz-version-id") != firstPut.Headers.Get("x-amz-version-id") {
+			t.Fatalf("restored body=%q headers=%v", body, restored.Headers)
+		}
+	})
+}

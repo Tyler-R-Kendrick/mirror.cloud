@@ -2647,6 +2647,11 @@ func TestReplicationFiltersStatusMetadataAndDeleteMarker(t *testing.T) {
 	if got := put.Headers.Get("x-amz-replication-status"); got != "COMPLETED" {
 		t.Fatalf("source replication status %q", got)
 	}
+	sourceVersion := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "source", "Key": "logs/file", "VersionId": version}, nil)
+	_ = sourceVersion.Stream.Close()
+	if got := sourceVersion.Headers.Get("x-amz-replication-status"); got != "COMPLETED" {
+		t.Fatalf("source version replication status %q", got)
+	}
 	dst := mustInvokeAs(t, p, west, "GetObject", map[string]any{"Bucket": "destination", "Key": "logs/file", "VersionId": version}, nil)
 	if got := string(readStream(t, dst)); got != "replicated" {
 		t.Fatalf("replica body %q", got)

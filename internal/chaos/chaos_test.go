@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"sync"
@@ -671,6 +674,31 @@ func TestBlobFailureSurfaces(t *testing.T) {
 	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "bucket", "Key": "k"}, Body: io.NopCloser(bytes.NewReader([]byte("x")))})
 	if err == nil {
 		t.Fatal("expected injected failure")
+	}
+}
+
+func TestPostObjectBlobFailureLeavesNoObject(t *testing.T) {
+	deps := spitest.Deps(t)
+	deps.Blobs = failBlobs{BlobStore: deps.Blobs, fail: true}
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "post-failure"}}); err != nil {
+		t.Fatal(err)
+	}
+	var payload bytes.Buffer
+	writer := multipart.NewWriter(&payload)
+	_ = writer.WriteField("key", "object")
+	file, _ := writer.CreateFormFile("file", "object.txt")
+	_, _ = file.Write([]byte("body"))
+	_ = writer.Close()
+	httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/post-failure", &payload)
+	httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PostObject", Input: map[string]any{"Bucket": "post-failure"}, Body: httpRequest.Body, HTTP: httpRequest}); err == nil {
+		t.Fatal("expected injected POST storage failure")
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{"Bucket": "post-failure", "Key": "object"}}); err == nil {
+		t.Fatal("failed POST left object metadata")
 	}
 }
 

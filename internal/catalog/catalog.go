@@ -52,7 +52,7 @@ func Bundle() *model.Bundle {
 		"GetBucketObjectLockConfiguration", "PutBucketObjectLockConfiguration",
 		"GetBucketRequestPayment", "PutBucketRequestPayment",
 		"GetBucketAccelerateConfiguration", "PutBucketAccelerateConfiguration",
-		"PutObject", "GetObject", "HeadObject", "DeleteObject", "DeleteObjects", "CopyObject",
+		"PutObject", "PostObject", "GetObject", "HeadObject", "DeleteObject", "DeleteObjects", "CopyObject",
 		"ListObjects", "ListObjectsV2", "ListObjectVersions",
 		"CreateMultipartUpload", "UploadPart", "UploadPartCopy", "CompleteMultipartUpload",
 		"AbortMultipartUpload", "ListParts", "ListMultipartUploads",

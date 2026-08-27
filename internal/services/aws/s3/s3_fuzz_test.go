@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cespare/xxhash/v2"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
@@ -227,6 +228,49 @@ func FuzzBucketVersioningState(f *testing.F) {
 		}
 		if got := mustInvoke(t, p, "GetBucketVersioning", input, nil).Output; len(got) != 0 {
 			t.Fatalf("invalid status %q persisted: %#v", status, got)
+		}
+	})
+}
+
+func FuzzObjectLockDefaultRetention(f *testing.F) {
+	for _, seed := range []struct {
+		mode, amount uint8
+		years        bool
+	}{{0, 1, false}, {1, 7, false}, {0, 1, true}, {1, 5, true}} {
+		f.Add(seed.mode, seed.amount, seed.years)
+	}
+	f.Fuzz(func(t *testing.T, modeSeed, amountSeed uint8, years bool) {
+		deps := spitest.Deps(t)
+		p := s3.New(deps)
+		modes := []string{"GOVERNANCE", "COMPLIANCE"}
+		mode := modes[int(modeSeed)%len(modes)]
+		amount := int(amountSeed)%30 + 1
+		retention := map[string]any{"Mode": mode}
+		if years {
+			retention["Years"] = amount
+		} else {
+			retention["Days"] = amount
+		}
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "lock-fuzz", "ObjectLockEnabledForBucket": true}, nil)
+		mustInvoke(t, p, "PutObjectLockConfiguration", map[string]any{"Bucket": "lock-fuzz", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": retention}}}, nil)
+		now := deps.Clock.Now().UTC()
+		put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "lock-fuzz", "Key": "key"}, []byte("body"))
+		version := put.Headers.Get("x-amz-version-id")
+		got := asMapForTest(mustInvoke(t, p, "GetObjectRetention", map[string]any{"Bucket": "lock-fuzz", "Key": "key", "VersionId": version}, nil).Output["Retention"])
+		deadline, err := time.Parse(time.RFC3339, got["RetainUntilDate"].(string))
+		want := now.AddDate(0, 0, amount)
+		if years {
+			want = now.AddDate(amount, 0, 0)
+		}
+		if err != nil || got["Mode"] != mode || !deadline.Equal(want) {
+			t.Fatalf("mode=%q amount=%d years=%v retention=%#v", mode, amount, years, got)
+		}
+		_, err = invoke(t, p, "DeleteObject", map[string]any{"Bucket": "lock-fuzz", "Key": "key", "VersionId": version, "BypassGovernanceRetention": true}, nil)
+		if mode == "GOVERNANCE" && err != nil {
+			t.Fatalf("governance bypass: %v", err)
+		}
+		if mode == "COMPLIANCE" && asFault(t, err).Code != "AccessDenied" {
+			t.Fatalf("compliance bypass: %v", err)
 		}
 	})
 }

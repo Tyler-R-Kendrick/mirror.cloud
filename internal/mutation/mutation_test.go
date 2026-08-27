@@ -582,6 +582,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestObjectLockBucketGuards",
 		},
 		{
+			name: "s3-drop-replicated-default-retention",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `p.syncReplicaObjectLock(ctx, req, b, key, vid, kind, raw)`,
+			new:  `if false { p.syncReplicaObjectLock(ctx, req, b, key, vid, kind, raw) }`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestReplicationFiltersStatusMetadataAndDeleteMarker",
+		},
+		{
 			name: "edge-drop-fault-response-headers",
 			file: filepath.Join("internal", "edge", "edge.go"),
 			old:  `for key, values := range f.Headers {`,

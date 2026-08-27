@@ -149,6 +149,32 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("enable versioning: %v", err)
 	}
+	if _, err := west.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String("sdk-west"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusEnabled}}); err != nil {
+		t.Fatalf("enable replica versioning: %v", err)
+	}
+	if _, err := s3c.PutBucketReplication(context.Background(), &s3.PutBucketReplicationInput{Bucket: aws.String("sdk"), ReplicationConfiguration: &s3types.ReplicationConfiguration{
+		Role:  aws.String("arn:aws:iam::000000000000:role/replication"),
+		Rules: []s3types.ReplicationRule{{Status: s3types.ReplicationRuleStatusEnabled, Filter: &s3types.ReplicationRuleFilter{Prefix: aws.String("replica/")}, Destination: &s3types.Destination{Bucket: aws.String("arn:aws:s3:::sdk-west")}}},
+	}}); err != nil {
+		t.Fatalf("configure replication: %v", err)
+	}
+	configuration, err := s3c.GetBucketReplication(context.Background(), &s3.GetBucketReplicationInput{Bucket: aws.String("sdk")})
+	if err != nil || configuration.ReplicationConfiguration == nil || len(configuration.ReplicationConfiguration.Rules) != 1 {
+		t.Fatalf("get replication configuration: %v", err)
+	}
+	replicaPut, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("replica/versioned"), Body: bytes.NewReader([]byte("replica-sdk")), Tagging: aws.String("stage=replicated")})
+	if err != nil {
+		t.Fatalf("put replicated version: %v", err)
+	}
+	replicaGet, err := west.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk-west"), Key: aws.String("replica/versioned"), VersionId: replicaPut.VersionId})
+	if err != nil {
+		t.Fatalf("get replicated version: %v", err)
+	}
+	replicaBody, _ := io.ReadAll(replicaGet.Body)
+	_ = replicaGet.Body.Close()
+	if string(replicaBody) != "replica-sdk" || aws.ToString(replicaGet.VersionId) != aws.ToString(replicaPut.VersionId) || replicaGet.ReplicationStatus != s3types.ReplicationStatusReplica {
+		t.Fatalf("replicated version body=%q output=%#v", replicaBody, replicaGet)
+	}
 	put, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{
 		Bucket: aws.String("sdk"), Key: aws.String("k"), Body: bytes.NewReader([]byte("hello-sdk")), ChecksumAlgorithm: s3types.ChecksumAlgorithmCrc32, Tagging: aws.String("stage=original"), ContentType: aws.String("text/plain"), CacheControl: aws.String("max-age=60"), Metadata: map[string]string{"owner": "mirror"}, WebsiteRedirectLocation: aws.String("/old"),
 	})

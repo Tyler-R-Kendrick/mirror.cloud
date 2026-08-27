@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -17,12 +18,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bus"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -2818,6 +2821,41 @@ func TestPostObjectSuccessRedirect(t *testing.T) {
 	query := location.Query()
 	if response.Status != http.StatusSeeOther || location.Host != "example.test" || query.Get("state") != "ok" || query.Get("bucket") != "post-redirect" || query.Get("key") != "redirected" || query.Get("etag") == "" {
 		t.Fatalf("redirect response: %#v", response)
+	}
+}
+
+func TestObjectCreatedEventNames(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	var events []string
+	cancel := deps.Bus.(*bus.Memory).Subscribe("s3:events", func(_ context.Context, payload []byte) {
+		var envelope map[string]any
+		_ = json.Unmarshal(payload, &envelope)
+		records := envelope["Records"].([]any)
+		events = append(events, records[0].(map[string]any)["eventName"].(string))
+	})
+	defer cancel()
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "events"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "events", "Key": "source"}, []byte("body"))
+	mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "events", "Key": "copy", "CopySource": "events/source"}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "events", "Key": "multipart"}, nil)
+	uploadID := created.Output["UploadId"].(string)
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 1}, []byte("part"))
+	mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
+	var payload bytes.Buffer
+	writer := multipart.NewWriter(&payload)
+	_ = writer.WriteField("key", "post")
+	file, _ := writer.CreateFormFile("file", "post.txt")
+	_, _ = file.Write([]byte("post"))
+	_ = writer.Close()
+	httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/events", &payload)
+	httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+	if _, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": "events"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"ObjectCreated:Put", "ObjectCreated:Copy", "ObjectCreated:CompleteMultipartUpload", "ObjectCreated:Post"}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("events=%v want=%v", events, want)
 	}
 }
 

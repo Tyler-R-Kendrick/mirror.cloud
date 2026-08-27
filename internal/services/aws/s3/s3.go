@@ -932,7 +932,16 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	for kind, raw := range lockDocs {
 		p.syncReplicaObjectLock(ctx, req, b, key, vid, kind, raw)
 	}
-	p.notify(ctx, req, b, key, "ObjectCreated:Put")
+	event := "ObjectCreated:Put"
+	switch req.Operation {
+	case "CopyObject":
+		event = "ObjectCreated:Copy"
+	case "CompleteMultipartUpload":
+		event = "ObjectCreated:CompleteMultipartUpload"
+	case "PostObject":
+		event = "ObjectCreated:Post"
+	}
+	p.notify(ctx, req, b, key, event)
 	return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"ETag": etag}}, nil
 }
 
@@ -997,7 +1006,7 @@ func (p *Pack) postObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		input["Metadata"] = metadata
 	}
 	child := *req
-	child.Operation, child.Input = "PutObject", input
+	child.Operation, child.Input = "PostObject", input
 	child.Body, child.HTTP = io.NopCloser(bytes.NewReader(body)), nil
 	response, err := p.putObject(ctx, &child, "", "", nil, nil)
 	if err != nil {

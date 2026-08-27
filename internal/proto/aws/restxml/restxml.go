@@ -405,8 +405,10 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 	case "DeleteObjects":
 		var d struct {
 			Object []struct {
-				Key string `xml:"Key"`
+				Key       string `xml:"Key"`
+				VersionID string `xml:"VersionId"`
 			} `xml:"Object"`
+			Quiet bool `xml:"Quiet"`
 		}
 		if xml.Unmarshal(raw, &d) != nil {
 			in["_body"] = string(raw)
@@ -414,10 +416,15 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 		}
 		objs := make([]any, 0, len(d.Object))
 		for _, o := range d.Object {
-			objs = append(objs, map[string]any{"Key": o.Key})
+			item := map[string]any{"Key": o.Key}
+			if o.VersionID != "" {
+				item["VersionId"] = o.VersionID
+			}
+			objs = append(objs, item)
 		}
 		in["Objects"] = objs
-		in["Delete"] = map[string]any{"Objects": objs}
+		in["Quiet"] = d.Quiet
+		in["Delete"] = map[string]any{"Objects": objs, "Quiet": d.Quiet}
 	case "CompleteMultipartUpload":
 		var completed struct {
 			Part []struct {
@@ -561,7 +568,12 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	if op.Name == "GetObjectAttributes" {
 		root = "GetObjectAttributesResponse"
 	}
-	fmt.Fprintf(&b, "<%s>", root)
+	namespace := ""
+	if op.Name == "DeleteObjects" {
+		root = "DeleteResult"
+		namespace = ` xmlns="http://s3.amazonaws.com/doc/2006-03-01/"`
+	}
+	fmt.Fprintf(&b, "<%s%s>", root, namespace)
 	switch op.Name {
 	case "ListBuckets":
 		top := make(map[string]any, len(resp.Output)-1)
@@ -612,6 +624,8 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 			b.WriteString("</Tag>")
 		}
 		b.WriteString("</TagSet>")
+	case "DeleteObjects":
+		writeFlattened(resp.Output, &b, [][2]string{{"Deleted", "Deleted"}, {"Errors", "Error"}})
 	default:
 		write(resp.Output, &b)
 	}

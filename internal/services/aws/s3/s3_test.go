@@ -1426,6 +1426,45 @@ func TestDeleteObjectRestoresPreviousVersion(t *testing.T) {
 	})
 }
 
+func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Enabled"}, nil)
+	first := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("first"))
+	second := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("second"))
+
+	deleted := mustInvoke(t, p, "DeleteObjects", map[string]any{"Bucket": "bucket", "Objects": []any{
+		map[string]any{"Key": "key", "VersionId": second.Headers.Get("x-amz-version-id")},
+	}}, nil)
+	item := deleted.Output["Deleted"].([]any)[0].(map[string]any)
+	if item["VersionId"] != second.Headers.Get("x-amz-version-id") || item["DeleteMarker"] != nil {
+		t.Fatalf("deleted version %#v", item)
+	}
+	restored := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil)
+	if restored.Headers.Get("x-amz-version-id") != first.Headers.Get("x-amz-version-id") || string(readStream(t, restored)) != "first" {
+		t.Fatalf("restored version %#v", restored)
+	}
+
+	quietVersion := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "quiet"}, []byte("quiet")).Headers.Get("x-amz-version-id")
+	result := mustInvoke(t, p, "DeleteObjects", map[string]any{"Bucket": "bucket", "Quiet": true, "Objects": []any{
+		map[string]any{"Key": "key", "VersionId": "missing"},
+		map[string]any{"Key": "quiet", "VersionId": quietVersion},
+	}}, nil)
+	if result.Output["Deleted"] != nil {
+		t.Fatalf("quiet response %#v", result.Output)
+	}
+	failure := result.Output["Errors"].([]any)[0].(map[string]any)
+	if failure["Code"] != "NoSuchVersion" || failure["VersionId"] != "missing" {
+		t.Fatalf("failure %#v", failure)
+	}
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "quiet", "VersionId": quietVersion}, nil); asFault(t, err).Code != "NoSuchKey" {
+		t.Fatalf("quiet delete did not run: %v", err)
+	}
+	if _, err := invoke(t, p, "DeleteObjects", map[string]any{"Bucket": "bucket", "Objects": []any{}}, nil); asFault(t, err).Code != "MalformedXML" {
+		t.Fatalf("empty delete: %v", err)
+	}
+}
+
 func TestVersionedObjectTaggingCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

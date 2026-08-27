@@ -101,7 +101,7 @@ func TestRouteNameQueryOps(t *testing.T) {
 }
 
 func TestDecodeDeleteObjectsXML(t *testing.T) {
-	body := `<Delete><Object><Key>k</Key></Object><Object><Key>src</Key></Object></Delete>`
+	body := `<Delete><Object><Key>k</Key><VersionId>v1</VersionId></Object><Object><Key>src</Key></Object><Quiet>true</Quiet></Delete>`
 	r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/b?delete", strings.NewReader(body))
 	op := &model.Operation{Name: "DeleteObjects"}
 	req, err := Codec{}.Decode(&model.Service{ID: "aws.s3"}, op, r)
@@ -114,6 +114,24 @@ func TestDecodeDeleteObjectsXML(t *testing.T) {
 	}
 	if str(objs[0].(map[string]any)["Key"]) != "k" {
 		t.Fatalf("first key %v", objs[0])
+	}
+	if str(objs[0].(map[string]any)["VersionId"]) != "v1" || req.Input["Quiet"] != true {
+		t.Fatalf("version and quiet %v", req.Input)
+	}
+}
+
+func TestEncodeDeleteObjectsXML(t *testing.T) {
+	w := httptest.NewRecorder()
+	err := (Codec{}).Encode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "DeleteObjects"}, w, &spi.Response{Output: map[string]any{
+		"Deleted": []any{map[string]any{"Key": "k", "VersionId": "v1"}},
+		"Errors":  []any{map[string]any{"Key": "missing", "Code": "NoSuchVersion"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `<?xml version="1.0" encoding="UTF-8"?><DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Deleted><Key>k</Key><VersionId>v1</VersionId></Deleted><Error><Code>NoSuchVersion</Code><Key>missing</Key></Error></DeleteResult>`
+	if w.Body.String() != want {
+		t.Fatalf("body %q want %q", w.Body.String(), want)
 	}
 }
 

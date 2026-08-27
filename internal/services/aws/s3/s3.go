@@ -1162,7 +1162,15 @@ func (p *Pack) deleteObjects(ctx context.Context, req *spi.Request) (*spi.Respon
 			objs, _ = d["Objects"].([]any)
 		}
 	}
+	if len(objs) == 0 {
+		return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	quiet := truthy(req.Input["Quiet"])
+	if d, ok := req.Input["Delete"].(map[string]any); ok {
+		quiet = quiet || truthy(d["Quiet"])
+	}
 	var deleted []any
+	var failures []any
 	for _, o := range objs {
 		m, _ := o.(map[string]any)
 		key := str(m["Key"])
@@ -1172,25 +1180,50 @@ func (p *Pack) deleteObjects(ctx context.Context, req *spi.Request) (*spi.Respon
 		child := *req
 		child.Input = cloneMap(req.Input)
 		child.Input["Key"] = key
-		if versionID := str(m["VersionId"]); versionID != "" {
+		versionID := str(m["VersionId"])
+		if versionID != "" {
 			child.Input["VersionId"] = versionID
 		} else {
 			delete(child.Input, "VersionId")
 		}
 		resp, err := p.deleteObject(ctx, &child)
 		if err != nil {
-			return nil, err
+			fault, ok := err.(*spi.Fault)
+			if !ok {
+				return nil, err
+			}
+			code, message := fault.Code, fault.Message
+			if versionID != "" && code == "InvalidArgument" {
+				code, message = "NoSuchVersion", "The specified version does not exist."
+			}
+			item := map[string]any{"Key": key, "Code": code, "Message": message}
+			if versionID != "" {
+				item["VersionId"] = versionID
+			}
+			failures = append(failures, item)
+			continue
+		}
+		if quiet {
+			continue
 		}
 		item := map[string]any{"Key": key}
-		if resp.Headers != nil {
-			if versionID := resp.Headers.Get("x-amz-version-id"); versionID != "" {
-				item["DeleteMarkerVersionId"] = versionID
-				item["DeleteMarker"] = true
-			}
+		if versionID != "" {
+			item["VersionId"] = versionID
+		}
+		if resp.Headers.Get("x-amz-delete-marker") == "true" {
+			item["DeleteMarkerVersionId"] = resp.Headers.Get("x-amz-version-id")
+			item["DeleteMarker"] = true
 		}
 		deleted = append(deleted, item)
 	}
-	return &spi.Response{Output: map[string]any{"Deleted": deleted}}, nil
+	output := map[string]any{}
+	if len(deleted) > 0 {
+		output["Deleted"] = deleted
+	}
+	if len(failures) > 0 {
+		output["Errors"] = failures
+	}
+	return &spi.Response{Output: output}, nil
 }
 
 func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response, error) {

@@ -727,3 +727,43 @@ func FuzzPostObjectMultipart(f *testing.F) {
 		}
 	})
 }
+
+func FuzzPostObjectPolicy(f *testing.F) {
+	f.Add("", "body")
+	f.Add(base64.StdEncoding.EncodeToString([]byte(`{"expiration":"2099-01-01T00:00:00Z","conditions":[["content-length-range",1,8]]}`)), "body")
+	f.Add(base64.StdEncoding.EncodeToString([]byte(`{"expiration":"1960-01-01T00:00:00Z","conditions":[]}`)), "body")
+	f.Add("not-base64", "body")
+	f.Fuzz(func(t *testing.T, policy, body string) {
+		if len(policy) > 8192 || len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "post-policy-fuzz"}, nil)
+		var payload bytes.Buffer
+		writer := multipart.NewWriter(&payload)
+		_ = writer.WriteField("key", "fuzz-policy")
+		if policy != "" {
+			_ = writer.WriteField("policy", policy)
+			_ = writer.WriteField("x-amz-algorithm", "AWS4-HMAC-SHA256")
+			_ = writer.WriteField("x-amz-credential", "test/20260827/us-east-1/s3/aws4_request")
+			_ = writer.WriteField("x-amz-date", "20260827T000000Z")
+			_ = writer.WriteField("x-amz-signature", "signature")
+		}
+		file, _ := writer.CreateFormFile("file", "file.txt")
+		_, _ = io.WriteString(file, body)
+		_ = writer.Close()
+		httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/post-policy-fuzz", &payload)
+		httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+		_, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": "post-policy-fuzz"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest})
+		got, getErr := invoke(t, p, "GetObject", map[string]any{"Bucket": "post-policy-fuzz", "Key": "fuzz-policy"}, nil)
+		if err != nil {
+			if fault := asFault(t, getErr); fault.Code != "NoSuchKey" {
+				t.Fatalf("rejected policy left object: %+v", fault)
+			}
+			return
+		}
+		if getErr != nil || string(readStream(t, got)) != body {
+			t.Fatalf("accepted policy did not preserve body: %v", getErr)
+		}
+	})
+}

@@ -43,6 +43,17 @@ type zeroIntRand struct{ spi.Rand }
 
 func (zeroIntRand) Intn(int) int { return 0 }
 
+type observedClock struct {
+	spi.Clock
+	after chan time.Duration
+}
+
+func (c *observedClock) After(delay time.Duration) <-chan time.Time {
+	result := c.Clock.After(delay)
+	c.after <- delay
+	return result
+}
+
 func TestStatesHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
 	if n := len(p.Operations()); n != 37 {
@@ -1998,6 +2009,8 @@ func TestStatesStructuralMetadataValidation(t *testing.T) {
 
 func TestStatesExecutionTimeout(t *testing.T) {
 	deps := spitest.Deps(t)
+	clock := &observedClock{Clock: deps.Clock, after: make(chan time.Duration, 16)}
+	deps.Clock = clock
 	p := New(deps)
 	defer func() { _ = p.Close() }()
 	ctx := context.Background()
@@ -2044,13 +2057,19 @@ func TestStatesExecutionTimeout(t *testing.T) {
 	expressDefinition := `{"TimeoutSeconds":2,"StartAt":"Wait","States":{"Wait":{"Type":"Wait","Seconds":10,"End":true}}}`
 	express := invoke("CreateStateMachine", map[string]any{"name": "sync-execution-timeout", "definition": expressDefinition, "roleArn": testRoleARN, "type": "EXPRESS"})
 	result := make(chan map[string]any, 1)
+	for len(clock.after) > 0 {
+		<-clock.after
+	}
 	go func() {
 		result <- invoke("StartSyncExecution", map[string]any{"stateMachineArn": express["stateMachineArn"]})
 	}()
 	select {
-	case early := <-result:
-		t.Fatalf("Express execution timeout completed early %#v", early)
-	case <-time.After(10 * time.Millisecond):
+	case delay := <-clock.after:
+		if delay != 2*time.Second {
+			t.Fatalf("Express execution scheduled for %s", delay)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Express execution did not schedule")
 	}
 	if err := deps.Clock.Advance(2 * time.Second); err != nil {
 		t.Fatal(err)

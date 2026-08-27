@@ -1,4 +1,9 @@
 {
+  "checksums": {
+    "algorithm without value": "InvalidRequest",
+    "mismatched": "BadDigest",
+    "missing": "MissingContentMD5"
+  },
   "empty": "MalformedXML",
   "oversized": "MalformedXML",
   "quiet": {

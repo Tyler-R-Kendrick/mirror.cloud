@@ -1478,12 +1478,32 @@ func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
 	if oversizedFault.Code != "MalformedXML" {
 		t.Fatalf("oversized delete: %v", err)
 	}
+	checksumBody := []byte("<Delete><Object><Key>checksum</Key></Object></Delete>")
+	checksumDigest := md5.Sum(checksumBody)
+	checksumFault := func(contentMD5, algorithm string) string {
+		httpReq := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/bucket?delete", bytes.NewReader(checksumBody))
+		if contentMD5 != "" {
+			httpReq.Header.Set("Content-MD5", contentMD5)
+		}
+		if algorithm != "" {
+			httpReq.Header.Set("x-amz-sdk-checksum-algorithm", algorithm)
+		}
+		_, err := p.Invoke(context.Background(), &spi.Request{Identity: ident(), Operation: "DeleteObjects", Input: map[string]any{
+			"Bucket": "bucket", "Objects": []any{map[string]any{"Key": "checksum"}}, "_body": string(checksumBody),
+		}, HTTP: httpReq})
+		return asFault(t, err).Code
+	}
 	golden.AssertJSON(t, map[string]any{
 		"verbose":      deleted.Output,
 		"quiet":        result.Output,
 		"restoredBody": restoredBody,
 		"empty":        emptyFault.Code,
 		"oversized":    oversizedFault.Code,
+		"checksums": map[string]any{
+			"missing":                 checksumFault("", ""),
+			"mismatched":              checksumFault("AA==", ""),
+			"algorithm without value": checksumFault(base64.StdEncoding.EncodeToString(checksumDigest[:]), "CRC32"),
+		},
 	})
 }
 

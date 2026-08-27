@@ -767,3 +767,37 @@ func FuzzPostObjectPolicy(f *testing.F) {
 		}
 	})
 }
+
+func FuzzPostObjectTagging(f *testing.F) {
+	f.Add("<Tagging><TagSet><Tag><Key>key</Key><Value>value</Value></Tag></TagSet></Tagging>")
+	f.Add("<InvalidXmlTagging></InvalidXmlTagging>")
+	f.Add("not-xml")
+	f.Add("")
+	f.Fuzz(func(t *testing.T, tagging string) {
+		if len(tagging) > 8192 || !utf8.ValidString(tagging) {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "post-tag-fuzz"}, nil)
+		var payload bytes.Buffer
+		writer := multipart.NewWriter(&payload)
+		_ = writer.WriteField("key", "fuzz-tags")
+		_ = writer.WriteField("tagging", tagging)
+		file, _ := writer.CreateFormFile("file", "file.txt")
+		_, _ = file.Write([]byte("body"))
+		_ = writer.Close()
+		httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/post-tag-fuzz", &payload)
+		httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+		_, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": "post-tag-fuzz"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest})
+		_, getErr := invoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "post-tag-fuzz", "Key": "fuzz-tags"}, nil)
+		if err != nil {
+			if fault := asFault(t, getErr); fault.Code != "NoSuchKey" {
+				t.Fatalf("rejected tagging left object: %+v", fault)
+			}
+			return
+		}
+		if getErr != nil {
+			t.Fatalf("accepted tagging lost object: %v", getErr)
+		}
+	})
+}

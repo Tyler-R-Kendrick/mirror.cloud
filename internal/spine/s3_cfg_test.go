@@ -33,6 +33,9 @@ func TestBootedServerS3BucketConfigsRoundTrip(t *testing.T) {
 		}
 		req, _ := http.NewRequest(method, ts.URL+path, rdr)
 		req.Header.Set("Authorization", auth)
+		if method == http.MethodPut && path == "/cfgb" {
+			req.Header.Set("x-amz-bucket-object-lock-enabled", "true")
+		}
 		if strings.Contains(path, "?attributes") {
 			req.Header.Set("x-amz-object-attributes", "ETag,ObjectSize")
 		}

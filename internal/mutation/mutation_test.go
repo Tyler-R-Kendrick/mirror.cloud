@@ -368,8 +368,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-reverse-object-retention-expiry",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `!p.deps.Clock.Now().Before(deadline)`,
-			new:  `p.deps.Clock.Now().Before(deadline)`,
+			old:  `if err == nil && !p.deps.Clock.Now().Before(deadline) {`,
+			new:  `if err == nil && p.deps.Clock.Now().Before(deadline) {`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestObjectLockPreventsPermanentDeletion",
 		},
@@ -1536,8 +1536,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-storage-class-skip-put-validation",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumType string, parts []any) (*spi.Response, error) {\n\tb, key := str(req.Input[\"Bucket\"]), str(req.Input[\"Key\"])\n\tif err := p.requireBucket(ctx, req, b); err != nil {\n\t\treturn nil, err\n\t}\n\tstorageClass, err := requestStorageClass(req)\n\tif err != nil {",
-			new:  "func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumType string, parts []any) (*spi.Response, error) {\n\tb, key := str(req.Input[\"Bucket\"]), str(req.Input[\"Key\"])\n\tif err := p.requireBucket(ctx, req, b); err != nil {\n\t\treturn nil, err\n\t}\n\tstorageClass, err := requestStorageClass(req)\n\tif false {",
+			old:  "func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumType string, parts []any, lockDocs map[string][]byte) (*spi.Response, error) {\n\tb, key := str(req.Input[\"Bucket\"]), str(req.Input[\"Key\"])\n\tif err := p.requireBucket(ctx, req, b); err != nil {\n\t\treturn nil, err\n\t}\n\tstorageClass, err := requestStorageClass(req)\n\tif err != nil {",
+			new:  "func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumType string, parts []any, lockDocs map[string][]byte) (*spi.Response, error) {\n\tb, key := str(req.Input[\"Bucket\"]), str(req.Input[\"Key\"])\n\tif err := p.requireBucket(ctx, req, b); err != nil {\n\t\treturn nil, err\n\t}\n\tstorageClass, err := requestStorageClass(req)\n\tif false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestStorageClassValidation",
 		},
@@ -2576,8 +2576,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-hide-copy-source-version-header",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "response, err := p.putObject(ctx, req, \"\", \"\", nil)\n\tif err == nil && source.version != \"\" {",
-			new:  "response, err := p.putObject(ctx, req, \"\", \"\", nil)\n\tif false {",
+			old:  "response, err := p.putObject(ctx, req, \"\", \"\", nil, nil)\n\tif err == nil && source.version != \"\" {",
+			new:  "response, err := p.putObject(ctx, req, \"\", \"\", nil, nil)\n\tif false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCopyObjectSourceVersions",
 		},
@@ -2688,8 +2688,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-store-single-part-etag-after-multipart",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `resp, err := p.putObject(ctx, req, etag, u.checksumType, completedParts)`,
-			new:  `resp, err := p.putObject(ctx, req, "", u.checksumType, completedParts)`,
+			old:  `resp, err := p.putObject(ctx, req, etag, u.checksumType, completedParts, u.lockDocs)`,
+			new:  `resp, err := p.putObject(ctx, req, "", u.checksumType, completedParts, u.lockDocs)`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestMultipartETagForm",
 		},

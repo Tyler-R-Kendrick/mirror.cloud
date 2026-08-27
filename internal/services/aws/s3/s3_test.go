@@ -1555,6 +1555,39 @@ func TestObjectLockPreventsPermanentDeletion(t *testing.T) {
 	})
 }
 
+func TestObjectLockAppliesRetentionOnWrite(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket", "ObjectLockEnabledForBucket": true}, nil)
+	mustInvoke(t, p, "PutObjectLockConfiguration", map[string]any{"Bucket": "bucket", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "GOVERNANCE", "Days": 2}}}}, nil)
+
+	version := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "default"}, []byte("locked")).Headers.Get("x-amz-version-id")
+	retention := mustInvoke(t, p, "GetObjectRetention", map[string]any{"Bucket": "bucket", "Key": "default", "VersionId": version}, nil)
+	if got := asMapForTest(retention.Output["Retention"]); got["Mode"] != "GOVERNANCE" || got["RetainUntilDate"] != "1970-01-03T00:00:00Z" {
+		t.Fatalf("default retention: %#v", retention.Output)
+	}
+	_, err := invoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "default", "VersionId": version}, nil)
+	if fault := asFault(t, err); fault.Code != "AccessDenied" {
+		t.Fatalf("default retention delete: %v", err)
+	}
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "default", "VersionId": version, "BypassGovernanceRetention": true}, nil)
+
+	explicit := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "explicit", "ObjectLockMode": "COMPLIANCE", "ObjectLockRetainUntilDate": "1970-01-02T00:00:00Z", "ObjectLockLegalHoldStatus": "ON"}, []byte("locked")).Headers.Get("x-amz-version-id")
+	explicitRetention := mustInvoke(t, p, "GetObjectRetention", map[string]any{"Bucket": "bucket", "Key": "explicit", "VersionId": explicit}, nil)
+	if got := asMapForTest(explicitRetention.Output["Retention"]); got["Mode"] != "COMPLIANCE" || got["RetainUntilDate"] != "1970-01-02T00:00:00Z" {
+		t.Fatalf("explicit retention: %#v", explicitRetention.Output)
+	}
+	legalHold := mustInvoke(t, p, "GetObjectLegalHold", map[string]any{"Bucket": "bucket", "Key": "explicit", "VersionId": explicit}, nil)
+	if got := asMapForTest(legalHold.Output["LegalHold"]); got["Status"] != "ON" {
+		t.Fatalf("write legal hold: %#v", legalHold.Output)
+	}
+
+	_, err = invoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "invalid", "ObjectLockMode": "GOVERNANCE"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" {
+		t.Fatalf("unpaired retention headers: %v", err)
+	}
+}
+
 func TestObjectLockBucketGuards(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "plain"}, nil)

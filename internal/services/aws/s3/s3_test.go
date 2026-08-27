@@ -1588,6 +1588,27 @@ func TestObjectLockAppliesRetentionOnWrite(t *testing.T) {
 	}
 }
 
+func TestObjectLockCapturesMultipartRetentionAtInitiation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket", "ObjectLockEnabledForBucket": true}, nil)
+	configuration := func(days int) map[string]any {
+		return map[string]any{"Bucket": "bucket", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "GOVERNANCE", "Days": days}}}}
+	}
+	mustInvoke(t, p, "PutObjectLockConfiguration", configuration(2), nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "multipart"}, nil).Output["UploadId"].(string)
+	if err := deps.Clock.Advance(24 * time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	mustInvoke(t, p, "PutObjectLockConfiguration", configuration(4), nil)
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 1}, []byte("part"))
+	completed := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
+	retention := mustInvoke(t, p, "GetObjectRetention", map[string]any{"Bucket": "bucket", "Key": "multipart", "VersionId": completed.Headers.Get("x-amz-version-id")}, nil)
+	if got := asMapForTest(retention.Output["Retention"]); got["RetainUntilDate"] != "1970-01-03T00:00:00Z" {
+		t.Fatalf("multipart retention: %#v", retention.Output)
+	}
+}
+
 func TestObjectLockBucketGuards(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "plain"}, nil)

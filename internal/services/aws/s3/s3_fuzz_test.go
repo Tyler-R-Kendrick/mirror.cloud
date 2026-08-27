@@ -641,3 +641,37 @@ func FuzzReplicationConfigurationValidation(f *testing.F) {
 		}
 	})
 }
+
+func FuzzReplicationDestinations(f *testing.F) {
+	f.Add(false, false)
+	f.Add(true, false)
+	f.Add(true, true)
+	f.Fuzz(func(t *testing.T, exists, versioned bool) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "replication-destination-source"}, nil)
+		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "replication-destination-source", "Status": "Enabled"}, nil)
+		if exists {
+			mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "replication-destination-target"}, nil)
+			if versioned {
+				mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "replication-destination-target", "Status": "Enabled"}, nil)
+			}
+		}
+		configuration := map[string]any{
+			"Role": "role", "Rules": []any{map[string]any{"Status": "Enabled", "Destination": map[string]any{"Bucket": "replication-destination-target"}}},
+		}
+		_, err := invoke(t, p, "PutBucketReplication", map[string]any{"Bucket": "replication-destination-source", "ReplicationConfiguration": configuration}, nil)
+		if !exists || !versioned {
+			if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+				t.Fatalf("fault=%+v", fault)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		rule := configuration["Rules"].([]any)[0].(map[string]any)
+		if id, _ := rule["ID"].(string); len(id) != 8 {
+			t.Fatalf("generated rule ID %q", id)
+		}
+	})
+}

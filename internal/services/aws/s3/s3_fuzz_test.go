@@ -1,14 +1,21 @@
 package s3_test
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"io"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cespare/xxhash/v2"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
@@ -672,6 +679,51 @@ func FuzzReplicationDestinations(f *testing.F) {
 		rule := configuration["Rules"].([]any)[0].(map[string]any)
 		if id, _ := rule["ID"].(string); len(id) != 8 {
 			t.Fatalf("generated rule ID %q", id)
+		}
+	})
+}
+
+func FuzzPostObjectMultipart(f *testing.F) {
+	f.Add("file.txt", "body", true)
+	f.Add("", "", false)
+	f.Fuzz(func(t *testing.T, filename, body string, created bool) {
+		if len(filename) > 512 || len(body) > 4096 || !utf8.ValidString(filename) || strings.IndexFunc(filename, func(r rune) bool { return r < ' ' || r == 0x7f }) >= 0 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "post-fuzz"}, nil)
+		var payload bytes.Buffer
+		writer := multipart.NewWriter(&payload)
+		_ = writer.WriteField("key", "fuzz/${filename}")
+		if created {
+			_ = writer.WriteField("success_action_status", "201")
+		}
+		file, err := writer.CreateFormFile("file", filename)
+		if err != nil {
+			t.Skip()
+		}
+		_, _ = io.WriteString(file, body)
+		_ = writer.Close()
+		httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/post-fuzz", &payload)
+		httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+		response, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": "post-fuzz"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest})
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantStatus := http.StatusNoContent
+		if created {
+			wantStatus = http.StatusCreated
+		}
+		if response.Status != wantStatus {
+			t.Fatalf("status=%d want=%d", response.Status, wantStatus)
+		}
+		effectiveFilename := filename
+		if effectiveFilename != "" {
+			effectiveFilename = filepath.Base(effectiveFilename)
+		}
+		got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "post-fuzz", "Key": "fuzz/" + effectiveFilename}, nil)
+		if stored := string(readStream(t, got)); stored != body {
+			t.Fatalf("body=%q want=%q", stored, body)
 		}
 	})
 }

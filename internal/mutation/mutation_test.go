@@ -246,9 +246,9 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestDeleteObjectRestoresPreviousVersion",
 		},
 		{
-			name: "s3-accept-empty-multi-delete",
+			name: "s3-accept-invalid-multi-delete-size",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if len(objs) == 0 {`,
+			old:  `if len(objs) == 0 || len(objs) > 1000 {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestDeleteObjectsVersionAndQuietSemantics",

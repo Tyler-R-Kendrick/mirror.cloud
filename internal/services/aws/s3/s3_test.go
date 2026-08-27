@@ -1466,6 +1466,16 @@ func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
 	if emptyFault.Code != "MalformedXML" {
 		t.Fatalf("empty delete: %v", err)
 	}
+	objects := make([]any, 1001)
+	for index := range objects {
+		objects[index] = map[string]any{"Key": fmt.Sprintf("limit-%d", index)}
+	}
+	if _, err := invoke(t, p, "DeleteObjects", map[string]any{"Bucket": "bucket", "Quiet": true, "Objects": objects[:1000]}, nil); err != nil {
+		t.Fatalf("maximum delete: %v", err)
+	}
+	if _, err := invoke(t, p, "DeleteObjects", map[string]any{"Bucket": "bucket", "Objects": objects}, nil); asFault(t, err).Code != "MalformedXML" {
+		t.Fatalf("oversized delete: %v", err)
+	}
 	golden.AssertJSON(t, map[string]any{
 		"verbose":      deleted.Output,
 		"quiet":        result.Output,

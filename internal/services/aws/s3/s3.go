@@ -1162,7 +1162,7 @@ func (p *Pack) deleteObjects(ctx context.Context, req *spi.Request) (*spi.Respon
 			objs, _ = d["Objects"].([]any)
 		}
 	}
-	if len(objs) == 0 {
+	if len(objs) == 0 || len(objs) > 1000 {
 		return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
 	quiet := truthy(req.Input["Quiet"])

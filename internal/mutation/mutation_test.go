@@ -440,8 +440,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-allow-object-lock-config-without-versioning",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if !p.versioningEnabled(ctx, req, b) {`,
-			new:  `if false {`,
+			old:  "if req.Operation == \"PutBucketObjectLockConfiguration\" || req.Operation == \"PutObjectLockConfiguration\" {\n\t\t\tif !p.versioningEnabled(ctx, req, b) {",
+			new:  "if req.Operation == \"PutBucketObjectLockConfiguration\" || req.Operation == \"PutObjectLockConfiguration\" {\n\t\t\tif false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestObjectLockBucketGuards",
 		},

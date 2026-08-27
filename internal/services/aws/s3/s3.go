@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"hash/crc32"
 	"hash/crc64"
@@ -987,6 +988,11 @@ func (p *Pack) postObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		return nil, err
 	}
 	input := map[string]any{"Bucket": bucket, "Key": key, "ContentType": "binary/octet-stream"}
+	if tagging, err := postObjectTagging(fields["tagging"]); err != nil {
+		return nil, err
+	} else if tagging != "" {
+		input["Tagging"] = tagging
+	}
 	for form, member := range map[string]string{
 		"Cache-Control":                   "CacheControl",
 		"Content-Disposition":             "ContentDisposition",
@@ -1046,6 +1052,33 @@ func (p *Pack) postObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		return &spi.Response{Status: status, Headers: headers, Output: map[string]any{"Location": location, "Bucket": bucket, "Key": key, "ETag": response.Output["ETag"]}}, nil
 	}
 	return &spi.Response{Status: status, Headers: headers}, nil
+}
+
+func postObjectTagging(value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	var document struct {
+		XMLName xml.Name
+		Tags    []struct {
+			Key   *string `xml:"Key"`
+			Value *string `xml:"Value"`
+		} `xml:"TagSet>Tag"`
+	}
+	if err := xml.Unmarshal([]byte(value), &document); err != nil {
+		return "", &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if document.XMLName.Local != "Tagging" || len(document.Tags) == 0 {
+		return "", nil
+	}
+	tags := url.Values{}
+	for _, tag := range document.Tags {
+		if tag.Key == nil || tag.Value == nil {
+			return "", &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		tags.Set(*tag.Key, *tag.Value)
+	}
+	return tags.Encode(), nil
 }
 
 func validatePostPolicy(fields map[string]string, bucket string, size int, now time.Time) error {

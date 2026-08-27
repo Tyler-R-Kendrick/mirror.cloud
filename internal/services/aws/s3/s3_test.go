@@ -2922,6 +2922,45 @@ func TestPostObjectPolicyValidation(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestPostObjectTagging(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "post-tags"}, nil)
+	post := func(key, tagging string) error {
+		t.Helper()
+		var payload bytes.Buffer
+		writer := multipart.NewWriter(&payload)
+		_ = writer.WriteField("key", key)
+		_ = writer.WriteField("tagging", tagging)
+		file, _ := writer.CreateFormFile("file", "file.txt")
+		_, _ = file.Write([]byte("body"))
+		_ = writer.Close()
+		httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/post-tags", &payload)
+		httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+		_, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": "post-tags"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest})
+		return err
+	}
+	valid := "<Tagging><TagSet><Tag><Key>one</Key><Value>1</Value></Tag><Tag><Key>two</Key><Value>2</Value></Tag></TagSet></Tagging>"
+	if err := post("valid", valid); err != nil {
+		t.Fatal(err)
+	}
+	tags := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "post-tags", "Key": "valid"}, nil).Output["TagSet"].([]any)
+	if len(tags) != 2 || asMapForTest(tags[0])["Key"] != "one" || asMapForTest(tags[1])["Key"] != "two" {
+		t.Fatalf("tags = %#v", tags)
+	}
+	if err := post("wrong-root", "<InvalidXmlTagging></InvalidXmlTagging>"); err != nil {
+		t.Fatal(err)
+	}
+	if tags := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "post-tags", "Key": "wrong-root"}, nil).Output["TagSet"].([]any); len(tags) != 0 {
+		t.Fatalf("wrong-root tags = %#v", tags)
+	}
+	if fault := asFault(t, post("malformed", "not-xml")); fault.Code != "MalformedXML" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("fault = %+v", fault)
+	}
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "post-tags", "Key": "malformed"}, nil); asFault(t, err).Code != "NoSuchKey" {
+		t.Fatal("malformed tagging stored object")
+	}
+}
+
 func TestObjectCreatedEventNames(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

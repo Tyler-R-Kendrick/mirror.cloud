@@ -818,6 +818,10 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	if err := p.checkWritePreconditions(ctx, req, b, key); err != nil {
 		return nil, err
 	}
+	lockDocs, err := p.objectLockForWrite(ctx, req, b)
+	if err != nil {
+		return nil, err
+	}
 	tags, err := requestTags(req)
 	if err != nil {
 		return nil, err
@@ -895,6 +899,9 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 			_ = p.col(req, "tags").Delete(ctx, tagKey)
 		}
 	}
+	for kind, raw := range lockDocs {
+		_ = p.col(req, "objlock").Put(ctx, objectLockKey(b, key, vid, kind), raw)
+	}
 	h := http.Header{}
 	h.Set("ETag", etag)
 	if vid != "" {
@@ -911,6 +918,9 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		meta, _ = json.Marshal(metaDoc)
 		_ = p.col(req, "objects").Put(ctx, b+"/"+key, meta)
 		h.Set("x-amz-replication-status", status)
+	}
+	for kind, raw := range lockDocs {
+		p.syncReplicaObjectLock(ctx, req, b, key, vid, kind, raw)
 	}
 	p.notify(ctx, req, b, key, "ObjectCreated:Put")
 	return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"ETag": etag}}, nil
@@ -2452,6 +2462,55 @@ func (p *Pack) objectLockExtras(ctx context.Context, req *spi.Request) (*spi.Res
 
 func objectLockKey(bucket, key, version, kind string) string {
 	return objectTagKey(bucket, key, version) + "/" + kind
+}
+
+func (p *Pack) objectLockForWrite(ctx context.Context, req *spi.Request, bucket string) (map[string][]byte, error) {
+	mode := strings.ToUpper(requestCondition(req, "ObjectLockMode", "x-amz-object-lock-mode"))
+	until := requestCondition(req, "ObjectLockRetainUntilDate", "x-amz-object-lock-retain-until-date")
+	legal := strings.ToUpper(requestCondition(req, "ObjectLockLegalHoldStatus", "x-amz-object-lock-legal-hold"))
+	if mode != "" || until != "" || legal != "" {
+		if !p.bucketObjectLockEnabled(ctx, req, bucket) {
+			return nil, &spi.Fault{Code: "InvalidRequest", Message: "Bucket is missing Object Lock Configuration", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+	}
+	if (mode == "") != (until == "") {
+		argument := "x-amz-object-lock-retain-until-date"
+		if mode == "" {
+			argument = "x-amz-object-lock-mode"
+		}
+		return nil, &spi.Fault{Code: "InvalidArgument", Message: "x-amz-object-lock-retain-until-date and x-amz-object-lock-mode must both be supplied", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": argument}}
+	}
+	if mode != "" && mode != "GOVERNANCE" && mode != "COMPLIANCE" {
+		return nil, &spi.Fault{Code: "InvalidArgument", Message: "Unknown wormMode directive.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-object-lock-mode", "ArgumentValue": mode}}
+	}
+	if legal != "" && legal != "ON" && legal != "OFF" {
+		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if mode == "" {
+		raw, ok, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/objectlock")
+		if ok {
+			var configuration map[string]any
+			_ = json.Unmarshal(raw, &configuration)
+			retention := asMap(asMap(asMap(configuration["ObjectLockConfiguration"])["Rule"])["DefaultRetention"])
+			mode = str(retention["Mode"])
+			if mode != "" {
+				now := p.deps.Clock.Now().UTC()
+				if days := asInt(retention["Days"]); days != 0 {
+					until = now.AddDate(0, 0, days).Format(time.RFC3339)
+				} else if years := asInt(retention["Years"]); years != 0 {
+					until = now.AddDate(years, 0, 0).Format(time.RFC3339)
+				}
+			}
+		}
+	}
+	docs := map[string][]byte{}
+	if mode != "" && until != "" {
+		docs["retention"], _ = json.Marshal(map[string]any{"Retention": map[string]any{"Mode": mode, "RetainUntilDate": until}})
+	}
+	if legal != "" {
+		docs["legalhold"], _ = json.Marshal(map[string]any{"LegalHold": map[string]any{"Status": legal}})
+	}
+	return docs, nil
 }
 
 func (p *Pack) objectVersionLocked(ctx context.Context, req *spi.Request, bucket, key, version string) bool {

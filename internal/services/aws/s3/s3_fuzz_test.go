@@ -451,3 +451,31 @@ func FuzzListBucketsPagination(f *testing.F) {
 		}
 	})
 }
+
+func FuzzDeleteObjectVersionRestoration(f *testing.F) {
+	f.Add("first", "second", "third", uint8(2))
+	f.Add("", "same", "same", uint8(1))
+	f.Fuzz(func(t *testing.T, first, second, third string, selected uint8) {
+		if len(first)+len(second)+len(third) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-fuzz"}, nil)
+		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "version-fuzz", "Status": "Enabled"}, nil)
+		versions := make([]string, 0, 3)
+		for _, body := range []string{first, second, third} {
+			put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-fuzz", "Key": "key"}, []byte(body))
+			versions = append(versions, put.Headers.Get("x-amz-version-id"))
+		}
+		index := int(selected % 3)
+		mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "version-fuzz", "Key": "key", "VersionId": versions[index]}, nil)
+		restored := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "version-fuzz", "Key": "key"}, nil)
+		want := third
+		if index == 2 {
+			want = second
+		}
+		if got := string(readStream(t, restored)); got != want {
+			t.Fatalf("deleted=%d body=%q want=%q", index, got, want)
+		}
+	})
+}

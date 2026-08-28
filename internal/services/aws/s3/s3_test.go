@@ -3023,6 +3023,51 @@ func TestPostObjectExpires(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestPostObjectChecksums(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "post-checksums"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "post-checksums", "Status": "Enabled"}, nil)
+	post := func(key, algorithm, checksum string) (*spi.Response, error) {
+		t.Helper()
+		var payload bytes.Buffer
+		writer := multipart.NewWriter(&payload)
+		_ = writer.WriteField("key", key)
+		_ = writer.WriteField("x-amz-checksum-algorithm", algorithm)
+		if checksum != "" {
+			_ = writer.WriteField("x-amz-checksum-"+strings.ToLower(algorithm), checksum)
+		}
+		file, _ := writer.CreateFormFile("file", "file.txt")
+		_, _ = file.Write([]byte("123456789"))
+		_ = writer.Close()
+		httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/post-checksums", &payload)
+		httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+		return p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": "post-checksums"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest})
+	}
+	sum := make([]byte, 4)
+	binary.BigEndian.PutUint32(sum, crc32.ChecksumIEEE([]byte("123456789")))
+	want := base64.StdEncoding.EncodeToString(sum)
+	for _, tc := range []struct{ key, checksum string }{{"provided", want}, {"computed", ""}} {
+		response, err := post(tc.key, "CRC32", tc.checksum)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.Headers.Get("x-amz-checksum-crc32") != want || response.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" || response.Headers.Get("x-amz-version-id") == "" {
+			t.Fatalf("headers = %v", response.Headers)
+		}
+		head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "post-checksums", "Key": tc.key, "ChecksumMode": "ENABLED"}, nil)
+		if head.Headers.Get("x-amz-checksum-crc32") != want {
+			t.Fatalf("stored checksum = %q", head.Headers.Get("x-amz-checksum-crc32"))
+		}
+	}
+	_, err := post("invalid", "CRC32", "AAAAAA==")
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("fault = %+v", fault)
+	}
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "post-checksums", "Key": "invalid"}, nil); asFault(t, err).Code != "NoSuchKey" {
+		t.Fatal("invalid checksum stored object")
+	}
+}
+
 func TestObjectCreatedEventNames(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

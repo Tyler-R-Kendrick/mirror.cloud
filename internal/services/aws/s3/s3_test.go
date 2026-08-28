@@ -732,6 +732,11 @@ func TestMultipartSSECustomerKey(t *testing.T) {
 	encryption := map[string]any{"SSECustomerAlgorithm": "AES256", "SSECustomerKey": key, "SSECustomerKeyMD5": keyMD5}
 	createInput := maps.Clone(encryption)
 	createInput["Bucket"], createInput["Key"] = "multipart-sse-c", "object"
+	invalidCreate := maps.Clone(createInput)
+	invalidCreate["SSECustomerAlgorithm"] = "AES128"
+	if _, err := invoke(t, p, "CreateMultipartUpload", invalidCreate, nil); asFault(t, err).Code != "InvalidEncryptionAlgorithmError" {
+		t.Fatalf("invalid create SSE-C = %v", err)
+	}
 	created := mustInvoke(t, p, "CreateMultipartUpload", createInput, nil)
 	if created.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != keyMD5 || created.Headers.Get("x-amz-server-side-encryption") != "" {
 		t.Fatalf("create SSE-C headers = %v", created.Headers)

@@ -2730,7 +2730,8 @@ func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket st
 	algorithm := requestCondition(req, "ServerSideEncryption", "x-amz-server-side-encryption")
 	keyID := requestCondition(req, "SSEKMSKeyId", "x-amz-server-side-encryption-aws-kms-key-id")
 	bucketKey := truthy(req.Input["BucketKeyEnabled"])
-	defaultKeyID := ""
+	defaultAlgorithm, defaultKeyID := "", ""
+	defaultBucketKey := false
 	raw, ok, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/encryption")
 	if ok {
 		var document map[string]any
@@ -2742,16 +2743,33 @@ func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket st
 		if rules := asSlice(configuration["Rules"]); len(rules) > 0 {
 			rule := asMap(rules[0])
 			defaults := asMap(rule["ApplyServerSideEncryptionByDefault"])
-			if algorithm == "" {
-				algorithm = str(defaults["SSEAlgorithm"])
-			}
+			defaultAlgorithm = str(defaults["SSEAlgorithm"])
 			defaultKeyID = str(defaults["KMSMasterKeyID"])
-			bucketKey = bucketKey || truthy(rule["BucketKeyEnabled"])
+			defaultBucketKey = truthy(rule["BucketKeyEnabled"])
+		} else if encoded := str(document["Document"]); encoded != "" {
+			var parsed struct {
+				Rules []struct {
+					Defaults struct {
+						Algorithm string `xml:"SSEAlgorithm"`
+						KeyID     string `xml:"KMSMasterKeyID"`
+					} `xml:"ApplyServerSideEncryptionByDefault"`
+					BucketKey bool `xml:"BucketKeyEnabled"`
+				} `xml:"Rule"`
+			}
+			if xml.Unmarshal([]byte(encoded), &parsed) == nil && len(parsed.Rules) > 0 {
+				defaultAlgorithm = parsed.Rules[0].Defaults.Algorithm
+				defaultKeyID = parsed.Rules[0].Defaults.KeyID
+				defaultBucketKey = parsed.Rules[0].BucketKey
+			}
 		}
 	}
 	if algorithm == "" {
-		algorithm = "AES256"
+		algorithm = defaultAlgorithm
+		if algorithm == "" {
+			algorithm = "AES256"
+		}
 	}
+	bucketKey = bucketKey || defaultBucketKey
 	if algorithm != "AES256" && algorithm != "aws:kms" && algorithm != "aws:kms:dsse" {
 		return "", "", false, &spi.Fault{Code: "InvalidArgument", Message: "The encryption method specified is not supported", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}

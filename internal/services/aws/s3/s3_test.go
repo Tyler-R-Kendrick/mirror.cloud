@@ -801,9 +801,15 @@ func TestCopyObjectSSECustomerKeys(t *testing.T) {
 		t.Fatal("customer copy readable without destination key")
 	}
 	get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "copy-sse-c", "Key": "customer", "SSECustomerAlgorithm": "AES256", "SSECustomerKey": destinationKey, "SSECustomerKeyMD5": destinationMD5}, nil)
-	if string(readStream(t, get)) != "secret" {
+	body := string(readStream(t, get))
+	if body != "secret" {
 		t.Fatal("customer copy body mismatch")
 	}
+	golden.AssertJSON(t, map[string]any{
+		"plain":    map[string]any{"algorithm": plain.Headers.Get("x-amz-server-side-encryption"), "customerKey": plain.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != ""},
+		"customer": map[string]any{"algorithm": customer.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": customer.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == destinationMD5},
+		"get":      map[string]any{"body": body, "keyMD5Matches": get.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == destinationMD5},
+	})
 }
 
 func TestUploadPartCopySSECustomerKeys(t *testing.T) {
@@ -838,9 +844,15 @@ func TestUploadPartCopySSECustomerKeys(t *testing.T) {
 		t.Fatalf("part copy completion encryption = %v", completed.Headers)
 	}
 	get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "part-copy-sse-c", "Key": "destination", "SSECustomerAlgorithm": "AES256", "SSECustomerKey": destinationKey, "SSECustomerKeyMD5": destinationMD5}, nil)
-	if string(readStream(t, get)) != "copied part" {
+	body := string(readStream(t, get))
+	if body != "copied part" {
 		t.Fatal("part copy body mismatch")
 	}
+	golden.AssertJSON(t, map[string]any{
+		"part":     map[string]any{"algorithm": part.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": part.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == destinationMD5},
+		"complete": map[string]any{"algorithm": completed.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": completed.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == destinationMD5},
+		"get":      map[string]any{"body": body, "keyMD5Matches": get.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == destinationMD5},
+	})
 }
 
 func TestCopyObjectTaggingDirective(t *testing.T) {

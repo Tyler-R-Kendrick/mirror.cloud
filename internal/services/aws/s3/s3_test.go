@@ -654,10 +654,11 @@ func TestObjectSSECustomerKey(t *testing.T) {
 	if head.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != keyMD5 {
 		t.Fatalf("head SSE-C headers = %v", head.Headers)
 	}
-	if body := string(readStream(t, mustInvoke(t, p, "GetObject", readInput, nil))); body != "secret" {
+	body := string(readStream(t, mustInvoke(t, p, "GetObject", readInput, nil)))
+	if body != "secret" {
 		t.Fatalf("SSE-C body = %q", body)
 	}
-	mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "sse-c", "Key": "object", "SSECustomerKeyMD5": keyMD5}, nil)
+	md5Only := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "sse-c", "Key": "object", "SSECustomerKeyMD5": keyMD5}, nil)
 	for name, changes := range map[string]map[string]any{
 		"algorithm":  {"SSECustomerAlgorithm": "AES128"},
 		"short key":  {"SSECustomerKey": base64.StdEncoding.EncodeToString([]byte("short"))},
@@ -672,6 +673,12 @@ func TestObjectSSECustomerKey(t *testing.T) {
 			t.Fatalf("%s SSE-C accepted", name)
 		}
 	}
+	golden.AssertJSON(t, map[string]any{
+		"put":     map[string]any{"algorithm": put.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": put.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == keyMD5},
+		"head":    map[string]any{"algorithm": head.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": head.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == keyMD5},
+		"md5Only": md5Only.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == keyMD5,
+		"body":    body,
+	})
 }
 
 func TestMultipartServerSideEncryption(t *testing.T) {

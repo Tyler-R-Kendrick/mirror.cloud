@@ -64,15 +64,16 @@ jobs:
           make specs-sync
           make generate
       - name: models reproduce byte-for-byte
-        # A diff means the committed models no longer follow from the lock,
-        # which is the only thing that makes them trustworthy as a build input.
+        # `make specs-sync` fetches exactly what the lock pins -- the AWS
+        # models at the recorded commit, the committed Discovery document --
+        # so this is deterministic. A diff means the committed models no
+        # longer follow from the lock, which is the only thing that makes
+        # them trustworthy as a build input.
         #
-        # AWS is pinned to a commit, so a diff there is a real defect. GCP
-        # Discovery is served live with nothing to pin, so a diff there means
-        # Google changed the document — which is a finding, not a build error:
-        # re-run `make specs-sync && make generate`, review what moved, and
-        # commit it. Until the behavioral changelog exists to record such
-        # changes, this job is where they surface.
+        # Moving the pins is `make specs-refresh`, deliberately, in its own
+        # commit: an upstream change should be reviewed, not absorbed by a
+        # build. That review is where an unannounced vendor change gets
+        # noticed until the behavioral changelog exists to record it.
         run: |
           git diff --exit-code -- internal/generated specs/mirror.lock || {
             echo "::error::internal/generated is stale; run 'make specs-sync && make generate' and commit the result"

@@ -1,15 +1,12 @@
 package engine_test
 
 import (
-	"compress/gzip"
 	"context"
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/behavior"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/engine"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/generated"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -240,21 +237,9 @@ func TestRefusesModelWithoutShapes(t *testing.T) {
 
 func generatedModel(t *testing.T, serviceID string) *model.Service {
 	t.Helper()
-	provider, service := serviceID[:3], serviceID[4:]
-	path := filepath.Join("..", "generated", provider, service, "model.json.gz")
-	f, err := os.Open(path)
+	svc, err := generated.Model(serviceID)
 	if err != nil {
-		t.Fatalf("no generated model at %s: %v\nRun: make specs-sync && make generate", path, err)
+		t.Fatalf("%v\nRun: make specs-sync && make generate", err)
 	}
-	defer f.Close()
-	zr, err := gzip.NewReader(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer zr.Close()
-	var svc model.Service
-	if err := json.NewDecoder(zr).Decode(&svc); err != nil {
-		t.Fatal(err)
-	}
-	return &svc
+	return svc
 }

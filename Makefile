@@ -2,7 +2,7 @@ BIN := bin
 GO  := go
 export CGO_ENABLED := 0
 
-.PHONY: all build test test-unit test-contract test-snapshot test-chaos test-bdd test-fuzz-seeds test-fuzz test-mutation test-race test-coverage vet fmt generate specs-sync
+.PHONY: all build test test-unit test-contract test-snapshot test-chaos test-bdd test-fuzz-seeds test-fuzz test-mutation test-race test-coverage vet fmt generate specs-sync ratchet ratchet-update equivalence
 
 all: build
 
@@ -88,6 +88,12 @@ ratchet:
 
 ratchet-update:
 	$(GO) run ./cmd/ratchet -write
+
+# Replays every recorded pack trace against the bundle that replaced it, and
+# checks that every bundle still builds and registers. A pack may only be
+# deleted with this green.
+equivalence:
+	$(GO) test ./internal/equivalence/ ./internal/bundled/ -count=1
 
 vet:
 	$(GO) vet ./...

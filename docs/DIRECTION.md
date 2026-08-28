@@ -220,3 +220,7 @@ The v2 direction closes the gap between the founding claim and the code, and wid
 4. **Provider neutrality gets real targets.** All eight intended clouds (AWS, Azure, GCP, Cloudflare, Vercel, Hetzner, Hostinger, DigitalOcean) publish machine-readable specs, and one OpenAPI receiver covers six of them. The next proof is DigitalOcean and Hetzner served with zero provider-specific Go.
 
 The execution contract for the implementing agent is [`MASTER_PROMPT_V2.md`](./MASTER_PROMPT_V2.md).
+
+### Where this stands
+
+The machinery is in the tree and under test; the migration has begun and is 0.7% done. What exists: anti-drift ratchets that fail CI on any growth of the hand-written surface; a reconnected spec pipeline producing 149 committed service models carrying 77,656 shapes, reproducible byte-for-byte from the lock; the B-IR schema, loader and validator; the engine that serves a bundle as an ordinary behavior pack; the equivalence recorder and its committed traces; and `aws.shield` served entirely from `behavior/aws/shield/service.yaml` with its Go pack deleted. What does not: the schema is provisional until a queue service proves the ceiling, the probe harness and corpora do not exist, so every provenance cell still reads `authored`, and 151 packs remain. The measured trend is in [`CRITIQUE.md`](./CRITIQUE.md) Part 7.

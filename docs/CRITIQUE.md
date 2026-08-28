@@ -321,3 +321,38 @@ The pivot stands, with its rationale strengthened: 1,230 commits of evidence tha
 - The mutation-driven discipline transfers directly: v2 replaces each Go mutant with a B-IR mutant, and the existing mutant inventory is the checklist.
 
 **The one adjustment**: `ratchet.json` baselines must be seeded from *current* counts (2,603 case labels, 55,905 services LOC, 869 fault sites, 154 packs), not the Part-5 figures — and the ratchet needs to be among the first things built, because the six-day trend shows how quickly the baseline moves when nothing forbids it.
+
+## Part 7 — The first reversal: one service, served from data
+
+Parts 5 and 6 measured a strangler running backwards. This part records the point where it turned, and states plainly how small that point is.
+
+### What now exists
+
+| Metric | Part-6 tip | Now | Δ |
+|---|---|---|---|
+| Service packs | 152 | 151 | **−1** |
+| Hand-typed `case` labels | 2,600 | 2,594 | **−6** |
+| Hand-written behavior LOC | 55,905 | 55,803 | **−102** |
+| Inline `&spi.Fault{}` sites | 868 | 867 | **−1** |
+| Generated LOC in use | 0 | 149 service models, 77,656 shapes | **served** |
+| Behavior data files | 0 | 1 bundle | +1 |
+| Services served from data | 0 | 1 | +1 |
+| Catalog services with empty `Shapes` | all | unchanged | — |
+
+Every counted metric moved the right way for the first time, and `ratchet.json` was rewritten downward — which is the only direction it accepts, so the counts above are now a floor that CI enforces.
+
+### What that is worth, honestly
+
+One service. `aws.shield` is the CRUD floor: two resources, six operations, no lifecycle, no queue semantics, no algorithmic core. Extracting it proves the loop is closed — spec → model → bundle → engine → registry → edge, with the pack deleted and its behavior frozen in a replayed recording — and proves nothing about the ceiling. The schema is not yet frozen, because freezing it on the easiest possible service would be self-congratulation. SQS is the case that decides whether statecharts, selectors and long-poll waits belong in the schema or behind primitives, and until that lands the schema is provisional.
+
+### Three things the extraction actually taught
+
+**C9. The gate works, and it found something on its first run.** The bundle initially required an existing record for `DeleteProtection`; the pack deletes absent records silently. Equivalence failed, and the rule held: the bundle was changed to match the pack, and the disagreement with the real service — which very likely does return `ResourceNotFoundException` — was written down as a `quirks:` entry with `provenance: authored` for a probe run to settle. This is the two-tier oracle behaving as designed on its first real case: **equivalence gates the migration, the corpus gates the truth**, and a behavior change is never a side effect of translation.
+
+**C10. Deleting the oracle needs the oracle preserved first.** The obvious form of the gate — record from the pack, replay against the engine — stops working the moment the pack is deleted, which is the same commit. Recordings are therefore committed artifacts (`internal/equivalence/traces/<service>.json`, `schema: trace/1`) cut from the pack in the commit that removes it. The gate then runs forever against something no longer in the tree, which is what keeps a later B-IR edit from quietly walking away from the behavior that was migrated.
+
+**C11. Zero-dependency construction was hiding behind tolerant packs.** `SupportRows` built every pack with an empty `spi.Deps{}` to ask what operations it serves. Hand-written packs tolerate that; the engine refuses to start without a clock, a store and a source of identifiers, and refusing is correct — a service that cannot be deterministic should not answer requests. The call site was given real dependencies rather than the engine being loosened. Expect more of this: the packs' informal tolerances are load-bearing in places nobody wrote down, and each one surfaces as an extraction failure.
+
+### The honest scoreboard
+
+151 of 152 services are still hand-written Go. The ratio is 0.7% migrated. What changed is not the ratio but its derivative — and the fact that the machinery which makes the next 151 mechanical (ratchet, spec pipeline, schema, loader, engine, equivalence recorder, registry integration) is now in the tree and under test, rather than described in a document.

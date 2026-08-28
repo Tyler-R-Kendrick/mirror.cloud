@@ -115,11 +115,11 @@ func Replay(t *Trace, h spi.Handler) (*Diff, error)
 
 1. Generated model with non-empty shapes exists (S-SPEC output).
 2. `cmd/birx` drafts B-IR from the pack's recognized idioms; residue is LLM-translated from pack source + tests. Drafts are proposals; the gate decides.
-3. **Equivalence gate**, all in one CI job (`equivalence/<service>`):
-   a. `equivalence.Record` over the pack's existing unit tests → `equivalence.Replay` against the engine-served B-IR — zero structural diffs;
+3. **Equivalence gate**, all in one CI job (`equivalence/<service>`, `make equivalence`):
+   a. `equivalence.Record` over the pack's existing unit tests → `equivalence.Replay` against the engine-served B-IR — zero structural diffs. **Commit the recording**: the gate has to survive the pack it was recorded from, so in the deleting commit the pack's answers are frozen to `internal/equivalence/traces/<service>.json` (`schema: trace/1` — request, identity, and either output or the comparable part of the fault; the message is excluded because wording is not behavior) and `TestBundlesMatchRecordedPacks` replays it on every run thereafter;
    b. spine + conformance + emulate-effects + SDK + BDD suites green with `MIRROR_ENGINE_SHADOW` routing this service to the engine;
    c. every `internal/mutation` mutant touching the service replaced by a B-IR mutant (swap an error ref, drop a `require` rule, off-by-one a limit, flip a guard) that the suites kill.
-4. Delete the Go pack in the same PR; flip the service's `specs/mirror.set` line to tier `bir`; ratchet baselines decrease.
+4. Delete the Go pack in the same PR; ratchet baselines decrease. Do **not** invent a `bir` tier in `specs/mirror.set`: tier is the fidelity a user gets (`mock|emulate|proxy`), not how the service is implemented, and a bundled service delivers the same fidelity the pack did — `docs/SUPPORT.md` is expected to be byte-identical across an extraction, which is a useful check that nothing was lost. Which services are data-defined is already answered by the presence of `behavior/<provider>/<service>/`, and `bundled.ServiceIDs()` reads exactly that.
 5. Provenance audit: every error row and limit either cites corpus evidence or is `authored`.
 
 **Wave order.** Wave 0 (serial, schema-proving): `shield`, `memorydb`, `sqs`, and `sns` or `kms` — then **schema v1 and the engine API freeze**. Wave 1 (maximally parallel): the ~117 remaining trivial packs, CRUD subset only, zero engine churn. Wave 2: the ~19 medium packs (may add `emit` routes and small primitives). Wave 3 (last): dynamodb, s3, gcs, iam, cloudformation, states, lambda — "extracted" means *B-IR shell + fat moved-verbatim primitive*: dispatch, errors, lifecycle, validation, projection in B-IR; the interpreter in `prims`. This definition is always mechanically completable.

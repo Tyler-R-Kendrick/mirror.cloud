@@ -21,6 +21,11 @@ jobs:
         run: test -z "$(gofmt -l . | grep -v node_modules || true)"
       - name: anti-drift ratchet
         run: make ratchet
+      - name: extraction equivalence
+        # Named separately so it can be a required check: no pack may be
+        # deleted without its recording replaying green against the bundle
+        # that replaced it.
+        run: make equivalence
       - name: unit and coverage floor
         run: make test-coverage
       - name: protocol contracts
@@ -61,6 +66,13 @@ jobs:
       - name: models reproduce byte-for-byte
         # A diff means the committed models no longer follow from the lock,
         # which is the only thing that makes them trustworthy as a build input.
+        #
+        # AWS is pinned to a commit, so a diff there is a real defect. GCP
+        # Discovery is served live with nothing to pin, so a diff there means
+        # Google changed the document — which is a finding, not a build error:
+        # re-run `make specs-sync && make generate`, review what moved, and
+        # commit it. Until the behavioral changelog exists to record such
+        # changes, this job is where they surface.
         run: |
           git diff --exit-code -- internal/generated specs/mirror.lock || {
             echo "::error::internal/generated is stale; run 'make specs-sync && make generate' and commit the result"

@@ -55,10 +55,11 @@ operations:
     list: { resource: protection, member: Protections, paginate: model }
 
   DeleteProtection:
-    require:
-      - { cond: rec_found, error: NotFound }
-    reads:
-      rec: { resource: protection }
+    # Deleting a protection that does not exist succeeds silently. Real Shield
+    # returns ResourceNotFoundException here, but the pack this was extracted
+    # from does not, and equivalence gates the migration: behavior changes on
+    # corpus evidence, deliberately and cited, not as a side effect of
+    # translation. See the quirk below.
     effects:
       - delete: { resource: protection }
 
@@ -74,3 +75,13 @@ operations:
       rec: { resource: subscription }
     output:
       SubscriptionState: "rec_found ? rec.SubscriptionState : 'INACTIVE'"
+
+quirks:
+  - operation: DeleteProtection
+    note: >
+      Deleting an absent protection returns success rather than
+      ResourceNotFoundException. Transcribed from the hand-written pack and
+      not yet checked against the real service; a probe run decides whether
+      this is fidelity or a bug, and the answer is recorded here with its
+      evidence.
+    provenance: authored

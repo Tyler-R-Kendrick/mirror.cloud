@@ -595,11 +595,25 @@ type SupportRow struct {
 func SupportRows() []SupportRow {
 	b := catalog.Bundle()
 	packOps := map[string]int{}
+	// Constructing a service to ask what it serves needs real dependencies:
+	// hand-written packs happen to tolerate a zero Deps, but a data-defined
+	// service refuses to start without a clock, a store and a source of
+	// identifiers, and refusing is the correct behavior. Nothing here is used
+	// beyond the constructor.
+	probe := spi.Deps{
+		Store:   store.NewMemory("support-matrix"),
+		Blobs:   blobs.NewMemory(),
+		Bus:     bus.New(),
+		Clock:   clock.NewControllable(),
+		Rand:    rand.New("support-matrix"),
+		Journal: journal.New(),
+		Model:   b,
+	}
 	for _, f := range registry.Factories() {
 		if f.Tier != model.TierEmulate {
 			continue
 		}
-		p, err := f.New(spi.Deps{})
+		p, err := f.New(probe)
 		if err != nil || p == nil {
 			continue
 		}

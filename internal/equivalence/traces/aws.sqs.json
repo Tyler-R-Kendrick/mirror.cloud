@@ -88,7 +88,10 @@
       "operation": "SendMessage",
       "input": {
         "MessageBody": "hello",
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 1
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -106,7 +109,10 @@
       "operation": "SendMessage",
       "input": {
         "MessageBody": "world",
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 1
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -123,7 +129,10 @@
     {
       "operation": "GetQueueAttributes",
       "input": {
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 1
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -143,7 +152,10 @@
       "operation": "ReceiveMessage",
       "input": {
         "MaxNumberOfMessages": 10,
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 1
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -177,7 +189,10 @@
       "operation": "ReceiveMessage",
       "input": {
         "MaxNumberOfMessages": 10,
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 1
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -196,7 +211,10 @@
         "Attributes": {
           "VisibilityTimeout": "45"
         },
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 1
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -209,7 +227,10 @@
     {
       "operation": "GetQueueAttributes",
       "input": {
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 1
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -228,7 +249,10 @@
     {
       "operation": "TagQueue",
       "input": {
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1",
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 1
+        },
         "Tags": {
           "env": "test",
           "team": "infra"
@@ -245,7 +269,10 @@
     {
       "operation": "ListQueueTags",
       "input": {
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 1
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -264,7 +291,10 @@
     {
       "operation": "UntagQueue",
       "input": {
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1",
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 1
+        },
         "TagKeys": [
           "team"
         ]
@@ -280,7 +310,10 @@
     {
       "operation": "ListQueueTags",
       "input": {
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 1
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -337,7 +370,10 @@
       "operation": "SendMessage",
       "input": {
         "MessageBody": "a",
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 17
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -357,7 +393,10 @@
       "input": {
         "MessageBody": "a",
         "MessageGroupId": "g1",
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 17
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -376,7 +415,10 @@
       "input": {
         "MessageBody": "a",
         "MessageGroupId": "g1",
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 17
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -395,7 +437,10 @@
       "input": {
         "MessageBody": "b",
         "MessageGroupId": "g1",
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 17
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -414,7 +459,10 @@
       "input": {
         "MessageBody": "c",
         "MessageGroupId": "g2",
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 17
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -432,7 +480,10 @@
       "operation": "ReceiveMessage",
       "input": {
         "MaxNumberOfMessages": 10,
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 17
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -465,7 +516,10 @@
     {
       "operation": "PurgeQueue",
       "input": {
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 17
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -478,7 +532,10 @@
     {
       "operation": "GetQueueAttributes",
       "input": {
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 17
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -499,7 +556,10 @@
     {
       "operation": "DeleteQueue",
       "input": {
-        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 17
+        }
       },
       "identity": {
         "Account": "000000000000",
@@ -523,6 +583,851 @@
         "QueueUrls": [
           "http://127.0.0.1:4566/000000000000/q1"
         ]
+      }
+    },
+    {
+      "operation": "CreateQueue",
+      "input": {
+        "QueueName": "perm-q"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/perm-q"
+      }
+    },
+    {
+      "operation": "AddPermission",
+      "input": {
+        "AWSAccountIds": [
+          "111122223333"
+        ],
+        "Actions": [
+          "SendMessage"
+        ],
+        "Label": "l1",
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 28
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetQueueAttributes",
+      "input": {
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 28
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Attributes": {
+          "ApproximateNumberOfMessages": "0",
+          "Policy": "{\"Statement\":[{\"Action\":[\"SQS:SendMessage\"],\"Effect\":\"Allow\",\"Principal\":{\"AWS\":[\"111122223333\"]},\"Resource\":\"arn:aws:sqs:us-east-1:000000000000:perm-q\",\"Sid\":\"l1\"}],\"Version\":\"2012-10-17\"}",
+          "VisibilityTimeout": "30"
+        }
+      }
+    },
+    {
+      "operation": "AddPermission",
+      "input": {
+        "AWSAccountIds": [
+          "444455556666"
+        ],
+        "Actions": [
+          "SQS:ReceiveMessage"
+        ],
+        "Label": "l2",
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 28
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetQueueAttributes",
+      "input": {
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 28
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Attributes": {
+          "ApproximateNumberOfMessages": "0",
+          "Policy": "{\"Statement\":[{\"Action\":[\"SQS:SendMessage\"],\"Effect\":\"Allow\",\"Principal\":{\"AWS\":[\"111122223333\"]},\"Resource\":\"arn:aws:sqs:us-east-1:000000000000:perm-q\",\"Sid\":\"l1\"},{\"Action\":[\"SQS:ReceiveMessage\"],\"Effect\":\"Allow\",\"Principal\":{\"AWS\":[\"444455556666\"]},\"Resource\":\"arn:aws:sqs:us-east-1:000000000000:perm-q\",\"Sid\":\"l2\"}],\"Version\":\"2012-10-17\"}",
+          "VisibilityTimeout": "30"
+        }
+      }
+    },
+    {
+      "operation": "AddPermission",
+      "input": {
+        "AWSAccountIds": [
+          "111122223333"
+        ],
+        "Actions": [
+          "SendMessage"
+        ],
+        "Label": "l1",
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 28
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidParameterValue",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AddPermission",
+      "input": {
+        "AWSAccountIds": [
+          "111122223333"
+        ],
+        "Actions": [
+          "SendMessage"
+        ],
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 28
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "MissingParameter",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AddPermission",
+      "input": {
+        "AWSAccountIds": [],
+        "Actions": [],
+        "Label": "l3",
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 28
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "MissingParameter",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "AddPermission",
+      "input": {
+        "AWSAccountIds": [
+          "111122223333"
+        ],
+        "Actions": [
+          "SendMessage"
+        ],
+        "Label": "l4",
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/absent-q"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "AWS.SimpleQueueService.NonExistentQueue",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "RemovePermission",
+      "input": {
+        "Label": "l1",
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 28
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetQueueAttributes",
+      "input": {
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 28
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Attributes": {
+          "ApproximateNumberOfMessages": "0",
+          "Policy": "{\"Statement\":[{\"Action\":[\"SQS:ReceiveMessage\"],\"Effect\":\"Allow\",\"Principal\":{\"AWS\":[\"444455556666\"]},\"Resource\":\"arn:aws:sqs:us-east-1:000000000000:perm-q\",\"Sid\":\"l2\"}],\"Version\":\"2012-10-17\"}",
+          "VisibilityTimeout": "30"
+        }
+      }
+    },
+    {
+      "operation": "RemovePermission",
+      "input": {
+        "Label": "l1",
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 28
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidParameterValue",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "RemovePermission",
+      "input": {
+        "Label": "l1",
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/absent-q"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "AWS.SimpleQueueService.NonExistentQueue",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateQueue",
+      "input": {
+        "QueueName": "dlq"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/dlq"
+      }
+    },
+    {
+      "operation": "CreateQueue",
+      "input": {
+        "Attributes": {
+          "RedrivePolicy": "{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:000000000000:dlq\",\"maxReceiveCount\":1}"
+        },
+        "QueueName": "src-created"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/src-created"
+      }
+    },
+    {
+      "operation": "CreateQueue",
+      "input": {
+        "QueueName": "src-set"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/src-set"
+      }
+    },
+    {
+      "operation": "SetQueueAttributes",
+      "input": {
+        "Attributes": {
+          "RedrivePolicy": "{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:000000000000:dlq\",\"maxReceiveCount\":1}"
+        },
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 43
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateQueue",
+      "input": {
+        "Attributes": {
+          "RedrivePolicy": "{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:000000000000:other-dlq\",\"maxReceiveCount\":1}"
+        },
+        "QueueName": "src-elsewhere"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/src-elsewhere"
+      }
+    },
+    {
+      "operation": "ListDeadLetterSourceQueues",
+      "input": {
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 41
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueueUrls": [
+          "http://127.0.0.1:4566/000000000000/src-created",
+          "http://127.0.0.1:4566/000000000000/src-set"
+        ]
+      },
+      "superseded": "the pack answers with a `QueueUrls` member; the model declares it as `queueUrls` and the awsJson codec writes the response map through unchanged, so the pack's member name is one no generated SDK client can read. The bundle answers with the declared name."
+    },
+    {
+      "operation": "ListDeadLetterSourceQueues",
+      "input": {
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 28
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueueUrls": null
+      },
+      "superseded": "the pack answers with a `QueueUrls` member; the model declares it as `queueUrls` and the awsJson codec writes the response map through unchanged, so the pack's member name is one no generated SDK client can read. The bundle answers with the declared name."
+    },
+    {
+      "operation": "ListDeadLetterSourceQueues",
+      "input": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/absent-q"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "AWS.SimpleQueueService.NonExistentQueue",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "SendMessage",
+      "input": {
+        "MessageBody": "move-one",
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 42
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MD5OfMessageBody": "a60b52f34917a0c92d06bd2a1271f5e4",
+        "MessageId": "9045051ba67c4ee8"
+      }
+    },
+    {
+      "operation": "SendMessage",
+      "input": {
+        "MessageBody": "move-two",
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 42
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MD5OfMessageBody": "1a1b7dd9fc509b736a449df8e1d37444",
+        "MessageId": "71a868c4bfb93e84"
+      }
+    },
+    {
+      "operation": "StartMessageMoveTask",
+      "input": {
+        "DestinationArn": "arn:aws:sqs:us-east-1:000000000000:dlq",
+        "SourceArn": "arn:aws:sqs:us-east-1:000000000000:src-created"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TaskHandle": "a0e8b56057f849f4"
+      }
+    },
+    {
+      "operation": "ReceiveMessage",
+      "input": {
+        "MaxNumberOfMessages": 10,
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 41
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Messages": [
+          {
+            "Attributes": {
+              "ApproximateReceiveCount": "1"
+            },
+            "Body": "move-one",
+            "MessageId": "9045051ba67c4ee8",
+            "ReceiptHandle": "842605a09b0619a859b40e2284f4b982e94d5e075d11aa23d3e17e80f9ea6ade"
+          },
+          {
+            "Attributes": {
+              "ApproximateReceiveCount": "1"
+            },
+            "Body": "move-two",
+            "MessageId": "71a868c4bfb93e84",
+            "ReceiptHandle": "39bb7163b1cbd6d9698335fbb68051ace5804d523e38583b3a6944302d25960e"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ReceiveMessage",
+      "input": {
+        "MaxNumberOfMessages": 10,
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 42
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Messages": []
+      }
+    },
+    {
+      "operation": "ListMessageMoveTasks",
+      "input": {
+        "SourceArn": "arn:aws:sqs:us-east-1:000000000000:src-created"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Results": [
+          {
+            "ApproximateNumberOfMessagesMoved": 2,
+            "DestinationArn": "arn:aws:sqs:us-east-1:000000000000:dlq",
+            "SourceArn": "arn:aws:sqs:us-east-1:000000000000:src-created",
+            "StartedTimestamp": 0,
+            "Status": "COMPLETED",
+            "TaskHandle": "a0e8b56057f849f4",
+            "source": "src-created"
+          }
+        ]
+      },
+      "superseded": "the pack returns its internal `source` bookkeeping member inside each result entry. The model's ListMessageMoveTasksResultEntry does not declare it, so it is state the pack leaked into a response rather than part of the contract; the bundle answers with the declared members only."
+    },
+    {
+      "operation": "ListMessageMoveTasks",
+      "input": {
+        "SourceArn": "arn:aws:sqs:us-east-1:000000000000:src-set"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Results": null
+      }
+    },
+    {
+      "operation": "CancelMessageMoveTask",
+      "input": {
+        "TaskHandle": {
+          "$fromPath": "TaskHandle",
+          "$fromStep": 51
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidParameterValue",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CancelMessageMoveTask",
+      "input": {
+        "TaskHandle": "not-a-task"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateQueue",
+      "input": {
+        "QueueName": "redrive-dlq"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/redrive-dlq"
+      }
+    },
+    {
+      "operation": "CreateQueue",
+      "input": {
+        "Attributes": {
+          "RedrivePolicy": "{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:000000000000:redrive-dlq\",\"maxReceiveCount\":1}"
+        },
+        "QueueName": "redrive-src"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/redrive-src"
+      }
+    },
+    {
+      "operation": "SendMessage",
+      "input": {
+        "MessageBody": "goes-and-returns",
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 59
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MD5OfMessageBody": "1a4441711a29eb129b2406a2a11c42df",
+        "MessageId": "9434407c2deb9755"
+      }
+    },
+    {
+      "operation": "ReceiveMessage",
+      "input": {
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 59
+        },
+        "VisibilityTimeout": 0
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Messages": [
+          {
+            "Attributes": {
+              "ApproximateReceiveCount": "1"
+            },
+            "Body": "goes-and-returns",
+            "MessageId": "9434407c2deb9755",
+            "ReceiptHandle": "ca25a4232cf64a129c0bb703190d52c9ad6b4e2421c0f61d0548c546316fa3c1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ReceiveMessage",
+      "input": {
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 59
+        },
+        "VisibilityTimeout": 0
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Messages": [
+          {
+            "Attributes": {
+              "ApproximateReceiveCount": "2"
+            },
+            "Body": "goes-and-returns",
+            "MessageId": "9434407c2deb9755",
+            "ReceiptHandle": "ba094efe62a93e4cce33454cecd8b2aebf00e705cf4b5ec4e927effb40679eb3"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ReceiveMessage",
+      "input": {
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 58
+        },
+        "VisibilityTimeout": 0
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Messages": [
+          {
+            "Attributes": {
+              "ApproximateReceiveCount": "3"
+            },
+            "Body": "goes-and-returns",
+            "MessageId": "9434407c2deb9755",
+            "ReceiptHandle": "ba094efe62a93e4cce33454cecd8b2aebf00e705cf4b5ec4e927effb40679eb3"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StartMessageMoveTask",
+      "input": {
+        "SourceArn": "arn:aws:sqs:us-east-1:000000000000:redrive-dlq"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TaskHandle": "a3e03f5e760a05c4"
+      }
+    },
+    {
+      "operation": "ReceiveMessage",
+      "input": {
+        "QueueUrl": {
+          "$fromPath": "QueueUrl",
+          "$fromStep": 59
+        },
+        "VisibilityTimeout": 0
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Messages": [
+          {
+            "Attributes": {
+              "ApproximateReceiveCount": "4"
+            },
+            "Body": "goes-and-returns",
+            "MessageId": "9434407c2deb9755",
+            "ReceiptHandle": "7130d138d77772d809f29b562d017127973c82f86113297dd4ef679cd32ea66b"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StartMessageMoveTask",
+      "input": {
+        "SourceArn": "arn:aws:sqs:us-east-1:000000000000:perm-q"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TaskHandle": "a488f7edf3660dd1"
       }
     }
   ]

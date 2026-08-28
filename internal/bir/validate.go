@@ -144,6 +144,12 @@ func Validate(s *Service, svc *model.Service) error {
 			problems = append(problems, fmt.Errorf("%s: %s: unknown provenance %q", s.ServiceID, where, e.Provenance))
 		}
 	}
+	if ref := s.MissingInput; ref != "" {
+		if _, ok := s.Errors[ref]; !ok {
+			problems = append(problems, fmt.Errorf(
+				"%s: missing_input_error: unknown error %q; add it to the error table", s.ServiceID, ref))
+		}
+	}
 
 	// Operations.
 	for _, name := range sortedKeys(s.Operations) {
@@ -260,9 +266,37 @@ func Validate(s *Service, svc *model.Service) error {
 				checkOutputMember(s, svc, modelOp, where+".list.member", l.Member, &problems)
 			}
 			compile(where+".list.key", l.Key)
-			// The filter sees one candidate record as `item`, and nothing the
-			// rest of the operation cannot see.
-			compilerFor(append(append([]string{}, scope...), "item")...)(where+".list.filter", l.Filter)
+			// The filter sees one candidate record as `item`, its per-item
+			// joins, and nothing the rest of the operation cannot see.
+			itemScope := append(append([]string{}, scope...), "item")
+			perItemKey := compilerFor(itemScope...)
+			for _, b := range sortedKeys(l.Reads) {
+				r := l.Reads[b]
+				if _, ok := s.Resources[r.Resource]; !ok {
+					problems = append(problems, fmt.Errorf("%s: %s.list.reads.%s: unknown resource %q",
+						s.ServiceID, where, b, r.Resource))
+				}
+				// A per-item read is keyed off the candidate, so deriving the key
+				// from the request -- what an operation-level read falls back to
+				// -- would load the same record for every item.
+				if r.Key == "" {
+					problems = append(problems, fmt.Errorf(
+						"%s: %s.list.reads.%s: no key; a per-item read is keyed off `item`, not off the request",
+						s.ServiceID, where, b))
+				}
+				perItemKey(where+".list.reads."+b+".key", r.Key)
+				itemScope = append(itemScope, b, b+"_found")
+			}
+			// Per-item lets see the candidate and its joins, and each other:
+			// the engine resolves them by dependency, not by name.
+			for _, b := range sortedKeys(l.Let) {
+				itemScope = append(itemScope, b)
+			}
+			perItemLet := compilerFor(itemScope...)
+			for _, b := range sortedKeys(l.Let) {
+				perItemLet(where+".list.let."+b, l.Let[b])
+			}
+			perItemLet(where+".list.filter", l.Filter)
 		}
 
 		// The central check: a bundle may not describe a response the wire

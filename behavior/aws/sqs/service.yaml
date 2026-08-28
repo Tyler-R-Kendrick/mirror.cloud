@@ -8,35 +8,55 @@ service: aws.sqs
 # observed/probed and records the evidence.
 provenance: authored
 
-# Proven, not yet serving. The message plane -- visibility timeouts, FIFO
-# ordering and deduplication, dead-letter redrive, long polling, batches -- is
-# expressed here and gated against the pack's recording on every CI run. Six
-# operations are not: AddPermission, RemovePermission, ListDeadLetterSourceQueues,
-# StartMessageMoveTask, CancelMessageMoveTask and ListMessageMoveTasks.
+# SQS calls an absent required input MissingParameter, not the engine's default
+# ValidationException. The model says which members are required; what a
+# service calls their absence is the service's own vocabulary, so it is stated
+# here rather than assumed by the engine.
+missing_input_error: MissingParameter
+
+# Every operation the pack serves is now expressed here, including the six that
+# were missing, and all of them are gated against the pack's recording on every
+# CI run: the message plane -- visibility timeouts, FIFO ordering and
+# deduplication, dead-letter redrive, long polling, batches -- plus the access
+# policy, the dead-letter sources and the message move tasks.
 #
-# ListDeadLetterSourceQueues is the one that decides a schema question: it
-# filters queues on a redrive policy that may live in either the queue record
-# or its settings record, so a list would have to join a companion resource per
-# item. That is a schema addition worth making on more than one operation's
-# evidence, so it waits.
+# ListDeadLetterSourceQueues was the operation that decided a schema question:
+# it filters queues on a redrive policy that may live in either the queue
+# record or its settings record, so the list has to join a companion resource
+# per item. That is now `list.reads` plus `list.let`, which is the operation's
+# own reads-then-lets shape applied to one candidate at a time rather than a
+# construct invented for this service.
 #
-# Until then the pack serves and this bundle shadows it: registering both would
-# mean two descriptions of one service, and deleting the pack now would lose
-# six operations.
+# What still keeps the pack serving is addressing, not semantics. SQS requires
+# QueueUrl on the wire and the model says so, so the engine's model-driven
+# input check rejects a request that names a queue any other way. The pack also
+# accepts QueueName, and the emulator's own delivery paths rely on that: an
+# EventBridge rule, a Scheduler target, an SNS subscription and a Pipes poller
+# each know a queue's name and have no URL to build one from, because nothing
+# in spi.Deps carries the endpoint the server is listening on. That is an
+# emulator-internal affordance rather than a claim about SQS, and resolving it
+# means letting a resource declare the members that address it -- so the
+# required check is satisfied by any one of them -- which is a change to input
+# validation for every service and wants its own evidence.
 shadow: >
-  Six operations are not yet expressed (AddPermission, RemovePermission,
-  ListDeadLetterSourceQueues, StartMessageMoveTask, CancelMessageMoveTask,
-  ListMessageMoveTasks); ListDeadLetterSourceQueues needs a per-item join
-  between a listed record and its companion settings record.
+  Complete and gated, but not yet serving: SQS requires QueueUrl on the wire
+  and the engine enforces that from the model, while the emulator's internal
+  delivery paths (events, scheduler, sns, pipes) address queues by QueueName
+  because no endpoint is available to them. Serving from this bundle needs
+  resource-declared addressing members in input validation.
 
 resources:
   queue:
     collection: queues
     id:
-      # A caller names a queue either directly or through its URL, and the two
-      # must resolve to the same record.
+      # A caller names a queue directly, through its URL, or -- the message
+      # move operations only -- through its ARN, and all three must resolve to
+      # the same record.
       input_members: [QueueName]
-      derive: "'QueueName' in input ? string(input.QueueName) : lastSegment(string(input.QueueUrl), '/')"
+      derive: >
+        'QueueName' in input ? string(input.QueueName)
+          : ('QueueUrl' in input ? lastSegment(string(input.QueueUrl), '/')
+             : ('SourceArn' in input ? queueFromArn(string(input.SourceArn)) : ''))
     record:
       name: id
       # The URL has to echo the endpoint the caller actually reached: a client
@@ -70,6 +90,19 @@ resources:
       derive: "'QueueName' in input ? string(input.QueueName) : lastSegment(string(input.QueueUrl), '/')"
     record:
       tags: "'Tags' in input ? input.Tags : {}"
+
+  # A message move task. The pack completes a move synchronously and records
+  # the task as already COMPLETED, so this record is a receipt rather than a
+  # job: nothing later advances its status. Real SQS runs the move in the
+  # background and the task passes through RUNNING, which is why
+  # CancelMessageMoveTask can never succeed here -- see quirks.
+  movetask:
+    collection: qmove
+    id: { generate: { kind: hex, bytes: 16 } }
+    record:
+      TaskHandle: id
+      Status: "'COMPLETED'"
+      StartedTimestamp: "int(now)"
 
   message:
     # Parent-scoped: each queue's messages are their own collection, named for
@@ -105,6 +138,11 @@ resources:
                   event.deadLetter != '' && event.deadLetter != event.queue
                 target: redriven
                 actions:
+                  # The delivery that redrives is still a delivery: it counts,
+                  # and the caller sees the incremented count on the message it
+                  # is handed. Setting this before the move is what carries the
+                  # new count into the dead-letter queue.
+                  - set: { receiveCount: "int(rec.receiveCount) + 1" }
                   - move:
                       to: { queue: event.deadLetter }
                       set:
@@ -117,6 +155,21 @@ resources:
                   - deadline: { name: reappear, after: "seconds(event.visibilityTimeout)" }
             DELETE: [{ target: deleted }]
             PURGE: [{ target: deleted }]
+            # A moved message arrives visible in its destination whatever it
+            # was in its source: the move is a delivery, not a redelivery, so
+            # it does not inherit an unexpired visibility timeout. Which
+            # messages are eligible to move is decided by the operation's
+            # selection, so there is no guard here.
+            MOVE:
+              - target: moved
+                actions:
+                  - move: &moveTo
+                      to:
+                        queue: >
+                          event.dest != '' ? event.dest : string(rec.origin)
+                      set:
+                        handle: { generate: { kind: hex, bytes: 64 } }
+                      state: visible
             CHANGE_VISIBILITY:
               - target: invisible
                 actions:
@@ -131,12 +184,14 @@ resources:
           on:
             DELETE: [{ target: deleted }]
             PURGE: [{ target: deleted }]
+            MOVE: [{ target: moved, actions: [{ move: *moveTo }] }]
             CHANGE_VISIBILITY:
               - target: invisible
                 actions:
                   - deadline: { name: reappear, after: "seconds(event.timeout)" }
 
         redriven: { final: true }
+        moved: { final: true }
         deleted: { final: true }
 
 errors:
@@ -151,6 +206,10 @@ errors:
     fault: client
   InvalidParameterValue:
     code: InvalidParameterValue
+    http: 400
+    fault: client
+  ResourceNotFound:
+    code: ResourceNotFoundException
     http: 400
     fault: client
 
@@ -417,7 +476,220 @@ operations:
     effects:
       - send_event: { foreach: msgs, event: PURGE }
 
+  # The access policy is a JSON document inside a queue attribute, so these two
+  # read it, amend the statement list and write the attribute back. Everything
+  # about the document is data here; nothing about it is SQS-specific except
+  # which attribute it lives in.
+  AddPermission:
+    reads:
+      q: { resource: queue }
+      s: { resource: settings }
+    let:
+      # Creation-time attributes underneath, SetQueueAttributes on top, which
+      # is the same order every read of a queue's attributes uses.
+      attrs: "merge(q_found ? q.attrs : {}, s_found ? s.attrs : {})"
+      policy: >
+        'Policy' in attrs && string(attrs.Policy) != ''
+          ? parseJSON(string(attrs.Policy))
+          : {'Version': '2012-10-17', 'Statement': []}
+      statements: >
+        policy != null && 'Statement' in policy && policy.Statement != null
+          ? policy.Statement : []
+      label: "'Label' in input ? string(input.Label) : ''"
+      accounts: "'AWSAccountIds' in input ? input.AWSAccountIds : []"
+      actions: "'Actions' in input ? input.Actions : []"
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+      - { cond: "label != ''", error: MissingParameter, message: Label }
+      - cond: "accounts.size() > 0 && actions.size() > 0"
+        error: MissingParameter
+        message: AWSAccountIds/Actions
+      # A label names one statement, so reusing it would leave the policy with
+      # two statements answering to the same name and no way to remove either.
+      - cond: "!statements.exists(st, 'Sid' in st && string(st.Sid) == label)"
+        error: InvalidParameterValue
+        message: Label exists
+    effects:
+      # A bare action name is qualified and a qualified one is left alone, so
+      # AddPermission('SendMessage') and AddPermission('SQS:SendMessage') mean
+      # the same thing.
+      - put:
+          resource: settings
+          record:
+            attrs: >
+              merge(attrs, {'Policy': toJSON({
+                'Version': policy != null && 'Version' in policy
+                  ? policy.Version : '2012-10-17',
+                'Statement': statements + [{
+                  'Sid': label,
+                  'Effect': 'Allow',
+                  'Principal': {'AWS': accounts.map(a, string(a))},
+                  'Action': actions.map(a,
+                    string(a).contains(':') ? string(a) : 'SQS:' + string(a)),
+                  'Resource': arn('aws', ['sqs', identity.region, identity.account, q.name])
+                }]
+              })})
+
+  RemovePermission:
+    reads:
+      q: { resource: queue }
+      s: { resource: settings }
+    let:
+      attrs: "merge(q_found ? q.attrs : {}, s_found ? s.attrs : {})"
+      policy: >
+        'Policy' in attrs && string(attrs.Policy) != ''
+          ? parseJSON(string(attrs.Policy))
+          : {'Version': '2012-10-17', 'Statement': []}
+      statements: >
+        policy != null && 'Statement' in policy && policy.Statement != null
+          ? policy.Statement : []
+      label: "'Label' in input ? string(input.Label) : ''"
+      kept: "statements.filter(st, !('Sid' in st) || string(st.Sid) != label)"
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+      # Removing a label that is not there is an error rather than a no-op:
+      # the caller believes a permission exists that does not.
+      - cond: "kept.size() != statements.size()"
+        error: InvalidParameterValue
+        message: Label not found
+    effects:
+      - put:
+          resource: settings
+          record:
+            attrs: >
+              merge(attrs, {'Policy': toJSON({
+                'Version': policy != null && 'Version' in policy
+                  ? policy.Version : '2012-10-17',
+                'Statement': kept
+              })})
+
+  # The per-item join: a queue's redrive policy may sit on the queue record or
+  # on its settings, so deciding whether a queue feeds this dead-letter queue
+  # needs both records for every candidate.
+  ListDeadLetterSourceQueues:
+    reads:
+      q: { resource: queue }
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+    list:
+      resource: queue
+      member: queueUrls
+      paginate: model
+      reads:
+        src: { resource: settings, key: "string(item.name)" }
+      let:
+        attrs: "merge(item.attrs, src_found ? src.attrs : {})"
+        redrivePolicy: >
+          'RedrivePolicy' in attrs && string(attrs.RedrivePolicy) != ''
+            ? parseJSON(string(attrs.RedrivePolicy)) : null
+        deadLetter: >
+          redrivePolicy != null && 'deadLetterTargetArn' in redrivePolicy
+            ? queueFromArn(string(redrivePolicy.deadLetterTargetArn)) : ''
+      filter: "deadLetter == q.name"
+    output:
+      queueUrls: "items.map(src, src.url)"
+
+  StartMessageMoveTask:
+    reads:
+      q: { resource: queue }
+    let:
+      source: "q_found ? string(q.name) : ''"
+      destination: >
+        'DestinationArn' in input && input.DestinationArn != null
+          ? queueFromArn(string(input.DestinationArn)) : ''
+    require:
+      - { cond: "source != ''", error: MissingParameter, message: SourceArn }
+    select:
+      binding: msgs
+      resource: message
+      # Without a destination the move is a redrive back to where each message
+      # came from, so a message that was never redriven has nowhere to go and
+      # is left alone -- as is one whose origin is the queue it is already in.
+      # Deciding eligibility here rather than in the statechart is what makes
+      # the moved count the size of this selection.
+      filter: >
+        (destination != ''
+          ? destination
+          : ('origin' in item && item.origin != null ? string(item.origin) : '')) != '' &&
+        (destination != ''
+          ? destination
+          : ('origin' in item && item.origin != null ? string(item.origin) : '')) != source
+    effects:
+      # The event carries the requested destination, which is the same for
+      # every message; where it is empty each message falls back to its own
+      # origin, and only the record knows that, so the fallback is in the move
+      # action rather than here.
+      - send_event:
+          foreach: msgs
+          event: MOVE
+          context:
+            dest: destination
+      - create:
+          resource: movetask
+          record:
+            SourceArn: "'SourceArn' in input ? input.SourceArn : ''"
+            DestinationArn: "'DestinationArn' in input ? input.DestinationArn : ''"
+            ApproximateNumberOfMessagesMoved: "msgs.size()"
+            source: source
+    output:
+      TaskHandle: rec.TaskHandle
+
+  CancelMessageMoveTask:
+    reads:
+      task: { resource: movetask, key: "string(input.TaskHandle)" }
+    require:
+      - { cond: task_found, error: ResourceNotFound, message: TaskHandle }
+      - cond: "string(task.Status) == 'RUNNING'"
+        error: InvalidParameterValue
+        message: task is not in progress
+    effects:
+      - patch:
+          resource: movetask
+          key: "string(input.TaskHandle)"
+          record:
+            Status: "'CANCELLING'"
+
+  ListMessageMoveTasks:
+    let:
+      source: >
+        'SourceArn' in input && input.SourceArn != null
+          ? queueFromArn(string(input.SourceArn)) : ''
+    list:
+      resource: movetask
+      member: Results
+      filter: "source == '' || string(item.source) == source"
+    output:
+      Results: >
+        items.map(t, {
+          'TaskHandle': t.TaskHandle,
+          'Status': t.Status,
+          'SourceArn': t.SourceArn,
+          'DestinationArn': t.DestinationArn,
+          'ApproximateNumberOfMessagesMoved': t.ApproximateNumberOfMessagesMoved,
+          'StartedTimestamp': t.StartedTimestamp
+        })
+
 quirks:
+  - operation: ListDeadLetterSourceQueues
+    note: >
+      The pack answered with a `QueueUrls` member. The model declares the
+      member as `queueUrls`, and the awsJson codec writes the response map
+      through unchanged, so the pack's answer was one no SDK could read: a
+      generated client looks for `queueUrls` and finds nothing. This bundle
+      answers with the member the model declares, which is a deliberate
+      divergence from the recording rather than a transcription error, and the
+      trace step records it as superseded for that reason.
+
+  - operation: CancelMessageMoveTask
+    note: >
+      The pack performs a move synchronously and files the task as COMPLETED,
+      so a cancel always fails with "task is not in progress" -- there is no
+      window in which a task is RUNNING. Real SQS moves messages in the
+      background at a bounded rate, which is what MaxNumberOfMessagesPerSecond
+      controls, and that input is accepted and ignored here. Transcribed as it
+      stands; a probe should settle whether a cancel ever succeeds and what
+      ApproximateNumberOfMessagesMoved answers when it does.
+
   - operation: ReceiveMessage
     note: >
       Redrive to the dead-letter queue is decided at receive rather than when

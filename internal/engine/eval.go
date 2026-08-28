@@ -241,32 +241,43 @@ func resourceNameOf(ir *bir.Service, want bir.Resource) string {
 // A binding that never becomes evaluable is reported with the error it kept
 // producing, so a genuine mistake reads as itself rather than as "cycle".
 func (ev *eval) evalLets(op bir.Operation) error {
-	pending := make([]string, 0, len(op.Let))
-	for n := range op.Let {
+	_, err := ev.resolveLets(op.Let, "operations."+ev.req.Operation+".let.")
+	return err
+}
+
+// resolveLets binds a set of let expressions, resolving them by dependency
+// rather than by name: a binding that names another is retried once the one it
+// needs exists. It answers with the names it bound, so a caller working in a
+// narrower scope -- a list's per-item lets -- can clear them again.
+func (ev *eval) resolveLets(lets map[string]string, base string) ([]string, error) {
+	pending := make([]string, 0, len(lets))
+	for n := range lets {
 		pending = append(pending, n)
 	}
 	sort.Strings(pending)
+	bound := make([]string, 0, len(pending))
 
 	lastErr := map[string]error{}
 	for len(pending) > 0 {
 		var stuck []string
 		progress := false
 		for _, n := range pending {
-			v, err := ev.eval("operations." + ev.req.Operation + ".let." + n)
+			v, err := ev.eval(base + n)
 			if err != nil {
 				lastErr[n] = err
 				stuck = append(stuck, n)
 				continue
 			}
 			ev.binds[n] = v
+			bound = append(bound, n)
 			progress = true
 		}
 		if !progress {
-			return fmt.Errorf("engine: %s.let.%s: %w", ev.req.Operation, stuck[0], lastErr[stuck[0]])
+			return bound, fmt.Errorf("engine: %s%s: %w", base, stuck[0], lastErr[stuck[0]])
 		}
 		pending = stuck
 	}
-	return nil
+	return bound, nil
 }
 
 // checkRequires evaluates preconditions in declaration order. The first
@@ -711,12 +722,38 @@ func (ev *eval) runList(ctx context.Context, op bir.Operation, modelOp model.Ope
 		}
 		if op.List.Filter != "" {
 			ev.binds["item"] = rec
-			keep, filterErr := ev.evalBool(base + "filter")
-			delete(ev.binds, "item")
-			if filterErr != nil {
-				return filterErr
+			joined, joinErr := ev.resolveListReads(ctx, op, base)
+			var (
+				derived []string
+				letErr  error
+			)
+			if joinErr == nil {
+				derived, letErr = ev.resolveLets(op.List.Let, base+"let.")
 			}
-			if !keep {
+			var keep bool
+			var filterErr error
+			if joinErr == nil && letErr == nil {
+				keep, filterErr = ev.evalBool(base + "filter")
+			}
+			// Every per-item binding is scoped to its candidate: one left in
+			// place would be visible to the next item's filter, and to the
+			// output projection, as though it belonged to the operation.
+			delete(ev.binds, "item")
+			for _, name := range derived {
+				delete(ev.binds, name)
+			}
+			for _, name := range joined {
+				delete(ev.binds, name)
+				delete(ev.binds, name+"_found")
+			}
+			switch {
+			case joinErr != nil:
+				return joinErr
+			case letErr != nil:
+				return letErr
+			case filterErr != nil:
+				return filterErr
+			case !keep:
 				continue
 			}
 		}
@@ -733,6 +770,60 @@ func (ev *eval) runList(ctx context.Context, op bir.Operation, modelOp model.Ope
 	// than the records themselves -- ListQueues answers with URLs, not queues.
 	ev.binds["items"] = items
 	return nil
+}
+
+// resolveListReads loads a list's per-item joins for the candidate currently
+// bound as `item`, and answers with the names it bound so the caller can clear
+// them again. The bindings are scoped to one candidate: a join left in place
+// would be visible to the next item's filter, and to the output projection,
+// as though it belonged to the whole operation.
+//
+// A join is keyed off the candidate, so unlike an operation's reads there is
+// no fallback to the request's own identity members; the loader requires the
+// key for that reason.
+func (ev *eval) resolveListReads(ctx context.Context, op bir.Operation, base string) ([]string, error) {
+	if len(op.List.Reads) == 0 {
+		return nil, nil
+	}
+	names := make([]string, 0, len(op.List.Reads))
+	for n := range op.List.Reads {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	bound := make([]string, 0, len(names))
+	for _, name := range names {
+		read := op.List.Reads[name]
+		res, ok := ev.e.ir.Resources[read.Resource]
+		if !ok {
+			return bound, fmt.Errorf("engine: unknown resource %q", read.Resource)
+		}
+		key, err := ev.eval(base + "reads." + name + ".key")
+		if err != nil {
+			return bound, err
+		}
+		col, err := ev.collection(res)
+		if err != nil {
+			return bound, err
+		}
+		raw, found, err := col.Get(ctx, fmt.Sprint(key))
+		if err != nil {
+			return bound, err
+		}
+		rec := map[string]any{}
+		if found {
+			if err := unmarshal(raw, &rec); err != nil {
+				return bound, err
+			}
+			if err := ev.applyViews(read.Resource, res, rec); err != nil {
+				return bound, err
+			}
+		}
+		ev.binds[name] = rec
+		ev.binds[name+"_found"] = found
+		bound = append(bound, name)
+	}
+	return bound, nil
 }
 
 // project builds the response, checking each value against the operation's
@@ -776,7 +867,16 @@ func fromCEL(v any) any {
 	return normalize(v)
 }
 
-// normalize rewrites CEL's map[any]any into map[string]any, recursively.
+// normalize rewrites CEL's own container shapes into the Go-native ones the
+// codecs and the store expect, recursively.
+//
+// CEL is not consistent about what a container converts to: a map that came
+// from stored JSON arrives as map[string]any, one built by an expression
+// arrives as map[ref.Val]ref.Val, and either can hold values that are still
+// ref.Val. Anything not converted here reaches encoding/json as a type it
+// refuses, so the reach is deliberately wide -- the reflect fallback catches
+// the container shapes not named above rather than leaving them to fail at the
+// point of use.
 func normalize(v any) any {
 	switch t := v.(type) {
 	case map[any]any:
@@ -791,14 +891,46 @@ func normalize(v any) any {
 			out[k] = normalize(val)
 		}
 		return out
+	case map[ref.Val]ref.Val:
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			out[fmt.Sprint(fromCEL(k))] = fromCEL(val)
+		}
+		return out
 	case []any:
 		out := make([]any, len(t))
 		for i, val := range t {
 			out[i] = normalize(val)
 		}
 		return out
+	case []ref.Val:
+		out := make([]any, len(t))
+		for i, val := range t {
+			out[i] = fromCEL(val)
+		}
+		return out
 	case ref.Val:
 		return fromCEL(t)
+	}
+
+	switch rv := reflect.ValueOf(v); rv.Kind() {
+	case reflect.Map:
+		out := make(map[string]any, rv.Len())
+		for iter := rv.MapRange(); iter.Next(); {
+			out[fmt.Sprint(normalize(iter.Key().Interface()))] = normalize(iter.Value().Interface())
+		}
+		return out
+	case reflect.Slice, reflect.Array:
+		// A byte slice is a value, not a container: rewriting it element by
+		// element would turn a blob into a list of numbers.
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return v
+		}
+		out := make([]any, rv.Len())
+		for i := range out {
+			out[i] = normalize(rv.Index(i).Interface())
+		}
+		return out
 	}
 	return v
 }

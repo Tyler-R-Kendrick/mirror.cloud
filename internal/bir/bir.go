@@ -81,6 +81,15 @@ type Service struct {
 	// with no stated gap is how a half-migration becomes permanent.
 	Shadow string `yaml:"shadow,omitempty"`
 
+	// MissingInput names the error table entry the engine answers with when a
+	// required input member is absent. The model says which members are
+	// required; it does not say what a service calls their absence, and
+	// services disagree -- SQS answers MissingParameter where others answer
+	// ValidationException or InvalidParameterException. Left unset the engine
+	// answers ValidationException, which is a default rather than a fact, so a
+	// bundle that knows better says so here.
+	MissingInput string `yaml:"missing_input_error,omitempty"`
+
 	// Compiled holds programs prepared at load time. Nil until Load runs.
 	Compiled *Compiled `yaml:"-"`
 }
@@ -301,6 +310,30 @@ type ListSpec struct {
 	// Filter is a predicate over each candidate record, which is bound as
 	// `item`. Records that do not satisfy it are omitted.
 	Filter string `yaml:"filter,omitempty"`
+	// Reads are companion records loaded once per candidate, keyed off the
+	// candidate itself, and bound for the filter exactly as an operation's
+	// reads are bound for its requires: each binding x also binds x_found.
+	//
+	// This exists because a listed record is not always the whole record. A
+	// service that splits an entity across collections -- SQS keeps a queue's
+	// creation attributes on the queue and its later SetQueueAttributes
+	// attributes beside it -- can be listed on a property that lives in the
+	// companion, and ListDeadLetterSourceQueues does exactly that: it selects
+	// queues whose redrive policy names a given dead-letter queue, and that
+	// policy may sit in either record.
+	//
+	// The alternative was to let the filter reach into the store, which would
+	// end CEL's purity for every expression in every bundle to serve one
+	// operation. Declaring the join keeps the read where the engine can see it
+	// and the expression pure. Each read needs an explicit key, since the
+	// candidate rather than the request decides what to load.
+	Reads map[string]Read `yaml:"reads,omitempty"`
+	// Let are per-candidate bindings, evaluated after the joins and visible to
+	// the filter, exactly as an operation's lets sit between its reads and its
+	// requires. Without them a filter that has to merge two records and pull a
+	// field out of a JSON-valued attribute repeats that whole chain at every
+	// mention, which is how a predicate stops being readable.
+	Let map[string]string `yaml:"let,omitempty"`
 }
 
 // Effect is one store mutation. The vocabulary is closed on purpose: a new

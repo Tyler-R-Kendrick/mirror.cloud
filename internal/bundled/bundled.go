@@ -17,7 +17,9 @@
 package bundled
 
 import (
+	"context"
 	"fmt"
+	"sync"
 
 	behaviors "github.com/tyler-r-kendrick/mirror.cloud/behavior"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/engine"
@@ -77,9 +79,31 @@ func shadowOf(id string) (string, error) {
 	return ir.Shadow, nil
 }
 
+// built caches one compiled engine per service, so the second and later calls
+// for a service rebind dependencies instead of parsing and compiling the
+// bundle again.
+//
+// Parsing, validating and compiling a bundle costs tens of milliseconds and
+// yields something read-only; only the dependencies differ between callers.
+// The cost matters because cross-service calls construct their target on
+// demand: an EventBridge rule delivering to a queue, or a pipe polling one,
+// asks for aws.sqs on every message.
+var (
+	builtMu sync.Mutex
+	built   = map[string]*engine.Engine{}
+)
+
 // New builds the engine for one bundled service. Exported so tests and tools
-// can construct a bundled service without going through the registry.
+// can construct a bundled service without going through the registry, and so
+// one service can reach another the way the edge would.
 func New(id string, deps spi.Deps) (spi.BehaviorPack, error) {
+	builtMu.Lock()
+	proto, ok := built[id]
+	builtMu.Unlock()
+	if ok {
+		return proto.WithDeps(deps)
+	}
+
 	svc, err := generated.Model(id)
 	if err != nil {
 		return nil, fmt.Errorf("bundled %s: %w", id, err)
@@ -88,7 +112,46 @@ func New(id string, deps spi.Deps) (spi.BehaviorPack, error) {
 	if err != nil {
 		return nil, fmt.Errorf("bundled %s: %w", id, err)
 	}
-	return engine.New(deps, ir, svc)
+	e, err := engine.New(deps, ir, svc)
+	if err != nil {
+		return nil, err
+	}
+	// Two callers racing here both build and one cache entry wins, which costs
+	// a duplicate compile and nothing else: an engine is read-only once built,
+	// so either is as good as the other.
+	builtMu.Lock()
+	built[id] = e
+	builtMu.Unlock()
+	return e, nil
+}
+
+// Handler answers with the service serving id, carrying any construction
+// failure into the call rather than to the caller.
+//
+// It exists for the delivery paths where one service reaches another as a
+// single expression -- an EventBridge rule sending to a queue, a pipe polling
+// one -- and where a build failure must not read as "delivered nothing". A
+// caller that can act on the failure should use New instead.
+func Handler(id string, deps spi.Deps) spi.BehaviorPack {
+	p, err := New(id, deps)
+	if err != nil {
+		return broken{id: id, err: err}
+	}
+	return p
+}
+
+// broken stands in for a service that could not be built, so the failure is
+// reported at the point of use instead of vanishing.
+type broken struct {
+	id  string
+	err error
+}
+
+func (b broken) ServiceID() string    { return b.id }
+func (b broken) Tier() model.Tier     { return model.TierEmulate }
+func (b broken) Operations() []string { return nil }
+func (b broken) Invoke(context.Context, *spi.Request) (*spi.Response, error) {
+	return nil, b.err
 }
 
 // factory captures the ID so each registered entry builds its own service.

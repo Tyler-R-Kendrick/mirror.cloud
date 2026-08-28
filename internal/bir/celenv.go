@@ -77,6 +77,10 @@ func celFuncs() []cel.EnvOption {
 		ternaryDyn("clamp", num, num, num, num),
 		unaryDyn("seconds", dyn, cel.DurationType),
 		unaryDyn("parseJSON", str, dyn),
+		// The inverse, for the attributes that hold a structured document as a
+		// string: without it a bundle can read an access policy but never
+		// amend one.
+		unaryDyn("toJSON", dyn, str),
 		binaryDyn("lastSegment", str, str, str),
 		// CEL comprehensions over a map yield a list, so there is no core way
 		// to build a map minus some keys or to layer two maps. Every provider's

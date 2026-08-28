@@ -72,6 +72,15 @@ func (e *Engine) bindingNames() []string {
 		if op.Select != nil && op.Select.Binding != "" {
 			seen[op.Select.Binding] = true
 		}
+		if op.List != nil {
+			for b := range op.List.Reads {
+				seen[b] = true
+				seen[b+"_found"] = true
+			}
+			for b := range op.List.Let {
+				seen[b] = true
+			}
+		}
 	}
 	out := make([]string, 0, len(seen))
 	for n := range seen {
@@ -150,6 +159,24 @@ func runtimeFuncs() []cel.EnvOption {
 					return types.NullValue
 				}
 				return types.DefaultTypeAdapter.NativeToValue(out)
+			}))),
+
+		// The inverse of parseJSON, for the services that keep a structured
+		// document inside a string-valued attribute -- an SQS queue's access
+		// policy, an SNS topic's, an IAM role's trust document. Reading one
+		// without being able to write it back means a bundle can inspect such
+		// a document but never amend it, which is what AddPermission does.
+		//
+		// Marshalling sorts map keys, so the same document always serializes
+		// to the same bytes and a stored policy does not churn between
+		// otherwise identical writes.
+		cel.Function("toJSON", cel.Overload("toJSON_1", []*cel.Type{dyn}, str,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				raw, err := json.Marshal(fromCEL(v))
+				if err != nil {
+					return types.String("")
+				}
+				return types.String(string(raw))
 			}))),
 
 		// CEL's core has no way to build a map from another map minus some

@@ -151,6 +151,17 @@ func merge(dst, src *Service, name string) error {
 	if src.Provenance != "" {
 		dst.Provenance = src.Provenance
 	}
+	// Service-level scalars have to be carried explicitly, and forgetting one
+	// is silent: the field parses, validates, and is then dropped on the way
+	// into the merged service. Shadow was dropped exactly that way, which left
+	// a bundle marked as not-yet-serving registering alongside the pack it was
+	// shadowing.
+	if src.Shadow != "" {
+		dst.Shadow = src.Shadow
+	}
+	if src.MissingInput != "" {
+		dst.MissingInput = src.MissingInput
+	}
 	dst.Quirks = append(dst.Quirks, src.Quirks...)
 
 	for k, v := range src.Primitives {

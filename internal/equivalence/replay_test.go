@@ -76,6 +76,12 @@ func TestRecordingsAreServedByBundles(t *testing.T) {
 	for _, id := range bundled.ServiceIDs() {
 		have[id] = true
 	}
+	// A shadow bundle is gated but not serving, and the gate is this test's
+	// concern: TestBundlesMatchRecordedPacks builds the bundle directly, so a
+	// recording keeps proving something whether or not the edge routes to it.
+	for id := range bundled.ShadowIDs() {
+		have[id] = true
+	}
 	for _, f := range files {
 		if !have[f.Service] {
 			t.Errorf("%s has a recording but no behavior bundle", f.Service)

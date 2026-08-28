@@ -91,6 +91,24 @@ func New(deps spi.Deps, ir *bir.Service, svc *model.Service) (*Engine, error) {
 	return e, nil
 }
 
+// WithDeps returns an engine serving the same bundle against a different set
+// of dependencies, sharing everything that was expensive to build.
+//
+// Compiling a bundle costs tens of milliseconds, and nothing about the result
+// depends on the store or the clock: the programs, the model and the IR are
+// read-only once construction finishes. Services that call each other -- an
+// EventBridge rule delivering to a queue, a pipe polling one -- would
+// otherwise recompile the target's bundle on every message, which is how a
+// per-delivery path acquires a per-delivery compiler.
+func (e *Engine) WithDeps(deps spi.Deps) (*Engine, error) {
+	if deps.Clock == nil || deps.Rand == nil || deps.Store == nil {
+		return nil, fmt.Errorf("engine: %s needs Clock, Rand and Store", e.ir.ServiceID)
+	}
+	clone := *e
+	clone.deps = deps
+	return &clone, nil
+}
+
 // ServiceID reports the service this engine serves.
 func (e *Engine) ServiceID() string { return e.ir.ServiceID }
 
@@ -196,6 +214,9 @@ func (e *Engine) validateInput(op model.Operation, req *spi.Request) *spi.Fault 
 		// Polly answers an empty Text with InvalidSsmlException, which it
 		// could never do if the engine had already rejected it as missing.
 		if m.Required && !present {
+			if ref := e.ir.MissingInput; ref != "" {
+				return e.fault(ref, name)
+			}
 			return &spi.Fault{
 				Code:       "ValidationException",
 				Message:    fmt.Sprintf("%s is required", name),

@@ -221,6 +221,19 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if string(customerBody) != "sse-c-sdk" || aws.ToString(customerGet.SSECustomerAlgorithm) != "AES256" || aws.ToString(customerGet.SSECustomerKeyMD5) != customerKeyMD5 {
 		t.Fatalf("get customer encryption: body=%q output=%#v", customerBody, customerGet)
 	}
+	customerCopy, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("customer-encrypted-copy"), CopySource: aws.String("sdk/customer-encrypted"), CopySourceSSECustomerAlgorithm: aws.String("AES256"), CopySourceSSECustomerKey: aws.String(customerKey64), CopySourceSSECustomerKeyMD5: aws.String(customerKeyMD5), SSECustomerAlgorithm: aws.String("AES256"), SSECustomerKey: aws.String(customerKey64), SSECustomerKeyMD5: aws.String(customerKeyMD5)})
+	if err != nil || aws.ToString(customerCopy.SSECustomerKeyMD5) != customerKeyMD5 {
+		t.Fatalf("copy customer encryption: %#v %v", customerCopy, err)
+	}
+	customerCopyGet, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("customer-encrypted-copy"), SSECustomerAlgorithm: aws.String("AES256"), SSECustomerKey: aws.String(customerKey64), SSECustomerKeyMD5: aws.String(customerKeyMD5)})
+	if err != nil {
+		t.Fatalf("get copied customer encryption: %v", err)
+	}
+	customerCopyBody, _ := io.ReadAll(customerCopyGet.Body)
+	_ = customerCopyGet.Body.Close()
+	if string(customerCopyBody) != "sse-c-sdk" {
+		t.Fatalf("copied customer encryption body=%q", customerCopyBody)
+	}
 	multipartCustomer, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("multipart-customer-encrypted"), SSECustomerAlgorithm: aws.String("AES256"), SSECustomerKey: aws.String(customerKey64), SSECustomerKeyMD5: aws.String(customerKeyMD5)})
 	if err != nil || aws.ToString(multipartCustomer.SSECustomerKeyMD5) != customerKeyMD5 {
 		t.Fatalf("create multipart customer encryption: %#v %v", multipartCustomer, err)

@@ -1,0 +1,26 @@
+{
+  "complete": {
+    "algorithm": "aws:kms",
+    "bucketKey": "true",
+    "key": "arn:aws:kms:us-east-1:123456789012:key/multipart"
+  },
+  "create": {
+    "algorithm": "aws:kms",
+    "bucketKey": "true",
+    "key": "arn:aws:kms:us-east-1:123456789012:key/multipart"
+  },
+  "head": {
+    "algorithm": "aws:kms",
+    "bucketKey": "true",
+    "key": "arn:aws:kms:us-east-1:123456789012:key/multipart"
+  },
+  "invalid": {
+    "code": "InvalidArgument",
+    "status": 400
+  },
+  "part": {
+    "algorithm": "aws:kms",
+    "bucketKey": "true",
+    "key": "arn:aws:kms:us-east-1:123456789012:key/multipart"
+  }
+}

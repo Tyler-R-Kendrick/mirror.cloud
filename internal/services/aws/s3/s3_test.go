@@ -653,12 +653,18 @@ func TestMultipartServerSideEncryption(t *testing.T) {
 	mustInvoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": "multipart-encryption", "ServerSideEncryptionConfiguration": aes}, nil)
 	completed := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
 	assertEncryption("complete", completed)
-	assertEncryption("head", mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "multipart-encryption", "Key": "object"}, nil))
+	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "multipart-encryption", "Key": "object"}, nil)
+	assertEncryption("head", head)
 
 	_, err := invoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-encryption", "Key": "invalid", "ServerSideEncryption": "invalid"}, nil)
-	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+	fault := asFault(t, err)
+	if fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("invalid encryption fault = %+v", fault)
 	}
+	snapshot := func(response *spi.Response) map[string]any {
+		return map[string]any{"algorithm": response.Headers.Get("x-amz-server-side-encryption"), "key": response.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id"), "bucketKey": response.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled")}
+	}
+	golden.AssertJSON(t, map[string]any{"create": snapshot(created), "part": snapshot(part), "complete": snapshot(completed), "head": snapshot(head), "invalid": map[string]any{"code": fault.Code, "status": fault.HTTPStatus}})
 }
 
 func TestCopyObjectTaggingDirective(t *testing.T) {

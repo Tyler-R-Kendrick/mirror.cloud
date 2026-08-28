@@ -2,6 +2,7 @@ package cloudformation
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -356,5 +357,117 @@ func TestParseYAMLRefGetAtt(t *testing.T) {
 	ref := props["QueueName"].(map[string]any)
 	if str(ref["Ref"]) != "Name" {
 		t.Fatalf("%v", m)
+	}
+}
+
+func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	resources := map[string]any{
+		"Api": map[string]any{"Type": "AWS::ApiGateway::RestApi", "Properties": map[string]any{}},
+		"Bucket": map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{
+			"VersioningConfiguration": map[string]any{"Status": "Enabled"}, "Tags": []any{map[string]any{"Key": "env", "Value": "test"}},
+			"CorsConfiguration": map[string]any{}, "BucketEncryption": map[string]any{}, "LifecycleConfiguration": map[string]any{},
+			"ReplicationConfiguration": map[string]any{}, "NotificationConfiguration": map[string]any{}, "OwnershipControls": map[string]any{},
+			"PublicAccessBlockConfiguration": map[string]any{}, "WebsiteConfiguration": map[string]any{},
+		}},
+		"Function":  map[string]any{"Type": "AWS::Lambda::Function", "Properties": map[string]any{"Runtime": "provided.al2", "Handler": "bootstrap", "Code": map[string]any{}}},
+		"Key":       map[string]any{"Type": "AWS::KMS::Key", "Properties": map[string]any{}},
+		"Log":       map[string]any{"Type": "AWS::Logs::LogGroup", "Properties": map[string]any{}},
+		"Parameter": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Value": "value"}},
+		"Policy": map[string]any{"Type": "AWS::Kinesis::ResourcePolicy", "Properties": map[string]any{
+			"ResourceARN": "arn:aws:kinesis:us-east-1:000000000000:stream/events", "Policy": `{"Version":"2012-10-17"}`,
+		}},
+		"Queue":  map[string]any{"Type": "AWS::SQS::Queue", "Properties": map[string]any{}},
+		"Role":   map[string]any{"Type": "AWS::IAM::Role", "Properties": map[string]any{}},
+		"Rule":   map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{}},
+		"Secret": map[string]any{"Type": "AWS::SecretsManager::Secret", "Properties": map[string]any{"SecretString": "value"}},
+		"Stream": map[string]any{"Type": "AWS::Kinesis::Stream", "Properties": map[string]any{}},
+		"Table":  map[string]any{"Type": "AWS::DynamoDB::Table", "Properties": map[string]any{}},
+		"Topic":  map[string]any{"Type": "AWS::SNS::Topic", "Properties": map[string]any{}},
+	}
+	template, _ := json.Marshal(map[string]any{"Resources": resources, "Outputs": map[string]any{
+		"BucketArn": map[string]any{"Value": map[string]any{"Fn::GetAtt": "Bucket.Arn"}},
+		"QueueArn":  map[string]any{"Value": map[string]any{"Fn::GetAtt": []any{"Queue", "Arn"}}},
+		"QueueName": map[string]any{"Value": map[string]any{"Fn::GetAtt": []any{"Queue", "QueueName"}}},
+		"Joined":    map[string]any{"Value": map[string]any{"Fn::Join": []any{"/", []any{map[string]any{"Ref": "AWS::Region"}, map[string]any{"Ref": "Bucket"}}}}},
+		"Subbed":    map[string]any{"Value": map[string]any{"Fn::Sub": "${AWS::StackName}-${Bucket}"}},
+	}})
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, HTTP: &http.Request{Host: "localhost:4566"}, Operation: "CreateStack", Input: map[string]any{
+		"StackName": "all", "TemplateBody": string(template),
+	}})
+	if err != nil || created.Output["StackId"] == nil {
+		t.Fatalf("create all resources: %#v %v", created, err)
+	}
+	described, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeStacks", Input: map[string]any{"StackName": "all"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stacks := described.Output["Stacks"].([]any)
+	if len(stacks) != 1 || len(stacks[0].(map[string]any)["Outputs"].([]any)) != 5 {
+		t.Fatalf("stack outputs %#v", stacks)
+	}
+	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListStackResources", Input: map[string]any{"StackName": "all"}})
+	if err != nil || len(listed.Output["StackResourceSummaries"].([]any)) != len(resources) {
+		t.Fatalf("resources %#v %v", listed, err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteStack", Input: map[string]any{"StackName": "all"}}); err != nil {
+		t.Fatal(err)
+	}
+	unsupported, _ := json.Marshal(map[string]any{"Resources": map[string]any{"Nope": map[string]any{"Type": "AWS::Nope::Thing"}}})
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "bad", "TemplateBody": string(unsupported)}}); err == nil {
+		t.Fatal("unsupported resource type succeeded")
+	}
+}
+
+func TestCloudFormationIntrinsicAndYAMLUnits(t *testing.T) {
+	p := New(spitest.Deps(t))
+	req := &spi.Request{Identity: spi.Identity{Account: "000000000000", Region: "us-east-1"}}
+	refs := map[string]string{"Bucket": "bucket", "Queue": "http://localhost/000000000000/queue"}
+	if p.ref("AWS::AccountId", refs, req, "stack") != "000000000000" || p.ref("AWS::Partition", refs, req, "stack") != "aws" || p.ref("AWS::URLSuffix", refs, req, "stack") != "amazonaws.com" || p.ref("missing", refs, req, "stack") != "missing" {
+		t.Fatal("pseudo-parameter references")
+	}
+	if p.getAtt("Bucket.Arn", refs, req) != "arn:aws:s3:::bucket" || p.getAtt([]any{"Queue", "Arn"}, refs, req) != "arn:aws:sqs:us-east-1:000000000000:queue" || p.getAtt([]any{"Queue", "QueueName"}, refs, req) != "queue" {
+		t.Fatal("GetAtt resolution")
+	}
+	if got := p.fnJoin([]any{"-", []any{"a", map[string]any{"Ref": "AWS::Region"}}}, refs, req, "stack"); got != "a-us-east-1" {
+		t.Fatalf("join %q", got)
+	}
+	if got := p.fnSub([]any{"${AWS::StackName}-${Bucket}"}, refs, req, "stack"); got != "stack-bucket" {
+		t.Fatalf("sub %q", got)
+	}
+	if got := p.resolve([]any{map[string]any{"Ref": "Bucket"}}, refs, req, "stack").([]any); len(got) != 1 || got[0] != "bucket" {
+		t.Fatalf("nested resolution %#v", got)
+	}
+	if got := p.fnJoin([]any{"only"}, refs, req, "stack"); got != "" {
+		t.Fatalf("short join %q", got)
+	}
+	parsed, err := parseYAML("# comment\nValues:\n  - one\n  - Key: two\n    Enabled: True\n  -\n    nested: 3.5\nEmpty:\n  -\nNull: ~\nQuoted: 'value'\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := parsed["Values"].([]any)
+	if len(values) != 3 || values[0] != "one" || values[1].(map[string]any)["Enabled"] != true {
+		t.Fatalf("YAML values %#v", parsed)
+	}
+	for _, body := range []string{"", "{", "- item", "Key: value\n  Too: deep", "Key\n"} {
+		if _, err := parseTemplate(body); err == nil {
+			t.Fatalf("invalid template accepted %q", body)
+		}
+	}
+	params := formParams(map[string]any{
+		"Parameters.member.1.ParameterKey": "Explicit", "Parameters.member.1.ParameterValue": "set", "ignored": "value",
+	})
+	tpl := map[string]any{"Parameters": map[string]any{
+		"Defaulted": map[string]any{"Default": "fallback"}, "Explicit": map[string]any{"Default": "wrong"}, "Required": map[string]any{},
+	}}
+	mergeParamDefaults(tpl, params)
+	if params["Explicit"] != "set" || params["Defaulted"] != "fallback" || len(paramDecls(tpl)) != 3 {
+		t.Fatalf("parameters %#v %#v", params, tpl)
+	}
+	if lastSlash("plain") != "plain" || lastColon("plain") != "plain" || !truthy(true) || truthy("false") {
+		t.Fatal("scalar helpers")
 	}
 }

@@ -1,0 +1,79 @@
+{
+  "all": {
+    "Buckets": [
+      {
+        "CreationDate": "1970-01-01T00:00:00.000Z",
+        "Name": "alpha-bucket"
+      },
+      {
+        "CreationDate": "1970-01-01T00:00:01.000Z",
+        "Name": "team-alpha"
+      },
+      {
+        "CreationDate": "1970-01-01T00:00:02.000Z",
+        "Name": "team-beta"
+      },
+      {
+        "CreationDate": "1970-01-01T00:00:03.000Z",
+        "Name": "team-charlie"
+      }
+    ],
+    "Owner": {
+      "DisplayName": "mirror",
+      "ID": "123456789012"
+    }
+  },
+  "last": {
+    "Buckets": [
+      {
+        "BucketRegion": "us-west-2",
+        "CreationDate": "1970-01-01T00:00:03.000Z",
+        "Name": "team-charlie"
+      }
+    ],
+    "Owner": {
+      "DisplayName": "mirror",
+      "ID": "123456789012"
+    },
+    "Prefix": "team-"
+  },
+  "page": {
+    "Buckets": [
+      {
+        "BucketRegion": "us-east-1",
+        "CreationDate": "1970-01-01T00:00:01.000Z",
+        "Name": "team-alpha"
+      },
+      {
+        "BucketRegion": "us-west-2",
+        "CreationDate": "1970-01-01T00:00:02.000Z",
+        "Name": "team-beta"
+      }
+    ],
+    "ContinuationToken": "dGVhbS1iZXRh",
+    "Owner": {
+      "DisplayName": "mirror",
+      "ID": "123456789012"
+    },
+    "Prefix": "team-"
+  },
+  "regional": {
+    "Buckets": [
+      {
+        "BucketRegion": "us-west-2",
+        "CreationDate": "1970-01-01T00:00:02.000Z",
+        "Name": "team-beta"
+      },
+      {
+        "BucketRegion": "us-west-2",
+        "CreationDate": "1970-01-01T00:00:03.000Z",
+        "Name": "team-charlie"
+      }
+    ],
+    "Owner": {
+      "DisplayName": "mirror",
+      "ID": "123456789012"
+    },
+    "Prefix": "team-"
+  }
+}

@@ -23,8 +23,9 @@ type Identity struct {
 
 // Request is one decoded operation invocation.
 type Request struct {
-	ServiceID string
-	Operation string
+	ServiceID     string
+	SourceService string // trusted originating service for internal service-to-service calls
+	Operation     string
 	// Input is the decoded operation input, keyed by member name as declared
 	// in the model. Values use Go-native types: string, float64, bool,
 	// []byte, time.Time, []any, map[string]any.
@@ -72,6 +73,7 @@ type Fault struct {
 	HTTPStatus int
 	Fault      string         // "client" | "server"
 	Fields     map[string]any // extra members on the error shape
+	Headers    http.Header    // protocol-level additions required on an error response
 }
 
 func (f *Fault) Error() string {
@@ -111,6 +113,7 @@ type Deps struct {
 // Store is account+region namespaced structured state.
 type Store interface {
 	Scope(account, region string) Scope
+	Scopes(ctx context.Context) ([]Identity, error)
 	Snapshot(ctx context.Context, w io.Writer) error
 	Restore(ctx context.Context, r io.Reader) error
 	Close() error

@@ -1,0 +1,30 @@
+{
+  "configured": {
+    "ObjectLockConfiguration": {
+      "ObjectLockEnabled": "Enabled",
+      "Rule": {
+        "DefaultRetention": {
+          "Days": 1,
+          "Mode": "GOVERNANCE"
+        }
+      }
+    }
+  },
+  "configuredSuspend": "InvalidBucketState",
+  "invalidConfiguration": "MalformedXML",
+  "lockedConfiguration": {
+    "ObjectLockConfiguration": {
+      "ObjectLockEnabled": "Enabled"
+    }
+  },
+  "lockedSuspend": "InvalidBucketState",
+  "lockedVersion": {
+    "Status": "Enabled"
+  },
+  "plainBypass": "InvalidArgument",
+  "plainConfiguration": "InvalidBucketState",
+  "plainLegalHold": "InvalidRequest",
+  "regionalVersion": {
+    "Status": "Enabled"
+  }
+}

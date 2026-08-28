@@ -332,18 +332,34 @@ func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	}
 	var rec map[string]any
 	_ = json.Unmarshal(b, &rec)
-	ev := map[string]any{}
-	for k, v := range req.Input {
-		if k == "FunctionName" || k == "InvocationType" || k == "LogType" || k == "Qualifier" {
-			continue
-		}
-		ev[k] = v
+	invocationType := str(req.Input["InvocationType"])
+	if invocationType == "DryRun" {
+		return &spi.Response{Status: http.StatusNoContent, Output: map[string]any{"StatusCode": http.StatusNoContent}}, nil
 	}
-	payload, _ := json.Marshal(ev)
-	if len(ev) == 0 {
-		payload = []byte("{}")
+	var payload []byte
+	if req.Body != nil {
+		var err error
+		payload, err = io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		ev := map[string]any{}
+		for k, v := range req.Input {
+			if k == "FunctionName" || k == "InvocationType" || k == "LogType" || k == "Qualifier" {
+				continue
+			}
+			ev[k] = v
+		}
+		payload, _ = json.Marshal(ev)
+		if len(ev) == 0 {
+			payload = []byte("{}")
+		}
 	}
 	out, err := runHandler(str(rec["Runtime"]), str(rec["Handler"]), rec["Code"], payload)
+	if invocationType == "Event" {
+		return &spi.Response{Status: http.StatusAccepted, Output: map[string]any{"StatusCode": http.StatusAccepted}}, nil
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,9 @@
+{
+  "east-location": "/team-123456789012-us-east-1-an",
+  "foreign-suffix": "InvalidBucketName",
+  "global-an": "InvalidBucketName",
+  "recreate": "BucketAlreadyOwnedByYou",
+  "unknown": "InvalidArgument",
+  "west-constraint": "us-west-2",
+  "west-location": "/team-123456789012-us-west-2-an"
+}

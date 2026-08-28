@@ -1,0 +1,27 @@
+{
+  "duplicate": [
+    {
+      "Key": "same",
+      "Value": "last"
+    }
+  ],
+  "malformed": {
+    "code": "MalformedXML",
+    "status": 400
+  },
+  "missing value": {
+    "code": "MalformedXML",
+    "status": 400
+  },
+  "valid": [
+    {
+      "Key": "one",
+      "Value": "1"
+    },
+    {
+      "Key": "two",
+      "Value": "2"
+    }
+  ],
+  "wrong root": []
+}

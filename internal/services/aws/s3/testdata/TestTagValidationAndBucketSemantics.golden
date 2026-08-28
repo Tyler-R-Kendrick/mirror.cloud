@@ -1,0 +1,28 @@
+{
+  "CreateMultipartUploadDuplicateHeader": "InvalidArgument",
+  "DeleteBucketTaggingMissingBucket": "NoSuchBucket",
+  "GetBucketTaggingMissingBucket": "NoSuchBucket",
+  "PutBucketTaggingMissingBucket": "NoSuchBucket",
+  "PutObjectDuplicateHeader": "InvalidArgument",
+  "acceptedBucketTags": 50,
+  "acceptedObjectTags": 10,
+  "duplicate-key": "InvalidTag",
+  "empty-key": "InvalidTag",
+  "invalid-header-key": "InvalidArgument",
+  "invalid-key": "InvalidTag",
+  "long-key": "InvalidTag",
+  "long-value": "InvalidTag",
+  "malformed-header": "InvalidArgument",
+  "missing-tag-set": "MalformedXML",
+  "missing-value": "MalformedXML",
+  "reserved-key": "InvalidTag",
+  "storedTags": [
+    {
+      "Key": "team α",
+      "Value": ""
+    }
+  ],
+  "too-many-header-tags": "InvalidArgument",
+  "too-many-object-tags": "InvalidTag",
+  "untaggedBucket": "NoSuchTagSet"
+}

@@ -192,7 +192,7 @@ func TestBootedServerSNSSection48(t *testing.T) {
 	}
 
 	code, lam, _ := formCall(url.Values{"Action": {"Subscribe"}, "TopicArn": {arn}, "Protocol": {"lambda"}, "Endpoint": {"fn"}})
-	if code != 501 && !strings.Contains(lam, "MirrorNotImplemented") && !strings.Contains(lam, "not implemented") {
+	if code != http.StatusOK || !strings.Contains(lam, "SubscriptionArn") {
 		t.Fatalf("lambda %d %s", code, lam)
 	}
 

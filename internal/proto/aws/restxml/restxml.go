@@ -219,6 +219,8 @@ func RouteName(r *http.Request) string {
 		return "CreateBucket"
 	case m == http.MethodDelete && key == "":
 		return "DeleteBucket"
+	case m == http.MethodPost && key == "":
+		return "PostObject"
 	case m == http.MethodPut && key != "":
 		return "PutObject"
 	case m == http.MethodGet && key != "":
@@ -372,11 +374,14 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 	for k, vs := range r.URL.Query() {
 		in[k] = vs[0]
 	}
+	if versionID := r.URL.Query().Get("versionId"); versionID != "" {
+		in["VersionId"] = versionID
+	}
 	if src := r.Header.Get("x-amz-copy-source"); src != "" {
 		in["CopySource"] = strings.TrimPrefix(src, "/")
 	}
 	req := &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}
-	streamOps := op.Name == "PutObject" || op.Name == "UploadPart"
+	streamOps := op.Name == "PutObject" || op.Name == "UploadPart" || op.Name == "PostObject"
 	if r.Body != nil && streamOps {
 		req.Body = r.Body
 		return req, nil
@@ -384,6 +389,9 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 	if r.Body != nil {
 		b, _ := io.ReadAll(r.Body)
 		if len(b) > 0 {
+			if op.Name == "DeleteObjects" {
+				in["_body"] = string(b)
+			}
 			parseXMLInput(op.Name, b, in)
 		}
 	}
@@ -392,11 +400,23 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 
 func parseXMLInput(op string, raw []byte, in map[string]any) {
 	switch op {
+	case "CreateBucket":
+		var cfg struct {
+			LocationConstraint string `xml:"LocationConstraint"`
+		}
+		if xml.Unmarshal(raw, &cfg) != nil {
+			in["_body"] = string(raw)
+			return
+		}
+		in["LocationConstraint"] = cfg.LocationConstraint
+		in["CreateBucketConfiguration"] = map[string]any{"LocationConstraint": cfg.LocationConstraint}
 	case "DeleteObjects":
 		var d struct {
 			Object []struct {
-				Key string `xml:"Key"`
+				Key       string `xml:"Key"`
+				VersionID string `xml:"VersionId"`
 			} `xml:"Object"`
+			Quiet bool `xml:"Quiet"`
 		}
 		if xml.Unmarshal(raw, &d) != nil {
 			in["_body"] = string(raw)
@@ -404,13 +424,44 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 		}
 		objs := make([]any, 0, len(d.Object))
 		for _, o := range d.Object {
-			objs = append(objs, map[string]any{"Key": o.Key})
+			item := map[string]any{"Key": o.Key}
+			if o.VersionID != "" {
+				item["VersionId"] = o.VersionID
+			}
+			objs = append(objs, item)
 		}
 		in["Objects"] = objs
-		in["Delete"] = map[string]any{"Objects": objs}
+		in["Quiet"] = d.Quiet
+		in["Delete"] = map[string]any{"Objects": objs, "Quiet": d.Quiet}
+	case "CompleteMultipartUpload":
+		var completed struct {
+			Part []struct {
+				ETag       string `xml:"ETag"`
+				PartNumber int    `xml:"PartNumber"`
+			} `xml:"Part"`
+		}
+		if xml.Unmarshal(raw, &completed) != nil {
+			in["_body"] = string(raw)
+			return
+		}
+		parts := make([]any, 0, len(completed.Part))
+		for _, part := range completed.Part {
+			parts = append(parts, map[string]any{"ETag": part.ETag, "PartNumber": part.PartNumber})
+		}
+		in["MultipartUpload"] = map[string]any{"Parts": parts}
+	case "RestoreObject":
+		var restore struct {
+			Days int `xml:"Days"`
+		}
+		if xml.Unmarshal(raw, &restore) != nil {
+			in["_body"] = string(raw)
+			return
+		}
+		in["Days"] = restore.Days
+		in["RestoreRequest"] = map[string]any{"Days": restore.Days}
 	case "PutBucketTagging", "PutObjectTagging":
 		var t struct {
-			TagSet struct {
+			TagSet *struct {
 				Tag []struct {
 					Key   string `xml:"Key"`
 					Value string `xml:"Value"`
@@ -421,17 +472,144 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 			in["_body"] = string(raw)
 			return
 		}
+		if t.TagSet == nil {
+			return
+		}
 		tags := make([]any, 0, len(t.TagSet.Tag))
 		for _, tg := range t.TagSet.Tag {
 			tags = append(tags, map[string]any{"Key": tg.Key, "Value": tg.Value})
 		}
 		in["TagSet"] = tags
+	case "PutObjectLegalHold":
+		var hold struct {
+			Status string `xml:"Status"`
+		}
+		if xml.Unmarshal(raw, &hold) != nil {
+			in["_body"] = string(raw)
+			return
+		}
+		in["LegalHold"] = map[string]any{"Status": hold.Status}
+	case "PutObjectRetention":
+		var retention struct {
+			Mode            string `xml:"Mode"`
+			RetainUntilDate string `xml:"RetainUntilDate"`
+		}
+		if xml.Unmarshal(raw, &retention) != nil {
+			in["_body"] = string(raw)
+			return
+		}
+		in["Retention"] = map[string]any{"Mode": retention.Mode, "RetainUntilDate": retention.RetainUntilDate}
+	case "PutBucketObjectLockConfiguration", "PutObjectLockConfiguration":
+		var configuration struct {
+			ObjectLockEnabled string `xml:"ObjectLockEnabled"`
+			Rule              *struct {
+				DefaultRetention *struct {
+					Mode  string `xml:"Mode"`
+					Days  *int   `xml:"Days"`
+					Years *int   `xml:"Years"`
+				} `xml:"DefaultRetention"`
+			} `xml:"Rule"`
+		}
+		if xml.Unmarshal(raw, &configuration) != nil {
+			in["_body"] = string(raw)
+			return
+		}
+		document := map[string]any{"ObjectLockEnabled": configuration.ObjectLockEnabled}
+		if configuration.Rule != nil && configuration.Rule.DefaultRetention != nil {
+			retention := map[string]any{"Mode": configuration.Rule.DefaultRetention.Mode}
+			if configuration.Rule.DefaultRetention.Days != nil {
+				retention["Days"] = *configuration.Rule.DefaultRetention.Days
+			}
+			if configuration.Rule.DefaultRetention.Years != nil {
+				retention["Years"] = *configuration.Rule.DefaultRetention.Years
+			}
+			document["Rule"] = map[string]any{"DefaultRetention": retention}
+		}
+		in["ObjectLockConfiguration"] = document
+	case "PutBucketReplication":
+		type tag struct {
+			Key   string `xml:"Key"`
+			Value string `xml:"Value"`
+		}
+		type filter struct {
+			Prefix string `xml:"Prefix"`
+			Tag    *tag   `xml:"Tag"`
+			And    *struct {
+				Prefix string `xml:"Prefix"`
+				Tags   []tag  `xml:"Tag"`
+			} `xml:"And"`
+		}
+		var configuration struct {
+			Role  string `xml:"Role"`
+			Rules []struct {
+				ID       string  `xml:"ID"`
+				Priority *int    `xml:"Priority"`
+				Status   string  `xml:"Status"`
+				Prefix   string  `xml:"Prefix"`
+				Filter   *filter `xml:"Filter"`
+				Delete   *struct {
+					Status string `xml:"Status"`
+				} `xml:"DeleteMarkerReplication"`
+				Destination struct {
+					Bucket       string `xml:"Bucket"`
+					Account      string `xml:"Account"`
+					StorageClass string `xml:"StorageClass"`
+				} `xml:"Destination"`
+			} `xml:"Rule"`
+		}
+		if xml.Unmarshal(raw, &configuration) != nil {
+			in["_body"] = string(raw)
+			return
+		}
+		rules := make([]any, 0, len(configuration.Rules))
+		for _, source := range configuration.Rules {
+			rule := map[string]any{"Status": source.Status, "Destination": map[string]any{"Bucket": source.Destination.Bucket}}
+			for key, value := range map[string]string{"ID": source.ID, "Prefix": source.Prefix} {
+				if value != "" {
+					rule[key] = value
+				}
+			}
+			if source.Priority != nil {
+				rule["Priority"] = *source.Priority
+			}
+			if source.Filter != nil {
+				value := map[string]any{}
+				if source.Filter.Prefix != "" {
+					value["Prefix"] = source.Filter.Prefix
+				}
+				if source.Filter.Tag != nil {
+					value["Tag"] = map[string]any{"Key": source.Filter.Tag.Key, "Value": source.Filter.Tag.Value}
+				}
+				if source.Filter.And != nil {
+					and := map[string]any{"Prefix": source.Filter.And.Prefix}
+					tags := make([]any, 0, len(source.Filter.And.Tags))
+					for _, item := range source.Filter.And.Tags {
+						tags = append(tags, map[string]any{"Key": item.Key, "Value": item.Value})
+					}
+					and["Tags"] = tags
+					value["And"] = and
+				}
+				rule["Filter"] = value
+			}
+			if source.Delete != nil {
+				rule["DeleteMarkerReplication"] = map[string]any{"Status": source.Delete.Status}
+			}
+			destination := rule["Destination"].(map[string]any)
+			if source.Destination.Account != "" {
+				destination["Account"] = source.Destination.Account
+			}
+			if source.Destination.StorageClass != "" {
+				destination["StorageClass"] = source.Destination.StorageClass
+			}
+			rules = append(rules, rule)
+		}
+		in["ReplicationConfiguration"] = map[string]any{"Role": configuration.Role, "Rules": rules}
 	case "PutBucketPolicy":
 		in["Policy"] = string(raw)
 	case "PutBucketCors", "PutBucketWebsite", "PutBucketLogging",
-		"PutBucketLifecycleConfiguration", "PutBucketReplication",
+		"PutBucketLifecycleConfiguration",
 		"PutBucketEncryption", "PutBucketAcl", "PutObjectAcl",
-		"PutBucketObjectLockConfiguration", "PutBucketRequestPayment",
+		"PutBucketRequestPayment",
 		"PutBucketAccelerateConfiguration":
 		in["_body"] = string(raw)
 		in["Document"] = string(raw)
@@ -505,6 +683,80 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	// Simple XML object encoder.
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
+	if op.Name == "GetBucketLocation" {
+		b.WriteString(`<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
+		_ = xml.EscapeText(&b, []byte(fmt.Sprint(resp.Output["LocationConstraint"])))
+		b.WriteString(`</LocationConstraint>`)
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
+	objectLockRoot := map[string]string{
+		"GetBucketObjectLockConfiguration": "ObjectLockConfiguration",
+		"GetObjectLockConfiguration":       "ObjectLockConfiguration",
+		"GetObjectLegalHold":               "LegalHold",
+		"GetObjectRetention":               "Retention",
+	}[op.Name]
+	if objectLockRoot != "" {
+		fmt.Fprintf(&b, `<%s xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`, objectLockRoot)
+		write(resp.Output[objectLockRoot], &b)
+		fmt.Fprintf(&b, "</%s>", objectLockRoot)
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
+	if op.Name == "GetBucketReplication" {
+		configuration, _ := resp.Output["ReplicationConfiguration"].(map[string]any)
+		if configuration == nil {
+			configuration = resp.Output
+		}
+		b.WriteString(`<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
+		if role := configuration["Role"]; role != nil {
+			write(map[string]any{"Role": role}, &b)
+		}
+		rules, _ := configuration["Rules"].([]any)
+		for _, rule := range rules {
+			b.WriteString("<Rule>")
+			document, _ := rule.(map[string]any)
+			fields := make(map[string]any, len(document))
+			for key, value := range document {
+				if key != "Filter" {
+					fields[key] = value
+				}
+			}
+			write(fields, &b)
+			if filter, ok := document["Filter"].(map[string]any); ok {
+				b.WriteString("<Filter>")
+				filterFields := make(map[string]any, len(filter))
+				for key, value := range filter {
+					if key != "And" {
+						filterFields[key] = value
+					}
+				}
+				write(filterFields, &b)
+				if and, ok := filter["And"].(map[string]any); ok {
+					b.WriteString("<And>")
+					andFields := make(map[string]any, len(and))
+					for key, value := range and {
+						if key != "Tags" {
+							andFields[key] = value
+						}
+					}
+					write(andFields, &b)
+					tags, _ := and["Tags"].([]any)
+					for _, tag := range tags {
+						b.WriteString("<Tag>")
+						write(tag, &b)
+						b.WriteString("</Tag>")
+					}
+					b.WriteString("</And>")
+				}
+				b.WriteString("</Filter>")
+			}
+			b.WriteString("</Rule>")
+		}
+		b.WriteString("</ReplicationConfiguration>")
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
 	root := op.Name + "Result"
 	if op.Name == "ListBuckets" {
 		root = "ListAllMyBucketsResult"
@@ -512,11 +764,95 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	if op.Name == "ListObjectsV2" || op.Name == "ListObjects" {
 		root = "ListBucketResult"
 	}
-	fmt.Fprintf(&b, "<%s>", root)
-	write(resp.Output, &b)
+	if op.Name == "GetObjectAttributes" {
+		root = "GetObjectAttributesResponse"
+	}
+	if op.Name == "PostObject" {
+		root = "PostResponse"
+	}
+	namespace := ""
+	if op.Name == "DeleteObjects" {
+		root = "DeleteResult"
+		namespace = ` xmlns="http://s3.amazonaws.com/doc/2006-03-01/"`
+	}
+	fmt.Fprintf(&b, "<%s%s>", root, namespace)
+	switch op.Name {
+	case "ListBuckets":
+		top := make(map[string]any, len(resp.Output)-1)
+		for key, value := range resp.Output {
+			if key != "Buckets" {
+				top[key] = value
+			}
+		}
+		write(top, &b)
+		b.WriteString("<Buckets>")
+		buckets, _ := resp.Output["Buckets"].([]any)
+		for _, item := range buckets {
+			b.WriteString("<Bucket>")
+			write(item, &b)
+			b.WriteString("</Bucket>")
+		}
+		b.WriteString("</Buckets>")
+	case "ListParts":
+		writeFlattened(resp.Output, &b, [][2]string{{"Parts", "Part"}})
+	case "ListMultipartUploads":
+		writeFlattened(resp.Output, &b, [][2]string{{"Uploads", "Upload"}, {"CommonPrefixes", "CommonPrefixes"}})
+	case "GetObjectAttributes":
+		top := make(map[string]any, len(resp.Output)-1)
+		for key, value := range resp.Output {
+			if key != "ObjectParts" {
+				top[key] = value
+			}
+		}
+		write(top, &b)
+		if parts, ok := resp.Output["ObjectParts"].(map[string]any); ok {
+			b.WriteString("<ObjectParts>")
+			encoded := make(map[string]any, len(parts))
+			for key, value := range parts {
+				encoded[key] = value
+			}
+			if count, ok := encoded["TotalPartsCount"]; ok {
+				delete(encoded, "TotalPartsCount")
+				encoded["PartsCount"] = count
+			}
+			writeFlattened(encoded, &b, [][2]string{{"Parts", "Part"}})
+			b.WriteString("</ObjectParts>")
+		}
+	case "GetObjectTagging", "GetBucketTagging":
+		b.WriteString("<TagSet>")
+		for _, item := range resp.Output["TagSet"].([]any) {
+			b.WriteString("<Tag>")
+			write(item, &b)
+			b.WriteString("</Tag>")
+		}
+		b.WriteString("</TagSet>")
+	case "DeleteObjects":
+		writeFlattened(resp.Output, &b, [][2]string{{"Deleted", "Deleted"}, {"Errors", "Error"}})
+	default:
+		write(resp.Output, &b)
+	}
 	fmt.Fprintf(&b, "</%s>", root)
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+func writeFlattened(output map[string]any, b *strings.Builder, members [][2]string) {
+	top := make(map[string]any, len(output)-len(members))
+	for key, value := range output {
+		top[key] = value
+	}
+	for _, member := range members {
+		delete(top, member[0])
+	}
+	write(top, b)
+	for _, member := range members {
+		items, _ := output[member[0]].([]any)
+		for _, item := range items {
+			fmt.Fprintf(b, "<%s>", member[1])
+			write(item, b)
+			fmt.Fprintf(b, "</%s>", member[1])
+		}
+	}
 }
 
 func write(v any, b *strings.Builder) {

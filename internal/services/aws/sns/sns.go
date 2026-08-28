@@ -4,8 +4,6 @@ package sns
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +14,8 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -132,10 +132,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"Successful": ok}}, nil
 	case "Subscribe":
-		if str(req.Input["Protocol"]) == "lambda" {
-			return nil, spi.NotImplemented("aws.sns", "Subscribe/lambda", "emulate")
-		}
-		sub := "arn:aws:sns:" + req.Identity.Region + ":" + req.Identity.Account + ":sub/" + p.deps.Rand.Hex(8)
+		sub := str(req.Input["TopicArn"]) + ":" + p.deps.Rand.UUID()
 		attrs := asMap(req.Input["Attributes"])
 		if str(req.Input["FilterPolicy"]) != "" {
 			attrs["FilterPolicy"] = req.Input["FilterPolicy"]
@@ -271,6 +268,8 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 		switch str(sub["Protocol"]) {
 		case "sqs":
 			p.deliverSQS(ctx, req, str(sub["Endpoint"]), payload)
+		case "lambda":
+			_, _ = p.deliverLambda(ctx, req, sub, body, mid, msgAttrs)
 		case "http", "https":
 			p.httpPost(str(sub["Endpoint"]), map[string]any{"Type": "Notification", "Message": body, "TopicArn": arn, "MessageId": mid})
 		}
@@ -278,19 +277,47 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 	return &spi.Response{Output: map[string]any{"MessageId": mid}}, nil
 }
 
+func (p *Pack) deliverLambda(ctx context.Context, req *spi.Request, sub map[string]any, body, messageID string, attrs map[string]any) (*spi.Response, error) {
+	endpoint := str(sub["Endpoint"])
+	name := endpoint
+	if _, rest, ok := strings.Cut(endpoint, ":function:"); ok {
+		name = rest
+	}
+	if i := strings.IndexByte(name, ':'); i >= 0 {
+		name = name[:i]
+	}
+	in := p.lambdaNotification(req, sub, body, messageID, attrs)
+	in["FunctionName"] = name
+	in["InvocationType"] = "Event"
+	return lambda.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: in})
+}
+
+func (p *Pack) lambdaNotification(req *spi.Request, sub map[string]any, body, messageID string, attrs map[string]any) map[string]any {
+	return map[string]any{
+		"Records": []any{map[string]any{
+			"EventSource": "aws:sns", "EventVersion": "1.0", "EventSubscriptionArn": sub["SubscriptionArn"],
+			"Sns": map[string]any{
+				"Type": "Notification", "MessageId": messageID, "TopicArn": sub["TopicArn"], "Subject": req.Input["Subject"],
+				"Message": body, "Timestamp": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), "MessageAttributes": attrs,
+				"SignatureVersion": "1", "Signature": "", "SigningCertUrl": "https://sns." + req.Identity.Region + ".amazonaws.com/SimpleNotificationService.pem",
+				"UnsubscribeUrl": "http://127.0.0.1:4566/?Action=Unsubscribe&SubscriptionArn=" + str(sub["SubscriptionArn"]),
+			},
+		}},
+	}
+}
+
 func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body string) {
 	name := endpoint
-	if i := strings.LastIndex(endpoint, "/"); i >= 0 {
+	if i := strings.LastIndexAny(endpoint, "/:"); i >= 0 {
 		name = endpoint[i+1:]
 	}
-	sum := md5.Sum([]byte(body))
-	rh := p.deps.Rand.Hex(64)
-	msg := map[string]any{
-		"id": p.deps.Rand.Hex(16), "body": body, "handle": rh,
-		"md5": hex.EncodeToString(sum[:]), "visibleAt": p.deps.Clock.Now().UnixNano(), "receiveCount": 0, "seq": 1,
+	in := map[string]any{"QueueName": name, "MessageBody": body}
+	for _, key := range []string{"MessageGroupId", "MessageDeduplicationId"} {
+		if value := str(req.Input[key]); value != "" {
+			in[key] = value
+		}
 	}
-	raw, _ := json.Marshal(msg)
-	_ = p.col(req, "msgs:"+name).Put(ctx, rh, raw)
+	_, _ = sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "SendMessage", Input: in})
 }
 
 func (p *Pack) httpPost(endpoint string, payload map[string]any) {

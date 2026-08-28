@@ -1,0 +1,13 @@
+{
+  "collisions": {
+    "other-account": "BucketAlreadyExists",
+    "owner-non-us-east-recreate": "BucketAlreadyOwnedByYou",
+    "owner-other-region": "BucketAlreadyOwnedByYou",
+    "owner-stored-other-region": "BucketAlreadyOwnedByYou"
+  },
+  "recreate": {
+    "object": "preserved",
+    "status": 200
+  },
+  "reuse_after_delete": "created"
+}

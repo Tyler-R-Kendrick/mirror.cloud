@@ -68,9 +68,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case hasPrefix(op.Name, "Create") || hasPrefix(op.Name, "Put"):
 		if id != "" {
 			p.mu.Lock()
-			if p.crud[op.Name[:3]] == nil {
-				p.crud["rec"] = map[string]any{}
-			}
 			if p.crud["rec"] == nil {
 				p.crud["rec"] = map[string]any{}
 			}

@@ -1,0 +1,24 @@
+{
+  "deleteVersion": "9c8e2cb0",
+  "listed": {
+    "DeleteMarkers": [
+      {
+        "ETag": null,
+        "Key": "logs/file",
+        "Size": null,
+        "VersionId": "9c8e2cb0"
+      }
+    ],
+    "Name": "destination",
+    "Versions": [
+      {
+        "ETag": "\"08069c56938bbf6ddcc01ee2fd848af5\"",
+        "Key": "logs/file",
+        "Size": 10,
+        "VersionId": "5f59f223"
+      }
+    ]
+  },
+  "objectVersion": "5f59f223",
+  "restoredBody": "replicated"
+}

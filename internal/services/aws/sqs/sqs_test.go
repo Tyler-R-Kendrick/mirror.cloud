@@ -2,7 +2,6 @@ package sqs
 
 import (
 	"context"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +10,17 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
+
+type observedClock struct {
+	spi.Clock
+	after chan time.Duration
+}
+
+func (c *observedClock) After(delay time.Duration) <-chan time.Time {
+	result := c.Clock.After(delay)
+	c.after <- delay
+	return result
+}
 
 func TestCreateSendReceiveDelete(t *testing.T) {
 	p := &Pack{deps: spitest.Deps(t)}
@@ -92,6 +102,68 @@ func TestCreateSendReceiveDelete(t *testing.T) {
 	}
 }
 
+func TestQueueScopedOperationsRejectMissingQueue(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	for _, operation := range []string{"GetQueueUrl", "SendMessage", "ReceiveMessage", "DeleteQueue", "GetQueueAttributes", "TagQueue"} {
+		_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: map[string]any{"QueueName": "missing"}})
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "AWS.SimpleQueueService.NonExistentQueue" {
+			t.Fatalf("%s error %#v", operation, err)
+		}
+	}
+}
+
+func TestSendValidationAndDelay(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(op string, in map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+	}
+	_, _ = invoke("CreateQueue", map[string]any{"QueueName": "strict.fifo"})
+	if _, err := invoke("SendMessage", map[string]any{"QueueName": "strict.fifo", "MessageBody": "x"}); faultCode(err) != "MissingParameter" {
+		t.Fatalf("missing group error %v", err)
+	}
+	if _, err := invoke("SendMessage", map[string]any{"QueueName": "strict.fifo", "MessageBody": "x", "MessageGroupId": "g"}); faultCode(err) != "InvalidParameterValue" {
+		t.Fatalf("missing dedup error %v", err)
+	}
+	batch, err := invoke("SendMessageBatch", map[string]any{"QueueName": "strict.fifo", "Entries": []any{
+		map[string]any{"Id": "bad", "MessageBody": "x"},
+		map[string]any{"Id": "ok", "MessageBody": "x", "MessageGroupId": "g", "MessageDeduplicationId": "d"},
+	}})
+	if err != nil || len(batch.Output["Successful"].([]any)) != 1 || len(batch.Output["Failed"].([]any)) != 1 {
+		t.Fatalf("batch response %#v error %v", batch, err)
+	}
+	_, _ = invoke("CreateQueue", map[string]any{"QueueName": "delayed", "Attributes": map[string]any{"DelaySeconds": "10"}})
+	if _, err := invoke("SendMessage", map[string]any{"QueueName": "delayed", "MessageBody": "later"}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := invoke("ReceiveMessage", map[string]any{"QueueName": "delayed"})
+	if len(before.Output["Messages"].([]any)) != 0 {
+		t.Fatalf("delayed message visible early %#v", before.Output)
+	}
+	_ = clk.Advance(10 * time.Second)
+	after, _ := invoke("ReceiveMessage", map[string]any{"QueueName": "delayed"})
+	if len(after.Output["Messages"].([]any)) != 1 {
+		t.Fatalf("delayed message missing %#v", after.Output)
+	}
+	if _, err := invoke("SendMessage", map[string]any{"QueueName": "delayed", "MessageBody": "x", "DelaySeconds": 901}); faultCode(err) != "InvalidParameterValue" {
+		t.Fatalf("invalid delay error %v", err)
+	}
+}
+
+func faultCode(err error) string {
+	fault, _ := err.(*spi.Fault)
+	if fault == nil {
+		return ""
+	}
+	return fault.Code
+}
+
 func TestFIFODedupDLQLongPoll(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
@@ -147,6 +219,8 @@ func TestFIFODedupDLQLongPoll(t *testing.T) {
 	}
 
 	inv("CreateQueue", map[string]any{"QueueName": "empty"})
+	after := make(chan time.Duration, 1)
+	p.deps.Clock = &observedClock{Clock: clk, after: after}
 	done := make(chan *spi.Response, 1)
 	go func() {
 		resp, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "empty", "WaitTimeSeconds": 1}})
@@ -155,18 +229,13 @@ func TestFIFODedupDLQLongPoll(t *testing.T) {
 		}
 		done <- resp
 	}()
-	for i := 0; i < 10000; i++ {
-		select {
-		case resp := <-done:
-			msgs, _ := resp.Output["Messages"].([]any)
-			if len(msgs) != 0 {
-				t.Fatalf("long poll msgs %v", resp.Output)
-			}
-			return
-		default:
-			runtime.Gosched()
-			_ = clk.Advance(time.Second)
-		}
+	if delay := <-after; delay != time.Second {
+		t.Fatalf("long poll delay %v", delay)
 	}
-	t.Fatal("long poll did not return on clock advance")
+	_ = clk.Advance(time.Second)
+	resp := <-done
+	msgs, _ = resp.Output["Messages"].([]any)
+	if len(msgs) != 0 {
+		t.Fatalf("long poll msgs %v", resp.Output)
+	}
 }

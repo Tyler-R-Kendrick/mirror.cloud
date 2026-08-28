@@ -1,0 +1,17 @@
+{
+  "headers": {
+    "Etag": [
+      "\"a20120654bc88c9c5012b66284a9191d\""
+    ],
+    "Location": [
+      "http://s3.test/post-object/uploads/hello%20world.txt"
+    ]
+  },
+  "output": {
+    "Bucket": "post-object",
+    "ETag": "\"a20120654bc88c9c5012b66284a9191d\"",
+    "Key": "uploads/hello world.txt",
+    "Location": "http://s3.test/post-object/uploads/hello%20world.txt"
+  },
+  "status": 201
+}

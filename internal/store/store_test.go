@@ -120,6 +120,33 @@ func TestTwoAccountIsolation(t *testing.T) {
 	}
 }
 
+func TestScopesAreEnumeratedDeterministically(t *testing.T) {
+	ctx := context.Background()
+	m := store.NewMemory("lock")
+	for _, id := range []spi.Identity{
+		{Account: "2", Region: "us-west-2"},
+		{Account: "1", Region: "us-east-1"},
+		{Account: "1", Region: "eu-west-1"},
+	} {
+		if err := m.Scope(id.Account, id.Region).Collection("items").Put(ctx, "k", []byte("v")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := m.Scopes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []spi.Identity{{Account: "1", Region: "eu-west-1"}, {Account: "1", Region: "us-east-1"}, {Account: "2", Region: "us-west-2"}}
+	if len(got) != len(want) {
+		t.Fatalf("scopes %#v", got)
+	}
+	for i := range want {
+		if got[i].Account != want[i].Account || got[i].Region != want[i].Region {
+			t.Fatalf("scope %d %#v, want %#v", i, got[i], want[i])
+		}
+	}
+}
+
 func TestSnapshotRestore(t *testing.T) {
 	ctx := context.Background()
 	src := store.NewMemory("abc")

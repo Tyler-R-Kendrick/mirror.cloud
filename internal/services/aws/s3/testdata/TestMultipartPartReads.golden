@@ -1,0 +1,17 @@
+{
+  "get": {
+    "body": "tail",
+    "checksum": "DGL4du8d6oMN6fMsL0tG3W101Q0ViW4J71ovzUrH4dc=",
+    "length": "4",
+    "parts": "2",
+    "range": "bytes 5242880-5242883/5242884",
+    "status": 206
+  },
+  "head": {
+    "checksum": "DGL4du8d6oMN6fMsL0tG3W101Q0ViW4J71ovzUrH4dc=",
+    "length": "4",
+    "parts": "2",
+    "range": "bytes 5242880-5242883/5242884",
+    "status": 206
+  }
+}

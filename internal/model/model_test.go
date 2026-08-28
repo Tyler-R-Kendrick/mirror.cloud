@@ -19,6 +19,18 @@ func TestNoServiceLiterals(t *testing.T) {
 	}
 }
 
+func TestLookups(t *testing.T) {
+	op := Operation{Name: "Get"}
+	service := Service{ID: "example", Operations: []Operation{op}}
+	bundle := Bundle{Services: []Service{service}}
+	if got := bundle.ServiceByID("example"); got == nil || got.OperationByName("Get") == nil {
+		t.Fatal("lookup missed existing service or operation")
+	}
+	if bundle.ServiceByID("missing") != nil || (*Bundle)(nil).ServiceByID("example") != nil || service.OperationByName("missing") != nil || (*Service)(nil).OperationByName("Get") != nil {
+		t.Fatal("lookup found missing service or operation")
+	}
+}
+
 func stripComments(s string) string {
 	var out strings.Builder
 	i := 0

@@ -1,0 +1,12 @@
+{
+  "12345678901": "InvalidBucketOwnerAWSAccountID",
+  "12345678901x": "InvalidBucketOwnerAWSAccountID",
+  "DeleteObject": "AccessDenied",
+  "DeleteObjectMissing": "NoSuchBucket",
+  "DeleteObjectsMissing": "NoSuchBucket",
+  "GetObject": "AccessDenied",
+  "GetObjectTaggingMissing": "NoSuchBucket",
+  "HeadBucket": "AccessDenied",
+  "HeadObject": "AccessDenied",
+  "PutObjectTagging": "AccessDenied"
+}

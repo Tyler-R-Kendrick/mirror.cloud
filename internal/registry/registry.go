@@ -4,6 +4,7 @@
 package registry
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -17,6 +18,7 @@ type Registry interface {
 	// set and the configured tier for that service.
 	Resolve(serviceID string) (spi.BehaviorPack, bool)
 	Enabled() []string
+	Close() error
 }
 
 // Factory constructs a pack once dependencies are available.
@@ -94,4 +96,14 @@ func (m *mem) Enabled() []string {
 	out := make([]string, len(m.order))
 	copy(out, m.order)
 	return out
+}
+
+func (m *mem) Close() error {
+	var err error
+	for i := len(m.order) - 1; i >= 0; i-- {
+		if closer, ok := m.enabled[m.order[i]].(interface{ Close() error }); ok {
+			err = errors.Join(err, closer.Close())
+		}
+	}
+	return err
 }

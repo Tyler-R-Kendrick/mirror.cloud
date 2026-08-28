@@ -1,0 +1,55 @@
+{
+  "full": {
+    "Checksum": {
+      "ChecksumCRC32": "ZaN+Aw==",
+      "ChecksumType": "FULL_OBJECT"
+    },
+    "ObjectParts": {
+      "TotalPartsCount": 2
+    }
+  },
+  "lastPage": {
+    "ObjectParts": {
+      "IsTruncated": false,
+      "MaxParts": 2,
+      "NextPartNumberMarker": "3",
+      "PartNumberMarker": "2",
+      "Parts": [
+        {
+          "ChecksumSHA256": "DGL4du8d6oMN6fMsL0tG3W101Q0ViW4J71ovzUrH4dc=",
+          "PartNumber": 3,
+          "Size": 4
+        }
+      ],
+      "TotalPartsCount": 3
+    }
+  },
+  "page": {
+    "Checksum": {
+      "ChecksumSHA256": "EuEzozznryqoXqarnNIqy+gInGo07smMfqbBnQT2Pgw=",
+      "ChecksumType": "COMPOSITE"
+    },
+    "ETag": "\"4855ec67efb4fafff0922b6c271ef5d3-3\"",
+    "ObjectParts": {
+      "IsTruncated": true,
+      "MaxParts": 2,
+      "NextPartNumberMarker": "2",
+      "PartNumberMarker": "0",
+      "Parts": [
+        {
+          "ChecksumSHA256": "275VF5loJr1YYawit0XSHREhkFXYkkPKGuoK0x9VKxI=",
+          "PartNumber": 1,
+          "Size": 5242880
+        },
+        {
+          "ChecksumSHA256": "mrHwOfjTL5Zwfj74F05HOQGLdUb7E5szdCbxgUSq6NM=",
+          "PartNumber": 2,
+          "Size": 5242880
+        }
+      ],
+      "TotalPartsCount": 3
+    },
+    "ObjectSize": 10485764,
+    "StorageClass": "STANDARD_IA"
+  }
+}

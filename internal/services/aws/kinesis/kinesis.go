@@ -118,6 +118,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		switch str(req.Input["ShardIteratorType"]) {
 		case "LATEST":
 			seq = p.curSeq(ctx, req, name)
+		case "AT_TIMESTAMP":
+			seq = p.atTimestampSeq(ctx, req, name, asFloat(req.Input["Timestamp"]))
 		case "AT_SEQUENCE_NUMBER":
 			seq, _ = strconv.Atoi(str(req.Input["StartingSequenceNumber"]))
 		case "AFTER_SEQUENCE_NUMBER":
@@ -183,10 +185,28 @@ func (p *Pack) put(ctx context.Context, req *spi.Request, name string, data any,
 	}
 	seq := p.nextSeq(ctx, req, name)
 	seqStr := strconv.Itoa(seq)
-	rec := map[string]any{"SequenceNumber": seqStr, "PartitionKey": pk, "Data": data, "ApproximateArrivalTimestamp": 0}
+	rec := map[string]any{"SequenceNumber": seqStr, "PartitionKey": pk, "Data": data, "ApproximateArrivalTimestamp": float64(p.deps.Clock.Now().UnixMilli()) / 1000}
 	b, _ := json.Marshal(rec)
 	_ = p.col(req, "kinesis:"+name).Put(ctx, seqStr, b)
+	if p.deps.Bus != nil {
+		event, _ := json.Marshal(map[string]any{"Account": req.Identity.Account, "Region": req.Identity.Region, "StreamName": name, "Record": rec})
+		_ = p.deps.Bus.Publish(ctx, "kinesis", event)
+	}
 	return &spi.Response{Output: map[string]any{"SequenceNumber": seqStr, "ShardId": "shardId-000000000000"}}, nil
+}
+
+func (p *Pack) atTimestampSeq(ctx context.Context, req *spi.Request, name string, timestamp float64) int {
+	kvs, _, _ := p.col(req, "kinesis:"+name).List(ctx, "", "", 0)
+	seq := p.curSeq(ctx, req, name)
+	for _, kv := range kvs {
+		var record map[string]any
+		if json.Unmarshal(kv.Value, &record) == nil && asFloat(record["ApproximateArrivalTimestamp"]) >= timestamp {
+			if n, err := strconv.Atoi(kv.Key); err == nil && n < seq {
+				seq = n
+			}
+		}
+	}
+	return seq
 }
 
 func (p *Pack) curSeq(ctx context.Context, req *spi.Request, name string) int {
@@ -245,6 +265,19 @@ func asInt(v any) int {
 		return int(n)
 	case string:
 		n, _ := strconv.Atoi(t)
+		return n
+	}
+	return 0
+}
+
+func asFloat(v any) float64 {
+	switch t := v.(type) {
+	case float64:
+		return t
+	case int:
+		return float64(t)
+	case json.Number:
+		n, _ := t.Float64()
 		return n
 	}
 	return 0

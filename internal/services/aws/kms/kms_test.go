@@ -30,6 +30,13 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	encAgain, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Encrypt", Input: map[string]any{"KeyId": kid, "Plaintext": []byte("hello-kms")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(enc.Output["CiphertextBlob"].([]byte), encAgain.Output["CiphertextBlob"].([]byte)) {
+		t.Fatal("reused AES-GCM nonce")
+	}
 	dec, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Decrypt", Input: map[string]any{"CiphertextBlob": enc.Output["CiphertextBlob"]}})
 	if err != nil {
 		t.Fatal(err)

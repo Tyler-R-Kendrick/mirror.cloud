@@ -91,13 +91,22 @@ func TestBootedServerS3VersioningPaginationPresign(t *testing.T) {
 			t.Fatalf("version body %q", b)
 		}
 	}
+	markerVersion := ""
 	if code, b, h := do(http.MethodDelete, "/holes/k", "", map[string]string{"Authorization": auth}); code >= 300 {
 		t.Fatalf("delete marker %d %s", code, b)
 	} else if h.Get("x-amz-delete-marker") != "true" {
 		t.Fatalf("no delete marker header %v %s", h, b)
+	} else {
+		markerVersion = h.Get("x-amz-version-id")
 	}
-	if code, b, _ := do(http.MethodGet, "/holes/k", "", map[string]string{"Authorization": auth}); code != 404 {
+	if code, b, h := do(http.MethodGet, "/holes/k", "", map[string]string{"Authorization": auth}); code != 404 || h.Get("x-amz-delete-marker") != "true" || h.Get("x-amz-version-id") != markerVersion {
 		t.Fatalf("deleted latest %d %s", code, b)
+	}
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		code, b, h := do(method, "/holes/k?versionId="+markerVersion, "", map[string]string{"Authorization": auth})
+		if code != http.StatusMethodNotAllowed || h.Get("Last-Modified") == "" || h.Get("x-amz-delete-marker") != "true" || h.Get("x-amz-version-id") != markerVersion {
+			t.Fatalf("%s explicit marker %d %v %s", method, code, h, b)
+		}
 	}
 	if code, b, _ := do(http.MethodGet, "/holes?versions", "", map[string]string{"Authorization": auth}); code != 200 || !bytes.Contains(b, []byte("DeleteMarker")) && !bytes.Contains(b, []byte("delete")) {
 		// restxml encodes DeleteMarkers key
@@ -133,14 +142,47 @@ func TestBootedServerS3VersioningPaginationPresign(t *testing.T) {
 		}
 	}
 
-	if code, b, _ := do(http.MethodPut, "/holes/ims", "body", map[string]string{"Authorization": auth}); code >= 300 {
+	code, b, conditionHeaders := do(http.MethodPut, "/holes/ims", "body", map[string]string{"Authorization": auth})
+	if code >= 300 {
 		t.Fatalf("put ims %d %s", code, b)
 	}
+	etag := conditionHeaders.Get("ETag")
 	if code, _, _ := do(http.MethodGet, "/holes/ims", "", map[string]string{"Authorization": auth, "If-Modified-Since": "Mon, 01 Jan 2099 00:00:00 GMT"}); code != 304 {
 		t.Fatalf("If-Modified-Since future %d", code)
 	}
 	if code, b, _ := do(http.MethodGet, "/holes/ims", "", map[string]string{"Authorization": auth, "If-Modified-Since": "Mon, 01 Jan 1990 00:00:00 GMT"}); code != 200 || string(b) != "body" {
 		t.Fatalf("If-Modified-Since past %d %s", code, b)
+	}
+	for _, request := range []struct {
+		method, path string
+		headers      map[string]string
+		status       int
+	}{
+		{http.MethodHead, "/holes/ims", map[string]string{"If-None-Match": etag}, http.StatusNotModified},
+		{http.MethodHead, "/holes/ims", map[string]string{"If-Match": `"wrong"`}, http.StatusPreconditionFailed},
+		{http.MethodHead, "/holes/ims", map[string]string{"If-Match": etag, "If-Unmodified-Since": "Mon, 01 Jan 1990 00:00:00 GMT"}, http.StatusOK},
+		{http.MethodGet, "/holes/ims?attributes", map[string]string{"x-amz-object-attributes": "ETag", "If-None-Match": etag}, http.StatusNotModified},
+		{http.MethodGet, "/holes/ims?attributes", map[string]string{"x-amz-object-attributes": "ETag", "If-Unmodified-Since": "Mon, 01 Jan 1990 00:00:00 GMT"}, http.StatusPreconditionFailed},
+	} {
+		headers := map[string]string{"Authorization": auth}
+		for key, value := range request.headers {
+			headers[key] = value
+		}
+		if code, body, _ := do(request.method, request.path, "", headers); code != request.status {
+			t.Fatalf("%s %s conditions %#v = %d %s", request.method, request.path, request.headers, code, body)
+		}
+	}
+	if code, body, headers := do(http.MethodGet, "/holes/ims", "", map[string]string{"Authorization": auth, "Range": "bytes=-2"}); code != http.StatusPartialContent || string(body) != "dy" || headers.Get("Content-Range") != "bytes 2-3/4" || headers.Get("Accept-Ranges") != "bytes" {
+		t.Fatalf("suffix range %d %q %v", code, body, headers)
+	}
+	if code, _, headers := do(http.MethodHead, "/holes/ims", "", map[string]string{"Authorization": auth, "Range": "bytes=1-2"}); code != http.StatusPartialContent || headers.Get("Content-Length") != "2" || headers.Get("Content-Range") != "bytes 1-2/4" {
+		t.Fatalf("head range %d %v", code, headers)
+	}
+	if code, body, headers := do(http.MethodGet, "/holes/ims", "", map[string]string{"Authorization": auth, "Range": "bytes=4-"}); code != http.StatusRequestedRangeNotSatisfiable || headers.Get("Content-Range") != "bytes */4" {
+		t.Fatalf("invalid range %d %s %v", code, body, headers)
+	}
+	if code, body, _ := do(http.MethodGet, "/holes/ims", "", map[string]string{"Authorization": auth, "Range": "bytes=bad"}); code != http.StatusOK || string(body) != "body" {
+		t.Fatalf("malformed range %d %q", code, body)
 	}
 
 	q := "/holes/ims?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test/20200101/us-east-1/s3/aws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=00"
@@ -214,14 +256,14 @@ func TestBootedServerS3NotificationToSQS(t *testing.T) {
 		return res.StatusCode, b
 	}
 	sqsJSON("CreateQueue", `{"QueueName":"nq"}`)
-	if code, b := do(http.MethodPut, "/nb", ""); code >= 300 {
+	if code, b := do(http.MethodPut, "/bucket-n", ""); code >= 300 {
 		t.Fatalf("bucket %d %s", code, b)
 	}
 	nxml := `<NotificationConfiguration><QueueConfiguration><Queue>arn:aws:sqs:us-east-1:000000000000:nq</Queue><Event>s3:ObjectCreated:Put</Event></QueueConfiguration></NotificationConfiguration>`
-	if code, b := do(http.MethodPut, "/nb?notification", nxml); code >= 300 {
+	if code, b := do(http.MethodPut, "/bucket-n?notification", nxml); code >= 300 {
 		t.Fatalf("notify cfg %d %s", code, b)
 	}
-	if code, b := do(http.MethodPut, "/nb/obj", "payload"); code >= 300 {
+	if code, b := do(http.MethodPut, "/bucket-n/obj", "payload"); code >= 300 {
 		t.Fatalf("put %d %s", code, b)
 	}
 	recv := sqsJSON("ReceiveMessage", `{"QueueName":"nq","WaitTimeSeconds":0,"MaxNumberOfMessages":10}`)

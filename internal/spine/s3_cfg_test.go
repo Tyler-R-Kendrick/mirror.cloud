@@ -33,6 +33,12 @@ func TestBootedServerS3BucketConfigsRoundTrip(t *testing.T) {
 		}
 		req, _ := http.NewRequest(method, ts.URL+path, rdr)
 		req.Header.Set("Authorization", auth)
+		if method == http.MethodPut && path == "/cfgb" {
+			req.Header.Set("x-amz-bucket-object-lock-enabled", "true")
+		}
+		if strings.Contains(path, "?attributes") {
+			req.Header.Set("x-amz-object-attributes", "ETag,ObjectSize")
+		}
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -98,9 +104,6 @@ func TestBootedServerS3BucketConfigsRoundTrip(t *testing.T) {
 	if code, b := do(http.MethodPut, "/cfgb/k?retention", `<Retention><Mode>GOVERNANCE</Mode></Retention>`); code >= 300 {
 		t.Fatalf("retention %d %s", code, b)
 	}
-	if code, b := do(http.MethodPost, "/cfgb/k?restore", `<RestoreRequest><Days>1</Days></RestoreRequest>`); code >= 300 {
-		t.Fatalf("restore %d %s", code, b)
-	}
 	if code, b := do(http.MethodPut, "/cfgb?analytics&id=a1", `<AnalyticsConfiguration><Id>a1</Id></AnalyticsConfiguration>`); code >= 300 {
 		t.Fatalf("put analytics %d %s", code, b)
 	}
@@ -147,8 +150,8 @@ func TestBootedServerS3BucketConfigsRoundTrip(t *testing.T) {
 
 func TestS3HTTPProvenOps(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
-	if n := len(p.Operations()); n != 114 {
-		t.Fatalf("s3 Operations() %d want 114", n)
+	if n := len(p.Operations()); n != 115 {
+		t.Fatalf("s3 Operations() %d want 115", n)
 	}
 }
 
@@ -182,78 +185,81 @@ func TestBootedServerS3ExtraEngines(t *testing.T) {
 		res.Body.Close()
 		return res.StatusCode, b, res.Header.Get("x-mirror-fidelity")
 	}
-	if code, b, _ := do(http.MethodPut, "/xb", "", nil); code >= 300 {
+	if code, b, _ := do(http.MethodPut, "/bucket-x", "", nil); code >= 300 {
 		t.Fatalf("mb %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodPut, "/xb/old", "hello-s3-rename", nil); code >= 300 {
+	if code, b, _ := do(http.MethodPut, "/bucket-x/old", "hello-s3-rename", nil); code >= 300 {
 		t.Fatalf("put old %d %s", code, b)
 	}
-	if code, b, fid := do(http.MethodPut, "/xb/new", "", map[string]string{"x-amz-rename-source": "old"}); code >= 300 || fid != "emulate" {
+	if code, b, fid := do(http.MethodPut, "/bucket-x/new", "", map[string]string{"x-amz-rename-source": "old"}); code >= 300 || fid != "emulate" {
 		t.Fatalf("rename %d %s fid %s", code, b, fid)
 	}
-	if code, b, _ := do(http.MethodGet, "/xb/new", "", nil); code != 200 || string(b) != "hello-s3-rename" {
+	if code, b, _ := do(http.MethodGet, "/bucket-x/new", "", nil); code != 200 || string(b) != "hello-s3-rename" {
 		t.Fatalf("renamed get %d %s", code, b)
 	}
-	if code, _, _ := do(http.MethodGet, "/xb/old", "", nil); code != 404 {
+	if code, _, _ := do(http.MethodGet, "/bucket-x/old", "", nil); code != 404 {
 		t.Fatalf("old still there %d", code)
 	}
-	if code, b, fid := do(http.MethodPost, "/xb?session", "", nil); code >= 300 || fid != "emulate" || !bytes.Contains(b, []byte("AccessKeyId")) {
+	if code, b, fid := do(http.MethodPost, "/bucket-x?session", "", nil); code >= 300 || fid != "emulate" || !bytes.Contains(b, []byte("AccessKeyId")) {
 		t.Fatalf("session %d %s fid %s", code, b, fid)
 	}
+	if code, b, _ := do(http.MethodPut, "/bucket-x?versioning", `<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`, nil); code >= 300 {
+		t.Fatalf("enable versioning %d %s", code, b)
+	}
 	lock := `<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>`
-	if code, b, _ := do(http.MethodPut, "/xb?object-lock", lock, nil); code >= 300 {
+	if code, b, _ := do(http.MethodPut, "/bucket-x?object-lock", lock, nil); code >= 300 {
 		t.Fatalf("put lock %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodGet, "/xb?object-lock", "", nil); code != 200 || !bytes.Contains(b, []byte("Enabled")) && !bytes.Contains(b, []byte("_body")) {
+	if code, b, _ := do(http.MethodGet, "/bucket-x?object-lock", "", nil); code != 200 || !bytes.Contains(b, []byte("Enabled")) && !bytes.Contains(b, []byte("_body")) {
 		t.Fatalf("get lock %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodPut, "/xb?abac", `<AbacStatus>Enabled</AbacStatus>`, nil); code >= 300 {
+	if code, b, _ := do(http.MethodPut, "/bucket-x?abac", `<AbacStatus>Enabled</AbacStatus>`, nil); code >= 300 {
 		t.Fatalf("put abac %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodGet, "/xb?abac", "", nil); code != 200 || !bytes.Contains(b, []byte("Enabled")) && !bytes.Contains(b, []byte("_body")) && !bytes.Contains(b, []byte("Abac")) {
+	if code, b, _ := do(http.MethodGet, "/bucket-x?abac", "", nil); code != 200 || !bytes.Contains(b, []byte("Enabled")) && !bytes.Contains(b, []byte("_body")) && !bytes.Contains(b, []byte("Abac")) {
 		t.Fatalf("get abac %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodPut, "/xb?metadataConfiguration", `<JournalTable><Enabled>true</Enabled></JournalTable>`, nil); code >= 300 {
+	if code, b, _ := do(http.MethodPut, "/bucket-x?metadataConfiguration", `<JournalTable><Enabled>true</Enabled></JournalTable>`, nil); code >= 300 {
 		t.Fatalf("put meta %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodGet, "/xb?metadataConfiguration", "", nil); code != 200 {
+	if code, b, _ := do(http.MethodGet, "/bucket-x?metadataConfiguration", "", nil); code != 200 {
 		t.Fatalf("get meta %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodPut, "/xb?metadataTable", `<TableName>t</TableName>`, nil); code >= 300 {
+	if code, b, _ := do(http.MethodPut, "/bucket-x?metadataTable", `<TableName>t</TableName>`, nil); code >= 300 {
 		t.Fatalf("put metatable %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodGet, "/xb?metadataTable", "", nil); code != 200 {
+	if code, b, _ := do(http.MethodGet, "/bucket-x?metadataTable", "", nil); code != 200 {
 		t.Fatalf("get metatable %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodPut, "/xb/rows", "alice,1\nbob,2\n", nil); code >= 300 {
+	if code, b, _ := do(http.MethodPut, "/bucket-x/rows", "alice,1\nbob,2\n", nil); code >= 300 {
 		t.Fatalf("put rows %d %s", code, b)
 	}
 	sel := `Action=SelectObjectContent&Expression=SELECT+%2A+WHERE+s._1+%3D+%27alice%27`
-	if code, b, fid := do(http.MethodPost, "/xb/rows?select&select-type=2", "Expression=SELECT * WHERE s._1 = 'alice'", map[string]string{"Content-Type": "application/x-www-form-urlencoded"}); code >= 300 || fid != "emulate" {
+	if code, b, fid := do(http.MethodPost, "/bucket-x/rows?select&select-type=2", "Expression=SELECT * WHERE s._1 = 'alice'", map[string]string{"Content-Type": "application/x-www-form-urlencoded"}); code >= 300 || fid != "emulate" {
 		t.Fatalf("select %d %s fid %s", code, b, fid)
 	} else if !bytes.Contains(b, []byte("alice")) || bytes.Contains(b, []byte("bob")) {
 		_ = sel
 		t.Fatalf("select filter %s", b)
 	}
-	if code, b, _ := do(http.MethodPut, "/xb?replication", `<ReplicationConfiguration><Role>arn:aws:iam::000000000000:role/r</Role></ReplicationConfiguration>`, nil); code >= 300 {
+	if code, b, _ := do(http.MethodPut, "/bucket-x?replication", `<ReplicationConfiguration><Role>arn:aws:iam::000000000000:role/r</Role><Rule><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::bucket-x</Bucket></Destination></Rule></ReplicationConfiguration>`, nil); code >= 300 {
 		t.Fatalf("put repl %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodDelete, "/xb?replication", "", nil); code >= 300 && code != 204 {
+	if code, b, _ := do(http.MethodDelete, "/bucket-x?replication", "", nil); code >= 300 && code != 204 {
 		t.Fatalf("del repl %d %s", code, b)
 	}
-	if code, _, _ := do(http.MethodGet, "/xb?replication", "", nil); code != 404 {
+	if code, _, _ := do(http.MethodGet, "/bucket-x?replication", "", nil); code != 404 {
 		t.Fatalf("repl after delete %d", code)
 	}
-	if code, b, _ := do(http.MethodPut, "/xb/k?annotation", `<Note>hi</Note>`, nil); code >= 300 {
+	if code, b, _ := do(http.MethodPut, "/bucket-x/k?annotation", `<Note>hi</Note>`, nil); code >= 300 {
 		t.Fatalf("put annot %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodGet, "/xb/k?annotation", "", nil); code != 200 {
+	if code, b, _ := do(http.MethodGet, "/bucket-x/k?annotation", "", nil); code != 200 {
 		t.Fatalf("get annot %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodGet, "/xb?annotation", "", nil); code != 200 {
+	if code, b, _ := do(http.MethodGet, "/bucket-x?annotation", "", nil); code != 200 {
 		t.Fatalf("list annot %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodGet, "/xb/new?torrent", "", nil); code != 200 || !bytes.Contains(b, []byte("announce")) && !bytes.Contains(b, []byte("Torrent")) {
+	if code, b, _ := do(http.MethodGet, "/bucket-x/new?torrent", "", nil); code != 200 || !bytes.Contains(b, []byte("announce")) && !bytes.Contains(b, []byte("Torrent")) {
 		t.Fatalf("torrent %d %s", code, b)
 	}
 	if code, b, fid := do(http.MethodGet, "/?Action=ListDirectoryBuckets", "", nil); code >= 300 || fid != "emulate" {
@@ -262,22 +268,22 @@ func TestBootedServerS3ExtraEngines(t *testing.T) {
 	if code, b, _ := do(http.MethodPost, "/?Action=WriteGetObjectResponse", "payload", map[string]string{"x-amz-request-route": "r1", "x-amz-request-token": "t1"}); code >= 300 {
 		t.Fatalf("wgor %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodPost, "/xb/k?Action=UpdateObjectEncryption", "", nil); code >= 300 {
+	if code, b, _ := do(http.MethodPost, "/bucket-x/k?Action=UpdateObjectEncryption", "", nil); code >= 300 {
 		t.Fatalf("objenc %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodPost, "/xb?metadataConfiguration&journal", `<Enabled>true</Enabled>`, nil); code >= 300 {
+	if code, b, _ := do(http.MethodPost, "/bucket-x?metadataConfiguration&journal", `<Enabled>true</Enabled>`, nil); code >= 300 {
 		t.Fatalf("upd journal %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodPost, "/xb?metadataConfiguration&inventory", `<Enabled>true</Enabled>`, nil); code >= 300 {
+	if code, b, _ := do(http.MethodPost, "/bucket-x?metadataConfiguration&inventory", `<Enabled>true</Enabled>`, nil); code >= 300 {
 		t.Fatalf("upd inventory %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodDelete, "/xb?metadataConfiguration", "", nil); code >= 300 && code != 204 {
+	if code, b, _ := do(http.MethodDelete, "/bucket-x?metadataConfiguration", "", nil); code >= 300 && code != 204 {
 		t.Fatalf("del meta %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodDelete, "/xb?metadataTable", "", nil); code >= 300 && code != 204 {
+	if code, b, _ := do(http.MethodDelete, "/bucket-x?metadataTable", "", nil); code >= 300 && code != 204 {
 		t.Fatalf("del metatable %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodDelete, "/xb/k?annotation", "", nil); code >= 300 && code != 204 {
+	if code, b, _ := do(http.MethodDelete, "/bucket-x/k?annotation", "", nil); code >= 300 && code != 204 {
 		t.Fatalf("del annot %d %s", code, b)
 	}
 }

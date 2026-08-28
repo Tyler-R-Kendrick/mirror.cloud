@@ -1,6 +1,7 @@
 package dynamodb
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
@@ -17,6 +19,28 @@ func TestDynamoDBStreamOpsCount(t *testing.T) {
 	p := New(spitest.Deps(t))
 	if n := len(p.Operations()); n != 62 {
 		t.Fatalf("dynamodb Operations() %d want 62", n)
+	}
+}
+
+func TestDynamoDBStreamPublishesRecords(t *testing.T) {
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := New(deps)
+	invoke := func(operation string, input map[string]any) {
+		t.Helper()
+		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	invoke("CreateTable", map[string]any{
+		"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_IMAGE"},
+	})
+	published := 0
+	cancel := deps.Bus.Subscribe("dynamodb-stream", func(context.Context, []byte) { published++ })
+	defer cancel()
+	invoke("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "1"}}})
+	if published != 1 {
+		t.Fatalf("published %d stream records", published)
 	}
 }
 

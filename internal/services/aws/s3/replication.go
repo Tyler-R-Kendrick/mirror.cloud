@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -17,15 +18,11 @@ type replicaRef struct {
 	Region  string `json:"region"`
 	Bucket  string `json:"bucket"`
 	Key     string `json:"key"`
+	Version string `json:"version,omitempty"`
 }
 
-func (p *Pack) replicateObject(ctx context.Context, req *spi.Request, bucket, key string, body []byte, meta map[string]any) string {
+func (p *Pack) replicateObject(ctx context.Context, req *spi.Request, bucket, key string, body []byte, meta map[string]any, tags map[string]string) string {
 	rules := p.replicationRules(ctx, req, bucket)
-	tags := requestTags(req)
-	if len(tags) > 0 {
-		raw, _ := json.Marshal(tagSet(tags))
-		_ = p.col(req, "tags").Put(ctx, bucket+"/"+key, raw)
-	}
 	matched, copied := false, false
 	for _, rule := range rules {
 		if !ruleMatches(rule, key, tags) {
@@ -40,7 +37,14 @@ func (p *Pack) replicateObject(ctx context.Context, req *spi.Request, bucket, ke
 		if _, ok, _ := scope.Collection("buckets").Get(ctx, ref.Bucket); !ok {
 			continue
 		}
-		info, err := p.deps.Blobs.Put(ctx, scopedBlobKey(ref.Account, ref.Region, ref.Bucket, key), bytes.NewReader(body))
+		blob := scopedBlobKey(ref.Account, ref.Region, ref.Bucket, key)
+		version := str(meta["versionId"])
+		if version != "" {
+			if _, err := p.deps.Blobs.Put(ctx, blob+"@"+version, bytes.NewReader(body)); err != nil {
+				continue
+			}
+		}
+		info, err := p.deps.Blobs.Put(ctx, blob, bytes.NewReader(body))
 		if err != nil {
 			continue
 		}
@@ -52,9 +56,23 @@ func (p *Pack) replicateObject(ctx context.Context, req *spi.Request, bucket, ke
 		}
 		raw, _ := json.Marshal(dstMeta)
 		_ = scope.Collection("objects").Put(ctx, ref.Bucket+"/"+key, raw)
+		if version != "" {
+			_ = scope.Collection("versions").Put(ctx, ref.Bucket+"/"+key+"/"+version, raw)
+			ref.Version = version
+		}
+		tagKeys := []string{objectTagKey(ref.Bucket, key, "")}
+		if version != "" {
+			tagKeys = append(tagKeys, objectTagKey(ref.Bucket, key, version))
+		}
 		if len(tags) > 0 {
 			tagRaw, _ := json.Marshal(tagSet(tags))
-			_ = scope.Collection("tags").Put(ctx, ref.Bucket+"/"+key, tagRaw)
+			for _, tagKey := range tagKeys {
+				_ = scope.Collection("tags").Put(ctx, tagKey, tagRaw)
+			}
+		} else {
+			for _, tagKey := range tagKeys {
+				_ = scope.Collection("tags").Delete(ctx, tagKey)
+			}
 		}
 		p.rememberReplica(ctx, req, bucket, key, ref)
 		copied = true
@@ -70,7 +88,7 @@ func (p *Pack) replicateObject(ctx context.Context, req *spi.Request, bucket, ke
 
 func (p *Pack) replicateDeleteMarker(ctx context.Context, req *spi.Request, bucket, key string, sourceMeta []byte) string {
 	matched, copied := false, false
-	tags := p.storedTags(ctx, req, bucket, key)
+	tags := p.storedTags(ctx, req, bucket, key, "")
 	for _, rule := range p.replicationRules(ctx, req, bucket) {
 		deleteCfg := asMap(rule["DeleteMarkerReplication"])
 		if !strings.EqualFold(str(deleteCfg["Status"]), "Enabled") || !ruleMatches(rule, key, tags) {
@@ -90,6 +108,9 @@ func (p *Pack) replicateDeleteMarker(ctx context.Context, req *spi.Request, buck
 		meta["replicationStatus"] = "REPLICA"
 		raw, _ := json.Marshal(meta)
 		_ = scope.Collection("objects").Put(ctx, ref.Bucket+"/"+key, raw)
+		if version := str(meta["versionId"]); version != "" {
+			_ = scope.Collection("versions").Put(ctx, ref.Bucket+"/"+key+"/"+version, raw)
+		}
 		copied = true
 	}
 	if copied {
@@ -101,8 +122,8 @@ func (p *Pack) replicateDeleteMarker(ctx context.Context, req *spi.Request, buck
 	return ""
 }
 
-func (p *Pack) storedTags(ctx context.Context, req *spi.Request, bucket, key string) map[string]string {
-	raw, ok, _ := p.col(req, "tags").Get(ctx, bucket+"/"+key)
+func (p *Pack) storedTags(ctx context.Context, req *spi.Request, bucket, key, version string) map[string]string {
+	raw, ok, _ := p.col(req, "tags").Get(ctx, objectTagKey(bucket, key, version))
 	if !ok {
 		return nil
 	}
@@ -116,6 +137,14 @@ func (p *Pack) storedTags(ctx context.Context, req *spi.Request, bucket, key str
 	return tags
 }
 
+func objectTagKey(bucket, key, version string) string {
+	tagKey := bucket + "/" + key
+	if version != "" {
+		tagKey += "/" + version
+	}
+	return tagKey
+}
+
 func (p *Pack) replicationRules(ctx context.Context, req *spi.Request, bucket string) []map[string]any {
 	raw, ok, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/replication")
 	if !ok {
@@ -123,6 +152,18 @@ func (p *Pack) replicationRules(ctx context.Context, req *spi.Request, bucket st
 	}
 	var doc map[string]any
 	_ = json.Unmarshal(raw, &doc)
+	values := replicationConfigurationRules(doc)
+	rules := make([]map[string]any, 0, len(values))
+	for _, rule := range values {
+		if !strings.EqualFold(str(rule["Status"]), "Disabled") {
+			rules = append(rules, rule)
+		}
+	}
+	return rules
+}
+
+func replicationConfigurationRules(value any) []map[string]any {
+	doc := asMap(value)
 	if nested := asMap(doc["ReplicationConfiguration"]); len(nested) > 0 {
 		doc = nested
 	}
@@ -136,12 +177,68 @@ func (p *Pack) replicationRules(ctx context.Context, req *spi.Request, bucket st
 	}
 	rules := make([]map[string]any, 0, len(values))
 	for _, value := range values {
-		rule := asMap(value)
-		if !strings.EqualFold(str(rule["Status"]), "Disabled") {
-			rules = append(rules, rule)
-		}
+		rules = append(rules, asMap(value))
 	}
 	return rules
+}
+
+func validateReplicationConfiguration(value any) error {
+	configuration := asMap(value)
+	rules := replicationConfigurationRules(configuration)
+	malformed := func() error {
+		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if str(configuration["Role"]) == "" || len(rules) < 1 || len(rules) > 1000 {
+		return malformed()
+	}
+	for _, rule := range rules {
+		if status := str(rule["Status"]); status != "Enabled" && status != "Disabled" {
+			return malformed()
+		}
+		if str(asMap(rule["Destination"])["Bucket"]) == "" {
+			return malformed()
+		}
+		deleteMarker, hasDeleteMarker := rule["DeleteMarkerReplication"]
+		deleteStatus := str(asMap(deleteMarker)["Status"])
+		if hasDeleteMarker && deleteStatus != "Enabled" && deleteStatus != "Disabled" {
+			return malformed()
+		}
+		filter, hasFilter := rule["Filter"]
+		if !hasFilter {
+			continue
+		}
+		if _, hasPriority := rule["Priority"]; !hasPriority || !hasDeleteMarker {
+			return malformed()
+		}
+		filterDoc := asMap(filter)
+		and := asMap(filterDoc["And"])
+		if deleteStatus == "Enabled" && (len(asMap(filterDoc["Tag"])) > 0 || len(asMap(and["Tag"])) > 0 || len(asSlice(and["Tags"])) > 0) {
+			return &spi.Fault{Code: "InvalidRequest", Message: "Delete marker replication cannot be enabled for tag-based rules", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+	}
+	return nil
+}
+
+func (p *Pack) prepareReplicationConfiguration(ctx context.Context, req *spi.Request, value any) error {
+	if err := validateReplicationConfiguration(value); err != nil {
+		return err
+	}
+	rules := replicationConfigurationRules(value)
+	for _, rule := range rules {
+		ref, _ := p.replicationDestination(ctx, req, rule, "")
+		scope := p.deps.Store.Scope(ref.Account, ref.Region)
+		_, exists, _ := scope.Collection("buckets").Get(ctx, ref.Bucket)
+		versioning, enabled, _ := scope.Collection("versioning").Get(ctx, ref.Bucket)
+		if !exists || !enabled || string(versioning) != "Enabled" {
+			return &spi.Fault{Code: "InvalidRequest", Message: "Destination bucket must have versioning enabled.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+	}
+	for index, rule := range rules {
+		if str(rule["ID"]) == "" {
+			rule["ID"] = p.deps.Rand.Derive("s3-replication-rule:" + req.Identity.Account + ":" + req.Identity.Region + ":" + str(req.Input["Bucket"]) + ":" + strconv.Itoa(index)).Hex(8)
+		}
+	}
+	return nil
 }
 
 func ruleMatches(rule map[string]any, key string, tags map[string]string) bool {
@@ -201,17 +298,32 @@ func (p *Pack) replicationDestination(ctx context.Context, req *spi.Request, rul
 	return replicaRef{Account: account, Region: region, Bucket: bucket, Key: key}, str(dst["StorageClass"])
 }
 
-func requestTags(req *spi.Request) map[string]string {
+func requestTags(req *spi.Request) (map[string]string, error) {
 	tagging := str(req.Input["Tagging"])
 	if tagging == "" && req.HTTP != nil {
 		tagging = req.HTTP.Header.Get("x-amz-tagging")
 	}
-	values, _ := url.ParseQuery(tagging)
-	tags := make(map[string]string, len(values))
-	for key := range values {
-		tags[key] = values.Get(key)
+	values, err := url.ParseQuery(tagging)
+	if err != nil {
+		return nil, invalidTaggingHeader(tagging)
 	}
-	return tags
+	tags := make(map[string]string, len(values))
+	tagSet := make([]any, 0, len(values))
+	for key, value := range values {
+		if len(value) != 1 {
+			return nil, invalidTaggingHeader(tagging)
+		}
+		tags[key] = value[0]
+		tagSet = append(tagSet, map[string]any{"Key": key, "Value": value[0]})
+	}
+	if err := validateTagSet(tagSet, 10, "object"); err != nil {
+		return nil, invalidTaggingHeader(tagging)
+	}
+	return tags, nil
+}
+
+func invalidTaggingHeader(value string) error {
+	return &spi.Fault{Code: "InvalidArgument", Message: "The header 'x-amz-tagging' shall be encoded as UTF-8 then URLEncoded URL query parameters without tag name duplicates.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-tagging", "ArgumentValue": value}}
 }
 
 func tagSet(tags map[string]string) []any {
@@ -243,7 +355,7 @@ func (p *Pack) rememberReplica(ctx context.Context, req *spi.Request, bucket, ke
 	_ = col.Put(ctx, bucket+"/"+key, raw)
 }
 
-func (p *Pack) syncReplicaTags(ctx context.Context, req *spi.Request, bucket, key string, tags []byte) {
+func (p *Pack) syncReplicaTags(ctx context.Context, req *spi.Request, bucket, key, version string, tags []byte) {
 	raw, ok, _ := p.col(req, "replicas").Get(ctx, bucket+"/"+key)
 	if !ok {
 		return
@@ -251,11 +363,18 @@ func (p *Pack) syncReplicaTags(ctx context.Context, req *spi.Request, bucket, ke
 	var refs []replicaRef
 	_ = json.Unmarshal(raw, &refs)
 	for _, ref := range refs {
-		_ = p.deps.Store.Scope(ref.Account, ref.Region).Collection("tags").Put(ctx, ref.Bucket+"/"+ref.Key, tags)
+		if ref.Version != "" && ref.Version != version {
+			continue
+		}
+		col := p.deps.Store.Scope(ref.Account, ref.Region).Collection("tags")
+		_ = col.Put(ctx, objectTagKey(ref.Bucket, ref.Key, ""), tags)
+		if version != "" {
+			_ = col.Put(ctx, objectTagKey(ref.Bucket, ref.Key, version), tags)
+		}
 	}
 }
 
-func (p *Pack) syncReplicaObjectLock(ctx context.Context, req *spi.Request, bucket, key, kind string, value []byte) {
+func (p *Pack) syncReplicaObjectLock(ctx context.Context, req *spi.Request, bucket, key, version, kind string, value []byte) {
 	raw, ok, _ := p.col(req, "replicas").Get(ctx, bucket+"/"+key)
 	if !ok {
 		return
@@ -263,7 +382,10 @@ func (p *Pack) syncReplicaObjectLock(ctx context.Context, req *spi.Request, buck
 	var refs []replicaRef
 	_ = json.Unmarshal(raw, &refs)
 	for _, ref := range refs {
-		_ = p.deps.Store.Scope(ref.Account, ref.Region).Collection("objlock").Put(ctx, ref.Bucket+"/"+ref.Key+"/"+kind, value)
+		if ref.Version != "" && ref.Version != version {
+			continue
+		}
+		_ = p.deps.Store.Scope(ref.Account, ref.Region).Collection("objlock").Put(ctx, objectLockKey(ref.Bucket, ref.Key, version, kind), value)
 	}
 }
 
@@ -271,7 +393,7 @@ func setReplicationHeaders(headers http.Header, meta map[string]any) {
 	if status := str(meta["replicationStatus"]); status != "" {
 		headers.Set("x-amz-replication-status", status)
 	}
-	if storageClass := str(meta["storageClass"]); storageClass != "" {
+	if storageClass := str(meta["storageClass"]); storageClass != "" && storageClass != "STANDARD" {
 		headers.Set("x-amz-storage-class", storageClass)
 	}
 }

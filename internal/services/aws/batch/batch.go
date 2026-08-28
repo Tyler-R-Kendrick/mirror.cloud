@@ -71,7 +71,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "SubmitJob":
 		id := p.deps.Rand.Hex(16)
-		rec := map[string]any{"jobId": id, "jobName": first(req.Input, "jobName"), "jobQueue": first(req.Input, "jobQueue"), "status": "SUCCEEDED"}
+		rec := map[string]any{"jobId": id, "jobName": first(req.Input, "jobName", "JobName"), "jobQueue": first(req.Input, "jobQueue", "JobQueue"), "status": "SUCCEEDED"}
 		b, _ := json.Marshal(rec)
 		_ = p.col(req, "bjob").Put(ctx, id, b)
 		return &spi.Response{Output: map[string]any{"jobId": id, "jobName": rec["jobName"]}}, nil

@@ -1,0 +1,32 @@
+{
+  "invalid": {
+    "": "InvalidBucketName",
+    "-starts": "InvalidBucketName",
+    "192.168.005.4": "InvalidBucketName",
+    "192.168.5.4": "InvalidBucketName",
+    "999.999.999.999": "InvalidBucketName",
+    "Uppercase": "InvalidBucketName",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "InvalidBucketName",
+    "ab": "InvalidBucketName",
+    "adjacent..dots": "InvalidBucketName",
+    "amzn-s3-demo-reserved": "InvalidBucketName",
+    "ends-": "InvalidBucketName",
+    "reserved--ol-s3": "InvalidBucketName",
+    "reserved--table-s3": "InvalidBucketName",
+    "reserved--x-s3": "InvalidBucketName",
+    "reserved-an": "InvalidBucketName",
+    "reserved-s3alias": "InvalidBucketName",
+    "reserved.mrap": "InvalidBucketName",
+    "sthree-reserved": "InvalidBucketName",
+    "under_score": "InvalidBucketName",
+    "xn--reserved": "InvalidBucketName"
+  },
+  "valid": {
+    "123": "/123",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "abc": "/abc",
+    "abc.def.ghi.jkl": "/abc.def.ghi.jkl",
+    "bucket-name": "/bucket-name",
+    "example.com": "/example.com"
+  }
+}

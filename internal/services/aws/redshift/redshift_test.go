@@ -1,15 +1,18 @@
 package redshift
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
@@ -115,5 +118,78 @@ func TestRedshiftHTTPProvenOps(t *testing.T) {
 	p := New(spitest.Deps(t))
 	if n := len(p.Operations()); n != 36+len(extraOps()) {
 		t.Fatalf("redshift Operations() %d want %d", n, 36+len(extraOps()))
+	}
+}
+
+func TestRedshiftCopyDataPlane(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	identity := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	req := &spi.Request{Identity: identity, Operation: "CreateCluster", Input: map[string]any{
+		"ClusterIdentifier": "warehouse", "DBName": "analytics", "MasterUsername": "firehose", "MasterUserPassword": "secret-password",
+	}}
+	response, err := p.Invoke(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster := response.Output["Cluster"].(map[string]any)
+	if cluster["MasterUserPassword"] != nil || cluster["DBName"] != "analytics" {
+		t.Fatalf("Redshift cluster description %#v", cluster)
+	}
+	if err := p.CreateTable(ctx, identity, "warehouse", "analytics", "events", []string{"id", "payload"}); err != nil {
+		t.Fatal(err)
+	}
+	input := CopyInput{
+		Cluster: "warehouse", Database: "analytics", Table: "events", Username: "firehose", Password: "secret-password",
+		Columns: "id,payload", Options: "delimiter '|'", Data: [][]byte{[]byte("1|one\n"), []byte("2|two\n")},
+	}
+	if err := p.Copy(ctx, identity, input); err != nil {
+		t.Fatal(err)
+	}
+	input.Options = "JSON 'auto'"
+	input.Data = [][]byte{[]byte(`{"id":3,"payload":"three"}` + "\n")}
+	if err := p.Copy(ctx, identity, input); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := p.TableRows(ctx, identity, "warehouse", "analytics", "events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []map[string]any{{"id": "1", "payload": "one"}, {"id": "2", "payload": "two"}, {"id": float64(3), "payload": "three"}}
+	if !reflect.DeepEqual(rows, want) {
+		t.Fatalf("Redshift COPY rows %#v", rows)
+	}
+	for name, mutate := range map[string]func(*CopyInput){
+		"credentials": func(input *CopyInput) { input.Password = "wrong-password" },
+		"database":    func(input *CopyInput) { input.Database = "missing" },
+		"table":       func(input *CopyInput) { input.Table = "missing" },
+		"columns":     func(input *CopyInput) { input.Columns = "missing" },
+		"row": func(input *CopyInput) {
+			input.Options, input.Data = "delimiter '|'", [][]byte{[]byte("only-one-column\n")}
+		},
+		"json": func(input *CopyInput) {
+			input.Options, input.Data = "JSON 'auto'", [][]byte{[]byte("not-json\n")}
+		},
+		"delimiter": func(input *CopyInput) {
+			input.Options, input.Data = "delimiter '||'", [][]byte{[]byte("1||one\n")}
+		},
+	} {
+		candidate := input
+		mutate(&candidate)
+		err := p.Copy(ctx, identity, candidate)
+		expected := map[string]string{
+			"credentials": "credentials are invalid", "database": "database does not exist", "table": "table not found", "columns": "column does not exist",
+			"row": "wrong column count", "json": "JSON row is invalid", "delimiter": "delimiter must be one byte",
+		}[name]
+		if err == nil || !strings.Contains(err.Error(), expected) {
+			t.Errorf("invalid Redshift COPY %s returned %v", name, err)
+		}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: identity, Operation: "DeleteCluster", Input: map[string]any{"ClusterIdentifier": "warehouse"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.TableRows(ctx, identity, "warehouse", "analytics", "events"); err == nil {
+		t.Fatal("deleted Redshift cluster retained table data")
 	}
 }

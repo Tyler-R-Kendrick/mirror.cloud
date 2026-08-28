@@ -1,7 +1,10 @@
 package lambda
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,8 +14,57 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
+
+func TestInvokeEventAndDryRunStatus(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+		"FunctionName": "async", "Runtime": "unsupported", "Handler": "handler",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for kind, status := range map[string]int{"DryRun": http.StatusNoContent, "Event": http.StatusAccepted} {
+		resp, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Invoke", Input: map[string]any{"FunctionName": "async", "InvocationType": kind}})
+		if err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+		if resp.Status != status || resp.Output["StatusCode"] != status {
+			t.Fatalf("%s response %#v", kind, resp)
+		}
+	}
+}
+
+func TestInvokeAcceptsRawArrayPayload(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	src := "def lambda_handler(event, context):\n    return {'length': len(event)}\n"
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+		"FunctionName": "batch", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
+		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(src))},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{
+		Identity: id, Operation: "Invoke", Input: map[string]any{"FunctionName": "batch"},
+		Body: io.NopCloser(bytes.NewBufferString(`[{"id":1},{"id":2}]`)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(response.Output["Payload"].(json.RawMessage)), `"length": 2`) {
+		t.Fatalf("payload %s", response.Output["Payload"])
+	}
+}
 
 func TestBootedServerLambdaPythonInvoke(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {

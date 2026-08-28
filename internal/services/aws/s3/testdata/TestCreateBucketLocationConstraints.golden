@@ -1,0 +1,27 @@
+{
+  "EU": {
+    "reported": "EU",
+    "stored_region": "eu-west-1"
+  },
+  "EU-header": "http://eu-alias.s3.amazonaws.com/",
+  "default": "",
+  "invalid": {
+    "code": "InvalidLocationConstraint",
+    "field": "moon-west-1",
+    "message": "The specified location-constraint is not valid",
+    "status": 400
+  },
+  "matching": "us-west-2",
+  "matching-header": "http://west-match.s3.amazonaws.com/",
+  "mismatch": {
+    "code": "IllegalLocationConstraintException",
+    "message": "The eu-west-1 location constraint is incompatible for the region specific endpoint this request was sent to.",
+    "status": 400
+  },
+  "missing": {
+    "code": "IllegalLocationConstraintException",
+    "message": "The unspecified location constraint is incompatible for the region specific endpoint this request was sent to.",
+    "status": 400
+  },
+  "secure-header": "https://s3.test/secure-location/"
+}

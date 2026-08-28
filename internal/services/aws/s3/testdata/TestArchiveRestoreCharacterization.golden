@@ -1,0 +1,25 @@
+{
+  "before": {
+    "deep": "InvalidObjectState",
+    "glacier": "InvalidObjectState",
+    "head": "allowed",
+    "instant": "allowed"
+  },
+  "copy": {
+    "object": "InvalidObjectState",
+    "part": "InvalidObjectState",
+    "partsWritten": 0
+  },
+  "restore": {
+    "first": 202,
+    "header": "ongoing-request=\"false\", expiry-date=\"Sun, 04 Jan 1970 00:00:00 GMT\"",
+    "missing": "NoSuchKey",
+    "second": 200,
+    "standard": "InvalidObjectState",
+    "withoutDays": 200
+  },
+  "version": {
+    "current": "InvalidObjectState",
+    "old": "allowed"
+  }
+}

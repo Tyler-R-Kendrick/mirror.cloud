@@ -1,9 +1,11 @@
-// Package kafka stores MSK cluster records (no Kafka broker).
+// Package kafka stores MSK cluster and local topic records (no Kafka broker).
 package kafka
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
@@ -18,6 +20,12 @@ func init() {
 
 // Pack implements MSK-lite.
 type Pack struct{ deps spi.Deps }
+
+// Message is a locally published MSK topic record.
+type Message struct {
+	Data      []byte
+	Timestamp time.Time
+}
 
 // New constructs the pack.
 func New(d spi.Deps) *Pack { return &Pack{deps: d} }
@@ -64,6 +72,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"ClusterInfoList": items}}, nil
 	case "DeleteCluster":
+		messages, _, _ := p.col(req, "mskrecords").List(ctx, arn+"|", "", 0)
+		for _, message := range messages {
+			_ = p.col(req, "mskrecords").Delete(ctx, message.Key)
+		}
 		_ = p.col(req, "msk").Delete(ctx, arn)
 		return &spi.Response{Output: map[string]any{"ClusterArn": arn, "State": "DELETING"}}, nil
 	case "GetBootstrapBrokers":
@@ -75,6 +87,45 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	default:
 		return nil, spi.NotImplemented("aws.kafka", req.Operation, "emulate")
 	}
+}
+
+// Publish stores a topic message and notifies in-process consumers.
+func (p *Pack) Publish(ctx context.Context, identity spi.Identity, clusterARN, topic string, data []byte) error {
+	req := &spi.Request{Identity: identity}
+	if _, ok, _ := p.col(req, "msk").Get(ctx, clusterARN); !ok {
+		return &spi.Fault{Code: "NotFoundException", HTTPStatus: 400, Fault: "client"}
+	}
+	message := Message{Data: append([]byte(nil), data...), Timestamp: p.deps.Clock.Now()}
+	encoded, _ := json.Marshal(message)
+	key := clusterARN + "|" + topic + "|" + fmt.Sprintf("%020d-%s", message.Timestamp.UnixNano(), p.deps.Rand.Hex(8))
+	if err := p.col(req, "mskrecords").Put(ctx, key, encoded); err != nil {
+		return err
+	}
+	if p.deps.Bus != nil {
+		event, _ := json.Marshal(map[string]any{"Account": identity.Account, "Region": identity.Region, "ClusterARN": clusterARN, "Topic": topic, "Message": message})
+		return p.deps.Bus.Publish(ctx, "kafka", event)
+	}
+	return nil
+}
+
+// Messages returns topic messages at or after the requested timestamp.
+func (p *Pack) Messages(ctx context.Context, identity spi.Identity, clusterARN, topic string, from time.Time) ([]Message, error) {
+	req := &spi.Request{Identity: identity}
+	if _, ok, _ := p.col(req, "msk").Get(ctx, clusterARN); !ok {
+		return nil, &spi.Fault{Code: "NotFoundException", HTTPStatus: 400, Fault: "client"}
+	}
+	items, _, err := p.col(req, "mskrecords").List(ctx, clusterARN+"|"+topic+"|", "", 0)
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]Message, 0, len(items))
+	for _, item := range items {
+		var message Message
+		if json.Unmarshal(item.Value, &message) == nil && !message.Timestamp.Before(from) {
+			messages = append(messages, message)
+		}
+	}
+	return messages, nil
 }
 
 func first(in map[string]any, keys ...string) string {

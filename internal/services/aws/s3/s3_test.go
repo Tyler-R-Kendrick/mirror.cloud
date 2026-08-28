@@ -581,6 +581,51 @@ func TestObjectMetadata(t *testing.T) {
 	})
 }
 
+func TestObjectServerSideEncryption(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "encrypted"}, nil)
+	defaultPut := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "encrypted", "Key": "default"}, []byte("body"))
+	if defaultPut.Headers.Get("x-amz-server-side-encryption") != "AES256" {
+		t.Fatalf("default encryption = %v", defaultPut.Headers)
+	}
+	if head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "encrypted", "Key": "default"}, nil); head.Headers.Get("x-amz-server-side-encryption") != "AES256" {
+		t.Fatalf("stored default encryption = %v", head.Headers)
+	}
+
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "encrypted", "Status": "Enabled"}, nil)
+	keyID := "arn:aws:kms:us-east-1:123456789012:key/test"
+	kms := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "encrypted", "Key": "kms", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true}, []byte("body"))
+	if kms.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || kms.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || kms.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" || kms.Headers.Get("x-amz-version-id") == "" {
+		t.Fatalf("kms response = %v", kms.Headers)
+	}
+	if head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "encrypted", "Key": "kms", "VersionId": kms.Headers.Get("x-amz-version-id")}, nil); head.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || head.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+		t.Fatalf("stored kms encryption = %v", head.Headers)
+	}
+
+	configuration := map[string]any{"Rules": []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "aws:kms", "KMSMasterKeyID": keyID}, "BucketKeyEnabled": true}}}
+	mustInvoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": "encrypted", "ServerSideEncryptionConfiguration": configuration}, nil)
+	inherited := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "encrypted", "Key": "inherited"}, []byte("body"))
+	if inherited.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || inherited.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || inherited.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+		t.Fatalf("inherited encryption = %v", inherited.Headers)
+	}
+	overridden := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "encrypted", "Key": "overridden", "ServerSideEncryption": "AES256"}, []byte("body"))
+	if overridden.Headers.Get("x-amz-server-side-encryption") != "AES256" || overridden.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != "" || overridden.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "" {
+		t.Fatalf("overridden encryption = %v", overridden.Headers)
+	}
+
+	_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": "encrypted", "Key": "invalid", "ServerSideEncryption": "invalid"}, []byte("body"))
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("invalid encryption fault = %+v", fault)
+	}
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "encrypted", "Key": "invalid"}, nil); asFault(t, err).Code != "NoSuchKey" {
+		t.Fatal("invalid encryption stored object")
+	}
+	mustInvoke(t, p, "DeleteBucketEncryption", map[string]any{"Bucket": "encrypted"}, nil)
+	if restored := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "encrypted", "Key": "restored-default"}, []byte("body")); restored.Headers.Get("x-amz-server-side-encryption") != "AES256" {
+		t.Fatalf("restored default = %v", restored.Headers)
+	}
+}
+
 func TestCopyObjectTaggingDirective(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

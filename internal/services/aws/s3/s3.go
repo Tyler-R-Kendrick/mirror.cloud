@@ -838,9 +838,16 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	}
 	objectMetadata := requestObjectMetadata(req)
 	websiteRedirectLocation := requestCondition(req, "WebsiteRedirectLocation", "x-amz-website-redirect-location")
-	serverSideEncryption, sseKMSKeyID, bucketKeyEnabled, err := p.objectEncryption(ctx, req, b)
+	sseCustomerKeyMD5, err := requestSSECustomerKey(req)
 	if err != nil {
 		return nil, err
+	}
+	serverSideEncryption, sseKMSKeyID, bucketKeyEnabled := "", "", false
+	if sseCustomerKeyMD5 == "" {
+		serverSideEncryption, sseKMSKeyID, bucketKeyEnabled, err = p.objectEncryption(ctx, req, b)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var body []byte
 	if req.Body != nil {
@@ -875,7 +882,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		current, _ := p.objectMetadata(ctx, req, b, key, "")
 		versionOrder = append(p.objectVersionOrder(ctx, req, b, key, current), vid)
 		_, _ = p.deps.Blobs.Put(ctx, blobKey(req, b, key)+"@"+vid, bytes.NewReader(body))
-		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "versionOrder": versionOrder, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation, "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled}
+		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "versionOrder": versionOrder, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation, "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled, "sseCustomerKeyMD5": sseCustomerKeyMD5}
 		if len(parts) > 0 {
 			versionMeta["parts"] = parts
 		}
@@ -886,7 +893,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		vm, _ := json.Marshal(versionMeta)
 		_ = p.col(req, "versions").Put(ctx, b+"/"+key+"/"+vid, vm)
 	}
-	metaDoc := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "versionId": vid, "deleteMarker": false, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation, "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled}
+	metaDoc := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "versionId": vid, "deleteMarker": false, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation, "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled, "sseCustomerKeyMD5": sseCustomerKeyMD5}
 	if versioned {
 		metaDoc["versionOrder"] = versionOrder
 	}
@@ -927,13 +934,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	if len(provided) > 0 {
 		h.Set("x-amz-checksum-type", checksumType)
 	}
-	h.Set("x-amz-server-side-encryption", serverSideEncryption)
-	if serverSideEncryption == "aws:kms" {
-		h.Set("x-amz-server-side-encryption-aws-kms-key-id", sseKMSKeyID)
-		if bucketKeyEnabled {
-			h.Set("x-amz-server-side-encryption-bucket-key-enabled", "true")
-		}
-	}
+	setObjectEncryptionHeaders(h, metaDoc)
 	if status := p.replicateObject(ctx, req, b, key, body, metaDoc, tags); status != "" {
 		metaDoc["replicationStatus"] = status
 		meta, _ = json.Marshal(metaDoc)
@@ -1261,6 +1262,9 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if truthy(meta["deleteMarker"]) {
 		return nil, deleteMarkerReadFault(meta, wantVer != "")
 	}
+	if err := validateStoredSSECustomerKey(req, meta); err != nil {
+		return nil, err
+	}
 	if err := p.requireRestored(ctx, req, b, key, meta); err != nil {
 		return nil, err
 	}
@@ -1353,6 +1357,9 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	}
 	if truthy(meta["deleteMarker"]) {
 		return nil, deleteMarkerReadFault(meta, wantVer != "")
+	}
+	if err := validateStoredSSECustomerKey(req, meta); err != nil {
+		return nil, err
 	}
 	bk := blobKey(req, b, key)
 	if wantVer != "" {
@@ -2798,6 +2805,52 @@ func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket st
 	return algorithm, keyID, bucketKey, nil
 }
 
+func requestSSECustomerKey(req *spi.Request) (string, error) {
+	algorithm := requestCondition(req, "SSECustomerAlgorithm", "x-amz-server-side-encryption-customer-algorithm")
+	key := requestCondition(req, "SSECustomerKey", "x-amz-server-side-encryption-customer-key")
+	keyMD5 := requestCondition(req, "SSECustomerKeyMD5", "x-amz-server-side-encryption-customer-key-MD5")
+	invalid := func(code, message string) error {
+		return &spi.Fault{Code: code, Message: message, HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-server-side-encryption"}}
+	}
+	if key == "" && algorithm == "" {
+		return "", nil
+	}
+	if requestCondition(req, "ServerSideEncryption", "x-amz-server-side-encryption") != "" {
+		return "", invalid("InvalidArgument", "Server Side Encryption with Customer provided key is incompatible with the encryption method specified")
+	}
+	if key == "" || algorithm == "" {
+		return "", invalid("InvalidArgument", "Requests specifying Server Side Encryption with Customer provided keys must provide an appropriate secret key and a valid encryption algorithm.")
+	}
+	if algorithm != "AES256" {
+		return "", invalid("InvalidEncryptionAlgorithmError", "The Encryption request you specified is not valid. Supported value: AES256.")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(key)
+	if err != nil || len(decoded) != 32 {
+		return "", invalid("InvalidArgument", "The secret key was invalid for the specified algorithm.")
+	}
+	sum := md5.Sum(decoded)
+	if base64.StdEncoding.EncodeToString(sum[:]) != keyMD5 {
+		return "", invalid("InvalidArgument", "The calculated MD5 hash of the key did not match the hash that was provided.")
+	}
+	return keyMD5, nil
+}
+
+func validateStoredSSECustomerKey(req *spi.Request, meta map[string]any) error {
+	stored := str(meta["sseCustomerKeyMD5"])
+	provided := requestCondition(req, "SSECustomerKeyMD5", "x-amz-server-side-encryption-customer-key-MD5")
+	validated, err := requestSSECustomerKey(req)
+	if err != nil {
+		return err
+	}
+	if validated != "" {
+		provided = validated
+	}
+	if stored != provided {
+		return &spi.Fault{Code: "InvalidRequest", Message: "The provided encryption parameters did not match the ones used originally.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	return nil
+}
+
 func setObjectMetadataHeaders(headers http.Header, meta map[string]any) {
 	metadata := asMap(meta["objectMetadata"])
 	for _, field := range []struct{ key, header string }{
@@ -2821,6 +2874,11 @@ func setObjectMetadataHeaders(headers http.Header, meta map[string]any) {
 }
 
 func setObjectEncryptionHeaders(headers http.Header, meta map[string]any) {
+	if keyMD5 := str(meta["sseCustomerKeyMD5"]); keyMD5 != "" {
+		headers.Set("x-amz-server-side-encryption-customer-algorithm", "AES256")
+		headers.Set("x-amz-server-side-encryption-customer-key-MD5", keyMD5)
+		return
+	}
 	encryption := str(meta["serverSideEncryption"])
 	if encryption == "" {
 		return

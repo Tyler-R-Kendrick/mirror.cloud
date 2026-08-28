@@ -634,6 +634,46 @@ func TestObjectServerSideEncryption(t *testing.T) {
 	})
 }
 
+func TestObjectSSECustomerKey(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "sse-c"}, nil)
+	rawKey := []byte("0123456789abcdef0123456789abcdef")
+	key := base64.StdEncoding.EncodeToString(rawKey)
+	digest := md5.Sum(rawKey)
+	keyMD5 := base64.StdEncoding.EncodeToString(digest[:])
+	input := map[string]any{"Bucket": "sse-c", "Key": "object", "SSECustomerAlgorithm": "AES256", "SSECustomerKey": key, "SSECustomerKeyMD5": keyMD5}
+	put := mustInvoke(t, p, "PutObject", input, []byte("secret"))
+	if put.Headers.Get("x-amz-server-side-encryption-customer-algorithm") != "AES256" || put.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != keyMD5 || put.Headers.Get("x-amz-server-side-encryption") != "" {
+		t.Fatalf("put SSE-C headers = %v", put.Headers)
+	}
+	if _, err := invoke(t, p, "HeadObject", map[string]any{"Bucket": "sse-c", "Key": "object"}, nil); asFault(t, err).Code != "InvalidRequest" {
+		t.Fatal("SSE-C object read without key")
+	}
+	readInput := map[string]any{"Bucket": "sse-c", "Key": "object", "SSECustomerAlgorithm": "AES256", "SSECustomerKey": key, "SSECustomerKeyMD5": keyMD5}
+	head := mustInvoke(t, p, "HeadObject", readInput, nil)
+	if head.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != keyMD5 {
+		t.Fatalf("head SSE-C headers = %v", head.Headers)
+	}
+	if body := string(readStream(t, mustInvoke(t, p, "GetObject", readInput, nil))); body != "secret" {
+		t.Fatalf("SSE-C body = %q", body)
+	}
+	mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "sse-c", "Key": "object", "SSECustomerKeyMD5": keyMD5}, nil)
+	for name, changes := range map[string]map[string]any{
+		"algorithm":  {"SSECustomerAlgorithm": "AES128"},
+		"short key":  {"SSECustomerKey": base64.StdEncoding.EncodeToString([]byte("short"))},
+		"key digest": {"SSECustomerKeyMD5": "AAAAAAAAAAAAAAAAAAAAAA=="},
+		"mixed SSE":  {"ServerSideEncryption": "AES256"},
+	} {
+		invalid := maps.Clone(input)
+		for key, value := range changes {
+			invalid[key] = value
+		}
+		if _, err := invoke(t, p, "PutObject", invalid, []byte("bad")); err == nil {
+			t.Fatalf("%s SSE-C accepted", name)
+		}
+	}
+}
+
 func TestMultipartServerSideEncryption(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-encryption"}, nil)

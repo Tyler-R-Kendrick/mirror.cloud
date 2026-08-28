@@ -3,6 +3,8 @@ package chaos
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -236,6 +238,41 @@ func TestConcurrentInvalidWritesLeaveNoObject(t *testing.T) {
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "classes", "Key": "object", "StorageClass": "STANDARD_IA"}, Body: io.NopCloser(bytes.NewReader([]byte("good")))}); err != nil {
 		t.Fatalf("valid write after invalid load: %v", err)
+	}
+}
+
+func TestCustomerEncryptionValidationFailurePreservesObject(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != nil {
+			stream = io.NopCloser(bytes.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "customer-encryption"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	rawKey := []byte("0123456789abcdef0123456789abcdef")
+	digest := md5.Sum(rawKey)
+	input := map[string]any{"Bucket": "customer-encryption", "Key": "object", "SSECustomerAlgorithm": "AES256", "SSECustomerKey": base64.StdEncoding.EncodeToString(rawKey), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(digest[:])}
+	if _, err := call("PutObject", input, []byte("original")); err != nil {
+		t.Fatal(err)
+	}
+	invalid := map[string]any{"Bucket": "customer-encryption", "Key": "object", "SSECustomerAlgorithm": "AES256", "SSECustomerKey": input["SSECustomerKey"], "SSECustomerKeyMD5": "AAAAAAAAAAAAAAAAAAAAAA=="}
+	if _, err := call("PutObject", invalid, []byte("replacement")); err == nil {
+		t.Fatal("invalid replacement accepted")
+	}
+	got, err := call("GetObject", input, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(got.Stream)
+	_ = got.Stream.Close()
+	if string(body) != "original" {
+		t.Fatalf("validation failure replaced object with %q", body)
 	}
 }
 

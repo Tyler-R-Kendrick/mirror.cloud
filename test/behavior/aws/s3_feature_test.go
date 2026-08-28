@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/xml"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -188,6 +189,57 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res, body := request(http.MethodGet, true)
 		if res.StatusCode != http.StatusOK || string(body) != "secret" || res.Header.Get("x-amz-server-side-encryption-customer-key-MD5") != headers["x-amz-server-side-encryption-customer-key-MD5"] {
 			t.Fatalf("get customer encryption %d %q %v", res.StatusCode, body, res.Header)
+		}
+	})
+
+	t.Run("Given a customer-encrypted source When copying it Then source and destination keys are independent", func(t *testing.T) {
+		res := do(http.MethodPut, "/copy-customer-encryption", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode >= 300 {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		rawKey := []byte("0123456789abcdef0123456789abcdef")
+		digest := md5.Sum(rawKey)
+		key, keyMD5 := base64.StdEncoding.EncodeToString(rawKey), base64.StdEncoding.EncodeToString(digest[:])
+		destinationHeaders := map[string]string{
+			"x-amz-server-side-encryption-customer-algorithm": "AES256",
+			"x-amz-server-side-encryption-customer-key":       key,
+			"x-amz-server-side-encryption-customer-key-MD5":   keyMD5,
+		}
+		request := func(method, path, body string, headers map[string]string) (*http.Response, []byte) {
+			t.Helper()
+			req, _ := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+			req.Header.Set("Authorization", auth)
+			for name, value := range headers {
+				req.Header.Set(name, value)
+			}
+			response, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response, data
+		}
+		if source, _ := request(http.MethodPut, "/copy-customer-encryption/source", "copy body", destinationHeaders); source.StatusCode != http.StatusOK {
+			t.Fatalf("put copy source %d", source.StatusCode)
+		}
+		if copied, _ := request(http.MethodPut, "/copy-customer-encryption/missing-source-key", "", map[string]string{"x-amz-copy-source": "/copy-customer-encryption/source"}); copied.StatusCode != http.StatusBadRequest {
+			t.Fatalf("copy without source key %d", copied.StatusCode)
+		}
+		copyHeaders := maps.Clone(destinationHeaders)
+		copyHeaders["x-amz-copy-source"] = "/copy-customer-encryption/source"
+		copyHeaders["x-amz-copy-source-server-side-encryption-customer-algorithm"] = "AES256"
+		copyHeaders["x-amz-copy-source-server-side-encryption-customer-key"] = key
+		copyHeaders["x-amz-copy-source-server-side-encryption-customer-key-MD5"] = keyMD5
+		copied, _ := request(http.MethodPut, "/copy-customer-encryption/copied", "", copyHeaders)
+		if copied.StatusCode != http.StatusOK || copied.Header.Get("x-amz-server-side-encryption-customer-key-MD5") != keyMD5 {
+			t.Fatalf("copy customer encryption %d %v", copied.StatusCode, copied.Header)
+		}
+		stored, body := request(http.MethodGet, "/copy-customer-encryption/copied", "", destinationHeaders)
+		if stored.StatusCode != http.StatusOK || string(body) != "copy body" || stored.Header.Get("x-amz-server-side-encryption-customer-key-MD5") != keyMD5 {
+			t.Fatalf("stored customer copy %d %q %v", stored.StatusCode, body, stored.Header)
 		}
 	})
 

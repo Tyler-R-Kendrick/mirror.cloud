@@ -2823,14 +2823,27 @@ func requestSSECustomerKey(req *spi.Request) (string, error) {
 	algorithm := requestCondition(req, "SSECustomerAlgorithm", "x-amz-server-side-encryption-customer-algorithm")
 	key := requestCondition(req, "SSECustomerKey", "x-amz-server-side-encryption-customer-key")
 	keyMD5 := requestCondition(req, "SSECustomerKeyMD5", "x-amz-server-side-encryption-customer-key-MD5")
+	if (key != "" || algorithm != "") && requestCondition(req, "ServerSideEncryption", "x-amz-server-side-encryption") != "" {
+		return "", &spi.Fault{Code: "InvalidArgument", Message: "Server Side Encryption with Customer provided key is incompatible with the encryption method specified", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-server-side-encryption"}}
+	}
+	return validateSSECustomerKey(algorithm, key, keyMD5, "x-amz-server-side-encryption-customer-key")
+}
+
+func requestCopySourceSSECustomerKey(req *spi.Request) (string, error) {
+	return validateSSECustomerKey(
+		requestCondition(req, "CopySourceSSECustomerAlgorithm", "x-amz-copy-source-server-side-encryption-customer-algorithm"),
+		requestCondition(req, "CopySourceSSECustomerKey", "x-amz-copy-source-server-side-encryption-customer-key"),
+		requestCondition(req, "CopySourceSSECustomerKeyMD5", "x-amz-copy-source-server-side-encryption-customer-key-MD5"),
+		"x-amz-copy-source-server-side-encryption-customer-key",
+	)
+}
+
+func validateSSECustomerKey(algorithm, key, keyMD5, argument string) (string, error) {
 	invalid := func(code, message string) error {
-		return &spi.Fault{Code: code, Message: message, HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-server-side-encryption"}}
+		return &spi.Fault{Code: code, Message: message, HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": argument}}
 	}
 	if key == "" && algorithm == "" {
 		return "", nil
-	}
-	if requestCondition(req, "ServerSideEncryption", "x-amz-server-side-encryption") != "" {
-		return "", invalid("InvalidArgument", "Server Side Encryption with Customer provided key is incompatible with the encryption method specified")
 	}
 	if key == "" || algorithm == "" {
 		return "", invalid("InvalidArgument", "Requests specifying Server Side Encryption with Customer provided keys must provide an appropriate secret key and a valid encryption algorithm.")
@@ -2860,6 +2873,21 @@ func validateStoredSSECustomerKey(req *spi.Request, meta map[string]any) error {
 		provided = validated
 	}
 	if stored != provided {
+		return &spi.Fault{Code: "InvalidRequest", Message: "The provided encryption parameters did not match the ones used originally.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	return nil
+}
+
+func validateCopySourceSSECustomerKey(req *spi.Request, meta map[string]any) error {
+	provided := requestCondition(req, "CopySourceSSECustomerKeyMD5", "x-amz-copy-source-server-side-encryption-customer-key-MD5")
+	validated, err := requestCopySourceSSECustomerKey(req)
+	if err != nil {
+		return err
+	}
+	if validated != "" {
+		provided = validated
+	}
+	if str(meta["sseCustomerKeyMD5"]) != provided {
 		return &spi.Fault{Code: "InvalidRequest", Message: "The provided encryption parameters did not match the ones used originally.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
 	return nil
@@ -3316,6 +3344,9 @@ func (p *Pack) openCopySource(ctx context.Context, req *spi.Request) (*copySourc
 			return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: 400, Fault: "client"}
 		}
 		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
+	}
+	if err := validateCopySourceSSECustomerKey(req, meta); err != nil {
+		return nil, err
 	}
 	if err := p.requireRestored(ctx, req, bucket, key, meta); err != nil {
 		return nil, err

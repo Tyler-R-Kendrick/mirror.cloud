@@ -190,7 +190,12 @@ func (e *Engine) validateInput(op model.Operation, req *spi.Request) *spi.Fault 
 	for _, name := range names {
 		m := shape.Members[name]
 		v, present := req.Input[name]
-		if m.Required && (!present || isEmpty(v)) {
+		// Required means present, not non-empty. Whether an empty value is
+		// acceptable is a length constraint, which the model already carries
+		// -- and conflating the two took the decision away from the service:
+		// Polly answers an empty Text with InvalidSsmlException, which it
+		// could never do if the engine had already rejected it as missing.
+		if m.Required && !present {
 			return &spi.Fault{
 				Code:       "ValidationException",
 				Message:    fmt.Sprintf("%s is required", name),
@@ -206,16 +211,6 @@ func (e *Engine) validateInput(op model.Operation, req *spi.Request) *spi.Fault 
 		}
 	}
 	return nil
-}
-
-func isEmpty(v any) bool {
-	switch t := v.(type) {
-	case nil:
-		return true
-	case string:
-		return t == ""
-	}
-	return false
 }
 
 // checkConstraints applies the length, range and pattern traits carried by the

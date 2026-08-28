@@ -31,6 +31,10 @@ type Step struct {
 	Operation string
 	Input     map[string]any
 	Identity  spi.Identity
+	// Superseded says the recorded output is known to be wrong and is not
+	// compared. The step still runs, so the state it produces is real and
+	// every later step is still gated.
+	Superseded bool
 }
 
 // Outcome is what a handler did with one step.
@@ -47,12 +51,16 @@ type Trace struct {
 
 // Record runs steps against a handler and captures the result of each.
 func Record(ctx context.Context, h spi.Handler, steps []Step) (*Trace, error) {
-	t := &Trace{Steps: steps}
+	t := &Trace{}
 	for _, s := range steps {
+		// A step may name a value an earlier step produced, which is how a
+		// recording expresses read-after-create for a generated identifier.
+		s.Input, _ = resolveInputs(s.Input, t.Outcomes).(map[string]any)
 		out, err := invoke(ctx, h, s)
 		if err != nil {
 			return nil, err
 		}
+		t.Steps = append(t.Steps, s)
 		t.Outcomes = append(t.Outcomes, out)
 	}
 	return t, nil
@@ -81,11 +89,16 @@ func Replay(ctx context.Context, h spi.Handler, t *Trace) ([]Diff, error) {
 	var diffs []Diff
 	u := &unifier{bound: map[string]string{}, used: map[string]string{}}
 
+	var answered []Outcome
 	for i, step := range t.Steps {
+		// Inputs that name an earlier answer are resolved against what this
+		// candidate answered, not against what the reference did.
+		step.Input, _ = resolveInputs(step.Input, answered).(map[string]any)
 		got, err := invoke(ctx, h, step)
 		if err != nil {
 			return nil, err
 		}
+		answered = append(answered, got)
 		want := t.Outcomes[i]
 
 		switch {
@@ -109,6 +122,11 @@ func Replay(ctx context.Context, h spi.Handler, t *Trace) ([]Diff, error) {
 					Want: want.Fault.Fault, Got: got.Fault.Fault})
 			}
 		default:
+			if step.Superseded {
+				// Both succeeded, which is all this step still asserts. The
+				// call ran, so the state behind the remaining steps is real.
+				continue
+			}
 			diffs = append(diffs, u.compare(i, "", want.Output, got.Output)...)
 		}
 	}

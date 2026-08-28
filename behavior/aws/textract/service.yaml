@@ -1,0 +1,81 @@
+schema: bir/1
+service: aws.textract
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Textract does no OCR here: the blocks are canned and the analysis
+# operations are indistinguishable from each other, which the quirks record.
+provenance: authored
+
+resources:
+  job:
+    collection: txjob
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [JobId]
+    record:
+      JobStatus: "'SUCCEEDED'"
+      Blocks: "[{'BlockType': 'LINE', 'Text': 'HELLO', 'Confidence': 99.0}]"
+
+errors:
+  InvalidJobId:
+    code: InvalidJobIdException
+    http: 400
+    fault: client
+
+operations:
+  DetectDocumentText:
+    output:
+      Blocks: "[{'BlockType': 'LINE', 'Text': 'HELLO', 'Confidence': 99.0}]"
+      DocumentMetadata: "{'Pages': 1}"
+
+  AnalyzeDocument:
+    output:
+      Blocks: "[{'BlockType': 'LINE', 'Text': 'HELLO', 'Confidence': 99.0}]"
+      DocumentMetadata: "{'Pages': 1}"
+
+  StartDocumentTextDetection:
+    effects:
+      - create: { resource: job }
+    output:
+      JobId: id
+
+  StartDocumentAnalysis:
+    effects:
+      - create: { resource: job }
+    output:
+      JobId: id
+
+  GetDocumentTextDetection:
+    reads:
+      rec: { resource: job }
+    require:
+      - { cond: rec_found, error: InvalidJobId }
+    output:
+      JobStatus: rec.JobStatus
+      Blocks: rec.Blocks
+
+  GetDocumentAnalysis:
+    reads:
+      rec: { resource: job }
+    require:
+      - { cond: rec_found, error: InvalidJobId }
+    output:
+      JobStatus: rec.JobStatus
+      Blocks: rec.Blocks
+
+quirks:
+  - note: >
+      Every document produces the same single canned LINE block. This is a
+      stub, not an emulation: nothing reads the document. The operations are
+      here so a caller's control flow works, and any test that asserts on the
+      text is asserting on this file.
+    provenance: authored
+
+  - operation: GetDocumentTextDetection
+    note: >
+      The pack also returned JobId, which is not a member of the operation's
+      output shape, so no SDK could read it. The bundle omits it, and the
+      recording's step is superseded citing the shape. Analysis and text
+      detection share one job record, so a job started by one can be read by
+      the other; real Textract rejects that.
+    provenance: declared

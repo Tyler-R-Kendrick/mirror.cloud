@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"path"
 	"sort"
+	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -39,6 +40,20 @@ type StepEntry struct {
 	Identity  spi.Identity   `json:"identity"`
 	Output    map[string]any `json:"output,omitempty"`
 	Fault     *FaultEntry    `json:"fault,omitempty"`
+	// Superseded states why this step's recorded output is known to be wrong
+	// and is deliberately not matched.
+	//
+	// The recording is what the pack did, and it stays that way: rewriting it
+	// to whatever the bundle produces would turn the gate into a mirror. When
+	// better evidence contradicts the pack -- most often the operation's own
+	// output shape, which is `declared` and outranks a pack's `authored`
+	// behavior -- the disagreement is recorded here instead, with the reason,
+	// and the step's outcome class (success or fault) is still compared.
+	//
+	// This is a hole in the gate by construction. It is a visible, reviewable,
+	// individually-justified hole, which is the most a two-tier oracle can
+	// offer: equivalence gates the migration, evidence gates the truth.
+	Superseded string `json:"superseded,omitempty"`
 }
 
 // FaultEntry is the comparable part of a fault. The message is deliberately
@@ -68,6 +83,9 @@ func NewFile(service, source, note string, t *Trace) *File {
 		}
 		f.Steps = append(f.Steps, e)
 	}
+	// Identifiers a step produced and a later step consumed become references,
+	// so the replay asks each side about the identifiers it issued itself.
+	linkInputs(f.Steps)
 	return f
 }
 
@@ -75,7 +93,10 @@ func NewFile(service, source, note string, t *Trace) *File {
 func (f *File) Trace() *Trace {
 	t := &Trace{}
 	for _, e := range f.Steps {
-		t.Steps = append(t.Steps, Step{Operation: e.Operation, Input: e.Input, Identity: e.Identity})
+		t.Steps = append(t.Steps, Step{
+			Operation: e.Operation, Input: e.Input, Identity: e.Identity,
+			Superseded: e.Superseded != "",
+		})
 		out := Outcome{Output: e.Output}
 		if e.Fault != nil {
 			out.Fault = &spi.Fault{
@@ -140,4 +161,164 @@ func LoadDir(fsys fs.FS, dir string) ([]*File, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Service < out[j].Service })
 	return out, nil
+}
+
+// Superseded lists the steps whose recorded output is deliberately not
+// matched, with the reason for each. A recording with many of these is a
+// recording that has stopped gating much, which is why the replay test reports
+// the count rather than letting it accumulate quietly.
+func (f *File) Superseded() map[int]string {
+	out := map[int]string{}
+	for i, e := range f.Steps {
+		if e.Superseded != "" {
+			out[i] = e.Superseded
+		}
+	}
+	return out
+}
+
+// A recorded input may carry a reference to a value an earlier step produced,
+// instead of that value:
+//
+//	{"JobId": {"$fromStep": 2, "$fromPath": "JobId"}}
+//
+// Without this, a trace cannot gate read-after-create for any resource whose
+// identifier is generated: the recording holds the identifier the reference
+// produced, the candidate produces a different one, and feeding the recorded
+// value back in reads a record that does not exist. Since read-after-create is
+// the most common shape there is, a gate that cannot express it is not gating
+// much.
+//
+// References are resolved against the *candidate's* own earlier answers, so
+// each side is asked about the identifiers it actually issued.
+const (
+	fromStepKey = "$fromStep"
+	fromPathKey = "$fromPath"
+)
+
+// linkInputs rewrites a recording's inputs, replacing any string that an
+// earlier step returned with a reference to where it came from. It is applied
+// once, at recording time.
+func linkInputs(steps []StepEntry) {
+	// Where each produced value was first seen.
+	origin := map[string][2]any{}
+	for i := range steps {
+		steps[i].Input = linkValue(steps[i].Input, origin).(map[string]any)
+		indexOutput(i, "", steps[i].Output, origin)
+	}
+}
+
+// From names a value an earlier step produced, for use in a recorded input.
+func From(step int, path string) map[string]any {
+	return map[string]any{fromStepKey: step, fromPathKey: path}
+}
+
+// indexOutput records where each identifier-shaped value in an answer came
+// from, by dotted path, so a later step can name a nested one.
+func indexOutput(step int, prefix string, v any, origin map[string][2]any) {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, vv := range t {
+			indexOutput(step, join(prefix, k), vv, origin)
+		}
+	case string:
+		// Short values are caller-chosen names, not issued identifiers, and
+		// linking them would turn a literal into a reference for no reason.
+		if len(t) >= 8 && prefix != "" {
+			if _, seen := origin[t]; !seen {
+				origin[t] = [2]any{step, prefix}
+			}
+		}
+	}
+}
+
+func linkValue(v any, origin map[string][2]any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		if _, _, isRef := asRef(t); isRef {
+			return t // already a reference; its contents are not data
+		}
+		out := make(map[string]any, len(t))
+		for k, vv := range t {
+			out[k] = linkValue(vv, origin)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, vv := range t {
+			out[i] = linkValue(vv, origin)
+		}
+		return out
+	case string:
+		if from, ok := origin[t]; ok {
+			return map[string]any{fromStepKey: from[0], fromPathKey: from[1]}
+		}
+	}
+	return v
+}
+
+// resolveInputs replaces references with what the candidate answered earlier.
+// A reference that cannot be resolved is left as it is, so the resulting
+// divergence names the step rather than disappearing.
+func resolveInputs(v any, outcomes []Outcome) any {
+	switch t := v.(type) {
+	case map[string]any:
+		if step, path, ok := asRef(t); ok {
+			if step >= 0 && step < len(outcomes) {
+				if got, ok := lookupPath(outcomes[step].Output, path); ok {
+					return got
+				}
+			}
+			return nil
+		}
+		out := make(map[string]any, len(t))
+		for k, vv := range t {
+			out[k] = resolveInputs(vv, outcomes)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, vv := range t {
+			out[i] = resolveInputs(vv, outcomes)
+		}
+		return out
+	}
+	return v
+}
+
+func asRef(m map[string]any) (step int, path string, ok bool) {
+	if len(m) != 2 {
+		return 0, "", false
+	}
+	raw, hasStep := m[fromStepKey]
+	p, hasPath := m[fromPathKey]
+	if !hasStep || !hasPath {
+		return 0, "", false
+	}
+	switch n := raw.(type) {
+	case int:
+		step = n
+	case float64:
+		step = int(n)
+	default:
+		return 0, "", false
+	}
+	s, isStr := p.(string)
+	return step, s, isStr
+}
+
+// lookupPath follows a dotted path into an answer.
+func lookupPath(out map[string]any, path string) (any, bool) {
+	var cur any = out
+	for _, part := range strings.Split(path, ".") {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		cur, ok = m[part]
+		if !ok {
+			return nil, false
+		}
+	}
+	return cur, true
 }

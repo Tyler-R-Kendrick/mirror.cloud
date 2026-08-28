@@ -185,3 +185,33 @@ func merge(dst, src *Service, name string) error {
 	}
 	return nil
 }
+
+// ServiceIDOf reads the service ID a bundle declares, without validating it
+// against a model.
+//
+// The declared ID is the bundle's identity: a directory name cannot be, because
+// a service ID may contain characters a directory name should not (aws.iot-data
+// lives in aws/iotdata). Callers that need to pair a bundle with its model ask
+// the bundle who it is, exactly as generation asks each upstream model.
+func ServiceIDOf(fsys fs.FS, dir string) (string, error) {
+	files, err := collect(fsys, dir)
+	if err != nil {
+		return "", err
+	}
+	for _, name := range files {
+		raw, err := fs.ReadFile(fsys, name)
+		if err != nil {
+			return "", err
+		}
+		var head struct {
+			Service string `yaml:"service"`
+		}
+		if err := yaml.Unmarshal(raw, &head); err != nil {
+			return "", fmt.Errorf("%s: %w", name, err)
+		}
+		if head.Service != "" {
+			return head.Service, nil
+		}
+	}
+	return "", fmt.Errorf("bir: no service declared under %s", dir)
+}

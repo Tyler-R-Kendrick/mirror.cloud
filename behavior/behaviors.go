@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"path"
 	"sort"
+	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -42,9 +43,17 @@ func ServiceIDs() []string {
 			continue
 		}
 		for _, svc := range svcs {
-			if svc.IsDir() {
-				out = append(out, provider.Name()+"."+svc.Name())
+			if !svc.IsDir() {
+				continue
 			}
+			// Ask the bundle who it is rather than reading it off the
+			// directory name: aws.iot-data lives in aws/iotdata, and a
+			// directory name is not an identity.
+			id, err := bir.ServiceIDOf(files, path.Join(provider.Name(), svc.Name()))
+			if err != nil {
+				continue
+			}
+			out = append(out, id)
 		}
 	}
 	sort.Strings(out)
@@ -52,12 +61,23 @@ func ServiceIDs() []string {
 }
 
 // Dir returns the embedded directory holding a service's bundle.
+//
+// The directory name is the service part with anything that is not a letter or
+// digit removed -- aws.iot-data lives in aws/iotdata -- which is the same rule
+// the generated models use. One rule, so a bundle and its model cannot end up
+// in differently-named directories and quietly fail to pair.
 func Dir(serviceID string) string {
 	provider, service, ok := cut(serviceID)
 	if !ok {
 		return ""
 	}
-	return path.Join(provider, service)
+	var name strings.Builder
+	for _, r := range strings.ToLower(service) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			name.WriteRune(r)
+		}
+	}
+	return path.Join(provider, name.String())
 }
 
 // Load reads and validates one service's bundle against its generated model.

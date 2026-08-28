@@ -1,0 +1,156 @@
+{
+  "schema": "trace/1",
+  "service": "aws.iot-data",
+  "source": "pack:internal/services/aws/iot-data@c42371d",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "GetThingShadow",
+      "input": {
+        "thingName": "t1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateThingShadow",
+      "input": {
+        "payload": "{\"state\":{\"desired\":{\"on\":true}}}",
+        "thingName": "t1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "payload": "{\"state\":{\"desired\":{\"on\":true}}}"
+      }
+    },
+    {
+      "operation": "GetThingShadow",
+      "input": {
+        "thingName": "t1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "payload": "{\"state\":{\"desired\":{\"on\":true}}}",
+        "thingName": "t1",
+        "timestamp": 1
+      },
+      "superseded": "The pack returned thingName and timestamp, neither of which is a member of this operation's output shape, so no SDK could read them. The bundle returns only payload. Evidence: the @output shape in internal/generated/aws/iotdata (declared), which outranks the pack's behavior (authored)."
+    },
+    {
+      "operation": "GetThingShadow",
+      "input": {
+        "thingName": "t1"
+      },
+      "identity": {
+        "Account": "111111111111",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListNamedShadowsForThing",
+      "input": {
+        "thingName": "t1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "results": []
+      }
+    },
+    {
+      "operation": "Publish",
+      "input": {
+        "topic": "a/b"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetRetainedMessage",
+      "input": {
+        "topic": "a/b"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "payload": ""
+      }
+    },
+    {
+      "operation": "DeleteThingShadow",
+      "input": {
+        "thingName": "t1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetThingShadow",
+      "input": {
+        "thingName": "t1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    }
+  ]
+}

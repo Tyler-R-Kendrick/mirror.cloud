@@ -3,6 +3,7 @@ package equivalence_test
 import (
 	"context"
 	"os"
+	"sort"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
@@ -49,8 +50,16 @@ func TestBundlesMatchRecordedPacks(t *testing.T) {
 			for _, d := range diffs {
 				t.Errorf("divergence from %s: %s", f.Source, d)
 			}
+			// Superseded steps are reported every run, by index and reason.
+			// A recording that accumulates them has stopped gating much, and
+			// the only defence against that is having to read them.
+			superseded := f.Superseded()
+			for _, i := range sortedIdx(superseded) {
+				t.Logf("step %d output not matched: %s", i, superseded[i])
+			}
 			if len(diffs) == 0 {
-				t.Logf("%d steps equivalent to %s", len(f.Steps), f.Source)
+				t.Logf("%d steps equivalent to %s (%d superseded)",
+					len(f.Steps), f.Source, len(superseded))
 			}
 		})
 	}
@@ -136,4 +145,13 @@ func (*fixedID) ServiceID() string    { return "aws.shield" }
 func (*fixedID) Operations() []string { return []string{"Get"} }
 func (*fixedID) Invoke(context.Context, *spi.Request) (*spi.Response, error) {
 	return &spi.Response{Output: map[string]any{"Id": "cccccccc"}}, nil
+}
+
+func sortedIdx(m map[int]string) []int {
+	out := make([]int, 0, len(m))
+	for i := range m {
+		out = append(out, i)
+	}
+	sort.Ints(out)
+	return out
 }

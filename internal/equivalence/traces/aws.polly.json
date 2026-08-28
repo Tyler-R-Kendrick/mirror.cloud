@@ -1,0 +1,173 @@
+{
+  "schema": "trace/1",
+  "service": "aws.polly",
+  "source": "pack:internal/services/aws/polly@c42371d",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DescribeVoices",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Voices": [
+          {
+            "Gender": "Female",
+            "Id": "Joanna",
+            "LanguageCode": "en-US",
+            "Name": "Joanna"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "SynthesizeSpeech",
+      "input": {
+        "OutputFormat": "mp3",
+        "Text": "hello",
+        "VoiceId": "Joanna"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AudioStream": "",
+        "ContentType": "audio/mpeg",
+        "RequestCharacters": 5
+      }
+    },
+    {
+      "operation": "SynthesizeSpeech",
+      "input": {
+        "OutputFormat": "mp3",
+        "Text": "",
+        "VoiceId": "Joanna"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidSsmlException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "StartSpeechSynthesisTask",
+      "input": {
+        "OutputFormat": "mp3",
+        "OutputS3BucketName": "b",
+        "Text": "hello",
+        "VoiceId": "Joanna"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SynthesisTask": {
+          "OutputUri": "s3://mirror-polly/7c589129.mp3",
+          "TaskId": "7c589129",
+          "TaskStatus": "completed",
+          "Text": "hello",
+          "VoiceId": "Joanna"
+        }
+      }
+    },
+    {
+      "operation": "ListSpeechSynthesisTasks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SynthesisTasks": [
+          {
+            "OutputUri": "s3://mirror-polly/7c589129.mp3",
+            "TaskId": "7c589129",
+            "TaskStatus": "completed",
+            "Text": "hello",
+            "VoiceId": "Joanna"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetSpeechSynthesisTask",
+      "input": {
+        "TaskId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "SynthesisTaskNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListSpeechSynthesisTasks",
+      "input": {},
+      "identity": {
+        "Account": "111111111111",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SynthesisTasks": null
+      }
+    },
+    {
+      "operation": "GetSpeechSynthesisTask",
+      "input": {
+        "TaskId": {
+          "$fromPath": "SynthesisTask.TaskId",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "SynthesisTask": {
+          "OutputUri": "s3://mirror-polly/7c589129.mp3",
+          "TaskId": "7c589129",
+          "TaskStatus": "completed",
+          "Text": "hello",
+          "VoiceId": "Joanna"
+        }
+      }
+    }
+  ]
+}

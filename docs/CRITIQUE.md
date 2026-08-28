@@ -330,20 +330,20 @@ Parts 5 and 6 measured a strangler running backwards. This part records the poin
 
 | Metric | Part-6 tip | Now | Δ |
 |---|---|---|---|
-| Service packs | 152 | 150 | **−2** |
-| Hand-typed `case` labels | 2,600 | 2,588 | **−12** |
-| Hand-written behavior LOC | 55,905 | 55,700 | **−205** |
-| Inline `&spi.Fault{}` sites | 868 | 866 | **−2** |
+| Service packs | 152 | 146 | **−6** |
+| Hand-typed `case` labels | 2,600 | 2,567 | **−33** |
+| Hand-written behavior LOC | 55,905 | 55,350 | **−555** |
+| Inline `&spi.Fault{}` sites | 868 | 859 | **−9** |
 | Generated LOC in use | 0 | 149 service models, 77,656 shapes | **served** |
-| Behavior data files | 0 | 2 bundles | +2 |
-| Services served from data | 0 | 2 | +2 |
+| Behavior data files | 0 | 7 bundles | +7 |
+| Services served from data | 0 | 6 (+1 shadowed) | +6 |
 | Catalog services with empty `Shapes` | all | unchanged | — |
 
 Every counted metric moved the right way for the first time, and `ratchet.json` was rewritten downward — which is the only direction it accepts, so the counts above are now a floor that CI enforces.
 
 ### What that is worth, honestly
 
-Two services. `aws.shield` and `aws.memorydb` are the CRUD floor: two resources and six operations each, no lifecycle, no queue semantics, no algorithmic core. Extracting them proves the loop is closed — spec → model → bundle → engine → registry → edge, with each pack deleted and its behavior frozen in a replayed recording — and proves nothing about the ceiling. The schema is not yet frozen, because freezing it on the easiest possible service would be self-congratulation. SQS is the case that decides whether statecharts, selectors and long-poll waits belong in the schema or behind primitives, and until that lands the schema is provisional.
+Six services. `aws.shield`, `aws.memorydb`, `aws.textract`, `aws.polly`, `aws.account` and `aws.iot-data` are the CRUD floor: a few resources and a handful of operations each, no lifecycle, no queue semantics, no algorithmic core. Extracting them proves the loop is closed — spec → model → bundle → engine → registry → edge, with each pack deleted and its behavior frozen in a replayed recording — and proves nothing about the ceiling on its own; `aws.sqs` does that separately. The schema is not yet frozen, because freezing it on the easiest possible service would be self-congratulation. SQS is the case that decides whether statecharts, selectors and long-poll waits belong in the schema or behind primitives, and until that lands the schema is provisional.
 
 ### Three things the extraction actually taught
 
@@ -379,6 +379,20 @@ Wave 0 exists to find out whether the schema can carry a hard service before 117
 
 **C14. Proving a schema and finishing a migration are different tasks, and conflating them corrupts both.** Six of SQS's twenty-three operations are not expressed. One of them, `ListDeadLetterSourceQueues`, filters queues on a redrive policy that may live in either the queue record or its companion settings record — which needs a per-item join between a listed record and another resource. That is a schema addition, and making it on the evidence of a single operation is how a schema accumulates features that fit one caller. So the pack still serves and the bundle *shadows* it: gated on every CI run, registered nowhere. The shadow flag carries the reason rather than a boolean, and a test fails a shadow bundle that does not say what is missing, because "proven but not serving" decays into "written and unchecked" the moment nobody has to justify it. **This PR therefore does not lower the ratchet.** Wave 0 was never supposed to.
 
+### Wave 1 begins: four packs at once, and what it cost
+
+With the ceiling proven, four trivial packs — `textract`, `polly`, `account`, `iot-data` — were extracted in one pass to find out whether mass extraction is really mechanical. It mostly is: four bundles, four recordings, no service-specific Go, and the ratchet fell from 150 packs to 146. But it found three things that a single extraction would not have.
+
+**C15. Packs return members no SDK can read.** Two of the four returned output members that are not in the operation's own output shape — `textract` returned `JobId` from `GetDocumentTextDetection`, `iot-data` returned `thingName` and `timestamp` from `GetThingShadow`. The engine validates projections against the shape and refuses them, which is correct: a bundle may not describe a response the protocol cannot carry. Two out of four is not a coincidence; expect this across the remaining 146.
+
+Resolving it needed a mechanism, because the recording is what the pack did and rewriting it to whatever the bundle produces would turn the gate into a mirror. A step may now be marked `superseded` with the reason its recorded output is not matched — here, the operation's own output shape, which is `declared` evidence and outranks the pack's `authored` behavior. The step still runs, so the state behind every later step is real, and only the outcome class is compared. **This is a hole in the gate by construction**, so it is a visible one: every superseded step is logged with its reason on every run, and the count is reported next to the equivalence result. A recording that accumulates them has stopped gating much, and having to read them is the only defence.
+
+**C16. The gate could not express read-after-create, which is the most common shape there is.** A trace holds the identifier the *reference* issued; the candidate issues a different one; feeding the recorded value back reads a record that does not exist. Every recording written so far avoided the problem by using caller-chosen names or deliberately-absent ones — which means read-after-create for any generated identifier was **entirely ungated**, and nobody would have noticed. Inputs may now name an earlier answer by step and dotted path, resolved against the candidate's own outputs, so each side is asked about the identifiers it issued itself. This is the single largest increase in what the gate covers so far, and it came from writing the fourth extraction rather than the first.
+
+**C17. The engine was making a semantic decision the model already expresses.** Required-member validation treated an empty string as missing. Polly answers an empty `Text` with `InvalidSsmlException`; it could never do so, because the engine rejected the request first. Required now means *present*, and whether an empty value is acceptable is a length constraint the model already carries. The general form of this is worth watching for: every place the engine decides something the model or the bundle could have decided is a place services cannot differ from each other.
+
+Cost per service, once the machinery existed: roughly forty lines of YAML and a recording. The three findings above were one-time.
+
 ### The honest scoreboard
 
-150 of 152 services are still hand-written Go. The ratio is 1.3% migrated. What changed is not the ratio but its derivative — and the fact that the machinery which makes the next 150 mechanical (ratchet, spec pipeline, schema, loader, engine, equivalence recorder, registry integration) is now in the tree and under test, rather than described in a document.
+146 of 152 services are still hand-written Go. The ratio is 3.9% migrated. What changed is not the ratio but its derivative — and the fact that the machinery which makes the next 146 mechanical (ratchet, spec pipeline, schema, loader, engine, equivalence recorder, registry integration) is now in the tree and under test, rather than described in a document.

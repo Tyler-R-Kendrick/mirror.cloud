@@ -1,0 +1,76 @@
+schema: bir/1
+service: aws.polly
+
+# Transcribed from the hand-written pack. Polly synthesizes nothing here: the
+# audio stream is empty and the voice list has one entry.
+provenance: authored
+
+resources:
+  task:
+    collection: potask
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [TaskId]
+    record:
+      TaskId: id
+      TaskStatus: "'completed'"
+      OutputUri: "'s3://mirror-polly/' + id + '.mp3'"
+      Text: input.Text
+      VoiceId: input.VoiceId
+
+errors:
+  InvalidSsml:
+    code: InvalidSsmlException
+    http: 400
+    fault: client
+  TaskNotFound:
+    code: SynthesisTaskNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  DescribeVoices:
+    output:
+      Voices: >
+        [{'Id': 'Joanna', 'LanguageCode': 'en-US', 'Gender': 'Female', 'Name': 'Joanna'}]
+
+  SynthesizeSpeech:
+    require:
+      - { cond: "string(input.Text) != ''", error: InvalidSsml }
+    output:
+      ContentType: "'audio/mpeg'"
+      AudioStream: "''"
+      RequestCharacters: "size(string(input.Text))"
+
+  StartSpeechSynthesisTask:
+    effects:
+      - create: { resource: task }
+    output:
+      SynthesisTask: rec
+
+  GetSpeechSynthesisTask:
+    reads:
+      rec: { resource: task }
+    require:
+      - { cond: rec_found, error: TaskNotFound }
+    output:
+      SynthesisTask: rec
+
+  ListSpeechSynthesisTasks:
+    list: { resource: task, member: SynthesisTasks, paginate: model }
+
+quirks:
+  - operation: SynthesizeSpeech
+    note: >
+      AudioStream is the empty string: no audio is produced. A caller that
+      writes it to a file gets a zero-byte file, which is honest but is not
+      what the real service does.
+    provenance: authored
+
+  - operation: SynthesizeSpeech
+    note: >
+      An empty Text is rejected as InvalidSsmlException, which is the wrong
+      error for the case -- real Polly rejects missing text as a validation
+      failure and reserves InvalidSsmlException for malformed SSML markup.
+      Transcribed from the pack; a probe should settle it.
+    provenance: authored

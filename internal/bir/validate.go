@@ -80,9 +80,12 @@ func Validate(s *Service, svc *model.Service) error {
 					s.ServiceID, where, g.Kind))
 			}
 		}
-		// A resource expression sees its own record and ID, plus its parent
-		// resource when it has one (an SQS message guard reads queue.redrive).
-		resScope := []string{"id", "rec"}
+		// A resource expression sees its own record, ID and ARN, plus its
+		// parent resource when it has one (an SQS message guard reads
+		// queue.redrive). `arn` is bound only where the resource declares an
+		// arn template, so referencing it without one is an authoring error
+		// the engine reports at the reference.
+		resScope := []string{"id", "rec", "arn"}
 		if res.Parent != "" {
 			resScope = append(resScope, res.Parent)
 		}
@@ -151,6 +154,14 @@ func Validate(s *Service, svc *model.Service) error {
 		if op.Select != nil && op.Select.Binding != "" {
 			scope = append(scope, op.Select.Binding)
 		}
+		// A write effect binds the record it wrote as `rec`, which is how an
+		// operation returns what it just created without restating it. It is
+		// in scope only for operations that actually write, so referring to it
+		// elsewhere stays a load error rather than a nil at request time. A
+		// read binding named rec adds it above by its own name.
+		if opWrites(op) {
+			scope = append(scope, "rec")
+		}
 		compile := compilerFor(scope...)
 
 		for _, b := range sortedKeys(op.Reads) {
@@ -213,7 +224,10 @@ func Validate(s *Service, svc *model.Service) error {
 			} else {
 				checkOutputMember(s, svc, modelOp, where+".list.member", l.Member, &problems)
 			}
-			compile(where+".list.filter", l.Filter)
+			compile(where+".list.key", l.Key)
+			// The filter sees one candidate record as `item`, and nothing the
+			// rest of the operation cannot see.
+			compilerFor(append(append([]string{}, scope...), "item")...)(where+".list.filter", l.Filter)
 		}
 
 		// The central check: a bundle may not describe a response the wire
@@ -428,3 +442,13 @@ func sortedKeys[V any](m map[string]V) []string {
 }
 
 func sortedKeysAny(m map[string]any) []string { return sortedKeys(m) }
+
+// opWrites reports whether an operation has an effect that binds `rec`.
+func opWrites(op Operation) bool {
+	for _, e := range op.Effects {
+		if e.Create != nil || e.Put != nil || e.Patch != nil {
+			return true
+		}
+	}
+	return false
+}

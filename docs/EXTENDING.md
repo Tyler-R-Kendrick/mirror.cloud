@@ -21,7 +21,7 @@ A bundle is validated against its model at load time and every bundle is built i
 
 ## Add a behavior pack (legacy; the ratchet forbids new ones)
 
-The 151 remaining packs under `internal/services/` predate the engine and are being extracted service by service. `internal/check`'s ratchet fails CI on any new pack directory, any increase in `case` labels, service LOC, inline `&spi.Fault{}` sites, or `registry.Register` call sites — so this path is closed by construction. If a service genuinely cannot be expressed in B-IR, the answer is a named, versioned primitive referenced from data, not a new pack; see [`BEHAVIOR_IR.md`](./BEHAVIOR_IR.md) §6.
+The 150 remaining packs under `internal/services/` predate the engine and are being extracted service by service. `internal/check`'s ratchet fails CI on any new pack directory, any increase in `case` labels, service LOC, inline `&spi.Fault{}` sites, or `registry.Register` call sites — so this path is closed by construction. If a service genuinely cannot be expressed in B-IR, the answer is a named, versioned primitive referenced from data, not a new pack; see [`BEHAVIOR_IR.md`](./BEHAVIOR_IR.md) §6.
 
 To extract an existing pack, follow the protocol in [`MASTER_PROMPT_V2.md`](./MASTER_PROMPT_V2.md) §3: record the pack's answers into `internal/equivalence/traces/<service>.json`, write the bundle, get `make equivalence` green, delete the pack in the same commit, and lower the baseline with `make ratchet-update`.
 

@@ -84,6 +84,37 @@ operations:
     output: { SubscriptionState: "rec_found ? rec.SubscriptionState : 'INACTIVE'" }
 ```
 
+### `list` in full
+
+```yaml
+list:
+  resource: cluster       # which resource to enumerate
+  member: Clusters        # output member, checked against the output shape
+  paginate: model         # bind tokens and page caps from the pagination trait
+  key: "'ClusterName' in input ? string(input.ClusterName) : ''"
+  filter: "item.Engine == 'valkey'"
+```
+
+`key` is the **describe-one-or-all** shape that almost every AWS `Describe*` has: a non-empty key narrows the answer to that one record, an empty key returns the page. A named record that does not exist yields an *empty list*, not a fault — an operation that must fault says so with `reads` plus `require`, and the difference is a per-service decision stated in the bundle. This is in the engine because it was the same eight lines in well over a hundred hand-written packs.
+
+`filter` is a predicate over each candidate record, bound as `item`.
+
+### Values an expression can name
+
+Beyond `input`, `identity` and `now`, the bindings depend on where the expression sits, and the loader rejects anything out of scope:
+
+| binding | where | what it is |
+|---|---|---|
+| `id` | anywhere | the resolved record key |
+| `arn` | a resource with an `arn:` template | that template, expanded |
+| `rec` | a read binding named `rec`; any operation with a write effect | the record read, or the record just written |
+| `<name>`, `<name>_found` | operations with `reads:` | each read binding and whether it was there |
+| `item` | `list.filter` | one candidate record |
+| `event` | statechart transitions | the triggering event |
+| `fx` | operations with effects | earlier effect results, by name |
+
+`arn` deserves the emphasis: a resource's ARN template becomes a value the record names, rather than five string pieces concatenated at the call site. The tree it replaces has 189 hand-built ARN strings, each free to get the partition, the region or a separator subtly wrong — and several do.
+
 Two details do real work. `list.paginate: model` binds tokens and page caps from `model.Pagination` + `spi.Collection.List(prefix, after, limit)` — which retrofits pagination onto the 66 list operations that v1 serves unbounded. And `member: Protections` is validated against the generated output shape, eliminating the entire class of bug where a synthesizer invents a member name (`"Items"`) that no SDK can read. Every read binding `x` also binds `x_found: bool`.
 
 ## 5. Worked example — the hard-case ceiling

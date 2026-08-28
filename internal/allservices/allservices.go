@@ -109,7 +109,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/medialive"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/mediapackage"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/mediastore"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/memorydb"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/monitoring"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/mq"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/mwaa"

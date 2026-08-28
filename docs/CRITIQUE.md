@@ -330,20 +330,20 @@ Parts 5 and 6 measured a strangler running backwards. This part records the poin
 
 | Metric | Part-6 tip | Now | Δ |
 |---|---|---|---|
-| Service packs | 152 | 151 | **−1** |
-| Hand-typed `case` labels | 2,600 | 2,594 | **−6** |
-| Hand-written behavior LOC | 55,905 | 55,803 | **−102** |
-| Inline `&spi.Fault{}` sites | 868 | 867 | **−1** |
+| Service packs | 152 | 150 | **−2** |
+| Hand-typed `case` labels | 2,600 | 2,588 | **−12** |
+| Hand-written behavior LOC | 55,905 | 55,700 | **−205** |
+| Inline `&spi.Fault{}` sites | 868 | 866 | **−2** |
 | Generated LOC in use | 0 | 149 service models, 77,656 shapes | **served** |
-| Behavior data files | 0 | 1 bundle | +1 |
-| Services served from data | 0 | 1 | +1 |
+| Behavior data files | 0 | 2 bundles | +2 |
+| Services served from data | 0 | 2 | +2 |
 | Catalog services with empty `Shapes` | all | unchanged | — |
 
 Every counted metric moved the right way for the first time, and `ratchet.json` was rewritten downward — which is the only direction it accepts, so the counts above are now a floor that CI enforces.
 
 ### What that is worth, honestly
 
-One service. `aws.shield` is the CRUD floor: two resources, six operations, no lifecycle, no queue semantics, no algorithmic core. Extracting it proves the loop is closed — spec → model → bundle → engine → registry → edge, with the pack deleted and its behavior frozen in a replayed recording — and proves nothing about the ceiling. The schema is not yet frozen, because freezing it on the easiest possible service would be self-congratulation. SQS is the case that decides whether statecharts, selectors and long-poll waits belong in the schema or behind primitives, and until that lands the schema is provisional.
+Two services. `aws.shield` and `aws.memorydb` are the CRUD floor: two resources and six operations each, no lifecycle, no queue semantics, no algorithmic core. Extracting them proves the loop is closed — spec → model → bundle → engine → registry → edge, with each pack deleted and its behavior frozen in a replayed recording — and proves nothing about the ceiling. The schema is not yet frozen, because freezing it on the easiest possible service would be self-congratulation. SQS is the case that decides whether statecharts, selectors and long-poll waits belong in the schema or behind primitives, and until that lands the schema is provisional.
 
 ### Three things the extraction actually taught
 
@@ -353,6 +353,18 @@ One service. `aws.shield` is the CRUD floor: two resources, six operations, no l
 
 **C11. Zero-dependency construction was hiding behind tolerant packs.** `SupportRows` built every pack with an empty `spi.Deps{}` to ask what operations it serves. Hand-written packs tolerate that; the engine refuses to start without a clock, a store and a source of identifiers, and refusing is correct — a service that cannot be deterministic should not answer requests. The call site was given real dependencies rather than the engine being loosened. Expect more of this: the packs' informal tolerances are load-bearing in places nobody wrote down, and each one surfaces as an extraction failure.
 
+### The second extraction, and what it measured
+
+`aws.memorydb` followed, and the point of doing it immediately was to find out whether the first one had been a one-off. It was not: the bundle is 40 lines of YAML, the equivalence gate passed on the first run over 15 steps, and the two engine additions it needed are both idioms rather than service semantics.
+
+- **`list.key`** — "one record when named, the page when not," the shape almost every AWS `Describe*` has. It was the same eight lines in well over a hundred packs.
+- **`arn` as a bound value** — a resource's ARN template is now something a record can name instead of concatenating. The 189 hand-built ARN strings in the tree were each free to get the partition, the region or a separator subtly wrong, and several do.
+- **`list.filter`** was already in the schema, validated and never evaluated. It is now evaluated and tested. A schema field the engine ignores is worse than one that does not exist.
+
+Neither addition is about MemoryDB. That is the signal wave 1 depends on: the second extraction cost two general-purpose engine features and no service-specific code, which is what "mechanically repeatable" has to mean if 117 more are going to follow.
+
+**C12. Extraction is where a pack's leniency becomes visible.** The pack accepted `CreateCluster` without `ACLName`; the model marks it `@required`. Here the two-tier rule points the other way from the shield case: a `declared` trait outranks a pack's `authored` leniency, so the bundle is deliberately *stricter* than the code it replaced, the divergence is recorded as a quirk, and a test pins it so it cannot be undone by accident. Equivalence did not object because the recorded requests were valid — which is the right outcome, and worth noticing: the gate constrains the behavior that was exercised, not the behavior that was never tried. That is an argument for probe-derived corpora, not for trusting the gate further than it reaches.
+
 ### The honest scoreboard
 
-151 of 152 services are still hand-written Go. The ratio is 0.7% migrated. What changed is not the ratio but its derivative — and the fact that the machinery which makes the next 151 mechanical (ratchet, spec pipeline, schema, loader, engine, equivalence recorder, registry integration) is now in the tree and under test, rather than described in a document.
+150 of 152 services are still hand-written Go. The ratio is 1.3% migrated. What changed is not the ratio but its derivative — and the fact that the machinery which makes the next 150 mechanical (ratchet, spec pipeline, schema, loader, engine, equivalence recorder, registry integration) is now in the tree and under test, rather than described in a document.

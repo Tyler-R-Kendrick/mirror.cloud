@@ -54,7 +54,10 @@ func (e *Engine) compileAll() error {
 // The loader already rejected out-of-scope references per operation, so a
 // single permissive runtime environment cannot loosen that guarantee.
 func (e *Engine) bindingNames() []string {
-	seen := map[string]bool{"id": true, "rec": true, "event": true, "fx": true, "hit": true}
+	seen := map[string]bool{
+		"id": true, "rec": true, "event": true, "fx": true,
+		"hit": true, "item": true, "arn": true,
+	}
 	for name := range e.ir.Resources {
 		seen[name] = true
 	}

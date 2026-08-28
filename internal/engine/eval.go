@@ -260,6 +260,18 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 	}
 	ev.id = key
 
+	// The resource's ARN template is a value the record can name, so a bundle
+	// writes `ARN: arn` instead of concatenating the same five pieces the way
+	// 189 hand-written call sites did -- each of which was free to get the
+	// partition, the region or the separator subtly wrong.
+	if res.ARN != "" {
+		arn, err := ev.interpolate(res.ARN)
+		if err != nil {
+			return fmt.Errorf("engine: %s: arn: %w", path, err)
+		}
+		ev.binds["arn"] = arn
+	}
+
 	rec := map[string]any{}
 	if !create {
 		col, err := ev.collection(res)
@@ -382,28 +394,71 @@ func (ev *eval) runList(ctx context.Context, op bir.Operation, modelOp model.Ope
 	if err != nil {
 		return err
 	}
-	limit := 0
-	after := ""
-	if modelOp.Pagination != nil {
-		if v, ok := ev.req.Input[modelOp.Pagination.InputToken]; ok {
-			after = fmt.Sprint(v)
+	// A key narrows the list to one record. Most Describe* operations take an
+	// optional name and answer with one item or none; without a key they
+	// answer with the page.
+	base := "operations." + ev.req.Operation + ".list."
+	key := ""
+	if op.List.Key != "" {
+		v, err := ev.eval(base + "key")
+		if err != nil {
+			return err
 		}
-		if v, ok := ev.req.Input[modelOp.Pagination.PageSize]; ok {
-			if n, isNum := toFloat(v); isNum {
-				limit = int(n)
+		if s, ok := v.(string); ok {
+			key = s
+		}
+	}
+
+	var (
+		entries []spi.KV
+		more    bool
+		last    string
+	)
+	if key != "" {
+		// A named record that is absent is an empty answer, not a fault. An
+		// operation that must fault says so with reads and require.
+		value, found, getErr := col.Get(ctx, key)
+		if getErr != nil {
+			return getErr
+		}
+		if found {
+			entries = []spi.KV{{Key: key, Value: value}}
+		}
+	} else {
+		limit := 0
+		after := ""
+		if modelOp.Pagination != nil {
+			if v, ok := ev.req.Input[modelOp.Pagination.InputToken]; ok {
+				after = fmt.Sprint(v)
+			}
+			if v, ok := ev.req.Input[modelOp.Pagination.PageSize]; ok {
+				if n, isNum := toFloat(v); isNum {
+					limit = int(n)
+				}
 			}
 		}
+		entries, more, err = col.List(ctx, "", after, limit)
+		if err != nil {
+			return err
+		}
 	}
-	entries, more, err := col.List(ctx, "", after, limit)
-	if err != nil {
-		return err
-	}
+
 	items := make([]any, 0, len(entries))
-	last := ""
 	for _, kv := range entries {
 		rec := map[string]any{}
 		if err := unmarshal(kv.Value, &rec); err != nil {
 			return err
+		}
+		if op.List.Filter != "" {
+			ev.binds["item"] = rec
+			keep, filterErr := ev.evalBool(base + "filter")
+			delete(ev.binds, "item")
+			if filterErr != nil {
+				return filterErr
+			}
+			if !keep {
+				continue
+			}
 		}
 		items = append(items, rec)
 		last = kv.Key

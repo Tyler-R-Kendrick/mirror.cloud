@@ -271,7 +271,20 @@ type ListSpec struct {
 	// name no SDK can read.
 	Member   string `yaml:"member"`
 	Paginate string `yaml:"paginate,omitempty"`
-	Filter   string `yaml:"filter,omitempty"`
+	// Key narrows the list to a single record when it evaluates to a
+	// non-empty string, and lists everything when it is empty. This is the
+	// "describe one or describe all" shape that most AWS Describe* operations
+	// have -- DescribeClusters returns one cluster given ClusterName and every
+	// cluster without it -- and it is in the engine because it appeared in
+	// well over a hundred hand-written packs as the same eight lines.
+	//
+	// A named record that does not exist yields an empty list, not a fault.
+	// Operations that must fault use reads plus require instead; the
+	// difference is a per-service decision and is stated in the bundle.
+	Key string `yaml:"key,omitempty"`
+	// Filter is a predicate over each candidate record, which is bound as
+	// `item`. Records that do not satisfy it are omitted.
+	Filter string `yaml:"filter,omitempty"`
 }
 
 // Effect is one store mutation. The vocabulary is closed on purpose: a new

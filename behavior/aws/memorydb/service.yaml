@@ -1,0 +1,98 @@
+schema: bir/1
+service: aws.memorydb
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Probing upgrades individual cells to observed/probed and records
+# the evidence.
+provenance: authored
+
+resources:
+  cluster:
+    collection: mdbcl
+    id:
+      # Named resources: the caller supplies the identifier, so there is
+      # nothing to generate.
+      input_members: [ClusterName]
+    arn: "arn:{partition}:memorydb:{region}:{account}:cluster/{id}"
+    record:
+      Name: id
+      Status: "'available'"
+      NodeType: input.NodeType
+      ARN: arn
+
+  user:
+    collection: mdbu
+    id:
+      input_members: [UserName]
+    arn: "arn:{partition}:memorydb:{region}:{account}:user/{id}"
+    record:
+      Name: id
+      Status: "'active'"
+      AccessString: input.AccessString
+
+operations:
+  CreateCluster:
+    effects:
+      - create: { resource: cluster }
+    output:
+      Cluster: rec
+
+  DescribeClusters:
+    # One cluster when named, the page when not. `key` is the engine's form of
+    # the describe-one-or-all shape; an absent name yields an empty list rather
+    # than a fault, which is what this service does.
+    list:
+      resource: cluster
+      member: Clusters
+      key: "'ClusterName' in input ? string(input.ClusterName) : ''"
+      paginate: model
+
+  DeleteCluster:
+    effects:
+      - delete: { resource: cluster }
+
+  CreateUser:
+    effects:
+      - create: { resource: user }
+    output:
+      User: rec
+
+  DescribeUsers:
+    list:
+      resource: user
+      member: Users
+      key: "'UserName' in input ? string(input.UserName) : ''"
+      paginate: model
+
+  DeleteUser:
+    effects:
+      - delete: { resource: user }
+
+quirks:
+  - operation: CreateCluster
+    note: >
+      The pack accepted a CreateCluster without ACLName or NodeType; the
+      generated model marks both @required, and the engine enforces the
+      model. The model's declared trait outranks the pack's authored
+      leniency, so the bundle is stricter than the code it replaced and
+      requests the pack would have accepted now fail validation. Real
+      MemoryDB rejects them too, but that is belief until a probe says so.
+    provenance: declared
+
+  - operation: DeleteCluster
+    note: >
+      Deleting an absent cluster returns success rather than
+      ClusterNotFoundFault, and deletion is immediate rather than moving the
+      cluster to a `deleting` state. Both are transcribed from the pack. Real
+      MemoryDB returns the fault and reports a deleting cluster for some time;
+      the second needs a lifecycle statechart, which is deliberately not in
+      this wave-0 bundle.
+    provenance: authored
+
+  - operation: DescribeClusters
+    note: >
+      Status is always `available` on creation. Real MemoryDB reports
+      `creating` and transitions after several minutes, which callers that
+      poll depend on. Recording that needs a statechart with a deadline
+      timer; until then this cell is a known simplification, not a claim.
+    provenance: authored

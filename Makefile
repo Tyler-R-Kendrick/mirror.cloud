@@ -69,14 +69,17 @@ test-race:
 	CGO_ENABLED=1 $(GO) test -race $$($(GO) list ./... | grep -v '/internal/mutation$$')
 
 test-coverage:
-	@packages="$$($(GO) list ./... | grep -v '/internal/mutation$$')"; $(GO) test $$packages -covermode=atomic -coverprofile=coverage-unit.out
+	@packages="$$($(GO) list ./... | grep -v '/internal/mutation$$' | grep -v '/internal/generated/')"; $(GO) test $$packages -covermode=atomic -coverprofile=coverage-unit.out
 	$(GO) test ./internal/chaos ./internal/conformance ./internal/runtime ./internal/spine ./test/behavior/... ./test/terraform \
 		./internal/services/aws/apigateway ./internal/services/aws/athena ./internal/services/aws/cloudcontrol \
 		./internal/services/aws/cloudformation ./internal/services/aws/ecs ./internal/services/aws/events ./internal/services/aws/firehose \
 		./internal/services/aws/iam ./internal/services/aws/organizations ./internal/services/aws/pipes ./internal/services/aws/s3 \
 		./internal/services/aws/scheduler ./internal/services/aws/sns ./internal/services/aws/states \
 		-coverpkg=./... -covermode=atomic -coverprofile=coverage-integration.out
-	@awk 'BEGIN { print "mode: atomic" } /^mode:/ { next } { statements[$$1] = $$2; if ($$3 > 0) covered[$$1] = 1 } END { for (block in statements) print block, statements[block], covered[block] + 0 }' coverage-unit.out coverage-integration.out > coverage.out
+	@# internal/generated is mirrorgen output pinned by specs/mirror.lock; its
+	@# correctness is asserted by regeneration byte-identity and the
+	@# internal/check gates, not by covering generated accessors.
+	@awk 'BEGIN { print "mode: atomic" } /^mode:/ { next } $$1 ~ /internal\/generated\// { next } { statements[$$1] = $$2; if ($$3 > 0) covered[$$1] = 1 } END { for (block in statements) print block, statements[block], covered[block] + 0 }' coverage-unit.out coverage-integration.out > coverage.out
 	@$(RM) coverage-unit.out coverage-integration.out
 	@pct=$$($(GO) tool cover -func=coverage.out | awk '/^total:/ {gsub("%", "", $$3); print $$3}'); awk -v got="$$pct" 'BEGIN { if (got < 80) { print "coverage " got "% is below 80%"; exit 1 } }'
 

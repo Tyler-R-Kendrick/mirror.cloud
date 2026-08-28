@@ -42,3 +42,27 @@ jobs:
         run: make test-mutation
       - name: race detector
         run: make test-race
+
+  # Separate job: syncing specs leaves ~92 MB under specs/, and a populated
+  # specs/ changes what the runtime boots from, so it must not share a
+  # workspace with the unit tests.
+  generated-models:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.24"
+          cache-dependency-path: go.sum
+      - name: regenerate from the pinned specs
+        run: |
+          make specs-sync
+          make generate
+      - name: models reproduce byte-for-byte
+        # A diff means the committed models no longer follow from the lock,
+        # which is the only thing that makes them trustworthy as a build input.
+        run: |
+          git diff --exit-code -- internal/generated specs/mirror.lock || {
+            echo "::error::internal/generated is stale; run 'make specs-sync && make generate' and commit the result"
+            exit 1
+          }

@@ -79,10 +79,11 @@ agent/
 data/
 skills/
 
-# vendored specs + generated models: produced by `make specs-sync` / `make generate`
+# Vendored upstream specs: ~92 MB, reproducible from specs/mirror.lock
+# (sha256 per file) via `make specs-sync`. The generated models below are the
+# committed artifact; these are their input.
 specs/aws/
 specs/gcp/
-internal/generated/
 
 # OS
 .DS_Store

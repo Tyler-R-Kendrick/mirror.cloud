@@ -62,8 +62,16 @@ test-fuzz:
 	$(GO) test ./internal/services/aws/states -run '^$$' -fuzz '^FuzzJSONPath$$' -fuzztime=10s -parallel=4
 	$(GO) test ./internal/services/gcp/gcs -run '^$$' -fuzz '^FuzzParsePath$$' -fuzztime=10s -parallel=4
 
+# The timeout is set from measurement, not from hope. The suite runs every
+# mutant against the full pack surface, so its cost tracks the emulator's
+# size; a GitHub-hosted runner has been observed finishing it in 1704s and,
+# on a slower draw, exceeding 1800s outright, against 463-702s on a developer
+# machine. A budget within a few percent of the observed maximum reports
+# runner speed rather than correctness, so this one carries roughly 2x
+# headroom over the slowest passing run seen. Lower it when the suite gets
+# cheaper, not to make a slow run fail sooner.
 test-mutation:
-	$(GO) test ./internal/mutation -count=1 -parallel 4 -timeout 1800s
+	$(GO) test ./internal/mutation -count=1 -parallel 4 -timeout 3600s
 
 test-race:
 	CGO_ENABLED=1 $(GO) test -race $$($(GO) list ./... | grep -v '/internal/mutation$$')

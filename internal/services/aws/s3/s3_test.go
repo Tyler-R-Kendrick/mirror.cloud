@@ -805,6 +805,11 @@ func TestCopyObjectSSECustomerKeys(t *testing.T) {
 	if body != "secret" {
 		t.Fatal("customer copy body mismatch")
 	}
+	invalidSource := maps.Clone(customerInput)
+	invalidSource["Key"], invalidSource["CopySourceSSECustomerKeyMD5"] = "invalid-source-key", "AAAAAAAAAAAAAAAAAAAAAA=="
+	if _, err := invoke(t, p, "CopyObject", invalidSource, nil); asFault(t, err).Code != "InvalidArgument" {
+		t.Fatalf("invalid copy source SSE-C = %v", err)
+	}
 	golden.AssertJSON(t, map[string]any{
 		"plain":    map[string]any{"algorithm": plain.Headers.Get("x-amz-server-side-encryption"), "customerKey": plain.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != ""},
 		"customer": map[string]any{"algorithm": customer.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": customer.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == destinationMD5},

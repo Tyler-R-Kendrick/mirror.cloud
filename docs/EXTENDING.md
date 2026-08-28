@@ -19,6 +19,8 @@ Worked path: `behavior/aws/shield/service.yaml`.
 
 A bundle is validated against its model at load time and every bundle is built in CI (`make equivalence`), so a bundle that references an operation the model does not have, or projects a member that is not in the output shape, fails the build rather than the first request.
 
+A bundle may set `shadow: <reason>` while it is being written: it is loaded, validated and replayed against its recording on every run, but it is not registered and the hand-written pack keeps serving. Use it only when a bundle covers a service's semantics but not yet every operation of its surface — registering both would mean two descriptions of one service, and deleting the pack early would lose operations. The reason is required, and it must say what is missing.
+
 ## Add a behavior pack (legacy; the ratchet forbids new ones)
 
 The 150 remaining packs under `internal/services/` predate the engine and are being extracted service by service. `internal/check`'s ratchet fails CI on any new pack directory, any increase in `case` labels, service LOC, inline `&spi.Fault{}` sites, or `registry.Register` call sites — so this path is closed by construction. If a service genuinely cannot be expressed in B-IR, the answer is a named, versioned primitive referenced from data, not a new pack; see [`BEHAVIOR_IR.md`](./BEHAVIOR_IR.md) §6.

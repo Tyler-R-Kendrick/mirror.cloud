@@ -254,6 +254,18 @@ What in SQS genuinely cannot be data, and where it goes instead:
 3. **FIFO exclusive-group selection** — the spec is data; the selector executor is generic engine code.
 4. Real receipt-handle *content* encodes metadata; ours stays opaque-random — recorded as a quirk annotation, not code.
 
+### What the ceiling case settled
+
+The worked example above is the design. What the implementation settled, and where it differs:
+
+- **A read binding *is* the record**, with the resource's `views` merged onto it. `q.fifo` is a view; `q.attrs` is a stored member. There is no `q.rec` wrapper. Views are recomputed on read and never persisted, and the loader rejects a view whose name collides with a stored member.
+- **A record with a lifecycle carries `__state` and `__deadlines`.** Keeping them on the record makes lifecycle atomic with the data; the cost is two reserved names, which the loader enforces. Deadlines are absolute instants, so nothing counts them down.
+- **`let` bindings resolve by dependency**, not by name order — YAML mapping order does not survive into a Go map, and an SQS send derives `dedupId` from `settings`, which sorts before it.
+- **`batch:`** delegates an operation to a sibling once per entry. Every AWS batch operation has one shape, and the packs implemented it once per operation, so each copy could drift from the singular operation it mirrored.
+- **`without(map, keys)` and `merge(a, b)`** are engine functions because CEL comprehensions over a map yield a list: there is no core way to build a map minus some keys, which every provider's `Untag*` needs.
+- **`endpoint`** is the base URL the caller reached. A service that hands back URLs to itself has to echo it, or the client follows a link somewhere it cannot reach.
+- **`shadow:`** marks a bundle proven but not yet serving: gated by the equivalence suite on every run, registered nowhere, with the pack still answering. Its value is the reason it is not serving, not a boolean — a shadow bundle that does not say what is missing is how a half-migration becomes permanent, so a test requires one.
+
 ## 6. Primitives — the budgeted escape hatch
 
 ```go

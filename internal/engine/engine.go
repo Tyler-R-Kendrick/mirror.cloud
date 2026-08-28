@@ -112,6 +112,11 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 		return nil, fault
 	}
 
+	// A batch operation is its singular sibling, run once per entry.
+	if op.Batch != nil {
+		return e.runBatch(ctx, req, op)
+	}
+
 	ev := e.newEval(req, op)
 	if err := ev.resolveReads(ctx, op); err != nil {
 		return nil, err

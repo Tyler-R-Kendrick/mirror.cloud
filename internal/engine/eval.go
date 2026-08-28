@@ -67,6 +67,11 @@ func (ev *eval) activation() map[string]any {
 		"id":  ev.id,
 		"fx":  ev.fx,
 		"hit": map[string]any{},
+		// The base URL the caller actually reached. Services that hand back
+		// URLs to themselves -- an SQS queue URL, a GCS resumable-upload
+		// location -- have to echo the endpoint the client used, or the client
+		// follows a link to somewhere it cannot reach.
+		"endpoint": ev.endpoint(),
 	}
 	for k, v := range ev.binds {
 		act[k] = v
@@ -138,8 +143,13 @@ func (ev *eval) resolveReads(ctx context.Context, op bir.Operation) error {
 				return err
 			}
 		}
-		if err := ev.applyViews(read.Resource, res, rec); err != nil {
-			return err
+		// Views derive from a record, so there is nothing to derive when there
+		// is none. An operation that names a view guards on _found first, and
+		// the require rule that does so runs before anything reads it.
+		if found {
+			if err := ev.applyViews(read.Resource, res, rec); err != nil {
+				return err
+			}
 		}
 		ev.binds[name] = rec
 		ev.binds[name+"_found"] = found
@@ -221,19 +231,40 @@ func resourceNameOf(ir *bir.Service, want bir.Resource) string {
 	return ""
 }
 
-// evalLets computes derived values in a stable order.
+// evalLets computes derived values, resolving the order from what each one
+// actually needs.
+//
+// YAML mapping order does not survive into a Go map, and naming order is not
+// dependency order -- an SQS send derives `dedupId` from `settings`, which
+// sorts after it. Rather than make a bundle author think about that, each pass
+// evaluates whatever can be evaluated now and repeats while progress is made.
+// A binding that never becomes evaluable is reported with the error it kept
+// producing, so a genuine mistake reads as itself rather than as "cycle".
 func (ev *eval) evalLets(op bir.Operation) error {
-	names := make([]string, 0, len(op.Let))
+	pending := make([]string, 0, len(op.Let))
 	for n := range op.Let {
-		names = append(names, n)
+		pending = append(pending, n)
 	}
-	sort.Strings(names)
-	for _, n := range names {
-		v, err := ev.eval("operations." + ev.req.Operation + ".let." + n)
-		if err != nil {
-			return err
+	sort.Strings(pending)
+
+	lastErr := map[string]error{}
+	for len(pending) > 0 {
+		var stuck []string
+		progress := false
+		for _, n := range pending {
+			v, err := ev.eval("operations." + ev.req.Operation + ".let." + n)
+			if err != nil {
+				lastErr[n] = err
+				stuck = append(stuck, n)
+				continue
+			}
+			ev.binds[n] = v
+			progress = true
 		}
-		ev.binds[n] = v
+		if !progress {
+			return fmt.Errorf("engine: %s.let.%s: %w", ev.req.Operation, stuck[0], lastErr[stuck[0]])
+		}
+		pending = stuck
 	}
 	return nil
 }
@@ -382,8 +413,8 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 	}
 
 	// Resource-level record members first, then effect-level overrides.
-	for _, k := range sortedKeys(res.Record) {
-		v, err := ev.evalAt("resources."+w.Resource+".record."+k, res.Record[k])
+	for _, k := range sortedKeysAny(res.Record) {
+		v, err := ev.recordValue(ctx, "resources."+w.Resource+".record."+k, res.Record[k])
 		if err != nil {
 			return err
 		}
@@ -409,6 +440,44 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 		}
 		key = fmt.Sprint(v)
 		ev.id = key
+	}
+
+	// A record with a lifecycle may be born somewhere other than its chart's
+	// initial state, with a timer already armed: an SQS message sent with a
+	// delay is invisible until its deadline passes, which is a deadline rather
+	// than a background job.
+	if res.Statechart != nil {
+		if w.State != "" {
+			st, err := ev.evalAt(path+".state", w.State)
+			if err != nil {
+				return err
+			}
+			name := fmt.Sprint(st)
+			if _, ok := res.Statechart.States[name]; !ok {
+				return fmt.Errorf("engine: %s.state: %q is not a defined state", path, name)
+			}
+			rec[stateMember] = name
+		}
+		if d := w.Deadline; d != nil {
+			arm := true
+			if d.When != "" {
+				arm, err = ev.evalBool(path + ".deadline.when")
+				if err != nil {
+					return err
+				}
+			}
+			if arm {
+				after, err := ev.eval(path + ".deadline.after")
+				if err != nil {
+					return err
+				}
+				dur, ok := asDuration(after)
+				if !ok {
+					return fmt.Errorf("engine: %s.deadline.after: expected a duration, got %T", path, after)
+				}
+				setDeadline(rec, d.Name, ev.e.deps.Clock.Now().Add(dur))
+			}
+		}
 	}
 
 	if err := ev.putRecord(ctx, col, key, rec); err != nil {
@@ -651,12 +720,18 @@ func (ev *eval) runList(ctx context.Context, op bir.Operation, modelOp model.Ope
 				continue
 			}
 		}
+		if err := ev.applyViews(op.List.Resource, res, rec); err != nil {
+			return err
+		}
 		items = append(items, rec)
 		last = kv.Key
 	}
 	ev.binds["__list"] = items
 	ev.binds["__list_more"] = more
 	ev.binds["__list_last"] = last
+	// `items` lets an operation project the listed records into something other
+	// than the records themselves -- ListQueues answers with URLs, not queues.
+	ev.binds["items"] = items
 	return nil
 }
 
@@ -740,3 +815,18 @@ func sortedKeys[V any](m map[string]V) []string {
 }
 
 func sortedKeysAny(m map[string]any) []string { return sortedKeys(m) }
+
+// endpoint is the base URL the caller reached, for services that return URLs
+// pointing at themselves. It falls back to the default listen address when a
+// request arrived without an HTTP context, which is how unit tests and replayed
+// traces reach the engine.
+func (ev *eval) endpoint() string {
+	if ev.req.HTTP != nil && ev.req.HTTP.Host != "" {
+		return "http://" + ev.req.HTTP.Host
+	}
+	return defaultEndpoint
+}
+
+// defaultEndpoint matches the address `mirror up` listens on, so a URL handed
+// out in a test is the URL a client would have been given.
+const defaultEndpoint = "http://127.0.0.1:4566"

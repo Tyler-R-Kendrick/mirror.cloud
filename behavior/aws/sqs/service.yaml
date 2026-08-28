@@ -1,0 +1,443 @@
+schema: bir/1
+service: aws.sqs
+
+# Transcribed from the hand-written pack, not established against the real
+# service. This is the wave-0 ceiling case: if the schema can carry visibility
+# timeouts, FIFO ordering and deduplication, dead-letter redrive and long
+# polling, it can carry the rest. Probing upgrades individual cells to
+# observed/probed and records the evidence.
+provenance: authored
+
+# Proven, not yet serving. The message plane -- visibility timeouts, FIFO
+# ordering and deduplication, dead-letter redrive, long polling, batches -- is
+# expressed here and gated against the pack's recording on every CI run. Six
+# operations are not: AddPermission, RemovePermission, ListDeadLetterSourceQueues,
+# StartMessageMoveTask, CancelMessageMoveTask and ListMessageMoveTasks.
+#
+# ListDeadLetterSourceQueues is the one that decides a schema question: it
+# filters queues on a redrive policy that may live in either the queue record
+# or its settings record, so a list would have to join a companion resource per
+# item. That is a schema addition worth making on more than one operation's
+# evidence, so it waits.
+#
+# Until then the pack serves and this bundle shadows it: registering both would
+# mean two descriptions of one service, and deleting the pack now would lose
+# six operations.
+shadow: >
+  Six operations are not yet expressed (AddPermission, RemovePermission,
+  ListDeadLetterSourceQueues, StartMessageMoveTask, CancelMessageMoveTask,
+  ListMessageMoveTasks); ListDeadLetterSourceQueues needs a per-item join
+  between a listed record and its companion settings record.
+
+resources:
+  queue:
+    collection: queues
+    id:
+      # A caller names a queue either directly or through its URL, and the two
+      # must resolve to the same record.
+      input_members: [QueueName]
+      derive: "'QueueName' in input ? string(input.QueueName) : lastSegment(string(input.QueueUrl), '/')"
+    record:
+      name: id
+      # The URL has to echo the endpoint the caller actually reached: a client
+      # handed a link to somewhere it cannot reach is worse than an error.
+      url: "endpoint + '/' + identity.account + '/' + id"
+      attrs: >
+        id.endsWith('.fifo')
+          ? merge('Attributes' in input ? input.Attributes : {}, {'FifoQueue': 'true'})
+          : ('Attributes' in input ? input.Attributes : {})
+    views:
+      fifo: "string(rec.name).endsWith('.fifo')"
+      # Stored attributes over the documented defaults, so a bundle reads one
+      # merged map rather than repeating the fallbacks at every site.
+      settings: "merge({'VisibilityTimeout': '30', 'DelaySeconds': '0'}, rec.attrs)"
+
+  # Queue attributes set after creation live apart from the queue record, as
+  # they do in the pack: SetQueueAttributes replaces this wholesale while
+  # CreateQueue's attributes stay put underneath.
+  settings:
+    collection: qattrs
+    id:
+      input_members: [QueueName]
+      derive: "'QueueName' in input ? string(input.QueueName) : lastSegment(string(input.QueueUrl), '/')"
+    record:
+      attrs: "'Attributes' in input ? input.Attributes : {}"
+
+  tags:
+    collection: qtags
+    id:
+      input_members: [QueueName]
+      derive: "'QueueName' in input ? string(input.QueueName) : lastSegment(string(input.QueueUrl), '/')"
+    record:
+      tags: "'Tags' in input ? input.Tags : {}"
+
+  message:
+    # Parent-scoped: each queue's messages are their own collection, named for
+    # the queue rather than filtered out of a shared one.
+    collection: "msgs:{queue.id}"
+    parent: queue
+    id: { generate: { kind: hex, bytes: 16 } }
+    # Addressed by receipt handle, which is what a caller holds.
+    key: handle
+    record:
+      id: id
+      handle: { generate: { kind: hex, bytes: 64 } }
+      body: input.MessageBody
+      md5: "md5hex(string(input.MessageBody))"
+      group: "'MessageGroupId' in input ? string(input.MessageGroupId) : ''"
+      attrs: "'MessageAttributes' in input ? input.MessageAttributes : {}"
+      seq: { counter: "seq:{queue.id}" }
+      receiveCount: "0"
+
+    statechart:
+      initial: visible
+      states:
+        visible:
+          on:
+            RECEIVE:
+              # Redrive is evaluated at receive, not at expiry: a message moves
+              # to the dead-letter queue on the delivery that would exceed the
+              # policy's count, which is what the pack does and what makes the
+              # count observable.
+              - guard: >
+                  has(event.maxReceiveCount) && event.maxReceiveCount > 0 &&
+                  int(rec.receiveCount) + 1 > event.maxReceiveCount &&
+                  event.deadLetter != '' && event.deadLetter != event.queue
+                target: redriven
+                actions:
+                  - move:
+                      to: { queue: event.deadLetter }
+                      set:
+                        handle: { generate: { kind: hex, bytes: 64 } }
+                        origin: "has(rec.origin) && rec.origin != '' ? rec.origin : event.queue"
+                      state: visible
+              - target: invisible
+                actions:
+                  - set: { receiveCount: "int(rec.receiveCount) + 1" }
+                  - deadline: { name: reappear, after: "seconds(event.visibilityTimeout)" }
+            DELETE: [{ target: deleted }]
+            PURGE: [{ target: deleted }]
+            CHANGE_VISIBILITY:
+              - target: invisible
+                actions:
+                  - deadline: { name: reappear, after: "seconds(event.timeout)" }
+
+        invisible:
+          timers:
+            # Lazy: nothing schedules this. The deadline sits on the record
+            # until something observes the queue, and the observation is what
+            # makes the message visible again.
+            - { deadline: reappear, target: visible }
+          on:
+            DELETE: [{ target: deleted }]
+            PURGE: [{ target: deleted }]
+            CHANGE_VISIBILITY:
+              - target: invisible
+                actions:
+                  - deadline: { name: reappear, after: "seconds(event.timeout)" }
+
+        redriven: { final: true }
+        deleted: { final: true }
+
+errors:
+  NonExistentQueue:
+    code: AWS.SimpleQueueService.NonExistentQueue
+    http: 400
+    fault: client
+    message: The specified queue does not exist.
+  MissingParameter:
+    code: MissingParameter
+    http: 400
+    fault: client
+  InvalidParameterValue:
+    code: InvalidParameterValue
+    http: 400
+    fault: client
+
+operations:
+  CreateQueue:
+    effects:
+      - create: { resource: queue }
+    output:
+      QueueUrl: rec.url
+
+  GetQueueUrl:
+    reads:
+      q: { resource: queue }
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+    output:
+      QueueUrl: q.url
+
+  ListQueues:
+    list: { resource: queue, member: QueueUrls, paginate: model }
+    output:
+      QueueUrls: "items.map(q, q.url)"
+
+  DeleteQueue:
+    reads:
+      q: { resource: queue }
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+    effects:
+      - delete: { resource: queue }
+
+  GetQueueAttributes:
+    reads:
+      q: { resource: queue }
+      s: { resource: settings }
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+    # Counting the messages is an observation like any other, so expired
+    # visibility timeouts settle here too.
+    select: { binding: msgs, resource: message }
+    output:
+      Attributes: >
+        merge(
+          merge({'ApproximateNumberOfMessages': string(msgs.size()), 'VisibilityTimeout': '30'},
+                q.attrs),
+          s_found ? s.attrs : {})
+
+  SetQueueAttributes:
+    reads:
+      q: { resource: queue }
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+    effects:
+      - put: { resource: settings }
+
+  TagQueue:
+    reads:
+      q: { resource: queue }
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+    effects:
+      - put: { resource: tags }
+
+  UntagQueue:
+    reads:
+      q: { resource: queue }
+      t: { resource: tags }
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+    effects:
+      - put:
+          resource: tags
+          record:
+            tags: "without(t_found ? t.tags : {}, 'TagKeys' in input ? input.TagKeys : [])"
+
+  ListQueueTags:
+    reads:
+      q: { resource: queue }
+      t: { resource: tags }
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+    output:
+      Tags: "t_found ? t.tags : {}"
+
+  SendMessage:
+    reads:
+      q: { resource: queue }
+      s: { resource: settings }
+    let:
+      settings: "merge(q.settings, s_found ? s.attrs : {})"
+      # Deduplication is explicit, or derived from the body when the queue asks
+      # for content-based deduplication, or absent.
+      dedupId: >
+        'MessageDeduplicationId' in input && string(input.MessageDeduplicationId) != ''
+          ? string(input.MessageDeduplicationId)
+          : (('ContentBasedDeduplication' in settings && string(settings.ContentBasedDeduplication) == 'true')
+              ? md5hex(string(input.MessageBody)) : '')
+      delay: >
+        int('DelaySeconds' in input && input.DelaySeconds != null
+              ? input.DelaySeconds
+              : coalesce(settings.DelaySeconds, '0'))
+    # Ordered: the first failing rule decides the error, and this ordering is
+    # the service's error precedence stated as data.
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+      - cond: "!q.fifo || ('MessageGroupId' in input && string(input.MessageGroupId) != '')"
+        error: MissingParameter
+        message: MessageGroupId
+      - cond: "!q.fifo || dedupId != ''"
+        error: InvalidParameterValue
+        message: MessageDeduplicationId is required when ContentBasedDeduplication is disabled.
+      - cond: "delay >= 0 && delay <= 900"
+        error: InvalidParameterValue
+        message: DelaySeconds must be between 0 and 900.
+    effects:
+      # A duplicate inside the window replays the first send's answer and
+      # writes nothing.
+      - dedup:
+          when: "dedupId != ''"
+          table: "dedup:{queue.id}"
+          key: dedupId
+          ttl: 5m
+          on_hit:
+            output:
+              MessageId: hit.MessageId
+              MD5OfMessageBody: hit.MD5OfMessageBody
+      - create:
+          resource: message
+          # A delayed message is born invisible with its reappearance already
+          # armed, rather than needing anything to wake up and deliver it.
+          state: "delay > 0 ? 'invisible' : 'visible'"
+          deadline: { name: reappear, after: "seconds(delay)", when: "delay > 0" }
+    output:
+      MessageId: rec.id
+      MD5OfMessageBody: rec.md5
+
+  SendMessageBatch:
+    reads:
+      q: { resource: queue }
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+    batch:
+      of: SendMessage
+      entries: Entries
+      id: Id
+      carry: [QueueUrl, QueueName]
+      successful: Successful
+      failed: Failed
+      result: [MessageId, MD5OfMessageBody]
+
+  ReceiveMessage:
+    reads:
+      q: { resource: queue }
+      s: { resource: settings }
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+    let:
+      settings: "merge(q.settings, s_found ? s.attrs : {})"
+      redrive: >
+        'RedrivePolicy' in settings ? parseJSON(string(settings.RedrivePolicy)) : null
+    select:
+      binding: msgs
+      resource: message
+      state: visible
+      order_by: item.seq
+      limit: "clamp(int(coalesce('MaxNumberOfMessages' in input ? input.MaxNumberOfMessages : 0, 1)), 1, 10)"
+      group:
+        # FIFO only: a standard queue has no ordering to preserve.
+        when: q.fifo
+        by: group
+        # A group with a message still in flight is closed until it settles,
+        # which is what "ordered within a group" actually means.
+        exclusive_in_flight: invisible
+    wait:
+      until: "msgs.size() > 0"
+      timeout: "seconds(int(coalesce('WaitTimeSeconds' in input ? input.WaitTimeSeconds : 0, 0)))"
+      on_timeout:
+        output:
+          Messages: "[]"
+    effects:
+      - send_event:
+          foreach: msgs
+          event: RECEIVE
+          context:
+            visibilityTimeout: >
+              int(coalesce('VisibilityTimeout' in input && input.VisibilityTimeout != null
+                            ? input.VisibilityTimeout : '',
+                          coalesce(settings.VisibilityTimeout, '30')))
+            maxReceiveCount: "redrive != null && 'maxReceiveCount' in redrive ? int(redrive.maxReceiveCount) : 0"
+            deadLetter: >
+              redrive != null && 'deadLetterTargetArn' in redrive
+                ? queueFromArn(string(redrive.deadLetterTargetArn)) : ''
+            queue: q.name
+    output:
+      Messages: >
+        msgs.map(m, {
+          'MessageId': m.id,
+          'ReceiptHandle': m.handle,
+          'Body': m.body,
+          'Attributes': {'ApproximateReceiveCount': string(m.receiveCount)},
+          'MessageAttributes': filterAttrs(m.attrs,
+            'MessageAttributeNames' in input ? input.MessageAttributeNames : [])
+        })
+
+  DeleteMessage:
+    reads:
+      q: { resource: queue }
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+    effects:
+      # Deleting a message that is not there is not an error in this service.
+      - send_event:
+          resource: message
+          key: "string(input.ReceiptHandle)"
+          event: DELETE
+          missing: ignore
+
+  DeleteMessageBatch:
+    reads:
+      q: { resource: queue }
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+    batch:
+      of: DeleteMessage
+      entries: Entries
+      id: Id
+      carry: [QueueUrl, QueueName]
+      successful: Successful
+      failed: Failed
+
+  ChangeMessageVisibility:
+    reads:
+      q: { resource: queue }
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+    effects:
+      - send_event:
+          resource: message
+          key: "string(input.ReceiptHandle)"
+          event: CHANGE_VISIBILITY
+          missing: ignore
+          context:
+            timeout: "int(coalesce(input.VisibilityTimeout, 0))"
+
+  ChangeMessageVisibilityBatch:
+    reads:
+      q: { resource: queue }
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+    batch:
+      of: ChangeMessageVisibility
+      entries: Entries
+      id: Id
+      carry: [QueueUrl, QueueName]
+      successful: Successful
+      failed: Failed
+
+  PurgeQueue:
+    reads:
+      q: { resource: queue }
+    require:
+      - { cond: q_found, error: NonExistentQueue }
+    select: { binding: msgs, resource: message }
+    effects:
+      - send_event: { foreach: msgs, event: PURGE }
+
+quirks:
+  - operation: ReceiveMessage
+    note: >
+      Redrive to the dead-letter queue is decided at receive rather than when
+      a visibility timeout expires, so a message that exceeds maxReceiveCount
+      moves on the delivery that would exceed it. Transcribed from the pack;
+      real SQS moves it without delivering it again, which a probe should
+      settle.
+    provenance: authored
+
+  - operation: DeleteQueue
+    note: >
+      Deleting a queue leaves its messages in the store rather than removing
+      the collection. Nothing can reach them, since every message operation
+      requires the queue, but the space is not reclaimed. Transcribed from the
+      pack.
+    provenance: authored
+
+  - note: >
+      MD5OfMessageAttributes is not returned. AWS computes it with an
+      undocumented binary encoding of the attribute map; that is the
+      `aws.sqs/attr-md5` primitive in the design, and no primitive registry
+      exists yet. Omitting it is honest; guessing it would not be.
+    provenance: authored

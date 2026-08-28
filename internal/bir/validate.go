@@ -91,8 +91,8 @@ func Validate(s *Service, svc *model.Service) error {
 		}
 		compile := compilerFor(resScope...)
 		compile(where+".id.derive", res.ID.Derive)
-		for _, k := range sortedKeys(res.Record) {
-			compile(where+".record."+k, res.Record[k])
+		compileAny(where+".record", res.Record, compile)
+		for _, k := range sortedKeysAny(res.Record) {
 			if reservedMember(k) {
 				problems = append(problems, fmt.Errorf(
 					"%s: %s.record.%s: %s is reserved for the record's lifecycle state",
@@ -181,6 +181,12 @@ func Validate(s *Service, svc *model.Service) error {
 		// read binding named rec adds it above by its own name.
 		if opWrites(op) {
 			scope = append(scope, "rec")
+		}
+		// A list binds its records as `items`, so an operation can project them
+		// into something other than the records themselves -- ListQueues
+		// answers with URLs.
+		if op.List != nil {
+			scope = append(scope, "items")
 		}
 		compile := compilerFor(scope...)
 
@@ -380,20 +386,28 @@ func validateEffect(s *Service, where string, eff Effect, compile func(string, s
 				s.ServiceID, where, field, name))
 		}
 	}
+	write := func(kind string, e *WriteEffect) {
+		res(e.Resource, kind)
+		compile(where+"."+kind+".when", e.When)
+		compile(where+"."+kind+".state", e.State)
+		compileAny(where+"."+kind+".record", e.Record, compile)
+		if d := e.Deadline; d != nil {
+			compile(where+"."+kind+".deadline.after", d.After)
+			compile(where+"."+kind+".deadline.when", d.When)
+			if d.Name == "" {
+				*problems = append(*problems, fmt.Errorf("%s: %s.%s.deadline: no name",
+					s.ServiceID, where, kind))
+			}
+		}
+	}
 	if e := eff.Create; e != nil {
-		res(e.Resource, "create")
-		compile(where+".create.when", e.When)
-		compileAny(where+".create.record", e.Record, compile)
+		write("create", e)
 	}
 	if e := eff.Put; e != nil {
-		res(e.Resource, "put")
-		compile(where+".put.when", e.When)
-		compileAny(where+".put.record", e.Record, compile)
+		write("put", e)
 	}
 	if e := eff.Patch; e != nil {
-		res(e.Resource, "patch")
-		compile(where+".patch.when", e.When)
-		compileAny(where+".patch.record", e.Record, compile)
+		write("patch", e)
 	}
 	if e := eff.Delete; e != nil {
 		res(e.Resource, "delete")

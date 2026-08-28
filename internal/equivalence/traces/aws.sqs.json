@@ -1,0 +1,529 @@
+{
+  "schema": "trace/1",
+  "service": "aws.sqs",
+  "source": "pack:internal/services/aws/sqs@fd434df",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListQueues",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueueUrls": null
+      }
+    },
+    {
+      "operation": "CreateQueue",
+      "input": {
+        "QueueName": "q1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+      }
+    },
+    {
+      "operation": "GetQueueUrl",
+      "input": {
+        "QueueName": "q1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+      }
+    },
+    {
+      "operation": "GetQueueUrl",
+      "input": {
+        "QueueName": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "AWS.SimpleQueueService.NonExistentQueue",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListQueues",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueueUrls": [
+          "http://127.0.0.1:4566/000000000000/q1"
+        ]
+      }
+    },
+    {
+      "operation": "SendMessage",
+      "input": {
+        "MessageBody": "hello",
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MD5OfMessageBody": "5d41402abc4b2a76b9719d911017c592",
+        "MessageId": "7c5891299f6489f8"
+      }
+    },
+    {
+      "operation": "SendMessage",
+      "input": {
+        "MessageBody": "world",
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MD5OfMessageBody": "7d793037a0760186574b0282f2f435e7",
+        "MessageId": "9c8e2cb00724681e"
+      }
+    },
+    {
+      "operation": "GetQueueAttributes",
+      "input": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Attributes": {
+          "ApproximateNumberOfMessages": "2",
+          "VisibilityTimeout": "30"
+        }
+      }
+    },
+    {
+      "operation": "ReceiveMessage",
+      "input": {
+        "MaxNumberOfMessages": 10,
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Messages": [
+          {
+            "Attributes": {
+              "ApproximateReceiveCount": "1"
+            },
+            "Body": "hello",
+            "MessageId": "7c5891299f6489f8",
+            "ReceiptHandle": "5f59f223d7974d142efbc70e360dac9bd91fc24a55cb61c9216632095f55fd84"
+          },
+          {
+            "Attributes": {
+              "ApproximateReceiveCount": "1"
+            },
+            "Body": "world",
+            "MessageId": "9c8e2cb00724681e",
+            "ReceiptHandle": "33f6fc5d83b79b8e49c4f349b79ed4dd608853fb5ea222613db6ba4f3f9d4d02"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ReceiveMessage",
+      "input": {
+        "MaxNumberOfMessages": 10,
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Messages": []
+      }
+    },
+    {
+      "operation": "SetQueueAttributes",
+      "input": {
+        "Attributes": {
+          "VisibilityTimeout": "45"
+        },
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetQueueAttributes",
+      "input": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Attributes": {
+          "ApproximateNumberOfMessages": "2",
+          "VisibilityTimeout": "45"
+        }
+      }
+    },
+    {
+      "operation": "TagQueue",
+      "input": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1",
+        "Tags": {
+          "env": "test",
+          "team": "infra"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListQueueTags",
+      "input": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": {
+          "env": "test",
+          "team": "infra"
+        }
+      }
+    },
+    {
+      "operation": "UntagQueue",
+      "input": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1",
+        "TagKeys": [
+          "team"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListQueueTags",
+      "input": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/q1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": {
+          "env": "test"
+        }
+      }
+    },
+    {
+      "operation": "GetQueueAttributes",
+      "input": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "AWS.SimpleQueueService.NonExistentQueue",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateQueue",
+      "input": {
+        "Attributes": {
+          "ContentBasedDeduplication": "true",
+          "FifoQueue": "true"
+        },
+        "QueueName": "f1.fifo"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+      }
+    },
+    {
+      "operation": "SendMessage",
+      "input": {
+        "MessageBody": "a",
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "MissingParameter",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "SendMessage",
+      "input": {
+        "MessageBody": "a",
+        "MessageGroupId": "g1",
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MD5OfMessageBody": "0cc175b9c0f1b6a831c399e269772661",
+        "MessageId": "83d4958a39f75457"
+      }
+    },
+    {
+      "operation": "SendMessage",
+      "input": {
+        "MessageBody": "a",
+        "MessageGroupId": "g1",
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MD5OfMessageBody": "0cc175b9c0f1b6a831c399e269772661",
+        "MessageId": "83d4958a39f75457"
+      }
+    },
+    {
+      "operation": "SendMessage",
+      "input": {
+        "MessageBody": "b",
+        "MessageGroupId": "g1",
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MD5OfMessageBody": "92eb5ffee6ae2fec3ad71c777531578f",
+        "MessageId": "3ed10eca83a29db2"
+      }
+    },
+    {
+      "operation": "SendMessage",
+      "input": {
+        "MessageBody": "c",
+        "MessageGroupId": "g2",
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MD5OfMessageBody": "4a8a08f09d37b73795649038408b5f33",
+        "MessageId": "e7175ec1cd1d60f2"
+      }
+    },
+    {
+      "operation": "ReceiveMessage",
+      "input": {
+        "MaxNumberOfMessages": 10,
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Messages": [
+          {
+            "Attributes": {
+              "ApproximateReceiveCount": "1"
+            },
+            "Body": "a",
+            "MessageId": "83d4958a39f75457",
+            "ReceiptHandle": "100aa4e60b963dc5ea239f1a89b17f21c27ea9356fee2331658b2f769a69a34c"
+          },
+          {
+            "Attributes": {
+              "ApproximateReceiveCount": "1"
+            },
+            "Body": "c",
+            "MessageId": "e7175ec1cd1d60f2",
+            "ReceiptHandle": "77df676fe2a7a5e2a158514dec7a6dd45a694b39a0bf31326482c22c87311fd2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PurgeQueue",
+      "input": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetQueueAttributes",
+      "input": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Attributes": {
+          "ApproximateNumberOfMessages": "0",
+          "ContentBasedDeduplication": "true",
+          "FifoQueue": "true",
+          "VisibilityTimeout": "30"
+        }
+      }
+    },
+    {
+      "operation": "DeleteQueue",
+      "input": {
+        "QueueUrl": "http://127.0.0.1:4566/000000000000/f1.fifo"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListQueues",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "QueueUrls": [
+          "http://127.0.0.1:4566/000000000000/q1"
+        ]
+      }
+    }
+  ]
+}

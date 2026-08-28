@@ -56,7 +56,7 @@ func (e *Engine) compileAll() error {
 func (e *Engine) bindingNames() []string {
 	seen := map[string]bool{
 		"id": true, "rec": true, "event": true, "fx": true,
-		"hit": true, "item": true, "arn": true,
+		"hit": true, "item": true, "arn": true, "items": true,
 	}
 	for name := range e.ir.Resources {
 		seen[name] = true
@@ -86,6 +86,7 @@ func runtimeEnv(names []string) (*cel.Env, error) {
 		cel.Variable("input", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("identity", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("now", cel.TimestampType),
+		cel.Variable("endpoint", cel.StringType),
 	}
 	for _, n := range names {
 		opts = append(opts, cel.Variable(n, cel.DynType))
@@ -151,10 +152,99 @@ func runtimeFuncs() []cel.EnvOption {
 				return types.DefaultTypeAdapter.NativeToValue(out)
 			}))),
 
+		// CEL's core has no way to build a map from another map minus some
+		// keys: comprehensions over a map yield a list. Every `Untag*`
+		// operation in every provider needs exactly that, so it is a function
+		// rather than a per-service primitive.
+		cel.Function("without", cel.Overload("without_2", []*cel.Type{dyn, dyn}, dyn,
+			cel.BinaryBinding(func(m, keys ref.Val) ref.Val {
+				src, _ := fromCEL(m).(map[string]any)
+				drop := map[string]bool{}
+				if list, ok := fromCEL(keys).([]any); ok {
+					for _, k := range list {
+						drop[fmt.Sprint(k)] = true
+					}
+				}
+				out := map[string]any{}
+				for k, v := range src {
+					if !drop[k] {
+						out[k] = v
+					}
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
+			}))),
+
+		// merge layers maps left to right, which is how a service states
+		// "defaults, then what was stored, then what was set".
+		cel.Function("merge", cel.Overload("merge_2", []*cel.Type{dyn, dyn}, dyn,
+			cel.BinaryBinding(func(a, b ref.Val) ref.Val {
+				out := map[string]any{}
+				for _, layer := range []ref.Val{a, b} {
+					if m, ok := fromCEL(layer).(map[string]any); ok {
+						for k, v := range m {
+							out[k] = v
+						}
+					}
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
+			}))),
+
 		cel.Function("lastSegment", cel.Overload("lastSegment_2", []*cel.Type{str, str}, str,
 			cel.BinaryBinding(func(s, sep ref.Val) ref.Val {
 				parts := strings.Split(fmt.Sprint(s.Value()), fmt.Sprint(sep.Value()))
 				return types.String(parts[len(parts)-1])
+			}))),
+
+		// arn builds "arn:<partition>:<rest joined by :>" from parts. String
+		// assembly, not provider logic: the engine stays free of service names.
+		cel.Function("arn", cel.Overload("arn_2", []*cel.Type{str, dyn}, str,
+			cel.BinaryBinding(func(partition, parts ref.Val) ref.Val {
+				out := []string{"arn", fmt.Sprint(partition.Value())}
+				if list, ok := fromCEL(parts).([]any); ok {
+					for _, p := range list {
+						out = append(out, fmt.Sprint(p))
+					}
+				}
+				return types.String(strings.Join(out, ":"))
+			}))),
+
+		// queueFromArn is lastSegment with the ARN separator, named for the
+		// thing bundles actually write.
+		cel.Function("queueFromArn", cel.Overload("queueFromArn_1", []*cel.Type{str}, str,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				parts := strings.Split(fmt.Sprint(v.Value()), ":")
+				return types.String(parts[len(parts)-1])
+			}))),
+
+		// filterAttrs narrows a map to a requested subset. An empty request or
+		// one naming "All" (or its "." shorthand) returns everything, which is
+		// the convention every provider that has such a parameter follows.
+		cel.Function("filterAttrs", cel.Overload("filterAttrs_2", []*cel.Type{dyn, dyn}, dyn,
+			cel.BinaryBinding(func(attrs, want ref.Val) ref.Val {
+				src, _ := fromCEL(attrs).(map[string]any)
+				names, ok := fromCEL(want).([]any)
+				if !ok || len(names) == 0 {
+					return types.DefaultTypeAdapter.NativeToValue(src)
+				}
+				out := map[string]any{}
+				for _, n := range names {
+					name := fmt.Sprint(n)
+					if name == "All" || name == "." {
+						return types.DefaultTypeAdapter.NativeToValue(src)
+					}
+					if v, ok := src[name]; ok {
+						out[name] = v
+					}
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
+			}))),
+
+		// prim dispatches to a named pure primitive. None are registered yet,
+		// so a bundle that calls one fails loudly rather than returning a
+		// plausible-looking value.
+		cel.Function("prim", cel.Overload("prim_2", []*cel.Type{str, dyn}, dyn,
+			cel.BinaryBinding(func(name, _ ref.Val) ref.Val {
+				return types.NewErr("engine: primitive %q is not registered", fmt.Sprint(name.Value()))
 			}))),
 	}
 }

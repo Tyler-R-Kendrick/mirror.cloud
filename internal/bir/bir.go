@@ -70,6 +70,17 @@ type Service struct {
 	Quirks     []Quirk              `yaml:"quirks,omitempty"`
 	Operations map[string]Operation `yaml:"operations,omitempty"`
 
+	// Shadow, when set, says this bundle is proven but not yet serving: the
+	// hand-written pack still answers requests, and the equivalence gate still
+	// replays this bundle against the pack's recording on every run.
+	//
+	// It exists for the case where a bundle covers a service's semantics but
+	// not yet every operation of its surface -- deleting the pack then would
+	// lose operations, and registering both would mean two descriptions of one
+	// service. The value is the reason, not a boolean, because a shadow bundle
+	// with no stated gap is how a half-migration becomes permanent.
+	Shadow string `yaml:"shadow,omitempty"`
+
 	// Compiled holds programs prepared at load time. Nil until Load runs.
 	Compiled *Compiled `yaml:"-"`
 }
@@ -95,9 +106,13 @@ type Resource struct {
 	// Key is the record member used as the store key, when it is not the ID.
 	Key string `yaml:"key,omitempty"`
 
-	ID     Identity          `yaml:"id,omitempty"`
-	ARN    string            `yaml:"arn,omitempty"`
-	Record map[string]string `yaml:"record,omitempty"`
+	ID  Identity `yaml:"id,omitempty"`
+	ARN string   `yaml:"arn,omitempty"`
+	// Record is the stored shape. A value is an expression, or one of the two
+	// forms that must not be expressions because they draw on state an
+	// expression may not touch: { generate: {...} } for a deterministic
+	// identifier and { counter: "<name>" } for a monotonic sequence.
+	Record map[string]any `yaml:"record,omitempty"`
 	// Views are cached CEL expressions over a loaded record.
 	Views      map[string]string `yaml:"views,omitempty"`
 	Statechart *Statechart       `yaml:"statechart,omitempty"`
@@ -212,6 +227,7 @@ type Operation struct {
 	Wait    *Wait             `yaml:"wait,omitempty"`
 	Effects []Effect          `yaml:"effects,omitempty"`
 	List    *ListSpec         `yaml:"list,omitempty"`
+	Batch   *BatchSpec        `yaml:"batch,omitempty"`
 	Output  map[string]string `yaml:"output,omitempty"`
 
 	Provenance Provenance `yaml:"provenance,omitempty"`
@@ -308,6 +324,20 @@ type WriteEffect struct {
 	Key      string         `yaml:"key,omitempty"`
 	Record   map[string]any `yaml:"record,omitempty"`
 	When     string         `yaml:"when,omitempty"`
+	// State is the lifecycle state a created record starts in, when that is
+	// not the chart's initial state. An SQS message sent with a delay is born
+	// invisible and becomes visible when its deadline passes.
+	State string `yaml:"state,omitempty"`
+	// Deadline arms a timer on the record as it is written, which is what
+	// makes that delay a deadline rather than a background job.
+	Deadline *WriteDeadline `yaml:"deadline,omitempty"`
+}
+
+// WriteDeadline arms a named timer on a record at write time.
+type WriteDeadline struct {
+	Name  string `yaml:"name"`
+	After string `yaml:"after"`
+	When  string `yaml:"when,omitempty"`
 }
 
 // DeleteEffect removes a record.
@@ -358,4 +388,30 @@ type PrimEffect struct {
 	Use  string            `yaml:"use"`
 	Args map[string]string `yaml:"args,omitempty"`
 	Bind string            `yaml:"bind,omitempty"`
+}
+
+// BatchSpec delegates an operation to a sibling, once per input entry.
+//
+// AWS batch operations are uniformly shaped: a list of entries each carrying a
+// caller-chosen Id, answered by a Successful list and a Failed list whose rows
+// carry that Id plus the error. Expressing that shape once means SendMessageBatch
+// is four lines of data rather than a second copy of SendMessage that can drift
+// from it -- which is what the hand-written packs had, and what made a fix to one
+// silently not a fix to the other.
+type BatchSpec struct {
+	// Of is the sibling operation each entry is delegated to.
+	Of string `yaml:"of"`
+	// Entries is the input member holding the entry list.
+	Entries string `yaml:"entries"`
+	// ID is the member of each entry carrying the caller's correlation id.
+	ID string `yaml:"id,omitempty"`
+	// Carry are input members copied onto every delegated request, such as the
+	// queue the whole batch addresses.
+	Carry []string `yaml:"carry,omitempty"`
+	// Successful and Failed name the output members the two result lists go in.
+	Successful string `yaml:"successful,omitempty"`
+	Failed     string `yaml:"failed,omitempty"`
+	// Result names the members of each delegated answer to copy into its
+	// Successful row, alongside the id.
+	Result []string `yaml:"result,omitempty"`
 }

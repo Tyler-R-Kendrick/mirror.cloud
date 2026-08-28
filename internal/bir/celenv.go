@@ -24,6 +24,7 @@ func baseVars() []cel.EnvOption {
 		cel.Variable("input", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("identity", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("now", cel.TimestampType),
+		cel.Variable("endpoint", cel.StringType),
 	}
 }
 
@@ -77,6 +78,12 @@ func celFuncs() []cel.EnvOption {
 		unaryDyn("seconds", dyn, cel.DurationType),
 		unaryDyn("parseJSON", str, dyn),
 		binaryDyn("lastSegment", str, str, str),
+		// CEL comprehensions over a map yield a list, so there is no core way
+		// to build a map minus some keys or to layer two maps. Every provider's
+		// Untag* and every "defaults, then stored, then set" attribute merge
+		// needs one of these.
+		binaryDyn("without", dyn, dyn, dyn),
+		binaryDyn("merge", dyn, dyn, dyn),
 
 		// Provider-shaped helpers. These are string manipulation, not provider
 		// logic: the engine stays free of service names.

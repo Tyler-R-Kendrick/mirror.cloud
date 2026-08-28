@@ -37,8 +37,45 @@ func init() {
 	}
 }
 
-// ServiceIDs lists the services served from bundles, sorted.
-func ServiceIDs() []string { return behaviors.ServiceIDs() }
+// ServiceIDs lists the services actually served from bundles, sorted. A shadow
+// bundle is proven but not yet serving, so it is not here; ShadowIDs lists
+// those.
+func ServiceIDs() []string {
+	var out []string
+	for _, id := range behaviors.ServiceIDs() {
+		if reason, _ := shadowOf(id); reason == "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// ShadowIDs lists the bundles that are gated but not yet serving, each with
+// the reason it is not.
+func ShadowIDs() map[string]string {
+	out := map[string]string{}
+	for _, id := range behaviors.ServiceIDs() {
+		if reason, err := shadowOf(id); err == nil && reason != "" {
+			out[id] = reason
+		}
+	}
+	return out
+}
+
+// shadowOf reports a bundle's shadow reason. Loading is cheap enough to do
+// once per bundle at init, and a bundle that cannot load at all is caught by
+// the factory rather than silently treated as shadowed.
+func shadowOf(id string) (string, error) {
+	svc, err := generated.Model(id)
+	if err != nil {
+		return "", err
+	}
+	ir, err := behaviors.Load(id, svc)
+	if err != nil {
+		return "", err
+	}
+	return ir.Shadow, nil
+}
 
 // New builds the engine for one bundled service. Exported so tests and tools
 // can construct a bundled service without going through the registry.

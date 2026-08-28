@@ -687,6 +687,46 @@ func TestEncryptedBlobFailureLeavesNoObjectAndRecovers(t *testing.T) {
 	}
 }
 
+func TestEncryptedMultipartCompletionFailurePreservesUpload(t *testing.T) {
+	deps := spitest.Deps(t)
+	blobs := &failBlobs{BlobStore: deps.Blobs}
+	deps.Blobs = blobs
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != nil {
+			stream = io.NopCloser(bytes.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "multipart-encryption"}, nil)
+	keyID := "arn:aws:kms:us-east-1:000000000000:key/multipart-chaos"
+	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-encryption", "Key": "object", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID := created.Output["UploadId"].(string)
+	part, err := call("UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 1}, []byte("body"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	complete := map[string]any{"UploadId": uploadID, "MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}}
+	blobs.fail = true
+	if _, err := call("CompleteMultipartUpload", complete, nil); err == nil {
+		t.Fatal("expected injected completion failure")
+	}
+	if _, err := call("HeadObject", map[string]any{"Bucket": "multipart-encryption", "Key": "object"}, nil); err == nil {
+		t.Fatal("failed encrypted completion left object metadata")
+	}
+	blobs.fail = false
+	completed, err := call("CompleteMultipartUpload", complete, nil)
+	if err != nil || completed.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || completed.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+		t.Fatalf("recovered completion: %#v %v", completed, err)
+	}
+}
+
 func TestPostObjectBlobFailureLeavesNoObject(t *testing.T) {
 	deps := spitest.Deps(t)
 	deps.Blobs = failBlobs{BlobStore: deps.Blobs, fail: true}

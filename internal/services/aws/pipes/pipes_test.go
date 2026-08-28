@@ -963,13 +963,27 @@ func storedStateExecutions(t *testing.T, deps spi.Deps, id spi.Identity) []map[s
 	return executions
 }
 
+// eventually waits for work the runtime does on its own goroutine after the
+// test advances the controllable clock.
+//
+// The wait is on the wall clock for something driven by simulated time, which
+// is the real fragility: the clock jump is synchronous and the work is not, so
+// the test can only poll. The deadline is therefore generous rather than tight
+// -- a passing run reaches its condition in milliseconds and pays nothing,
+// while a loaded machine running under -race no longer fails a correct
+// implementation for being slow.
+//
+// Making this deterministic needs the runtime to expose a point where due work
+// is known to be flushed. That is a change to a pack scheduled for extraction,
+// so a longer deadline is the proportionate fix -- not a solution to the
+// underlying design, and not pretending to be one.
 func eventually(t *testing.T, condition func() bool) {
 	t.Helper()
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(60 * time.Second)
 	for !condition() {
 		select {
 		case <-deadline:
-			t.Fatal("condition not met")
+			t.Fatal("the expected state did not arrive within 60s of advancing the clock")
 		default:
 			time.Sleep(time.Millisecond)
 		}

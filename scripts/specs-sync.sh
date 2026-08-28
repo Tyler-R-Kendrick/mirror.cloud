@@ -134,6 +134,26 @@ def sha256(path):
             h.update(chunk)
     return h.hexdigest()
 
+# Previous lock, keyed by path. `ingested` means "when this exact content was
+# first seen", not "when specs-sync last ran": stamping the current time on
+# every entry makes the lock differ on every sync, and CI's regeneration gate
+# — which asserts the lock and the models follow byte-for-byte from their
+# inputs — could then never pass. Carrying the timestamp forward while the
+# hash is unchanged keeps the field meaningful and the file reproducible.
+previous = {}
+try:
+    with open(lock_path, encoding="utf-8") as fh:
+        for entry in json.load(fh).get("files", []):
+            previous[entry.get("path")] = entry
+except (OSError, ValueError):
+    pass
+
+def first_seen(rel, digest):
+    prior = previous.get(rel)
+    if prior and prior.get("sha256") == digest and prior.get("ingested"):
+        return prior["ingested"]
+    return ingested
+
 files = []
 with open(pairs_path, encoding="utf-8") as fh:
     for line in fh:
@@ -142,6 +162,7 @@ with open(pairs_path, encoding="utf-8") as fh:
             continue
         service_id, _, rel = line.partition("\t")
         path = os.path.join(root, "specs", rel)
+        digest = sha256(path)
         files.append({
             # serviceId is the canonical mirror.cloud ID for this model. It is
             # recorded here because the ID a model declares (its endpointPrefix)
@@ -151,18 +172,28 @@ with open(pairs_path, encoding="utf-8") as fh:
             "source": aws_repo,
             "ref": aws_sha,
             "path": rel,
-            "sha256": sha256(path),
-            "ingested": ingested,
+            "sha256": digest,
+            "ingested": first_seen(rel, digest),
         })
 gcs = os.path.join(root, "specs", "gcp", "storage.json")
 if os.path.isfile(gcs):
+    digest = sha256(gcs)
+    prior = previous.get("gcp/storage.json")
+    # Discovery is served live and has no upstream revision to pin, so the ref
+    # is the timestamp of the fetch that produced this content. Hold it steady
+    # while the content is: a ref that moves on identical bytes is noise, and
+    # noise is where an unannounced upstream change hides.
+    ref = gcs_etag
+    if prior and prior.get("sha256") == digest and prior.get("ref"):
+        ref = prior["ref"]
+    gcs_etag = ref
     files.append({
         "serviceId": "gcp.storage",
         "source": gcs_url,
-        "ref": gcs_etag,
+        "ref": ref,
         "path": "gcp/storage.json",
-        "sha256": sha256(gcs),
-        "ingested": ingested,
+        "sha256": digest,
+        "ingested": first_seen("gcp/storage.json", digest),
     })
 files.sort(key=lambda x: x["path"])
 doc = {

@@ -1,0 +1,76 @@
+schema: bir/1
+service: aws.shield
+
+# Wave-0 CRUD floor. Every cell here is `authored`: it was transcribed from the
+# hand-written pack, not established against the real service. Probing upgrades
+# individual cells to `observed/probed` and records the evidence.
+provenance: authored
+
+resources:
+  protection:
+    collection: shprot
+    id:
+      generate: { kind: hex, bytes: 8 }
+      # How callers name the ID on reads and deletes, tried in order.
+      input_members: [ProtectionId, Id]
+    arn: "arn:{partition}:shield::{account}:protection/{id}"
+    record:
+      Id: id
+      Name: input.Name
+      ResourceArn: input.ResourceArn
+
+  subscription:
+    collection: shsub
+    singleton: state
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+    # The hand-written packs disagree with themselves here: this code is
+    # rendered 400 in most and 404 in others. 400 matches the pack this was
+    # transcribed from; a probe decides which is right and rewrites this row.
+    provenance: authored
+
+operations:
+  CreateProtection:
+    effects:
+      - create: { resource: protection }
+    output:
+      ProtectionId: id
+
+  DescribeProtection:
+    reads:
+      rec: { resource: protection }
+    require:
+      - { cond: rec_found, error: NotFound }
+    output:
+      Protection: rec
+
+  ListProtections:
+    # paginate: model binds tokens and page caps from the model's pagination
+    # trait, which is how list operations that were previously unbounded get
+    # pagination without per-service code.
+    list: { resource: protection, member: Protections, paginate: model }
+
+  DeleteProtection:
+    require:
+      - { cond: rec_found, error: NotFound }
+    reads:
+      rec: { resource: protection }
+    effects:
+      - delete: { resource: protection }
+
+  CreateSubscription:
+    effects:
+      - put:
+          resource: subscription
+          record:
+            SubscriptionState: "'ACTIVE'"
+
+  GetSubscriptionState:
+    reads:
+      rec: { resource: subscription }
+    output:
+      SubscriptionState: "rec_found ? rec.SubscriptionState : 'INACTIVE'"

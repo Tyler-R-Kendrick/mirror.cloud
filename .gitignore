@@ -5,6 +5,11 @@ bin/
 *.out
 coverage.out
 .mirror/
+# `go build ./cmd/<x>` in the repo root drops the binary here; one was
+# committed by accident, so name them.
+/mirror
+/mirrorgen
+/ratchet
 
 # node (local lint tooling)
 node_modules/

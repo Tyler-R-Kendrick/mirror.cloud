@@ -61,6 +61,19 @@ const testRoleARN = "arn:aws:iam::123456789012:role/firehose"
 // slow the suite down.
 const pollBudget = 60 * time.Second
 
+// polling reports whether a wait whose budget is this channel may attempt
+// again. The budget is a channel rather than an instant because these tests
+// must not read the wall clock directly: simulated time is the only clock the
+// emulator is allowed to consult, and a guard test keeps it that way.
+func polling(deadline <-chan time.Time) bool {
+	select {
+	case <-deadline:
+		return false
+	default:
+		return true
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
@@ -742,7 +755,7 @@ func TestOpenSearchBufferRetryPersistence(t *testing.T) {
 	}
 	wait := func(message string, ready func() bool) {
 		t.Helper()
-		for deadline := time.Now().Add(pollBudget); time.Now().Before(deadline); {
+		for deadline := time.After(pollBudget); polling(deadline); {
 			if ready() {
 				return
 			}
@@ -1023,7 +1036,7 @@ func TestFirehoseOpenSearchServerlessDestination(t *testing.T) {
 		map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(records[1]))},
 	}})
 	var hits []any
-	for deadline := time.Now().Add(pollBudget); time.Now().Before(deadline); {
+	for deadline := time.After(pollBudget); polling(deadline); {
 		result := call(search, "Search", map[string]any{"Index": "collection/events", "query": map[string]any{"match_all": map[string]any{}}})
 		hits = result.Output["hits"].(map[string]any)["hits"].([]any)
 		if len(hits) == 1 {
@@ -1051,7 +1064,7 @@ func TestFirehoseOpenSearchServerlessDestination(t *testing.T) {
 	failedID := first(responses[1].(map[string]any), "RecordId")
 	failureKey := id.Account + "/" + id.Region + "/out/backup/AmazonOpenSearchService-failed/1970/01/01/00/serverless-delivery-1-1970-01-01-00-00-00-" + failedID
 	var failureBody []byte
-	for deadline := time.Now().Add(pollBudget); time.Now().Before(deadline); {
+	for deadline := time.After(pollBudget); polling(deadline); {
 		reader, _, err := deps.Blobs.Get(ctx, failureKey)
 		if err == nil {
 			failureBody, _ = io.ReadAll(reader)
@@ -1112,7 +1125,7 @@ func TestFirehoseOpenSearchServerlessPersistentBuffer(t *testing.T) {
 		t.Fatal(err)
 	}
 	search := opensearch.New(deps)
-	for deadline := time.Now().Add(pollBudget); time.Now().Before(deadline); {
+	for deadline := time.After(pollBudget); polling(deadline); {
 		result, err := search.Invoke(ctx, &spi.Request{Identity: id, Operation: "Search", Input: map[string]any{"Index": "collection/events", "query": map[string]any{"match_all": map[string]any{}}}})
 		if err == nil && len(result.Output["hits"].(map[string]any)["hits"].([]any)) == 1 {
 			return
@@ -1325,7 +1338,7 @@ func TestFirehoseRedshiftPersistentRetry(t *testing.T) {
 	if err := deps.Clock.Advance(5 * time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	for deadline := time.Now().Add(pollBudget); time.Now().Before(deadline); {
+	for deadline := time.After(pollBudget); polling(deadline); {
 		rows, _ := redshift.TableRows(context.Background(), id, "retry-warehouse", "analytics", "events")
 		if len(rows) == 1 {
 			if !reflect.DeepEqual(rows[0], map[string]any{"id": "3", "payload": "three"}) {
@@ -1383,11 +1396,11 @@ func TestFirehoseRedshiftRetryExpiryAndDelete(t *testing.T) {
 	if err := deps.Clock.Advance(5 * time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	for deadline := time.Now().Add(pollBudget); ; {
+	for deadline := time.After(pollBudget); ; {
 		if work, _, _ := collection.List(context.Background(), "redshift-expiry/", "", 0); len(work) == 0 {
 			break
 		}
-		if !time.Now().Before(deadline) {
+		if !polling(deadline) {
 			t.Fatal("expired Redshift retry remained persisted")
 		}
 		time.Sleep(time.Millisecond)
@@ -1663,7 +1676,7 @@ func TestFirehoseSnowflakeDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	var rows []map[string]any
-	for deadline := time.Now().Add(pollBudget); time.Now().Before(deadline); {
+	for deadline := time.After(pollBudget); polling(deadline); {
 		rows, err = p.SnowflakeRows(ctx, id, first(destination, "AccountUrl"), "ANALYTICS", "PUBLIC", "EVENTS")
 		if err == nil && len(rows) == 2 {
 			break
@@ -1763,7 +1776,7 @@ func TestFirehoseSnowflakeSecretAndPersistentBuffer(t *testing.T) {
 		t.Fatal(err)
 	}
 	var rows []map[string]any
-	for deadline := time.Now().Add(pollBudget); time.Now().Before(deadline); {
+	for deadline := time.After(pollBudget); polling(deadline); {
 		rows, err = p.SnowflakeRows(ctx, id, first(destination, "AccountUrl"), "ANALYTICS", "PUBLIC", "EVENTS")
 		if err == nil && len(rows) == 1 {
 			break
@@ -1793,7 +1806,7 @@ func TestFirehoseSnowflakeSecretAndPersistentBuffer(t *testing.T) {
 		t.Fatal(err)
 	}
 	failureKey := id.Account + "/" + id.Region + "/out/errors/snowflake-failed/1970/01/01/00/snowflake-rotated-1-1970-01-01-00-00-05-" + first(failed.Output, "RecordId")
-	for deadline := time.Now().Add(pollBudget); time.Now().Before(deadline); {
+	for deadline := time.After(pollBudget); polling(deadline); {
 		reader, _, err = deps.Blobs.Get(ctx, failureKey)
 		if err == nil {
 			break
@@ -1991,7 +2004,7 @@ func TestFirehoseSplunkFailureBackup(t *testing.T) {
 	recordID := response.Output["RecordId"].(string)
 	failureKey := id.Account + "/" + id.Region + "/out/errors/splunk-failed/1970/01/01/00/splunk-failure-1-1970-01-01-00-00-00-" + recordID
 	var failureBody []byte
-	for deadline := time.Now().Add(pollBudget); time.Now().Before(deadline); {
+	for deadline := time.After(pollBudget); polling(deadline); {
 		reader, _, err := deps.Blobs.Get(context.Background(), failureKey)
 		if err == nil {
 			failureBody, _ = io.ReadAll(reader)
@@ -2060,7 +2073,7 @@ func TestFirehoseSplunkSecretAndPersistentRetry(t *testing.T) {
 	}
 	retryCollection := deps.Store.Scope(id.Account, id.Region).Collection("fh-http-retries")
 	var retryKey, dataKey string
-	for deadline := time.Now().Add(pollBudget); time.Now().Before(deadline); {
+	for deadline := time.After(pollBudget); polling(deadline); {
 		items, _, _ := retryCollection.List(context.Background(), "", "", 0)
 		if len(items) == 1 {
 			var retry httpRetry
@@ -2093,7 +2106,7 @@ func TestFirehoseSplunkSecretAndPersistentRetry(t *testing.T) {
 			t.Fatal("persisted Splunk retry did not complete")
 		}
 	}
-	for deadline := time.Now().Add(pollBudget); time.Now().Before(deadline); {
+	for deadline := time.After(pollBudget); polling(deadline); {
 		if _, ok, _ := retryCollection.Get(context.Background(), retryKey); !ok {
 			if _, _, err := deps.Blobs.Get(context.Background(), dataKey); err == nil {
 				t.Fatal("successful Splunk retry payload remained persisted")
@@ -2144,7 +2157,7 @@ func TestFirehoseSplunkAcknowledgmentTimeout(t *testing.T) {
 	}
 	recordID := response.Output["RecordId"].(string)
 	key := id.Account + "/" + id.Region + "/out/failed/splunk-failed/1970/01/01/00/splunk-timeout-1-1970-01-01-00-03-00-" + recordID
-	for deadline := time.Now().Add(pollBudget); time.Now().Before(deadline); {
+	for deadline := time.After(pollBudget); polling(deadline); {
 		reader, _, err := deps.Blobs.Get(context.Background(), key)
 		if err == nil {
 			body, _ := io.ReadAll(reader)
@@ -4403,7 +4416,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	}
 	waitBlob := func(key string) {
 		t.Helper()
-		for deadline := time.Now().Add(pollBudget); time.Now().Before(deadline); {
+		for deadline := time.After(pollBudget); polling(deadline); {
 			if reader, _, err := deps.Blobs.Get(context.Background(), key); err == nil {
 				_ = reader.Close()
 				return
@@ -4701,7 +4714,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	initialRetry := <-captured
 	retryCollection := deps.Store.Scope(id.Account, id.Region).Collection("fh-http-retries")
 	var storedRetries []spi.KV
-	for deadline := time.Now().Add(pollBudget); time.Now().Before(deadline); {
+	for deadline := time.After(pollBudget); polling(deadline); {
 		storedRetries, _, _ = retryCollection.List(context.Background(), "", "", 0)
 		if len(storedRetries) == 1 {
 			break
@@ -4744,12 +4757,12 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	if first(retried.payload, "requestId") != first(initialRetry.payload, "requestId") || retried.header.Get("X-Amz-Firehose-Access-Key") != "retry-success" {
 		t.Fatalf("HTTP retry %#v initial %#v", retried, initialRetry)
 	}
-	for deadline := time.Now().Add(pollBudget); ; {
+	for deadline := time.After(pollBudget); ; {
 		retries, _, _ := retryCollection.List(context.Background(), "", "", 0)
 		if len(retries) == 0 {
 			break
 		}
-		if !time.Now().Before(deadline) {
+		if !polling(deadline) {
 			t.Fatal("successful HTTP retry remained persisted")
 		}
 		time.Sleep(time.Millisecond)
@@ -4785,7 +4798,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	if first(retriedExhausted.payload, "requestId") != first(initialExhausted.payload, "requestId") {
 		t.Fatalf("HTTP retry request IDs %#v %#v", initialExhausted.payload, retriedExhausted.payload)
 	}
-	for deadline := time.Now().Add(pollBudget); ; {
+	for deadline := time.After(pollBudget); ; {
 		retries, _, _ := retryCollection.List(context.Background(), "", "", 0)
 		if len(retries) == 1 {
 			var retry httpRetry
@@ -4794,7 +4807,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 				break
 			}
 		}
-		if !time.Now().Before(deadline) {
+		if !polling(deadline) {
 			t.Fatal("HTTP retry state was not updated")
 		}
 		time.Sleep(time.Millisecond)
@@ -4869,12 +4882,12 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	if first(bufferedRequest.payload, "requestId") != bufferedFirst.Output["RecordId"] || len(bufferedRecords) != 2 || first(bufferedRecords[0].(map[string]any), "data") != base64.StdEncoding.EncodeToString([]byte("buffer-one")) || first(bufferedRecords[1].(map[string]any), "data") != base64.StdEncoding.EncodeToString([]byte("buffer-two")) {
 		t.Fatalf("buffered HTTP request %#v", bufferedRequest.payload)
 	}
-	for deadline := time.Now().Add(pollBudget); ; {
+	for deadline := time.After(pollBudget); ; {
 		items, _, _ := bufferCollection.List(context.Background(), "http-buffered/", "", 0)
 		if len(items) == 0 {
 			break
 		}
-		if !time.Now().Before(deadline) {
+		if !polling(deadline) {
 			t.Fatal("delivered HTTP buffer remained persisted")
 		}
 		time.Sleep(time.Millisecond)
@@ -4973,7 +4986,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	}
 	<-captured
 	var deleteRetry httpRetry
-	for deadline := time.Now().Add(pollBudget); ; {
+	for deadline := time.After(pollBudget); ; {
 		retries, _, _ := retryCollection.List(context.Background(), "", "", 0)
 		for _, item := range retries {
 			_ = json.Unmarshal(item.Value, &deleteRetry)
@@ -4984,7 +4997,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		if deleteRetry.Stream == "http-delete-retry" {
 			break
 		}
-		if !time.Now().Before(deadline) {
+		if !polling(deadline) {
 			t.Fatal("delete HTTP retry was not persisted")
 		}
 		time.Sleep(time.Millisecond)

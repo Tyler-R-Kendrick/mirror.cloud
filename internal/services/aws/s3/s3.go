@@ -2743,6 +2743,9 @@ func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket st
 	algorithm := requestCondition(req, "ServerSideEncryption", "x-amz-server-side-encryption")
 	keyID := requestCondition(req, "SSEKMSKeyId", "x-amz-server-side-encryption-aws-kms-key-id")
 	bucketKey := truthy(req.Input["BucketKeyEnabled"])
+	if !bucketKey && req.HTTP != nil {
+		bucketKey = truthy(req.HTTP.Header.Get("x-amz-server-side-encryption-bucket-key-enabled"))
+	}
 	defaultAlgorithm, defaultKeyID := "", ""
 	defaultBucketKey := false
 	raw, ok, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/encryption")

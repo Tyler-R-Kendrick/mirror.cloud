@@ -198,12 +198,20 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 		t.Fatalf("deleted key still there %d %s", code, b)
 	}
 
-	code, b, createHeaders := do(http.MethodPost, "/bucket-q/m?uploads", "", map[string]string{"x-amz-checksum-algorithm": "CRC32", "x-amz-checksum-type": "FULL_OBJECT", "x-amz-storage-class": "STANDARD_IA", "x-amz-tagging": "env=test&team=storage"})
+	multipartKeyID := "arn:aws:kms:us-east-1:000000000000:key/multipart-contract"
+	assertMultipartEncryption := func(name string, headers http.Header) {
+		t.Helper()
+		if headers.Get("x-amz-server-side-encryption") != "aws:kms" || headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != multipartKeyID || headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+			t.Fatalf("%s encryption headers %v", name, headers)
+		}
+	}
+	code, b, createHeaders := do(http.MethodPost, "/bucket-q/m?uploads", "", map[string]string{"x-amz-checksum-algorithm": "CRC32", "x-amz-checksum-type": "FULL_OBJECT", "x-amz-storage-class": "STANDARD_IA", "x-amz-tagging": "env=test&team=storage", "x-amz-server-side-encryption": "aws:kms", "x-amz-server-side-encryption-aws-kms-key-id": multipartKeyID, "x-amz-server-side-encryption-bucket-key-enabled": "true"})
 	if code >= 300 {
 		t.Fatalf("create mpu %d %s", code, b)
 	} else if createHeaders.Get("x-amz-checksum-algorithm") != "CRC32" || createHeaders.Get("x-amz-checksum-type") != "FULL_OBJECT" {
 		t.Fatalf("create mpu checksum headers %v", createHeaders)
 	}
+	assertMultipartEncryption("create", createHeaders)
 	uid := regexp.MustCompile(`<UploadId>([^<]+)</UploadId>`).FindSubmatch(b)
 	if uid == nil {
 		t.Fatalf("no UploadId in %s", b)
@@ -244,12 +252,14 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	if code >= 300 {
 		t.Fatalf("upload part %d %s", code, b)
 	}
+	assertMultipartEncryption("part", part1Headers)
 	code, b, part2Headers := do(http.MethodPut, "/bucket-q/m?partNumber=2&uploadId="+uploadID, "", map[string]string{"x-amz-copy-source": "bucket-q/src"})
 	if code >= 300 {
 		t.Fatalf("upload part copy %d %s", code, b)
 	} else if part2Headers.Get("x-mirror-fidelity") != "emulate" {
 		t.Fatalf("part copy fidelity %q", part2Headers.Get("x-mirror-fidelity"))
 	}
+	assertMultipartEncryption("part copy", part2Headers)
 	if code, b, _ := do(http.MethodGet, "/bucket-q/m?uploadId="+uploadID+"&max-parts=1", "", nil); code != 200 {
 		t.Fatalf("list parts page 1 %d %s", code, b)
 	} else if !bytes.Contains(b, []byte("<Part><ChecksumCRC32>")) || bytes.Contains(b, []byte("<member>")) || !bytes.Contains(b, []byte("<PartNumber>1</PartNumber>")) || !bytes.Contains(b, []byte("<IsTruncated>true</IsTruncated>")) || !bytes.Contains(b, []byte("<NextPartNumberMarker>1</NextPartNumberMarker>")) || !bytes.Contains(b, []byte("<ChecksumAlgorithm>CRC32</ChecksumAlgorithm>")) || !bytes.Contains(b, []byte("<ChecksumType>FULL_OBJECT</ChecksumType>")) {
@@ -294,9 +304,13 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 		t.Fatalf("multipart etag %s %v", b, h)
 	} else if !bytes.Contains(b, []byte(checksum)) {
 		t.Fatalf("multipart checksum output %s", b)
+	} else {
+		assertMultipartEncryption("complete", h)
 	}
 	if code, b, h := do(http.MethodGet, "/bucket-q/m", "", map[string]string{"x-amz-checksum-mode": "ENABLED"}); code != http.StatusOK || h.Get("x-amz-checksum-crc32") != checksum || h.Get("x-amz-checksum-type") != "FULL_OBJECT" || h.Get("x-amz-storage-class") != "STANDARD_IA" {
 		t.Fatalf("get multipart checksum %d %s %v", code, b, h)
+	} else {
+		assertMultipartEncryption("get", h)
 	}
 	partRange := fmt.Sprintf("bytes %d-%d/%d", 5<<20, size-1, size)
 	if code, b, h := do(http.MethodGet, "/bucket-q/m?partNumber=2", "", map[string]string{"x-amz-checksum-mode": "ENABLED"}); code != http.StatusPartialContent || string(b) != "SRC-BYTES" || h.Get("Content-Length") != strconv.Itoa(len("SRC-BYTES")) || h.Get("Content-Range") != partRange || h.Get("x-amz-mp-parts-count") != "2" || h.Get("x-amz-checksum-crc32") != "" {

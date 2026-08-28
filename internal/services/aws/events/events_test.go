@@ -391,13 +391,24 @@ func TestPutTargetsValidatesReliability(t *testing.T) {
 	}
 }
 
+// eventuallyEvent waits for a delivery the scheduler makes on its own
+// goroutine after the test advances the controllable clock.
+//
+// The wait is on the wall clock for something driven by simulated time, which
+// is the real fragility here: the clock jump is synchronous and the delivery
+// is not, so the test can only poll. The deadline is therefore generous rather
+// than tight -- a passing run reaches its condition in milliseconds and pays
+// nothing, while a loaded machine running under -race no longer fails a
+// correct implementation for being slow. Making this deterministic needs the
+// scheduler to expose a "due deliveries flushed" point, which is a change to a
+// pack that is scheduled for extraction.
 func eventuallyEvent(t *testing.T, condition func() bool) {
 	t.Helper()
-	deadline := time.After(10 * time.Second)
+	deadline := time.After(60 * time.Second)
 	for !condition() {
 		select {
 		case <-deadline:
-			t.Fatal("condition not met")
+			t.Fatal("scheduled delivery did not arrive within 60s of advancing the clock")
 		default:
 			time.Sleep(time.Millisecond)
 		}

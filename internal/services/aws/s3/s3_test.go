@@ -755,9 +755,16 @@ func TestMultipartSSECustomerKey(t *testing.T) {
 	readInput := maps.Clone(encryption)
 	readInput["Bucket"], readInput["Key"] = "multipart-sse-c", "object"
 	get := mustInvoke(t, p, "GetObject", readInput, nil)
-	if string(readStream(t, get)) != "body" || get.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != keyMD5 {
+	body := string(readStream(t, get))
+	if body != "body" || get.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != keyMD5 {
 		t.Fatalf("stored multipart SSE-C headers = %v", get.Headers)
 	}
+	golden.AssertJSON(t, map[string]any{
+		"create":   map[string]any{"algorithm": created.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": created.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == keyMD5},
+		"part":     map[string]any{"algorithm": part.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": part.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == keyMD5},
+		"complete": map[string]any{"algorithm": completed.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": completed.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == keyMD5},
+		"get":      map[string]any{"algorithm": get.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": get.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == keyMD5, "body": body},
+	})
 }
 
 func TestCopyObjectTaggingDirective(t *testing.T) {

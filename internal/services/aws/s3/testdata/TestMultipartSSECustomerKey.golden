@@ -1,0 +1,19 @@
+{
+  "complete": {
+    "algorithm": "AES256",
+    "keyMD5Matches": true
+  },
+  "create": {
+    "algorithm": "AES256",
+    "keyMD5Matches": true
+  },
+  "get": {
+    "algorithm": "AES256",
+    "body": "body",
+    "keyMD5Matches": true
+  },
+  "part": {
+    "algorithm": "AES256",
+    "keyMD5Matches": true
+  }
+}

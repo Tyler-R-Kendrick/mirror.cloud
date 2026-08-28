@@ -660,18 +660,25 @@ func TestObjectSSECustomerKey(t *testing.T) {
 		t.Fatalf("SSE-C body = %q", body)
 	}
 	md5Only := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "sse-c", "Key": "object", "VersionId": put.Headers.Get("x-amz-version-id"), "SSECustomerKeyMD5": keyMD5}, nil)
-	for name, changes := range map[string]map[string]any{
-		"algorithm":  {"SSECustomerAlgorithm": "AES128"},
-		"short key":  {"SSECustomerKey": base64.StdEncoding.EncodeToString([]byte("short"))},
-		"key digest": {"SSECustomerKeyMD5": "AAAAAAAAAAAAAAAAAAAAAA=="},
-		"mixed SSE":  {"ServerSideEncryption": "AES256"},
+	shortDigest := md5.Sum([]byte("short"))
+	for name, test := range map[string]struct {
+		changes map[string]any
+		code    string
+	}{
+		"algorithm":         {map[string]any{"SSECustomerAlgorithm": "AES128"}, "InvalidEncryptionAlgorithmError"},
+		"short key":         {map[string]any{"SSECustomerKey": base64.StdEncoding.EncodeToString([]byte("short")), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(shortDigest[:])}, "InvalidArgument"},
+		"key encoding":      {map[string]any{"SSECustomerKey": "*"}, "InvalidArgument"},
+		"key digest":        {map[string]any{"SSECustomerKeyMD5": "AAAAAAAAAAAAAAAAAAAAAA=="}, "InvalidArgument"},
+		"mixed SSE":         {map[string]any{"ServerSideEncryption": "AES256"}, "InvalidArgument"},
+		"missing algorithm": {map[string]any{"SSECustomerAlgorithm": ""}, "InvalidArgument"},
+		"missing key":       {map[string]any{"SSECustomerKey": ""}, "InvalidArgument"},
 	} {
 		invalid := maps.Clone(input)
-		for key, value := range changes {
+		for key, value := range test.changes {
 			invalid[key] = value
 		}
-		if _, err := invoke(t, p, "PutObject", invalid, []byte("bad")); err == nil {
-			t.Fatalf("%s SSE-C accepted", name)
+		if _, err := invoke(t, p, "PutObject", invalid, []byte("bad")); asFault(t, err).Code != test.code {
+			t.Fatalf("%s SSE-C fault = %v", name, err)
 		}
 	}
 	golden.AssertJSON(t, map[string]any{

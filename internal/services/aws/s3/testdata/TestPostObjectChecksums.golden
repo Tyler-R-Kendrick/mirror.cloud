@@ -1,0 +1,36 @@
+{
+  "CRC32": {
+    "checksum": "y/Q5Jg==",
+    "type": "FULL_OBJECT",
+    "versioned": true
+  },
+  "CRC32C": {
+    "checksum": "4waSgw==",
+    "type": "FULL_OBJECT",
+    "versioned": true
+  },
+  "CRC64NVME": {
+    "checksum": "rosUhgp5mIg=",
+    "type": "FULL_OBJECT",
+    "versioned": true
+  },
+  "SHA1": {
+    "checksum": "98O8HYCOBHMq32eZZczDTKeuNEE=",
+    "type": "FULL_OBJECT",
+    "versioned": true
+  },
+  "SHA256": {
+    "checksum": "FeKw08M4keuw8e9gnsQZQgwg4yDOlMZfvIwzEkSOsiU=",
+    "type": "FULL_OBJECT",
+    "versioned": true
+  },
+  "invalid value": {
+    "code": "InvalidRequest",
+    "message": "Value for x-amz-checksum-crc32 header is invalid.",
+    "status": 400
+  },
+  "unsupported algorithm": {
+    "code": "InvalidArgument",
+    "status": 400
+  }
+}

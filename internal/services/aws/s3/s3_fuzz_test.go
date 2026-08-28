@@ -1021,3 +1021,55 @@ func FuzzMultipartServerSideEncryption(f *testing.F) {
 		}
 	})
 }
+
+func FuzzMultipartSSECustomerKey(f *testing.F) {
+	f.Add(uint8(0), []byte("key"), "body")
+	f.Add(uint8(1), []byte("digest-only"), "md5")
+	f.Add(uint8(2), []byte("missing"), "reject")
+	f.Add(uint8(3), []byte("mismatch"), "reject")
+	f.Fuzz(func(t *testing.T, kind uint8, key []byte, body string) {
+		if len(key) > 4096 || len(body) > 4096 {
+			t.Skip()
+		}
+		rawKey := sha256.Sum256(key)
+		digest := md5.Sum(rawKey[:])
+		key64, keyMD5 := base64.StdEncoding.EncodeToString(rawKey[:]), base64.StdEncoding.EncodeToString(digest[:])
+		encryption := map[string]any{"SSECustomerAlgorithm": "AES256", "SSECustomerKey": key64, "SSECustomerKeyMD5": keyMD5}
+		create := map[string]any{"Bucket": "multipart-sse-c-fuzz", "Key": "object", "SSECustomerAlgorithm": "AES256", "SSECustomerKey": key64, "SSECustomerKeyMD5": keyMD5}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-sse-c-fuzz"}, nil)
+		created := mustInvoke(t, p, "CreateMultipartUpload", create, nil)
+		uploadID := created.Output["UploadId"].(string)
+		partInput := map[string]any{"UploadId": uploadID, "PartNumber": 1}
+		mode := kind % 4
+		switch mode {
+		case 0:
+			for name, value := range encryption {
+				partInput[name] = value
+			}
+		case 1:
+			partInput["SSECustomerKeyMD5"] = keyMD5
+		case 3:
+			digest[0] ^= 0xff
+			partInput["SSECustomerKeyMD5"] = base64.StdEncoding.EncodeToString(digest[:])
+		}
+		part, err := invoke(t, p, "UploadPart", partInput, []byte(body))
+		if mode >= 2 {
+			if fault := asFault(t, err); fault.Code != "InvalidRequest" {
+				t.Fatalf("part fault = %+v", fault)
+			}
+			return
+		}
+		if err != nil || part.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != keyMD5 {
+			t.Fatalf("part %v headers=%v", err, part.Headers)
+		}
+		completed := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
+		if completed.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != keyMD5 {
+			t.Fatalf("complete headers=%v", completed.Headers)
+		}
+		get := mustInvoke(t, p, "GetObject", create, nil)
+		if string(readStream(t, get)) != body {
+			t.Fatal("multipart customer body mismatch")
+		}
+	})
+}

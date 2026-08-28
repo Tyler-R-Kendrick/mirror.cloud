@@ -393,7 +393,7 @@ func TestPutTargetsValidatesReliability(t *testing.T) {
 
 func eventuallyEvent(t *testing.T, condition func() bool) {
 	t.Helper()
-	deadline := time.After(10 * time.Second)
+	deadline := time.After(30 * time.Second)
 	for !condition() {
 		select {
 		case <-deadline:

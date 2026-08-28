@@ -8,5 +8,6 @@
   "put": {
     "algorithm": "AES256",
     "keyMD5Matches": true
-  }
+  },
+  "version": true
 }

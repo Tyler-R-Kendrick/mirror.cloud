@@ -637,6 +637,7 @@ func TestObjectServerSideEncryption(t *testing.T) {
 func TestObjectSSECustomerKey(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "sse-c"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "sse-c", "Status": "Enabled"}, nil)
 	rawKey := []byte("0123456789abcdef0123456789abcdef")
 	key := base64.StdEncoding.EncodeToString(rawKey)
 	digest := md5.Sum(rawKey)
@@ -649,7 +650,7 @@ func TestObjectSSECustomerKey(t *testing.T) {
 	if _, err := invoke(t, p, "HeadObject", map[string]any{"Bucket": "sse-c", "Key": "object"}, nil); asFault(t, err).Code != "InvalidRequest" {
 		t.Fatal("SSE-C object read without key")
 	}
-	readInput := map[string]any{"Bucket": "sse-c", "Key": "object", "SSECustomerAlgorithm": "AES256", "SSECustomerKey": key, "SSECustomerKeyMD5": keyMD5}
+	readInput := map[string]any{"Bucket": "sse-c", "Key": "object", "VersionId": put.Headers.Get("x-amz-version-id"), "SSECustomerAlgorithm": "AES256", "SSECustomerKey": key, "SSECustomerKeyMD5": keyMD5}
 	head := mustInvoke(t, p, "HeadObject", readInput, nil)
 	if head.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != keyMD5 {
 		t.Fatalf("head SSE-C headers = %v", head.Headers)
@@ -658,7 +659,7 @@ func TestObjectSSECustomerKey(t *testing.T) {
 	if body != "secret" {
 		t.Fatalf("SSE-C body = %q", body)
 	}
-	md5Only := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "sse-c", "Key": "object", "SSECustomerKeyMD5": keyMD5}, nil)
+	md5Only := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "sse-c", "Key": "object", "VersionId": put.Headers.Get("x-amz-version-id"), "SSECustomerKeyMD5": keyMD5}, nil)
 	for name, changes := range map[string]map[string]any{
 		"algorithm":  {"SSECustomerAlgorithm": "AES128"},
 		"short key":  {"SSECustomerKey": base64.StdEncoding.EncodeToString([]byte("short"))},
@@ -678,6 +679,7 @@ func TestObjectSSECustomerKey(t *testing.T) {
 		"head":    map[string]any{"algorithm": head.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": head.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == keyMD5},
 		"md5Only": md5Only.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == keyMD5,
 		"body":    body,
+		"version": put.Headers.Get("x-amz-version-id") != "",
 	})
 }
 

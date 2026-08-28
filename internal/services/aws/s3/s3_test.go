@@ -588,8 +588,9 @@ func TestObjectServerSideEncryption(t *testing.T) {
 	if defaultPut.Headers.Get("x-amz-server-side-encryption") != "AES256" {
 		t.Fatalf("default encryption = %v", defaultPut.Headers)
 	}
-	if head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "encrypted", "Key": "default"}, nil); head.Headers.Get("x-amz-server-side-encryption") != "AES256" {
-		t.Fatalf("stored default encryption = %v", head.Headers)
+	defaultHead := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "encrypted", "Key": "default"}, nil)
+	if defaultHead.Headers.Get("x-amz-server-side-encryption") != "AES256" {
+		t.Fatalf("stored default encryption = %v", defaultHead.Headers)
 	}
 
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "encrypted", "Status": "Enabled"}, nil)
@@ -598,8 +599,9 @@ func TestObjectServerSideEncryption(t *testing.T) {
 	if kms.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || kms.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || kms.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" || kms.Headers.Get("x-amz-version-id") == "" {
 		t.Fatalf("kms response = %v", kms.Headers)
 	}
-	if head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "encrypted", "Key": "kms", "VersionId": kms.Headers.Get("x-amz-version-id")}, nil); head.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || head.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
-		t.Fatalf("stored kms encryption = %v", head.Headers)
+	kmsHead := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "encrypted", "Key": "kms", "VersionId": kms.Headers.Get("x-amz-version-id")}, nil)
+	if kmsHead.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || kmsHead.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+		t.Fatalf("stored kms encryption = %v", kmsHead.Headers)
 	}
 
 	configuration := map[string]any{"Rules": []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "aws:kms", "KMSMasterKeyID": keyID}, "BucketKeyEnabled": true}}}
@@ -624,6 +626,12 @@ func TestObjectServerSideEncryption(t *testing.T) {
 	if restored := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "encrypted", "Key": "restored-default"}, []byte("body")); restored.Headers.Get("x-amz-server-side-encryption") != "AES256" {
 		t.Fatalf("restored default = %v", restored.Headers)
 	}
+	golden.AssertJSON(t, map[string]any{
+		"default":   map[string]any{"put": defaultPut.Headers.Get("x-amz-server-side-encryption"), "head": defaultHead.Headers.Get("x-amz-server-side-encryption")},
+		"explicit":  map[string]any{"algorithm": kms.Headers.Get("x-amz-server-side-encryption"), "key": kmsHead.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id"), "bucketKey": kmsHead.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled"), "versioned": kms.Headers.Get("x-amz-version-id") != ""},
+		"inherited": map[string]any{"algorithm": inherited.Headers.Get("x-amz-server-side-encryption"), "key": inherited.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id"), "bucketKey": inherited.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled")},
+		"override":  map[string]any{"algorithm": overridden.Headers.Get("x-amz-server-side-encryption"), "key": overridden.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id"), "bucketKey": overridden.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled")},
+	})
 }
 
 func TestCopyObjectTaggingDirective(t *testing.T) {

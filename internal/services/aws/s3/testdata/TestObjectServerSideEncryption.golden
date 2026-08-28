@@ -1,0 +1,22 @@
+{
+  "default": {
+    "head": "AES256",
+    "put": "AES256"
+  },
+  "explicit": {
+    "algorithm": "aws:kms",
+    "bucketKey": "true",
+    "key": "arn:aws:kms:us-east-1:123456789012:key/test",
+    "versioned": true
+  },
+  "inherited": {
+    "algorithm": "aws:kms",
+    "bucketKey": "true",
+    "key": "arn:aws:kms:us-east-1:123456789012:key/test"
+  },
+  "override": {
+    "algorithm": "AES256",
+    "bucketKey": "",
+    "key": ""
+  }
+}

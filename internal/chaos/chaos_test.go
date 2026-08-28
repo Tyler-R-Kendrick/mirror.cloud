@@ -764,6 +764,53 @@ func TestEncryptedMultipartCompletionFailurePreservesUpload(t *testing.T) {
 	}
 }
 
+func TestCustomerEncryptedMultipartCompletionFailurePreservesUpload(t *testing.T) {
+	deps := spitest.Deps(t)
+	blobs := &failBlobs{BlobStore: deps.Blobs}
+	deps.Blobs = blobs
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != nil {
+			stream = io.NopCloser(bytes.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "multipart-sse-c"}, nil)
+	rawKey := []byte("0123456789abcdef0123456789abcdef")
+	digest := md5.Sum(rawKey)
+	encryption := map[string]any{"SSECustomerAlgorithm": "AES256", "SSECustomerKey": base64.StdEncoding.EncodeToString(rawKey), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(digest[:])}
+	create := map[string]any{"Bucket": "multipart-sse-c", "Key": "object"}
+	for key, value := range encryption {
+		create[key] = value
+	}
+	created, err := call("CreateMultipartUpload", create, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID := created.Output["UploadId"].(string)
+	partInput := map[string]any{"UploadId": uploadID, "PartNumber": 1}
+	for key, value := range encryption {
+		partInput[key] = value
+	}
+	part, err := call("UploadPart", partInput, []byte("body"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	complete := map[string]any{"UploadId": uploadID, "MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}}
+	blobs.fail = true
+	if _, err := call("CompleteMultipartUpload", complete, nil); err == nil {
+		t.Fatal("expected injected completion failure")
+	}
+	blobs.fail = false
+	completed, err := call("CompleteMultipartUpload", complete, nil)
+	if err != nil || completed.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != encryption["SSECustomerKeyMD5"] {
+		t.Fatalf("recovered customer completion: %#v %v", completed, err)
+	}
+}
+
 func TestPostObjectBlobFailureLeavesNoObject(t *testing.T) {
 	deps := spitest.Deps(t)
 	deps.Blobs = failBlobs{BlobStore: deps.Blobs, fail: true}

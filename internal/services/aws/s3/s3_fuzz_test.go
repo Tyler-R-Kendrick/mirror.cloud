@@ -840,3 +840,39 @@ func FuzzPostObjectExpires(f *testing.F) {
 		}
 	})
 }
+
+func FuzzPostObjectChecksums(f *testing.F) {
+	f.Add(uint8(0), "body")
+	f.Add(uint8(4), "")
+	f.Fuzz(func(t *testing.T, algorithmIndex uint8, body string) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		algorithms := []string{"CRC32", "CRC32C", "CRC64NVME", "SHA1", "SHA256"}
+		algorithm := algorithms[int(algorithmIndex)%len(algorithms)]
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "post-checksum-fuzz"}, nil)
+		var payload bytes.Buffer
+		writer := multipart.NewWriter(&payload)
+		_ = writer.WriteField("key", "fuzz-checksum")
+		_ = writer.WriteField("x-amz-checksum-algorithm", algorithm)
+		file, _ := writer.CreateFormFile("file", "file.txt")
+		_, _ = io.WriteString(file, body)
+		_ = writer.Close()
+		httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/post-checksum-fuzz", &payload)
+		httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+		response, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": "post-checksum-fuzz"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest})
+		if err != nil {
+			t.Fatal(err)
+		}
+		header := "x-amz-checksum-" + strings.ToLower(algorithm)
+		checksum := response.Headers.Get(header)
+		if checksum == "" || response.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+			t.Fatalf("headers = %v", response.Headers)
+		}
+		head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "post-checksum-fuzz", "Key": "fuzz-checksum", "ChecksumMode": "ENABLED"}, nil)
+		if head.Headers.Get(header) != checksum {
+			t.Fatalf("stored checksum = %q, want %q", head.Headers.Get(header), checksum)
+		}
+	})
+}

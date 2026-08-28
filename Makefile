@@ -2,7 +2,7 @@ BIN := bin
 GO  := go
 export CGO_ENABLED := 0
 
-.PHONY: all build test test-unit test-contract test-snapshot test-chaos test-bdd test-fuzz-seeds test-fuzz test-mutation test-race test-coverage vet fmt generate specs-sync
+.PHONY: all build test test-unit test-contract test-snapshot test-chaos test-bdd test-fuzz-seeds test-fuzz test-mutation test-race test-coverage vet fmt generate specs-sync specs-refresh
 
 all: build
 
@@ -99,5 +99,15 @@ fmt:
 generate:
 	$(GO) run ./cmd/mirrorgen
 
+# Fetches exactly what specs/mirror.lock pins, so the generated models follow
+# from the lock on any machine at any time.
 specs-sync:
 	bash scripts/specs-sync.sh
+
+# Moves the pins forward: AWS from its default branch, Google Discovery
+# refetched. Whatever changed upstream lands as a reviewable diff in the lock,
+# in specs/gcp/ and in the regenerated models -- which is how an unannounced
+# vendor change gets noticed, so it must be a deliberate act and never a side
+# effect of a build.
+specs-refresh:
+	SPECS_REFRESH=1 bash scripts/specs-sync.sh

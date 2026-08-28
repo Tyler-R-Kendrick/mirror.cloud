@@ -84,11 +84,15 @@ agent/
 data/
 skills/
 
-# Vendored upstream specs: ~92 MB, reproducible from specs/mirror.lock
-# (sha256 per file) via `make specs-sync`. The generated models below are the
-# committed artifact; these are their input.
+# Vendored AWS models: ~92 MB, and reproducible byte-for-byte from the commit
+# pinned in specs/mirror.lock via `make specs-sync`. The generated models are
+# the committed artifact; these are their input.
 specs/aws/
-specs/gcp/
+# specs/gcp/ is NOT ignored. Google Discovery is served live from a URL with
+# no revision to pin, so the document itself is the pin: it is committed, its
+# sha256 is in the lock, and `make specs-sync` uses the committed copy rather
+# than refetching. `make specs-refresh` is how it moves, deliberately, with a
+# reviewable diff. It is 244 KB.
 
 # OS
 .DS_Store

@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
-# Fetch pinned provider specs into specs/ and rewrite specs/mirror.lock.
+# Fetch the pinned provider specs into specs/ and rewrite specs/mirror.lock.
+#
+# The lock is a pin, not a receipt. By default this script fetches exactly what
+# specs/mirror.lock names -- the AWS models at the commit it records, and the
+# committed Google Discovery document -- so the generated models follow from
+# the lock byte-for-byte on any machine, at any time. That property is what
+# makes the committed models trustworthy as a build input, and CI asserts it.
+#
+# SPECS_REFRESH=1 (or `make specs-refresh`) moves the pins forward instead:
+# AWS is taken from AWS_REF, Discovery is refetched, and whatever changed
+# upstream shows up as a reviewable diff in the lock, in specs/gcp/ and in the
+# regenerated models. Discovering an unannounced vendor change is the point of
+# that diff, so it must never happen silently as a side effect of a build.
 #
 # Service IDs are resolved by asking `mirrorgen -index` what each upstream
 # model declares, not by guessing directory names: the receivers that derive
@@ -16,6 +28,7 @@ cd "$ROOT"
 
 AWS_REPO="${AWS_REPO:-https://github.com/aws/api-models-aws}"
 AWS_REF="${AWS_REF:-main}"
+REFRESH="${SPECS_REFRESH:-}"
 GCS_URL='https://storage.googleapis.com/$discovery/rest?version=v1'
 LOCK="$ROOT/specs/mirror.lock"
 SET="$ROOT/specs/mirror.set"
@@ -66,17 +79,50 @@ trap cleanup EXIT
 AWS_SHA=""
 copied=()
 
+# pinned_aws_ref reads the AWS commit the lock records, so a plain sync
+# reproduces that exact tree. Empty when there is no lock yet.
+pinned_aws_ref() {
+  [[ -f "$LOCK" ]] || return 0
+  python3 - "$LOCK" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        print(json.load(fh).get("pin", {}).get("aws", {}).get("ref", ""))
+except (OSError, ValueError):
+    pass
+PY
+}
+
 if ((want_aws)); then
-  echo "specs-sync: cloning $AWS_REPO@$AWS_REF (shallow)…" >&2
-  if ! git clone --depth 1 --filter=blob:none --sparse --branch "$AWS_REF" "$AWS_REPO" "$TMP/aws" >/dev/null 2>"$TMP/git.err"; then
-    # Some git builds reject --filter; retry a plain shallow clone.
-    if ! git clone --depth 1 --branch "$AWS_REF" "$AWS_REPO" "$TMP/aws" >/dev/null 2>>"$TMP/git.err"; then
-      die "git clone failed: $(tr '\n' ' ' < "$TMP/git.err")"
+  pin=""
+  if [[ -z "$REFRESH" ]]; then
+    pin="$(pinned_aws_ref)"
+  fi
+
+  if [[ -n "$pin" ]]; then
+    # Fetch the pinned commit itself. `clone --branch` only takes a name, so
+    # this is init + fetch of the one object, which is also cheaper.
+    echo "specs-sync: fetching $AWS_REPO at pinned $pin…" >&2
+    mkdir -p "$TMP/aws"
+    git -C "$TMP/aws" init -q 2>"$TMP/git.err" || die "git init failed"
+    git -C "$TMP/aws" remote add origin "$AWS_REPO" 2>>"$TMP/git.err" || die "git remote failed"
+    if ! git -C "$TMP/aws" fetch -q --depth 1 origin "$pin" 2>>"$TMP/git.err"; then
+      die "could not fetch pinned commit $pin: $(tr '\n' ' ' < "$TMP/git.err"); \
+if the pin is gone upstream, re-pin with SPECS_REFRESH=1 make specs-sync"
     fi
+    git -C "$TMP/aws" checkout -q FETCH_HEAD 2>>"$TMP/git.err" || die "git checkout failed"
   else
-    # Every model is needed: the index asks each one which service it is.
-    git -C "$TMP/aws" sparse-checkout set --no-cone 'models/**' >/dev/null 2>>"$TMP/git.err" \
-      || echo "specs-sync: sparse-checkout failed; using full tree" >&2
+    echo "specs-sync: cloning $AWS_REPO@$AWS_REF (shallow)…" >&2
+    if ! git clone --depth 1 --filter=blob:none --sparse --branch "$AWS_REF" "$AWS_REPO" "$TMP/aws" >/dev/null 2>"$TMP/git.err"; then
+      # Some git builds reject --filter; retry a plain shallow clone.
+      if ! git clone --depth 1 --branch "$AWS_REF" "$AWS_REPO" "$TMP/aws" >/dev/null 2>>"$TMP/git.err"; then
+        die "git clone failed: $(tr '\n' ' ' < "$TMP/git.err")"
+      fi
+    else
+      # Every model is needed: the index asks each one which service it is.
+      git -C "$TMP/aws" sparse-checkout set --no-cone 'models/**' >/dev/null 2>>"$TMP/git.err" \
+        || echo "specs-sync: sparse-checkout failed; using full tree" >&2
+    fi
   fi
 
   AWS_SHA="$(git -C "$TMP/aws" rev-parse HEAD)"
@@ -106,13 +152,28 @@ fi
 
 gcs_etag=""
 if ((want_gcp)); then
-  echo "specs-sync: fetching GCS discovery JSON…" >&2
-  if ! fetch "$GCS_URL" > "$TMP/storage.json"; then
-    die "failed to fetch $GCS_URL"
-  fi
+  gcs_dest="$ROOT/specs/gcp/storage.json"
   mkdir -p "$ROOT/specs/gcp"
-  cp -f "$TMP/storage.json" "$ROOT/specs/gcp/storage.json"
-  # ETag is optional; the hash is the lock.
+  # Discovery is served live from a URL with no revision to pin, so the
+  # document itself is the pin: it is committed, and a plain sync uses the
+  # committed copy. Refetching by default would make every build depend on
+  # what Google happened to be serving that minute -- which is exactly the
+  # failure this replaces, where CI went red because the document changed
+  # between two runs an hour apart.
+  if [[ -z "$REFRESH" && -s "$gcs_dest" ]]; then
+    echo "specs-sync: using the committed GCS discovery document (SPECS_REFRESH=1 to refetch)" >&2
+  else
+    echo "specs-sync: fetching GCS discovery JSON…" >&2
+    if ! fetch "$GCS_URL" > "$TMP/storage.json"; then
+      die "failed to fetch $GCS_URL"
+    fi
+    if [[ -s "$gcs_dest" ]] && ! cmp -s "$TMP/storage.json" "$gcs_dest"; then
+      echo "specs-sync: the GCS discovery document changed upstream; review the diff in specs/gcp/" >&2
+    fi
+    cp -f "$TMP/storage.json" "$gcs_dest"
+  fi
+  # The hash is the lock; this is the timestamp of the fetch that produced the
+  # content, held steady below while the content is.
   gcs_etag="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 fi
 

@@ -634,6 +634,33 @@ func TestObjectServerSideEncryption(t *testing.T) {
 	})
 }
 
+func TestMultipartServerSideEncryption(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-encryption"}, nil)
+	keyID := "arn:aws:kms:us-east-1:123456789012:key/multipart"
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-encryption", "Key": "object", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true}, nil)
+	assertEncryption := func(name string, response *spi.Response) {
+		t.Helper()
+		if response.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || response.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || response.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+			t.Fatalf("%s encryption = %v", name, response.Headers)
+		}
+	}
+	assertEncryption("create", created)
+	uploadID := created.Output["UploadId"].(string)
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 1}, []byte("body"))
+	assertEncryption("part", part)
+	aes := map[string]any{"Rules": []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256"}}}}
+	mustInvoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": "multipart-encryption", "ServerSideEncryptionConfiguration": aes}, nil)
+	completed := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
+	assertEncryption("complete", completed)
+	assertEncryption("head", mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "multipart-encryption", "Key": "object"}, nil))
+
+	_, err := invoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-encryption", "Key": "invalid", "ServerSideEncryption": "invalid"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("invalid encryption fault = %+v", fault)
+	}
+}
+
 func TestCopyObjectTaggingDirective(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

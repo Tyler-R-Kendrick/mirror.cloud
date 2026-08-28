@@ -93,9 +93,29 @@ func Validate(s *Service, svc *model.Service) error {
 		compile(where+".id.derive", res.ID.Derive)
 		for _, k := range sortedKeys(res.Record) {
 			compile(where+".record."+k, res.Record[k])
+			if reservedMember(k) {
+				problems = append(problems, fmt.Errorf(
+					"%s: %s.record.%s: %s is reserved for the record's lifecycle state",
+					s.ServiceID, where, k, k))
+			}
 		}
 		for _, k := range sortedKeys(res.Views) {
 			compile(where+".views."+k, res.Views[k])
+			// Views are merged onto the record when it is read, so a view that
+			// shares a name with a stored member would silently shadow it and
+			// the two would disagree the moment either changed.
+			if _, clash := res.Record[k]; clash {
+				problems = append(problems, fmt.Errorf(
+					"%s: %s.views.%s: a record member of that name already exists; "+
+						"a view may not shadow stored data", s.ServiceID, where, k))
+			}
+		}
+		if res.Key != "" {
+			if _, ok := res.Record[res.Key]; !ok {
+				problems = append(problems, fmt.Errorf(
+					"%s: %s.key: keys on %q, which the record does not set",
+					s.ServiceID, where, res.Key))
+			}
 		}
 		if res.Statechart != nil {
 			// Transitions additionally see the event that triggered them.
@@ -196,9 +216,17 @@ func Validate(s *Service, svc *model.Service) error {
 				problems = append(problems, fmt.Errorf("%s: %s.select: no binding", s.ServiceID, where))
 			}
 			compile(where+".select.limit", sel.Limit)
-			compile(where+".select.filter", sel.Filter)
+			// order_by and filter are evaluated once per candidate, which is
+			// bound as `item`.
+			perItem := compilerFor(append(append([]string{}, scope...), "item")...)
+			perItem(where+".select.filter", sel.Filter)
+			perItem(where+".select.order_by", sel.OrderBy)
 			if sel.Group != nil {
 				compile(where+".select.group.when", sel.Group.When)
+				if sel.Group.By == "" {
+					problems = append(problems, fmt.Errorf("%s: %s.select.group: no `by` member",
+						s.ServiceID, where))
+				}
 			}
 		}
 		if w := op.Wait; w != nil {
@@ -208,6 +236,7 @@ func Validate(s *Service, svc *model.Service) error {
 			}
 			compile(where+".wait.until", w.Until)
 			compile(where+".wait.timeout", w.Timeout)
+			compileAny(where+".wait.on_timeout.output", asMapAny(w.OnTimeout["output"]), compile)
 		}
 
 		for i, eff := range op.Effects {
@@ -309,6 +338,12 @@ func validateStatechart(s *Service, where string, sc *Statechart, compile func(s
 							*problems = append(*problems, fmt.Errorf("%s: %s.deadline: no name", s.ServiceID, aw))
 						}
 					}
+					if act.Move != nil {
+						for _, k := range sortedKeys(act.Move.To) {
+							compile(aw+".move.to."+k, act.Move.To[k])
+						}
+						compileAny(aw+".move.set", act.Move.Set, compile)
+					}
 					if act.Move != nil && act.Move.State != "" {
 						// The move target lives in another collection, so its
 						// state belongs to that resource's chart; only require
@@ -375,6 +410,10 @@ func validateEffect(s *Service, where string, eff Effect, compile func(string, s
 		set++
 		compile(where+".dedup.key", e.Key)
 		compile(where+".dedup.when", e.When)
+		for _, k := range sortedKeys(e.Record) {
+			compile(where+".dedup.record."+k, e.Record[k])
+		}
+		compileAny(where+".dedup.on_hit.output", asMapAny(e.OnHit["output"]), compile)
 		if e.Table == "" || e.TTL == "" {
 			*problems = append(*problems, fmt.Errorf("%s: %s.dedup: table and ttl are required", s.ServiceID, where))
 		}
@@ -447,6 +486,28 @@ func sortedKeysAny(m map[string]any) []string { return sortedKeys(m) }
 func opWrites(op Operation) bool {
 	for _, e := range op.Effects {
 		if e.Create != nil || e.Put != nil || e.Patch != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// asMapAny narrows an inline output block to the map form the compiler walks.
+func asMapAny(v any) map[string]any {
+	m, _ := v.(map[string]any)
+	return m
+}
+
+// ReservedMembers are the record members the engine owns. A record with a
+// lifecycle stores its state and its armed deadlines alongside its data, which
+// keeps the two atomic; the cost is that these two names are not a bundle's to
+// use, and saying so at load time is cheaper than debugging a record whose
+// state a service overwrote.
+var ReservedMembers = []string{"__state", "__deadlines"}
+
+func reservedMember(name string) bool {
+	for _, r := range ReservedMembers {
+		if name == r {
 			return true
 		}
 	}

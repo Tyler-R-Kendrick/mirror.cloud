@@ -23,6 +23,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -121,7 +122,33 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 	if fault := ev.checkRequires(op); fault != nil {
 		return nil, fault
 	}
+	// Select is the observation point: expired deadlines fire here, so what an
+	// operation acts on is a function of the clock reading rather than of when
+	// anyone last looked. Wait re-observes until the bundle's condition holds.
+	if err := ev.runSelect(ctx, op); err != nil {
+		return nil, err
+	}
+	if err := ev.runWait(ctx, op); err != nil {
+		return nil, err
+	}
+	if op.Wait != nil && len(op.Wait.OnTimeout) > 0 {
+		done, err := ev.evalBool("operations." + req.Operation + ".wait.until")
+		if err != nil {
+			return nil, err
+		}
+		if !done {
+			out, err := ev.projectMap("operations."+req.Operation+".wait.on_timeout.output",
+				op.Wait.OnTimeout["output"])
+			if err != nil {
+				return nil, err
+			}
+			return &spi.Response{Output: out}, nil
+		}
+	}
 	if err := ev.runEffects(ctx, op); err != nil {
+		if errors.Is(err, errShortCircuit) {
+			return &spi.Response{Output: ev.shortOutput}, nil
+		}
 		return nil, err
 	}
 	if err := ev.runList(ctx, op, modelOp); err != nil {
@@ -129,6 +156,11 @@ func (e *Engine) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 	}
 	out, err := ev.project(op, modelOp)
 	if err != nil {
+		return nil, err
+	}
+	// An idempotency entry can only be completed once the answer exists; a
+	// duplicate inside the window replays exactly this.
+	if err := ev.completeDedup(ctx, out); err != nil {
 		return nil, err
 	}
 	return &spi.Response{Output: out}, nil
@@ -314,6 +346,14 @@ func (ev *eval) lookup(ref string) (any, error) {
 		return ev.id, nil
 	}
 	head, rest, _ := strings.Cut(ref, ".")
+	// A resource name resolves to the key currently in play for it, which is
+	// how a child's collection names its parent -- "msgs:{queue.id}" -- without
+	// depending on what this operation called its binding.
+	if rest == "id" {
+		if key, ok := ev.resIDs[head]; ok {
+			return key, nil
+		}
+	}
 	v, ok := ev.binds[head]
 	if !ok {
 		return nil, fmt.Errorf("engine: template references unknown binding %q", head)

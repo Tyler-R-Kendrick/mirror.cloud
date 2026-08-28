@@ -24,15 +24,31 @@ type eval struct {
 	binds map[string]any
 	id    string
 	fx    map[string]any
+	// selection is what the operation's select gathered, with store keys, so
+	// effects can write each chosen record back where it came from.
+	selection []selected
+	// shortOutput is the answer a short-circuiting effect already decided --
+	// a deduplicated send replays the first send's identifiers.
+	shortOutput map[string]any
+	// dedupPending is the idempotency entry to complete with this operation's
+	// output once its effects have produced one.
+	dedupPending *pendingDedup
+	// resIDs is the key most recently resolved for each resource, by resource
+	// name. A child resource's collection template names its parent by
+	// resource name -- "msgs:{queue.id}" -- rather than by whichever binding
+	// this particular operation happened to call it, so the template stays the
+	// same across every operation that touches the resource.
+	resIDs map[string]string
 }
 
 func (e *Engine) newEval(req *spi.Request, op bir.Operation) *eval {
 	return &eval{
-		e:     e,
-		req:   req,
-		op:    op,
-		binds: map[string]any{},
-		fx:    map[string]any{},
+		e:      e,
+		req:    req,
+		op:     op,
+		binds:  map[string]any{},
+		fx:     map[string]any{},
+		resIDs: map[string]string{},
 	}
 }
 
@@ -106,6 +122,7 @@ func (ev *eval) resolveReads(ctx context.Context, op bir.Operation) error {
 			return err
 		}
 		ev.id = key
+		ev.resIDs[read.Resource] = key
 
 		col, err := ev.collection(res)
 		if err != nil {
@@ -121,8 +138,45 @@ func (ev *eval) resolveReads(ctx context.Context, op bir.Operation) error {
 				return err
 			}
 		}
+		if err := ev.applyViews(read.Resource, res, rec); err != nil {
+			return err
+		}
 		ev.binds[name] = rec
 		ev.binds[name+"_found"] = found
+	}
+	return nil
+}
+
+// applyViews computes a resource's derived members over a loaded record and
+// merges them in, so a bundle names `q.fifo` rather than repeating
+// `id.endsWith('.fifo')` at every site that needs it. Views are read-only: they
+// are recomputed on load and never persisted, so a record cannot drift from the
+// values derived out of it.
+//
+// The loader rejects a view whose name collides with a record member, so a
+// merge cannot silently shadow stored data.
+func (ev *eval) applyViews(resource string, res bir.Resource, rec map[string]any) error {
+	if len(res.Views) == 0 {
+		return nil
+	}
+	// The view sees the record it is derived from, under the name its
+	// definition uses.
+	saved, hadRec := ev.binds["rec"]
+	ev.binds["rec"] = rec
+	defer func() {
+		if hadRec {
+			ev.binds["rec"] = saved
+		} else {
+			delete(ev.binds, "rec")
+		}
+	}()
+
+	for _, name := range sortedKeys(res.Views) {
+		v, err := ev.eval("resources." + resource + ".views." + name)
+		if err != nil {
+			return err
+		}
+		rec[name] = v
 	}
 	return nil
 }
@@ -222,6 +276,30 @@ func (ev *eval) runEffects(ctx context.Context, op bir.Operation) error {
 			if err := ev.remove(ctx, path+".delete", *eff.Delete); err != nil {
 				return err
 			}
+		case eff.Counter != nil:
+			name, err := ev.interpolate(eff.Counter.Name)
+			if err != nil {
+				return err
+			}
+			n, err := ev.nextCounter(ctx, name)
+			if err != nil {
+				return err
+			}
+			ev.fx["counter"] = n
+		case eff.Dedup != nil:
+			short, err := ev.runDedup(ctx, path+".dedup", *eff.Dedup)
+			if err != nil {
+				return err
+			}
+			if short {
+				// A deduplicated request answers with what the first one
+				// answered and performs none of the effects behind it.
+				return errShortCircuit
+			}
+		case eff.SendEvent != nil:
+			if err := ev.runSendEvent(ctx, path+".send_event", *eff.SendEvent); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("engine: %s: effect kind is not yet supported by this engine", path)
 		}
@@ -247,6 +325,9 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 		}
 	}
 
+	// The identity first: record expressions may name `id`, and a generated ID
+	// must be drawn from the deterministic Rand rather than computed by an
+	// expression, so that a recorded run replays.
 	key := ev.id
 	if create && res.ID.Generate != nil {
 		key = ev.generate(*res.ID.Generate)
@@ -272,11 +353,24 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 		ev.binds["arn"] = arn
 	}
 
+	col, err := ev.collection(res)
+	if err != nil {
+		return err
+	}
+
 	rec := map[string]any{}
 	if !create {
-		col, err := ev.collection(res)
-		if err != nil {
-			return err
+		// An update addresses an existing record. When the store key is a
+		// record member rather than the ID, the key is whatever the caller
+		// named, resolved the same way a read would resolve it.
+		if res.Key != "" {
+			k, err := ev.resourceKey(res, w.Key, "")
+			if err != nil {
+				return err
+			}
+			if k != "" {
+				key = k
+			}
 		}
 		if raw, found, err := col.Get(ctx, key); err != nil {
 			return err
@@ -296,32 +390,129 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 		rec[k] = v
 	}
 	for _, k := range sortedKeysAny(w.Record) {
-		raw := w.Record[k]
-		if s, isStr := raw.(string); isStr {
-			v, err := ev.evalAt(path+".record."+k, s)
-			if err != nil {
-				return err
-			}
-			rec[k] = v
-			continue
+		v, err := ev.recordValue(ctx, path+".record."+k, w.Record[k])
+		if err != nil {
+			return err
 		}
-		rec[k] = raw
+		rec[k] = v
 	}
 
+	// A resource may key its records by one of their own members -- an SQS
+	// message is addressed by its receipt handle, which is regenerated every
+	// time the message becomes invisible. The member is computed above, so the
+	// key is only knowable now.
+	if res.Key != "" {
+		v, ok := rec[res.Key]
+		if !ok {
+			return fmt.Errorf("engine: %s: resource keys on %q, which the record does not set",
+				path, res.Key)
+		}
+		key = fmt.Sprint(v)
+		ev.id = key
+	}
+
+	if err := ev.putRecord(ctx, col, key, rec); err != nil {
+		return err
+	}
+	ev.resIDs[w.Resource] = key
+	ev.fx[strings.TrimPrefix(path[strings.LastIndex(path, ".")+1:], ".")] = rec
+	ev.binds["rec"] = rec
+	return nil
+}
+
+// putRecord marshals and stores one record.
+func (ev *eval) putRecord(ctx context.Context, col spi.Collection, key string, rec map[string]any) error {
 	blob, err := marshal(rec)
 	if err != nil {
 		return err
 	}
-	col, err := ev.collection(res)
+	return col.Put(ctx, key, blob)
+}
+
+// recordValue evaluates one member of a record literal. A string is an
+// expression; a single-key map is one of the two value forms that must not be
+// expressions, because both draw on state an expression is not allowed to
+// touch:
+//
+//	{ generate: { kind: hex, bytes: 64 } }   the deterministic Rand
+//	{ counter: "queues/{queue.id}/seq" }     a monotonic sequence in the store
+//
+// Anything else is a literal.
+func (ev *eval) recordValue(ctx context.Context, path string, raw any) (any, error) {
+	switch v := raw.(type) {
+	case string:
+		return ev.evalAt(path, v)
+	case map[string]any:
+		if len(v) == 1 {
+			if g, ok := v["generate"]; ok {
+				spec, err := generateSpec(g)
+				if err != nil {
+					return nil, fmt.Errorf("engine: %s: %w", path, err)
+				}
+				return ev.generate(spec), nil
+			}
+			if c, ok := v["counter"]; ok {
+				name, err := ev.interpolate(fmt.Sprint(c))
+				if err != nil {
+					return nil, fmt.Errorf("engine: %s: %w", path, err)
+				}
+				return ev.nextCounter(ctx, name)
+			}
+		}
+	}
+	return raw, nil
+}
+
+// generateSpec reads a { kind, bytes } map out of a record literal.
+func generateSpec(raw any) (bir.Generate, error) {
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return bir.Generate{}, fmt.Errorf("generate: expected a map, got %T", raw)
+	}
+	g := bir.Generate{Kind: fmt.Sprint(m["kind"])}
+	if n, ok := toFloat(m["bytes"]); ok {
+		g.Bytes = int(n)
+	}
+	switch g.Kind {
+	case "hex", "uuid", "int":
+		return g, nil
+	}
+	return bir.Generate{}, fmt.Errorf("generate: unknown kind %q", g.Kind)
+}
+
+// countersCollection holds monotonic sequences. It is a store collection like
+// any other, so a counter survives a snapshot and restore along with the
+// records that reference it.
+const countersCollection = "__counters"
+
+// nextCounter increments a named sequence and returns the new value. Sequence
+// numbers are state, not expressions: two calls in one request must differ, and
+// a replay of the same request sequence must produce the same values.
+func (ev *eval) nextCounter(ctx context.Context, name string) (int64, error) {
+	col := ev.e.scope(ev.req).Collection(countersCollection)
+	var n int64
+	raw, found, err := col.Get(ctx, name)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if err := col.Put(ctx, key, blob); err != nil {
-		return err
+	if found {
+		var cur struct {
+			N int64 `json:"n"`
+		}
+		if err := unmarshal(raw, &cur); err != nil {
+			return 0, err
+		}
+		n = cur.N
 	}
-	ev.fx[strings.TrimPrefix(path[strings.LastIndex(path, ".")+1:], ".")] = rec
-	ev.binds["rec"] = rec
-	return nil
+	n++
+	blob, err := marshal(map[string]any{"n": n})
+	if err != nil {
+		return 0, err
+	}
+	if err := col.Put(ctx, name, blob); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // evalAt runs a compiled expression, falling back to the literal when the

@@ -54,6 +54,7 @@ type mpu struct {
 	tagging                           string
 	checksumAlgorithm, checksumType   string
 	serverSideEncryption, sseKMSKeyID string
+	sseCustomerKeyMD5                 string
 	bucketKeyEnabled                  bool
 	lockDocs                          map[string][]byte
 	parts                             map[int]multipartPart
@@ -838,9 +839,12 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	}
 	objectMetadata := requestObjectMetadata(req)
 	websiteRedirectLocation := requestCondition(req, "WebsiteRedirectLocation", "x-amz-website-redirect-location")
-	sseCustomerKeyMD5, err := requestSSECustomerKey(req)
-	if err != nil {
-		return nil, err
+	sseCustomerKeyMD5 := str(asMap(req.Input["_ObjectEncryption"])["sseCustomerKeyMD5"])
+	if sseCustomerKeyMD5 == "" {
+		sseCustomerKeyMD5, err = requestSSECustomerKey(req)
+		if err != nil {
+			return nil, err
+		}
 	}
 	serverSideEncryption, sseKMSKeyID, bucketKeyEnabled := "", "", false
 	if sseCustomerKeyMD5 == "" {
@@ -1766,18 +1770,25 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if err := validateMultipartChecksumContract(req, algorithm, checksumType); err != nil {
 		return nil, err
 	}
-	serverSideEncryption, sseKMSKeyID, bucketKeyEnabled, err := p.objectEncryption(ctx, req, b)
+	sseCustomerKeyMD5, err := requestSSECustomerKey(req)
 	if err != nil {
 		return nil, err
 	}
+	serverSideEncryption, sseKMSKeyID, bucketKeyEnabled := "", "", false
+	if sseCustomerKeyMD5 == "" {
+		serverSideEncryption, sseKMSKeyID, bucketKeyEnabled, err = p.objectEncryption(ctx, req, b)
+		if err != nil {
+			return nil, err
+		}
+	}
 	id := p.deps.Rand.Hex(16)
 	p.mu.Lock()
-	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), tagging: requestCondition(req, "Tagging", "x-amz-tagging"), checksumAlgorithm: algorithm, checksumType: checksumType, serverSideEncryption: serverSideEncryption, sseKMSKeyID: sseKMSKeyID, bucketKeyEnabled: bucketKeyEnabled, lockDocs: lockDocs, parts: map[int]multipartPart{}}
+	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), tagging: requestCondition(req, "Tagging", "x-amz-tagging"), checksumAlgorithm: algorithm, checksumType: checksumType, serverSideEncryption: serverSideEncryption, sseKMSKeyID: sseKMSKeyID, sseCustomerKeyMD5: sseCustomerKeyMD5, bucketKeyEnabled: bucketKeyEnabled, lockDocs: lockDocs, parts: map[int]multipartPart{}}
 	p.mu.Unlock()
 	h := http.Header{}
 	h.Set("x-amz-checksum-algorithm", algorithm)
 	h.Set("x-amz-checksum-type", checksumType)
-	setObjectEncryptionHeaders(h, map[string]any{"serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled})
+	setObjectEncryptionHeaders(h, map[string]any{"serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "sseCustomerKeyMD5": sseCustomerKeyMD5, "bucketKeyEnabled": bucketKeyEnabled})
 	return &spi.Response{Headers: h, Output: map[string]any{"Bucket": b, "Key": key, "UploadId": id, "ChecksumAlgorithm": algorithm, "ChecksumType": checksumType}}, nil
 }
 
@@ -1829,8 +1840,11 @@ func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response,
 		return nil, &spi.Fault{Code: "NoSuchUpload", HTTPStatus: http.StatusNotFound, Fault: "client"}
 	}
 	algorithm := u.checksumAlgorithm
-	encryption := map[string]any{"serverSideEncryption": u.serverSideEncryption, "ssekmsKeyId": u.sseKMSKeyID, "bucketKeyEnabled": u.bucketKeyEnabled}
+	encryption := map[string]any{"serverSideEncryption": u.serverSideEncryption, "ssekmsKeyId": u.sseKMSKeyID, "sseCustomerKeyMD5": u.sseCustomerKeyMD5, "bucketKeyEnabled": u.bucketKeyEnabled}
 	p.mu.Unlock()
+	if err := validateStoredSSECustomerKey(req, encryption); err != nil {
+		return nil, err
+	}
 	if requested := strings.ToUpper(requestCondition(req, "ChecksumAlgorithm", "x-amz-sdk-checksum-algorithm")); requested != "" && requested != algorithm {
 		return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
@@ -1944,7 +1958,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	}
 	req.Input[checksum.input], req.Input["ChecksumType"] = objectChecksum, u.checksumType
 	req.Input["Bucket"], req.Input["Key"], req.Input["StorageClass"], req.Input["Tagging"] = bucket, key, u.storageClass, u.tagging
-	req.Input["_ObjectEncryption"] = map[string]any{"serverSideEncryption": u.serverSideEncryption, "ssekmsKeyId": u.sseKMSKeyID, "bucketKeyEnabled": u.bucketKeyEnabled}
+	req.Input["_ObjectEncryption"] = map[string]any{"serverSideEncryption": u.serverSideEncryption, "ssekmsKeyId": u.sseKMSKeyID, "sseCustomerKeyMD5": u.sseCustomerKeyMD5, "bucketKeyEnabled": u.bucketKeyEnabled}
 	req.Body = io.NopCloser(&buf)
 	resp, err := p.putObject(ctx, req, etag, u.checksumType, completedParts, u.lockDocs)
 	if err != nil {

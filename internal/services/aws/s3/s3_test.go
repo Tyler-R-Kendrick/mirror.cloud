@@ -723,6 +723,43 @@ func TestMultipartServerSideEncryption(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"create": snapshot(created), "part": snapshot(part), "complete": snapshot(completed), "head": snapshot(head), "invalid": map[string]any{"code": fault.Code, "status": fault.HTTPStatus}})
 }
 
+func TestMultipartSSECustomerKey(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-sse-c"}, nil)
+	rawKey := []byte("0123456789abcdef0123456789abcdef")
+	digest := md5.Sum(rawKey)
+	key, keyMD5 := base64.StdEncoding.EncodeToString(rawKey), base64.StdEncoding.EncodeToString(digest[:])
+	encryption := map[string]any{"SSECustomerAlgorithm": "AES256", "SSECustomerKey": key, "SSECustomerKeyMD5": keyMD5}
+	createInput := maps.Clone(encryption)
+	createInput["Bucket"], createInput["Key"] = "multipart-sse-c", "object"
+	created := mustInvoke(t, p, "CreateMultipartUpload", createInput, nil)
+	if created.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != keyMD5 || created.Headers.Get("x-amz-server-side-encryption") != "" {
+		t.Fatalf("create SSE-C headers = %v", created.Headers)
+	}
+	uploadID := created.Output["UploadId"].(string)
+	partInput := map[string]any{"UploadId": uploadID, "PartNumber": 1}
+	if _, err := invoke(t, p, "UploadPart", partInput, []byte("body")); asFault(t, err).Code != "InvalidRequest" {
+		t.Fatalf("part without SSE-C = %v", err)
+	}
+	for key, value := range encryption {
+		partInput[key] = value
+	}
+	part := mustInvoke(t, p, "UploadPart", partInput, []byte("body"))
+	if part.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != keyMD5 {
+		t.Fatalf("part SSE-C headers = %v", part.Headers)
+	}
+	completed := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
+	if completed.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != keyMD5 {
+		t.Fatalf("complete SSE-C headers = %v", completed.Headers)
+	}
+	readInput := maps.Clone(encryption)
+	readInput["Bucket"], readInput["Key"] = "multipart-sse-c", "object"
+	get := mustInvoke(t, p, "GetObject", readInput, nil)
+	if string(readStream(t, get)) != "body" || get.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != keyMD5 {
+		t.Fatalf("stored multipart SSE-C headers = %v", get.Headers)
+	}
+}
+
 func TestCopyObjectTaggingDirective(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

@@ -80,6 +80,12 @@ test-coverage:
 	@$(RM) coverage-unit.out coverage-integration.out
 	@pct=$$($(GO) tool cover -func=coverage.out | awk '/^total:/ {gsub("%", "", $$3); print $$3}'); awk -v got="$$pct" 'BEGIN { if (got < 80) { print "coverage " got "% is below 80%"; exit 1 } }'
 
+ratchet:
+	$(GO) test ./internal/check/ -run 'TestRatchet|TestNoNew' -count=1
+
+ratchet-update:
+	$(GO) run ./cmd/ratchet -write
+
 vet:
 	$(GO) vet ./...
 	@out=$$(gofmt -l $$(find . -name '*.go' -not -path './node_modules/*') || true); if [ -n "$$out" ]; then echo "$$out"; exit 1; fi

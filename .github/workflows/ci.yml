@@ -7,6 +7,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Full history: the ratchet's baseline guard compares ratchet.json
+          # against the merge-base with main, and skips without it.
+          fetch-depth: 0
       - uses: actions/setup-go@v7
         with:
           go-version: "1.24"
@@ -15,6 +19,8 @@ jobs:
         run: go vet ./...
       - name: gofmt
         run: test -z "$(gofmt -l . | grep -v node_modules || true)"
+      - name: anti-drift ratchet
+        run: make ratchet
       - name: unit and coverage floor
         run: make test-coverage
       - name: protocol contracts

@@ -275,3 +275,49 @@ Every one of ~218 test files snapshots the implementation's own output; conforma
 ### What this pass changes, in one paragraph
 
 v1 answered "can we build a wire-compatible emulator?" — yes, verifiably. It did not touch the founding question, "can we *generate* one?", and its 46k hand-written LOC actively drifted away from it. The pivot keeps everything v1 got right — the SPI, the edge, the test discipline — and changes what behavior *is*: data with provenance, executed by one engine, graded against recorded reality, ratcheted so the hand-rolling path can never quietly return. The packs' final job is to be the oracle that proves their replacement correct, and then to be deleted.
+
+---
+
+## Part 6 — The trend check: six days, ~1,230 commits, zero movement toward generation
+
+Part 5 audited the implementation and produced the v2 pivot. Before that pivot was adopted, implementation continued on a separate lineage for roughly 1,230 commits. This part measures what happened, because the *direction of travel* matters more than any single snapshot.
+
+### The two scoreboards disagree completely
+
+| Metric | Part-5 audit | Current tip | Δ |
+|---|---|---|---|
+| Source LOC | 46,003 | 65,113 | **+42%** |
+| Test LOC | 22,075 | 54,517 | **+147%** |
+| Service packs | 152 | 154 | +2 |
+| Hand-written behavior LOC | 37,230 | 55,905 | **+50%** |
+| Hand-typed `case` labels | 2,433 | 2,603 | +170 |
+| Inline `&spi.Fault{}` sites | 406 | 869 | **+114%** |
+| Generated LOC in use | 0 | 0 | — |
+| `go:generate` directives | 0 | 0 | — |
+| Behavior data files | 0 | 0 | — |
+| Catalog services with empty `Shapes` | all | all | — |
+| Real-cloud fixtures / corpus | none | none | — |
+| Proxy reachable from the binary | no | no | — |
+| Packs self-declaring `TierEmulate` | 152 | 152 | — |
+
+**As an AWS emulator, this is real progress.** The commit mix (645 `test`, 228 `docs`, 215 `feat`, 126 `fix`) is unusually test-led, much of it mutation-driven. S3 alone tripled — 1,346 → 4,459 LOC — and the additions are exactly the undocumented edge surface that parity actually consists of: POST-policy browser uploads, object lock and default retention, replication preconditions and destination validation, storage-class validation, multi-delete limits and semantics, bucket-name and object-key validation, expected-owner guards, archive-restore state. Step Functions gained a real JSONPath/JSONata path with fuzzing. This is careful work on the right *content*.
+
+**As "a system that generates emulators," it is movement in the wrong direction.** Every generative metric is unchanged at zero while the mass to be replaced grew by half. The strangler is running in reverse: the thing scheduled for deletion is the thing being invested in.
+
+### The three findings that change the plan
+
+**C6. The marginal cost of parity is rising, not falling.** ~1,230 commits bought depth in roughly one service family plus event plumbing. Under a generative pipeline the same effort should buy breadth across services and providers. Extrapolated, "the same structures across eight clouds" is unreachable on this trajectory — not because the work is bad, but because each increment is priced in hand-written Go.
+
+**C7. Duplication is compounding measurably.** Inline fault sites more than doubled (406 → 869) — the exact metric that predicted the `ResourceNotFoundException` 400-vs-404 inconsistency, now with twice the surface. Every additional site is one more cell to reconcile at extraction, and one more place for the same logical error to disagree with itself.
+
+**C8. The main module lost its zero-dependency property.** `gojq`, `jsonata`, `parquet-go`, `snappy`, `xxhash`/`xxh3`, and `klauspost/compress` now ship in the binary, pulled in by per-pack depth (Firehose formats, Step Functions query languages). All are permissive, so no covenant is broken — but there is still no license CI gate, and this is precisely the pressure the primitive registry exists to absorb: a query-language evaluator or a Parquet writer belongs behind one versioned primitive interface, referenced from data, not imported by an individual pack.
+
+### What this does *not* change — and one thing it improves
+
+The pivot stands, with its rationale strengthened: 1,230 commits of evidence that "write the packs more carefully" does not converge on the stated goal. But the new work is **not** waste under the strangler plan, and is worth more than it was:
+
+- Test LOC nearly tripled, and the test-to-source ratio rose from 0.48 to 0.84. Those tests *are* the equivalence-gate oracle. A richer oracle makes extraction safer, not harder.
+- The deepened S3 semantics are the highest-value wave-3 extraction target, and they are now specified by tests rather than by memory.
+- The mutation-driven discipline transfers directly: v2 replaces each Go mutant with a B-IR mutant, and the existing mutant inventory is the checklist.
+
+**The one adjustment**: `ratchet.json` baselines must be seeded from *current* counts (2,603 case labels, 55,905 services LOC, 869 fault sites, 154 packs), not the Part-5 figures — and the ratchet needs to be among the first things built, because the six-day trend shows how quickly the baseline moves when nothing forbids it.

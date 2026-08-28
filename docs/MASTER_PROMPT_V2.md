@@ -6,9 +6,11 @@
 
 ## 0. Mission
 
-v1 produced a working, well-tested, wire-compatible emulator — built the wrong way. The verified state of this tree:
+v1 produced a working, well-tested, wire-compatible emulator — built the wrong way, and still growing that way. The verified state of this tree (measured at the current implementation tip; the parenthesized figures are the same metrics six days and ~1,230 commits earlier, so the trend is visible):
 
-- **37,230 LOC of hand-written behavior** across 152 service packs, dispatched by 2,433 hand-typed `case` labels. 70–75% of it is a recurring skeleton.
+- **55,905 LOC of hand-written behavior** (was 37,230) across 154 service packs (was 152), dispatched by 2,603 hand-typed `case` labels (was 2,433). 70–75% of it is a recurring skeleton.
+- **869 inline `&spi.Fault{}` construction sites** (was 406) — the duplication metric more than doubled while the design called for a single model-seeded error table.
+- Generated code, `go:generate` directives, and behavior data files: **zero, unchanged**. The hand-written mass grew 50% in six days; the generative pipeline did not move.
 - **The generation pipeline exists and is disconnected**: `internal/receiver → fusion → model → specdiff → mirrorgen` is clean, but `internal/generated/` is absent and gitignored, nothing imports it, and the process boots from `internal/catalog/catalog.go` — whose `Shapes` maps are **empty for all 152 services**, silently disabling model validation and schema-driven synthesis.
 - `specs/mirror.set` declares 152 services; `specs/mirror.lock` pins 29 files; `scripts/specs-sync.sh` can fetch 28.
 - **Nothing has ever been compared to a real cloud.** Conformance iterates a catalog authored to match the packs. All 152 packs self-declare `TierEmulate`.
@@ -23,7 +25,7 @@ The end state, structurally enforced: **adding or changing a service never means
 - Rewriting the hard interpreters (DynamoDB expressions, ASL, CloudFormation templates, IAM policy eval, the object-store core) in YAML. They move **verbatim** into versioned engine primitives. "Everything as rewrite rules" is a rejected tar pit.
 - Real compute (Lambda runtimes, hypervisors), real broker protocol emulation, IAM beyond the existing evaluator.
 - Probing from user machines or CI-on-PR. Probes are maintainer-side only, per `PARITY_PIPELINE.md` §2 safety rails.
-- Breaking any covenant: no auth tokens, no telemetry, no phone-home, Apache-2.0, permissive deps only, main module stays zero-dependency except `cel-go` and a YAML parser (both permissive; justify any other addition in `docs/INTERFACE_NOTES.md`).
+- Breaking any covenant: no auth tokens, no telemetry, no phone-home, Apache-2.0, permissive deps only. The main module is **no longer zero-dependency** — it now carries `gojq`, `jsonata`, `parquet-go`, `snappy`, `xxhash`/`xxh3`, and `klauspost/compress` (all permissive, all pulled in by hand-written service depth). Add `cel-go` and a YAML parser for the engine; every dependency needs a license check in CI (§4-P1) and a line in `docs/INTERFACE_NOTES.md`. Several of these are candidates to become engine primitives rather than per-pack imports.
 
 ---
 
@@ -149,7 +151,7 @@ func Replay(t *Trace, h spi.Handler) (*Diff, error)
 
 The v1 implementer, given a prompt scoped to 8 emulate services + honest mock tier, hand-wrote 152 packs instead. v2 makes that path unmergeable:
 
-1. **Ratchet**: `internal/check/ratchet_test.go` against a committed `ratchet.json` — `case "` label count in `internal/services`, `internal/services` file count and LOC, and `registry.Register` call sites may only decrease; a guard test fails if the baseline is edited upward.
+1. **Ratchet — build this first.** `internal/check/ratchet_test.go` against a committed `ratchet.json` — `case "` label count in `internal/services`, `internal/services` file count and LOC, `&spi.Fault{` construction-site count, and `registry.Register` call sites may only decrease; a guard test fails if the baseline is edited upward. **Seed the baseline by measuring the tree at the moment you start** (at time of writing: 2,603 case labels, 55,905 services LOC, 869 fault sites, 154 packs) — do not copy figures from any document, including this one. The six days before this prompt added ~19k LOC of hand-written behavior and doubled the fault-site count; nothing structural forbade it. This gate is what makes the pivot real, so it lands before extraction, not after.
 2. **No new packs**: any new directory under `internal/services/` fails CI. New services enter only as a `specs/` entry + `behavior/` YAML; a test diffs `mirror.set` tiers against the filesystem.
 3. **Primitive budget**: plugin count and per-plugin LOC caps in `ratchet.json`; missing `JUSTIFICATION.md` fails.
 4. **Grade ratchet**: SUPPORT.md grades may only improve.

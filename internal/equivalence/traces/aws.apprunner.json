@@ -1,0 +1,285 @@
+{
+  "schema": "trace/1",
+  "service": "aws.apprunner",
+  "source": "pack:internal/services/aws/apprunner@55959ff",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListServices",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServiceSummaryList": null
+      }
+    },
+    {
+      "operation": "DescribeService",
+      "input": {
+        "ServiceArn": "arn:aws:apprunner:us-east-1:000000000000:service/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateService",
+      "input": {
+        "ServiceName": "",
+        "SourceConfiguration": {
+          "ImageRepository": {
+            "ImageIdentifier": "public.ecr.aws/nginx:latest",
+            "ImageRepositoryType": "ECR_PUBLIC"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidRequestException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateService",
+      "input": {
+        "ServiceName": "web",
+        "SourceConfiguration": {
+          "ImageRepository": {
+            "ImageIdentifier": "public.ecr.aws/nginx:latest",
+            "ImageRepositoryType": "ECR_PUBLIC"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Service": {
+          "ServiceArn": "arn:aws:apprunner:us-east-1:000000000000:service/web",
+          "ServiceId": "7c589129",
+          "ServiceName": "web",
+          "Status": "RUNNING"
+        }
+      }
+    },
+    {
+      "operation": "DescribeService",
+      "input": {
+        "ServiceArn": {
+          "$fromPath": "Service.ServiceArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Service": {
+          "ServiceArn": "arn:aws:apprunner:us-east-1:000000000000:service/web",
+          "ServiceId": "7c589129",
+          "ServiceName": "web",
+          "Status": "RUNNING"
+        }
+      }
+    },
+    {
+      "operation": "CreateService",
+      "input": {
+        "ServiceName": "api",
+        "SourceConfiguration": {
+          "ImageRepository": {
+            "ImageIdentifier": "public.ecr.aws/nginx:latest",
+            "ImageRepositoryType": "ECR_PUBLIC"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Service": {
+          "ServiceArn": "arn:aws:apprunner:us-east-1:000000000000:service/api",
+          "ServiceId": "5f59f223",
+          "ServiceName": "api",
+          "Status": "RUNNING"
+        }
+      }
+    },
+    {
+      "operation": "ListServices",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServiceSummaryList": [
+          {
+            "ServiceArn": "arn:aws:apprunner:us-east-1:000000000000:service/api",
+            "ServiceId": "5f59f223",
+            "ServiceName": "api",
+            "Status": "RUNNING"
+          },
+          {
+            "ServiceArn": "arn:aws:apprunner:us-east-1:000000000000:service/web",
+            "ServiceId": "7c589129",
+            "ServiceName": "web",
+            "Status": "RUNNING"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PauseService",
+      "input": {
+        "ServiceArn": {
+          "$fromPath": "Service.ServiceArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Service": {
+          "Status": "PAUSED"
+        }
+      }
+    },
+    {
+      "operation": "DescribeService",
+      "input": {
+        "ServiceArn": {
+          "$fromPath": "Service.ServiceArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Service": {
+          "ServiceArn": "arn:aws:apprunner:us-east-1:000000000000:service/web",
+          "ServiceId": "7c589129",
+          "ServiceName": "web",
+          "Status": "RUNNING"
+        }
+      }
+    },
+    {
+      "operation": "ResumeService",
+      "input": {
+        "ServiceArn": {
+          "$fromPath": "Service.ServiceArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Service": {
+          "Status": "RUNNING"
+        }
+      }
+    },
+    {
+      "operation": "DeleteService",
+      "input": {
+        "ServiceArn": {
+          "$fromPath": "Service.ServiceArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListServices",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServiceSummaryList": [
+          {
+            "ServiceArn": "arn:aws:apprunner:us-east-1:000000000000:service/api",
+            "ServiceId": "5f59f223",
+            "ServiceName": "api",
+            "Status": "RUNNING"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteService",
+      "input": {
+        "ServiceArn": "arn:aws:apprunner:us-east-1:000000000000:service/gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

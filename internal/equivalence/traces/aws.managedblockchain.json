@@ -1,0 +1,199 @@
+{
+  "schema": "trace/1",
+  "service": "aws.managedblockchain",
+  "source": "pack:internal/services/aws/managedblockchain@55959ff",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListNetworks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Networks": null
+      }
+    },
+    {
+      "operation": "GetNetwork",
+      "input": {
+        "NetworkId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateNetwork",
+      "input": {
+        "ClientRequestToken": "tok-1",
+        "Framework": "HYPERLEDGER_FABRIC",
+        "FrameworkVersion": "2.2",
+        "MemberConfiguration": {
+          "FrameworkConfiguration": {
+            "Fabric": {
+              "AdminPassword": "Password1!",
+              "AdminUsername": "admin"
+            }
+          },
+          "Name": "member-one"
+        },
+        "Name": "net-one",
+        "VotingPolicy": {
+          "ApprovalThresholdPolicy": {
+            "ProposalDurationInHours": 24,
+            "ThresholdPercentage": 50
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "NetworkId": "7c589129"
+      }
+    },
+    {
+      "operation": "GetNetwork",
+      "input": {
+        "NetworkId": {
+          "$fromPath": "NetworkId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Network": {
+          "Framework": "HYPERLEDGER_FABRIC",
+          "Id": "7c589129",
+          "Name": "net-one",
+          "Status": "AVAILABLE"
+        }
+      }
+    },
+    {
+      "operation": "ListNetworks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Networks": [
+          {
+            "Framework": "HYPERLEDGER_FABRIC",
+            "Id": "7c589129",
+            "Name": "net-one",
+            "Status": "AVAILABLE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateMember",
+      "input": {
+        "ClientRequestToken": "tok-2",
+        "InvitationId": "inv-1",
+        "MemberConfiguration": {
+          "FrameworkConfiguration": {
+            "Fabric": {
+              "AdminPassword": "Password1!",
+              "AdminUsername": "admin"
+            }
+          },
+          "Name": "member-one"
+        },
+        "NetworkId": {
+          "$fromPath": "NetworkId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MemberId": "5f59f223"
+      }
+    },
+    {
+      "operation": "GetMember",
+      "input": {
+        "MemberId": {
+          "$fromPath": "MemberId",
+          "$fromStep": 5
+        },
+        "NetworkId": {
+          "$fromPath": "NetworkId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Member": {
+          "Id": "5f59f223",
+          "Name": "",
+          "NetworkId": "7c589129",
+          "Status": "AVAILABLE"
+        }
+      }
+    },
+    {
+      "operation": "GetMember",
+      "input": {
+        "MemberId": "absent",
+        "NetworkId": {
+          "$fromPath": "NetworkId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    }
+  ]
+}

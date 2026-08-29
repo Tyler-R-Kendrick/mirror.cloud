@@ -17,7 +17,6 @@ import (
 	// bundle under behavior/, so adding a service adds no Go anywhere.
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/accessanalyzer"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/acm"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/acmpca"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/amplify"
@@ -26,7 +25,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/appconfig"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/applicationautoscaling"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/appmesh"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apprunner"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/appsync"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/athena"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/autoscaling"
@@ -50,7 +48,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/configservice"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/connect"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dax"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/directconnect"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/directoryservice"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dms"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/docdb"
@@ -95,7 +92,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lookoutmetrics"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/macie2"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/managedblockchain"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/mediaconnect"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/mediaconvert"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/medialive"

@@ -156,7 +156,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.dsql` | `awsJson1_1` | 6 | 0 |
 | `aws.codeconnections` | `awsJson1_1` | 6 | 0 |
 | `aws.iot-data` | `awsJson1_1` | 6 | 0 |
-| `aws.managedblockchain` | `awsJson1_1` | 6 | 0 |
+| `aws.managedblockchain` | `awsJson1_1` | 5 | 1 |
 | `aws.kinesisanalyticsv2` | `awsJson1_1` | 6 | 0 |
 
 S3 GetObjectAttributes honors requested ETag, checksum, object-parts, storage-class, and size fields for current or explicit versions, with composite part checksums and marker/limit pagination; full-object checksums return only the total part count.

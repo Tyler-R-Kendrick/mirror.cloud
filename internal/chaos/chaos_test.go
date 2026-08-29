@@ -877,6 +877,52 @@ func TestConcurrentBucketAccelerationRemainsValid(t *testing.T) {
 	}
 }
 
+func TestConcurrentBucketLoggingRemainsValid(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	for _, bucket := range []string{"logging-chaos-source", "logging-chaos-target"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": bucket}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			logging := map[string]any{"TargetBucket": "missing"}
+			if n%2 == 0 {
+				logging = map[string]any{"TargetBucket": "logging-chaos-target", "TargetPrefix": fmt.Sprintf("logs/%d/", n)}
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutBucketLogging", Input: map[string]any{"Bucket": "logging-chaos-source", "BucketLoggingStatus": map[string]any{"LoggingEnabled": logging}}})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	successes := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "InvalidTargetBucketForLogging" {
+			t.Fatalf("concurrent logging put: %v", err)
+		}
+	}
+	if successes != 16 {
+		t.Fatalf("successful logging puts = %d, want 16", successes)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBucketLogging", Input: map[string]any{"Bucket": "logging-chaos-source"}})
+	logging, _ := response.Output["LoggingEnabled"].(map[string]any)
+	if err != nil || logging["TargetBucket"] != "logging-chaos-target" || !strings.HasPrefix(logging["TargetPrefix"].(string), "logs/") {
+		t.Fatalf("persisted concurrent logging = %#v, err=%v", response, err)
+	}
+}
+
 func TestConcurrentInvalidVersioningWritesDoNotChangeState(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

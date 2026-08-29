@@ -502,6 +502,30 @@ func TestBucketCors(t *testing.T) {
 	}
 }
 
+func TestBucketCorsCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	input := map[string]any{"Bucket": "cors-characterization"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	_, beforeErr := invoke(t, p, "GetBucketCors", input, nil)
+	before := asFault(t, beforeErr)
+	rules := []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{"*"}, "ID": "read"}}
+	put := mustInvoke(t, p, "PutBucketCors", map[string]any{"Bucket": input["Bucket"], "CORSConfiguration": map[string]any{"CORSRules": rules}}, nil)
+	after := mustInvoke(t, p, "GetBucketCors", input, nil)
+	_, invalidErr := invoke(t, p, "PutBucketCors", map[string]any{"Bucket": input["Bucket"], "CORSRules": []any{map[string]any{"AllowedMethods": []any{"OPTIONS"}, "AllowedOrigins": []any{"*"}}}}, nil)
+	invalid := asFault(t, invalidErr)
+	preserved := mustInvoke(t, p, "GetBucketCors", input, nil)
+	deleted := mustInvoke(t, p, "DeleteBucketCors", input, nil)
+	_, finalErr := invoke(t, p, "GetBucketCors", input, nil)
+	final := asFault(t, finalErr)
+	golden.AssertJSON(t, map[string]any{
+		"default": map[string]any{"code": before.Code, "status": before.HTTPStatus, "bucket": before.Fields["BucketName"]},
+		"put":     put.Output, "get": after.Output,
+		"invalid":   map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus},
+		"preserved": preserved.Output, "delete": deleted.Output,
+		"deleted": map[string]any{"code": final.Code, "status": final.HTTPStatus, "bucket": final.Fields["BucketName"]},
+	})
+}
+
 func TestBucketLoggingCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	for _, bucket := range []string{"logging-characterization-source", "logging-characterization-target"} {

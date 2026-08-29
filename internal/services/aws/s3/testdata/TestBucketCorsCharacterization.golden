@@ -1,0 +1,45 @@
+{
+  "default": {
+    "bucket": "cors-characterization",
+    "code": "NoSuchCORSConfiguration",
+    "status": 404
+  },
+  "delete": null,
+  "deleted": {
+    "bucket": "cors-characterization",
+    "code": "NoSuchCORSConfiguration",
+    "status": 404
+  },
+  "get": {
+    "CORSRules": [
+      {
+        "AllowedMethods": [
+          "GET"
+        ],
+        "AllowedOrigins": [
+          "*"
+        ],
+        "ID": "read"
+      }
+    ]
+  },
+  "invalid": {
+    "code": "InvalidRequest",
+    "message": "Found unsupported HTTP method in CORS config. Unsupported method is OPTIONS",
+    "status": 400
+  },
+  "preserved": {
+    "CORSRules": [
+      {
+        "AllowedMethods": [
+          "GET"
+        ],
+        "AllowedOrigins": [
+          "*"
+        ],
+        "ID": "read"
+      }
+    ]
+  },
+  "put": null
+}

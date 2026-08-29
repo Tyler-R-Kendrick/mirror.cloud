@@ -111,6 +111,19 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.GetPublicAccessBlock(context.Background(), &s3.GetPublicAccessBlockInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchPublicAccessBlockConfiguration") {
 		t.Fatalf("get deleted public access block: %v", err)
 	}
+	if payment, err := s3c.GetBucketRequestPayment(context.Background(), &s3.GetBucketRequestPaymentInput{Bucket: aws.String("sdk")}); err != nil || payment.Payer != s3types.PayerBucketOwner {
+		t.Fatalf("default request payer: %#v %v", payment, err)
+	}
+	if _, err := s3c.PutBucketRequestPayment(context.Background(), &s3.PutBucketRequestPaymentInput{Bucket: aws.String("sdk"), RequestPaymentConfiguration: &s3types.RequestPaymentConfiguration{Payer: s3types.PayerRequester}}); err != nil {
+		t.Fatalf("put request payer: %v", err)
+	}
+	if payment, err := s3c.GetBucketRequestPayment(context.Background(), &s3.GetBucketRequestPaymentInput{Bucket: aws.String("sdk")}); err != nil || payment.Payer != s3types.PayerRequester {
+		t.Fatalf("request payer round trip: %#v %v", payment, err)
+	}
+	invalidPayer := s3types.Payer("Invalid")
+	if _, err := s3c.PutBucketRequestPayment(context.Background(), &s3.PutBucketRequestPaymentInput{Bucket: aws.String("sdk"), RequestPaymentConfiguration: &s3types.RequestPaymentConfiguration{Payer: invalidPayer}}); err == nil || !strings.Contains(err.Error(), "MalformedXML") {
+		t.Fatalf("invalid request payer: %v", err)
+	}
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk")}); err != nil {
 		t.Fatalf("recreate us-east-1 bucket: %v", err)
 	}

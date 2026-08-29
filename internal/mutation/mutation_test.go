@@ -3440,7 +3440,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-versioning-return-put-status",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "_ = p.col(req, \"versioning\").Put(ctx, b, []byte(st))\n\t\treturn &spi.Response{Status: 200, Output: map[string]any{}}, nil",
+			old:  "_ = p.col(req, \"versioning\").Put(ctx, b, []byte(st))\n\t\treturn &spi.Response{Status: 200}, nil",
 			new:  "_ = p.col(req, \"versioning\").Put(ctx, b, []byte(st))\n\t\treturn &spi.Response{Status: 200, Output: map[string]any{\"Status\": st}}, nil",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestBucketVersioningState",

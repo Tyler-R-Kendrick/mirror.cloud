@@ -120,7 +120,8 @@
             "Name": "staging"
           }
         ]
-      }
+      },
+      "superseded": "The pack listed a group under Name. GroupIdentifier declares GroupName, so the listing named the group with a member no SDK reads and left the one it does read absent. The declared shape outranks the pack's authored behavior, so the bundle emits GroupName and this step is compared without its body."
     },
     {
       "operation": "GroupResources",

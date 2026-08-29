@@ -264,6 +264,12 @@ func Validate(s *Service, svc *model.Service) error {
 				problems = append(problems, fmt.Errorf("%s: %s.list: no output member", s.ServiceID, where))
 			} else {
 				checkOutputMember(s, svc, modelOp, where+".list.member", l.Member, &problems)
+				// An unprojected list answers with the stored records
+				// themselves, so the record is the item and its members have to
+				// be the item shape's members.
+				if _, projected := op.Output[l.Member]; !projected {
+					checkListItemMembers(s, svc, modelOp, where, l, &problems)
+				}
 			}
 			compile(where+".list.key", l.Key)
 			// The filter sees one candidate record as `item`, its per-item
@@ -346,6 +352,66 @@ func checkOutputMember(s *Service, svc *model.Service, op model.Operation, where
 		known := sortedKeys(shape.Members)
 		*problems = append(*problems, fmt.Errorf("%s: %s: %q is not a member of %s (have: %s)",
 			s.ServiceID, where, member, op.Output, strings.Join(known, ", ")))
+	}
+}
+
+// checkListItemMembers reports a record member that the listed item's shape
+// does not declare.
+//
+// checkOutputMember covers the name of the member the items are placed in, and
+// stopped there, so a listing could name a member every SDK reads and then fill
+// it with items every SDK ignores: sesv2 listed identities carrying
+// VerifiedForSendingStatus where IdentityInfo declares SendingEnabled, and the
+// member the SDK does read was simply absent. Nothing failed, because nothing
+// looked.
+//
+// This applies only to an unprojected list, where the stored record *is* the
+// item. A list with an output projection builds its items from an expression,
+// and checking those keys would mean reading the expression rather than the
+// schema; those stay the author's responsibility.
+func checkListItemMembers(s *Service, svc *model.Service, op model.Operation, where string, l *ListSpec, problems *Errors) {
+	if op.Output == "" {
+		return // already reported by checkOutputMember
+	}
+	outShape, ok := svc.Shapes[op.Output]
+	if !ok {
+		return
+	}
+	member, ok := outShape.Members[l.Member]
+	if !ok {
+		return
+	}
+	list, ok := svc.Shapes[member.Shape]
+	if !ok || list.Kind != model.KindList {
+		return
+	}
+	item, ok := svc.Shapes[list.Member]
+	// Only a structure has members to check. A list of strings is projected
+	// from the record by an expression, which this deliberately does not read.
+	if !ok || item.Kind != model.KindStructure {
+		return
+	}
+	res, ok := s.Resources[l.Resource]
+	if !ok {
+		return // already reported
+	}
+	report := func(kind, name string) {
+		known := sortedKeys(item.Members)
+		*problems = append(*problems, fmt.Errorf(
+			"%s: %s.list: %s %q is not a member of %s, so a listed item carries a field no SDK can read (have: %s)",
+			s.ServiceID, where, kind, name, list.Member, strings.Join(known, ", ")))
+	}
+	for _, name := range sortedKeys(res.Record) {
+		if _, declared := item.Members[name]; !declared {
+			report("record member", name)
+		}
+	}
+	// Views are merged into a record as it is loaded, so a listed item carries
+	// them too.
+	for _, name := range sortedKeys(res.Views) {
+		if _, declared := item.Members[name]; !declared {
+			report("view", name)
+		}
 	}
 }
 

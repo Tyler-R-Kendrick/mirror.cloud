@@ -93,7 +93,8 @@
             "status": "ACTIVE"
           }
         ]
-      }
+      },
+      "superseded": "The pack listed a cluster with status. ClusterSummary declares identifier and arn only, so the listing carried a member no SDK can read. The declared shape outranks the pack's authored behavior, so the bundle projects the listing and this step is compared without its body; GetCluster still answers with status, where the model declares it."
     },
     {
       "operation": "GetCluster",

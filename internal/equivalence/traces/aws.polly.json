@@ -110,7 +110,8 @@
             "VoiceId": "Joanna"
           }
         ]
-      }
+      },
+      "superseded": "The pack listed a task with the text it was given. SynthesisTask declares no Text member, so the listing carried a field no SDK can read. The declared shape outranks the pack's authored behavior, so the bundle drops it from the listing and this step is compared without its body; the text stays on the record, which is how GetSpeechSynthesisTask is still served."
     },
     {
       "operation": "GetSpeechSynthesisTask",

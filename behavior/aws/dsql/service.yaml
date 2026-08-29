@@ -57,8 +57,12 @@ operations:
       arn: cluster.arn
       status: cluster.status
 
+  # ClusterSummary declares only identifier and arn, so a listed cluster is
+  # not the stored record: its status is answered by GetCluster and not here.
   ListClusters:
     list: { resource: cluster, member: clusters, paginate: model }
+    output:
+      clusters: "items.map(c, {'identifier': c.identifier, 'arn': c.arn})"
 
   DeleteCluster:
     effects:

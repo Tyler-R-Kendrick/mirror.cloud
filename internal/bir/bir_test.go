@@ -268,3 +268,91 @@ func keysOf[V any](m map[string]V) []string {
 	}
 	return out
 }
+
+// listModel adds a listing whose item shape declares one member, so a record
+// with anything else in it is a listing no SDK can read in full.
+func listModel() *model.Service {
+	return &model.Service{
+		ID:       "aws.demo",
+		Protocol: model.ProtoAWSJSON10,
+		Operations: []model.Operation{
+			{Name: "ListThings", Output: "com.demo#ListThingsResponse"},
+		},
+		Shapes: map[string]model.Shape{
+			"com.demo#ListThingsResponse": {Kind: model.KindStructure, Members: map[string]model.Member{
+				"Things": {Shape: "com.demo#ThingSummaryList"},
+			}},
+			"com.demo#ThingSummaryList": {Kind: model.KindList, Member: "com.demo#ThingSummary"},
+			"com.demo#ThingSummary": {Kind: model.KindStructure, Members: map[string]model.Member{
+				"ThingId": {Shape: "smithy.api#String"},
+			}},
+		},
+	}
+}
+
+const listBundle = `schema: bir/1
+service: aws.demo
+provenance: authored
+resources:
+  thing:
+    collection: things
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      ThingId: id
+operations:
+  ListThings:
+    list: { resource: thing, member: Things }
+`
+
+func loadList(t *testing.T, body string) (*Service, error) {
+	t.Helper()
+	fsys := fstest.MapFS{"aws/demo/service.yaml": &fstest.MapFile{Data: []byte(body)}}
+	return Load(fsys, "aws/demo", listModel())
+}
+
+// TestListItemMembersMustBeDeclared covers the half of the output contract that
+// checkOutputMember does not: naming a member every SDK reads and then filling
+// it with items every SDK ignores.
+func TestListItemMembersMustBeDeclared(t *testing.T) {
+	if _, err := loadList(t, listBundle); err != nil {
+		t.Fatalf("the declared listing must load: %v", err)
+	}
+
+	t.Run("undeclared record member", func(t *testing.T) {
+		body := strings.Replace(listBundle, "      ThingId: id\n",
+			"      ThingId: id\n      Colour: \"'red'\"\n", 1)
+		_, err := loadList(t, body)
+		if err == nil {
+			t.Fatal("a record member the item shape does not declare must be rejected")
+		}
+		if !strings.Contains(err.Error(), `record member "Colour"`) ||
+			!strings.Contains(err.Error(), "no SDK can read") {
+			t.Fatalf("the error must name the member and why it matters: %v", err)
+		}
+	})
+
+	t.Run("undeclared view", func(t *testing.T) {
+		body := strings.Replace(listBundle, "      ThingId: id\n",
+			"      ThingId: id\n    views:\n      loud: \"true\"\n", 1)
+		_, err := loadList(t, body)
+		if err == nil {
+			t.Fatal("a view is merged into the record, so it must be checked too")
+		}
+		if !strings.Contains(err.Error(), `view "loud"`) {
+			t.Fatalf("the error must name the view: %v", err)
+		}
+	})
+
+	// A projection builds the items from an expression rather than from the
+	// record, so the record is no longer what is listed and the check does not
+	// apply. This is the escape hatch the three bundles this check caught use.
+	t.Run("a projection lifts the check", func(t *testing.T) {
+		body := strings.Replace(listBundle, "      ThingId: id\n",
+			"      ThingId: id\n      Colour: \"'red'\"\n", 1) +
+			"    output:\n      Things: \"items.map(t, {'ThingId': t.ThingId})\"\n"
+		if _, err := loadList(t, body); err != nil {
+			t.Fatalf("a projected listing must load: %v", err)
+		}
+	})
+}

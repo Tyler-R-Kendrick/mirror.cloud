@@ -56,8 +56,19 @@ operations:
     output:
       SynthesisTask: rec
 
+  # SynthesisTask declares no Text member: the text a task was given is kept
+  # on the record so GetSpeechSynthesisTask can be served from it, and dropped
+  # from the listing, which is the only place the model has no room for it.
   ListSpeechSynthesisTasks:
     list: { resource: task, member: SynthesisTasks, paginate: model }
+    output:
+      SynthesisTasks: >
+        items.map(t, {
+          'TaskId': t.TaskId,
+          'TaskStatus': t.TaskStatus,
+          'OutputUri': t.OutputUri,
+          'VoiceId': t.VoiceId
+        })
 
 quirks:
   - operation: SynthesizeSpeech

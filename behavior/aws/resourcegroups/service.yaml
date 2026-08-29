@@ -45,8 +45,18 @@ operations:
     output:
       Group: group
 
+  # GroupIdentifier names a group GroupName, not Name. The record keeps Name
+  # because that is what CreateGroup's own Group answer declares, so the two
+  # spellings are both the model's and the listing carries the one it asks for.
   ListGroups:
     list: { resource: group, member: GroupIdentifiers, paginate: model }
+    output:
+      GroupIdentifiers: >
+        items.map(g, {
+          'GroupName': g.Name,
+          'GroupArn': g.GroupArn,
+          'Description': g.Description
+        })
 
   DeleteGroup:
     effects:

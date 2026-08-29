@@ -629,6 +629,61 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given bucket CORS When replacing and deleting it Then S3 validates and persists the rules", func(t *testing.T) {
+		res := do(http.MethodPut, "/cors-bdd", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create CORS bucket %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/cors-bdd?cors", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchCORSConfiguration")) {
+			t.Fatalf("default CORS %d %s", res.StatusCode, body)
+		}
+		valid := []byte(`<CORSConfiguration><CORSRule><ID>read</ID><AllowedMethod>GET</AllowedMethod><AllowedMethod>HEAD</AllowedMethod><AllowedOrigin>https://example.test</AllowedOrigin><MaxAgeSeconds>300</MaxAgeSeconds></CORSRule></CORSConfiguration>`)
+		res = do(http.MethodPut, "/cors-bdd?cors", valid, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("put CORS %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/cors-bdd?cors", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<AllowedMethod>GET</AllowedMethod>")) || !bytes.Contains(body, []byte("<AllowedOrigin>https://example.test</AllowedOrigin>")) || bytes.Contains(body, []byte("<member>")) || bytes.Contains(body, []byte("GetBucketCorsResult")) {
+			t.Fatalf("get CORS %d %s", res.StatusCode, body)
+		}
+		invalid := []byte(`<CORSConfiguration><CORSRule><AllowedMethod>OPTIONS</AllowedMethod><AllowedOrigin>*</AllowedOrigin></CORSRule></CORSConfiguration>`)
+		res = do(http.MethodPut, "/cors-bdd?cors", invalid, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidRequest")) {
+			t.Fatalf("invalid CORS %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/cors-bdd?cors", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<ID>read</ID>")) {
+			t.Fatalf("CORS after invalid put %d %s", res.StatusCode, body)
+		}
+		for range 2 {
+			res = do(http.MethodDelete, "/cors-bdd?cors", nil, "")
+			io.Copy(io.Discard, res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusNoContent {
+				t.Fatalf("delete CORS %d", res.StatusCode)
+			}
+		}
+		res = do(http.MethodGet, "/cors-bdd?cors", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchCORSConfiguration")) {
+			t.Fatalf("get deleted CORS %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given request payment When changing the payer Then S3 validates and persists it", func(t *testing.T) {
 		res := do(http.MethodPut, "/request-payment", nil, "")
 		io.Copy(io.Discard, res.Body)

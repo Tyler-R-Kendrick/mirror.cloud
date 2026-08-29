@@ -502,6 +502,75 @@ func TestBucketCors(t *testing.T) {
 	}
 }
 
+func TestBucketWebsite(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	input := map[string]any{"Bucket": "website"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	_, err := invoke(t, p, "GetBucketWebsite", input, nil)
+	if fault := asFault(t, err); fault.Code != "NoSuchWebsiteConfiguration" || fault.HTTPStatus != http.StatusNotFound || fault.Fields["BucketName"] != "website" {
+		t.Fatalf("default website fault = %#v", fault)
+	}
+	redirect := map[string]any{"RedirectAllRequestsTo": map[string]any{"HostName": "example.test", "Protocol": "https"}}
+	mustInvoke(t, p, "PutBucketWebsite", map[string]any{"Bucket": "website", "WebsiteConfiguration": redirect}, nil)
+	if got := mustInvoke(t, p, "GetBucketWebsite", input, nil).Output; !reflect.DeepEqual(got, redirect) {
+		t.Fatalf("redirect website = %#v", got)
+	}
+	website := map[string]any{
+		"IndexDocument": map[string]any{"Suffix": "index.html"},
+		"ErrorDocument": map[string]any{"Key": "error.html"},
+		"RoutingRules":  []any{map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "docs/"}, "Redirect": map[string]any{"Protocol": "https", "ReplaceKeyPrefixWith": "manual/"}}},
+	}
+	mustInvoke(t, p, "PutBucketWebsite", map[string]any{"Bucket": "website", "WebsiteConfiguration": website}, nil)
+	if got := mustInvoke(t, p, "GetBucketWebsite", input, nil).Output; !reflect.DeepEqual(got, website) {
+		t.Fatalf("website = %#v", got)
+	}
+	tooMany := make([]any, 51)
+	for i := range tooMany {
+		tooMany[i] = map[string]any{"Redirect": map[string]any{}}
+	}
+	for _, tc := range []struct {
+		name   string
+		config any
+		code   string
+		status int
+	}{
+		{"malformed body", nil, "MalformedXML", http.StatusBadRequest},
+		{"redirect with index", map[string]any{"RedirectAllRequestsTo": map[string]any{"HostName": "example.test"}, "IndexDocument": map[string]any{"Suffix": "index.html"}}, "InvalidArgument", http.StatusBadRequest},
+		{"redirect without host", map[string]any{"RedirectAllRequestsTo": map[string]any{"Protocol": "https"}}, "MalformedXML", http.StatusBadRequest},
+		{"redirect protocol", map[string]any{"RedirectAllRequestsTo": map[string]any{"HostName": "example.test", "Protocol": "ftp"}}, "InvalidRequest", http.StatusBadRequest},
+		{"missing index", map[string]any{}, "InvalidArgument", http.StatusBadRequest},
+		{"empty suffix", map[string]any{"IndexDocument": map[string]any{"Suffix": ""}}, "InvalidArgument", http.StatusBadRequest},
+		{"slash suffix", map[string]any{"IndexDocument": map[string]any{"Suffix": "dir/index.html"}}, "InvalidArgument", http.StatusBadRequest},
+		{"empty error key", map[string]any{"IndexDocument": map[string]any{"Suffix": "index.html"}, "ErrorDocument": map[string]any{}}, "MalformedXML", http.StatusBadRequest},
+		{"empty routing rules", map[string]any{"IndexDocument": map[string]any{"Suffix": "index.html"}, "RoutingRules": []any{}}, "MalformedXML", http.StatusBadRequest},
+		{"too many routing rules", map[string]any{"IndexDocument": map[string]any{"Suffix": "index.html"}, "RoutingRules": tooMany}, "InternalError", http.StatusInternalServerError},
+		{"two replacement forms", map[string]any{"IndexDocument": map[string]any{"Suffix": "index.html"}, "RoutingRules": []any{map[string]any{"Redirect": map[string]any{"ReplaceKeyPrefixWith": "a", "ReplaceKeyWith": "b"}}}}, "InvalidRequest", http.StatusBadRequest},
+		{"empty condition", map[string]any{"IndexDocument": map[string]any{"Suffix": "index.html"}, "RoutingRules": []any{map[string]any{"Condition": map[string]any{}, "Redirect": map[string]any{}}}}, "InvalidRequest", http.StatusBadRequest},
+		{"routing protocol", map[string]any{"IndexDocument": map[string]any{"Suffix": "index.html"}, "RoutingRules": []any{map[string]any{"Redirect": map[string]any{"Protocol": "ftp"}}}}, "InvalidRequest", http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := map[string]any{"Bucket": "website", "WebsiteConfiguration": tc.config}
+			if tc.name == "malformed body" {
+				request["_body"] = "<broken"
+			}
+			_, err := invoke(t, p, "PutBucketWebsite", request, nil)
+			if fault := asFault(t, err); fault.Code != tc.code || fault.HTTPStatus != tc.status {
+				t.Fatalf("fault = %#v", fault)
+			}
+		})
+	}
+	if got := mustInvoke(t, p, "GetBucketWebsite", input, nil).Output; !reflect.DeepEqual(got, website) {
+		t.Fatalf("invalid put replaced website = %#v", got)
+	}
+	for range 2 {
+		mustInvoke(t, p, "DeleteBucketWebsite", input, nil)
+	}
+	_, err = invoke(t, p, "GetBucketWebsite", input, nil)
+	if fault := asFault(t, err); fault.Code != "NoSuchWebsiteConfiguration" {
+		t.Fatalf("deleted website fault = %#v", fault)
+	}
+}
+
 func TestBucketCorsCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	input := map[string]any{"Bucket": "cors-characterization"}

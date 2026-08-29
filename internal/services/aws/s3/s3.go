@@ -2353,6 +2353,14 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	col := p.col(req, "bktcfg")
 	if strings.HasPrefix(req.Operation, "Put") {
+		if req.Operation == "PutBucketWebsite" {
+			if str(req.Input["_body"]) != "" {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			if err := validateWebsiteConfiguration(req.Input["WebsiteConfiguration"]); err != nil {
+				return nil, err
+			}
+		}
 		if req.Operation == "PutBucketCors" {
 			if str(req.Input["_body"]) != "" {
 				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
@@ -2511,6 +2519,9 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 		if req.Operation == "GetBucketCors" {
 			return nil, &spi.Fault{Code: "NoSuchCORSConfiguration", Message: "The CORS configuration does not exist", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": b}}
 		}
+		if req.Operation == "GetBucketWebsite" {
+			return nil, &spi.Fault{Code: "NoSuchWebsiteConfiguration", Message: "The specified bucket does not have a website configuration", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": b}}
+		}
 		if miss != nil {
 			return nil, miss
 		}
@@ -2530,7 +2541,69 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if req.Operation == "GetBucketCors" {
 		return &spi.Response{Status: 200, Output: map[string]any{"CORSRules": asMap(doc["CORSConfiguration"])["CORSRules"]}}, nil
 	}
+	if req.Operation == "GetBucketWebsite" {
+		return &spi.Response{Status: 200, Output: asMap(doc["WebsiteConfiguration"])}, nil
+	}
 	return &spi.Response{Status: 200, Output: doc}, nil
+}
+
+func validateWebsiteConfiguration(value any) error {
+	configuration, ok := value.(map[string]any)
+	if !ok {
+		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if redirect := asMap(configuration["RedirectAllRequestsTo"]); len(redirect) != 0 {
+		if len(configuration) > 1 {
+			return &spi.Fault{Code: "InvalidArgument", Message: "RedirectAllRequestsTo cannot be provided in conjunction with other Routing Rules.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "RedirectAllRequestsTo", "ArgumentValue": "not null"}}
+		}
+		if _, ok := redirect["HostName"]; !ok {
+			return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		if protocol := str(redirect["Protocol"]); protocol != "" && protocol != "http" && protocol != "https" {
+			return &spi.Fault{Code: "InvalidRequest", Message: "Invalid protocol, protocol can be http or https. If not defined the protocol will be selected automatically.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		return nil
+	}
+	index := asMap(configuration["IndexDocument"])
+	if len(index) == 0 {
+		return &spi.Fault{Code: "InvalidArgument", Message: "A value for IndexDocument Suffix must be provided if RedirectAllRequestsTo is empty", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "IndexDocument", "ArgumentValue": nil}}
+	}
+	suffix := str(index["Suffix"])
+	if suffix == "" || strings.Contains(suffix, "/") {
+		argumentValue := any(suffix)
+		if suffix == "" {
+			argumentValue = nil
+		}
+		return &spi.Fault{Code: "InvalidArgument", Message: "The IndexDocument Suffix is not well formed", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "IndexDocument", "ArgumentValue": argumentValue}}
+	}
+	if _, exists := configuration["ErrorDocument"]; exists && str(asMap(configuration["ErrorDocument"])["Key"]) == "" {
+		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if _, exists := configuration["RoutingRules"]; exists {
+		rules := asSlice(configuration["RoutingRules"])
+		if len(rules) == 0 {
+			return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		if len(rules) > 50 {
+			return &spi.Fault{Code: "InternalError", Message: "Too many routing rules", HTTPStatus: http.StatusInternalServerError, Fault: "server"}
+		}
+		for _, value := range rules {
+			rule := asMap(value)
+			redirect := asMap(rule["Redirect"])
+			_, prefix := redirect["ReplaceKeyPrefixWith"]
+			_, key := redirect["ReplaceKeyWith"]
+			if prefix && key {
+				return &spi.Fault{Code: "InvalidRequest", Message: "You can only define ReplaceKeyPrefix or ReplaceKey but not both.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			if _, exists := rule["Condition"]; exists && len(asMap(rule["Condition"])) == 0 {
+				return &spi.Fault{Code: "InvalidRequest", Message: "Condition cannot be empty. To redirect all requests without a condition, the condition element shouldn't be present.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			if protocol := str(redirect["Protocol"]); protocol != "" && protocol != "http" && protocol != "https" {
+				return &spi.Fault{Code: "InvalidRequest", Message: "Invalid protocol, protocol can be http or https. If not defined the protocol will be selected automatically.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+		}
+	}
+	return nil
 }
 
 func normalizePublicAccessBlock(value any) (map[string]any, error) {

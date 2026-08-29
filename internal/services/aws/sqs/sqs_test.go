@@ -16,8 +16,11 @@ type observedClock struct {
 	after chan time.Duration
 }
 
-func (c *observedClock) After(delay time.Duration) <-chan time.Time {
-	result := c.Clock.After(delay)
+// AfterTime reports how far ahead the wait was, so a test can still assert the
+// length of a wait now that the packs park on an instant rather than a delay.
+func (c *observedClock) AfterTime(at time.Time) <-chan time.Time {
+	delay := at.Sub(c.Clock.Now())
+	result := c.Clock.AfterTime(at)
 	c.after <- delay
 	return result
 }

@@ -1519,6 +1519,7 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 			h.Set("x-amz-replication-status", status)
 		}
 		_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, ""))
+		p.notify(ctx, req, b, key, "ObjectRemoved:DeleteMarkerCreated")
 		return &spi.Response{Status: 204, Headers: h}, nil
 	}
 	if wantVer != "" {
@@ -1560,11 +1561,16 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		if truthy(meta["deleteMarker"]) {
 			h.Set("x-amz-delete-marker", "true")
 		}
+		p.notify(ctx, req, b, key, "ObjectRemoved:Delete")
 		return &spi.Response{Status: 204, Headers: h}, nil
 	}
+	_, existed := p.objectMetadata(ctx, req, b, key, "")
 	_ = p.deps.Blobs.Delete(ctx, blobKey(req, b, key))
 	_ = p.col(req, "objects").Delete(ctx, b+"/"+key)
 	_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, ""))
+	if existed {
+		p.notify(ctx, req, b, key, "ObjectRemoved:Delete")
+	}
 	return &spi.Response{Status: 204}, nil
 }
 
@@ -2874,6 +2880,9 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 		if objectVersion != "" {
 			h.Set("x-amz-version-id", objectVersion)
 		}
+		if req.Operation == "DeleteObjectTagging" {
+			p.notify(ctx, req, b, key, "ObjectTagging:Delete")
+		}
 		return &spi.Response{Status: 204, Headers: h, Output: map[string]any{}}, nil
 	case "PutBucketTagging", "PutObjectTagging":
 		tagKey := b
@@ -2907,6 +2916,9 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 		h := http.Header{}
 		if objectVersion != "" {
 			h.Set("x-amz-version-id", objectVersion)
+		}
+		if req.Operation == "PutObjectTagging" {
+			p.notify(ctx, req, b, key, "ObjectTagging:Put")
 		}
 		return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"TagSet": json.RawMessage(raw)}}, nil
 	case "GetBucketTagging", "GetObjectTagging":

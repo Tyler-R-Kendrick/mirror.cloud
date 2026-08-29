@@ -326,6 +326,58 @@ func TestBucketNotificationDeliveryFilters(t *testing.T) {
 	}
 }
 
+func TestBucketNotificationRemovalAndTaggingEvents(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	bucket := "notification-events"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	if err := deps.Store.Scope(ident().Account, ident().Region).Collection("queues").Put(context.Background(), "queue", []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{
+		"Bucket": bucket,
+		"NotificationConfiguration": map[string]any{"QueueConfigurations": []any{map[string]any{
+			"QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue",
+			"Events":   []any{"s3:ObjectRemoved:*", "s3:ObjectTagging:*"},
+		}}},
+	}, nil)
+
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "plain"}, []byte("plain"))
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "plain"}, nil)
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "missing"}, nil)
+
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}, nil)
+	version := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "versioned"}, []byte("versioned")).Headers.Get("x-amz-version-id")
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "versioned"}, nil)
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "versioned", "VersionId": version}, nil)
+
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "tagged"}, []byte("tagged"))
+	mustInvoke(t, p, "PutObjectTagging", map[string]any{"Bucket": bucket, "Key": "tagged", "TagSet": []any{map[string]any{"Key": "kind", "Value": "test"}}}, nil)
+	mustInvoke(t, p, "DeleteObjectTagging", map[string]any{"Bucket": bucket, "Key": "tagged"}, nil)
+
+	messages, _, err := deps.Store.Scope(ident().Account, ident().Region).Collection("msgs:queue").List(context.Background(), "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := map[string]int{}
+	for _, stored := range messages {
+		var message map[string]any
+		if err := json.Unmarshal(stored.Value, &message); err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(message["body"].(string)), &payload); err != nil {
+			t.Fatal(err)
+		}
+		record := asMapForTest(asSliceForTest(payload["Records"])[0])
+		events[record["eventName"].(string)]++
+	}
+	want := map[string]int{"ObjectRemoved:Delete": 2, "ObjectRemoved:DeleteMarkerCreated": 1, "ObjectTagging:Put": 1, "ObjectTagging:Delete": 1}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("notification events = %#v, want %#v", events, want)
+	}
+}
+
 func TestCreateBucketObjectOwnership(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	characterization := map[string]any{}

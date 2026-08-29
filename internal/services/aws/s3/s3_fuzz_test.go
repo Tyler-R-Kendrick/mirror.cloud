@@ -168,6 +168,46 @@ func FuzzCreateBucketTags(f *testing.F) {
 	})
 }
 
+func FuzzCreateBucketObjectOwnership(f *testing.F) {
+	for _, seed := range []struct {
+		set       bool
+		ownership string
+	}{{false, ""}, {true, "BucketOwnerPreferred"}, {true, "ObjectWriter"}, {true, "BucketOwnerEnforced"}, {true, ""}, {true, "invalid"}} {
+		f.Add(seed.set, seed.ownership)
+	}
+	f.Fuzz(func(t *testing.T, set bool, ownership string) {
+		p := s3.New(spitest.Deps(t))
+		input := map[string]any{"Bucket": "ownership-fuzz"}
+		if set {
+			input["ObjectOwnership"] = ownership
+		}
+		_, err := invoke(t, p, "CreateBucket", input, nil)
+		valid := !set || ownership == "BucketOwnerPreferred" || ownership == "ObjectWriter" || ownership == "BucketOwnerEnforced"
+		if !valid {
+			if fault := asFault(t, err); fault.Code != "InvalidArgument" {
+				t.Fatalf("ownership=%q: %#v", ownership, fault)
+			}
+			if _, err := invoke(t, p, "HeadBucket", map[string]any{"Bucket": "ownership-fuzz"}, nil); asFault(t, err).Code != "NoSuchBucket" {
+				t.Fatalf("invalid ownership reserved bucket: %v", err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := ownership
+		if !set {
+			want = "BucketOwnerEnforced"
+		}
+		response := mustInvoke(t, p, "GetBucketOwnershipControls", map[string]any{"Bucket": "ownership-fuzz"}, nil)
+		controls := response.Output["OwnershipControls"].(map[string]any)
+		rules := controls["Rules"].([]any)
+		if len(rules) != 1 || rules[0].(map[string]any)["ObjectOwnership"] != want {
+			t.Fatalf("stored ownership = %#v, want %q", response.Output, want)
+		}
+	})
+}
+
 func FuzzDeleteBucketEmptiness(f *testing.F) {
 	for _, seed := range []struct {
 		versioned bool

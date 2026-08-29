@@ -1,0 +1,89 @@
+schema: bir/1
+service: aws.dsql
+
+# Transcribed from the hand-written pack, not established against the real
+# service. A cluster here is a record; there is no database behind it.
+provenance: authored
+
+resources:
+  cluster:
+    collection: dsqlcl
+    id:
+      # Created without a name -- the service issues the identifier -- and
+      # named by it on every later call.
+      generate: { kind: hex, bytes: 8 }
+      input_members: [identifier]
+    arn: "arn:{partition}:dsql:{region}:{account}:cluster/{id}"
+    record:
+      identifier: id
+      arn: arn
+      status: "'ACTIVE'"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateCluster:
+    effects:
+      - create: { resource: cluster }
+    output:
+      identifier: rec.identifier
+      arn: rec.arn
+      status: rec.status
+
+  GetCluster:
+    reads:
+      cluster: { resource: cluster }
+    require:
+      - { cond: cluster_found, error: NotFound }
+    output:
+      identifier: cluster.identifier
+      arn: cluster.arn
+      status: cluster.status
+
+  # An update that updates nothing: the pack answered with the record as it
+  # stood, and none of the mutable inputs -- deletion protection, the KMS key,
+  # multi-region properties -- were ever stored to update.
+  UpdateCluster:
+    reads:
+      cluster: { resource: cluster }
+    require:
+      - { cond: cluster_found, error: NotFound }
+    output:
+      identifier: cluster.identifier
+      arn: cluster.arn
+      status: cluster.status
+
+  ListClusters:
+    list: { resource: cluster, member: clusters, paginate: model }
+
+  DeleteCluster:
+    effects:
+      - delete: { resource: cluster, missing: ignore }
+
+  GetVpcEndpointServiceName:
+    output:
+      serviceName: "'com.amazonaws.' + identity.region + '.dsql'"
+
+quirks:
+  - operation: CreateCluster
+    note: >
+      The model marks creationTime and deletionProtectionEnabled required in
+      this operation's output and the pack answers with neither, so a strict
+      client sees a response missing two members it was promised. Transcribed
+      as it stands rather than invented; a probe should record what the real
+      service returns, at which point these become real cells rather than
+      absent ones.
+  - operation: DeleteCluster
+    note: >
+      Deleting answers with nothing, where the model declares arn,
+      creationTime, identifier and status required. The same gap as
+      CreateCluster, and deleting an absent cluster is not an error here.
+  - operation: UpdateCluster
+    note: >
+      Accepted and ignored: nothing the operation can change is stored, so the
+      answer is the record as it already was. Real DSQL applies the change and
+      reports status UPDATING.

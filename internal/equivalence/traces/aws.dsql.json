@@ -1,0 +1,208 @@
+{
+  "schema": "trace/1",
+  "service": "aws.dsql",
+  "source": "pack:internal/services/aws/dsql@4802ff3",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "clusters": null
+      }
+    },
+    {
+      "operation": "GetCluster",
+      "input": {
+        "identifier": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateCluster",
+      "input": {
+        "deletionProtectionEnabled": true
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "arn": "arn:aws:dsql:us-east-1:000000000000:cluster/7c589129",
+        "identifier": "7c589129",
+        "status": "ACTIVE"
+      }
+    },
+    {
+      "operation": "CreateCluster",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "arn": "arn:aws:dsql:us-east-1:000000000000:cluster/5f59f223",
+        "identifier": "5f59f223",
+        "status": "ACTIVE"
+      }
+    },
+    {
+      "operation": "ListClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "clusters": [
+          {
+            "arn": "arn:aws:dsql:us-east-1:000000000000:cluster/5f59f223",
+            "identifier": "5f59f223",
+            "status": "ACTIVE"
+          },
+          {
+            "arn": "arn:aws:dsql:us-east-1:000000000000:cluster/7c589129",
+            "identifier": "7c589129",
+            "status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetCluster",
+      "input": {
+        "identifier": {
+          "$fromPath": "identifier",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "arn": "arn:aws:dsql:us-east-1:000000000000:cluster/7c589129",
+        "identifier": "7c589129",
+        "status": "ACTIVE"
+      }
+    },
+    {
+      "operation": "UpdateCluster",
+      "input": {
+        "deletionProtectionEnabled": false,
+        "identifier": {
+          "$fromPath": "identifier",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "arn": "arn:aws:dsql:us-east-1:000000000000:cluster/7c589129",
+        "identifier": "7c589129",
+        "status": "ACTIVE"
+      }
+    },
+    {
+      "operation": "GetVpcEndpointServiceName",
+      "input": {
+        "identifier": "any"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "serviceName": "com.amazonaws.us-east-1.dsql"
+      }
+    },
+    {
+      "operation": "DeleteCluster",
+      "input": {
+        "identifier": {
+          "$fromPath": "identifier",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetCluster",
+      "input": {
+        "identifier": {
+          "$fromPath": "identifier",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteCluster",
+      "input": {
+        "identifier": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+schema: bir/1
+service: aws.resource-groups
+
+# Transcribed from the hand-written pack, not established against the real
+# service. A group here is a name and a description; membership is accepted and
+# never stored, so nothing can be listed back out of one.
+provenance: authored
+
+resources:
+  group:
+    collection: rg
+    id:
+      # Created as Name, addressed afterwards as GroupName.
+      input_members: [Name, GroupName]
+    arn: "arn:{partition}:resource-groups:{region}:{account}:group/{id}"
+    record:
+      Name: id
+      Description: "'Description' in input ? string(input.Description) : ''"
+      GroupArn: arn
+
+errors:
+  BadRequest:
+    code: BadRequestException
+    http: 400
+    fault: client
+  NotFound:
+    code: NotFoundException
+    http: 404
+    fault: client
+
+operations:
+  CreateGroup:
+    require:
+      - { cond: "string(input.Name) != ''", error: BadRequest }
+    effects:
+      - put: { resource: group }
+    output:
+      Group: rec
+
+  GetGroup:
+    reads:
+      group: { resource: group }
+    require:
+      - { cond: group_found, error: NotFound }
+    output:
+      Group: group
+
+  ListGroups:
+    list: { resource: group, member: GroupIdentifiers, paginate: model }
+
+  DeleteGroup:
+    effects:
+      - delete: { resource: group, missing: ignore }
+
+  # Membership is echoed rather than recorded: every ARN offered comes back as
+  # succeeded and none of them is stored, which is why ListGroupResources can
+  # only ever answer empty.
+  GroupResources:
+    output:
+      Succeeded: "'ResourceArns' in input ? input.ResourceArns : []"
+      Failed: "[]"
+
+  UngroupResources:
+    output:
+      Succeeded: "'ResourceArns' in input ? input.ResourceArns : []"
+      Failed: "[]"
+
+  ListGroupResources:
+    output:
+      Resources: "[]"
+
+quirks:
+  - operation: GroupResources
+    note: >
+      Grouping succeeds for every ARN offered and stores none of them, so
+      ListGroupResources answers empty for a group whose resources were just
+      added. That is the pack's behavior and it is self-inconsistent as an
+      emulation; it is transcribed rather than corrected because inventing the
+      membership store is writing behavior, not recording it. Storing the ARNs
+      is a small B-IR change once a probe says what the real service returns
+      for Pending and for an ARN that does not exist.
+  - operation: DeleteGroup
+    note: >
+      Deleting answers with nothing where the model declares a Group member,
+      and deleting an absent group is not an error.

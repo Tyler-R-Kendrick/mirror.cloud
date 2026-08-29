@@ -69,12 +69,14 @@ test-fuzz:
 
 # The timeout is set from measurement, not from hope. The suite runs every
 # mutant against the full pack surface, so its cost tracks the emulator's
-# size; a GitHub-hosted runner has been observed finishing it in 1704s and,
-# on a slower draw, exceeding 1800s outright, against 463-702s on a developer
-# machine. A budget within a few percent of the observed maximum reports
-# runner speed rather than correctness, so this one carries roughly 2x
-# headroom over the slowest passing run seen. Lower it when the suite gets
-# cheaper, not to make a slow run fail sooner.
+# size, and what it costs varies by more than 3x for reasons that have nothing
+# to do with the code: runs of 463s, 702s and 1589s on the same developer
+# machine, 1704s on a GitHub-hosted runner, and one runner exceeding 1800s
+# outright. A budget set within a few percent of the observed maximum
+# therefore reports which machine drew the job rather than whether anything
+# broke, so this one carries roughly 2x headroom over the slowest passing run
+# seen. Lower it when the suite gets cheaper, not to make a slow run fail
+# sooner.
 test-mutation:
 	$(GO) test ./internal/mutation -count=1 -parallel 4 -timeout 3600s
 

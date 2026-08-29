@@ -1,0 +1,219 @@
+{
+  "schema": "trace/1",
+  "service": "aws.resource-groups",
+  "source": "pack:internal/services/aws/resourcegroups@4802ff3",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GroupIdentifiers": null
+      }
+    },
+    {
+      "operation": "GetGroup",
+      "input": {
+        "GroupName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateGroup",
+      "input": {
+        "Description": "production stack",
+        "Name": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Group": {
+          "Description": "production stack",
+          "GroupArn": "arn:aws:resource-groups:us-east-1:000000000000:group/prod",
+          "Name": "prod"
+        }
+      }
+    },
+    {
+      "operation": "GetGroup",
+      "input": {
+        "GroupName": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Group": {
+          "Description": "production stack",
+          "GroupArn": "arn:aws:resource-groups:us-east-1:000000000000:group/prod",
+          "Name": "prod"
+        }
+      }
+    },
+    {
+      "operation": "CreateGroup",
+      "input": {
+        "Name": "staging"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Group": {
+          "Description": "",
+          "GroupArn": "arn:aws:resource-groups:us-east-1:000000000000:group/staging",
+          "Name": "staging"
+        }
+      }
+    },
+    {
+      "operation": "ListGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GroupIdentifiers": [
+          {
+            "Description": "production stack",
+            "GroupArn": "arn:aws:resource-groups:us-east-1:000000000000:group/prod",
+            "Name": "prod"
+          },
+          {
+            "Description": "",
+            "GroupArn": "arn:aws:resource-groups:us-east-1:000000000000:group/staging",
+            "Name": "staging"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GroupResources",
+      "input": {
+        "Group": "prod",
+        "ResourceArns": [
+          "arn:aws:s3:::one",
+          "arn:aws:s3:::two"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Failed": [],
+        "Succeeded": [
+          "arn:aws:s3:::one",
+          "arn:aws:s3:::two"
+        ]
+      }
+    },
+    {
+      "operation": "ListGroupResources",
+      "input": {
+        "GroupName": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Resources": []
+      }
+    },
+    {
+      "operation": "UngroupResources",
+      "input": {
+        "Group": "prod",
+        "ResourceArns": [
+          "arn:aws:s3:::one"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Failed": [],
+        "Succeeded": [
+          "arn:aws:s3:::one"
+        ]
+      }
+    },
+    {
+      "operation": "DeleteGroup",
+      "input": {
+        "GroupName": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetGroup",
+      "input": {
+        "GroupName": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    }
+  ]
+}

@@ -1,0 +1,169 @@
+{
+  "schema": "trace/1",
+  "service": "aws.comprehendmedical",
+  "source": "pack:internal/services/aws/comprehendmedical@4802ff3",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DetectEntitiesV2",
+      "input": {
+        "Text": "patient reports a persistent cough"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Entities": [
+          {
+            "Category": "MEDICAL_CONDITION",
+            "Score": 0.99,
+            "Text": "cough",
+            "Type": "DX_NAME"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DetectPHI",
+      "input": {
+        "Text": "patient reports a persistent cough"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Entities": []
+      }
+    },
+    {
+      "operation": "InferICD10CM",
+      "input": {
+        "Text": "patient reports a persistent cough"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Entities": [
+          {
+            "Category": "MEDICAL_CONDITION",
+            "Score": 0.99,
+            "Text": "cough",
+            "Type": "DX_NAME"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListEntitiesDetectionV2Jobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ComprehendMedicalAsyncJobPropertiesList": null
+      }
+    },
+    {
+      "operation": "DescribeEntitiesDetectionV2Job",
+      "input": {
+        "JobId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "StartEntitiesDetectionV2Job",
+      "input": {
+        "DataAccessRoleArn": "arn:aws:iam::000000000000:role/cm",
+        "InputDataConfig": {
+          "S3Bucket": "in"
+        },
+        "JobName": "nightly",
+        "LanguageCode": "en",
+        "OutputDataConfig": {
+          "S3Bucket": "out"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobId": "7c589129"
+      }
+    },
+    {
+      "operation": "DescribeEntitiesDetectionV2Job",
+      "input": {
+        "JobId": {
+          "$fromPath": "JobId",
+          "$fromStep": 5
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ComprehendMedicalAsyncJobProperties": {
+          "JobId": "7c589129",
+          "JobName": "nightly",
+          "JobStatus": "COMPLETED"
+        }
+      }
+    },
+    {
+      "operation": "ListEntitiesDetectionV2Jobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ComprehendMedicalAsyncJobPropertiesList": [
+          {
+            "JobId": "7c589129",
+            "JobName": "nightly",
+            "JobStatus": "COMPLETED"
+          }
+        ]
+      }
+    }
+  ]
+}

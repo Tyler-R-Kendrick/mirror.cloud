@@ -555,6 +555,63 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 			return
 		}
 		in["AccelerateConfiguration"] = map[string]any{"Status": configuration.Status}
+	case "PutBucketLogging":
+		var status struct {
+			XMLName        xml.Name
+			LoggingEnabled *struct {
+				TargetBucket string `xml:"TargetBucket"`
+				TargetPrefix string `xml:"TargetPrefix"`
+				TargetGrants []struct {
+					Grantee struct {
+						DisplayName  string `xml:"DisplayName"`
+						EmailAddress string `xml:"EmailAddress"`
+						ID           string `xml:"ID"`
+						URI          string `xml:"URI"`
+						Type         string `xml:"type,attr"`
+					} `xml:"Grantee"`
+					Permission string `xml:"Permission"`
+				} `xml:"TargetGrants>Grant"`
+				TargetObjectKeyFormat *struct {
+					SimplePrefix      *struct{} `xml:"SimplePrefix"`
+					PartitionedPrefix *struct {
+						PartitionDateSource string `xml:"PartitionDateSource"`
+					} `xml:"PartitionedPrefix"`
+				} `xml:"TargetObjectKeyFormat"`
+			} `xml:"LoggingEnabled"`
+		}
+		if xml.Unmarshal(raw, &status) != nil || status.XMLName.Local != "BucketLoggingStatus" {
+			in["_body"] = string(raw)
+			return
+		}
+		document := map[string]any{}
+		if source := status.LoggingEnabled; source != nil {
+			logging := map[string]any{"TargetBucket": source.TargetBucket, "TargetPrefix": source.TargetPrefix}
+			if len(source.TargetGrants) != 0 {
+				grants := make([]any, 0, len(source.TargetGrants))
+				for _, source := range source.TargetGrants {
+					grantee := map[string]any{}
+					for key, value := range map[string]string{"DisplayName": source.Grantee.DisplayName, "EmailAddress": source.Grantee.EmailAddress, "ID": source.Grantee.ID, "Type": source.Grantee.Type, "URI": source.Grantee.URI} {
+						if value != "" {
+							grantee[key] = value
+						}
+					}
+					grants = append(grants, map[string]any{"Grantee": grantee, "Permission": source.Permission})
+				}
+				logging["TargetGrants"] = grants
+			}
+			if format := source.TargetObjectKeyFormat; format != nil {
+				value := map[string]any{}
+				if format.SimplePrefix != nil {
+					value["SimplePrefix"] = map[string]any{}
+				}
+				if format.PartitionedPrefix != nil {
+					value["PartitionedPrefix"] = map[string]any{"PartitionDateSource": format.PartitionedPrefix.PartitionDateSource}
+				}
+				logging["TargetObjectKeyFormat"] = value
+			}
+			document["LoggingEnabled"] = logging
+		}
+		in["BucketLoggingStatus"] = document
 	case "PutObjectLegalHold":
 		var hold struct {
 			Status string `xml:"Status"`
@@ -681,7 +738,7 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 		in["ReplicationConfiguration"] = map[string]any{"Role": configuration.Role, "Rules": rules}
 	case "PutBucketPolicy":
 		in["Policy"] = string(raw)
-	case "PutBucketCors", "PutBucketWebsite", "PutBucketLogging",
+	case "PutBucketCors", "PutBucketWebsite",
 		"PutBucketLifecycleConfiguration",
 		"PutBucketEncryption", "PutBucketAcl", "PutObjectAcl":
 		in["_body"] = string(raw)

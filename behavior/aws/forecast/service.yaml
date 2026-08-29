@@ -1,0 +1,126 @@
+schema: bir/1
+service: aws.forecast
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is trained and nothing is forecast: a dataset and a
+# predictor are records that are ACTIVE the moment they are created.
+provenance: authored
+
+resources:
+  # Addressed by ARN everywhere but creation, so the ARN is the store key. The
+  # pack keyed on the name and recovered it from the ARN's last segment, which
+  # answers the same way for every ARN it built itself.
+  dataset:
+    collection: fcds
+    key: DatasetArn
+    id:
+      input_members: [DatasetName]
+    arn: "arn:{partition}:forecast:{region}:{account}:dataset/{id}"
+    record:
+      DatasetName: id
+      DatasetArn: arn
+      Status: "'ACTIVE'"
+      Domain: "'Domain' in input ? string(input.Domain) : ''"
+
+  predictor:
+    collection: fcpred
+    key: PredictorArn
+    id:
+      input_members: [PredictorName]
+    arn: "arn:{partition}:forecast:{region}:{account}:predictor/{id}"
+    record:
+      PredictorName: id
+      PredictorArn: arn
+      Status: "'ACTIVE'"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateDataset:
+    effects:
+      - put: { resource: dataset }
+    output:
+      DatasetArn: rec.DatasetArn
+
+  DescribeDataset:
+    reads:
+      d: { resource: dataset, key: "string(input.DatasetArn)" }
+    require:
+      - { cond: d_found, error: NotFound }
+    output:
+      DatasetName: d.DatasetName
+      DatasetArn: d.DatasetArn
+      Status: d.Status
+      Domain: d.Domain
+
+  # DatasetSummary declares no Status, so the listed form of a dataset is not
+  # the stored record.
+  ListDatasets:
+    list: { resource: dataset, member: Datasets, paginate: model }
+    output:
+      Datasets: >
+        items.map(d, {
+          'DatasetArn': d.DatasetArn,
+          'DatasetName': d.DatasetName,
+          'Domain': d.Domain
+        })
+
+  DeleteDataset:
+    effects:
+      - delete: { resource: dataset, key: "string(input.DatasetArn)", missing: ignore }
+
+  CreatePredictor:
+    effects:
+      - put: { resource: predictor }
+    output:
+      PredictorArn: rec.PredictorArn
+
+  DescribePredictor:
+    reads:
+      p: { resource: predictor, key: "string(input.PredictorArn)" }
+    require:
+      - { cond: p_found, error: NotFound }
+    output:
+      PredictorName: p.PredictorName
+      PredictorArn: p.PredictorArn
+      Status: p.Status
+
+  DeletePredictor:
+    effects:
+      - delete: { resource: predictor, key: "string(input.PredictorArn)", missing: ignore }
+
+quirks:
+  - operation: ListDatasets
+    note: >
+      A listed dataset carries no Status, because DatasetSummary declares none,
+      while the same dataset described carries one. The pack emitted the stored
+      record in both, so the listing carried a member no SDK could read, and
+      the recorded step is superseded with that reason. DatasetType is declared
+      on the summary and on the describe answer and is never set, though the
+      model requires it on creation: the pack read the domain out of the
+      request and not the type.
+  - operation: CreateDataset
+    note: >
+      Schema and DatasetType are required and dropped, so a dataset has no
+      columns and no type, and CreationTime, LastModificationTime,
+      DataFrequency and EncryptionConfig are declared on the describe answer
+      and never set. A dataset is ACTIVE immediately, so nothing ever observes
+      CREATE_PENDING. Creating the same name twice overwrites rather than
+      faulting.
+  - operation: CreatePredictor
+    note: >
+      A predictor is ACTIVE without training: FeaturizationConfig,
+      ForecastHorizon and InputDataConfig are required and dropped, so a
+      predictor names no dataset and has no horizon. Nothing relates a
+      predictor to the dataset it was built from, and DescribePredictor answers
+      three members where the model declares twenty-five. No forecast can be
+      generated from it -- CreateForecast is not served -- so a predictor is a
+      record that exists and does nothing.
+  - operation: DeleteDataset
+    note: >
+      Deleting an absent dataset or predictor succeeds, where describing the
+      same ARN faults. The real service faults, and that is a probe away.

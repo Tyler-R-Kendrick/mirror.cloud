@@ -1,0 +1,124 @@
+schema: bir/1
+service: aws.quicksight
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is analysed: a dataset carries no tables and a dashboard
+# carries no version, and neither is ever ingested or published.
+provenance: authored
+
+resources:
+  dataset:
+    collection: qsds
+    id:
+      input_members: [DataSetId]
+    arn: "arn:{partition}:quicksight:{region}:{account}:dataset/{id}"
+    record:
+      DataSetId: id
+      Name: "'Name' in input ? string(input.Name) : ''"
+      Arn: arn
+
+  dashboard:
+    collection: qsdash
+    id:
+      input_members: [DashboardId]
+    arn: "arn:{partition}:quicksight:{region}:{account}:dashboard/{id}"
+    record:
+      DashboardId: id
+      Name: "'Name' in input ? string(input.Name) : ''"
+      Arn: arn
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateDataSet:
+    effects:
+      - put: { resource: dataset }
+    output:
+      Arn: rec.Arn
+      DataSetId: rec.DataSetId
+      Status: "201"
+
+  DescribeDataSet:
+    reads:
+      d: { resource: dataset }
+    require:
+      - { cond: d_found, error: NotFound }
+    output:
+      DataSet: d
+
+  ListDataSets:
+    list: { resource: dataset, member: DataSetSummaries, paginate: model }
+
+  DeleteDataSet:
+    effects:
+      - delete: { resource: dataset, missing: ignore }
+    output:
+      Status: "200"
+
+  CreateDashboard:
+    effects:
+      - put: { resource: dashboard }
+    output:
+      Arn: rec.Arn
+      DashboardId: rec.DashboardId
+      Status: "202"
+
+  DescribeDashboard:
+    reads:
+      d: { resource: dashboard }
+    require:
+      - { cond: d_found, error: NotFound }
+    output:
+      Dashboard: d
+
+  ListDashboards:
+    list: { resource: dashboard, member: DashboardSummaryList, paginate: model }
+
+  DeleteDashboard:
+    effects:
+      - delete: { resource: dashboard, missing: ignore }
+    output:
+      Status: "204"
+
+quirks:
+  - operation: CreateDataSet
+    note: >
+      A dataset is three members: its id, its name and its ARN. PhysicalTableMap
+      and ImportMode are required by the model and dropped, so a dataset has no
+      tables and no import mode, and LogicalTableMap, Permissions, ColumnGroups
+      and the row- and column-level permission rules are all accepted and
+      dropped too. IngestionArn and IngestionId are declared on the answer and
+      absent: nothing is ever ingested, so the caller has no ingestion to poll.
+
+      The pack generated an identifier when DataSetId was missing. DataSetId is
+      required, so the engine now rejects that request before the fallback can
+      run, and the same is true of DashboardId. The fallback was unreachable
+      through the wire in the pack too, since the edge validated the same
+      requirement.
+  - operation: CreateDashboard
+    note: >
+      A dashboard has no Version, so DescribeDashboard answers a dashboard that
+      has never been published, and CreationStatus and VersionArn are declared
+      on the create answer and absent. Definition, SourceEntity, Parameters and
+      ThemeArn are dropped. Creating either resource twice with the same id
+      overwrites rather than faulting.
+  - operation: DeleteDataSet
+    note: >
+      Deleting answers only a Status where Arn and DataSetId are also declared,
+      and deleting an absent dataset or dashboard succeeds -- where describing
+      the same id faults. The status codes are the pack's: 201 for creating a
+      dataset, 202 for creating a dashboard, 200 and 204 for deleting them.
+      They are transcribed rather than reasoned about; the real service's are a
+      probe away.
+  - operation: ListDataSets
+    note: >
+      AwsAccountId is required on every operation and narrows nothing: the
+      account and region already scope the store, so asking as one account for
+      another account's datasets answers with the caller's own. RequestId is
+      declared on every answer and never set. CreatedTime and LastUpdatedTime
+      are declared on both the full and summary forms and never set, so nothing
+      can be sorted by age.

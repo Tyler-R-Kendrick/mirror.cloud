@@ -1,0 +1,108 @@
+schema: bir/1
+service: aws.personalize
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is trained: a dataset group and a solution are records that
+# are ACTIVE the moment they are created.
+provenance: authored
+
+resources:
+  # Addressed by ARN everywhere but creation, so the ARN is the store key. The
+  # pack keyed on the name and recovered it from the ARN's last segment, which
+  # answers the same way for every ARN it built itself.
+  datasetgroup:
+    collection: psdg
+    key: datasetGroupArn
+    id:
+      input_members: [name]
+    arn: "arn:{partition}:personalize:{region}:{account}:dataset-group/{id}"
+    record:
+      name: id
+      datasetGroupArn: arn
+      status: "'ACTIVE'"
+
+  solution:
+    collection: pssol
+    key: solutionArn
+    id:
+      input_members: [name]
+    arn: "arn:{partition}:personalize:{region}:{account}:solution/{id}"
+    record:
+      name: id
+      solutionArn: arn
+      status: "'ACTIVE'"
+      datasetGroupArn: "string(input.datasetGroupArn)"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateDatasetGroup:
+    effects:
+      - put: { resource: datasetgroup }
+    output:
+      datasetGroupArn: rec.datasetGroupArn
+
+  DescribeDatasetGroup:
+    reads:
+      g: { resource: datasetgroup, key: "string(input.datasetGroupArn)" }
+    require:
+      - { cond: g_found, error: NotFound }
+    output:
+      datasetGroup: g
+
+  ListDatasetGroups:
+    list: { resource: datasetgroup, member: datasetGroups, paginate: model }
+
+  DeleteDatasetGroup:
+    effects:
+      - delete: { resource: datasetgroup, key: "string(input.datasetGroupArn)", missing: ignore }
+
+  CreateSolution:
+    effects:
+      - put: { resource: solution }
+    output:
+      solutionArn: rec.solutionArn
+
+  DescribeSolution:
+    reads:
+      s: { resource: solution, key: "string(input.solutionArn)" }
+    require:
+      - { cond: s_found, error: NotFound }
+    output:
+      solution: s
+
+  DeleteSolution:
+    effects:
+      - delete: { resource: solution, key: "string(input.solutionArn)", missing: ignore }
+
+quirks:
+  - operation: CreateDatasetGroup
+    note: >
+      A dataset group is ACTIVE immediately and has no creationDateTime,
+      lastUpdatedDateTime, domain, roleArn or kmsKeyArn, all of which
+      DatasetGroup declares and the request may carry. domain is declared on
+      the create answer too and is not returned. Creating the same name twice
+      overwrites rather than faulting, and nothing validates the roleArn.
+  - operation: CreateSolution
+    note: >
+      A solution is ACTIVE with no recipe, no configuration and no version:
+      recipeArn, solutionConfig, performAutoML, latestSolutionVersion and
+      eventType are all declared, accepted and dropped. datasetGroupArn is
+      required and stored without being checked against an existing dataset
+      group, so a solution can name one that was never created.
+  - operation: DeleteDatasetGroup
+    note: >
+      Deleting an absent dataset group or solution succeeds, where describing
+      the same ARN faults. Deleting a dataset group leaves its solutions
+      behind, still naming it. The real service faults on the first and
+      refuses the second while solutions remain; both are a probe away.
+  - operation: ListDatasetGroups
+    note: >
+      Solutions cannot be listed at all -- the pack served no
+      ListSolutions -- so a solution is reachable only by an ARN the caller
+      kept. The catalog still carries the operation, so it answers at the mock
+      tier with a synthesized body.

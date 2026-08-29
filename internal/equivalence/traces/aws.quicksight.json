@@ -1,0 +1,281 @@
+{
+  "schema": "trace/1",
+  "service": "aws.quicksight",
+  "source": "pack:internal/services/aws/quicksight@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListDataSets",
+      "input": {
+        "AwsAccountId": "000000000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DataSetSummaries": null
+      }
+    },
+    {
+      "operation": "DescribeDataSet",
+      "input": {
+        "AwsAccountId": "000000000000",
+        "DataSetId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateDataSet",
+      "input": {
+        "AwsAccountId": "000000000000",
+        "DataSetId": "ds1",
+        "ImportMode": "SPICE",
+        "Name": "sales",
+        "PhysicalTableMap": {
+          "t1": {
+            "CustomSql": {
+              "DataSourceArn": "arn:aws:quicksight:us-east-1:000000000000:datasource/d",
+              "Name": "q",
+              "SqlQuery": "select 1"
+            }
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:quicksight:us-east-1:000000000000:dataset/ds1",
+        "DataSetId": "ds1",
+        "Status": 201
+      }
+    },
+    {
+      "operation": "DescribeDataSet",
+      "input": {
+        "AwsAccountId": "000000000000",
+        "DataSetId": "ds1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DataSet": {
+          "Arn": "arn:aws:quicksight:us-east-1:000000000000:dataset/ds1",
+          "DataSetId": "ds1",
+          "Name": "sales"
+        }
+      }
+    },
+    {
+      "operation": "ListDataSets",
+      "input": {
+        "AwsAccountId": "000000000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DataSetSummaries": [
+          {
+            "Arn": "arn:aws:quicksight:us-east-1:000000000000:dataset/ds1",
+            "DataSetId": "ds1",
+            "Name": "sales"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListDashboards",
+      "input": {
+        "AwsAccountId": "000000000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DashboardSummaryList": null
+      }
+    },
+    {
+      "operation": "CreateDashboard",
+      "input": {
+        "AwsAccountId": "000000000000",
+        "DashboardId": "db1",
+        "Name": "board"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:quicksight:us-east-1:000000000000:dashboard/db1",
+        "DashboardId": "db1",
+        "Status": 202
+      }
+    },
+    {
+      "operation": "DescribeDashboard",
+      "input": {
+        "AwsAccountId": "000000000000",
+        "DashboardId": "db1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Dashboard": {
+          "Arn": "arn:aws:quicksight:us-east-1:000000000000:dashboard/db1",
+          "DashboardId": "db1",
+          "Name": "board"
+        }
+      }
+    },
+    {
+      "operation": "ListDashboards",
+      "input": {
+        "AwsAccountId": "000000000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DashboardSummaryList": [
+          {
+            "Arn": "arn:aws:quicksight:us-east-1:000000000000:dashboard/db1",
+            "DashboardId": "db1",
+            "Name": "board"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDashboard",
+      "input": {
+        "AwsAccountId": "000000000000",
+        "DashboardId": "db1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Status": 204
+      }
+    },
+    {
+      "operation": "DescribeDashboard",
+      "input": {
+        "AwsAccountId": "000000000000",
+        "DashboardId": "db1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteDataSet",
+      "input": {
+        "AwsAccountId": "000000000000",
+        "DataSetId": "ds1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Status": 200
+      }
+    },
+    {
+      "operation": "ListDataSets",
+      "input": {
+        "AwsAccountId": "000000000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DataSetSummaries": null
+      }
+    },
+    {
+      "operation": "DeleteDataSet",
+      "input": {
+        "AwsAccountId": "000000000000",
+        "DataSetId": "ds1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Status": 200
+      }
+    }
+  ]
+}

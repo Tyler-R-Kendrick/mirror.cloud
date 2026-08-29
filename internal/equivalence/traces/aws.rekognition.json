@@ -1,0 +1,426 @@
+{
+  "schema": "trace/1",
+  "service": "aws.rekognition",
+  "source": "pack:internal/services/aws/rekognition@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListCollections",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CollectionIds": null
+      }
+    },
+    {
+      "operation": "DescribeCollection",
+      "input": {
+        "CollectionId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateCollection",
+      "input": {
+        "CollectionId": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CollectionArn": "arn:aws:rekognition:us-east-1:000000000000:collection/c1",
+        "StatusCode": 200
+      }
+    },
+    {
+      "operation": "DescribeCollection",
+      "input": {
+        "CollectionId": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CollectionARN": "arn:aws:rekognition:us-east-1:000000000000:collection/c1",
+        "CollectionId": "c1",
+        "FaceCount": 0
+      },
+      "superseded": "DescribeCollectionResponse declares no CollectionId. The pack answered with the stored record, which carries one, so its answer held a member no SDK could read. The declared shape outranks the pack's authored behavior."
+    },
+    {
+      "operation": "CreateCollection",
+      "input": {
+        "CollectionId": "c2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CollectionArn": "arn:aws:rekognition:us-east-1:000000000000:collection/c2",
+        "StatusCode": 200
+      }
+    },
+    {
+      "operation": "ListCollections",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CollectionIds": [
+          "c1",
+          "c2"
+        ]
+      }
+    },
+    {
+      "operation": "SearchFacesByImage",
+      "input": {
+        "CollectionId": "c1",
+        "Image": {
+          "Bytes": "QQ=="
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FaceMatches": null
+      }
+    },
+    {
+      "operation": "IndexFaces",
+      "input": {
+        "CollectionId": "c1",
+        "Image": {
+          "Bytes": "QQ=="
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FaceRecords": [
+          {
+            "Face": {
+              "CollectionId": "c1",
+              "FaceId": "7c589129"
+            }
+          }
+        ]
+      },
+      "superseded": "Face declares no CollectionId. The pack stored the collection on the face -- which is how a face is kept out of another collection's search -- and answered with it, so every indexed and matched face carried a member no SDK could read. The member stays in the record and is projected away on the way out."
+    },
+    {
+      "operation": "IndexFaces",
+      "input": {
+        "CollectionId": "c1",
+        "Image": {
+          "Bytes": "QQ=="
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FaceRecords": [
+          {
+            "Face": {
+              "CollectionId": "c1",
+              "FaceId": "5f59f223"
+            }
+          }
+        ]
+      },
+      "superseded": "Face declares no CollectionId. The pack stored the collection on the face -- which is how a face is kept out of another collection's search -- and answered with it, so every indexed and matched face carried a member no SDK could read. The member stays in the record and is projected away on the way out."
+    },
+    {
+      "operation": "IndexFaces",
+      "input": {
+        "CollectionId": "c2",
+        "Image": {
+          "Bytes": "QQ=="
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FaceRecords": [
+          {
+            "Face": {
+              "CollectionId": "c2",
+              "FaceId": "9c8e2cb0"
+            }
+          }
+        ]
+      },
+      "superseded": "Face declares no CollectionId. The pack stored the collection on the face -- which is how a face is kept out of another collection's search -- and answered with it, so every indexed and matched face carried a member no SDK could read. The member stays in the record and is projected away on the way out."
+    },
+    {
+      "operation": "SearchFacesByImage",
+      "input": {
+        "CollectionId": "c1",
+        "Image": {
+          "Bytes": "QQ=="
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FaceMatches": [
+          {
+            "Face": {
+              "CollectionId": "c1",
+              "FaceId": "5f59f223"
+            },
+            "Similarity": 99
+          },
+          {
+            "Face": {
+              "CollectionId": "c1",
+              "FaceId": "7c589129"
+            },
+            "Similarity": 99
+          }
+        ]
+      },
+      "superseded": "Face declares no CollectionId. The pack stored the collection on the face -- which is how a face is kept out of another collection's search -- and answered with it, so every indexed and matched face carried a member no SDK could read. The member stays in the record and is projected away on the way out."
+    },
+    {
+      "operation": "SearchFacesByImage",
+      "input": {
+        "CollectionId": "c2",
+        "Image": {
+          "Bytes": "QQ=="
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FaceMatches": [
+          {
+            "Face": {
+              "CollectionId": "c2",
+              "FaceId": "9c8e2cb0"
+            },
+            "Similarity": 99
+          }
+        ]
+      },
+      "superseded": "Face declares no CollectionId. The pack stored the collection on the face -- which is how a face is kept out of another collection's search -- and answered with it, so every indexed and matched face carried a member no SDK could read. The member stays in the record and is projected away on the way out."
+    },
+    {
+      "operation": "DetectLabels",
+      "input": {
+        "Image": {
+          "Bytes": "QQ=="
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Labels": [
+          {
+            "Confidence": 99,
+            "Name": "Person"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DetectFaces",
+      "input": {
+        "Image": {
+          "Bytes": "QQ=="
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FaceDetails": [
+          {
+            "Confidence": 99
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DetectText",
+      "input": {
+        "Image": {
+          "Bytes": "QQ=="
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TextDetections": [
+          {
+            "Confidence": 99,
+            "DetectedText": "HELLO",
+            "Type": "LINE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DetectModerationLabels",
+      "input": {
+        "Image": {
+          "Bytes": "QQ=="
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ModerationLabels": []
+      }
+    },
+    {
+      "operation": "DeleteCollection",
+      "input": {
+        "CollectionId": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StatusCode": 200
+      }
+    },
+    {
+      "operation": "ListCollections",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CollectionIds": [
+          "c2"
+        ]
+      }
+    },
+    {
+      "operation": "DescribeCollection",
+      "input": {
+        "CollectionId": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteCollection",
+      "input": {
+        "CollectionId": "c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "StatusCode": 200
+      }
+    }
+  ]
+}

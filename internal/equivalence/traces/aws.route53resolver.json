@@ -1,0 +1,362 @@
+{
+  "schema": "trace/1",
+  "service": "aws.route53resolver",
+  "source": "pack:internal/services/aws/route53resolver@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListResolverEndpoints",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResolverEndpoints": null
+      }
+    },
+    {
+      "operation": "GetResolverEndpoint",
+      "input": {
+        "ResolverEndpointId": "rslvr-in-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateResolverEndpoint",
+      "input": {
+        "CreatorRequestId": "r1",
+        "Direction": "INBOUND",
+        "IpAddresses": [
+          {
+            "SubnetId": "subnet-1"
+          }
+        ],
+        "Name": "in",
+        "SecurityGroupIds": [
+          "sg-1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResolverEndpoint": {
+          "Arn": "arn:aws:route53resolver:us-east-1:000000000000:resolver-endpoint/rslvr-in-7c589129",
+          "Direction": "INBOUND",
+          "Id": "rslvr-in-7c589129",
+          "Name": "in",
+          "Status": "OPERATIONAL"
+        }
+      }
+    },
+    {
+      "operation": "GetResolverEndpoint",
+      "input": {
+        "ResolverEndpointId": {
+          "$fromPath": "ResolverEndpoint.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResolverEndpoint": {
+          "Arn": "arn:aws:route53resolver:us-east-1:000000000000:resolver-endpoint/rslvr-in-7c589129",
+          "Direction": "INBOUND",
+          "Id": "rslvr-in-7c589129",
+          "Name": "in",
+          "Status": "OPERATIONAL"
+        }
+      }
+    },
+    {
+      "operation": "CreateResolverEndpoint",
+      "input": {
+        "CreatorRequestId": "r2",
+        "Direction": "OUTBOUND",
+        "IpAddresses": [
+          {
+            "SubnetId": "subnet-1"
+          }
+        ],
+        "Name": "out",
+        "SecurityGroupIds": [
+          "sg-1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResolverEndpoint": {
+          "Arn": "arn:aws:route53resolver:us-east-1:000000000000:resolver-endpoint/rslvr-in-5f59f223",
+          "Direction": "OUTBOUND",
+          "Id": "rslvr-in-5f59f223",
+          "Name": "out",
+          "Status": "OPERATIONAL"
+        }
+      }
+    },
+    {
+      "operation": "ListResolverEndpoints",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResolverEndpoints": [
+          {
+            "Arn": "arn:aws:route53resolver:us-east-1:000000000000:resolver-endpoint/rslvr-in-5f59f223",
+            "Direction": "OUTBOUND",
+            "Id": "rslvr-in-5f59f223",
+            "Name": "out",
+            "Status": "OPERATIONAL"
+          },
+          {
+            "Arn": "arn:aws:route53resolver:us-east-1:000000000000:resolver-endpoint/rslvr-in-7c589129",
+            "Direction": "INBOUND",
+            "Id": "rslvr-in-7c589129",
+            "Name": "in",
+            "Status": "OPERATIONAL"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateResolverRule",
+      "input": {
+        "CreatorRequestId": "r3",
+        "DomainName": "example.com",
+        "Name": "fwd",
+        "ResolverEndpointId": {
+          "$fromPath": "ResolverEndpoint.Id",
+          "$fromStep": 2
+        },
+        "RuleType": "FORWARD"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResolverRule": {
+          "DomainName": "example.com",
+          "Id": "rslvr-rr-9c8e2cb0",
+          "Name": "fwd",
+          "ResolverEndpointId": "rslvr-in-7c589129",
+          "RuleType": "FORWARD",
+          "Status": "COMPLETE"
+        }
+      }
+    },
+    {
+      "operation": "GetResolverRule",
+      "input": {
+        "ResolverRuleId": {
+          "$fromPath": "ResolverRule.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResolverRule": {
+          "DomainName": "example.com",
+          "Id": "rslvr-rr-9c8e2cb0",
+          "Name": "fwd",
+          "ResolverEndpointId": "rslvr-in-7c589129",
+          "RuleType": "FORWARD",
+          "Status": "COMPLETE"
+        }
+      }
+    },
+    {
+      "operation": "GetResolverRule",
+      "input": {
+        "ResolverRuleId": "rslvr-rr-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListResolverRules",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResolverRules": [
+          {
+            "DomainName": "example.com",
+            "Id": "rslvr-rr-9c8e2cb0",
+            "Name": "fwd",
+            "ResolverEndpointId": "rslvr-in-7c589129",
+            "RuleType": "FORWARD",
+            "Status": "COMPLETE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteResolverEndpoint",
+      "input": {
+        "ResolverEndpointId": {
+          "$fromPath": "ResolverEndpoint.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListResolverEndpoints",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResolverEndpoints": [
+          {
+            "Arn": "arn:aws:route53resolver:us-east-1:000000000000:resolver-endpoint/rslvr-in-5f59f223",
+            "Direction": "OUTBOUND",
+            "Id": "rslvr-in-5f59f223",
+            "Name": "out",
+            "Status": "OPERATIONAL"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetResolverRule",
+      "input": {
+        "ResolverRuleId": {
+          "$fromPath": "ResolverRule.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResolverRule": {
+          "DomainName": "example.com",
+          "Id": "rslvr-rr-9c8e2cb0",
+          "Name": "fwd",
+          "ResolverEndpointId": "rslvr-in-7c589129",
+          "RuleType": "FORWARD",
+          "Status": "COMPLETE"
+        }
+      }
+    },
+    {
+      "operation": "DeleteResolverRule",
+      "input": {
+        "ResolverRuleId": {
+          "$fromPath": "ResolverRule.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListResolverRules",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResolverRules": null
+      }
+    },
+    {
+      "operation": "DeleteResolverRule",
+      "input": {
+        "ResolverRuleId": "rslvr-rr-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

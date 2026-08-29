@@ -1,0 +1,122 @@
+schema: bir/1
+service: aws.ds
+
+# Transcribed from the hand-written pack, not established against the real
+# service. There is no directory: no domain is joined, no password is checked
+# and no trust is ever established.
+provenance: authored
+
+resources:
+  directory:
+    collection: dsdir
+    # The identifier answered with carries a d- prefix, so the record member
+    # rather than the raw generated id is the store key: a describe, a delete
+    # and an alias all arrive with the prefixed form.
+    key: DirectoryId
+    id:
+      generate: { kind: hex, bytes: 8 }
+    # Only the key member lives here. Resource-level members are re-evaluated
+    # on every write, and CreateAlias is a write that carries no Name,
+    # ShortName or type -- anything else here would be recomputed from a
+    # request that does not have it, blanking what the create stored. The
+    # identifier is safe because both writers know it: a create has none and
+    # mints one, an alias arrives carrying the one it means.
+    record:
+      DirectoryId: "'DirectoryId' in input ? string(input.DirectoryId) : 'd-' + id"
+
+errors:
+  NotFound:
+    code: EntityDoesNotExistException
+    http: 400
+    fault: client
+
+operations:
+  CreateDirectory:
+    effects:
+      - create:
+          resource: directory
+          record:
+            Name: "'Name' in input ? string(input.Name) : ''"
+            Type: "'SimpleAD'"
+            Stage: "'Active'"
+            ShortName: "'ShortName' in input ? string(input.ShortName) : ''"
+    output:
+      DirectoryId: rec.DirectoryId
+
+  # The same operation but for the type it records. The pack served both from
+  # one branch and differed only in the Type it stored.
+  CreateMicrosoftAD:
+    effects:
+      - create:
+          resource: directory
+          record:
+            Name: "'Name' in input ? string(input.Name) : ''"
+            Type: "'MicrosoftAD'"
+            Stage: "'Active'"
+            ShortName: "'ShortName' in input ? string(input.ShortName) : ''"
+    output:
+      DirectoryId: rec.DirectoryId
+
+  # Named or not: one directory when DirectoryIds names one, the page when it
+  # does not. Only the first id in the list is read, which is the pack's
+  # behavior.
+  DescribeDirectories:
+    list:
+      resource: directory
+      member: DirectoryDescriptions
+      key: >
+        'DirectoryIds' in input && size(input.DirectoryIds) > 0
+          ? string(input.DirectoryIds[0])
+          : ''
+      paginate: model
+
+  DeleteDirectory:
+    effects:
+      - delete: { resource: directory, key: "string(input.DirectoryId)", missing: ignore }
+
+  # A patch rather than a put, so a directory keeps its name and type. The
+  # pack read the record, set the alias and wrote it back; when the directory
+  # did not exist it wrote a record carrying only the id and the alias, which
+  # a patch on an absent record does too.
+  CreateAlias:
+    effects:
+      - patch:
+          resource: directory
+          key: "string(input.DirectoryId)"
+          record:
+            Alias: "string(input.Alias)"
+    output:
+      DirectoryId: "string(input.DirectoryId)"
+      Alias: "string(input.Alias)"
+
+  DescribeTrusts:
+    output:
+      Trusts: "[]"
+
+quirks:
+  - operation: CreateDirectory
+    note: >
+      Password and Size are required and dropped, and VpcSettings is dropped
+      too, so a directory is Active without a network, a size or a
+      password -- nothing can authenticate against it. A directory reaches
+      Active immediately, so nothing ever observes Requested or Creating, and
+      LaunchTime, AccessUrl, DnsIpAddrs and the domain controller count are all
+      declared and never set.
+  - operation: CreateAlias
+    note: >
+      Aliasing a directory that does not exist succeeds and creates a record
+      carrying only that id and the alias -- a directory with no name, no type
+      and no stage, which then appears in DescribeDirectories. That is the
+      pack's behavior, and it is the one place here where a write invents a
+      resource. Nothing checks the alias is unique across the account, which
+      the real service does because an alias becomes a public DNS name.
+  - operation: DeleteDirectory
+    note: >
+      Deleting answers with nothing where the model declares the DirectoryId,
+      and deleting an absent directory succeeds where describing it faults. The
+      real service faults on the second.
+  - operation: DescribeTrusts
+    note: >
+      There are no trusts and no operation creates one: the answer is always
+      empty, and DirectoryId and TrustIds are ignored. CreateTrust is not
+      served, so nothing could populate it.

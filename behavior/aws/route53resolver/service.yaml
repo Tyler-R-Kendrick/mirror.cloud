@@ -1,0 +1,119 @@
+schema: bir/1
+service: aws.route53resolver
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing resolves: an endpoint has no IP addresses and a rule
+# forwards nowhere.
+provenance: authored
+
+resources:
+  # Not named `endpoint`: that is the base URL the caller reached, and a
+  # resource may not shadow it.
+  resolverendpoint:
+    collection: r53ep
+    # The identifier answered with carries an rslvr-in- prefix, so the record
+    # member rather than the raw generated id is the store key: a get or a
+    # delete arrives with the prefixed form.
+    key: Id
+    id:
+      generate: { kind: hex, bytes: 8 }
+    arn: "arn:{partition}:route53resolver:{region}:{account}:resolver-endpoint/rslvr-in-{id}"
+    record:
+      Id: "'rslvr-in-' + id"
+      Name: "'Name' in input ? string(input.Name) : ''"
+      # The pack defaulted an absent Direction to INBOUND. Direction is
+      # required by the model, so the default is unreachable through the wire;
+      # it is kept because the request could carry an empty string, which is
+      # present and so passes the requirement.
+      Direction: "'Direction' in input && string(input.Direction) != '' ? string(input.Direction) : 'INBOUND'"
+      Status: "'OPERATIONAL'"
+      Arn: arn
+
+  rule:
+    collection: r53rr
+    key: Id
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      Id: "'rslvr-rr-' + id"
+      Name: "'Name' in input ? string(input.Name) : ''"
+      DomainName: "'DomainName' in input ? string(input.DomainName) : ''"
+      RuleType: "'RuleType' in input && string(input.RuleType) != '' ? string(input.RuleType) : 'FORWARD'"
+      Status: "'COMPLETE'"
+      ResolverEndpointId: "'ResolverEndpointId' in input ? string(input.ResolverEndpointId) : ''"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateResolverEndpoint:
+    effects:
+      - create: { resource: resolverendpoint }
+    output:
+      ResolverEndpoint: rec
+
+  GetResolverEndpoint:
+    reads:
+      e: { resource: resolverendpoint, key: "string(input.ResolverEndpointId)" }
+    require:
+      - { cond: e_found, error: NotFound }
+    output:
+      ResolverEndpoint: e
+
+  ListResolverEndpoints:
+    list: { resource: resolverendpoint, member: ResolverEndpoints, paginate: model }
+
+  DeleteResolverEndpoint:
+    effects:
+      - delete: { resource: resolverendpoint, key: "string(input.ResolverEndpointId)", missing: ignore }
+
+  CreateResolverRule:
+    effects:
+      - create: { resource: rule }
+    output:
+      ResolverRule: rec
+
+  GetResolverRule:
+    reads:
+      r: { resource: rule, key: "string(input.ResolverRuleId)" }
+    require:
+      - { cond: r_found, error: NotFound }
+    output:
+      ResolverRule: r
+
+  ListResolverRules:
+    list: { resource: rule, member: ResolverRules, paginate: model }
+
+  DeleteResolverRule:
+    effects:
+      - delete: { resource: rule, key: "string(input.ResolverRuleId)", missing: ignore }
+
+quirks:
+  - operation: CreateResolverEndpoint
+    note: >
+      IpAddresses and SecurityGroupIds are required and dropped, so an endpoint
+      that is OPERATIONAL has no addresses to resolve at and belongs to no
+      security group. Every endpoint's identifier carries the rslvr-in- prefix
+      whatever Direction was asked for, so an OUTBOUND endpoint is named as an
+      inbound one. HostVPCId, IpAddressCount and the creation timestamps are
+      declared and never set.
+  - operation: CreateResolverRule
+    note: >
+      TargetIps is dropped, so a FORWARD rule forwards to nothing, and the
+      ResolverEndpointId it names is stored without being checked against an
+      existing endpoint -- a rule can point at an endpoint that was never
+      created, or at one that has since been deleted.
+  - operation: DeleteResolverEndpoint
+    note: >
+      Deleting answers with nothing where the model declares the deleted
+      ResolverEndpoint or ResolverRule, and deleting an absent one succeeds
+      where getting it faults. The real service answers with the record in its
+      DELETING state and faults on an absent one; both are a probe away.
+      Deleting an endpoint leaves the rules that name it behind.
+  - operation: ListResolverEndpoints
+    note: >
+      Filters is accepted and ignored: every endpoint and every rule in the
+      account and region is answered for, whatever was asked about.

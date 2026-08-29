@@ -1,0 +1,285 @@
+{
+  "schema": "trace/1",
+  "service": "aws.ds",
+  "source": "pack:internal/services/aws/directoryservice@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DescribeDirectories",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DirectoryDescriptions": null
+      }
+    },
+    {
+      "operation": "CreateDirectory",
+      "input": {
+        "Name": "corp.example.com",
+        "Password": "p",
+        "ShortName": "CORP",
+        "Size": "Small"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DirectoryId": "d-7c589129"
+      }
+    },
+    {
+      "operation": "DescribeDirectories",
+      "input": {
+        "DirectoryIds": [
+          {
+            "$fromPath": "DirectoryId",
+            "$fromStep": 1
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DirectoryDescriptions": [
+          {
+            "DirectoryId": "d-7c589129",
+            "Name": "corp.example.com",
+            "ShortName": "CORP",
+            "Stage": "Active",
+            "Type": "SimpleAD"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateMicrosoftAD",
+      "input": {
+        "Name": "ad.example.com",
+        "Password": "p",
+        "ShortName": "AD",
+        "VpcSettings": {
+          "SubnetIds": [
+            "subnet-1",
+            "subnet-2"
+          ],
+          "VpcId": "vpc-1"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DirectoryId": "d-5f59f223"
+      }
+    },
+    {
+      "operation": "DescribeDirectories",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DirectoryDescriptions": [
+          {
+            "DirectoryId": "d-5f59f223",
+            "Name": "ad.example.com",
+            "ShortName": "AD",
+            "Stage": "Active",
+            "Type": "MicrosoftAD"
+          },
+          {
+            "DirectoryId": "d-7c589129",
+            "Name": "corp.example.com",
+            "ShortName": "CORP",
+            "Stage": "Active",
+            "Type": "SimpleAD"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateAlias",
+      "input": {
+        "Alias": "corp",
+        "DirectoryId": {
+          "$fromPath": "DirectoryId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Alias": "corp",
+        "DirectoryId": "d-7c589129"
+      }
+    },
+    {
+      "operation": "DescribeDirectories",
+      "input": {
+        "DirectoryIds": [
+          {
+            "$fromPath": "DirectoryId",
+            "$fromStep": 1
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DirectoryDescriptions": [
+          {
+            "Alias": "corp",
+            "DirectoryId": "d-7c589129",
+            "Name": "corp.example.com",
+            "ShortName": "CORP",
+            "Stage": "Active",
+            "Type": "SimpleAD"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateAlias",
+      "input": {
+        "Alias": "ghost",
+        "DirectoryId": "d-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Alias": "ghost",
+        "DirectoryId": "d-absent"
+      }
+    },
+    {
+      "operation": "DescribeDirectories",
+      "input": {
+        "DirectoryIds": [
+          "d-absent"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DirectoryDescriptions": [
+          {
+            "Alias": "ghost",
+            "DirectoryId": "d-absent"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeTrusts",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Trusts": []
+      }
+    },
+    {
+      "operation": "DeleteDirectory",
+      "input": {
+        "DirectoryId": {
+          "$fromPath": "DirectoryId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeDirectories",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DirectoryDescriptions": [
+          {
+            "DirectoryId": "d-5f59f223",
+            "Name": "ad.example.com",
+            "ShortName": "AD",
+            "Stage": "Active",
+            "Type": "MicrosoftAD"
+          },
+          {
+            "Alias": "ghost",
+            "DirectoryId": "d-absent"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDirectory",
+      "input": {
+        "DirectoryId": "d-absent2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

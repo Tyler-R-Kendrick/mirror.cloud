@@ -149,6 +149,39 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.GetBucketCors(context.Background(), &s3.GetBucketCorsInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchCORSConfiguration") {
 		t.Fatalf("get deleted bucket CORS: %v", err)
 	}
+	if _, err := s3c.GetBucketWebsite(context.Background(), &s3.GetBucketWebsiteInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchWebsiteConfiguration") {
+		t.Fatalf("default bucket website: %v", err)
+	}
+	website := &s3types.WebsiteConfiguration{
+		IndexDocument: &s3types.IndexDocument{Suffix: aws.String("index.html")},
+		ErrorDocument: &s3types.ErrorDocument{Key: aws.String("error.html")},
+		RoutingRules: []s3types.RoutingRule{{
+			Condition: &s3types.Condition{KeyPrefixEquals: aws.String("docs/")},
+			Redirect:  &s3types.Redirect{Protocol: s3types.ProtocolHttps, ReplaceKeyPrefixWith: aws.String("manual/")},
+		}},
+	}
+	if _, err := s3c.PutBucketWebsite(context.Background(), &s3.PutBucketWebsiteInput{Bucket: aws.String("sdk"), WebsiteConfiguration: website}); err != nil {
+		t.Fatalf("put bucket website: %v", err)
+	}
+	gotWebsite, err := s3c.GetBucketWebsite(context.Background(), &s3.GetBucketWebsiteInput{Bucket: aws.String("sdk")})
+	if err != nil || gotWebsite.IndexDocument == nil || aws.ToString(gotWebsite.IndexDocument.Suffix) != "index.html" || gotWebsite.ErrorDocument == nil || aws.ToString(gotWebsite.ErrorDocument.Key) != "error.html" || len(gotWebsite.RoutingRules) != 1 || gotWebsite.RoutingRules[0].Redirect == nil || gotWebsite.RoutingRules[0].Redirect.Protocol != s3types.ProtocolHttps || aws.ToString(gotWebsite.RoutingRules[0].Redirect.ReplaceKeyPrefixWith) != "manual/" {
+		t.Fatalf("bucket website round trip: %#v %v", gotWebsite, err)
+	}
+	invalidWebsite := &s3types.WebsiteConfiguration{IndexDocument: &s3types.IndexDocument{Suffix: aws.String("dir/index.html")}}
+	if _, err := s3c.PutBucketWebsite(context.Background(), &s3.PutBucketWebsiteInput{Bucket: aws.String("sdk"), WebsiteConfiguration: invalidWebsite}); err == nil || !strings.Contains(err.Error(), "InvalidArgument") {
+		t.Fatalf("invalid bucket website: %v", err)
+	}
+	if gotWebsite, err = s3c.GetBucketWebsite(context.Background(), &s3.GetBucketWebsiteInput{Bucket: aws.String("sdk")}); err != nil || gotWebsite.IndexDocument == nil || aws.ToString(gotWebsite.IndexDocument.Suffix) != "index.html" {
+		t.Fatalf("invalid website replaced configuration: %#v %v", gotWebsite, err)
+	}
+	for range 2 {
+		if _, err := s3c.DeleteBucketWebsite(context.Background(), &s3.DeleteBucketWebsiteInput{Bucket: aws.String("sdk")}); err != nil {
+			t.Fatalf("delete bucket website: %v", err)
+		}
+	}
+	if _, err := s3c.GetBucketWebsite(context.Background(), &s3.GetBucketWebsiteInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchWebsiteConfiguration") {
+		t.Fatalf("get deleted bucket website: %v", err)
+	}
 	if payment, err := s3c.GetBucketRequestPayment(context.Background(), &s3.GetBucketRequestPaymentInput{Bucket: aws.String("sdk")}); err != nil || payment.Payer != s3types.PayerBucketOwner {
 		t.Fatalf("default request payer: %#v %v", payment, err)
 	}

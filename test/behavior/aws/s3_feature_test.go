@@ -580,6 +580,55 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given bucket logging When enabling and disabling it Then S3 validates and persists the destination", func(t *testing.T) {
+		for _, bucket := range []string{"logging-bdd-source", "logging-bdd-target"} {
+			res := do(http.MethodPut, "/"+bucket, nil, "")
+			io.Copy(io.Discard, res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("create %s bucket %d", bucket, res.StatusCode)
+			}
+		}
+		res := do(http.MethodGet, "/logging-bdd-source?logging", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || bytes.Contains(body, []byte("<LoggingEnabled>")) {
+			t.Fatalf("default logging %d %s", res.StatusCode, body)
+		}
+		valid := []byte(`<BucketLoggingStatus><LoggingEnabled><TargetBucket>logging-bdd-target</TargetBucket><TargetPrefix>logs/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>`)
+		res = do(http.MethodPut, "/logging-bdd-source?logging", valid, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("put logging %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/logging-bdd-source?logging", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<TargetBucket>logging-bdd-target</TargetBucket>")) || !bytes.Contains(body, []byte("<TargetPrefix>logs/</TargetPrefix>")) || bytes.Contains(body, []byte("GetBucketLoggingResult")) {
+			t.Fatalf("get logging %d %s", res.StatusCode, body)
+		}
+		invalid := []byte(`<BucketLoggingStatus><LoggingEnabled><TargetBucket>missing</TargetBucket></LoggingEnabled></BucketLoggingStatus>`)
+		res = do(http.MethodPut, "/logging-bdd-source?logging", invalid, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidTargetBucketForLogging")) {
+			t.Fatalf("invalid logging %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodPut, "/logging-bdd-source?logging", []byte(`<BucketLoggingStatus/>`), "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("disable logging %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/logging-bdd-source?logging", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || bytes.Contains(body, []byte("<LoggingEnabled>")) {
+			t.Fatalf("disabled logging %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given request payment When changing the payer Then S3 validates and persists it", func(t *testing.T) {
 		res := do(http.MethodPut, "/request-payment", nil, "")
 		io.Copy(io.Discard, res.Body)

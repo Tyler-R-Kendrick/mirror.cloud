@@ -199,12 +199,43 @@ const (
 // linkInputs rewrites a recording's inputs, replacing any string that an
 // earlier step returned with a reference to where it came from. It is applied
 // once, at recording time.
+//
+// A value the caller supplied itself is never linked, however often the service
+// echoes it back. The point of a reference is to follow an identifier the
+// service issued, and a name the caller chose is not one: linking it makes a
+// literal depend on some earlier answer happening to repeat it. That is how a
+// step comes to reference an output member a bundle deliberately drops, and the
+// input then resolves to nothing -- a failure that reads as though the bundle
+// were wrong about the step it broke, several steps away from the echo.
 func linkInputs(steps []StepEntry) {
 	// Where each produced value was first seen.
 	origin := map[string][2]any{}
+	// Values the caller has already supplied, which are literals, not
+	// identifiers, no matter where they later appear.
+	supplied := map[string]bool{}
 	for i := range steps {
-		steps[i].Input = linkValue(steps[i].Input, origin).(map[string]any)
+		steps[i].Input = linkValue(steps[i].Input, origin, supplied).(map[string]any)
+		indexSupplied(steps[i].Input, supplied)
 		indexOutput(i, "", steps[i].Output, origin)
+	}
+}
+
+// indexSupplied records every literal string a step's input carries.
+func indexSupplied(v any, supplied map[string]bool) {
+	switch t := v.(type) {
+	case map[string]any:
+		if _, _, isRef := asRef(t); isRef {
+			return // a reference carries no literal of its own
+		}
+		for _, vv := range t {
+			indexSupplied(vv, supplied)
+		}
+	case []any:
+		for _, vv := range t {
+			indexSupplied(vv, supplied)
+		}
+	case string:
+		supplied[t] = true
 	}
 }
 
@@ -232,7 +263,7 @@ func indexOutput(step int, prefix string, v any, origin map[string][2]any) {
 	}
 }
 
-func linkValue(v any, origin map[string][2]any) any {
+func linkValue(v any, origin map[string][2]any, supplied map[string]bool) any {
 	switch t := v.(type) {
 	case map[string]any:
 		if _, _, isRef := asRef(t); isRef {
@@ -240,16 +271,19 @@ func linkValue(v any, origin map[string][2]any) any {
 		}
 		out := make(map[string]any, len(t))
 		for k, vv := range t {
-			out[k] = linkValue(vv, origin)
+			out[k] = linkValue(vv, origin, supplied)
 		}
 		return out
 	case []any:
 		out := make([]any, len(t))
 		for i, vv := range t {
-			out[i] = linkValue(vv, origin)
+			out[i] = linkValue(vv, origin, supplied)
 		}
 		return out
 	case string:
+		if supplied[t] {
+			return v
+		}
 		if from, ok := origin[t]; ok {
 			return map[string]any{fromStepKey: from[0], fromPathKey: from[1]}
 		}

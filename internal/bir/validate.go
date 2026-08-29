@@ -422,6 +422,11 @@ func validateEffect(s *Service, where string, eff Effect, compile func(string, s
 	}
 	write := func(kind string, e *WriteEffect) {
 		res(e.Resource, kind)
+		// A write may address a record by an explicit key, exactly as a delete
+		// may. Leaving this uncompiled made the field silently unusable: the
+		// bundle loaded, and the engine then failed at request time asking for
+		// an expression nobody had written.
+		compile(where+"."+kind+".key", e.Key)
 		compile(where+"."+kind+".when", e.When)
 		compile(where+"."+kind+".state", e.State)
 		compileAny(where+"."+kind+".record", e.Record, compile)

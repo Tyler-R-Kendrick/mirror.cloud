@@ -122,7 +122,8 @@ func (ev *eval) resolveReads(ctx context.Context, op bir.Operation) error {
 		if !ok {
 			return fmt.Errorf("engine: unknown resource %q", read.Resource)
 		}
-		key, err := ev.resourceKey(res, read.Key, name)
+		key, err := ev.resourceKey(res, read.Key,
+			"operations."+ev.req.Operation+".reads."+name+".key")
 		if err != nil {
 			return err
 		}
@@ -194,9 +195,16 @@ func (ev *eval) applyViews(resource string, res bir.Resource, rec map[string]any
 // resourceKey determines which key a read or write addresses: an explicit key
 // expression, a singleton's fixed key, the request members that carry the ID,
 // or a derivation.
-func (ev *eval) resourceKey(res bir.Resource, keyExpr, bindPath string) (string, error) {
+//
+// keyPath is where the key expression was compiled, which the caller knows and
+// this cannot infer: a read's key lives under the binding that declared it, an
+// effect's under that effect's own index. Deriving it here from a binding name
+// worked only for reads, and left every effect asking for a `reads..key` that
+// was never compiled -- which surfaced only when the effect also had no id
+// already bound, since an id in hand skips this entirely.
+func (ev *eval) resourceKey(res bir.Resource, keyExpr, keyPath string) (string, error) {
 	if keyExpr != "" {
-		v, err := ev.eval("operations." + ev.req.Operation + ".reads." + bindPath + ".key")
+		v, err := ev.eval(keyPath)
 		if err != nil {
 			return "", err
 		}
@@ -386,7 +394,7 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 		key = ev.generate(*res.ID.Generate)
 	}
 	if key == "" {
-		k, err := ev.resourceKey(res, w.Key, "")
+		k, err := ev.resourceKey(res, w.Key, path+".key")
 		if err != nil {
 			return err
 		}
@@ -417,7 +425,7 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 		// record member rather than the ID, the key is whatever the caller
 		// named, resolved the same way a read would resolve it.
 		if res.Key != "" {
-			k, err := ev.resourceKey(res, w.Key, "")
+			k, err := ev.resourceKey(res, w.Key, path+".key")
 			if err != nil {
 				return err
 			}
@@ -655,7 +663,7 @@ func (ev *eval) remove(ctx context.Context, path string, d bir.DeleteEffect) err
 	}
 	key := ev.id
 	if key == "" {
-		k, err := ev.resourceKey(res, d.Key, "")
+		k, err := ev.resourceKey(res, d.Key, path+".key")
 		if err != nil {
 			return err
 		}

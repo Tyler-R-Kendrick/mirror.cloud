@@ -1,0 +1,122 @@
+schema: bir/1
+service: aws.ses
+
+# Transcribed from the hand-written pack, not established against the real
+# service. There is no SMTP here: verification always succeeds immediately, and
+# a sent message is stored and never delivered, listed or read back.
+provenance: authored
+
+resources:
+  address:
+    collection: sesid
+    id:
+      # Created as EmailAddress, addressed afterwards as Identity.
+      input_members: [EmailAddress, Identity]
+    record:
+      Identity: id
+      # Verification is instantaneous and unconditional, which is the whole of
+      # what the pack modelled: nothing ever observes a Pending identity.
+      VerificationStatus: "'Success'"
+
+  # A sent message is write-only. No operation reads one back, so the record
+  # exists to keep the send observable in the store rather than to be listed.
+  message:
+    collection: sesmsg
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      MessageId: id
+      Source: "'Source' in input ? string(input.Source) : ''"
+
+operations:
+  VerifyEmailIdentity:
+    effects:
+      - put: { resource: address }
+    output: {}
+
+  DeleteIdentity:
+    effects:
+      - delete: { resource: address, missing: ignore }
+    output: {}
+
+  ListIdentities:
+    list: { resource: address, member: Identities }
+    output:
+      Identities: "items.map(i, string(i.Identity))"
+
+  GetIdentityVerificationAttributes:
+    reads:
+      ident: { resource: address, key: "string(input.Identities[0])" }
+    output:
+      VerificationAttributes: >
+        ident_found
+          ? {string(input.Identities[0]): {'VerificationStatus': 'Success'}}
+          : {}
+
+  # The identifier keeps the pack's 0000- prefix. It is not a real SES message
+  # id, but it is what anything recorded against this emulator already carries,
+  # and changing it would be a behavior change dressed up as a cleanup.
+  SendEmail:
+    effects:
+      - generate: { bind: raw, kind: hex, bytes: 8 }
+      - put:
+          resource: message
+          key: "'0000-' + fx.raw"
+          record:
+            MessageId: "'0000-' + fx.raw"
+            Source: "string(input.Source)"
+    output:
+      MessageId: "'0000-' + fx.raw"
+
+  SendRawEmail:
+    effects:
+      - generate: { bind: raw, kind: hex, bytes: 8 }
+      - put:
+          resource: message
+          key: "'0000-' + fx.raw"
+          record:
+            MessageId: "'0000-' + fx.raw"
+            Source: "'Source' in input ? string(input.Source) : ''"
+    output:
+      MessageId: "'0000-' + fx.raw"
+
+  GetSendQuota:
+    output:
+      Max24HourSend: "200.0"
+      MaxSendRate: "1.0"
+      SentLast24Hours: "0.0"
+
+  GetSendStatistics:
+    output:
+      SendDataPoints: "[]"
+
+quirks:
+  - operation: GetIdentityVerificationAttributes
+    note: >
+      Only the first requested identity is answered for. The real operation
+      takes a list and returns an entry per identity; the pack read a single
+      flat query key and could not see the rest, and this transcribes that.
+      Answering the whole list needs a per-item store read in a non-list
+      operation, which the engine does not have and which is not worth adding
+      on a guess -- a probe says what the real service returns for a mix of
+      verified, unverified and unknown identities, and that is the moment to
+      add it.
+  - operation: GetIdentityVerificationAttributes
+    note: >
+      The pack answered with EmailAddress beside VerificationStatus. The model
+      declares IdentityVerificationAttributes as VerificationStatus and
+      VerificationToken only, so EmailAddress was a member no SDK could read.
+      The declared shape outranks the pack's authored behavior, so it is
+      dropped here and the recorded step is superseded with that reason.
+  - operation: ListIdentities
+    note: >
+      IdentityType and MaxItems are accepted and ignored, and no NextToken is
+      ever issued: the pack listed every identity in one answer. The model
+      declares the paging members, so a client may send them and will not be
+      told they did nothing.
+  - operation: SendEmail
+    note: >
+      Nothing is delivered and nothing validates the source against the
+      verified identities: sending from an unverified address succeeds. The
+      real service rejects that, and it is the first thing a probe should
+      settle.

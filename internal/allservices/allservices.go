@@ -134,7 +134,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/serverlessrepo"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/servicecatalog"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/servicediscovery"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ses"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sesv2"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"

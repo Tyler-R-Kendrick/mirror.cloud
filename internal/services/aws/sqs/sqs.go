@@ -323,12 +323,8 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 			}
 			return &spi.Response{Output: map[string]any{"Messages": out}}, nil
 		}
-		d := deadline.Sub(now)
-		if d < 0 {
-			d = 0
-		}
 		select {
-		case <-p.deps.Clock.After(d):
+		case <-p.deps.Clock.AfterTime(deadline):
 		case <-ctx.Done():
 			return &spi.Response{Output: map[string]any{"Messages": []any{}}}, nil
 		}

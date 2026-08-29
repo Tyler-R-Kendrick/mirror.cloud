@@ -184,21 +184,32 @@ func TestCreateBucketTags(t *testing.T) {
 	tags := []any{map[string]any{"Key": "team", "Value": "storage"}, map[string]any{"Key": "env", "Value": "test"}}
 	input := map[string]any{"Bucket": "tagged-bucket", "CreateBucketConfiguration": map[string]any{"Tags": tags}}
 	mustInvoke(t, p, "CreateBucket", input, nil)
-	if response := mustInvoke(t, p, "GetBucketTagging", map[string]any{"Bucket": "tagged-bucket"}, nil); !reflect.DeepEqual(response.Output["TagSet"], tags) {
+	response := mustInvoke(t, p, "GetBucketTagging", map[string]any{"Bucket": "tagged-bucket"}, nil)
+	if !reflect.DeepEqual(response.Output["TagSet"], tags) {
 		t.Fatalf("created bucket tags = %#v", response.Output["TagSet"])
 	}
-	if _, err := invoke(t, p, "CreateBucket", input, nil); asFault(t, err).Code != "BucketAlreadyOwnedByYou" {
+	_, err := invoke(t, p, "CreateBucket", input, nil)
+	recreate := asFault(t, err)
+	if recreate.Code != "BucketAlreadyOwnedByYou" {
 		t.Fatalf("tagged recreation = %v", err)
 	}
 	invalid := map[string]any{"Bucket": "invalid-tagged-bucket", "CreateBucketConfiguration": map[string]any{"Tags": []any{
 		map[string]any{"Key": "duplicate", "Value": "one"}, map[string]any{"Key": "duplicate", "Value": "two"},
 	}}}
-	if _, err := invoke(t, p, "CreateBucket", invalid, nil); asFault(t, err).Code != "InvalidTag" {
+	_, err = invoke(t, p, "CreateBucket", invalid, nil)
+	invalidTags := asFault(t, err)
+	if invalidTags.Code != "InvalidTag" {
 		t.Fatalf("duplicate create tags = %v", err)
 	}
-	if _, err := invoke(t, p, "HeadBucket", map[string]any{"Bucket": "invalid-tagged-bucket"}, nil); asFault(t, err).Code != "NoSuchBucket" {
+	_, err = invoke(t, p, "HeadBucket", map[string]any{"Bucket": "invalid-tagged-bucket"}, nil)
+	invalidBucket := asFault(t, err)
+	if invalidBucket.Code != "NoSuchBucket" {
 		t.Fatalf("invalid tags reserved bucket = %v", err)
 	}
+	golden.AssertJSON(t, map[string]any{
+		"tags": response.Output["TagSet"], "tagged recreation": recreate.Code,
+		"invalid tags": invalidTags.Code, "invalid bucket": invalidBucket.Code,
+	})
 }
 
 func TestCreateBucketAccountRegionalNamespace(t *testing.T) {

@@ -1,0 +1,15 @@
+{
+  "invalid bucket": "NoSuchBucket",
+  "invalid tags": "InvalidTag",
+  "tagged recreation": "BucketAlreadyOwnedByYou",
+  "tags": [
+    {
+      "Key": "team",
+      "Value": "storage"
+    },
+    {
+      "Key": "env",
+      "Value": "test"
+    }
+  ]
+}

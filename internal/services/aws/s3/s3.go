@@ -578,12 +578,16 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 	if !ownershipSet {
 		ownership = "BucketOwnerEnforced"
 	}
-	switch ownership {
-	case "BucketOwnerPreferred", "ObjectWriter", "BucketOwnerEnforced":
-	default:
-		return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid x-amz-object-ownership header", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-object-ownership", "ArgumentValue": ownership}}
+	var ownershipDocument []byte
+	validateOwnership := func() error {
+		switch ownership {
+		case "BucketOwnerPreferred", "ObjectWriter", "BucketOwnerEnforced":
+		default:
+			return &spi.Fault{Code: "InvalidArgument", Message: "Invalid x-amz-object-ownership header", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-object-ownership", "ArgumentValue": ownership}}
+		}
+		ownershipDocument, _ = json.Marshal(map[string]any{"OwnershipControls": map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": ownership}}}})
+		return nil
 	}
-	ownershipDocument, _ := json.Marshal(map[string]any{"OwnershipControls": map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": ownership}}}})
 	objectLock := truthy(req.Input["ObjectLockEnabledForBucket"])
 	if req.HTTP != nil {
 		objectLock = objectLock || strings.EqualFold(req.HTTP.Header.Get("x-amz-bucket-object-lock-enabled"), "true")
@@ -632,6 +636,9 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		} else if exists {
 			return nil, &spi.Fault{Code: "BucketAlreadyOwnedByYou", Message: "Your previous request to create the named bucket succeeded and you already own it.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"BucketName": b}}
 		}
+		if err := validateOwnership(); err != nil {
+			return nil, err
+		}
 		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "namespace": namespace, "objectLockEnabled": objectLock, "creationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")})
 		if err := buckets.Put(ctx, b, meta); err != nil {
 			return nil, err
@@ -667,6 +674,9 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 			return nil, &spi.Fault{Code: "BucketAlreadyOwnedByYou", Message: "Your previous request to create the named bucket succeeded and you already own it.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"BucketName": b}}
 		}
 	} else {
+		if err := validateOwnership(); err != nil {
+			return nil, err
+		}
 		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "objectLockEnabled": objectLock, "creationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")})
 		if err := buckets.Put(ctx, b, meta); err != nil {
 			return nil, err

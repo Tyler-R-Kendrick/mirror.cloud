@@ -240,6 +240,10 @@ func TestCreateBucketObjectOwnership(t *testing.T) {
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket, "ObjectOwnership": ownership}, nil)
 		assertOwnership(bucket, ownership)
 	}
+	if _, err := invoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucketownerpreferred", "ObjectOwnership": ""}, nil); err != nil {
+		t.Fatalf("us-east-1 ownership recreation: %v", err)
+	}
+	assertOwnership("bucketownerpreferred", "BucketOwnerPreferred")
 
 	_, err := invoke(t, p, "CreateBucket", map[string]any{"Bucket": "invalid-ownership", "ObjectOwnership": ""}, nil)
 	fault := asFault(t, err)

@@ -305,6 +305,27 @@ func TestBucketOwnershipControls(t *testing.T) {
 	}
 }
 
+func TestBucketOwnershipControlsCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "ownership-characterization"}, nil)
+	controls := map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": "ObjectWriter"}}}
+	put := mustInvoke(t, p, "PutBucketOwnershipControls", map[string]any{"Bucket": "ownership-characterization", "OwnershipControls": controls}, nil)
+	get := mustInvoke(t, p, "GetBucketOwnershipControls", map[string]any{"Bucket": "ownership-characterization"}, nil)
+	_, invalidErr := invoke(t, p, "PutBucketOwnershipControls", map[string]any{"Bucket": "ownership-characterization", "OwnershipControls": map[string]any{"Rules": []any{}}}, nil)
+	invalid := asFault(t, invalidErr)
+	firstDelete := mustInvoke(t, p, "DeleteBucketOwnershipControls", map[string]any{"Bucket": "ownership-characterization"}, nil)
+	secondDelete := mustInvoke(t, p, "DeleteBucketOwnershipControls", map[string]any{"Bucket": "ownership-characterization"}, nil)
+	_, missingErr := invoke(t, p, "GetBucketOwnershipControls", map[string]any{"Bucket": "ownership-characterization"}, nil)
+	missing := asFault(t, missingErr)
+	golden.AssertJSON(t, map[string]any{
+		"put":     map[string]any{"status": put.Status, "output": put.Output},
+		"get":     get.Output,
+		"invalid": map[string]any{"code": invalid.Code, "status": invalid.HTTPStatus},
+		"delete":  []any{firstDelete.Status, secondDelete.Status},
+		"missing": map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus},
+	})
+}
+
 func TestCreateBucketAccountRegionalNamespace(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	east := ident()

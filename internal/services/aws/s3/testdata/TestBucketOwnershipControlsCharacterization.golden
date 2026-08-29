@@ -1,0 +1,36 @@
+{
+  "delete": [
+    204,
+    204
+  ],
+  "get": {
+    "OwnershipControls": {
+      "Rules": [
+        {
+          "ObjectOwnership": "ObjectWriter"
+        }
+      ]
+    }
+  },
+  "invalid": {
+    "code": "MalformedXML",
+    "status": 400
+  },
+  "missing": {
+    "code": "OwnershipControlsNotFoundError",
+    "message": "The bucket ownership controls were not found",
+    "status": 404
+  },
+  "put": {
+    "output": {
+      "OwnershipControls": {
+        "Rules": [
+          {
+            "ObjectOwnership": "ObjectWriter"
+          }
+        ]
+      }
+    },
+    "status": 200
+  }
+}

@@ -357,6 +357,12 @@ func TestRESTXMLServiceDecodeContracts(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(configuration, map[string]any{"BlockPublicAcls": true, "RestrictPublicBuckets": false}) {
 		t.Fatalf("public access block decode %#v %v", decoded, err)
 	}
+	requestPayment := `<RequestPaymentConfiguration><Payer>Requester</Payer></RequestPaymentConfiguration>`
+	decoded, err = codec.Decode(s3, &model.Operation{Name: "PutBucketRequestPayment"}, httptest.NewRequest(http.MethodPut, "/bucket?requestPayment", strings.NewReader(requestPayment)))
+	configuration, _ = decoded.Input["RequestPaymentConfiguration"].(map[string]any)
+	if err != nil || configuration["Payer"] != "Requester" {
+		t.Fatalf("request payment decode %#v %v", decoded, err)
+	}
 }
 
 func TestPostObjectProtocolContract(t *testing.T) {
@@ -427,6 +433,10 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	w = httptest.NewRecorder()
 	if err := codec.Encode(svc, &model.Operation{Name: "GetPublicAccessBlock"}, w, &spi.Response{Output: map[string]any{"PublicAccessBlockConfiguration": map[string]any{"BlockPublicAcls": true, "BlockPublicPolicy": false, "IgnorePublicAcls": false, "RestrictPublicBuckets": true}}}); err != nil || !strings.Contains(w.Body.String(), `<PublicAccessBlockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><BlockPublicAcls>true</BlockPublicAcls><BlockPublicPolicy>false</BlockPublicPolicy><IgnorePublicAcls>false</IgnorePublicAcls><RestrictPublicBuckets>true</RestrictPublicBuckets></PublicAccessBlockConfiguration>`) {
 		t.Fatalf("public access block response %v %s", err, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(svc, &model.Operation{Name: "GetBucketRequestPayment"}, w, &spi.Response{Output: map[string]any{"Payer": "Requester"}}); err != nil || !strings.Contains(w.Body.String(), `<RequestPaymentConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Payer>Requester</Payer></RequestPaymentConfiguration>`) {
+		t.Fatalf("request payment response %v %s", err, w.Body.String())
 	}
 	w = httptest.NewRecorder()
 	if err := codec.EncodeFault(svc, &model.Operation{Name: "Missing"}, w, spi.NotImplemented(svc.ID, "Missing", "emulate"), "r<&"); err != nil {

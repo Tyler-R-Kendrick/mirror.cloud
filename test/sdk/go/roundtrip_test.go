@@ -202,6 +202,19 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || gotLifecycle.TransitionDefaultMinimumObjectSize != s3types.TransitionDefaultMinimumObjectSizeVariesByStorageClass || len(gotLifecycle.Rules) != 1 || aws.ToString(gotLifecycle.Rules[0].ID) != "expire-images" || gotLifecycle.Rules[0].Filter == nil || gotLifecycle.Rules[0].Filter.And == nil || aws.ToString(gotLifecycle.Rules[0].Filter.And.Prefix) != "images/" || len(gotLifecycle.Rules[0].Transitions) != 1 || gotLifecycle.Rules[0].Transitions[0].StorageClass != s3types.TransitionStorageClassGlacier {
 		t.Fatalf("bucket lifecycle round trip: %#v %v", gotLifecycle, err)
 	}
+	putExpiring, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("images/temporary.txt"), Body: strings.NewReader("photo"), Tagging: aws.String("class=temporary")})
+	if err != nil || !strings.Contains(aws.ToString(putExpiring.Expiration), `rule-id="expire-images"`) {
+		t.Fatalf("put lifecycle expiration: %#v %v", putExpiring, err)
+	}
+	getExpiring, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("images/temporary.txt")})
+	if err != nil || !strings.Contains(aws.ToString(getExpiring.Expiration), `rule-id="expire-images"`) {
+		t.Fatalf("get lifecycle expiration: %#v %v", getExpiring, err)
+	}
+	_ = getExpiring.Body.Close()
+	headExpiring, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String("images/temporary.txt")})
+	if err != nil || !strings.Contains(aws.ToString(headExpiring.Expiration), `rule-id="expire-images"`) {
+		t.Fatalf("head lifecycle expiration: %#v %v", headExpiring, err)
+	}
 	invalidLifecycle := &s3types.BucketLifecycleConfiguration{Rules: []s3types.LifecycleRule{{ID: aws.String("invalid"), Status: s3types.ExpirationStatusEnabled, Filter: &s3types.LifecycleRuleFilter{Prefix: aws.String("a"), Tag: &s3types.Tag{Key: aws.String("k"), Value: aws.String("v")}}}}}
 	if _, err := s3c.PutBucketLifecycleConfiguration(context.Background(), &s3.PutBucketLifecycleConfigurationInput{Bucket: aws.String("sdk"), LifecycleConfiguration: invalidLifecycle}); err == nil || !strings.Contains(err.Error(), "MalformedXML") {
 		t.Fatalf("invalid bucket lifecycle: %v", err)

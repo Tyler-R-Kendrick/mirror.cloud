@@ -740,6 +740,66 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given bucket lifecycle When configuring objects Then S3 returns LocalStack expiration headers", func(t *testing.T) {
+		res := do(http.MethodPut, "/lifecycle-bdd", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create lifecycle bucket %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/lifecycle-bdd?lifecycle", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchLifecycleConfiguration")) {
+			t.Fatalf("default lifecycle %d %s", res.StatusCode, body)
+		}
+		valid := []byte(`<LifecycleConfiguration><Rule><ID>expire</ID><Filter></Filter><Status>Enabled</Status><Expiration><Days>1</Days></Expiration></Rule></LifecycleConfiguration>`)
+		res = do(http.MethodPut, "/lifecycle-bdd?lifecycle", valid, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || len(body) != 0 || res.Header.Get("x-amz-transition-default-minimum-object-size") != "all_storage_classes_128K" {
+			t.Fatalf("put lifecycle %d %s headers=%v", res.StatusCode, body, res.Header)
+		}
+		res = do(http.MethodGet, "/lifecycle-bdd?lifecycle", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<LifecycleConfiguration")) || !bytes.Contains(body, []byte("<Rule>")) || bytes.Contains(body, []byte("<member>")) || res.Header.Get("x-amz-transition-default-minimum-object-size") != "all_storage_classes_128K" {
+			t.Fatalf("get lifecycle %d %s headers=%v", res.StatusCode, body, res.Header)
+		}
+		res = do(http.MethodPut, "/lifecycle-bdd/object", []byte("body"), "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !strings.Contains(res.Header.Get("x-amz-expiration"), `rule-id="expire"`) {
+			t.Fatalf("put lifecycle object %d headers=%v", res.StatusCode, res.Header)
+		}
+		res = do(http.MethodHead, "/lifecycle-bdd/object", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !strings.Contains(res.Header.Get("x-amz-expiration"), `rule-id="expire"`) {
+			t.Fatalf("head lifecycle object %d headers=%v", res.StatusCode, res.Header)
+		}
+		invalid := []byte(`<LifecycleConfiguration><Rule><ID>invalid</ID><Filter><Prefix>a</Prefix><ObjectSizeGreaterThan>1</ObjectSizeGreaterThan></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>`)
+		res = do(http.MethodPut, "/lifecycle-bdd?lifecycle", invalid, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("MalformedXML")) {
+			t.Fatalf("invalid lifecycle %d %s", res.StatusCode, body)
+		}
+		for range 2 {
+			res = do(http.MethodDelete, "/lifecycle-bdd?lifecycle", nil, "")
+			io.Copy(io.Discard, res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusNoContent {
+				t.Fatalf("delete lifecycle %d", res.StatusCode)
+			}
+		}
+		res = do(http.MethodGet, "/lifecycle-bdd?lifecycle", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchLifecycleConfiguration")) {
+			t.Fatalf("get deleted lifecycle %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given bucket notifications When configuring and clearing them Then matching objects reach the queue", func(t *testing.T) {
 		res := do(http.MethodPut, "/notification-bdd", nil, "")
 		io.Copy(io.Discard, res.Body)

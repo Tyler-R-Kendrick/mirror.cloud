@@ -1,0 +1,60 @@
+{
+  "default": {
+    "bucket": "lifecycle-characterization",
+    "code": "NoSuchLifecycleConfiguration",
+    "message": "The lifecycle configuration does not exist",
+    "status": 404
+  },
+  "delete": {
+    "status": 204
+  },
+  "deleted": {
+    "bucket": "lifecycle-characterization",
+    "code": "NoSuchLifecycleConfiguration",
+    "message": "The lifecycle configuration does not exist",
+    "status": 404
+  },
+  "get": {
+    "output": {
+      "Rules": [
+        {
+          "Expiration": {
+            "Days": 2
+          },
+          "Filter": {
+            "Prefix": "logs/"
+          },
+          "ID": "expire",
+          "Status": "Enabled"
+        }
+      ]
+    },
+    "transitionMinimum": "varies_by_storage_class"
+  },
+  "invalid": {
+    "code": "MalformedXML",
+    "status": 400
+  },
+  "object": {
+    "headExpiration": "expiry-date=\"Sun, 04 Jan 1970 00:00:00 GMT\", rule-id=\"expire\"",
+    "putExpiration": "expiry-date=\"Sun, 04 Jan 1970 00:00:00 GMT\", rule-id=\"expire\""
+  },
+  "preserved": {
+    "Rules": [
+      {
+        "Expiration": {
+          "Days": 2
+        },
+        "Filter": {
+          "Prefix": "logs/"
+        },
+        "ID": "expire",
+        "Status": "Enabled"
+      }
+    ]
+  },
+  "put": {
+    "status": 200,
+    "transitionMinimum": "varies_by_storage_class"
+  }
+}

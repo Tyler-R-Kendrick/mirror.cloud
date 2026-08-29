@@ -1002,6 +1002,9 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		h.Set("x-amz-checksum-type", checksumType)
 	}
 	setObjectEncryptionHeaders(h, metaDoc)
+	if req.Operation == "PutObject" || req.Operation == "PostObject" {
+		p.setLifecycleExpirationHeader(ctx, req, b, key, info.Size, tags, mtime, h)
+	}
 	if status := p.replicateObject(ctx, req, b, key, body, metaDoc, tags); status != "" {
 		metaDoc["replicationStatus"] = status
 		meta, _ = json.Marshal(metaDoc)
@@ -1360,8 +1363,12 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if vid := str(meta["versionId"]); vid != "" {
 		h.Set("x-amz-version-id", vid)
 	}
-	if count := len(p.storedTags(ctx, req, b, key, wantVer)); count > 0 {
+	tags := p.storedTags(ctx, req, b, key, wantVer)
+	if count := len(tags); count > 0 {
 		h.Set("x-amz-tagging-count", strconv.Itoa(count))
+	}
+	if wantVer == "" || p.currentObjectVersion(ctx, req, b, key) == wantVer {
+		p.setLifecycleExpirationHeader(ctx, req, b, key, info.Size, tags, mtime, h)
 	}
 	setObjectEncryptionHeaders(h, meta)
 	if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
@@ -1449,8 +1456,12 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	if version := str(meta["versionId"]); version != "" {
 		h.Set("x-amz-version-id", version)
 	}
-	if count := len(p.storedTags(ctx, req, b, key, wantVer)); count > 0 {
+	tags := p.storedTags(ctx, req, b, key, wantVer)
+	if count := len(tags); count > 0 {
 		h.Set("x-amz-tagging-count", strconv.Itoa(count))
+	}
+	if wantVer == "" {
+		p.setLifecycleExpirationHeader(ctx, req, b, key, info.Size, tags, str(meta["mtime"]), h)
 	}
 	if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
 		setChecksumHeaders(h, meta)
@@ -2368,8 +2379,13 @@ func (p *Pack) bucketLifecycle(ctx context.Context, req *spi.Request) (*spi.Resp
 		if err != nil {
 			return nil, err
 		}
-		minimum := requestCondition(req, "TransitionDefaultMinimumObjectSize", "x-amz-transition-default-minimum-object-size")
-		if minimum == "" {
+		minimumValue, specified := req.Input["TransitionDefaultMinimumObjectSize"]
+		minimum := str(minimumValue)
+		if !specified && req.HTTP != nil {
+			_, specified = req.HTTP.Header[http.CanonicalHeaderKey("x-amz-transition-default-minimum-object-size")]
+			minimum = req.HTTP.Header.Get("x-amz-transition-default-minimum-object-size")
+		}
+		if !specified {
 			minimum = "all_storage_classes_128K"
 		}
 		if minimum != "all_storage_classes_128K" && minimum != "varies_by_storage_class" {
@@ -2470,6 +2486,110 @@ func lifecycleDate(value any) (time.Time, bool) {
 	}
 	date, err := time.Parse(time.RFC3339Nano, str(value))
 	return date, err == nil
+}
+
+func (p *Pack) setLifecycleExpirationHeader(ctx context.Context, req *spi.Request, bucket, key string, size int64, tags map[string]string, modified string, headers http.Header) {
+	raw, exists, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/lifecycle")
+	if !exists {
+		return
+	}
+	var configuration map[string]any
+	_ = json.Unmarshal(raw, &configuration)
+	for _, value := range asSlice(configuration["Rules"]) {
+		rule := asMap(value)
+		expiration, configured := rule["Expiration"].(map[string]any)
+		if _, deleteMarker := expiration["ExpiredObjectDeleteMarker"]; !configured || deleteMarker || !lifecycleFilterMatches(asMap(rule["Filter"]), key, size, tags) {
+			continue
+		}
+		var expires time.Time
+		if days := asInt(expiration["Days"]); days != 0 {
+			lastModified, err := http.ParseTime(modified)
+			if err != nil {
+				return
+			}
+			expires = time.Date(lastModified.Year(), lastModified.Month(), lastModified.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, days+1)
+		} else {
+			var ok bool
+			expires, ok = lifecycleDate(expiration["Date"])
+			if !ok {
+				return
+			}
+		}
+		headers.Set("x-amz-expiration", fmt.Sprintf(`expiry-date="%s", rule-id="%s"`, expires.UTC().Format(http.TimeFormat), str(rule["ID"])))
+		return
+	}
+}
+
+func lifecycleFilterMatches(filter map[string]any, key string, size int64, tags map[string]string) bool {
+	if len(filter) == 0 {
+		return true
+	}
+	if value, exists := filter["And"]; exists {
+		and := asMap(value)
+		if len(and) == 0 {
+			return false
+		}
+		for field, value := range and {
+			if !lifecyclePredicateMatches(field, value, key, size, tags) {
+				return false
+			}
+		}
+		return true
+	}
+	for field, value := range filter {
+		return lifecyclePredicateMatches(field, value, key, size, tags)
+	}
+	return false
+}
+
+func lifecyclePredicateMatches(field string, value any, key string, size int64, tags map[string]string) bool {
+	switch field {
+	case "Prefix":
+		return strings.HasPrefix(key, str(value))
+	case "Tag":
+		tag := asMap(value)
+		actual, exists := tags[str(tag["Key"])]
+		return exists && actual == str(tag["Value"])
+	case "ObjectSizeGreaterThan":
+		return size > lifecycleSize(value)
+	case "ObjectSizeLessThan":
+		return size < lifecycleSize(value)
+	case "Tags":
+		if len(tags) == 0 {
+			return false
+		}
+		for _, value := range asSlice(value) {
+			tag := asMap(value)
+			if tags[str(tag["Key"])] != str(tag["Value"]) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func lifecycleSize(value any) int64 {
+	switch size := value.(type) {
+	case int:
+		return int64(size)
+	case int64:
+		return size
+	case float64:
+		return int64(size)
+	case string:
+		parsed, _ := strconv.ParseInt(size, 10, 64)
+		return parsed
+	}
+	return 0
+}
+
+func (p *Pack) currentObjectVersion(ctx context.Context, req *spi.Request, bucket, key string) string {
+	current, exists := p.objectMetadata(ctx, req, bucket, key, "")
+	if !exists {
+		return ""
+	}
+	return str(current["versionId"])
 }
 
 func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, error) {

@@ -516,6 +516,63 @@ func FuzzBucketWebsite(f *testing.F) {
 	})
 }
 
+func FuzzBucketLifecycle(f *testing.F) {
+	for _, seed := range []struct {
+		mode   uint8
+		prefix string
+		size   uint8
+	}{{0, "images/", 5}, {0, "", 0}, {1, "images/", 5}, {2, "images/", 5}, {3, "images/", 5}, {4, "images/", 5}} {
+		f.Add(seed.mode, seed.prefix, seed.size)
+	}
+	f.Fuzz(func(t *testing.T, mode uint8, prefix string, sizeSeed uint8) {
+		if !utf8.ValidString(prefix) {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		bucket := map[string]any{"Bucket": "lifecycle-fuzz"}
+		mustInvoke(t, p, "CreateBucket", bucket, nil)
+		baseline := []any{map[string]any{"ID": "baseline", "Filter": map[string]any{}, "Status": "Enabled", "Expiration": map[string]any{"Days": float64(1)}}}
+		mustInvoke(t, p, "PutBucketLifecycleConfiguration", map[string]any{"Bucket": bucket["Bucket"], "LifecycleConfiguration": map[string]any{"Rules": baseline}}, nil)
+		rules := []any{map[string]any{"ID": "fuzz", "Filter": map[string]any{"Prefix": prefix}, "Status": "Enabled", "Expiration": map[string]any{"Days": 1}}}
+		valid, wantFault := true, ""
+		request := map[string]any{"Bucket": bucket["Bucket"], "LifecycleConfiguration": map[string]any{"Rules": rules}}
+		switch mode % 5 {
+		case 1:
+			rules[0].(map[string]any)["Filter"] = map[string]any{"Prefix": prefix, "ObjectSizeGreaterThan": int(sizeSeed)}
+			valid, wantFault = false, "MalformedXML"
+		case 2:
+			rules[0].(map[string]any)["Filter"] = map[string]any{"And": map[string]any{"Tags": []any{map[string]any{"Key": "k", "Value": "a"}, map[string]any{"Key": "k", "Value": "b"}}}}
+			valid, wantFault = false, "InvalidRequest"
+		case 3:
+			request["TransitionDefaultMinimumObjectSize"] = prefix
+			valid = prefix == "all_storage_classes_128K" || prefix == "varies_by_storage_class"
+			if !valid {
+				wantFault = "InvalidRequest"
+			}
+		case 4:
+			rules[0].(map[string]any)["Filter"] = map[string]any{"ObjectSizeGreaterThan": int(sizeSeed)}
+		}
+		_, err := invoke(t, p, "PutBucketLifecycleConfiguration", request, nil)
+		if valid && err != nil {
+			t.Fatal(err)
+		}
+		if !valid {
+			if fault := asFault(t, err); fault.Code != wantFault {
+				t.Fatalf("mode=%d prefix=%q size=%d fault=%#v", mode%5, prefix, sizeSeed, fault)
+			}
+			if got := mustInvoke(t, p, "GetBucketLifecycleConfiguration", bucket, nil).Output["Rules"]; !reflect.DeepEqual(got, baseline) {
+				t.Fatalf("invalid lifecycle replaced baseline: %#v", got)
+			}
+			return
+		}
+		body := bytes.Repeat([]byte{'x'}, int(sizeSeed)+1)
+		put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": prefix + "key"}, body)
+		if got := put.Headers.Get("x-amz-expiration"); got == "" {
+			t.Fatalf("mode=%d prefix=%q size=%d missing expiration", mode%5, prefix, sizeSeed)
+		}
+	})
+}
+
 func FuzzBucketNotifications(f *testing.F) {
 	for _, seed := range []struct {
 		mode uint8

@@ -351,6 +351,12 @@ func TestRESTXMLServiceDecodeContracts(t *testing.T) {
 	if err != nil || len(rules) != 1 || rules[0].(map[string]any)["ObjectOwnership"] != "ObjectWriter" {
 		t.Fatalf("ownership controls decode %#v %v", decoded, err)
 	}
+	publicAccessBlock := `<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls><RestrictPublicBuckets>false</RestrictPublicBuckets></PublicAccessBlockConfiguration>`
+	decoded, err = codec.Decode(s3, &model.Operation{Name: "PutPublicAccessBlock"}, httptest.NewRequest(http.MethodPut, "/bucket?publicAccessBlock", strings.NewReader(publicAccessBlock)))
+	configuration, _ := decoded.Input["PublicAccessBlockConfiguration"].(map[string]any)
+	if err != nil || !reflect.DeepEqual(configuration, map[string]any{"BlockPublicAcls": true, "RestrictPublicBuckets": false}) {
+		t.Fatalf("public access block decode %#v %v", decoded, err)
+	}
 }
 
 func TestPostObjectProtocolContract(t *testing.T) {
@@ -417,6 +423,10 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	w = httptest.NewRecorder()
 	if err := codec.Encode(svc, &model.Operation{Name: "GetBucketOwnershipControls"}, w, &spi.Response{Output: map[string]any{"OwnershipControls": map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": "BucketOwnerPreferred"}}}}}); err != nil || !strings.Contains(w.Body.String(), `<OwnershipControls xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><ObjectOwnership>BucketOwnerPreferred</ObjectOwnership></Rule></OwnershipControls>`) || strings.Contains(w.Body.String(), "<member>") {
 		t.Fatalf("bucket ownership response %v %s", err, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(svc, &model.Operation{Name: "GetPublicAccessBlock"}, w, &spi.Response{Output: map[string]any{"PublicAccessBlockConfiguration": map[string]any{"BlockPublicAcls": true, "BlockPublicPolicy": false, "IgnorePublicAcls": false, "RestrictPublicBuckets": true}}}); err != nil || !strings.Contains(w.Body.String(), `<PublicAccessBlockConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><BlockPublicAcls>true</BlockPublicAcls><BlockPublicPolicy>false</BlockPublicPolicy><IgnorePublicAcls>false</IgnorePublicAcls><RestrictPublicBuckets>true</RestrictPublicBuckets></PublicAccessBlockConfiguration>`) {
+		t.Fatalf("public access block response %v %s", err, w.Body.String())
 	}
 	w = httptest.NewRecorder()
 	if err := codec.EncodeFault(svc, &model.Operation{Name: "Missing"}, w, spi.NotImplemented(svc.ID, "Missing", "emulate"), "r<&"); err != nil {

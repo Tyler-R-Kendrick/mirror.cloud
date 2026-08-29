@@ -457,6 +457,65 @@ func FuzzBucketCors(f *testing.F) {
 	})
 }
 
+func FuzzBucketWebsite(f *testing.F) {
+	for _, seed := range []struct {
+		mode     uint8
+		suffix   string
+		protocol string
+	}{{0, "index.html", ""}, {0, "", ""}, {0, "dir/index.html", ""}, {1, "", "https"}, {1, "", "ftp"}, {2, "", ""}, {3, "", ""}, {4, "", ""}, {5, "", ""}, {6, "", ""}, {7, "", "http"}, {7, "", "smtp"}, {8, "", ""}} {
+		f.Add(seed.mode, seed.suffix, seed.protocol)
+	}
+	f.Fuzz(func(t *testing.T, mode uint8, suffix, protocol string) {
+		if !utf8.ValidString(suffix) || !utf8.ValidString(protocol) {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		input := map[string]any{"Bucket": "website-fuzz"}
+		mustInvoke(t, p, "CreateBucket", input, nil)
+		baseline := map[string]any{"IndexDocument": map[string]any{"Suffix": "baseline.html"}}
+		mustInvoke(t, p, "PutBucketWebsite", map[string]any{"Bucket": input["Bucket"], "WebsiteConfiguration": baseline}, nil)
+		valid, wantFault := false, "InvalidRequest"
+		switch mode % 9 {
+		case 0:
+			input["WebsiteConfiguration"] = map[string]any{"IndexDocument": map[string]any{"Suffix": suffix}}
+			valid = suffix != "" && !strings.Contains(suffix, "/")
+			if !valid {
+				wantFault = "InvalidArgument"
+			}
+		case 1:
+			input["WebsiteConfiguration"] = map[string]any{"RedirectAllRequestsTo": map[string]any{"HostName": "example.test", "Protocol": protocol}}
+			valid = protocol == "" || protocol == "http" || protocol == "https"
+		case 2:
+			input["WebsiteConfiguration"], wantFault = map[string]any{"RedirectAllRequestsTo": map[string]any{"Protocol": "https"}}, "MalformedXML"
+		case 3:
+			input["WebsiteConfiguration"], wantFault = map[string]any{"RedirectAllRequestsTo": map[string]any{"HostName": "example.test"}, "IndexDocument": map[string]any{"Suffix": "index.html"}}, "InvalidArgument"
+		case 4:
+			input["WebsiteConfiguration"], wantFault = map[string]any{"IndexDocument": map[string]any{"Suffix": "index.html"}, "RoutingRules": []any{}}, "MalformedXML"
+		case 5:
+			input["WebsiteConfiguration"] = map[string]any{"IndexDocument": map[string]any{"Suffix": "index.html"}, "RoutingRules": []any{map[string]any{"Condition": map[string]any{}, "Redirect": map[string]any{}}}}
+		case 6:
+			input["WebsiteConfiguration"] = map[string]any{"IndexDocument": map[string]any{"Suffix": "index.html"}, "RoutingRules": []any{map[string]any{"Redirect": map[string]any{"ReplaceKeyPrefixWith": "a", "ReplaceKeyWith": "b"}}}}
+		case 7:
+			input["WebsiteConfiguration"] = map[string]any{"IndexDocument": map[string]any{"Suffix": "index.html"}, "RoutingRules": []any{map[string]any{"Redirect": map[string]any{"Protocol": protocol}}}}
+			valid = protocol == "" || protocol == "http" || protocol == "https"
+		case 8:
+			input["_body"], wantFault = "<broken", "MalformedXML"
+		}
+		_, err := invoke(t, p, "PutBucketWebsite", input, nil)
+		if !valid {
+			if fault := asFault(t, err); fault.Code != wantFault {
+				t.Fatalf("mode=%d suffix=%q protocol=%q: %#v", mode%9, suffix, protocol, fault)
+			}
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		stored := mustInvoke(t, p, "GetBucketWebsite", map[string]any{"Bucket": "website-fuzz"}, nil).Output
+		if valid && !reflect.DeepEqual(stored, input["WebsiteConfiguration"]) || !valid && !reflect.DeepEqual(stored, baseline) {
+			t.Fatalf("stored website = %#v", stored)
+		}
+	})
+}
+
 func FuzzDeleteBucketEmptiness(f *testing.F) {
 	for _, seed := range []struct {
 		versioned bool

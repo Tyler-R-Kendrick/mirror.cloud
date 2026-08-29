@@ -185,7 +185,20 @@ type Clock interface {
 	// return an error.
 	Advance(d time.Duration) error
 	// After fires after d according to this clock.
+	//
+	// The duration is measured from whenever this call happens, which makes it
+	// the wrong choice for waiting until a deadline: a caller that reads Now,
+	// computes a delay, and then calls After has a window in which the clock
+	// can move, and the timer it registers is then relative to the new time.
+	// Under a controllable clock nothing moves it a second time, so the wakeup
+	// is lost outright. Use AfterTime for a deadline; keep After for a genuine
+	// interval whose start is this call.
 	After(d time.Duration) <-chan time.Time
+	// AfterTime fires when this clock reaches at, and immediately if it already
+	// has. The instant is absolute, so registering it late is harmless: a clock
+	// that moved past the deadline in the meantime fires at once rather than
+	// waiting for a jump that already happened.
+	AfterTime(at time.Time) <-chan time.Time
 }
 
 // Rand is the only source of randomness in the process. All methods are

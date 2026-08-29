@@ -222,6 +222,7 @@ func TestCreateBucketTags(t *testing.T) {
 
 func TestCreateBucketObjectOwnership(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
+	characterization := map[string]any{}
 	assertOwnership := func(bucket, want string) {
 		t.Helper()
 		response := mustInvoke(t, p, "GetBucketOwnershipControls", map[string]any{"Bucket": bucket}, nil)
@@ -229,6 +230,7 @@ func TestCreateBucketObjectOwnership(t *testing.T) {
 		if len(rules) != 1 || asMapForTest(rules[0])["ObjectOwnership"] != want {
 			t.Fatalf("%s ownership = %#v", bucket, response.Output)
 		}
+		characterization[bucket] = want
 	}
 
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "default-ownership"}, nil)
@@ -244,6 +246,7 @@ func TestCreateBucketObjectOwnership(t *testing.T) {
 	if fault.Code != "InvalidArgument" || fault.Fields["ArgumentName"] != "x-amz-object-ownership" {
 		t.Fatalf("invalid ownership = %#v", fault)
 	}
+	characterization["invalid"] = fault.Code
 	if _, err := invoke(t, p, "HeadBucket", map[string]any{"Bucket": "invalid-ownership"}, nil); asFault(t, err).Code != "NoSuchBucket" {
 		t.Fatalf("invalid ownership reserved bucket: %v", err)
 	}
@@ -256,6 +259,8 @@ func TestCreateBucketObjectOwnership(t *testing.T) {
 	if len(rules) != 1 || asMapForTest(rules[0])["ObjectOwnership"] != "ObjectWriter" {
 		t.Fatalf("account-regional ownership = %#v", response.Output)
 	}
+	characterization["account-regional"] = "ObjectWriter"
+	golden.AssertJSON(t, characterization)
 }
 
 func TestCreateBucketAccountRegionalNamespace(t *testing.T) {

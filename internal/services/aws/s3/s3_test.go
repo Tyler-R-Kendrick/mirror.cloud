@@ -449,6 +449,27 @@ func TestBucketLogging(t *testing.T) {
 	}
 }
 
+func TestBucketLoggingCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	for _, bucket := range []string{"logging-characterization-source", "logging-characterization-target"} {
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	}
+	input := map[string]any{"Bucket": "logging-characterization-source"}
+	before := mustInvoke(t, p, "GetBucketLogging", input, nil)
+	put := mustInvoke(t, p, "PutBucketLogging", map[string]any{"Bucket": input["Bucket"], "BucketLoggingStatus": map[string]any{"LoggingEnabled": map[string]any{"TargetBucket": "logging-characterization-target", "TargetPrefix": "logs/"}}}, nil)
+	after := mustInvoke(t, p, "GetBucketLogging", input, nil)
+	_, invalidErr := invoke(t, p, "PutBucketLogging", map[string]any{"Bucket": input["Bucket"], "BucketLoggingStatus": map[string]any{"LoggingEnabled": map[string]any{"TargetBucket": "missing"}}}, nil)
+	invalid := asFault(t, invalidErr)
+	preserved := mustInvoke(t, p, "GetBucketLogging", input, nil)
+	disabled := mustInvoke(t, p, "PutBucketLogging", map[string]any{"Bucket": input["Bucket"], "BucketLoggingStatus": map[string]any{}}, nil)
+	final := mustInvoke(t, p, "GetBucketLogging", input, nil)
+	golden.AssertJSON(t, map[string]any{
+		"default": before.Output, "put": put.Output, "get": after.Output,
+		"invalid":   map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus, "target": invalid.Fields["TargetBucket"]},
+		"preserved": preserved.Output, "disable": disabled.Output, "disabled": final.Output,
+	})
+}
+
 func TestBucketAccelerateConfigurationCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "accelerate-characterization"}, nil)

@@ -97,6 +97,20 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.PutBucketOwnershipControls(context.Background(), &s3.PutBucketOwnershipControlsInput{Bucket: aws.String("sdk"), OwnershipControls: controls}); err != nil {
 		t.Fatalf("restore bucket ownership controls: %v", err)
 	}
+	publicAccessBlock := &s3types.PublicAccessBlockConfiguration{BlockPublicAcls: aws.Bool(true)}
+	if _, err := s3c.PutPublicAccessBlock(context.Background(), &s3.PutPublicAccessBlockInput{Bucket: aws.String("sdk"), PublicAccessBlockConfiguration: publicAccessBlock}); err != nil {
+		t.Fatalf("put public access block: %v", err)
+	}
+	blocked, err := s3c.GetPublicAccessBlock(context.Background(), &s3.GetPublicAccessBlockInput{Bucket: aws.String("sdk")})
+	if err != nil || blocked.PublicAccessBlockConfiguration == nil || !aws.ToBool(blocked.PublicAccessBlockConfiguration.BlockPublicAcls) || aws.ToBool(blocked.PublicAccessBlockConfiguration.BlockPublicPolicy) {
+		t.Fatalf("public access block round trip: %#v %v", blocked, err)
+	}
+	if _, err := s3c.DeletePublicAccessBlock(context.Background(), &s3.DeletePublicAccessBlockInput{Bucket: aws.String("sdk")}); err != nil {
+		t.Fatalf("delete public access block: %v", err)
+	}
+	if _, err := s3c.GetPublicAccessBlock(context.Background(), &s3.GetPublicAccessBlockInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchPublicAccessBlockConfiguration") {
+		t.Fatalf("get deleted public access block: %v", err)
+	}
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk")}); err != nil {
 		t.Fatalf("recreate us-east-1 bucket: %v", err)
 	}

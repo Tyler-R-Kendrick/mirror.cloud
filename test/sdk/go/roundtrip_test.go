@@ -124,6 +124,19 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.PutBucketRequestPayment(context.Background(), &s3.PutBucketRequestPaymentInput{Bucket: aws.String("sdk"), RequestPaymentConfiguration: &s3types.RequestPaymentConfiguration{Payer: invalidPayer}}); err == nil || !strings.Contains(err.Error(), "MalformedXML") {
 		t.Fatalf("invalid request payer: %v", err)
 	}
+	if acceleration, err := s3c.GetBucketAccelerateConfiguration(context.Background(), &s3.GetBucketAccelerateConfigurationInput{Bucket: aws.String("sdk")}); err != nil || acceleration.Status != "" {
+		t.Fatalf("default acceleration: %#v %v", acceleration, err)
+	}
+	if _, err := s3c.PutBucketAccelerateConfiguration(context.Background(), &s3.PutBucketAccelerateConfigurationInput{Bucket: aws.String("sdk"), AccelerateConfiguration: &s3types.AccelerateConfiguration{Status: s3types.BucketAccelerateStatusEnabled}}); err != nil {
+		t.Fatalf("put acceleration: %v", err)
+	}
+	if acceleration, err := s3c.GetBucketAccelerateConfiguration(context.Background(), &s3.GetBucketAccelerateConfigurationInput{Bucket: aws.String("sdk")}); err != nil || acceleration.Status != s3types.BucketAccelerateStatusEnabled {
+		t.Fatalf("acceleration round trip: %#v %v", acceleration, err)
+	}
+	invalidAcceleration := s3types.BucketAccelerateStatus("Invalid")
+	if _, err := s3c.PutBucketAccelerateConfiguration(context.Background(), &s3.PutBucketAccelerateConfigurationInput{Bucket: aws.String("sdk"), AccelerateConfiguration: &s3types.AccelerateConfiguration{Status: invalidAcceleration}}); err == nil || !strings.Contains(err.Error(), "MalformedXML") {
+		t.Fatalf("invalid acceleration: %v", err)
+	}
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk")}); err != nil {
 		t.Fatalf("recreate us-east-1 bucket: %v", err)
 	}

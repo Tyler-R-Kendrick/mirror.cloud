@@ -307,6 +307,37 @@ func TestBucketOwnershipControls(t *testing.T) {
 	}
 }
 
+func TestPublicAccessBlock(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "public-access-block"}, nil)
+	put := func(configuration any) error {
+		_, err := invoke(t, p, "PutPublicAccessBlock", map[string]any{"Bucket": "public-access-block", "PublicAccessBlockConfiguration": configuration}, nil)
+		return err
+	}
+	if err := put(map[string]any{"BlockPublicAcls": true}); err != nil {
+		t.Fatal(err)
+	}
+	response := mustInvoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil)
+	want := map[string]any{"BlockPublicAcls": true, "BlockPublicPolicy": false, "IgnorePublicAcls": false, "RestrictPublicBuckets": false}
+	if got := response.Output["PublicAccessBlockConfiguration"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("configuration = %#v", got)
+	}
+	for _, invalid := range []any{nil, map[string]any{"Unknown": true}, map[string]any{"BlockPublicAcls": "true"}} {
+		if fault := asFault(t, put(invalid)); fault.Code != "MalformedXML" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("configuration %#v fault = %#v", invalid, fault)
+		}
+	}
+	response = mustInvoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil)
+	if got := response.Output["PublicAccessBlockConfiguration"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("invalid put replaced configuration = %#v", got)
+	}
+	mustInvoke(t, p, "DeletePublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil)
+	mustInvoke(t, p, "DeletePublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil)
+	if _, err := invoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block"}, nil); asFault(t, err).Code != "NoSuchPublicAccessBlockConfiguration" {
+		t.Fatalf("get deleted configuration: %v", err)
+	}
+}
+
 func TestBucketOwnershipControlsCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "ownership-characterization"}, nil)

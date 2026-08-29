@@ -834,6 +834,49 @@ func TestConcurrentBucketRequestPaymentRemainsValid(t *testing.T) {
 	}
 }
 
+func TestConcurrentBucketAccelerationRemainsValid(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "accelerate-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			status := "Invalid"
+			if n%2 == 0 {
+				status = []string{"Enabled", "Suspended"}[(n/2)%2]
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutBucketAccelerateConfiguration", Input: map[string]any{"Bucket": "accelerate-chaos", "AccelerateConfiguration": map[string]any{"Status": status}}})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	successes := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "MalformedXML" {
+			t.Fatalf("concurrent accelerate put: %v", err)
+		}
+	}
+	if successes != 16 {
+		t.Fatalf("successful accelerate puts = %d, want 16", successes)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBucketAccelerateConfiguration", Input: map[string]any{"Bucket": "accelerate-chaos"}})
+	if err != nil || response.Output["Status"] != "Enabled" && response.Output["Status"] != "Suspended" {
+		t.Fatalf("persisted acceleration = %#v, err=%v", response, err)
+	}
+}
+
 func TestConcurrentInvalidVersioningWritesDoNotChangeState(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

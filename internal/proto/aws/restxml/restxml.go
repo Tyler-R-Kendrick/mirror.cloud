@@ -834,6 +834,13 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
+	if op.Name == "GetBucketLogging" {
+		b.WriteString(`<BucketLoggingStatus xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
+		write(resp.Output, &b)
+		b.WriteString("</BucketLoggingStatus>")
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
 	configurationRoot := map[string]string{
 		"GetBucketObjectLockConfiguration": "ObjectLockConfiguration",
 		"GetObjectLockConfiguration":       "ObjectLockConfiguration",

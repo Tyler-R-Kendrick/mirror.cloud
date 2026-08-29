@@ -479,6 +479,10 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 		t.Fatalf("accelerate response %v %s", err, w.Body.String())
 	}
 	w = httptest.NewRecorder()
+	if err := codec.Encode(svc, &model.Operation{Name: "GetBucketLogging"}, w, &spi.Response{Output: map[string]any{"LoggingEnabled": map[string]any{"TargetBucket": "target", "TargetPrefix": "logs/"}}}); err != nil || !strings.Contains(w.Body.String(), `<BucketLoggingStatus xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><LoggingEnabled><TargetBucket>target</TargetBucket><TargetPrefix>logs/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>`) {
+		t.Fatalf("logging response %v %s", err, w.Body.String())
+	}
+	w = httptest.NewRecorder()
 	if err := codec.EncodeFault(svc, &model.Operation{Name: "Missing"}, w, spi.NotImplemented(svc.ID, "Missing", "emulate"), "r<&"); err != nil {
 		t.Fatal(err)
 	}

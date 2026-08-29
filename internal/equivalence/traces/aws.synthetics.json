@@ -1,0 +1,227 @@
+{
+  "schema": "trace/1",
+  "service": "aws.synthetics",
+  "source": "pack:internal/services/aws/synthetics@44547e0",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "GetCanary",
+      "input": {
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateCanary",
+      "input": {
+        "ArtifactS3Location": "s3://canary-artifacts/checkout",
+        "Code": {
+          "Handler": "index.handler",
+          "S3Bucket": "canary-code",
+          "S3Key": "checkout.zip"
+        },
+        "ExecutionRoleArn": "arn:aws:iam::000000000000:role/canary",
+        "Name": "checkout",
+        "RuntimeVersion": "syn-nodejs-puppeteer-9.1",
+        "Schedule": {
+          "Expression": "rate(5 minutes)"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Canary": {
+          "Id": "7c589129",
+          "Name": "checkout",
+          "Status": {
+            "State": "READY"
+          }
+        }
+      }
+    },
+    {
+      "operation": "GetCanary",
+      "input": {
+        "Name": {
+          "$fromPath": "Canary.Name",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Canary": {
+          "Id": "7c589129",
+          "Name": "checkout",
+          "Status": {
+            "State": "READY"
+          }
+        }
+      }
+    },
+    {
+      "operation": "CreateCanary",
+      "input": {
+        "ArtifactS3Location": "s3://canary-artifacts/search",
+        "Code": {
+          "Handler": "index.handler",
+          "S3Bucket": "canary-code",
+          "S3Key": "search.zip"
+        },
+        "ExecutionRoleArn": "arn:aws:iam::000000000000:role/canary",
+        "Name": "search",
+        "RuntimeVersion": "syn-nodejs-puppeteer-9.1",
+        "Schedule": {
+          "Expression": "rate(5 minutes)"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Canary": {
+          "Id": "5f59f223",
+          "Name": "search",
+          "Status": {
+            "State": "READY"
+          }
+        }
+      }
+    },
+    {
+      "operation": "StartCanary",
+      "input": {
+        "Name": {
+          "$fromPath": "Canary.Name",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetCanary",
+      "input": {
+        "Name": {
+          "$fromPath": "Canary.Name",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Canary": {
+          "Id": "7c589129",
+          "Name": "checkout",
+          "Status": {
+            "State": "READY"
+          }
+        }
+      }
+    },
+    {
+      "operation": "StopCanary",
+      "input": {
+        "Name": {
+          "$fromPath": "Canary.Name",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteCanary",
+      "input": {
+        "Name": {
+          "$fromPath": "Canary.Name",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetCanary",
+      "input": {
+        "Name": {
+          "$fromPath": "Canary.Name",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteCanary",
+      "input": {
+        "Name": {
+          "$fromPath": "Canary.Name",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

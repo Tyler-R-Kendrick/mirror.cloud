@@ -466,6 +466,20 @@ func validateEffect(s *Service, where string, eff Effect, compile func(string, s
 			*problems = append(*problems, fmt.Errorf("%s: %s.dedup: table and ttl are required", s.ServiceID, where))
 		}
 	}
+	if e := eff.Generate; e != nil {
+		set++
+		compile(where+".generate.when", e.When)
+		if e.Bind == "" {
+			*problems = append(*problems, fmt.Errorf(
+				"%s: %s.generate: no bind; the value is unreachable without a name", s.ServiceID, where))
+		}
+		switch e.Kind {
+		case "hex", "uuid", "int", "":
+		default:
+			*problems = append(*problems, fmt.Errorf("%s: %s.generate: unknown kind %q",
+				s.ServiceID, where, e.Kind))
+		}
+	}
 	if e := eff.SendEvent; e != nil {
 		set++
 		if e.Resource != "" {
@@ -511,10 +525,37 @@ func validateEffect(s *Service, where string, eff Effect, compile func(string, s
 
 // compileAny compiles the string-valued entries of a record literal. Non-string
 // values are constants and need no compilation.
+// compileAny compiles every expression in a record literal, including the ones
+// inside nested maps and lists: a nested member is a member, and the engine
+// evaluates it as one, so the loader has to prove it compiles here or the
+// failure lands at request time instead.
+//
+// A single-key `generate` or `counter` map is a value form rather than a
+// nested record -- both draw on state an expression may not touch -- so it is
+// left alone.
 func compileAny(where string, rec map[string]any, compile func(string, string)) {
 	for _, k := range sortedKeysAny(rec) {
-		if s, ok := rec[k].(string); ok {
-			compile(where+"."+k, s)
+		compileValue(where+"."+k, rec[k], compile)
+	}
+}
+
+func compileValue(where string, v any, compile func(string, string)) {
+	switch t := v.(type) {
+	case string:
+		compile(where, t)
+	case map[string]any:
+		if len(t) == 1 {
+			if _, ok := t["generate"]; ok {
+				return
+			}
+			if _, ok := t["counter"]; ok {
+				return
+			}
+		}
+		compileAny(where, t, compile)
+	case []any:
+		for i, item := range t {
+			compileValue(fmt.Sprintf("%s[%d]", where, i), item, compile)
 		}
 	}
 }

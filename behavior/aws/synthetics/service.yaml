@@ -1,0 +1,78 @@
+schema: bir/1
+service: aws.synthetics
+
+# Transcribed from the hand-written pack, not established against the real
+# service. A canary here is a record; nothing runs, nothing is scheduled and
+# no artifact is ever written.
+provenance: authored
+
+resources:
+  canary:
+    collection: syncan
+    id:
+      input_members: [Name]
+    record:
+      Name: id
+      Id: { generate: { kind: hex, bytes: 8 } }
+      # A canary is born READY and stays there: with no runtime behind it,
+      # RUNNING would assert something is executing.
+      Status: { State: "'READY'" }
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateCanary:
+    require:
+      - { cond: "string(input.Name) != ''", error: Validation }
+    effects:
+      - put: { resource: canary }
+    output:
+      Canary: rec
+
+  GetCanary:
+    reads:
+      canary: { resource: canary }
+    require:
+      - { cond: canary_found, error: NotFound }
+    output:
+      Canary: canary
+
+  # The pack served this as `ListCanaries`, which is not an operation of this
+  # service -- see quirks. DescribeCanaries is the one the model declares and
+  # the one an SDK calls.
+  DescribeCanaries:
+    list: { resource: canary, member: Canaries, paginate: model }
+
+  DeleteCanary:
+    effects:
+      - delete: { resource: canary, missing: ignore }
+
+  # Starting and stopping are accepted and do nothing, because there is nothing
+  # to start. Expressed rather than omitted so a caller's start does not fail
+  # outright, which is what the pack chose.
+  StartCanary: {}
+  StopCanary: {}
+
+quirks:
+  - operation: DescribeCanaries
+    note: >
+      The pack answered an operation called `ListCanaries`. AWS Synthetics has
+      no such operation -- the list operation is DescribeCanaries -- so no
+      generated SDK client could ever have reached the pack's version, and the
+      recording does not contain it. This bundle serves DescribeCanaries with
+      the same records, which is a deliberate correction rather than a
+      transcription.
+  - operation: StartCanary
+    note: >
+      Start and stop are accepted and change nothing; a canary's Status.State
+      stays READY. Real Synthetics moves through STARTING and RUNNING and
+      begins producing runs, which GetCanaryRuns would show. Transcribed from
+      the pack; a probe should record the state sequence.

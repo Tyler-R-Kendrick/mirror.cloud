@@ -1,0 +1,73 @@
+schema: bir/1
+service: aws.rum
+
+# Transcribed from the hand-written pack, not established against the real
+# service. An app monitor here is a record; no telemetry is ingested, stored or
+# queried back.
+provenance: authored
+
+resources:
+  monitor:
+    collection: rummon
+    id:
+      input_members: [Name]
+    record:
+      Name: id
+      Id: { generate: { kind: hex, bytes: 8 } }
+      State: "'CREATED'"
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateAppMonitor:
+    require:
+      - { cond: "string(input.Name) != ''", error: Validation }
+    effects:
+      - put: { resource: monitor }
+    output:
+      Id: rec.Id
+
+  GetAppMonitor:
+    reads:
+      monitor: { resource: monitor }
+    require:
+      - { cond: monitor_found, error: NotFound }
+    output:
+      AppMonitor: monitor
+
+  ListAppMonitors:
+    list: { resource: monitor, member: AppMonitorSummaries, paginate: model }
+
+  DeleteAppMonitor:
+    effects:
+      - delete: { resource: monitor, missing: ignore }
+
+  # Events are accepted and dropped. Storing them would be storing something
+  # nothing can read back, since GetAppMonitorData answers empty either way.
+  PutRumEvents: {}
+
+  GetAppMonitorData:
+    output:
+      Events: "[]"
+
+quirks:
+  - operation: PutRumEvents
+    note: >
+      Events are accepted and discarded, and GetAppMonitorData always answers
+      with nothing. Transcribed from the pack, which did the same; a service
+      that stores telemetry it can never return would be worse, not better.
+  - operation: GetAppMonitorData
+    note: >
+      The pack answered with a `RumEventSummaries` member. The model declares
+      the member as `Events`, and the restJson codec writes the response map
+      through unchanged, so the pack's member name is one no generated SDK
+      client can read. This bundle answers with the declared name, and the
+      trace step records the difference as superseded.

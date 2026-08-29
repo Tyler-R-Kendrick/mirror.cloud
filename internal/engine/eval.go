@@ -338,6 +338,17 @@ func (ev *eval) runEffects(ctx context.Context, op bir.Operation) error {
 				// answered and performs none of the effects behind it.
 				return errShortCircuit
 			}
+		case eff.Generate != nil:
+			if eff.Generate.When != "" {
+				ok, err := ev.evalBool(path + ".generate.when")
+				if err != nil {
+					return err
+				}
+				if !ok {
+					continue
+				}
+			}
+			ev.fx[eff.Generate.Bind] = ev.generate(eff.Generate.Generate)
 		case eff.SendEvent != nil:
 			if err := ev.runSendEvent(ctx, path+".send_event", *eff.SendEvent); err != nil {
 				return err
@@ -539,6 +550,30 @@ func (ev *eval) recordValue(ctx context.Context, path string, raw any) (any, err
 				return ev.nextCounter(ctx, name)
 			}
 		}
+		// Any other map is a nested record, and its members are members like
+		// any other. Returning it untouched would store the expression sources
+		// as text -- a canary's { Status: { State: "'READY'" } } would come
+		// back with the quotes still on it, which is a wrong value rather than
+		// an error and so the worst way to fail.
+		out := make(map[string]any, len(v))
+		for _, k := range sortedKeysAny(v) {
+			member, err := ev.recordValue(ctx, path+"."+k, v[k])
+			if err != nil {
+				return nil, err
+			}
+			out[k] = member
+		}
+		return out, nil
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			member, err := ev.recordValue(ctx, fmt.Sprintf("%s[%d]", path, i), item)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = member
+		}
+		return out, nil
 	}
 	return raw, nil
 }

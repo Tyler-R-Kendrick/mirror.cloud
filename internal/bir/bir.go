@@ -340,15 +340,16 @@ type ListSpec struct {
 // kind is an engine change with a test, so semantic pressure surfaces as a
 // reviewed pull request instead of per-service drift.
 type Effect struct {
-	Create    *WriteEffect  `yaml:"create,omitempty"`
-	Put       *WriteEffect  `yaml:"put,omitempty"`
-	Patch     *WriteEffect  `yaml:"patch,omitempty"`
-	Delete    *DeleteEffect `yaml:"delete,omitempty"`
-	Counter   *CounterSpec  `yaml:"counter,omitempty"`
-	Dedup     *DedupEffect  `yaml:"dedup,omitempty"`
-	SendEvent *SendEvent    `yaml:"send_event,omitempty"`
-	Emit      *EmitEffect   `yaml:"emit,omitempty"`
-	Primitive *PrimEffect   `yaml:"primitive,omitempty"`
+	Create    *WriteEffect    `yaml:"create,omitempty"`
+	Put       *WriteEffect    `yaml:"put,omitempty"`
+	Patch     *WriteEffect    `yaml:"patch,omitempty"`
+	Delete    *DeleteEffect   `yaml:"delete,omitempty"`
+	Counter   *CounterSpec    `yaml:"counter,omitempty"`
+	Dedup     *DedupEffect    `yaml:"dedup,omitempty"`
+	SendEvent *SendEvent      `yaml:"send_event,omitempty"`
+	Emit      *EmitEffect     `yaml:"emit,omitempty"`
+	Generate  *GenerateEffect `yaml:"generate,omitempty"`
+	Primitive *PrimEffect     `yaml:"primitive,omitempty"`
 }
 
 // WriteEffect creates or updates a resource record.
@@ -414,6 +415,22 @@ type EmitEffect struct {
 	Target  string            `yaml:"target"`
 	Payload map[string]string `yaml:"payload,omitempty"`
 	When    string            `yaml:"when,omitempty"`
+}
+
+// GenerateEffect draws a fresh value from the deterministic Rand and binds it
+// under fx for the operation's output to name.
+//
+// Expressions are pure and may not reach randomness, and record generators
+// only exist where a record is being written -- so an operation that answers
+// with a freshly minted value it does not store (a CLI token, a session
+// identifier, a presigned nonce) had no way to say so. It could store the
+// value instead, and the wire could not tell, which is exactly why that would
+// be the wrong shape: state nobody reads, written to work around a gap.
+type GenerateEffect struct {
+	// Bind is the name under fx the value appears as.
+	Bind     string `yaml:"bind"`
+	Generate `yaml:",inline"`
+	When     string `yaml:"when,omitempty"`
 }
 
 // PrimEffect invokes a stateful engine primitive.

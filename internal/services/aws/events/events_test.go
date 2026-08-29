@@ -152,6 +152,9 @@ func TestEventBridgeRequestValidation(t *testing.T) {
 
 func TestScheduledRulesPersistAndRespectState(t *testing.T) {
 	deps := spitest.Deps(t)
+	baseClock := deps.Clock
+	observed := &eventObservedClock{Clock: baseClock, after: make(chan time.Duration, 16)}
+	deps.Clock = observed
 	p := New(deps)
 	defer func() { _ = p.Close() }()
 	queue := sqs.New(deps)
@@ -194,6 +197,7 @@ func TestScheduledRulesPersistAndRespectState(t *testing.T) {
 	call(p, "PutTargets", map[string]any{"Rule": "scheduled", "Targets": []any{map[string]any{
 		"Id": "queue", "Arn": "arn:aws:sqs:us-east-1:1:scheduled",
 	}}})
+	waitEventTimer(t, observed.after, time.Minute)
 	_ = deps.Clock.Advance(59 * time.Second)
 	if got := messages("scheduled"); len(got) != 0 {
 		t.Fatalf("scheduled early %#v", got)
@@ -208,7 +212,10 @@ func TestScheduledRulesPersistAndRespectState(t *testing.T) {
 	if err := p.Close(); err != nil {
 		t.Fatal(err)
 	}
+	observed = &eventObservedClock{Clock: baseClock, after: make(chan time.Duration, 16)}
+	deps.Clock = observed
 	p = New(deps)
+	waitEventTimer(t, observed.after, time.Minute)
 	_ = deps.Clock.Advance(3 * time.Minute)
 	eventuallyEvent(t, func() bool { return len(messages("scheduled")) == 4 })
 
@@ -216,12 +223,14 @@ func TestScheduledRulesPersistAndRespectState(t *testing.T) {
 	call(p, "PutTargets", map[string]any{"Rule": "disabled", "Targets": []any{map[string]any{
 		"Id": "queue", "Arn": "arn:aws:sqs:us-east-1:1:disabled",
 	}}})
+	waitEventTimer(t, observed.after, time.Minute)
 	_ = deps.Clock.Advance(time.Minute)
 	p.runScheduledRules(ctx)
 	if got := messages("disabled"); len(got) != 0 {
 		t.Fatalf("disabled schedule delivered %#v", got)
 	}
 	call(p, "EnableRule", map[string]any{"Name": "disabled"})
+	waitEventTimer(t, observed.after, time.Minute)
 	_ = deps.Clock.Advance(time.Minute)
 	eventuallyEvent(t, func() bool { return len(messages("disabled")) == 1 })
 
@@ -239,6 +248,32 @@ func TestScheduledRulesPersistAndRespectState(t *testing.T) {
 		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: map[string]any{"Name": "missing"}})
 		if fault, ok := err.(*spi.Fault); !ok || fault.Code != "ResourceNotFoundException" {
 			t.Fatalf("%s missing rule fault=%#v", operation, err)
+		}
+	}
+}
+
+type eventObservedClock struct {
+	spi.Clock
+	after chan time.Duration
+}
+
+func (c *eventObservedClock) After(delay time.Duration) <-chan time.Time {
+	ch := c.Clock.After(delay)
+	c.after <- delay
+	return ch
+}
+
+func waitEventTimer(t *testing.T, after <-chan time.Duration, want time.Duration) {
+	t.Helper()
+	deadline := time.After(30 * time.Second)
+	for {
+		select {
+		case delay := <-after:
+			if delay == want {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("scheduler did not register %v timer", want)
 		}
 	}
 }

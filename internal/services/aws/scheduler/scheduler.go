@@ -298,12 +298,8 @@ func (p *Pack) loop() {
 			}
 			continue
 		}
-		delay := next.Sub(p.deps.Clock.Now())
-		if delay < 0 {
-			delay = 0
-		}
 		select {
-		case <-p.deps.Clock.After(delay):
+		case <-p.deps.Clock.AfterTime(next):
 		case <-p.wake:
 		case <-p.stop:
 			return

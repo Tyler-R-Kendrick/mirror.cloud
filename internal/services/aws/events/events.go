@@ -412,12 +412,8 @@ func (p *Pack) retryLoop() {
 			}
 			continue
 		}
-		delay := next.Sub(p.deps.Clock.Now())
-		if delay < 0 {
-			delay = 0
-		}
 		select {
-		case <-p.deps.Clock.After(delay):
+		case <-p.deps.Clock.AfterTime(next):
 		case <-p.wake:
 		case <-p.stop:
 			return
@@ -952,7 +948,7 @@ func waitAPIDestinationRate(ctx context.Context, deps spi.Deps, identity spi.Ide
 		rate = 300
 	}
 	now := deps.Clock.Now()
-	wait := time.Duration(0)
+	var opensAt time.Time // the instant the next slot opens; see spi.Clock.AfterTime
 	// ponytail: fixed one-second windows; use a token bucket if burst smoothing becomes observable.
 	err = deps.Store.Scope(identity.Account, identity.Region).Collection("apidest-rate").Txn(ctx, func(tx spi.Tx) error {
 		state := apiDestinationRateState{Window: now.Truncate(time.Second).UnixNano()}
@@ -968,15 +964,15 @@ func waitAPIDestinationRate(ctx context.Context, deps spi.Deps, identity spi.Ide
 			window, state.Count = window.Add(time.Second), 0
 		}
 		state.Window, state.Count = window.UnixNano(), state.Count+1
-		wait = max(window.Sub(now), 0)
+		opensAt = window
 		body, _ := json.Marshal(state)
 		return tx.Put(name, body)
 	})
-	if err != nil || wait == 0 {
+	if err != nil || !opensAt.After(now) {
 		return err
 	}
 	select {
-	case <-deps.Clock.After(wait):
+	case <-deps.Clock.AfterTime(opensAt):
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

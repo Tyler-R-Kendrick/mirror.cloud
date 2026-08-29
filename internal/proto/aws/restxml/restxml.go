@@ -612,6 +612,39 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 			document["LoggingEnabled"] = logging
 		}
 		in["BucketLoggingStatus"] = document
+	case "PutBucketCors":
+		var configuration struct {
+			XMLName xml.Name
+			Rules   []struct {
+				AllowedHeaders []string `xml:"AllowedHeader"`
+				AllowedMethods []string `xml:"AllowedMethod"`
+				AllowedOrigins []string `xml:"AllowedOrigin"`
+				ExposeHeaders  []string `xml:"ExposeHeader"`
+				MaxAgeSeconds  *int     `xml:"MaxAgeSeconds"`
+				ID             string   `xml:"ID"`
+			} `xml:"CORSRule"`
+		}
+		if xml.Unmarshal(raw, &configuration) != nil || configuration.XMLName.Local != "CORSConfiguration" {
+			in["_body"] = string(raw)
+			return
+		}
+		rules := make([]any, 0, len(configuration.Rules))
+		for _, source := range configuration.Rules {
+			rule := map[string]any{"AllowedMethods": stringsToAny(source.AllowedMethods), "AllowedOrigins": stringsToAny(source.AllowedOrigins)}
+			for key, values := range map[string][]string{"AllowedHeaders": source.AllowedHeaders, "ExposeHeaders": source.ExposeHeaders} {
+				if len(values) != 0 {
+					rule[key] = stringsToAny(values)
+				}
+			}
+			if source.MaxAgeSeconds != nil {
+				rule["MaxAgeSeconds"] = *source.MaxAgeSeconds
+			}
+			if source.ID != "" {
+				rule["ID"] = source.ID
+			}
+			rules = append(rules, rule)
+		}
+		in["CORSConfiguration"] = map[string]any{"CORSRules": rules}
 	case "PutObjectLegalHold":
 		var hold struct {
 			Status string `xml:"Status"`
@@ -738,7 +771,7 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 		in["ReplicationConfiguration"] = map[string]any{"Role": configuration.Role, "Rules": rules}
 	case "PutBucketPolicy":
 		in["Policy"] = string(raw)
-	case "PutBucketCors", "PutBucketWebsite",
+	case "PutBucketWebsite",
 		"PutBucketLifecycleConfiguration",
 		"PutBucketEncryption", "PutBucketAcl", "PutObjectAcl":
 		in["_body"] = string(raw)
@@ -838,6 +871,31 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		b.WriteString(`<BucketLoggingStatus xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
 		write(resp.Output, &b)
 		b.WriteString("</BucketLoggingStatus>")
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
+	if op.Name == "GetBucketCors" {
+		b.WriteString(`<CORSConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
+		for _, value := range resp.Output["CORSRules"].([]any) {
+			rule, _ := value.(map[string]any)
+			b.WriteString("<CORSRule>")
+			for _, field := range []string{"ID", "AllowedHeaders", "AllowedMethods", "AllowedOrigins", "ExposeHeaders", "MaxAgeSeconds"} {
+				value, ok := rule[field]
+				if !ok {
+					continue
+				}
+				tag := strings.TrimSuffix(field, "s")
+				if values, ok := value.([]any); ok {
+					for _, value := range values {
+						fmt.Fprintf(&b, "<%s>%s</%s>", tag, xmlEscape(fmt.Sprint(value)), tag)
+					}
+					continue
+				}
+				fmt.Fprintf(&b, "<%s>%s</%s>", field, xmlEscape(fmt.Sprint(value)), field)
+			}
+			b.WriteString("</CORSRule>")
+		}
+		b.WriteString("</CORSConfiguration>")
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
@@ -1018,6 +1076,14 @@ func writeFlattened(output map[string]any, b *strings.Builder, members [][2]stri
 			fmt.Fprintf(b, "</%s>", member[1])
 		}
 	}
+}
+
+func stringsToAny(values []string) []any {
+	result := make([]any, len(values))
+	for i, value := range values {
+		result[i] = value
+	}
+	return result
 }
 
 func write(v any, b *strings.Builder) {

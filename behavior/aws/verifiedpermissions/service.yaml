@@ -1,0 +1,108 @@
+schema: bir/1
+service: aws.verifiedpermissions
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No authorization decision is ever made: a policy store is an id
+# and a policy is an id inside it, with no Cedar text behind either.
+provenance: authored
+
+resources:
+  policystore:
+    collection: vpps
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [policyStoreId]
+    arn: "arn:{partition}:verifiedpermissions:{region}:{account}:policy-store/{id}"
+    record:
+      policyStoreId: id
+      arn: arn
+      description: "'description' in input ? string(input.description) : ''"
+
+  # A policy belongs to a store and is addressed by both ids together, which
+  # is how the pack keyed it.
+  policy:
+    collection: vppol
+    id:
+      derive: >
+        'policyId' in input
+          ? string(input.policyStoreId) + '/' + string(input.policyId)
+          : string(input.policyStoreId)
+    record: {}
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreatePolicyStore:
+    effects:
+      - create: { resource: policystore }
+    output:
+      policyStoreId: rec.policyStoreId
+      arn: rec.arn
+
+  GetPolicyStore:
+    reads:
+      ps: { resource: policystore }
+    require:
+      - { cond: ps_found, error: NotFound }
+    output:
+      policyStoreId: ps.policyStoreId
+      arn: ps.arn
+      description: ps.description
+
+  ListPolicyStores:
+    list: { resource: policystore, member: policyStores, paginate: model }
+
+  DeletePolicyStore:
+    effects:
+      - delete: { resource: policystore, missing: ignore }
+
+  # The policy's own id is generated, so the key it is filed under is the
+  # store id joined to it, built in the effect where both are known.
+  CreatePolicy:
+    effects:
+      - generate: { bind: pid, kind: hex, bytes: 8 }
+      - put:
+          resource: policy
+          key: "string(input.policyStoreId) + '/' + fx.pid"
+          record:
+            policyId: fx.pid
+            policyStoreId: "string(input.policyStoreId)"
+    output:
+      policyId: fx.pid
+      policyStoreId: "string(input.policyStoreId)"
+
+  GetPolicy:
+    reads:
+      pol: { resource: policy }
+    require:
+      - { cond: pol_found, error: NotFound }
+    output:
+      policyId: pol.policyId
+      policyStoreId: pol.policyStoreId
+
+  DeletePolicy:
+    effects:
+      - delete: { resource: policy, missing: ignore }
+
+quirks:
+  - operation: CreatePolicyStore
+    note: >
+      validationSettings is required by the model and is not stored, so
+      GetPolicyStore answers without the member it declares as required, and
+      nothing validates a policy against a schema. createdDate and
+      lastUpdatedDate are likewise required on the answers and never set.
+  - operation: CreatePolicy
+    note: >
+      definition is required and is not stored, so a policy has no Cedar text
+      at all: GetPolicy answers without the definition it declares as
+      required, and policyType, effect, principal and resource are never set.
+      Nothing checks that the store a policy names exists, and deleting a
+      store leaves its policies behind.
+  - operation: GetPolicy
+    note: >
+      There is no IsAuthorized operation here, so nothing is ever evaluated
+      against a policy. A policy store is a place to put ids.

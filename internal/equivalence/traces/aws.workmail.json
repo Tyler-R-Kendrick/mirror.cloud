@@ -1,0 +1,300 @@
+{
+  "schema": "trace/1",
+  "service": "aws.workmail",
+  "source": "pack:internal/services/aws/workmail@c5468c6",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListOrganizations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OrganizationSummaries": null
+      }
+    },
+    {
+      "operation": "DescribeOrganization",
+      "input": {
+        "OrganizationId": "m-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "OrganizationNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateOrganization",
+      "input": {
+        "Alias": "acme"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OrganizationId": "m-7c589129"
+      }
+    },
+    {
+      "operation": "DescribeOrganization",
+      "input": {
+        "OrganizationId": {
+          "$fromPath": "OrganizationId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Alias": "acme",
+        "OrganizationId": "m-7c589129",
+        "State": "Active"
+      }
+    },
+    {
+      "operation": "CreateOrganization",
+      "input": {
+        "Alias": "other"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OrganizationId": "m-5f59f223"
+      }
+    },
+    {
+      "operation": "ListOrganizations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OrganizationSummaries": [
+          {
+            "Alias": "other",
+            "OrganizationId": "m-5f59f223",
+            "State": "Active"
+          },
+          {
+            "Alias": "acme",
+            "OrganizationId": "m-7c589129",
+            "State": "Active"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateUser",
+      "input": {
+        "DisplayName": "alice",
+        "Email": "alice@example.com",
+        "Name": "alice",
+        "OrganizationId": "acme-org"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserId": "9c8e2cb0"
+      }
+    },
+    {
+      "operation": "DescribeUser",
+      "input": {
+        "OrganizationId": "acme-org",
+        "UserId": {
+          "$fromPath": "UserId",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Email": "alice@example.com",
+        "Name": "alice",
+        "OrganizationId": "acme-org",
+        "State": "ENABLED",
+        "UserId": "9c8e2cb0"
+      },
+      "superseded": "The pack answered a user with the OrganizationId it stored. DescribeUser declares no such member -- the organization is in the request, not the answer -- so it was a member no SDK could read. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "DescribeUser",
+      "input": {
+        "OrganizationId": "acme-org",
+        "UserId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "EntityNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateUser",
+      "input": {
+        "DisplayName": "bob",
+        "Email": "bob@example.com",
+        "Name": "bob",
+        "OrganizationId": "other-org"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserId": "33f6fc5d"
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "OrganizationId": "acme-org"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "Email": "alice@example.com",
+            "Name": "alice",
+            "OrganizationId": "acme-org",
+            "State": "ENABLED",
+            "UserId": "9c8e2cb0"
+          },
+          {
+            "Email": "bob@example.com",
+            "Name": "bob",
+            "OrganizationId": "other-org",
+            "State": "ENABLED",
+            "UserId": "33f6fc5d"
+          }
+        ]
+      },
+      "superseded": "The pack listed a user under UserId and with an OrganizationId. A listed user is identified by Id and declares no OrganizationId, so the listing named the user with a member no SDK reads and left the one it does read absent. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "DeleteOrganization",
+      "input": {
+        "DeleteDirectory": false,
+        "OrganizationId": {
+          "$fromPath": "OrganizationId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListOrganizations",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OrganizationSummaries": [
+          {
+            "Alias": "other",
+            "OrganizationId": "m-5f59f223",
+            "State": "Active"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteUser",
+      "input": {
+        "OrganizationId": "acme-org",
+        "UserId": {
+          "$fromPath": "UserId",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteUser",
+      "input": {
+        "OrganizationId": "acme-org",
+        "UserId": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

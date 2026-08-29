@@ -1,0 +1,107 @@
+schema: bir/1
+service: aws.codeartifact
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No package is ever stored: a domain and a repository are names
+# that are Active the moment they are created.
+provenance: authored
+
+missing_input_error: Validation
+
+resources:
+  domain:
+    collection: cadom
+    id:
+      input_members: [domain]
+    arn: "arn:{partition}:codeartifact:{region}:{account}:domain/{id}"
+    record:
+      name: id
+      arn: arn
+      status: "'Active'"
+
+  # A repository belongs to a domain and is addressed by both names together,
+  # which is how the pack keyed it.
+  repository:
+    collection: carepo
+    id:
+      derive: "string(input.domain) + '/' + string(input.repository)"
+    arn: "arn:{partition}:codeartifact:{region}:{account}:repository/{id}"
+    record:
+      name: "string(input.repository)"
+      domainName: "string(input.domain)"
+      arn: arn
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateDomain:
+    require:
+      - { cond: "string(input.domain) != ''", error: Validation }
+    effects:
+      - put: { resource: domain }
+    output:
+      domain: rec
+
+  DescribeDomain:
+    reads:
+      d: { resource: domain }
+    require:
+      - { cond: d_found, error: NotFound }
+    output:
+      domain: d
+
+  ListDomains:
+    list: { resource: domain, member: domains, paginate: model }
+
+  DeleteDomain:
+    effects:
+      - delete: { resource: domain, missing: ignore }
+    output: {}
+
+  CreateRepository:
+    effects:
+      - put: { resource: repository }
+    output:
+      repository: rec
+
+  DescribeRepository:
+    reads:
+      r: { resource: repository }
+    require:
+      - { cond: r_found, error: NotFound }
+    output:
+      repository: r
+
+  DeleteRepository:
+    effects:
+      - delete: { resource: repository, missing: ignore }
+    output: {}
+
+quirks:
+  - operation: DeleteDomain
+    note: >
+      Deleting answers with nothing where the model declares the deleted
+      domain or repository, and deleting an absent one succeeds where
+      describing it faults. Deleting a domain leaves its repositories behind,
+      so a repository can name a domain that is gone; the real service refuses
+      to delete a domain that still has repositories.
+  - operation: CreateRepository
+    note: >
+      Nothing checks that the domain a repository names exists, and no
+      upstream, external connection or description is stored. repositoryCount
+      is never set on a domain, so a domain with repositories still reports
+      none.
+  - operation: CreateDomain
+    note: >
+      A domain is Active at once and has no encryptionKey, s3BucketArn,
+      createdTime or assetSizeBytes -- all declared -- because the pack stored
+      none of them. No package version is ever published, so the whole point
+      of the service is absent.

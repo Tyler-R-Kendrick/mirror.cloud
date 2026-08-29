@@ -1,0 +1,227 @@
+{
+  "schema": "trace/1",
+  "service": "aws.resource-explorer-2",
+  "source": "pack:internal/services/aws/resourceexplorer2@c5468c6",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "GetIndex",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListIndexes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Indexes": null
+      }
+    },
+    {
+      "operation": "CreateIndex",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:resource-explorer-2:us-east-1:000000000000:index/7c589129",
+        "State": "ACTIVE",
+        "Type": "LOCAL"
+      },
+      "superseded": "The pack answered a created index with its Type. CreateIndex declares Arn, CreatedAt and State only -- Type is declared on GetIndex -- so it was a member no SDK could read there. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "GetIndex",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:resource-explorer-2:us-east-1:000000000000:index/7c589129",
+        "State": "ACTIVE",
+        "Type": "LOCAL"
+      }
+    },
+    {
+      "operation": "ListIndexes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Indexes": [
+          {
+            "Arn": "arn:aws:resource-explorer-2:us-east-1:000000000000:index/7c589129",
+            "State": "ACTIVE",
+            "Type": "LOCAL"
+          }
+        ]
+      },
+      "superseded": "The pack listed an index with its State. A listed index declares Arn, Region and Type, and no State, so the listing carried a member no SDK can read and left Region absent. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "CreateIndex",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:resource-explorer-2:us-east-1:000000000000:index/5f59f223",
+        "State": "ACTIVE",
+        "Type": "LOCAL"
+      },
+      "superseded": "The pack answered a created index with its Type. CreateIndex declares Arn, CreatedAt and State only -- Type is declared on GetIndex -- so it was a member no SDK could read there. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "GetIndex",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:resource-explorer-2:us-east-1:000000000000:index/5f59f223",
+        "State": "ACTIVE",
+        "Type": "LOCAL"
+      }
+    },
+    {
+      "operation": "CreateView",
+      "input": {
+        "ViewName": "view-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "View": {
+          "ViewArn": "arn:aws:resource-explorer-2:us-east-1:000000000000:view/view-one",
+          "ViewName": "view-one"
+        }
+      }
+    },
+    {
+      "operation": "GetView",
+      "input": {
+        "ViewArn": {
+          "$fromPath": "View.ViewArn",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "View": {
+          "ViewArn": "arn:aws:resource-explorer-2:us-east-1:000000000000:view/view-one",
+          "ViewName": "view-one"
+        }
+      }
+    },
+    {
+      "operation": "GetView",
+      "input": {
+        "ViewArn": "arn:aws:resource-explorer-2:us-east-1:000000000000:view/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteIndex",
+      "input": {
+        "Arn": "arn:aws:resource-explorer-2:us-east-1:999999999999:index/someone-else"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetIndex",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListIndexes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Indexes": null
+      }
+    }
+  ]
+}

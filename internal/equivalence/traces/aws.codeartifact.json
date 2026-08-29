@@ -1,0 +1,306 @@
+{
+  "schema": "trace/1",
+  "service": "aws.codeartifact",
+  "source": "pack:internal/services/aws/codeartifact@c5468c6",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListDomains",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "domains": null
+      }
+    },
+    {
+      "operation": "DescribeDomain",
+      "input": {
+        "domain": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateDomain",
+      "input": {
+        "domain": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ValidationException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateDomain",
+      "input": {
+        "domain": "team"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "domain": {
+          "arn": "arn:aws:codeartifact:us-east-1:000000000000:domain/team",
+          "name": "team",
+          "status": "Active"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDomain",
+      "input": {
+        "domain": "team"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "domain": {
+          "arn": "arn:aws:codeartifact:us-east-1:000000000000:domain/team",
+          "name": "team",
+          "status": "Active"
+        }
+      }
+    },
+    {
+      "operation": "CreateDomain",
+      "input": {
+        "domain": "other"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "domain": {
+          "arn": "arn:aws:codeartifact:us-east-1:000000000000:domain/other",
+          "name": "other",
+          "status": "Active"
+        }
+      }
+    },
+    {
+      "operation": "ListDomains",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "domains": [
+          {
+            "arn": "arn:aws:codeartifact:us-east-1:000000000000:domain/other",
+            "name": "other",
+            "status": "Active"
+          },
+          {
+            "arn": "arn:aws:codeartifact:us-east-1:000000000000:domain/team",
+            "name": "team",
+            "status": "Active"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateRepository",
+      "input": {
+        "domain": "team",
+        "repository": "npm"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repository": {
+          "arn": "arn:aws:codeartifact:us-east-1:000000000000:repository/team/npm",
+          "domainName": "team",
+          "name": "npm"
+        }
+      }
+    },
+    {
+      "operation": "DescribeRepository",
+      "input": {
+        "domain": "team",
+        "repository": "npm"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repository": {
+          "arn": "arn:aws:codeartifact:us-east-1:000000000000:repository/team/npm",
+          "domainName": "team",
+          "name": "npm"
+        }
+      }
+    },
+    {
+      "operation": "DescribeRepository",
+      "input": {
+        "domain": "other",
+        "repository": "npm"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateRepository",
+      "input": {
+        "domain": "no-such",
+        "repository": "orphan"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repository": {
+          "arn": "arn:aws:codeartifact:us-east-1:000000000000:repository/no-such/orphan",
+          "domainName": "no-such",
+          "name": "orphan"
+        }
+      }
+    },
+    {
+      "operation": "DeleteDomain",
+      "input": {
+        "domain": "team"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListDomains",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "domains": [
+          {
+            "arn": "arn:aws:codeartifact:us-east-1:000000000000:domain/other",
+            "name": "other",
+            "status": "Active"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeRepository",
+      "input": {
+        "domain": "team",
+        "repository": "npm"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repository": {
+          "arn": "arn:aws:codeartifact:us-east-1:000000000000:repository/team/npm",
+          "domainName": "team",
+          "name": "npm"
+        }
+      }
+    },
+    {
+      "operation": "DeleteRepository",
+      "input": {
+        "domain": "team",
+        "repository": "npm"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteDomain",
+      "input": {
+        "domain": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

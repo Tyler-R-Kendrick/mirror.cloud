@@ -1,0 +1,143 @@
+schema: bir/1
+service: aws.workmail
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No mailbox exists: an organization is an alias and a user is a
+# name and an address, with nothing to send or receive.
+provenance: authored
+
+resources:
+  organization:
+    collection: wmorg
+    # The identifier answered with carries an m- prefix, so the record member
+    # rather than the raw generated id is the store key: a describe or a
+    # delete arrives with the prefixed form.
+    key: OrganizationId
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [OrganizationId]
+    record:
+      OrganizationId: "'m-' + id"
+      Alias: "'Alias' in input ? string(input.Alias) : ''"
+      State: "'Active'"
+
+  # A user belongs to an organization and is addressed by both ids together,
+  # which is how the pack keyed it.
+  user:
+    collection: wmuser
+    id:
+      derive: >
+        'UserId' in input
+          ? string(input.OrganizationId) + '/' + string(input.UserId)
+          : string(input.OrganizationId)
+    record: {}
+
+errors:
+  OrganizationNotFound:
+    code: OrganizationNotFoundException
+    http: 400
+    fault: client
+  EntityNotFound:
+    code: EntityNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateOrganization:
+    effects:
+      - create: { resource: organization }
+    output:
+      OrganizationId: rec.OrganizationId
+
+  DescribeOrganization:
+    reads:
+      org: { resource: organization }
+    require:
+      - { cond: org_found, error: OrganizationNotFound }
+    output:
+      OrganizationId: org.OrganizationId
+      Alias: org.Alias
+      State: org.State
+
+  ListOrganizations:
+    list: { resource: organization, member: OrganizationSummaries, paginate: model }
+
+  DeleteOrganization:
+    effects:
+      - delete: { resource: organization, missing: ignore }
+    output: {}
+
+  # The user's own id is generated, so the key it is filed under is the
+  # organization id joined to it, built in the effect where both are known.
+  CreateUser:
+    effects:
+      - generate: { bind: uid, kind: hex, bytes: 8 }
+      - put:
+          resource: user
+          key: "string(input.OrganizationId) + '/' + fx.uid"
+          record:
+            UserId: fx.uid
+            Name: "'Name' in input ? string(input.Name) : ''"
+            Email: "'Email' in input ? string(input.Email) : ''"
+            OrganizationId: "string(input.OrganizationId)"
+            State: "'ENABLED'"
+    output:
+      UserId: fx.uid
+
+  # DescribeUser declares no OrganizationId: the organization is in the
+  # request, not in the answer.
+  DescribeUser:
+    reads:
+      u: { resource: user }
+    require:
+      - { cond: u_found, error: EntityNotFound }
+    output:
+      UserId: u.UserId
+      Name: u.Name
+      Email: u.Email
+      State: u.State
+
+  # A listed user is identified by Id, not UserId, and carries no
+  # OrganizationId, so the listed form is not the stored record.
+  ListUsers:
+    list: { resource: user, member: Users, paginate: model }
+    output:
+      Users: >
+        items.map(u, {
+          'Id': u.UserId,
+          'Name': u.Name,
+          'Email': u.Email,
+          'State': u.State
+        })
+
+  DeleteUser:
+    effects:
+      - delete: { resource: user, missing: ignore }
+
+quirks:
+  - operation: DescribeUser
+    note: >
+      The pack answered a user with the OrganizationId it stored. DescribeUser
+      declares no such member -- the organization is in the request -- and a
+      listed user is identified by Id rather than UserId, so the pack's
+      listing named the user with a member no SDK reads and left the one it
+      does read absent. The declared shapes outrank the pack's authored
+      behavior, so both are corrected and the recorded steps are superseded
+      with that reason.
+  - operation: ListUsers
+    note: >
+      OrganizationId is required and does not narrow the listing: users are
+      keyed by organization and user id together, but the listing walks the
+      whole collection, so listing one organization's users answers with every
+      user in the account. Narrowing it needs a filter over a key prefix.
+  - operation: DeleteOrganization
+    note: >
+      DeleteDirectory is required and ignored, deleting answers with nothing
+      where the model declares OrganizationId and State, and deleting an
+      organization leaves its users behind: a user can name an organization
+      that is gone.
+  - operation: CreateUser
+    note: >
+      A user has no mailbox: nothing is provisioned, MailboxProvisionedDate is
+      never set, and there is no operation here that sends or receives
+      anything. DisplayName is required and is not stored.

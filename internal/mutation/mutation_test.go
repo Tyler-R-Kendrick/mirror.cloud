@@ -2784,8 +2784,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-bucket-location-ignore-nested-config",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "if constraint == \"\" {\n\t\tconstraint = str(asMap(req.Input[\"CreateBucketConfiguration\"])[\"LocationConstraint\"])\n\t}",
-			new:  "if false {\n\t\tconstraint = str(asMap(req.Input[\"CreateBucketConfiguration\"])[\"LocationConstraint\"])\n\t}",
+			old:  "if constraint == \"\" {\n\t\tconstraint = str(configuration[\"LocationConstraint\"])\n\t}",
+			new:  "if false {\n\t\tconstraint = str(configuration[\"LocationConstraint\"])\n\t}",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCreateBucketLocationConstraints",
 		},
@@ -2856,8 +2856,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-bucket-location-store-in-endpoint",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `p.deps.Store.Scope(req.Identity.Account, bucketRegion).Collection("buckets")`,
-			new:  `p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection("buckets")`,
+			old:  `bucketStore := p.deps.Store.Scope(req.Identity.Account, bucketRegion)`,
+			new:  `bucketStore := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region)`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCreateBucketLocationConstraints",
 		},

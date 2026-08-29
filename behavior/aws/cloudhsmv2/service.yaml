@@ -1,0 +1,91 @@
+schema: bir/1
+service: aws.cloudhsmv2
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No hardware is provisioned: a cluster and an HSM are records that
+# are born ACTIVE, and no backup is ever taken.
+provenance: authored
+
+resources:
+  cluster:
+    collection: hsmcl
+    # The identifier the service issues carries a cluster- prefix, so the
+    # record member rather than the raw generated id is the store key.
+    key: ClusterId
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      ClusterId: "'cluster-' + id"
+      State: "'ACTIVE'"
+      HsmType: "'HsmType' in input ? string(input.HsmType) : ''"
+
+  hsm:
+    collection: hsm
+    key: HsmId
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      HsmId: "'hsm-' + id"
+      ClusterId: "'ClusterId' in input ? string(input.ClusterId) : ''"
+      State: "'ACTIVE'"
+
+operations:
+  CreateCluster:
+    effects:
+      - create: { resource: cluster }
+    output:
+      Cluster: rec
+
+  # Describe-one-or-describe-all: a ClusterId narrows to that cluster, and an
+  # absent one answers with an empty list rather than a fault.
+  DescribeClusters:
+    list:
+      resource: cluster
+      member: Clusters
+      paginate: model
+      key: "'ClusterId' in input ? string(input.ClusterId) : ''"
+
+  DeleteCluster:
+    effects:
+      - delete: { resource: cluster, key: "string(input.ClusterId)", missing: ignore }
+    output: {}
+
+  CreateHsm:
+    effects:
+      - create: { resource: hsm }
+    output:
+      Hsm: rec
+
+  DeleteHsm:
+    effects:
+      - delete: { resource: hsm, key: "'HsmId' in input ? string(input.HsmId) : ''", missing: ignore }
+    output: {}
+
+  DescribeBackups:
+    output:
+      Backups: "[]"
+
+quirks:
+  - operation: CreateCluster
+    note: >
+      SubnetIds is required by the model and is neither read nor stored, so a
+      cluster has no SubnetMapping, VpcId, Certificates or CreateTimestamp --
+      all of which Cluster declares. The engine now rejects a request that
+      omits SubnetIds, which the pack accepted.
+  - operation: DeleteCluster
+    note: >
+      Deleting answers with nothing where the model declares an optional
+      Cluster, and deleting an absent cluster succeeds. Deleting a cluster
+      leaves its HSMs behind: nothing cascades, so DescribeClusters can be
+      empty while an HSM still names a cluster that is gone.
+  - operation: DeleteHsm
+    note: >
+      ClusterId is the required member and HsmId is the one that identifies
+      what to delete, so a request naming only its cluster is accepted and
+      deletes nothing. That is the pack's behavior; the real service takes one
+      of HsmId, EniId or EniIp and a probe settles which it prefers.
+  - operation: DescribeBackups
+    note: >
+      No backup is ever taken, so this is always empty. The operation is served
+      rather than absent because a client that lists backups should get an
+      empty list, not a not-implemented fault.

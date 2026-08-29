@@ -1,0 +1,208 @@
+{
+  "schema": "trace/1",
+  "service": "aws.cloudhsmv2",
+  "source": "pack:internal/services/aws/cloudhsmv2@4a3a0b9",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DescribeClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": null
+      }
+    },
+    {
+      "operation": "CreateCluster",
+      "input": {
+        "HsmType": "hsm1.medium",
+        "SubnetIds": [
+          "subnet-1",
+          "subnet-2"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Cluster": {
+          "ClusterId": "cluster-7c589129",
+          "HsmType": "hsm1.medium",
+          "State": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": [
+          {
+            "ClusterId": "cluster-7c589129",
+            "HsmType": "hsm1.medium",
+            "State": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeClusters",
+      "input": {
+        "ClusterId": {
+          "$fromPath": "Cluster.ClusterId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": [
+          {
+            "ClusterId": "cluster-7c589129",
+            "HsmType": "hsm1.medium",
+            "State": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeClusters",
+      "input": {
+        "ClusterId": "cluster-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": []
+      }
+    },
+    {
+      "operation": "CreateHsm",
+      "input": {
+        "AvailabilityZone": "us-east-1a",
+        "ClusterId": {
+          "$fromPath": "Cluster.ClusterId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Hsm": {
+          "ClusterId": "cluster-7c589129",
+          "HsmId": "hsm-5f59f223",
+          "State": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeBackups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Backups": []
+      }
+    },
+    {
+      "operation": "DeleteHsm",
+      "input": {
+        "ClusterId": {
+          "$fromPath": "Cluster.ClusterId",
+          "$fromStep": 1
+        },
+        "HsmId": {
+          "$fromPath": "Hsm.HsmId",
+          "$fromStep": 5
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteCluster",
+      "input": {
+        "ClusterId": {
+          "$fromPath": "Cluster.ClusterId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": null
+      }
+    },
+    {
+      "operation": "DeleteCluster",
+      "input": {
+        "ClusterId": "cluster-gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

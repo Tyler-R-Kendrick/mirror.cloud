@@ -1,0 +1,230 @@
+{
+  "schema": "trace/1",
+  "service": "aws.bedrock",
+  "source": "pack:internal/services/aws/bedrock@4a3a0b9",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListGuardrails",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "guardrails": null
+      }
+    },
+    {
+      "operation": "GetGuardrail",
+      "input": {
+        "guardrailIdentifier": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateGuardrail",
+      "input": {
+        "blockedInputMessaging": "blocked in",
+        "blockedOutputsMessaging": "blocked out",
+        "name": "one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "guardrailArn": "arn:aws:bedrock:us-east-1:000000000000:guardrail/7c589129",
+        "guardrailId": "7c589129",
+        "version": "DRAFT"
+      }
+    },
+    {
+      "operation": "GetGuardrail",
+      "input": {
+        "guardrailIdentifier": {
+          "$fromPath": "guardrailId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "guardrailArn": "arn:aws:bedrock:us-east-1:000000000000:guardrail/7c589129",
+        "guardrailId": "7c589129",
+        "name": "one",
+        "status": "READY",
+        "version": "DRAFT"
+      }
+    },
+    {
+      "operation": "CreateGuardrail",
+      "input": {
+        "blockedInputMessaging": "blocked in",
+        "blockedOutputsMessaging": "blocked out",
+        "name": "two"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "guardrailArn": "arn:aws:bedrock:us-east-1:000000000000:guardrail/5f59f223",
+        "guardrailId": "5f59f223",
+        "version": "DRAFT"
+      }
+    },
+    {
+      "operation": "ListGuardrails",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "guardrails": [
+          {
+            "guardrailArn": "arn:aws:bedrock:us-east-1:000000000000:guardrail/5f59f223",
+            "guardrailId": "5f59f223",
+            "name": "two",
+            "status": "READY",
+            "version": "DRAFT"
+          },
+          {
+            "guardrailArn": "arn:aws:bedrock:us-east-1:000000000000:guardrail/7c589129",
+            "guardrailId": "7c589129",
+            "name": "one",
+            "status": "READY",
+            "version": "DRAFT"
+          }
+        ]
+      },
+      "superseded": "The pack listed a guardrail with guardrailId and guardrailArn. GuardrailSummary declares id and arn, so the listing carried two members no SDK can read and left the two it does read absent. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "ListFoundationModels",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "modelSummaries": [
+          {
+            "modelId": "amazon.titan-text-lite-v1",
+            "modelName": "Titan Text Lite",
+            "providerName": "Amazon"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateModelCustomizationJob",
+      "input": {
+        "baseModelIdentifier": "amazon.titan-text-lite-v1",
+        "customModelName": "custom",
+        "jobName": "job-1",
+        "outputDataConfig": {
+          "s3Uri": "s3://bucket/out"
+        },
+        "roleArn": "arn:aws:iam::000000000000:role/bedrock",
+        "trainingDataConfig": {
+          "s3Uri": "s3://bucket/train"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobArn": "arn:aws:bedrock:us-east-1:000000000000:model-customization-job/9c8e2cb0"
+      }
+    },
+    {
+      "operation": "DeleteGuardrail",
+      "input": {
+        "guardrailIdentifier": {
+          "$fromPath": "guardrailId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListGuardrails",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "guardrails": [
+          {
+            "guardrailArn": "arn:aws:bedrock:us-east-1:000000000000:guardrail/5f59f223",
+            "guardrailId": "5f59f223",
+            "name": "two",
+            "status": "READY",
+            "version": "DRAFT"
+          }
+        ]
+      },
+      "superseded": "The pack listed a guardrail with guardrailId and guardrailArn. GuardrailSummary declares id and arn, so the listing carried two members no SDK can read and left the two it does read absent. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "DeleteGuardrail",
+      "input": {
+        "guardrailIdentifier": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

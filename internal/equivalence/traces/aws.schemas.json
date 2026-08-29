@@ -1,0 +1,280 @@
+{
+  "schema": "trace/1",
+  "service": "aws.schemas",
+  "source": "pack:internal/services/aws/schemas@4a3a0b9",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListRegistries",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Registries": null
+      }
+    },
+    {
+      "operation": "DescribeRegistry",
+      "input": {
+        "RegistryName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateRegistry",
+      "input": {
+        "RegistryName": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "BadRequestException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateRegistry",
+      "input": {
+        "RegistryName": "reg"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RegistryArn": "arn:aws:schemas:us-east-1:000000000000:registry/reg",
+        "RegistryName": "reg"
+      }
+    },
+    {
+      "operation": "DescribeRegistry",
+      "input": {
+        "RegistryName": "reg"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RegistryArn": "arn:aws:schemas:us-east-1:000000000000:registry/reg",
+        "RegistryName": "reg"
+      }
+    },
+    {
+      "operation": "CreateRegistry",
+      "input": {
+        "RegistryName": "reg2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RegistryArn": "arn:aws:schemas:us-east-1:000000000000:registry/reg2",
+        "RegistryName": "reg2"
+      }
+    },
+    {
+      "operation": "ListRegistries",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Registries": [
+          {
+            "RegistryArn": "arn:aws:schemas:us-east-1:000000000000:registry/reg",
+            "RegistryName": "reg"
+          },
+          {
+            "RegistryArn": "arn:aws:schemas:us-east-1:000000000000:registry/reg2",
+            "RegistryName": "reg2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateSchema",
+      "input": {
+        "Content": "{\"openapi\":\"3.0.0\"}",
+        "RegistryName": "reg",
+        "SchemaName": "order",
+        "Type": "OpenApi3"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RegistryName": "reg",
+        "SchemaArn": "arn:aws:schemas:us-east-1:000000000000:schema/reg/order",
+        "SchemaName": "order"
+      },
+      "superseded": "The pack answered with the registry name beside the schema. Neither CreateSchema nor DescribeSchema declares a RegistryName member -- the registry is in the path and in the ARN, not in the answer -- so it was a field no SDK could read. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "DescribeSchema",
+      "input": {
+        "RegistryName": "reg",
+        "SchemaName": "order"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RegistryName": "reg",
+        "SchemaArn": "arn:aws:schemas:us-east-1:000000000000:schema/reg/order",
+        "SchemaName": "order"
+      },
+      "superseded": "The pack answered with the registry name beside the schema. Neither CreateSchema nor DescribeSchema declares a RegistryName member -- the registry is in the path and in the ARN, not in the answer -- so it was a field no SDK could read. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "DescribeSchema",
+      "input": {
+        "RegistryName": "reg",
+        "SchemaName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateSchema",
+      "input": {
+        "Content": "{\"openapi\":\"3.0.0\"}",
+        "RegistryName": "reg2",
+        "SchemaName": "order",
+        "Type": "OpenApi3"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RegistryName": "reg2",
+        "SchemaArn": "arn:aws:schemas:us-east-1:000000000000:schema/reg2/order",
+        "SchemaName": "order"
+      },
+      "superseded": "The pack answered with the registry name beside the schema. Neither CreateSchema nor DescribeSchema declares a RegistryName member -- the registry is in the path and in the ARN, not in the answer -- so it was a field no SDK could read. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "DescribeSchema",
+      "input": {
+        "RegistryName": "reg2",
+        "SchemaName": "order"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "RegistryName": "reg2",
+        "SchemaArn": "arn:aws:schemas:us-east-1:000000000000:schema/reg2/order",
+        "SchemaName": "order"
+      },
+      "superseded": "The pack answered with the registry name beside the schema. Neither CreateSchema nor DescribeSchema declares a RegistryName member -- the registry is in the path and in the ARN, not in the answer -- so it was a field no SDK could read. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "DeleteRegistry",
+      "input": {
+        "RegistryName": "reg"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListRegistries",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Registries": [
+          {
+            "RegistryArn": "arn:aws:schemas:us-east-1:000000000000:registry/reg2",
+            "RegistryName": "reg2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteRegistry",
+      "input": {
+        "RegistryName": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

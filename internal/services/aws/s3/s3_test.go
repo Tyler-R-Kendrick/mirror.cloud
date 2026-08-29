@@ -179,6 +179,28 @@ func TestCreateBucketGlobalCollisions(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"collisions": collisions, "recreate": map[string]any{"status": http.StatusOK, "object": preserved}, "reuse_after_delete": "created"})
 }
 
+func TestCreateBucketTags(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	tags := []any{map[string]any{"Key": "team", "Value": "storage"}, map[string]any{"Key": "env", "Value": "test"}}
+	input := map[string]any{"Bucket": "tagged-bucket", "CreateBucketConfiguration": map[string]any{"Tags": tags}}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	if response := mustInvoke(t, p, "GetBucketTagging", map[string]any{"Bucket": "tagged-bucket"}, nil); !reflect.DeepEqual(response.Output["TagSet"], tags) {
+		t.Fatalf("created bucket tags = %#v", response.Output["TagSet"])
+	}
+	if _, err := invoke(t, p, "CreateBucket", input, nil); asFault(t, err).Code != "BucketAlreadyOwnedByYou" {
+		t.Fatalf("tagged recreation = %v", err)
+	}
+	invalid := map[string]any{"Bucket": "invalid-tagged-bucket", "CreateBucketConfiguration": map[string]any{"Tags": []any{
+		map[string]any{"Key": "duplicate", "Value": "one"}, map[string]any{"Key": "duplicate", "Value": "two"},
+	}}}
+	if _, err := invoke(t, p, "CreateBucket", invalid, nil); asFault(t, err).Code != "InvalidTag" {
+		t.Fatalf("duplicate create tags = %v", err)
+	}
+	if _, err := invoke(t, p, "HeadBucket", map[string]any{"Bucket": "invalid-tagged-bucket"}, nil); asFault(t, err).Code != "NoSuchBucket" {
+		t.Fatalf("invalid tags reserved bucket = %v", err)
+	}
+}
+
 func TestCreateBucketAccountRegionalNamespace(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	east := ident()

@@ -557,6 +557,17 @@ func (p *Pack) col(req *spi.Request, name string) spi.Collection {
 
 func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b := str(req.Input["Bucket"])
+	configuration := asMap(req.Input["CreateBucketConfiguration"])
+	tags := asSlice(configuration["Tags"])
+	if _, ok := configuration["Tags"]; ok {
+		if err := validateTagSet(configuration["Tags"], 50, "bucket"); err != nil {
+			return nil, err
+		}
+	}
+	var tagDocument []byte
+	if len(tags) > 0 {
+		tagDocument, _ = json.Marshal(tags)
+	}
 	objectLock := truthy(req.Input["ObjectLockEnabledForBucket"])
 	if req.HTTP != nil {
 		objectLock = objectLock || strings.EqualFold(req.HTTP.Header.Get("x-amz-bucket-object-lock-enabled"), "true")
@@ -571,7 +582,7 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 	}
 	constraint := str(req.Input["LocationConstraint"])
 	if constraint == "" {
-		constraint = str(asMap(req.Input["CreateBucketConfiguration"])["LocationConstraint"])
+		constraint = str(configuration["LocationConstraint"])
 	}
 	bucketRegion, err := createBucketRegion(req.Identity.Region, constraint)
 	if err != nil {
@@ -585,7 +596,8 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	buckets := p.deps.Store.Scope(req.Identity.Account, bucketRegion).Collection("buckets")
+	bucketStore := p.deps.Store.Scope(req.Identity.Account, bucketRegion)
+	buckets := bucketStore.Collection("buckets")
 	if accountRegional {
 		if _, exists, err := buckets.Get(ctx, b); err != nil {
 			return nil, err
@@ -595,6 +607,12 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "namespace": namespace, "objectLockEnabled": objectLock, "creationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")})
 		if err := buckets.Put(ctx, b, meta); err != nil {
 			return nil, err
+		}
+		if len(tagDocument) > 0 {
+			if err := bucketStore.Collection("tags").Put(ctx, b, tagDocument); err != nil {
+				_ = buckets.Delete(ctx, b)
+				return nil, err
+			}
 		}
 		if objectLock {
 			_ = p.deps.Store.Scope(req.Identity.Account, bucketRegion).Collection("versioning").Put(ctx, b, []byte("Enabled"))
@@ -619,7 +637,7 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		if location.Account != req.Identity.Account {
 			return nil, &spi.Fault{Code: "BucketAlreadyExists", Message: "The requested bucket name is not available. The bucket namespace is shared by all users of the system. Select a different name and try again.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"BucketName": b}}
 		}
-		if bucketRegion != "us-east-1" || location.Region != bucketRegion {
+		if bucketRegion != "us-east-1" || location.Region != bucketRegion || len(tags) > 0 {
 			return nil, &spi.Fault{Code: "BucketAlreadyOwnedByYou", Message: "Your previous request to create the named bucket succeeded and you already own it.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"BucketName": b}}
 		}
 	} else {
@@ -631,6 +649,13 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		if err := global.Put(ctx, b, location); err != nil {
 			_ = buckets.Delete(ctx, b)
 			return nil, err
+		}
+		if len(tagDocument) > 0 {
+			if err := bucketStore.Collection("tags").Put(ctx, b, tagDocument); err != nil {
+				_ = global.Delete(ctx, b)
+				_ = buckets.Delete(ctx, b)
+				return nil, err
+			}
 		}
 		if objectLock {
 			_ = p.deps.Store.Scope(req.Identity.Account, bucketRegion).Collection("versioning").Put(ctx, b, []byte("Enabled"))

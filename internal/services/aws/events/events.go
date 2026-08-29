@@ -44,12 +44,16 @@ type Pack struct {
 	wake      chan struct{}
 	stop      chan struct{}
 	done      chan struct{}
+	cancelS3  func()
 	closeOnce sync.Once
 }
 
 // New constructs the pack and resumes persisted target retries.
 func New(d spi.Deps) *Pack {
 	p := &Pack{deps: d, wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{})}
+	if d.Bus != nil {
+		p.cancelS3 = d.Bus.Subscribe("events:s3", p.consumeS3)
+	}
 	if d.Store == nil || d.Clock == nil {
 		close(p.done)
 		return p
@@ -60,9 +64,25 @@ func New(d spi.Deps) *Pack {
 
 // Close stops the target retry worker.
 func (p *Pack) Close() error {
-	p.closeOnce.Do(func() { close(p.stop) })
+	p.closeOnce.Do(func() {
+		if p.cancelS3 != nil {
+			p.cancelS3()
+		}
+		close(p.stop)
+	})
 	<-p.done
 	return nil
+}
+
+func (p *Pack) consumeS3(ctx context.Context, payload []byte) {
+	var event struct {
+		Identity spi.Identity   `json:"identity"`
+		Entry    map[string]any `json:"entry"`
+	}
+	if json.Unmarshal(payload, &event) != nil || event.Entry == nil {
+		return
+	}
+	_, _ = p.Invoke(ctx, &spi.Request{Identity: event.Identity, Operation: "PutEvents", Input: map[string]any{"Entries": []any{event.Entry}}})
 }
 
 func (p *Pack) ServiceID() string { return "aws.events" }

@@ -30,8 +30,10 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bus"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -418,6 +420,47 @@ func TestBucketNotificationLambdaDelivery(t *testing.T) {
 	record := asMapForTest(asSliceForTest(payload["Records"])[0])
 	if record["eventName"] != "ObjectCreated:Put" || asMapForTest(asMapForTest(record["s3"])["object"])["key"] != "created" {
 		t.Fatalf("lambda notification = %#v", payload)
+	}
+}
+
+func TestBucketNotificationEventBridgeDelivery(t *testing.T) {
+	deps := spitest.Deps(t)
+	eventPack, queuePack := events.New(deps), sqs.New(deps)
+	defer eventPack.Close()
+	ctx, id := context.Background(), ident()
+	invokePack := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := pack.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response
+	}
+	invokePack(queuePack, "CreateQueue", map[string]any{"QueueName": "events"})
+	invokePack(eventPack, "PutRule", map[string]any{"Name": "s3", "EventPattern": `{"source":["aws.s3"],"detail-type":["Object Created"]}`})
+	invokePack(eventPack, "PutTargets", map[string]any{"Rule": "s3", "Targets": []any{map[string]any{
+		"Id": "queue", "Arn": "arn:aws:sqs:us-east-1:123456789012:events",
+	}}})
+
+	p := s3.New(deps)
+	bucket := "notification-eventbridge"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{
+		"Bucket": bucket, "NotificationConfiguration": map[string]any{"EventBridgeConfiguration": map[string]any{}},
+	}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "created"}, []byte("created"))
+
+	messages := invokePack(queuePack, "ReceiveMessage", map[string]any{"QueueName": "events", "MaxNumberOfMessages": 10}).Output["Messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("eventbridge messages = %#v", messages)
+	}
+	var event map[string]any
+	if err := json.Unmarshal([]byte(asMapForTest(messages[0])["Body"].(string)), &event); err != nil {
+		t.Fatal(err)
+	}
+	detail := asMapForTest(event["detail"])
+	if event["source"] != "aws.s3" || event["detail-type"] != "Object Created" || asMapForTest(detail["bucket"])["name"] != bucket || asMapForTest(detail["object"])["key"] != "created" {
+		t.Fatalf("eventbridge notification = %#v", event)
 	}
 }
 

@@ -1020,7 +1020,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	case "PostObject":
 		event = "ObjectCreated:Post"
 	}
-	p.notify(ctx, req, b, key, event)
+	p.notify(ctx, req, b, key, event, metaDoc)
 	return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"ETag": etag}}, nil
 }
 
@@ -1510,7 +1510,8 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		vid := p.deps.Rand.Hex(8)
 		mtime := p.deps.Clock.Now().UTC().Format(http.TimeFormat)
 		current, _ := p.objectMetadata(ctx, req, b, key, "")
-		meta, _ := json.Marshal(map[string]any{"deleteMarker": true, "versionId": vid, "versionOrder": append(p.objectVersionOrder(ctx, req, b, key, current), vid), "mtime": mtime, "key": key})
+		metaDoc := map[string]any{"deleteMarker": true, "versionId": vid, "versionOrder": append(p.objectVersionOrder(ctx, req, b, key, current), vid), "mtime": mtime, "key": key}
+		meta, _ := json.Marshal(metaDoc)
 		_ = p.col(req, "objects").Put(ctx, b+"/"+key, meta)
 		_ = p.col(req, "versions").Put(ctx, b+"/"+key+"/"+vid, meta)
 		h := http.Header{}
@@ -1520,7 +1521,7 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 			h.Set("x-amz-replication-status", status)
 		}
 		_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, ""))
-		p.notify(ctx, req, b, key, "ObjectRemoved:DeleteMarkerCreated")
+		p.notify(ctx, req, b, key, "ObjectRemoved:DeleteMarkerCreated", metaDoc)
 		return &spi.Response{Status: 204, Headers: h}, nil
 	}
 	if wantVer != "" {
@@ -1562,15 +1563,15 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		if truthy(meta["deleteMarker"]) {
 			h.Set("x-amz-delete-marker", "true")
 		}
-		p.notify(ctx, req, b, key, "ObjectRemoved:Delete")
+		p.notify(ctx, req, b, key, "ObjectRemoved:Delete", meta)
 		return &spi.Response{Status: 204, Headers: h}, nil
 	}
-	_, existed := p.objectMetadata(ctx, req, b, key, "")
+	meta, existed := p.objectMetadata(ctx, req, b, key, "")
 	_ = p.deps.Blobs.Delete(ctx, blobKey(req, b, key))
 	_ = p.col(req, "objects").Delete(ctx, b+"/"+key)
 	_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, ""))
 	if existed {
-		p.notify(ctx, req, b, key, "ObjectRemoved:Delete")
+		p.notify(ctx, req, b, key, "ObjectRemoved:Delete", meta)
 	}
 	return &spi.Response{Status: 204}, nil
 }
@@ -3637,13 +3638,14 @@ func (p *Pack) requireBucketOwner(ctx context.Context, req *spi.Request, b, expe
 	return nil
 }
 
-func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event string) {
-	payload, _ := json.Marshal(map[string]any{
-		"Records": []any{map[string]any{
-			"eventName": event,
-			"s3":        map[string]any{"bucket": map[string]any{"name": bucket}, "object": map[string]any{"key": key}},
-		}},
-	})
+func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event string, metadata ...map[string]any) {
+	meta := map[string]any{}
+	if len(metadata) > 0 {
+		meta = metadata[0]
+	} else {
+		meta, _ = p.objectMetadata(ctx, req, bucket, key, str(req.Input["VersionId"]))
+	}
+	payload := p.notificationPayload(req, bucket, key, event, "", meta)
 	_ = p.deps.Bus.Publish(ctx, "s3:"+bucket, payload)
 	raw, ok, _ := p.col(req, "notify").Get(ctx, bucket)
 	if !ok {
@@ -3666,6 +3668,7 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 		if arn == "" {
 			continue
 		}
+		payload = p.notificationPayload(req, bucket, key, event, str(m["Id"]), meta)
 		name := arn
 		if i := strings.LastIndex(arn, ":"); i >= 0 {
 			name = arn[i+1:]
@@ -3684,6 +3687,7 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 			continue
 		}
 		arn := str(configuration["LambdaFunctionArn"])
+		payload = p.notificationPayload(req, bucket, key, event, str(configuration["Id"]), meta)
 		_, name, found := strings.Cut(arn, ":function:")
 		if !found {
 			continue
@@ -3693,6 +3697,99 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 			Identity: req.Identity, Operation: "Invoke", Body: io.NopCloser(bytes.NewReader(payload)),
 			Input: map[string]any{"FunctionName": name, "InvocationType": "Event"},
 		})
+	}
+	if _, enabled := cfg["EventBridgeConfiguration"]; enabled {
+		entry := p.eventBridgeEntry(req, bucket, key, event, meta)
+		envelope, _ := json.Marshal(map[string]any{"identity": req.Identity, "entry": entry})
+		_ = p.deps.Bus.Publish(ctx, "events:s3", envelope)
+	}
+}
+
+func (p *Pack) notificationPayload(req *spi.Request, bucket, key, event, configurationID string, meta map[string]any) []byte {
+	object := map[string]any{"key": strings.ReplaceAll(url.PathEscape(key), "%2F", "/"), "sequencer": "0055AED6DCD90281E5"}
+	if version := str(meta["versionId"]); version != "" && version != "null" {
+		object["versionId"] = version
+	}
+	if strings.Contains(event, "ObjectCreated") || strings.Contains(event, "ObjectRestore") {
+		object["eTag"] = strings.Trim(str(meta["etag"]), `"`)
+		object["size"] = asInt(meta["size"])
+	}
+	eventVersion := "2.1"
+	if strings.Contains(event, "ObjectTagging") || strings.Contains(event, "ObjectAcl") {
+		eventVersion = "2.3"
+		object["eTag"] = strings.Trim(str(meta["etag"]), `"`)
+		delete(object, "sequencer")
+	}
+	record := map[string]any{
+		"eventVersion": eventVersion, "eventSource": "aws:s3", "awsRegion": req.Identity.Region,
+		"eventTime": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z"), "eventName": event,
+		"userIdentity":      map[string]any{"principalId": "AIDAJDPLRKLG7UEXAMPLE"},
+		"requestParameters": map[string]any{"sourceIPAddress": "127.0.0.1"},
+		"responseElements":  map[string]any{"x-amz-request-id": "mirror", "x-amz-id-2": "mirror"},
+		"s3": map[string]any{
+			"s3SchemaVersion": "1.0", "configurationId": configurationID,
+			"bucket": map[string]any{"name": bucket, "ownerIdentity": map[string]any{"principalId": req.Identity.Account}, "arn": "arn:aws:s3:::" + bucket},
+			"object": object,
+		},
+	}
+	payload, _ := json.Marshal(map[string]any{"Records": []any{record}})
+	return payload
+}
+
+func (p *Pack) eventBridgeEntry(req *spi.Request, bucket, key, event string, meta map[string]any) map[string]any {
+	object := map[string]any{
+		"key": strings.ReplaceAll(url.PathEscape(key), "%2F", "/"), "size": asInt(meta["size"]),
+		"etag": strings.Trim(str(meta["etag"]), `"`), "sequencer": "0062E99A88DC407460",
+	}
+	if version := str(meta["versionId"]); version != "" && version != "null" {
+		object["version-id"] = version
+	}
+	detail := map[string]any{
+		"version": "0", "bucket": map[string]any{"name": bucket}, "object": object,
+		"request-id": "mirror", "requester": req.Identity.Account, "source-ip-address": "127.0.0.1",
+	}
+	detailType := ""
+	switch {
+	case strings.Contains(event, "ObjectCreated"):
+		detailType = "Object Created"
+		action := event[strings.LastIndex(event, ":")+1:]
+		if action == "Put" || action == "Post" || action == "Copy" {
+			detail["reason"] = action + "Object"
+		} else {
+			detail["reason"] = "s3:" + event
+		}
+	case strings.Contains(event, "ObjectRemoved"):
+		detailType, detail["reason"] = "Object Deleted", "DeleteObject"
+		delete(object, "size")
+		if strings.Contains(event, "DeleteMarkerCreated") {
+			detail["deletion-type"] = "Delete Marker Created"
+			object["etag"] = "d41d8cd98f00b204e9800998ecf8427e"
+		} else {
+			detail["deletion-type"] = "Permanently Deleted"
+			delete(object, "etag")
+		}
+	case strings.Contains(event, "ObjectTagging"):
+		if strings.HasSuffix(event, ":Put") {
+			detailType = "Object Tags Added"
+		} else {
+			detailType = "Object Tags Deleted"
+		}
+	case strings.Contains(event, "ObjectAcl"):
+		detailType = "Object ACL Updated"
+		delete(object, "size")
+		delete(object, "sequencer")
+	case strings.Contains(event, "ObjectRestore"):
+		detailType = "Object Restore Initiated"
+		if strings.HasSuffix(event, ":Completed") {
+			detailType = "Object Restore Completed"
+		}
+		detail["source-storage-class"] = str(meta["storageClass"])
+		delete(object, "sequencer")
+	}
+	detailJSON, _ := json.Marshal(detail)
+	return map[string]any{
+		"Source": "aws.s3", "Resources": []any{"arn:aws:s3:::" + bucket},
+		"Time": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), "DetailType": detailType, "Detail": string(detailJSON),
 	}
 }
 

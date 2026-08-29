@@ -1,0 +1,277 @@
+{
+  "schema": "trace/1",
+  "service": "aws.macie2",
+  "source": "pack:internal/services/aws/macie2@d3f18de",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "GetMacieSession",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "AccessDeniedException",
+        "http_status": 403,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "EnableMacie",
+      "input": {
+        "findingPublishingFrequency": "FIFTEEN_MINUTES"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetMacieSession",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "findingPublishingFrequency": "FIFTEEN_MINUTES",
+        "status": "ENABLED"
+      }
+    },
+    {
+      "operation": "EnableMacie",
+      "input": {
+        "findingPublishingFrequency": "ONE_HOUR"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetMacieSession",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "findingPublishingFrequency": "ONE_HOUR",
+        "status": "ENABLED"
+      }
+    },
+    {
+      "operation": "ListClassificationJobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": null
+      }
+    },
+    {
+      "operation": "CreateClassificationJob",
+      "input": {
+        "clientToken": "tok-1",
+        "jobType": "ONE_TIME",
+        "name": "scan-one",
+        "s3JobDefinition": {
+          "bucketDefinitions": [
+            {
+              "accountId": "000000000000",
+              "buckets": [
+                "bucket-one"
+              ]
+            }
+          ]
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobId": "7c589129"
+      }
+    },
+    {
+      "operation": "DescribeClassificationJob",
+      "input": {
+        "jobId": {
+          "$fromPath": "jobId",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobId": "7c589129",
+        "jobStatus": "COMPLETE",
+        "name": "scan-one"
+      }
+    },
+    {
+      "operation": "DescribeClassificationJob",
+      "input": {
+        "jobId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateClassificationJob",
+      "input": {
+        "clientToken": "tok-2",
+        "jobType": "ONE_TIME",
+        "name": "scan-two",
+        "s3JobDefinition": {
+          "bucketDefinitions": [
+            {
+              "accountId": "000000000000",
+              "buckets": [
+                "bucket-one"
+              ]
+            }
+          ]
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobId": "5f59f223"
+      }
+    },
+    {
+      "operation": "ListClassificationJobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "jobId": "5f59f223",
+            "jobStatus": "COMPLETE",
+            "name": "scan-two"
+          },
+          {
+            "jobId": "7c589129",
+            "jobStatus": "COMPLETE",
+            "name": "scan-one"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DisableMacie",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetMacieSession",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "AccessDeniedException",
+        "http_status": 403,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DisableMacie",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListClassificationJobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "items": [
+          {
+            "jobId": "5f59f223",
+            "jobStatus": "COMPLETE",
+            "name": "scan-two"
+          },
+          {
+            "jobId": "7c589129",
+            "jobStatus": "COMPLETE",
+            "name": "scan-one"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+schema: bir/1
+service: aws.macie2
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is classified: enabling Macie writes one account-wide
+# record, and a classification job is complete before it is answered for.
+provenance: authored
+
+resources:
+  # One session per account and region, so the record has a fixed key rather
+  # than one drawn from the request.
+  session:
+    collection: macie
+    singleton: session
+    record:
+      status: "'ENABLED'"
+      findingPublishingFrequency: "'findingPublishingFrequency' in input ? string(input.findingPublishingFrequency) : ''"
+
+  job:
+    collection: maciejob
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [jobId]
+    record:
+      jobId: id
+      name: "'name' in input ? string(input.name) : ''"
+      jobStatus: "'COMPLETE'"
+
+errors:
+  AccessDenied:
+    code: AccessDeniedException
+    http: 403
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 404
+    fault: client
+
+operations:
+  EnableMacie:
+    effects:
+      - put: { resource: session }
+    output: {}
+
+  # Macie answers a session that was never enabled with access denied rather
+  # than not found, which is what the real service does for an account that
+  # has never enabled it.
+  GetMacieSession:
+    reads:
+      s: { resource: session }
+    require:
+      - { cond: s_found, error: AccessDenied }
+    output:
+      status: s.status
+      findingPublishingFrequency: s.findingPublishingFrequency
+
+  DisableMacie:
+    effects:
+      - delete: { resource: session, missing: ignore }
+    output: {}
+
+  CreateClassificationJob:
+    effects:
+      - create: { resource: job }
+    output:
+      jobId: rec.jobId
+
+  DescribeClassificationJob:
+    reads:
+      j: { resource: job }
+    require:
+      - { cond: j_found, error: NotFound }
+    output:
+      jobId: j.jobId
+      name: j.name
+      jobStatus: j.jobStatus
+
+  ListClassificationJobs:
+    list: { resource: job, member: items, paginate: model }
+
+quirks:
+  - operation: EnableMacie
+    note: >
+      Enabling twice succeeds and overwrites the session, where the real
+      service faults on an account that has already enabled Macie. Disabling
+      an account that never enabled it also succeeds. createdAt, updatedAt and
+      serviceRole are declared on the session and are never set.
+  - operation: CreateClassificationJob
+    note: >
+      clientToken, jobType and s3JobDefinition are required by the model and
+      none is stored, so a job has no buckets to scan, no schedule and no
+      type, and the jobArn declared on the answer is never issued. The engine
+      now rejects a request that omits them, which the pack accepted.
+  - operation: CreateClassificationJob
+    note: >
+      A job is COMPLETE before it is answered for, because nothing runs it, so
+      nothing ever observes RUNNING, PAUSED or CANCELLED and no finding is
+      ever produced. A classification job here records that one was asked for.

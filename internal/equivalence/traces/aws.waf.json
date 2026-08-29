@@ -1,0 +1,327 @@
+{
+  "schema": "trace/1",
+  "service": "aws.waf",
+  "source": "pack:internal/services/aws/waf@d3f18de",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListWebACLs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WebACLs": null
+      }
+    },
+    {
+      "operation": "GetWebACL",
+      "input": {
+        "WebACLId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "WAFNonexistentItemException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateWebACL",
+      "input": {
+        "ChangeToken": "tok-1",
+        "DefaultAction": {
+          "Type": "ALLOW"
+        },
+        "MetricName": "aclOne",
+        "Name": "acl-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WebACL": {
+          "DefaultAction": {
+            "Type": "ALLOW"
+          },
+          "Name": "acl-one",
+          "WebACLId": "7c589129"
+        }
+      }
+    },
+    {
+      "operation": "GetWebACL",
+      "input": {
+        "WebACLId": {
+          "$fromPath": "WebACL.WebACLId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WebACL": {
+          "DefaultAction": {
+            "Type": "ALLOW"
+          },
+          "Name": "acl-one",
+          "WebACLId": "7c589129"
+        }
+      }
+    },
+    {
+      "operation": "CreateWebACL",
+      "input": {
+        "ChangeToken": "tok-2",
+        "DefaultAction": {
+          "Type": "BLOCK"
+        },
+        "MetricName": "aclTwo",
+        "Name": "acl-two"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WebACL": {
+          "DefaultAction": {
+            "Type": "BLOCK"
+          },
+          "Name": "acl-two",
+          "WebACLId": "5f59f223"
+        }
+      }
+    },
+    {
+      "operation": "ListWebACLs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WebACLs": [
+          {
+            "DefaultAction": {
+              "Type": "BLOCK"
+            },
+            "Name": "acl-two",
+            "WebACLId": "5f59f223"
+          },
+          {
+            "DefaultAction": {
+              "Type": "ALLOW"
+            },
+            "Name": "acl-one",
+            "WebACLId": "7c589129"
+          }
+        ]
+      },
+      "superseded": "The pack listed a web ACL with the DefaultAction it stored. WebACLSummary declares Name and WebACLId only, so the listing carried a member no SDK can read. The declared shape outranks the pack's authored behavior, so the bundle projects the listing and this step is compared without its body; GetWebACL still answers with the DefaultAction, where the model declares it."
+    },
+    {
+      "operation": "ListIPSets",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IPSets": null
+      }
+    },
+    {
+      "operation": "CreateIPSet",
+      "input": {
+        "ChangeToken": "tok-3",
+        "Name": "ips-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IPSet": {
+          "IPSetId": "9c8e2cb0",
+          "Name": "ips-one"
+        }
+      }
+    },
+    {
+      "operation": "GetIPSet",
+      "input": {
+        "IPSetId": {
+          "$fromPath": "IPSet.IPSetId",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IPSet": {
+          "IPSetId": "9c8e2cb0",
+          "Name": "ips-one"
+        }
+      }
+    },
+    {
+      "operation": "GetIPSet",
+      "input": {
+        "IPSetId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "WAFNonexistentItemException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListIPSets",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IPSets": [
+          {
+            "IPSetId": "9c8e2cb0",
+            "Name": "ips-one"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteIPSet",
+      "input": {
+        "ChangeToken": "tok-4",
+        "IPSetId": {
+          "$fromPath": "IPSet.IPSetId",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListIPSets",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IPSets": null
+      }
+    },
+    {
+      "operation": "DeleteWebACL",
+      "input": {
+        "ChangeToken": "tok-5",
+        "WebACLId": {
+          "$fromPath": "WebACL.WebACLId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListWebACLs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "WebACLs": [
+          {
+            "DefaultAction": {
+              "Type": "BLOCK"
+            },
+            "Name": "acl-two",
+            "WebACLId": "5f59f223"
+          }
+        ]
+      },
+      "superseded": "The pack listed a web ACL with the DefaultAction it stored. WebACLSummary declares Name and WebACLId only, so the listing carried a member no SDK can read. The declared shape outranks the pack's authored behavior, so the bundle projects the listing and this step is compared without its body; GetWebACL still answers with the DefaultAction, where the model declares it."
+    },
+    {
+      "operation": "DeleteWebACL",
+      "input": {
+        "ChangeToken": "tok-6",
+        "WebACLId": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

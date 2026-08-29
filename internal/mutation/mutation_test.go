@@ -7134,6 +7134,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
 		{
+			name: "states-schedule-relative-wait-deadline",
+			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+			old:  `case <-p.deps.Clock.AfterUntil(next):`,
+			new:  `case <-p.deps.Clock.After(next.Sub(p.deps.Clock.Now())):`,
+			pkg:  "./internal/services/aws/states",
+			run:  "TestStatesWaitLoopUsesAbsoluteDeadline",
+		},
+		{
 			name: "states-ignore-parallel-parameters",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 			old:  `branchInput, valid = applyParamsValidated(params, data, stateContext, p.deps.Rand, variables)`,
@@ -13426,6 +13434,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/events",
 			run:  "TestInvokeAPIDestinationOAuth",
+		},
+		{
+			name: "events-schedule-relative-rule-deadline",
+			file: filepath.Join("internal", "services", "aws", "events", "events.go"),
+			old:  `case <-p.deps.Clock.AfterUntil(next):`,
+			new:  `case <-p.deps.Clock.After(next.Sub(p.deps.Clock.Now())):`,
+			pkg:  "./internal/services/aws/events",
+			run:  "TestSchedulerUsesAbsoluteDeadline",
 		},
 		{
 			name: "events-skip-initial-target-retry",

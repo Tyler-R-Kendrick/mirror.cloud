@@ -208,6 +208,40 @@ func FuzzCreateBucketObjectOwnership(f *testing.F) {
 	})
 }
 
+func FuzzBucketOwnershipControls(f *testing.F) {
+	for _, seed := range []struct {
+		rules     uint8
+		ownership string
+	}{{1, "BucketOwnerPreferred"}, {1, "ObjectWriter"}, {1, "BucketOwnerEnforced"}, {0, ""}, {2, "ObjectWriter"}, {1, "invalid"}} {
+		f.Add(seed.rules, seed.ownership)
+	}
+	f.Fuzz(func(t *testing.T, ruleSeed uint8, ownership string) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "ownership-controls-fuzz"}, nil)
+		rules := make([]any, int(ruleSeed%4))
+		for i := range rules {
+			rules[i] = map[string]any{"ObjectOwnership": ownership}
+		}
+		_, err := invoke(t, p, "PutBucketOwnershipControls", map[string]any{
+			"Bucket": "ownership-controls-fuzz", "OwnershipControls": map[string]any{"Rules": rules},
+		}, nil)
+		valid := len(rules) == 1 && (ownership == "BucketOwnerPreferred" || ownership == "ObjectWriter" || ownership == "BucketOwnerEnforced")
+		if !valid {
+			if fault := asFault(t, err); fault.Code != "MalformedXML" {
+				t.Fatalf("rules=%d ownership=%q: %#v", len(rules), ownership, fault)
+			}
+			ownership = "BucketOwnerEnforced"
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		response := mustInvoke(t, p, "GetBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls-fuzz"}, nil)
+		stored := asSliceForTest(asMapForTest(response.Output["OwnershipControls"])["Rules"])
+		if len(stored) != 1 || asMapForTest(stored[0])["ObjectOwnership"] != ownership {
+			t.Fatalf("stored ownership controls = %#v, want %q", response.Output, ownership)
+		}
+	})
+}
+
 func FuzzDeleteBucketEmptiness(f *testing.F) {
 	for _, seed := range []struct {
 		versioned bool

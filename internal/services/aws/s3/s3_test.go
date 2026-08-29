@@ -33,6 +33,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -308,12 +309,12 @@ func TestBucketNotificationDeliveryFilters(t *testing.T) {
 	p := s3.New(deps)
 	input := map[string]any{"Bucket": "notification-delivery"}
 	mustInvoke(t, p, "CreateBucket", input, nil)
-	if err := deps.Store.Scope("111111111111", "us-east-1").Collection("queues").Put(context.Background(), "queue", []byte("{}")); err != nil {
+	if err := deps.Store.Scope(ident().Account, ident().Region).Collection("queues").Put(context.Background(), "queue", []byte("{}")); err != nil {
 		t.Fatal(err)
 	}
 	configuration := map[string]any{"QueueConfigurations": []any{
-		map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:queue", "Events": []any{"s3:ObjectCreated:*"}, "Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{map[string]any{"Name": "prefix", "Value": "images/"}, map[string]any{"Name": "suffix", "Value": ".jpg"}}}}},
-		map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:queue", "Events": []any{"s3:ObjectRemoved:*"}},
+		map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue", "Events": []any{"s3:ObjectCreated:*"}, "Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{map[string]any{"Name": "prefix", "Value": "images/"}, map[string]any{"Name": "suffix", "Value": ".jpg"}}}}},
+		map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue", "Events": []any{"s3:ObjectRemoved:*"}},
 	}}
 	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": configuration}, nil)
 	for _, key := range []string{"images/photo.jpg", "images/photo.png", "docs/photo.jpg"} {
@@ -420,6 +421,40 @@ func TestBucketNotificationLambdaDelivery(t *testing.T) {
 	record := asMapForTest(asSliceForTest(payload["Records"])[0])
 	if record["eventName"] != "ObjectCreated:Put" || asMapForTest(asMapForTest(record["s3"])["object"])["key"] != "created" {
 		t.Fatalf("lambda notification = %#v", payload)
+	}
+}
+
+func TestBucketNotificationTopicDelivery(t *testing.T) {
+	deps := spitest.Deps(t)
+	topicPack, queuePack := sns.New(deps), sqs.New(deps)
+	ctx, id := context.Background(), ident()
+	invokePack := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := pack.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response
+	}
+	invokePack(queuePack, "CreateQueue", map[string]any{"QueueName": "subscriber"})
+	topicARN := invokePack(topicPack, "CreateTopic", map[string]any{"Name": "object-events"}).Output["TopicArn"].(string)
+	invokePack(topicPack, "Subscribe", map[string]any{
+		"TopicArn": topicARN, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:123456789012:subscriber", "RawMessageDelivery": "true",
+	})
+
+	p := s3.New(deps)
+	bucket := "notification-topic"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{
+		"Bucket": bucket,
+		"NotificationConfiguration": map[string]any{"TopicConfigurations": []any{map[string]any{
+			"TopicArn": topicARN, "Events": []any{"s3:ObjectCreated:Put"},
+		}}},
+	}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "created"}, []byte("created"))
+	messages := invokePack(queuePack, "ReceiveMessage", map[string]any{"QueueName": "subscriber", "MaxNumberOfMessages": 10}).Output["Messages"].([]any)
+	if len(messages) != 1 || !strings.Contains(asMapForTest(messages[0])["Body"].(string), `"eventName":"ObjectCreated:Put"`) {
+		t.Fatalf("topic notification = %#v", messages)
 	}
 }
 

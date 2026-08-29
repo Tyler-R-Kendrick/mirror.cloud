@@ -31,6 +31,8 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/zeebo/xxh3"
 )
@@ -3698,12 +3700,16 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 			name = arn[i+1:]
 		}
 		if str(m["QueueArn"]) != "" || str(m["Queue"]) != "" || strings.Contains(arn, ":sqs:") {
-			rh := p.deps.Rand.Hex(16)
-			msg, _ := json.Marshal(map[string]any{"id": rh, "body": string(payload), "handle": rh, "visibleAt": 0, "receiveCount": 0, "seq": 1})
-			_ = p.col(req, "msgs:"+name).Put(ctx, rh, msg)
+			_, _ = sqs.New(p.deps).Invoke(ctx, &spi.Request{
+				Identity: notificationTargetIdentity(req.Identity, arn), Operation: "SendMessage",
+				Input: map[string]any{"QueueName": name, "MessageBody": string(payload)},
+			})
 			continue
 		}
-		_ = p.deps.Bus.Publish(ctx, "sns:"+arn, payload)
+		_, _ = sns.New(p.deps).Invoke(ctx, &spi.Request{
+			Identity: notificationTargetIdentity(req.Identity, arn), Operation: "Publish",
+			Input: map[string]any{"TopicArn": arn, "Message": string(payload)},
+		})
 	}
 	for _, dest := range asSlice(cfg["LambdaFunctionConfigurations"]) {
 		configuration := asMap(dest)
@@ -3718,7 +3724,7 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 		}
 		name, _, _ = strings.Cut(name, ":")
 		_, _ = lambda.New(p.deps).Invoke(ctx, &spi.Request{
-			Identity: req.Identity, Operation: "Invoke", Body: io.NopCloser(bytes.NewReader(payload)),
+			Identity: notificationTargetIdentity(req.Identity, arn), Operation: "Invoke", Body: io.NopCloser(bytes.NewReader(payload)),
 			Input: map[string]any{"FunctionName": name, "InvocationType": "Event"},
 		})
 	}
@@ -3727,6 +3733,14 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 		envelope, _ := json.Marshal(map[string]any{"identity": req.Identity, "entry": entry})
 		_ = p.deps.Bus.Publish(ctx, "events:s3", envelope)
 	}
+}
+
+func notificationTargetIdentity(identity spi.Identity, arn string) spi.Identity {
+	parts := strings.Split(arn, ":")
+	if len(parts) >= 6 {
+		identity.Region, identity.Account = parts[3], parts[4]
+	}
+	return identity
 }
 
 func (p *Pack) notificationPayload(req *spi.Request, bucket, key, event, configurationID string, meta map[string]any) []byte {

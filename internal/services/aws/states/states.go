@@ -126,9 +126,8 @@ func (p *Pack) waitLoop() {
 			}
 			continue
 		}
-		delay := max(time.Duration(0), next.Sub(p.deps.Clock.Now()))
 		select {
-		case <-p.deps.Clock.After(delay):
+		case <-p.deps.Clock.AfterTime(next):
 		case <-p.wake:
 		case <-p.stop:
 			return
@@ -2823,9 +2822,9 @@ walkLoop:
 		}
 		if waitUntil.After(p.deps.Clock.Now()) {
 			if first(req.Input, "_executionType") == "EXPRESS" {
-				delay, timeout := p.executionDelay(req, waitUntil.Sub(p.deps.Clock.Now()))
+				wake, timeout := p.executionWake(req, waitUntil)
 				select {
-				case <-p.deps.Clock.After(delay):
+				case <-p.deps.Clock.AfterTime(wake):
 					if timeout {
 						return walkResult{out: data, status: "TIMED_OUT", cause: "States.Timeout", errorName: "States.Timeout", hist: hist}
 					}
@@ -2927,16 +2926,19 @@ func executionDeadline(definition, executionType string, start time.Time) string
 	return start.Add(limit).UTC().Format(time.RFC3339Nano)
 }
 
-func (p *Pack) executionDelay(req *spi.Request, delay time.Duration) (time.Duration, bool) {
+// executionWake answers with the instant an express execution should wake at:
+// the one asked for, or the execution's own deadline when that comes first, in
+// which case the second result says the execution has timed out. An instant
+// rather than a delay, because the caller parks on it -- see spi.Clock.AfterTime.
+func (p *Pack) executionWake(req *spi.Request, wake time.Time) (time.Time, bool) {
 	deadline, err := time.Parse(time.RFC3339Nano, first(req.Input, "_executionDeadline"))
 	if err != nil {
-		return delay, false
+		return wake, false
 	}
-	remaining := deadline.Sub(p.deps.Clock.Now())
-	if remaining <= delay {
-		return max(time.Duration(0), remaining), true
+	if !deadline.After(wake) {
+		return deadline, true
 	}
-	return delay, false
+	return wake, false
 }
 
 func (p *Pack) scheduleRetry(ctx context.Context, req *spi.Request, state string, input any, attempts map[int]int, variables map[string]any, delay time.Duration, hist []any) *walkResult {
@@ -2945,9 +2947,9 @@ func (p *Pack) scheduleRetry(ctx context.Context, req *spi.Request, state string
 	}
 	switch first(req.Input, "_executionType") {
 	case "EXPRESS":
-		delay, timeout := p.executionDelay(req, delay)
+		wake, timeout := p.executionWake(req, p.deps.Clock.Now().Add(delay))
 		select {
-		case <-p.deps.Clock.After(delay):
+		case <-p.deps.Clock.AfterTime(wake):
 			if timeout {
 				return &walkResult{out: input, status: "TIMED_OUT", cause: "States.Timeout", errorName: "States.Timeout", hist: hist}
 			}

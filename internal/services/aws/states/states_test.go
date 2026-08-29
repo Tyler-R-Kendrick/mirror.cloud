@@ -50,9 +50,6 @@ type observedClock struct {
 }
 
 func (c *observedClock) After(delay time.Duration) <-chan time.Time {
-	if c.beforeUntil != nil {
-		c.beforeUntil()
-	}
 	result := c.Clock.After(delay)
 	c.after <- delay
 	return result

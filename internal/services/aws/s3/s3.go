@@ -3017,6 +3017,7 @@ func (p *Pack) prepareNotificationConfiguration(ctx context.Context, req *spi.Re
 		}
 	}
 	normalized := make(map[string]any, len(configuration))
+	var verified []struct{ service, arn string }
 	for field, value := range configuration {
 		if field == "EventBridgeConfiguration" {
 			if eventBridge, ok := value.(map[string]any); !ok || len(eventBridge) != 0 {
@@ -3071,6 +3072,7 @@ func (p *Pack) prepareNotificationConfiguration(ctx context.Context, req *spi.Re
 				if _, exists, _ := p.deps.Store.Scope(arnParts[4], arnParts[3]).Collection(collection).Get(ctx, name); !exists {
 					return nil, &spi.Fault{Code: "InvalidArgument", Message: "Unable to validate the following destination configurations", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": arn, "ArgumentValue": missing}}
 				}
+				verified = append(verified, struct{ service, arn string }{service, arn})
 			}
 			for key := range configuration {
 				if key != "Id" && key != arnField && key != "Events" && key != "Filter" {
@@ -3112,7 +3114,33 @@ func (p *Pack) prepareNotificationConfiguration(ctx context.Context, req *spi.Re
 		}
 		normalized[field] = items
 	}
+	for _, destination := range verified {
+		if err := p.verifyNotificationDestination(ctx, req, destination.service, destination.arn); err != nil {
+			return nil, err
+		}
+	}
 	return normalized, nil
+}
+
+func (p *Pack) verifyNotificationDestination(ctx context.Context, req *spi.Request, service, arn string) error {
+	identity := notificationTargetIdentity(req.Identity, arn)
+	name := arn[strings.LastIndex(arn, ":")+1:]
+	if service == "lambda" {
+		_, name, _ = strings.Cut(arn, ":function:")
+		name, _, _ = strings.Cut(name, ":")
+		_, err := lambda.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Invoke", Input: map[string]any{"FunctionName": name, "InvocationType": "DryRun"}})
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"Service": "Amazon S3", "Event": "s3:TestEvent", "Time": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		"Bucket": str(req.Input["Bucket"]), "RequestId": "mirror", "HostId": "eftixk72aD6Ap51TnqcoF8eFidJG9Z/2",
+	})
+	if service == "sqs" {
+		_, err := sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": string(payload)}})
+		return err
+	}
+	_, err := sns.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Publish", Input: map[string]any{"TopicArn": arn, "Message": string(payload)}})
+	return err
 }
 
 func validateTagSet(value any, limit int, kind string) error {

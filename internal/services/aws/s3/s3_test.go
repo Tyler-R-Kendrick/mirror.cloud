@@ -321,14 +321,20 @@ func TestBucketNotificationDeliveryFilters(t *testing.T) {
 		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": input["Bucket"], "Key": key}, []byte(key))
 	}
 	messages, _, err := deps.Store.Scope(ident().Account, ident().Region).Collection("msgs:queue").List(context.Background(), "", "", 0)
-	if err != nil || len(messages) != 1 {
+	if err != nil || len(messages) != 3 {
 		t.Fatalf("filtered notifications = %#v, err=%v", messages, err)
 	}
-	var message map[string]any
-	err = json.Unmarshal(messages[0].Value, &message)
-	body, _ := message["body"].(string)
-	if err != nil || !strings.Contains(body, `"key":"images/photo.jpg"`) {
-		t.Fatalf("notification message = %#v, err=%v", message, err)
+	found := false
+	for _, stored := range messages {
+		var message map[string]any
+		if err := json.Unmarshal(stored.Value, &message); err != nil {
+			t.Fatal(err)
+		}
+		body, _ := message["body"].(string)
+		found = found || strings.Contains(body, `"key":"images/photo.jpg"`)
+	}
+	if !found {
+		t.Fatalf("notification messages = %#v", messages)
 	}
 }
 
@@ -374,6 +380,9 @@ func TestBucketNotificationRemovalAndTaggingEvents(t *testing.T) {
 		var payload map[string]any
 		if err := json.Unmarshal([]byte(message["body"].(string)), &payload); err != nil {
 			t.Fatal(err)
+		}
+		if payload["Records"] == nil {
+			continue
 		}
 		record := asMapForTest(asSliceForTest(payload["Records"])[0])
 		events[record["eventName"].(string)]++
@@ -453,7 +462,14 @@ func TestBucketNotificationTopicDelivery(t *testing.T) {
 	}, nil)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "created"}, []byte("created"))
 	messages := invokePack(queuePack, "ReceiveMessage", map[string]any{"QueueName": "subscriber", "MaxNumberOfMessages": 10}).Output["Messages"].([]any)
-	if len(messages) != 1 || !strings.Contains(asMapForTest(messages[0])["Body"].(string), `"eventName":"ObjectCreated:Put"`) {
+	if len(messages) != 2 {
+		t.Fatalf("topic notification = %#v", messages)
+	}
+	found := false
+	for _, message := range messages {
+		found = found || strings.Contains(asMapForTest(message)["Body"].(string), `"eventName":"ObjectCreated:Put"`)
+	}
+	if !found {
 		t.Fatalf("topic notification = %#v", messages)
 	}
 }
@@ -533,6 +549,9 @@ func TestBucketNotificationRestoreAndACLEvents(t *testing.T) {
 		var payload map[string]any
 		if err := json.Unmarshal([]byte(message["body"].(string)), &payload); err != nil {
 			t.Fatal(err)
+		}
+		if payload["Records"] == nil {
+			continue
 		}
 		record := asMapForTest(asSliceForTest(payload["Records"])[0])
 		events[record["eventName"].(string)] = record

@@ -772,7 +772,11 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			}
 		}
 		messages, _, err := deps.Store.Scope("000000000000", "us-east-1").Collection("msgs:notification-queue").List(context.Background(), "", "", 0)
-		if err != nil || len(messages) != 1 || !bytes.Contains(messages[0].Value, []byte("images/photo.jpg")) {
+		matched := false
+		for _, message := range messages {
+			matched = matched || bytes.Contains(message.Value, []byte("images/photo.jpg"))
+		}
+		if err != nil || len(messages) != 2 || !matched {
 			t.Fatalf("notification messages = %#v, err=%v", messages, err)
 		}
 		invalid := []byte(`<NotificationConfiguration><QueueConfiguration><Queue>arn:aws:sqs:us-east-1:000000000000:missing</Queue><Event>s3:ObjectCreated:*</Event></QueueConfiguration></NotificationConfiguration>`)

@@ -286,6 +286,31 @@ func TestBucketNotificationConfiguration(t *testing.T) {
 	}
 }
 
+func TestBucketNotificationDeliveryFilters(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	input := map[string]any{"Bucket": "notification-delivery"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	configuration := map[string]any{"QueueConfigurations": []any{
+		map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:queue", "Events": []any{"s3:ObjectCreated:*"}, "Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{map[string]any{"Name": "prefix", "Value": "images/"}, map[string]any{"Name": "suffix", "Value": ".jpg"}}}}},
+		map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:queue", "Events": []any{"s3:ObjectRemoved:*"}},
+	}}
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": configuration}, nil)
+	for _, key := range []string{"images/photo.jpg", "images/photo.png", "docs/photo.jpg"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": input["Bucket"], "Key": key}, []byte(key))
+	}
+	messages, _, err := deps.Store.Scope(ident().Account, ident().Region).Collection("msgs:queue").List(context.Background(), "", "", 0)
+	if err != nil || len(messages) != 1 {
+		t.Fatalf("filtered notifications = %#v, err=%v", messages, err)
+	}
+	var message map[string]any
+	err = json.Unmarshal(messages[0].Value, &message)
+	body, _ := message["body"].(string)
+	if err != nil || !strings.Contains(body, `"key":"images/photo.jpg"`) {
+		t.Fatalf("notification message = %#v, err=%v", message, err)
+	}
+}
+
 func TestCreateBucketObjectOwnership(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	characterization := map[string]any{}

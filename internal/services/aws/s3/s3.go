@@ -3612,6 +3612,9 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 	_ = json.Unmarshal(raw, &cfg)
 	for _, dest := range append(asSlice(cfg["QueueConfigurations"]), asSlice(cfg["TopicConfigurations"])...) {
 		m := asMap(dest)
+		if !notificationMatches(m, key, event) {
+			continue
+		}
 		arn := str(m["QueueArn"])
 		if arn == "" {
 			arn = str(m["TopicArn"])
@@ -3634,6 +3637,35 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 		}
 		_ = p.deps.Bus.Publish(ctx, "sns:"+arn, payload)
 	}
+}
+
+func notificationMatches(configuration map[string]any, key, event string) bool {
+	event = "s3:" + event
+	wildcard := event[:strings.LastIndex(event, ":")+1] + "*"
+	matched := false
+	for _, value := range asSlice(configuration["Events"]) {
+		if configured := str(value); configured == event || configured == wildcard {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return false
+	}
+	for _, value := range asSlice(asMap(asMap(configuration["Filter"])["Key"])["FilterRules"]) {
+		rule := asMap(value)
+		switch strings.ToLower(str(rule["Name"])) {
+		case "prefix":
+			if !strings.HasPrefix(key, str(rule["Value"])) {
+				return false
+			}
+		case "suffix":
+			if !strings.HasSuffix(key, str(rule["Value"])) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func blobKey(req *spi.Request, b, k string) string {

@@ -46,6 +46,12 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if method == http.MethodPut && path == "/object-lock" {
 			req.Header.Set("x-amz-bucket-object-lock-enabled", "true")
 		}
+		if method == http.MethodPut && path == "/create-owned" {
+			req.Header.Set("x-amz-object-ownership", "BucketOwnerPreferred")
+		}
+		if method == http.MethodPut && path == "/invalid-create-owned" {
+			req.Header.Set("x-amz-object-ownership", "")
+		}
 		if strings.Contains(path, "?delete") {
 			digest := md5.Sum(body)
 			req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(digest[:]))
@@ -447,6 +453,32 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusNotFound {
 			t.Fatalf("invalid tags reserved bucket: %d", res.StatusCode)
+		}
+	})
+
+	t.Run("Given object ownership When creating a bucket Then ownership controls are persisted", func(t *testing.T) {
+		res := do(http.MethodPut, "/create-owned", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("owned create %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/create-owned?ownershipControls", nil, "")
+		controls, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(controls, []byte("<Rule><ObjectOwnership>BucketOwnerPreferred</ObjectOwnership></Rule>")) || bytes.Contains(controls, []byte("<member>")) {
+			t.Fatalf("created ownership %d %s", res.StatusCode, controls)
+		}
+		res = do(http.MethodPut, "/invalid-create-owned", nil, "")
+		fault, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("InvalidArgument")) {
+			t.Fatalf("invalid ownership %d %s", res.StatusCode, fault)
+		}
+		res = do(http.MethodHead, "/invalid-create-owned", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound {
+			t.Fatalf("invalid ownership reserved bucket: %d", res.StatusCode)
 		}
 	})
 

@@ -3605,12 +3605,8 @@ func (p *Pack) httpRetryLoop() {
 			}
 			continue
 		}
-		delay := next.Sub(p.deps.Clock.Now())
-		if delay < 0 {
-			delay = 0
-		}
 		select {
-		case <-p.deps.Clock.After(delay):
+		case <-p.deps.Clock.AfterTime(next):
 		case <-p.wake:
 		case <-p.stop:
 			return
@@ -4053,6 +4049,7 @@ func (p *Pack) deliverSplunk(ctx context.Context, req *spi.Request, destination 
 	deadline := p.deps.Clock.Now().Add(time.Duration(timeout) * time.Second)
 	ackBody, _ := json.Marshal(map[string]any{"acks": []any{ackID}})
 	for {
+		nextPoll := p.deps.Clock.Now().Add(time.Second) // before the request; see spi.Clock.AfterTime
 		ackRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/services/collector/ack", bytes.NewReader(ackBody))
 		if err != nil {
 			return false, false, "Splunk.InvalidEndpoint", err.Error()
@@ -4084,7 +4081,7 @@ func (p *Pack) deliverSplunk(ctx context.Context, req *spi.Request, destination 
 		select {
 		case <-ctx.Done():
 			return false, false, "Splunk.ConnectionClosed", ctx.Err().Error()
-		case <-p.deps.Clock.After(time.Second):
+		case <-p.deps.Clock.AfterTime(nextPoll):
 		}
 	}
 }

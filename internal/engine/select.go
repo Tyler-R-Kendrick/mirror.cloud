@@ -232,12 +232,16 @@ func (ev *eval) runWait(ctx context.Context, op bir.Operation) error {
 		if !now.Before(deadline) {
 			return nil
 		}
-		step := deadline.Sub(now)
-		if step > waitPoll {
-			step = waitPoll
+		// The instant to wake at, worked out from the reading above rather
+		// than from whenever the timer happens to be registered: an advance
+		// landing in between would otherwise park this past a deadline that
+		// has already passed. See spi.Clock.AfterTime.
+		wake := now.Add(waitPoll)
+		if wake.After(deadline) {
+			wake = deadline
 		}
 		select {
-		case <-ev.e.deps.Clock.After(step):
+		case <-ev.e.deps.Clock.AfterTime(wake):
 		case <-ctx.Done():
 			return nil
 		}

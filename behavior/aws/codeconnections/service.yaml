@@ -1,0 +1,118 @@
+schema: bir/1
+service: aws.codeconnections
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No provider is ever reached: a connection is AVAILABLE the moment
+# it is created, where a real one is PENDING until a human completes the
+# handshake in the console.
+provenance: authored
+
+missing_input_error: Validation
+
+resources:
+  connection:
+    collection: ccn
+    # Created by name and addressed afterwards by ARN, so the identifier is
+    # derived to cover both without taking an ARN apart.
+    id:
+      derive: >
+        'ConnectionArn' in input
+          ? string(input.ConnectionArn)
+          : 'arn:aws:codeconnections:' + identity.region + ':' + identity.account
+            + ':connection/' + string(input.ConnectionName)
+    record: {}
+
+  host:
+    collection: cchost
+    id:
+      derive: >
+        'HostArn' in input
+          ? string(input.HostArn)
+          : 'arn:aws:codeconnections:' + identity.region + ':' + identity.account
+            + ':host/' + string(input.Name)
+    record: {}
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateConnection:
+    require:
+      - { cond: "string(input.ConnectionName) != ''", error: Validation }
+    effects:
+      - put:
+          resource: connection
+          record:
+            ConnectionName: "string(input.ConnectionName)"
+            ConnectionArn: id
+            ConnectionStatus: "'AVAILABLE'"
+            ProviderType: "'ProviderType' in input ? string(input.ProviderType) : ''"
+    output:
+      ConnectionArn: rec.ConnectionArn
+
+  GetConnection:
+    reads:
+      c: { resource: connection }
+    require:
+      - { cond: c_found, error: NotFound }
+    output:
+      Connection: c
+
+  ListConnections:
+    list: { resource: connection, member: Connections, paginate: model }
+
+  DeleteConnection:
+    effects:
+      - delete: { resource: connection, missing: ignore }
+
+  CreateHost:
+    effects:
+      - put:
+          resource: host
+          record:
+            Name: "string(input.Name)"
+            HostArn: id
+            Status: "'AVAILABLE'"
+    output:
+      HostArn: rec.HostArn
+
+  # GetHost declares Name, ProviderEndpoint, ProviderType, Status and a VPC
+  # configuration. The HostArn the pack answered with is not a member of this
+  # answer -- it is what the request names the host by.
+  GetHost:
+    reads:
+      h: { resource: host }
+    require:
+      - { cond: h_found, error: NotFound }
+    output:
+      Name: h.Name
+      Status: h.Status
+
+quirks:
+  - operation: GetHost
+    note: >
+      The pack answered with the HostArn it stored. GetHost declares Name,
+      ProviderEndpoint, ProviderType, Status and VpcConfiguration -- the ARN
+      is how the request names the host, not part of the answer -- so it was a
+      member no SDK could read. The declared shape outranks the pack's
+      authored behavior, so it is dropped and the recorded step is superseded
+      with that reason.
+  - operation: CreateHost
+    note: >
+      ProviderEndpoint and ProviderType are required by the model and neither
+      is stored, so GetHost answers without both members it declares, and no
+      VpcConfiguration is ever set. Nothing relates a connection to a host:
+      HostArn is declared on a connection and never populated.
+  - operation: CreateConnection
+    note: >
+      A connection is AVAILABLE the moment it is created. A real one is
+      PENDING until someone completes the handshake with the provider in the
+      console, so nothing here can observe the state that matters, and
+      OwnerAccountId is never set.

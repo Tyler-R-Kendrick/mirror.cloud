@@ -1,0 +1,313 @@
+{
+  "schema": "trace/1",
+  "service": "aws.kendra",
+  "source": "pack:internal/services/aws/kendra@571d5d1",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListIndices",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IndexConfigurationSummaryItems": null
+      }
+    },
+    {
+      "operation": "DescribeIndex",
+      "input": {
+        "Id": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateIndex",
+      "input": {
+        "Name": "docs",
+        "RoleArn": "arn:aws:iam::000000000000:role/kendra"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "7c589129"
+      }
+    },
+    {
+      "operation": "DescribeIndex",
+      "input": {
+        "Id": {
+          "$fromPath": "Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "7c589129",
+        "Name": "docs",
+        "Status": "ACTIVE"
+      }
+    },
+    {
+      "operation": "CreateIndex",
+      "input": {
+        "Name": "wiki",
+        "RoleArn": "arn:aws:iam::000000000000:role/kendra"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "5f59f223"
+      }
+    },
+    {
+      "operation": "ListIndices",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IndexConfigurationSummaryItems": [
+          {
+            "Id": "5f59f223",
+            "Name": "wiki",
+            "Status": "ACTIVE"
+          },
+          {
+            "Id": "7c589129",
+            "Name": "docs",
+            "Status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "Query",
+      "input": {
+        "IndexId": {
+          "$fromPath": "Id",
+          "$fromStep": 2
+        },
+        "QueryText": "anything"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResultItems": [],
+        "TotalNumberOfResults": 0
+      }
+    },
+    {
+      "operation": "Query",
+      "input": {
+        "IndexId": "no-such-index"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ResultItems": [],
+        "TotalNumberOfResults": 0
+      }
+    },
+    {
+      "operation": "CreateDataSource",
+      "input": {
+        "IndexId": {
+          "$fromPath": "Id",
+          "$fromStep": 2
+        },
+        "Name": "bucket",
+        "Type": "S3"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "9c8e2cb0"
+      }
+    },
+    {
+      "operation": "DescribeDataSource",
+      "input": {
+        "Id": {
+          "$fromPath": "Id",
+          "$fromStep": 8
+        },
+        "IndexId": {
+          "$fromPath": "Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "9c8e2cb0",
+        "IndexId": "7c589129",
+        "Name": "bucket",
+        "Status": "ACTIVE",
+        "Type": "S3"
+      }
+    },
+    {
+      "operation": "DescribeDataSource",
+      "input": {
+        "Id": {
+          "$fromPath": "Id",
+          "$fromStep": 8
+        },
+        "IndexId": "no-such-index"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "9c8e2cb0",
+        "IndexId": "7c589129",
+        "Name": "bucket",
+        "Status": "ACTIVE",
+        "Type": "S3"
+      }
+    },
+    {
+      "operation": "DeleteIndex",
+      "input": {
+        "Id": {
+          "$fromPath": "Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListIndices",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IndexConfigurationSummaryItems": [
+          {
+            "Id": "5f59f223",
+            "Name": "wiki",
+            "Status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeDataSource",
+      "input": {
+        "Id": {
+          "$fromPath": "Id",
+          "$fromStep": 8
+        },
+        "IndexId": {
+          "$fromPath": "Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "9c8e2cb0",
+        "IndexId": "7c589129",
+        "Name": "bucket",
+        "Status": "ACTIVE",
+        "Type": "S3"
+      }
+    },
+    {
+      "operation": "DeleteDataSource",
+      "input": {
+        "Id": {
+          "$fromPath": "Id",
+          "$fromStep": 8
+        },
+        "IndexId": {
+          "$fromPath": "Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

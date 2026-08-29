@@ -1,0 +1,133 @@
+schema: bir/1
+service: aws.keyspaces
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No Cassandra runs: a keyspace is a name and a table is a name
+# inside one, with no schema stored and no row ever written.
+provenance: authored
+
+missing_input_error: Validation
+
+resources:
+  keyspace:
+    collection: ksks
+    id:
+      input_members: [keyspaceName, KeyspaceName]
+    arn: "arn:{partition}:cassandra:{region}:{account}:/keyspace/{id}/"
+    record:
+      keyspaceName: id
+      resourceArn: arn
+
+  # A table belongs to a keyspace and is addressed by both names together.
+  # The pack kept each keyspace's tables in their own collection; here they
+  # share one and the listing filters, which scopes the same way and keeps the
+  # key readable.
+  table:
+    collection: kstbl
+    id:
+      derive: "string(input.keyspaceName) + '/' + string(input.tableName)"
+    record:
+      keyspaceName: "string(input.keyspaceName)"
+      tableName: "string(input.tableName)"
+      resourceArn: >
+        'arn:aws:cassandra:' + identity.region + ':' + identity.account
+        + ':/keyspace/' + string(input.keyspaceName) + '/table/' + string(input.tableName)
+      status: "'ACTIVE'"
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateKeyspace:
+    require:
+      - { cond: "string(input.keyspaceName) != ''", error: Validation }
+    effects:
+      - put: { resource: keyspace }
+    output:
+      resourceArn: rec.resourceArn
+
+  GetKeyspace:
+    reads:
+      ks: { resource: keyspace }
+    require:
+      - { cond: ks_found, error: NotFound }
+    output:
+      keyspaceName: ks.keyspaceName
+      resourceArn: ks.resourceArn
+
+  ListKeyspaces:
+    list: { resource: keyspace, member: keyspaces, paginate: model }
+
+  DeleteKeyspace:
+    effects:
+      - delete: { resource: keyspace, missing: ignore }
+
+  CreateTable:
+    require:
+      - { cond: "string(input.keyspaceName) != ''", error: Validation }
+      - { cond: "string(input.tableName) != ''", error: Validation }
+    effects:
+      - put: { resource: table }
+    output:
+      resourceArn: rec.resourceArn
+
+  GetTable:
+    reads:
+      t: { resource: table }
+    require:
+      - { cond: t_found, error: NotFound }
+    output:
+      keyspaceName: t.keyspaceName
+      tableName: t.tableName
+      resourceArn: t.resourceArn
+      status: t.status
+
+  # A listed table declares keyspaceName, resourceArn and tableName, and no
+  # status. The filter is what keeps one keyspace's tables out of another's
+  # listing, which is what the pack got from a per-keyspace collection.
+  ListTables:
+    list:
+      resource: table
+      member: tables
+      paginate: model
+      filter: "string(item.keyspaceName) == string(input.keyspaceName)"
+    output:
+      tables: >
+        items.map(t, {
+          'keyspaceName': t.keyspaceName,
+          'tableName': t.tableName,
+          'resourceArn': t.resourceArn
+        })
+
+  DeleteTable:
+    effects:
+      - delete: { resource: table, missing: ignore }
+
+quirks:
+  - operation: ListTables
+    note: >
+      The pack listed a table with the status it stored. A listed table
+      declares keyspaceName, resourceArn and tableName and no status, so the
+      listing carried a member no SDK can read. The declared shape outranks
+      the pack's authored behavior, so the listing is projected and the
+      recorded step is superseded with that reason; GetTable still answers
+      with the status, where the model declares it.
+  - operation: GetKeyspace
+    note: >
+      replicationStrategy is a required member of the answer and is never set,
+      because the pack stored none: a keyspace here has no replication at all,
+      single-region or multi. CreateTable's required schemaDefinition is
+      likewise not stored, so a table has no columns and GetTable answers
+      without the schema a client needs to use it.
+  - operation: DeleteKeyspace
+    note: >
+      Deleting a keyspace leaves its tables behind, so a table can name a
+      keyspace that is gone and still be fetched. Deleting an absent keyspace
+      or table succeeds where getting the same one faults.

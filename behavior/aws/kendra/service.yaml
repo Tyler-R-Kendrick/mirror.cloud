@@ -1,0 +1,107 @@
+schema: bir/1
+service: aws.kendra
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is crawled and nothing is searched: an index is ACTIVE the
+# moment it is created and every query answers with no results.
+provenance: authored
+
+resources:
+  index:
+    collection: kidx
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [Id]
+    record:
+      Id: id
+      Name: "'Name' in input ? string(input.Name) : ''"
+      Status: "'ACTIVE'"
+
+  datasource:
+    collection: kds
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [Id]
+    record:
+      Id: id
+      Name: "'Name' in input ? string(input.Name) : ''"
+      IndexId: "'IndexId' in input ? string(input.IndexId) : ''"
+      Type: "'Type' in input ? string(input.Type) : ''"
+      Status: "'ACTIVE'"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateIndex:
+    effects:
+      - create: { resource: index }
+    output:
+      Id: rec.Id
+
+  DescribeIndex:
+    reads:
+      ix: { resource: index }
+    require:
+      - { cond: ix_found, error: NotFound }
+    output:
+      Id: ix.Id
+      Name: ix.Name
+      Status: ix.Status
+
+  ListIndices:
+    list: { resource: index, member: IndexConfigurationSummaryItems, paginate: model }
+
+  DeleteIndex:
+    effects:
+      - delete: { resource: index, missing: ignore }
+
+  Query:
+    output:
+      ResultItems: "[]"
+      TotalNumberOfResults: "0"
+
+  CreateDataSource:
+    effects:
+      - create: { resource: datasource }
+    output:
+      Id: rec.Id
+
+  DescribeDataSource:
+    reads:
+      ds: { resource: datasource }
+    require:
+      - { cond: ds_found, error: NotFound }
+    output:
+      Id: ds.Id
+      Name: ds.Name
+      IndexId: ds.IndexId
+      Type: ds.Type
+      Status: ds.Status
+
+  DeleteDataSource:
+    effects:
+      - delete: { resource: datasource, missing: ignore }
+
+quirks:
+  - operation: Query
+    note: >
+      Every query answers with no results and a total of zero, whatever is
+      asked and whether or not the index exists: IndexId is required and never
+      read. No QueryId is issued, which the model declares, so a client cannot
+      submit feedback against a query it just made.
+  - operation: DescribeDataSource
+    note: >
+      IndexId is required on the describe and the delete and is ignored: a
+      data source is found by its own id alone, so asking the wrong index for
+      one still answers with it. Nothing checks that the index a data source
+      names exists, and deleting an index leaves its data sources behind.
+  - operation: CreateIndex
+    note: >
+      RoleArn is required by the model and is not stored, and neither is a
+      data source's Configuration, so nothing has anywhere to crawl. An index
+      is ACTIVE at once, so nothing observes CREATING or a failure, and
+      CreatedAt, Edition and the statistics the model declares are never set.

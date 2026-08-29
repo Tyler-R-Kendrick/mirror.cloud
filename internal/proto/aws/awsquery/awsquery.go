@@ -51,6 +51,7 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 			in[k] = arr
 		}
 	}
+	unflatten(svc, op.Input, r.Form, in)
 	return &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}, nil
 }
 
@@ -131,3 +132,133 @@ func xmlEscape(s string) string {
 
 // FormEncode is exported for tests.
 func FormEncode(v url.Values) string { return v.Encode() }
+
+// unflatten rebuilds the structured input the model describes from the flat
+// query parameters the wire carries.
+//
+// The AWS query protocol has no nesting: a list arrives as Name.member.1,
+// Name.member.2, a map as Name.entry.1.key and Name.entry.1.value, a nested
+// structure as Name.Field, and any of them may be "flattened", which drops the
+// member/entry segment. Decoding without the shape therefore yields members
+// literally named "Identities.member.1" and no member named "Identities" at
+// all -- which is why the hand-written packs read those dotted keys directly,
+// and why the engine, which enforces the model's required members, rejected
+// every real request to an awsQuery service.
+//
+// The flat keys are left in place beside the structured ones. Six packs still
+// read them, and they go when the last of those is extracted; until then a
+// decoder that removed them would break services this change is not otherwise
+// touching.
+func unflatten(svc *model.Service, shapeID string, form url.Values, in map[string]any) {
+	shape, ok := svc.Shapes[shapeID]
+	if !ok || shape.Kind != model.KindStructure {
+		return
+	}
+	for name, member := range shape.Members {
+		wire := name
+		if member.Binding.Name != "" {
+			wire = member.Binding.Name
+		}
+		if v, found := valueAt(svc, member, wire, form, 0); found {
+			in[name] = v
+		}
+	}
+}
+
+// maxDepth bounds the shape-graph descent. valueAt walks the model, not the
+// request, so a shape that reaches itself would recurse until the stack ran
+// out however small the request was -- a crash rather than a rejected input.
+// No such shape exists today: the deepest awsQuery or ec2Query input in the
+// generated models is 11 levels, at aws.autoscaling.PutScalingPolicy. But the
+// models move under specs-refresh without any code change here, so the bound
+// is what keeps a vendor's edit from turning into a panic. It is set to roughly
+// three times the observed maximum: deep enough that no real shape reaches it,
+// shallow enough to stop a cycle promptly.
+const maxDepth = 32
+
+// valueAt reads one member, whatever its shape, from prefix in form.
+func valueAt(svc *model.Service, member model.Member, prefix string, form url.Values, depth int) (any, bool) {
+	if depth > maxDepth {
+		return nil, false
+	}
+	shape, ok := svc.Shapes[member.Shape]
+	if !ok {
+		if v := form.Get(prefix); v != "" || form.Has(prefix) {
+			return v, true
+		}
+		return nil, false
+	}
+	switch shape.Kind {
+	case model.KindList:
+		return listAt(svc, shape, prefix, member.Binding.XMLFlattened, form, depth)
+	case model.KindMap:
+		return mapAt(svc, shape, prefix, member.Binding.XMLFlattened, form, depth)
+	case model.KindStructure, model.KindUnion:
+		out := map[string]any{}
+		for name, field := range shape.Members {
+			wire := name
+			if field.Binding.Name != "" {
+				wire = field.Binding.Name
+			}
+			if v, found := valueAt(svc, field, prefix+"."+wire, form, depth+1); found {
+				out[name] = v
+			}
+		}
+		if len(out) == 0 {
+			return nil, false
+		}
+		return out, true
+	default:
+		if form.Has(prefix) {
+			return form.Get(prefix), true
+		}
+		return nil, false
+	}
+}
+
+// listAt reads an indexed list. Indices are one-based and contiguous, which is
+// what every AWS SDK emits; a gap ends the list rather than being skipped, so a
+// truncated request does not silently become a shorter valid one.
+func listAt(svc *model.Service, shape model.Shape, prefix string, flat bool, form url.Values, depth int) (any, bool) {
+	at := prefix
+	if !flat {
+		at = prefix + ".member"
+	}
+	item := model.Member{Shape: shape.Member}
+	var out []any
+	for i := 1; ; i++ {
+		v, found := valueAt(svc, item, fmt.Sprintf("%s.%d", at, i), form, depth+1)
+		if !found {
+			break
+		}
+		out = append(out, v)
+	}
+	if out == nil {
+		return nil, false
+	}
+	return out, true
+}
+
+// mapAt reads an indexed map, whose entries carry an explicit key and value.
+func mapAt(svc *model.Service, shape model.Shape, prefix string, flat bool, form url.Values, depth int) (any, bool) {
+	at := prefix
+	if !flat {
+		at = prefix + ".entry"
+	}
+	key := model.Member{Shape: shape.Key}
+	value := model.Member{Shape: shape.Member}
+	out := map[string]any{}
+	for i := 1; ; i++ {
+		base := fmt.Sprintf("%s.%d", at, i)
+		k, found := valueAt(svc, key, base+".key", form, depth+1)
+		if !found {
+			break
+		}
+		v, _ := valueAt(svc, value, base+".value", form, depth+1)
+		out[fmt.Sprint(k)] = v
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return out, true
+}

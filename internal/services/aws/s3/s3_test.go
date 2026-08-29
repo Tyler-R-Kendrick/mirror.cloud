@@ -365,6 +365,21 @@ func TestBucketRequestPayment(t *testing.T) {
 	}
 }
 
+func TestBucketRequestPaymentCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "request-payment-characterization"}, nil)
+	before := mustInvoke(t, p, "GetBucketRequestPayment", map[string]any{"Bucket": "request-payment-characterization"}, nil)
+	put := mustInvoke(t, p, "PutBucketRequestPayment", map[string]any{"Bucket": "request-payment-characterization", "RequestPaymentConfiguration": map[string]any{"Payer": "Requester"}}, nil)
+	after := mustInvoke(t, p, "GetBucketRequestPayment", map[string]any{"Bucket": "request-payment-characterization"}, nil)
+	_, invalidErr := invoke(t, p, "PutBucketRequestPayment", map[string]any{"Bucket": "request-payment-characterization", "RequestPaymentConfiguration": map[string]any{"Payer": "Invalid"}}, nil)
+	invalid := asFault(t, invalidErr)
+	preserved := mustInvoke(t, p, "GetBucketRequestPayment", map[string]any{"Bucket": "request-payment-characterization"}, nil)
+	golden.AssertJSON(t, map[string]any{
+		"default": before.Output, "put": put.Output, "get": after.Output,
+		"invalid": map[string]any{"code": invalid.Code, "status": invalid.HTTPStatus}, "preserved": preserved.Output,
+	})
+}
+
 func TestPublicAccessBlockCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "public-access-block-characterization"}, nil)

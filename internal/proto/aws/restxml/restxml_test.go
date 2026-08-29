@@ -344,6 +344,13 @@ func TestRESTXMLServiceDecodeContracts(t *testing.T) {
 	if err != nil || len(decoded.Input["QueueConfigurations"].([]any)) != 1 || len(decoded.Input["TopicConfigurations"].([]any)) != 1 {
 		t.Fatalf("notification decode %#v %v", decoded, err)
 	}
+	ownership := `<OwnershipControls><Rule><ObjectOwnership>ObjectWriter</ObjectOwnership></Rule></OwnershipControls>`
+	decoded, err = codec.Decode(s3, &model.Operation{Name: "PutBucketOwnershipControls"}, httptest.NewRequest(http.MethodPut, "/bucket?ownershipControls", strings.NewReader(ownership)))
+	controls, _ := decoded.Input["OwnershipControls"].(map[string]any)
+	rules, _ := controls["Rules"].([]any)
+	if err != nil || len(rules) != 1 || rules[0].(map[string]any)["ObjectOwnership"] != "ObjectWriter" {
+		t.Fatalf("ownership controls decode %#v %v", decoded, err)
+	}
 }
 
 func TestPostObjectProtocolContract(t *testing.T) {

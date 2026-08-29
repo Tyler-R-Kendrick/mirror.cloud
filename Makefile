@@ -14,8 +14,13 @@ build:
 
 test: test-unit test-contract
 
+# The needle check is pulled out of the excluded mutation package on purpose:
+# it is the one part of that suite that is fast, and a mutant whose needle has
+# stopped matching is exactly what a refactor breaks and what waiting for the
+# full suite reports half an hour late.
 test-unit:
 	$(GO) test $$($(GO) list ./... | grep -v '/internal/mutation$$')
+	$(GO) test ./internal/mutation -run '^TestMutantNeedlesExist$$' -count=1
 
 test-contract:
 	$(GO) test ./internal/conformance ./internal/proto/... -count=1

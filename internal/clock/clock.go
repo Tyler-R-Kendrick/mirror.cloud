@@ -17,7 +17,8 @@ func (Real) Since(t time.Time) time.Duration { return time.Since(t) }
 func (Real) Advance(time.Duration) error {
 	return errors.New("real clock cannot be advanced")
 }
-func (Real) After(d time.Duration) <-chan time.Time { return time.After(d) }
+func (Real) After(d time.Duration) <-chan time.Time  { return time.After(d) }
+func (Real) AfterUntil(t time.Time) <-chan time.Time { return time.After(time.Until(t)) }
 
 // Controllable is a deterministic clock starting at epoch.
 type Controllable struct {
@@ -66,9 +67,18 @@ func (c *Controllable) Advance(d time.Duration) error {
 }
 
 func (c *Controllable) After(d time.Duration) <-chan time.Time {
-	ch := make(chan time.Time, 1)
 	c.mu.Lock()
 	at := c.now.Add(d)
+	return c.afterLocked(at)
+}
+
+func (c *Controllable) AfterUntil(at time.Time) <-chan time.Time {
+	c.mu.Lock()
+	return c.afterLocked(at)
+}
+
+func (c *Controllable) afterLocked(at time.Time) <-chan time.Time {
+	ch := make(chan time.Time, 1)
 	if !c.now.Before(at) {
 		c.mu.Unlock()
 		ch <- c.now

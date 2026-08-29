@@ -126,9 +126,8 @@ func (p *Pack) waitLoop() {
 			}
 			continue
 		}
-		delay := max(time.Duration(0), next.Sub(p.deps.Clock.Now()))
 		select {
-		case <-p.deps.Clock.After(delay):
+		case <-p.deps.Clock.AfterUntil(next):
 		case <-p.wake:
 		case <-p.stop:
 			return

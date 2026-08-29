@@ -45,11 +45,25 @@ func (zeroIntRand) Intn(int) int { return 0 }
 
 type observedClock struct {
 	spi.Clock
-	after chan time.Duration
+	after       chan time.Duration
+	beforeUntil func()
 }
 
 func (c *observedClock) After(delay time.Duration) <-chan time.Time {
+	if c.beforeUntil != nil {
+		c.beforeUntil()
+	}
 	result := c.Clock.After(delay)
+	c.after <- delay
+	return result
+}
+
+func (c *observedClock) AfterUntil(at time.Time) <-chan time.Time {
+	delay := max(time.Duration(0), at.Sub(c.Clock.Now()))
+	if c.beforeUntil != nil {
+		c.beforeUntil()
+	}
+	result := c.Clock.AfterUntil(at)
 	c.after <- delay
 	return result
 }
@@ -1361,6 +1375,46 @@ func TestStatesDurableWait(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Express Wait did not resume")
+	}
+}
+
+func TestStatesWaitLoopUsesAbsoluteDeadline(t *testing.T) {
+	deps := spitest.Deps(t)
+	advance := make(chan time.Duration, 1)
+	advance <- 10 * time.Second
+	baseClock := deps.Clock
+	deps.Clock = &observedClock{Clock: baseClock, after: make(chan time.Duration, 16), beforeUntil: func() {
+		select {
+		case duration := <-advance:
+			_ = baseClock.Advance(duration)
+		default:
+		}
+	}}
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invoke := func(operation string, input map[string]any) map[string]any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	machine := invoke("CreateStateMachine", map[string]any{"name": "absolute-wait", "definition": `{"StartAt":"Wait","States":{"Wait":{"Type":"Wait","Seconds":10,"End":true}}}`, "roleArn": testRoleARN})
+	executionARN := invoke("StartExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"]})["executionArn"].(string)
+	deadline := time.After(time.Second)
+	for {
+		execution := invoke("DescribeExecution", map[string]any{"executionArn": executionARN})
+		if execution["status"] == "SUCCEEDED" {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("Wait did not resume at its absolute deadline %#v", execution)
+		default:
+			time.Sleep(time.Millisecond)
+		}
 	}
 }
 

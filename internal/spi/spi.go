@@ -186,6 +186,8 @@ type Clock interface {
 	Advance(d time.Duration) error
 	// After fires after d according to this clock.
 	After(d time.Duration) <-chan time.Time
+	// AfterUntil fires at t according to this clock.
+	AfterUntil(t time.Time) <-chan time.Time
 }
 
 // Rand is the only source of randomness in the process. All methods are

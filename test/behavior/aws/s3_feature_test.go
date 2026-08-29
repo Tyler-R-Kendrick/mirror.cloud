@@ -684,6 +684,61 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a bucket website When replacing and deleting it Then S3 validates and persists the routing", func(t *testing.T) {
+		res := do(http.MethodPut, "/website-bdd", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create website bucket %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/website-bdd?website", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchWebsiteConfiguration")) {
+			t.Fatalf("default website %d %s", res.StatusCode, body)
+		}
+		valid := []byte(`<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><ErrorDocument><Key>error.html</Key></ErrorDocument><RoutingRules><RoutingRule><Condition><KeyPrefixEquals>docs/</KeyPrefixEquals></Condition><Redirect><Protocol>https</Protocol><ReplaceKeyPrefixWith>manual/</ReplaceKeyPrefixWith></Redirect></RoutingRule></RoutingRules></WebsiteConfiguration>`)
+		res = do(http.MethodPut, "/website-bdd?website", valid, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("put website %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/website-bdd?website", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Suffix>index.html</Suffix>")) || !bytes.Contains(body, []byte("<ReplaceKeyPrefixWith>manual/</ReplaceKeyPrefixWith>")) || bytes.Contains(body, []byte("<member>")) || bytes.Contains(body, []byte("GetBucketWebsiteResult")) {
+			t.Fatalf("get website %d %s", res.StatusCode, body)
+		}
+		invalid := []byte(`<WebsiteConfiguration><IndexDocument><Suffix>dir/index.html</Suffix></IndexDocument></WebsiteConfiguration>`)
+		res = do(http.MethodPut, "/website-bdd?website", invalid, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidArgument")) {
+			t.Fatalf("invalid website %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/website-bdd?website", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Suffix>index.html</Suffix>")) {
+			t.Fatalf("website after invalid put %d %s", res.StatusCode, body)
+		}
+		for range 2 {
+			res = do(http.MethodDelete, "/website-bdd?website", nil, "")
+			io.Copy(io.Discard, res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusNoContent {
+				t.Fatalf("delete website %d", res.StatusCode)
+			}
+		}
+		res = do(http.MethodGet, "/website-bdd?website", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchWebsiteConfiguration")) {
+			t.Fatalf("get deleted website %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given request payment When changing the payer Then S3 validates and persists it", func(t *testing.T) {
 		res := do(http.MethodPut, "/request-payment", nil, "")
 		io.Copy(io.Discard, res.Body)

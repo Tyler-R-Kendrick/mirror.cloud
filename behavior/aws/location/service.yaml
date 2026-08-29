@@ -1,0 +1,117 @@
+schema: bir/1
+service: aws.location
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is geocoded: a place index is a name and a data source,
+# and a search answers with the text it was given at a fixed point.
+provenance: authored
+
+resources:
+  index:
+    collection: geoix
+    id:
+      input_members: [IndexName]
+    arn: "arn:{partition}:geo:{region}:{account}:place-index/{id}"
+    record:
+      IndexName: id
+      IndexArn: arn
+      DataSource: "'DataSource' in input ? string(input.DataSource) : ''"
+
+  collection:
+    collection: geofc
+    id:
+      input_members: [CollectionName]
+    arn: "arn:{partition}:geo:{region}:{account}:geofence-collection/{id}"
+    record:
+      CollectionName: id
+      CollectionArn: arn
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreatePlaceIndex:
+    effects:
+      - put: { resource: index }
+    output:
+      IndexName: rec.IndexName
+      IndexArn: rec.IndexArn
+
+  DescribePlaceIndex:
+    reads:
+      ix: { resource: index }
+    require:
+      - { cond: ix_found, error: NotFound }
+    output:
+      IndexName: ix.IndexName
+      IndexArn: ix.IndexArn
+      DataSource: ix.DataSource
+
+  # A listed entry declares no IndexArn, so the listed form is not the stored
+  # record; DescribePlaceIndex answers with the ARN.
+  ListPlaceIndexes:
+    list: { resource: index, member: Entries, paginate: model }
+    output:
+      Entries: >
+        items.map(e, {
+          'IndexName': e.IndexName,
+          'DataSource': e.DataSource
+        })
+
+  DeletePlaceIndex:
+    effects:
+      - delete: { resource: index, missing: ignore }
+
+  # The search answers with the text it was given, at a point in Seattle,
+  # whatever was asked for and whether or not the index exists.
+  SearchPlaceIndexForText:
+    output:
+      Results: >
+        [{'Place': {
+          'Label': string(input.Text),
+          'Geometry': {'Point': [-122.3, 47.6]}
+        }}]
+
+  CreateGeofenceCollection:
+    effects:
+      - put: { resource: collection }
+    output:
+      CollectionName: rec.CollectionName
+      CollectionArn: rec.CollectionArn
+
+  DescribeGeofenceCollection:
+    reads:
+      gc: { resource: collection }
+    require:
+      - { cond: gc_found, error: NotFound }
+    output:
+      CollectionName: gc.CollectionName
+      CollectionArn: gc.CollectionArn
+
+  DeleteGeofenceCollection:
+    effects:
+      - delete: { resource: collection, missing: ignore }
+
+quirks:
+  - operation: SearchPlaceIndexForText
+    note: >
+      One result is always returned: the text asked for, labelled as a place,
+      at a fixed point near Seattle. Nothing reads the index, so searching an
+      index that does not exist succeeds, and the required Summary the model
+      declares is never answered with. Nothing here can geocode, and a probe
+      is the only way to get a real answer shape for a query.
+  - operation: CreatePlaceIndex
+    note: >
+      CreateTime is a required member of the answer and is not set, as it was
+      not in the pack; the same goes for CreateGeofenceCollection. A place
+      index has no Description or DataSourceConfiguration, and a geofence
+      collection no Description, both of which their describes declare as
+      required.
+  - operation: CreateGeofenceCollection
+    note: >
+      No geofence is ever put into a collection: there is no PutGeofence here,
+      so a collection is a name and GeofenceCount is never set. Nothing
+      evaluates a position against one.

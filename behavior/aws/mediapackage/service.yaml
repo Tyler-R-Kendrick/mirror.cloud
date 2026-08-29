@@ -1,0 +1,103 @@
+schema: bir/1
+service: aws.mediapackage
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is packaged: a channel has no ingest endpoint and an
+# origin endpoint serves a URL that resolves to nothing.
+provenance: authored
+
+resources:
+  channel:
+    collection: mpch
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [Id]
+    arn: "arn:{partition}:mediapackage:{region}:{account}:channels/{id}"
+    record:
+      Id: id
+      Arn: arn
+
+  # Not `endpoint`: that binding is the base URL the caller reached.
+  origin:
+    collection: mpep
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [Id]
+    record:
+      Id: id
+      ChannelId: "'ChannelId' in input ? string(input.ChannelId) : ''"
+      Url: "'https://mediapackage.local/' + id + '.m3u8'"
+
+errors:
+  NotFound:
+    code: NotFoundException
+    http: 404
+    fault: client
+
+operations:
+  CreateChannel:
+    effects:
+      - put: { resource: channel }
+    output:
+      Id: rec.Id
+      Arn: rec.Arn
+
+  DescribeChannel:
+    reads:
+      ch: { resource: channel }
+    require:
+      - { cond: ch_found, error: NotFound }
+    output:
+      Id: ch.Id
+      Arn: ch.Arn
+
+  ListChannels:
+    list: { resource: channel, member: Channels, paginate: model }
+
+  DeleteChannel:
+    effects:
+      - delete: { resource: channel, missing: ignore }
+
+  CreateOriginEndpoint:
+    effects:
+      - put: { resource: origin }
+    output:
+      Id: rec.Id
+      ChannelId: rec.ChannelId
+      Url: rec.Url
+
+  DescribeOriginEndpoint:
+    reads:
+      ep: { resource: origin }
+    require:
+      - { cond: ep_found, error: NotFound }
+    output:
+      Id: ep.Id
+      ChannelId: ep.ChannelId
+      Url: ep.Url
+
+  DeleteOriginEndpoint:
+    effects:
+      - delete: { resource: origin, missing: ignore }
+
+quirks:
+  - operation: CreateChannel
+    note: >
+      Id is required by the model, and the pack generated one when it was
+      absent rather than rejecting the request. That is transcribed: a
+      request without an Id is now rejected by the engine before the bundle
+      sees it, so the generated fallback can only be reached by an Id that is
+      present and empty.
+  - operation: CreateChannel
+    note: >
+      A channel has no HlsIngest, so there is no endpoint to publish to, and
+      no CreatedAt or Description. An origin endpoint's Url points at
+      mediapackage.local, which resolves to nothing; nothing checks that the
+      ChannelId it names exists, and deleting a channel leaves its endpoints
+      behind.
+  - operation: CreateOriginEndpoint
+    note: >
+      None of the packaging settings the model declares -- HlsPackage,
+      DashPackage, CmafPackage, MssPackage -- is read or stored, so an
+      endpoint has no packaging at all and every endpoint is identical apart
+      from its id.

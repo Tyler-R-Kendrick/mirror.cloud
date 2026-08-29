@@ -1,0 +1,284 @@
+{
+  "schema": "trace/1",
+  "service": "aws.identitystore",
+  "source": "pack:internal/services/aws/identitystore@c2b6df2",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListUsers",
+      "input": {
+        "IdentityStoreId": "d-1234567890"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": null
+      }
+    },
+    {
+      "operation": "DescribeUser",
+      "input": {
+        "IdentityStoreId": "d-1234567890",
+        "UserId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateUser",
+      "input": {
+        "IdentityStoreId": "d-1234567890",
+        "UserName": "alice"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IdentityStoreId": "d-1234567890",
+        "UserId": "7c589129"
+      }
+    },
+    {
+      "operation": "DescribeUser",
+      "input": {
+        "IdentityStoreId": "d-1234567890",
+        "UserId": {
+          "$fromPath": "UserId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IdentityStoreId": "d-1234567890",
+        "UserId": "7c589129",
+        "UserName": "alice"
+      }
+    },
+    {
+      "operation": "CreateUser",
+      "input": {
+        "IdentityStoreId": "d-1234567890",
+        "UserName": "bob"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IdentityStoreId": "d-1234567890",
+        "UserId": "5f59f223"
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "IdentityStoreId": "d-1234567890"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "IdentityStoreId": "d-1234567890",
+            "UserId": "5f59f223",
+            "UserName": "bob"
+          },
+          {
+            "IdentityStoreId": "d-1234567890",
+            "UserId": "7c589129",
+            "UserName": "alice"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "IdentityStoreId": "d-0000000000"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "IdentityStoreId": "d-1234567890",
+            "UserId": "5f59f223",
+            "UserName": "bob"
+          },
+          {
+            "IdentityStoreId": "d-1234567890",
+            "UserId": "7c589129",
+            "UserName": "alice"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateGroup",
+      "input": {
+        "DisplayName": "admins",
+        "IdentityStoreId": "d-1234567890"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GroupId": "9c8e2cb0",
+        "IdentityStoreId": "d-1234567890"
+      }
+    },
+    {
+      "operation": "DescribeGroup",
+      "input": {
+        "GroupId": {
+          "$fromPath": "GroupId",
+          "$fromStep": 7
+        },
+        "IdentityStoreId": "d-1234567890"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DisplayName": "admins",
+        "GroupId": "9c8e2cb0",
+        "IdentityStoreId": "d-1234567890"
+      }
+    },
+    {
+      "operation": "ListGroups",
+      "input": {
+        "IdentityStoreId": "d-1234567890"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Groups": [
+          {
+            "DisplayName": "admins",
+            "GroupId": "9c8e2cb0",
+            "IdentityStoreId": "d-1234567890"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteUser",
+      "input": {
+        "IdentityStoreId": "d-1234567890",
+        "UserId": {
+          "$fromPath": "UserId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "IdentityStoreId": "d-1234567890"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "IdentityStoreId": "d-1234567890",
+            "UserId": "5f59f223",
+            "UserName": "bob"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteUser",
+      "input": {
+        "IdentityStoreId": "d-1234567890",
+        "UserId": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteGroup",
+      "input": {
+        "GroupId": "gone",
+        "IdentityStoreId": "d-1234567890"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

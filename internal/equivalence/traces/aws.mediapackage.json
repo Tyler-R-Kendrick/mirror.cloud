@@ -1,0 +1,264 @@
+{
+  "schema": "trace/1",
+  "service": "aws.mediapackage",
+  "source": "pack:internal/services/aws/mediapackage@c2b6df2",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListChannels",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Channels": null
+      }
+    },
+    {
+      "operation": "DescribeChannel",
+      "input": {
+        "Id": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateChannel",
+      "input": {
+        "Id": "chan-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:mediapackage:us-east-1:000000000000:channels/chan-one",
+        "Id": "chan-one"
+      }
+    },
+    {
+      "operation": "DescribeChannel",
+      "input": {
+        "Id": "chan-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:mediapackage:us-east-1:000000000000:channels/chan-one",
+        "Id": "chan-one"
+      }
+    },
+    {
+      "operation": "CreateChannel",
+      "input": {
+        "Id": "chan-two"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:mediapackage:us-east-1:000000000000:channels/chan-two",
+        "Id": "chan-two"
+      }
+    },
+    {
+      "operation": "ListChannels",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Channels": [
+          {
+            "Arn": "arn:aws:mediapackage:us-east-1:000000000000:channels/chan-one",
+            "Id": "chan-one"
+          },
+          {
+            "Arn": "arn:aws:mediapackage:us-east-1:000000000000:channels/chan-two",
+            "Id": "chan-two"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateOriginEndpoint",
+      "input": {
+        "ChannelId": "chan-one",
+        "Id": "ep-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChannelId": "chan-one",
+        "Id": "ep-one",
+        "Url": "https://mediapackage.local/ep-one.m3u8"
+      }
+    },
+    {
+      "operation": "DescribeOriginEndpoint",
+      "input": {
+        "Id": "ep-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChannelId": "chan-one",
+        "Id": "ep-one",
+        "Url": "https://mediapackage.local/ep-one.m3u8"
+      }
+    },
+    {
+      "operation": "DescribeOriginEndpoint",
+      "input": {
+        "Id": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateOriginEndpoint",
+      "input": {
+        "ChannelId": "no-such-channel",
+        "Id": "ep-orphan"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChannelId": "no-such-channel",
+        "Id": "ep-orphan",
+        "Url": "https://mediapackage.local/ep-orphan.m3u8"
+      }
+    },
+    {
+      "operation": "DeleteChannel",
+      "input": {
+        "Id": "chan-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListChannels",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Channels": [
+          {
+            "Arn": "arn:aws:mediapackage:us-east-1:000000000000:channels/chan-two",
+            "Id": "chan-two"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeOriginEndpoint",
+      "input": {
+        "Id": "ep-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ChannelId": "chan-one",
+        "Id": "ep-one",
+        "Url": "https://mediapackage.local/ep-one.m3u8"
+      }
+    },
+    {
+      "operation": "DeleteOriginEndpoint",
+      "input": {
+        "Id": "ep-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteChannel",
+      "input": {
+        "Id": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

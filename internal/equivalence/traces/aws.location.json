@@ -1,0 +1,290 @@
+{
+  "schema": "trace/1",
+  "service": "aws.location",
+  "source": "pack:internal/services/aws/location@c2b6df2",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListPlaceIndexes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Entries": null
+      }
+    },
+    {
+      "operation": "DescribePlaceIndex",
+      "input": {
+        "IndexName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreatePlaceIndex",
+      "input": {
+        "DataSource": "Esri",
+        "IndexName": "ix-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IndexArn": "arn:aws:geo:us-east-1:000000000000:place-index/ix-one",
+        "IndexName": "ix-one"
+      }
+    },
+    {
+      "operation": "DescribePlaceIndex",
+      "input": {
+        "IndexName": "ix-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DataSource": "Esri",
+        "IndexArn": "arn:aws:geo:us-east-1:000000000000:place-index/ix-one",
+        "IndexName": "ix-one"
+      }
+    },
+    {
+      "operation": "CreatePlaceIndex",
+      "input": {
+        "DataSource": "Here",
+        "IndexName": "ix-two"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IndexArn": "arn:aws:geo:us-east-1:000000000000:place-index/ix-two",
+        "IndexName": "ix-two"
+      }
+    },
+    {
+      "operation": "ListPlaceIndexes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Entries": [
+          {
+            "DataSource": "Esri",
+            "IndexArn": "arn:aws:geo:us-east-1:000000000000:place-index/ix-one",
+            "IndexName": "ix-one"
+          },
+          {
+            "DataSource": "Here",
+            "IndexArn": "arn:aws:geo:us-east-1:000000000000:place-index/ix-two",
+            "IndexName": "ix-two"
+          }
+        ]
+      },
+      "superseded": "The pack listed a place index with the IndexArn it stored. A listed entry declares CreateTime, DataSource, Description, IndexName, PricingPlan and UpdateTime -- no IndexArn -- so the listing carried a member no SDK can read. The declared shape outranks the pack's authored behavior, so the bundle projects the listing and this step is compared without its body; DescribePlaceIndex still answers with the ARN."
+    },
+    {
+      "operation": "SearchPlaceIndexForText",
+      "input": {
+        "IndexName": "ix-one",
+        "Text": "1600 Pennsylvania Ave"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Results": [
+          {
+            "Place": {
+              "Geometry": {
+                "Point": [
+                  -122.3,
+                  47.6
+                ]
+              },
+              "Label": "1600 Pennsylvania Ave"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "SearchPlaceIndexForText",
+      "input": {
+        "IndexName": "no-such-index",
+        "Text": "anywhere"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Results": [
+          {
+            "Place": {
+              "Geometry": {
+                "Point": [
+                  -122.3,
+                  47.6
+                ]
+              },
+              "Label": "anywhere"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateGeofenceCollection",
+      "input": {
+        "CollectionName": "fence-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CollectionArn": "arn:aws:geo:us-east-1:000000000000:geofence-collection/fence-one",
+        "CollectionName": "fence-one"
+      }
+    },
+    {
+      "operation": "DescribeGeofenceCollection",
+      "input": {
+        "CollectionName": "fence-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CollectionArn": "arn:aws:geo:us-east-1:000000000000:geofence-collection/fence-one",
+        "CollectionName": "fence-one"
+      }
+    },
+    {
+      "operation": "DescribeGeofenceCollection",
+      "input": {
+        "CollectionName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeletePlaceIndex",
+      "input": {
+        "IndexName": "ix-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListPlaceIndexes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Entries": [
+          {
+            "DataSource": "Here",
+            "IndexArn": "arn:aws:geo:us-east-1:000000000000:place-index/ix-two",
+            "IndexName": "ix-two"
+          }
+        ]
+      },
+      "superseded": "The pack listed a place index with the IndexArn it stored. A listed entry declares CreateTime, DataSource, Description, IndexName, PricingPlan and UpdateTime -- no IndexArn -- so the listing carried a member no SDK can read. The declared shape outranks the pack's authored behavior, so the bundle projects the listing and this step is compared without its body; DescribePlaceIndex still answers with the ARN."
+    },
+    {
+      "operation": "DeleteGeofenceCollection",
+      "input": {
+        "CollectionName": "fence-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeletePlaceIndex",
+      "input": {
+        "IndexName": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

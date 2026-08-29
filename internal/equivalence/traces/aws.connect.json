@@ -1,0 +1,282 @@
+{
+  "schema": "trace/1",
+  "service": "aws.connect",
+  "source": "pack:internal/services/aws/connect@4dea611",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceSummaryList": null
+      }
+    },
+    {
+      "operation": "DescribeInstance",
+      "input": {
+        "InstanceId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateInstance",
+      "input": {
+        "IdentityManagementType": "CONNECT_MANAGED",
+        "InboundCallsEnabled": true,
+        "InstanceAlias": "acme",
+        "OutboundCallsEnabled": true
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Arn": "arn:aws:connect:us-east-1:000000000000:instance/7c589129",
+        "Id": "7c589129"
+      }
+    },
+    {
+      "operation": "DescribeInstance",
+      "input": {
+        "InstanceId": {
+          "$fromPath": "Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Instance": {
+          "Arn": "arn:aws:connect:us-east-1:000000000000:instance/7c589129",
+          "Id": "7c589129",
+          "InstanceAlias": "acme",
+          "InstanceStatus": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "ListInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceSummaryList": [
+          {
+            "Arn": "arn:aws:connect:us-east-1:000000000000:instance/7c589129",
+            "Id": "7c589129",
+            "InstanceAlias": "acme",
+            "InstanceStatus": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateUser",
+      "input": {
+        "InstanceId": "inst-a",
+        "RoutingProfileId": "rp-1",
+        "SecurityProfileIds": [
+          "sp-1"
+        ],
+        "Username": "alice"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserArn": "arn:aws:connect:us-east-1:000000000000:instance/inst-a/agent/5f59f223",
+        "UserId": "5f59f223"
+      }
+    },
+    {
+      "operation": "DescribeUser",
+      "input": {
+        "InstanceId": "inst-a",
+        "UserId": {
+          "$fromPath": "UserId",
+          "$fromStep": 5
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "User": {
+          "Id": "5f59f223",
+          "InstanceId": "inst-a",
+          "Username": "alice"
+        }
+      },
+      "superseded": "The pack answered a user with the InstanceId it stored, on both the describe and the listing. User and UserSummary declare no such member -- the instance is in the request, not the answer -- so it was a member no SDK could read. The declared shapes outrank the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "DescribeUser",
+      "input": {
+        "InstanceId": "inst-a",
+        "UserId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateUser",
+      "input": {
+        "InstanceId": "inst-b",
+        "RoutingProfileId": "rp-1",
+        "SecurityProfileIds": [
+          "sp-1"
+        ],
+        "Username": "bob"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserArn": "arn:aws:connect:us-east-1:000000000000:instance/inst-b/agent/9c8e2cb0",
+        "UserId": "9c8e2cb0"
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "InstanceId": "inst-a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "UserSummaryList": [
+          {
+            "Id": "5f59f223",
+            "InstanceId": "inst-a",
+            "Username": "alice"
+          },
+          {
+            "Id": "9c8e2cb0",
+            "InstanceId": "inst-b",
+            "Username": "bob"
+          }
+        ]
+      },
+      "superseded": "The pack answered a user with the InstanceId it stored, on both the describe and the listing. User and UserSummary declare no such member -- the instance is in the request, not the answer -- so it was a member no SDK could read. The declared shapes outrank the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "DeleteInstance",
+      "input": {
+        "InstanceId": {
+          "$fromPath": "Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "InstanceSummaryList": null
+      }
+    },
+    {
+      "operation": "DeleteUser",
+      "input": {
+        "InstanceId": "inst-a",
+        "UserId": {
+          "$fromPath": "UserId",
+          "$fromStep": 5
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteUser",
+      "input": {
+        "InstanceId": "inst-a",
+        "UserId": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

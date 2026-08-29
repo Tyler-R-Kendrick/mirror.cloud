@@ -1,0 +1,317 @@
+{
+  "schema": "trace/1",
+  "service": "aws.healthlake",
+  "source": "pack:internal/services/aws/healthlake@4dea611",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListFHIRDatastores",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DatastorePropertiesList": null
+      }
+    },
+    {
+      "operation": "DescribeFHIRDatastore",
+      "input": {
+        "DatastoreId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateFHIRDatastore",
+      "input": {
+        "DatastoreName": "clinic",
+        "DatastoreTypeVersion": "R4"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DatastoreArn": "arn:aws:healthlake:us-east-1:000000000000:datastore/fhir/7c589129",
+        "DatastoreId": "7c589129",
+        "DatastoreStatus": "ACTIVE"
+      }
+    },
+    {
+      "operation": "DescribeFHIRDatastore",
+      "input": {
+        "DatastoreId": {
+          "$fromPath": "DatastoreId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DatastoreProperties": {
+          "DatastoreArn": "arn:aws:healthlake:us-east-1:000000000000:datastore/fhir/7c589129",
+          "DatastoreId": "7c589129",
+          "DatastoreName": "clinic",
+          "DatastoreStatus": "ACTIVE",
+          "DatastoreTypeVersion": "R4"
+        }
+      }
+    },
+    {
+      "operation": "CreateFHIRDatastore",
+      "input": {
+        "DatastoreName": "lab",
+        "DatastoreTypeVersion": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DatastoreArn": "arn:aws:healthlake:us-east-1:000000000000:datastore/fhir/5f59f223",
+        "DatastoreId": "5f59f223",
+        "DatastoreStatus": "ACTIVE"
+      }
+    },
+    {
+      "operation": "ListFHIRDatastores",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DatastorePropertiesList": [
+          {
+            "DatastoreArn": "arn:aws:healthlake:us-east-1:000000000000:datastore/fhir/5f59f223",
+            "DatastoreId": "5f59f223",
+            "DatastoreName": "lab",
+            "DatastoreStatus": "ACTIVE",
+            "DatastoreTypeVersion": "R4"
+          },
+          {
+            "DatastoreArn": "arn:aws:healthlake:us-east-1:000000000000:datastore/fhir/7c589129",
+            "DatastoreId": "7c589129",
+            "DatastoreName": "clinic",
+            "DatastoreStatus": "ACTIVE",
+            "DatastoreTypeVersion": "R4"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StartFHIRImportJob",
+      "input": {
+        "DataAccessRoleArn": "arn:aws:iam::000000000000:role/healthlake",
+        "DatastoreId": {
+          "$fromPath": "DatastoreId",
+          "$fromStep": 2
+        },
+        "InputDataConfig": {
+          "S3Uri": "s3://bucket/in"
+        },
+        "JobName": "load-one",
+        "JobOutputDataConfig": {
+          "S3Configuration": {
+            "KmsKeyId": "k",
+            "S3Uri": "s3://bucket/out"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobId": "9c8e2cb0",
+        "JobStatus": "COMPLETED"
+      }
+    },
+    {
+      "operation": "DescribeFHIRImportJob",
+      "input": {
+        "DatastoreId": {
+          "$fromPath": "DatastoreId",
+          "$fromStep": 2
+        },
+        "JobId": {
+          "$fromPath": "JobId",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ImportJobProperties": {
+          "DatastoreId": "7c589129",
+          "JobId": "9c8e2cb0",
+          "JobName": "load-one",
+          "JobStatus": "COMPLETED"
+        }
+      }
+    },
+    {
+      "operation": "DescribeFHIRImportJob",
+      "input": {
+        "DatastoreId": "no-such-datastore",
+        "JobId": {
+          "$fromPath": "JobId",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ImportJobProperties": {
+          "DatastoreId": "7c589129",
+          "JobId": "9c8e2cb0",
+          "JobName": "load-one",
+          "JobStatus": "COMPLETED"
+        }
+      }
+    },
+    {
+      "operation": "DescribeFHIRImportJob",
+      "input": {
+        "DatastoreId": {
+          "$fromPath": "DatastoreId",
+          "$fromStep": 2
+        },
+        "JobId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteFHIRDatastore",
+      "input": {
+        "DatastoreId": {
+          "$fromPath": "DatastoreId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListFHIRDatastores",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DatastorePropertiesList": [
+          {
+            "DatastoreArn": "arn:aws:healthlake:us-east-1:000000000000:datastore/fhir/5f59f223",
+            "DatastoreId": "5f59f223",
+            "DatastoreName": "lab",
+            "DatastoreStatus": "ACTIVE",
+            "DatastoreTypeVersion": "R4"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeFHIRImportJob",
+      "input": {
+        "DatastoreId": {
+          "$fromPath": "DatastoreId",
+          "$fromStep": 2
+        },
+        "JobId": {
+          "$fromPath": "JobId",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ImportJobProperties": {
+          "DatastoreId": "7c589129",
+          "JobId": "9c8e2cb0",
+          "JobName": "load-one",
+          "JobStatus": "COMPLETED"
+        }
+      }
+    },
+    {
+      "operation": "DeleteFHIRDatastore",
+      "input": {
+        "DatastoreId": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

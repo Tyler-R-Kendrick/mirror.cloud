@@ -1,0 +1,128 @@
+schema: bir/1
+service: aws.connect
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No contact centre exists: an instance is ACTIVE the moment it is
+# created and a user is a name inside it, with no phone or routing profile.
+provenance: authored
+
+resources:
+  instance:
+    collection: cninst
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [InstanceId, Id]
+    arn: "arn:{partition}:connect:{region}:{account}:instance/{id}"
+    record:
+      Id: id
+      Arn: arn
+      InstanceAlias: "'InstanceAlias' in input ? string(input.InstanceAlias) : ''"
+      InstanceStatus: "'ACTIVE'"
+
+  # A user belongs to an instance and is addressed by both ids together,
+  # which is how the pack keyed it.
+  user:
+    collection: cnuser
+    id:
+      derive: >
+        'UserId' in input
+          ? string(input.InstanceId) + '/' + string(input.UserId)
+          : string(input.InstanceId)
+    record: {}
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateInstance:
+    effects:
+      - create: { resource: instance }
+    output:
+      Id: rec.Id
+      Arn: rec.Arn
+
+  DescribeInstance:
+    reads:
+      inst: { resource: instance }
+    require:
+      - { cond: inst_found, error: NotFound }
+    output:
+      Instance: inst
+
+  ListInstances:
+    list: { resource: instance, member: InstanceSummaryList, paginate: model }
+
+  DeleteInstance:
+    effects:
+      - delete: { resource: instance, missing: ignore }
+
+  # The user's own id is generated, so the key it is filed under is the
+  # instance id joined to it, built in the effect where both are known.
+  CreateUser:
+    effects:
+      - generate: { bind: uid, kind: hex, bytes: 8 }
+      - put:
+          resource: user
+          key: "string(input.InstanceId) + '/' + fx.uid"
+          record:
+            Id: fx.uid
+            Username: "'Username' in input ? string(input.Username) : ''"
+            InstanceId: "string(input.InstanceId)"
+    output:
+      UserId: fx.uid
+      UserArn: >
+        'arn:aws:connect:' + identity.region + ':' + identity.account
+        + ':instance/' + string(input.InstanceId) + '/agent/' + fx.uid
+
+  # User declares no InstanceId: the instance is in the request, not the
+  # answer.
+  DescribeUser:
+    reads:
+      u: { resource: user }
+    require:
+      - { cond: u_found, error: NotFound }
+    output:
+      User: "{'Id': u.Id, 'Username': u.Username}"
+
+  # A listed user declares Arn, Id, Username and the last-modified members,
+  # and no InstanceId, so the listed form is not the stored record.
+  ListUsers:
+    list: { resource: user, member: UserSummaryList, paginate: model }
+    output:
+      UserSummaryList: >
+        items.map(u, {'Id': u.Id, 'Username': u.Username})
+
+  DeleteUser:
+    effects:
+      - delete: { resource: user, missing: ignore }
+
+quirks:
+  - operation: DescribeUser
+    note: >
+      The pack answered a user with the InstanceId it stored, on both the
+      describe and the listing. User and UserSummary declare no such member --
+      the instance is in the request -- so it was a member no SDK could read.
+      The declared shapes outrank the pack's authored behavior, so it is
+      dropped from both and the recorded steps are superseded with that
+      reason.
+  - operation: ListUsers
+    note: >
+      InstanceId is required and does not narrow the listing: users are keyed
+      by instance and user id together, but the listing walks the whole
+      collection, so listing one instance's users answers with every user in
+      the account.
+  - operation: CreateUser
+    note: >
+      RoutingProfileId and SecurityProfileIds are required by the model and
+      neither is stored, so a user cannot take a contact: no phone config, no
+      routing profile, no security profile. The UserArn answered with is built
+      from the request rather than stored, so it is not read back by anything.
+  - operation: CreateInstance
+    note: >
+      IdentityManagementType, InboundCallsEnabled and OutboundCallsEnabled are
+      required and none is stored, so an instance reports none of them when
+      described. It is ACTIVE at once, nothing observes CREATION_IN_PROGRESS,
+      and deleting an instance leaves its users behind.

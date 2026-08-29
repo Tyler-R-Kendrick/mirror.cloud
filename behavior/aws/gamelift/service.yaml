@@ -1,0 +1,113 @@
+schema: bir/1
+service: aws.gamelift
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No server runs: a fleet, a game session and a player session are
+# records that are created and read back.
+provenance: authored
+
+resources:
+  fleet:
+    collection: glfleet
+    # The identifier the service issues carries a fleet- prefix, so the record
+    # member rather than the raw generated id is the store key.
+    key: FleetId
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      FleetId: "'fleet-' + id"
+      Name: "'Name' in input ? string(input.Name) : ''"
+      Status: "'ACTIVE'"
+      BuildId: "'BuildId' in input ? string(input.BuildId) : ''"
+
+  gamesession:
+    collection: glsess
+    key: GameSessionId
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      GameSessionId: "'gsess-' + id"
+      FleetId: "'FleetId' in input ? string(input.FleetId) : ''"
+      Status: "'ACTIVE'"
+      Name: "'Name' in input ? string(input.Name) : ''"
+
+  playersession:
+    collection: glps
+    key: PlayerSessionId
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      PlayerSessionId: "'psess-' + id"
+      GameSessionId: "'GameSessionId' in input ? string(input.GameSessionId) : ''"
+      PlayerId: "'PlayerId' in input ? string(input.PlayerId) : ''"
+      Status: "'RESERVED'"
+
+operations:
+  CreateFleet:
+    effects:
+      - create: { resource: fleet }
+    output:
+      FleetAttributes: rec
+
+  # Describe-one-or-describe-all: a FleetId narrows to that fleet, and an
+  # absent one answers with an empty list rather than a fault.
+  DescribeFleetAttributes:
+    list:
+      resource: fleet
+      member: FleetAttributes
+      paginate: model
+      key: "'FleetId' in input ? string(input.FleetId) : ''"
+
+  # FleetIds is a list of identifiers, not of fleets.
+  ListFleets:
+    list: { resource: fleet, member: FleetIds, paginate: model }
+    output:
+      FleetIds: "items.map(f, string(f.FleetId))"
+
+  DeleteFleet:
+    effects:
+      - delete: { resource: fleet, key: "string(input.FleetId)", missing: ignore }
+
+  CreateGameSession:
+    effects:
+      - create: { resource: gamesession }
+    output:
+      GameSession: rec
+
+  DescribeGameSessions:
+    list:
+      resource: gamesession
+      member: GameSessions
+      paginate: model
+      key: "'GameSessionId' in input ? string(input.GameSessionId) : ''"
+
+  CreatePlayerSession:
+    effects:
+      - create: { resource: playersession }
+    output:
+      PlayerSession: rec
+
+quirks:
+  - operation: CreateGameSession
+    note: >
+      MaximumPlayerSessionCount is required by the model and is not stored, so
+      a game session has no capacity and CurrentPlayerSessionCount is never
+      set: creating player sessions never fills a game session and nothing is
+      ever refused for being full.
+  - operation: CreatePlayerSession
+    note: >
+      Nothing checks that the game session a player session names exists, and
+      a player session is RESERVED for ever: there is no operation here that
+      accepts or times one out. There is no DescribePlayerSessions either, so
+      a player session is written and never read back.
+  - operation: CreateFleet
+    note: >
+      A fleet is ACTIVE at once, so nothing observes NEW, BUILDING or
+      ACTIVATING, and it has no FleetArn, InstanceType, ComputeType or
+      OperatingSystem -- all declared. Nothing relates a game session to a
+      fleet beyond storing the FleetId it was given, which is not checked.
+  - operation: DeleteFleet
+    note: >
+      Deleting a fleet leaves its game sessions behind, and deleting an absent
+      fleet succeeds. The real service refuses to delete a fleet with active
+      sessions.

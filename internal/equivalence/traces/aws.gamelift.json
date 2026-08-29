@@ -1,0 +1,309 @@
+{
+  "schema": "trace/1",
+  "service": "aws.gamelift",
+  "source": "pack:internal/services/aws/gamelift@4dea611",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListFleets",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FleetIds": null
+      }
+    },
+    {
+      "operation": "DescribeFleetAttributes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FleetAttributes": null
+      }
+    },
+    {
+      "operation": "CreateFleet",
+      "input": {
+        "BuildId": "build-1",
+        "Name": "fleet-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FleetAttributes": {
+          "BuildId": "build-1",
+          "FleetId": "fleet-7c589129",
+          "Name": "fleet-one",
+          "Status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeFleetAttributes",
+      "input": {
+        "FleetId": {
+          "$fromPath": "FleetAttributes.FleetId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FleetAttributes": [
+          {
+            "BuildId": "build-1",
+            "FleetId": "fleet-7c589129",
+            "Name": "fleet-one",
+            "Status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeFleetAttributes",
+      "input": {
+        "FleetId": "fleet-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FleetAttributes": []
+      }
+    },
+    {
+      "operation": "CreateFleet",
+      "input": {
+        "BuildId": "build-2",
+        "Name": "fleet-two"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FleetAttributes": {
+          "BuildId": "build-2",
+          "FleetId": "fleet-5f59f223",
+          "Name": "fleet-two",
+          "Status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "ListFleets",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FleetIds": [
+          "fleet-5f59f223",
+          "fleet-7c589129"
+        ]
+      }
+    },
+    {
+      "operation": "CreateGameSession",
+      "input": {
+        "FleetId": {
+          "$fromPath": "FleetAttributes.FleetId",
+          "$fromStep": 2
+        },
+        "MaximumPlayerSessionCount": 8,
+        "Name": "session-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GameSession": {
+          "FleetId": "fleet-7c589129",
+          "GameSessionId": "gsess-9c8e2cb0",
+          "Name": "session-one",
+          "Status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeGameSessions",
+      "input": {
+        "GameSessionId": {
+          "$fromPath": "GameSession.GameSessionId",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GameSessions": [
+          {
+            "FleetId": "fleet-7c589129",
+            "GameSessionId": "gsess-9c8e2cb0",
+            "Name": "session-one",
+            "Status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreatePlayerSession",
+      "input": {
+        "GameSessionId": {
+          "$fromPath": "GameSession.GameSessionId",
+          "$fromStep": 7
+        },
+        "PlayerId": "player-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PlayerSession": {
+          "GameSessionId": "gsess-9c8e2cb0",
+          "PlayerId": "player-1",
+          "PlayerSessionId": "psess-33f6fc5d",
+          "Status": "RESERVED"
+        }
+      }
+    },
+    {
+      "operation": "CreatePlayerSession",
+      "input": {
+        "GameSessionId": "gsess-absent",
+        "PlayerId": "player-2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PlayerSession": {
+          "GameSessionId": "gsess-absent",
+          "PlayerId": "player-2",
+          "PlayerSessionId": "psess-83d4958a",
+          "Status": "RESERVED"
+        }
+      }
+    },
+    {
+      "operation": "DeleteFleet",
+      "input": {
+        "FleetId": {
+          "$fromPath": "FleetAttributes.FleetId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListFleets",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FleetIds": [
+          "fleet-5f59f223"
+        ]
+      }
+    },
+    {
+      "operation": "DescribeGameSessions",
+      "input": {
+        "GameSessionId": {
+          "$fromPath": "GameSession.GameSessionId",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "GameSessions": [
+          {
+            "FleetId": "fleet-7c589129",
+            "GameSessionId": "gsess-9c8e2cb0",
+            "Name": "session-one",
+            "Status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteFleet",
+      "input": {
+        "FleetId": "fleet-gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

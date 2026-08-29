@@ -566,6 +566,9 @@ func TestBucketNotificationRestoreAndACLEvents(t *testing.T) {
 	if events["ObjectAcl:Put"]["eventVersion"] != "2.3" {
 		t.Fatalf("ACL event = %#v", events["ObjectAcl:Put"])
 	}
+	if events["ObjectRestore:Post"]["eventTime"].(string) >= events["ObjectRestore:Completed"]["eventTime"].(string) {
+		t.Fatalf("restore event ordering = %#v", events)
+	}
 }
 
 func TestCreateBucketObjectOwnership(t *testing.T) {
@@ -983,7 +986,7 @@ func TestBucketNotificationConfigurationCharacterization(t *testing.T) {
 	configuration := map[string]any{"QueueConfigurations": []any{map[string]any{"Id": "images", "QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue", "Events": []any{"s3:ObjectCreated:*"}, "Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{map[string]any{"Name": "prefix", "Value": "images/"}}}}}}}
 	put := mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": configuration}, nil)
 	after := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil)
-	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": input["Bucket"], "Key": "images/photo.jpg"}, []byte("photo"))
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": input["Bucket"], "Key": "images/a+b c.jpg"}, []byte("photo"))
 	messages, _, err := deps.Store.Scope(ident().Account, ident().Region).Collection("msgs:queue").List(context.Background(), "", "", 0)
 	if err != nil {
 		t.Fatal(err)

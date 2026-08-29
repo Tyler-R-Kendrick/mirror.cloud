@@ -3772,7 +3772,7 @@ func notificationTargetIdentity(identity spi.Identity, arn string) spi.Identity 
 }
 
 func (p *Pack) notificationPayload(req *spi.Request, bucket, key, event, configurationID string, meta map[string]any) []byte {
-	object := map[string]any{"key": strings.ReplaceAll(url.PathEscape(key), "%2F", "/"), "sequencer": "0055AED6DCD90281E5"}
+	object := map[string]any{"key": notificationKey(key), "sequencer": "0055AED6DCD90281E5"}
 	if version := str(meta["versionId"]); version != "" && version != "null" {
 		object["versionId"] = version
 	}
@@ -3786,9 +3786,13 @@ func (p *Pack) notificationPayload(req *spi.Request, bucket, key, event, configu
 		object["eTag"] = strings.Trim(str(meta["etag"]), `"`)
 		delete(object, "sequencer")
 	}
+	eventTime := p.deps.Clock.Now().UTC()
+	if strings.HasSuffix(event, "ObjectRestore:Completed") {
+		eventTime = eventTime.Add(500 * time.Millisecond)
+	}
 	record := map[string]any{
 		"eventVersion": eventVersion, "eventSource": "aws:s3", "awsRegion": req.Identity.Region,
-		"eventTime": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z"), "eventName": event,
+		"eventTime": eventTime.Format("2006-01-02T15:04:05.000Z"), "eventName": event,
 		"userIdentity":      map[string]any{"principalId": "AIDAJDPLRKLG7UEXAMPLE"},
 		"requestParameters": map[string]any{"sourceIPAddress": "127.0.0.1"},
 		"responseElements":  map[string]any{"x-amz-request-id": "mirror", "x-amz-id-2": "mirror"},
@@ -3809,7 +3813,7 @@ func (p *Pack) notificationPayload(req *spi.Request, bucket, key, event, configu
 
 func (p *Pack) eventBridgeEntry(req *spi.Request, bucket, key, event string, meta map[string]any) map[string]any {
 	object := map[string]any{
-		"key": strings.ReplaceAll(url.PathEscape(key), "%2F", "/"), "size": asInt(meta["size"]),
+		"key": notificationKey(key), "size": asInt(meta["size"]),
 		"etag": strings.Trim(str(meta["etag"]), `"`), "sequencer": "0062E99A88DC407460",
 	}
 	if version := str(meta["versionId"]); version != "" && version != "null" {
@@ -3860,10 +3864,18 @@ func (p *Pack) eventBridgeEntry(req *spi.Request, bucket, key, event string, met
 		delete(object, "sequencer")
 	}
 	detailJSON, _ := json.Marshal(detail)
+	eventTime := p.deps.Clock.Now().UTC()
+	if strings.HasSuffix(event, "ObjectRestore:Completed") {
+		eventTime = eventTime.Add(time.Second)
+	}
 	return map[string]any{
 		"Source": "aws.s3", "Resources": []any{"arn:aws:s3:::" + bucket},
-		"Time": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), "DetailType": detailType, "Detail": string(detailJSON),
+		"Time": eventTime.Format(time.RFC3339Nano), "DetailType": detailType, "Detail": string(detailJSON),
 	}
+}
+
+func notificationKey(key string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(url.QueryEscape(key), "+", "%20"), "%2F", "/")
 }
 
 func notificationMatches(configuration map[string]any, key, event string) bool {

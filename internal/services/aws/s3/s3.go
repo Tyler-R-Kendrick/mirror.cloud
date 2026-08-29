@@ -30,6 +30,7 @@ import (
 	"github.com/cespare/xxhash/v2"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/zeebo/xxh3"
 )
@@ -3040,6 +3041,9 @@ func (p *Pack) prepareNotificationConfiguration(ctx context.Context, req *spi.Re
 					collection, missing = "topics", "The destination topic does not exist"
 				case "lambda":
 					collection, missing = "lambda", "The destination Lambda does not exist"
+					if _, resource, found := strings.Cut(arn, ":function:"); found {
+						name, _, _ = strings.Cut(resource, ":")
+					}
 				}
 				if _, exists, _ := p.deps.Store.Scope(arnParts[4], arnParts[3]).Collection(collection).Get(ctx, name); !exists {
 					return nil, &spi.Fault{Code: "InvalidArgument", Message: "Unable to validate the following destination configurations", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": arn, "ArgumentValue": missing}}
@@ -3673,6 +3677,22 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 			continue
 		}
 		_ = p.deps.Bus.Publish(ctx, "sns:"+arn, payload)
+	}
+	for _, dest := range asSlice(cfg["LambdaFunctionConfigurations"]) {
+		configuration := asMap(dest)
+		if !notificationMatches(configuration, key, event) {
+			continue
+		}
+		arn := str(configuration["LambdaFunctionArn"])
+		_, name, found := strings.Cut(arn, ":function:")
+		if !found {
+			continue
+		}
+		name, _, _ = strings.Cut(name, ":")
+		_, _ = lambda.New(p.deps).Invoke(ctx, &spi.Request{
+			Identity: req.Identity, Operation: "Invoke", Body: io.NopCloser(bytes.NewReader(payload)),
+			Input: map[string]any{"FunctionName": name, "InvocationType": "Event"},
+		})
 	}
 }
 

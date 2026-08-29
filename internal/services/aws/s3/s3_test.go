@@ -19,6 +19,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"os/exec"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -28,6 +30,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bus"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -375,6 +378,46 @@ func TestBucketNotificationRemovalAndTaggingEvents(t *testing.T) {
 	want := map[string]int{"ObjectRemoved:Delete": 2, "ObjectRemoved:DeleteMarkerCreated": 1, "ObjectTagging:Put": 1, "ObjectTagging:Delete": 1}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("notification events = %#v, want %#v", events, want)
+	}
+}
+
+func TestBucketNotificationLambdaDelivery(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	deps := spitest.Deps(t)
+	ctx := context.Background()
+	id := ident()
+	path := t.TempDir() + "/event.json"
+	source := "import json\n\ndef lambda_handler(event, context):\n    open(" + strconv.Quote(path) + ", 'w').write(json.dumps(event))\n"
+	if _, err := lambda.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+		"FunctionName": "handler", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
+		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(source))},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	p := s3.New(deps)
+	bucket := "notification-lambda"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	arn := "arn:aws:lambda:us-east-1:123456789012:function:handler:live"
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{
+		"Bucket": bucket,
+		"NotificationConfiguration": map[string]any{"LambdaFunctionConfigurations": []any{map[string]any{
+			"LambdaFunctionArn": arn, "Events": []any{"s3:ObjectCreated:Put"},
+		}}},
+	}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "created"}, []byte("created"))
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	record := asMapForTest(asSliceForTest(payload["Records"])[0])
+	if record["eventName"] != "ObjectCreated:Put" || asMapForTest(asMapForTest(record["s3"])["object"])["key"] != "created" {
+		t.Fatalf("lambda notification = %#v", payload)
 	}
 }
 

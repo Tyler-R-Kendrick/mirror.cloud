@@ -1,0 +1,123 @@
+schema: bir/1
+service: aws.storagegateway
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is activated and nothing is mounted: a gateway and a file
+# share are records that are stored, listed and deleted.
+provenance: authored
+
+resources:
+  gateway:
+    collection: sgw
+    # The ARN is the identifier a caller addresses the gateway by, so it is
+    # also the store key.
+    key: GatewayARN
+    id:
+      generate: { kind: hex, bytes: 8 }
+    arn: "arn:{partition}:storagegateway:{region}:{account}:gateway/sgw-{id}"
+    record:
+      GatewayARN: arn
+      GatewayName: "'GatewayName' in input ? string(input.GatewayName) : ''"
+      GatewayType: "'GatewayType' in input ? string(input.GatewayType) : ''"
+      GatewayState: "'RUNNING'"
+
+  share:
+    collection: sgwshare
+    key: FileShareARN
+    id:
+      generate: { kind: hex, bytes: 8 }
+    arn: "arn:{partition}:storagegateway:{region}:{account}:share/share-{id}"
+    record:
+      FileShareARN: arn
+      GatewayARN: "'GatewayARN' in input ? string(input.GatewayARN) : ''"
+      LocationARN: "'LocationARN' in input ? string(input.LocationARN) : ''"
+      FileShareStatus: "'AVAILABLE'"
+
+errors:
+  InvalidGatewayRequest:
+    code: InvalidGatewayRequestException
+    http: 400
+    fault: client
+
+operations:
+  ActivateGateway:
+    effects:
+      - create: { resource: gateway }
+    output:
+      GatewayARN: rec.GatewayARN
+
+  DescribeGatewayInformation:
+    reads:
+      gw: { resource: gateway, key: "string(input.GatewayARN)" }
+    require:
+      - { cond: gw_found, error: InvalidGatewayRequest }
+    output:
+      GatewayARN: gw.GatewayARN
+      GatewayName: gw.GatewayName
+      GatewayType: gw.GatewayType
+      GatewayState: gw.GatewayState
+
+  # GatewayInfo declares GatewayOperationalState, not GatewayState, so the
+  # listed form of a gateway is not the stored record.
+  ListGateways:
+    list: { resource: gateway, member: Gateways, paginate: model }
+    output:
+      Gateways: >
+        items.map(g, {
+          'GatewayARN': g.GatewayARN,
+          'GatewayName': g.GatewayName,
+          'GatewayType': g.GatewayType,
+          'GatewayOperationalState': g.GatewayState
+        })
+
+  # Answers with nothing where the model declares an optional GatewayARN. The
+  # pack did that, and DeleteFileShare beside it echoes its ARN back, so the
+  # two disagree; both are valid against the model, and picking one would be a
+  # behavior change rather than a transcription.
+  DeleteGateway:
+    effects:
+      - delete: { resource: gateway, key: "string(input.GatewayARN)", missing: ignore }
+    output: {}
+
+  CreateNFSFileShare:
+    effects:
+      - create: { resource: share }
+    output:
+      FileShareARN: rec.FileShareARN
+
+  # Every share is listed, whatever ARNs were asked for. The pack ignored the
+  # list it was given and this transcribes that.
+  DescribeNFSFileShares:
+    list: { resource: share, member: NFSFileShareInfoList }
+
+  DeleteFileShare:
+    effects:
+      - delete: { resource: share, key: "string(input.FileShareARN)", missing: ignore }
+    output:
+      FileShareARN: "string(input.FileShareARN)"
+
+quirks:
+  - operation: ActivateGateway
+    note: >
+      ActivationKey, GatewayRegion and GatewayTimezone are required by the
+      model and were neither read nor stored by the pack. The engine now
+      rejects a request that omits them, which the pack accepted. They are
+      still not stored: keeping a member nothing answers with would be
+      inventing behavior rather than transcribing it.
+  - operation: ListGateways
+    note: >
+      A listed gateway reports its state as GatewayOperationalState, because
+      that is what GatewayInfo declares; the same gateway reports GatewayState
+      when described, because that is what DescribeGatewayInformation declares.
+      The pack emitted GatewayState in both, so the listing carried a member no
+      SDK could read, and the recorded step is superseded with that reason.
+  - operation: DescribeNFSFileShares
+    note: >
+      FileShareARNList is required and ignored: every share in the account and
+      region is answered for, not the ones asked about. That is the pack's
+      behavior. Filtering to the requested ARNs is a small change once a probe
+      says what the real service does with an ARN that does not exist.
+  - operation: DeleteGateway
+    note: >
+      Deleting an absent gateway or share succeeds and echoes back the ARN it
+      was given. The real service faults, and that is a probe away.

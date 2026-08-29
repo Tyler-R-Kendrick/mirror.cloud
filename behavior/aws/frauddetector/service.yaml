@@ -1,0 +1,89 @@
+schema: bir/1
+service: aws.frauddetector
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing here detects fraud: a detector and an event type are records
+# that are stored and read back, and no event is ever evaluated against one.
+provenance: authored
+
+missing_input_error: Validation
+
+resources:
+  detector:
+    collection: fddet
+    id:
+      input_members: [detectorId]
+    record:
+      detectorId: id
+      eventTypeName: "'eventTypeName' in input ? string(input.eventTypeName) : ''"
+
+  eventtype:
+    collection: fdet
+    id:
+      input_members: [name]
+    record:
+      name: id
+      eventVariables: "'eventVariables' in input ? input.eventVariables : []"
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+
+operations:
+  PutDetector:
+    require:
+      - { cond: "string(input.detectorId) != ''", error: Validation }
+    effects:
+      - put: { resource: detector }
+    output: {}
+
+  # Describe-one-or-describe-all: a detectorId narrows to that record, and an
+  # absent one answers with an empty list rather than a fault, which is what
+  # the pack did.
+  GetDetectors:
+    list: { resource: detector, member: detectors, paginate: model, key: "'detectorId' in input ? string(input.detectorId) : ''" }
+
+  DeleteDetector:
+    effects:
+      - delete: { resource: detector, missing: ignore }
+    output: {}
+
+  PutEventType:
+    effects:
+      - put: { resource: eventtype }
+    output: {}
+
+  GetEventTypes:
+    list: { resource: eventtype, member: eventTypes, paginate: model, key: "'name' in input ? string(input.name) : ''" }
+
+  DeleteEventType:
+    effects:
+      - delete: { resource: eventtype, missing: ignore }
+    output: {}
+
+quirks:
+  - operation: PutDetector
+    note: >
+      The pack stored a status of ACTIVE on every detector. The model declares
+      Detector as description, detectorId, eventTypeName, lastUpdatedTime, arn
+      and createdTime -- there is no status member, so it was a field no SDK
+      could read. The declared shape outranks the pack's authored behavior, so
+      it is dropped and the recorded GetDetectors step is superseded with that
+      reason.
+  - operation: PutEventType
+    note: >
+      entityTypes is required by the model and was neither read nor stored by
+      the pack. The engine now rejects a request that omits it, which the pack
+      accepted; it is still not stored, because storing a member nothing reads
+      back would be inventing behavior rather than transcribing it.
+  - operation: DeleteDetector
+    note: >
+      Deleting an absent detector succeeds. The real service answers with a
+      ResourceNotFoundException, and that is a probe away from being settled.
+  - operation: GetDetectors
+    note: >
+      Neither detectors nor event types carry arn, createdTime or
+      lastUpdatedTime: the pack never set them, and deriving a timestamp here
+      would put an invented value where a probe should put a real one.

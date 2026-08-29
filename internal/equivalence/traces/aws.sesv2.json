@@ -1,0 +1,256 @@
+{
+  "schema": "trace/1",
+  "service": "aws.sesv2",
+  "source": "pack:internal/services/aws/sesv2@f910980",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListEmailIdentities",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EmailIdentities": null
+      }
+    },
+    {
+      "operation": "GetEmailIdentity",
+      "input": {
+        "EmailIdentity": "absent@example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateEmailIdentity",
+      "input": {
+        "EmailIdentity": "a@example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EmailIdentity": "a@example.com",
+        "IdentityType": "EMAIL_ADDRESS",
+        "VerifiedForSendingStatus": true
+      },
+      "superseded": "The pack answered with the record it stored, which carried EmailIdentity and VerifiedForSendingStatus. The model names those IdentityName and SendingEnabled inside IdentityInfo, and declares no EmailIdentity member on this answer at all, so the pack's answer carried members no SDK could read. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "GetEmailIdentity",
+      "input": {
+        "EmailIdentity": "a@example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EmailIdentity": "a@example.com",
+        "IdentityType": "EMAIL_ADDRESS",
+        "VerifiedForSendingStatus": true
+      },
+      "superseded": "The pack answered with the record it stored, which carried EmailIdentity and VerifiedForSendingStatus. The model names those IdentityName and SendingEnabled inside IdentityInfo, and declares no EmailIdentity member on this answer at all, so the pack's answer carried members no SDK could read. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "CreateEmailIdentity",
+      "input": {
+        "EmailIdentity": "b@example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EmailIdentity": "b@example.com",
+        "IdentityType": "EMAIL_ADDRESS",
+        "VerifiedForSendingStatus": true
+      },
+      "superseded": "The pack answered with the record it stored, which carried EmailIdentity and VerifiedForSendingStatus. The model names those IdentityName and SendingEnabled inside IdentityInfo, and declares no EmailIdentity member on this answer at all, so the pack's answer carried members no SDK could read. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "ListEmailIdentities",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EmailIdentities": [
+          {
+            "EmailIdentity": "a@example.com",
+            "IdentityType": "EMAIL_ADDRESS",
+            "VerifiedForSendingStatus": true
+          },
+          {
+            "EmailIdentity": "b@example.com",
+            "IdentityType": "EMAIL_ADDRESS",
+            "VerifiedForSendingStatus": true
+          }
+        ]
+      },
+      "superseded": "The pack answered with the record it stored, which carried EmailIdentity and VerifiedForSendingStatus. The model names those IdentityName and SendingEnabled inside IdentityInfo, and declares no EmailIdentity member on this answer at all, so the pack's answer carried members no SDK could read. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "SendEmail",
+      "input": {
+        "Content": {
+          "Simple": {
+            "Body": {
+              "Text": {
+                "Data": "body"
+              }
+            },
+            "Subject": {
+              "Data": "hello"
+            }
+          }
+        },
+        "Destination": {
+          "ToAddresses": [
+            "to@example.com"
+          ]
+        },
+        "FromEmailAddress": "a@example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MessageId": "7c5891299f6489f8"
+      }
+    },
+    {
+      "operation": "SendBulkEmail",
+      "input": {
+        "BulkEmailEntries": [
+          {
+            "Destination": {
+              "ToAddresses": [
+                "one@example.com"
+              ]
+            }
+          },
+          {
+            "Destination": {
+              "ToAddresses": [
+                "two@example.com"
+              ]
+            }
+          }
+        ],
+        "DefaultContent": {
+          "Template": {
+            "TemplateName": "t"
+          }
+        },
+        "FromEmailAddress": "a@example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "MessageId": "5f59f223d7974d14"
+      },
+      "superseded": "The pack served SendBulkEmail with the same code as SendEmail and answered with a MessageId. SendBulkEmail declares no MessageId member and does declare a required BulkEmailEntryResults, so the pack's answer was unreadable and its required member absent. The bundle answers one result per entry, so this step is compared without its body."
+    },
+    {
+      "operation": "GetAccount",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProductionAccessEnabled": true,
+        "SendingEnabled": true
+      }
+    },
+    {
+      "operation": "DeleteEmailIdentity",
+      "input": {
+        "EmailIdentity": "a@example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListEmailIdentities",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EmailIdentities": [
+          {
+            "EmailIdentity": "b@example.com",
+            "IdentityType": "EMAIL_ADDRESS",
+            "VerifiedForSendingStatus": true
+          }
+        ]
+      },
+      "superseded": "The pack answered with the record it stored, which carried EmailIdentity and VerifiedForSendingStatus. The model names those IdentityName and SendingEnabled inside IdentityInfo, and declares no EmailIdentity member on this answer at all, so the pack's answer carried members no SDK could read. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "DeleteEmailIdentity",
+      "input": {
+        "EmailIdentity": "gone@example.com"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

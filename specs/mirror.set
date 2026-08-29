@@ -30,7 +30,7 @@ aws.route53 mock
 aws.acm mock
 aws.elbv2 mock
 aws.autoscaling mock
-aws.applicationautoscaling mock
+aws.application-autoscaling mock
 aws.resourcegroupstaggingapi mock
 aws.ec2 emulate
 aws.ses emulate

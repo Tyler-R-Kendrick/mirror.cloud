@@ -85,7 +85,7 @@
       "ingested": "2026-08-28T18:51:00Z"
     },
     {
-      "serviceId": "aws.applicationautoscaling",
+      "serviceId": "aws.application-autoscaling",
       "source": "https://github.com/aws/api-models-aws",
       "ref": "66407b3109cc41cc2a21b0d9f9fb5b18a1dec935",
       "path": "aws/application-auto-scaling/service/2016-02-06/application-auto-scaling-2016-02-06.json",

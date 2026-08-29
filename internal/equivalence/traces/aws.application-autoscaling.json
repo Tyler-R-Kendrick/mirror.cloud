@@ -1,0 +1,465 @@
+{
+  "schema": "trace/1",
+  "service": "aws.application-autoscaling",
+  "source": "pack:internal/services/aws/applicationautoscaling@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DescribeScalableTargets",
+      "input": {
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScalableTargets": null
+      }
+    },
+    {
+      "operation": "RegisterScalableTarget",
+      "input": {
+        "MaxCapacity": 5,
+        "MinCapacity": 1,
+        "ResourceId": "service/default/web",
+        "RoleARN": "arn:aws:iam::000000000000:role/aas",
+        "ScalableDimension": "ecs:service:DesiredCount",
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScalableTargetARN": "arn:aws:application-autoscaling:us-east-1:000000000000:scalable-target/7c589129"
+      }
+    },
+    {
+      "operation": "DescribeScalableTargets",
+      "input": {
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScalableTargets": [
+          {
+            "MaxCapacity": 5,
+            "MinCapacity": 1,
+            "ResourceId": "service/default/web",
+            "RoleARN": "arn:aws:iam::000000000000:role/aas",
+            "ScalableDimension": "ecs:service:DesiredCount",
+            "ServiceNamespace": "ecs"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutScalingPolicy",
+      "input": {
+        "PolicyName": "scale-out",
+        "PolicyType": "TargetTrackingScaling",
+        "ResourceId": "service/default/web",
+        "ScalableDimension": "ecs:service:DesiredCount",
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PolicyARN": "arn:aws:application-autoscaling:us-east-1:000000000000:scaling-policy/scale-out"
+      }
+    },
+    {
+      "operation": "DescribeScalingPolicies",
+      "input": {
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScalingPolicies": [
+          {
+            "PolicyName": "scale-out",
+            "PolicyType": "TargetTrackingScaling",
+            "ResourceId": "service/default/web",
+            "ScalableDimension": "ecs:service:DesiredCount",
+            "ServiceNamespace": "ecs"
+          }
+        ]
+      },
+      "superseded": "ScalingPolicy declares PolicyARN required and the pack's record was the request body, which carries none, so the listing omitted a required member while PutScalingPolicy answered with the very ARN it failed to store. The declared shape outranks the pack's authored behavior, so the bundle stores and lists it."
+    },
+    {
+      "operation": "PutScheduledAction",
+      "input": {
+        "ResourceId": "service/default/web",
+        "ScalableDimension": "ecs:service:DesiredCount",
+        "Schedule": "cron(0 0 * * ? *)",
+        "ScheduledActionName": "nightly",
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeScheduledActions",
+      "input": {
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScheduledActions": [
+          {
+            "ResourceId": "service/default/web",
+            "ScalableDimension": "ecs:service:DesiredCount",
+            "Schedule": "cron(0 0 * * ? *)",
+            "ScheduledActionName": "nightly",
+            "ServiceNamespace": "ecs"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeScalingActivities",
+      "input": {
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScalingActivities": []
+      }
+    },
+    {
+      "operation": "GetPredictiveScalingForecast",
+      "input": {
+        "EndTime": 1700086400,
+        "PolicyName": "scale-out",
+        "ResourceId": "service/default/web",
+        "ScalableDimension": "ecs:service:DesiredCount",
+        "ServiceNamespace": "ecs",
+        "StartTime": 1700000000
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "CapacityForecast": [],
+        "LoadForecast": []
+      }
+    },
+    {
+      "operation": "TagResource",
+      "input": {
+        "ResourceARN": "arn:aws:application-autoscaling:us-east-1:000000000000:scalable-target/abc",
+        "Tags": {
+          "env": "dev"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "ResourceARN": "arn:aws:application-autoscaling:us-east-1:000000000000:scalable-target/abc"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": {
+          "env": "dev"
+        }
+      }
+    },
+    {
+      "operation": "TagResource",
+      "input": {
+        "ResourceARN": "arn:aws:application-autoscaling:us-east-1:000000000000:scalable-target/abc",
+        "Tags": {
+          "team": "core"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "ResourceARN": "arn:aws:application-autoscaling:us-east-1:000000000000:scalable-target/abc"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": {
+          "team": "core"
+        }
+      }
+    },
+    {
+      "operation": "UntagResource",
+      "input": {
+        "ResourceARN": "arn:aws:application-autoscaling:us-east-1:000000000000:scalable-target/abc",
+        "TagKeys": [
+          "team"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListTagsForResource",
+      "input": {
+        "ResourceARN": "arn:aws:application-autoscaling:us-east-1:000000000000:scalable-target/abc"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Tags": {}
+      }
+    },
+    {
+      "operation": "RegisterScalableTarget",
+      "input": {
+        "MaxCapacity": 9,
+        "MinCapacity": 2,
+        "ResourceId": "service/default/web",
+        "ScalableDimension": "ecs:service:DesiredCount",
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScalableTargetARN": "arn:aws:application-autoscaling:us-east-1:000000000000:scalable-target/5f59f223"
+      }
+    },
+    {
+      "operation": "DescribeScalableTargets",
+      "input": {
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScalableTargets": [
+          {
+            "MaxCapacity": 9,
+            "MinCapacity": 2,
+            "ResourceId": "service/default/web",
+            "ScalableDimension": "ecs:service:DesiredCount",
+            "ServiceNamespace": "ecs"
+          }
+        ]
+      },
+      "superseded": "ScalableTarget declares RoleARN required. The second register carried no RoleARN, and the pack stored the request verbatim, so re-registering a target silently dropped a required member from the listing. The bundle keeps every declared member on every write, so it lists as empty rather than absent."
+    },
+    {
+      "operation": "DeleteScalingPolicy",
+      "input": {
+        "PolicyName": "scale-out",
+        "ResourceId": "service/default/web",
+        "ScalableDimension": "ecs:service:DesiredCount",
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeScalingPolicies",
+      "input": {
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScalingPolicies": null
+      }
+    },
+    {
+      "operation": "DeleteScalingPolicy",
+      "input": {
+        "PolicyName": "absent",
+        "ResourceId": "service/default/web",
+        "ScalableDimension": "ecs:service:DesiredCount",
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteScheduledAction",
+      "input": {
+        "ResourceId": "service/default/web",
+        "ScalableDimension": "ecs:service:DesiredCount",
+        "ScheduledActionName": "nightly",
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeScheduledActions",
+      "input": {
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScheduledActions": null
+      }
+    },
+    {
+      "operation": "DeregisterScalableTarget",
+      "input": {
+        "ResourceId": "service/default/web",
+        "ScalableDimension": "ecs:service:DesiredCount",
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeScalableTargets",
+      "input": {
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ScalableTargets": null
+      }
+    },
+    {
+      "operation": "DeregisterScalableTarget",
+      "input": {
+        "ResourceId": "service/default/web",
+        "ScalableDimension": "ecs:service:DesiredCount",
+        "ServiceNamespace": "ecs"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

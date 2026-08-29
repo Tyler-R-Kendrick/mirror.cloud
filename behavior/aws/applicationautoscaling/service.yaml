@@ -1,0 +1,172 @@
+schema: bir/1
+service: aws.application-autoscaling
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing scales: a scalable target, a policy and a scheduled action
+# are records, no alarm is ever created and no activity ever happens.
+provenance: authored
+
+resources:
+  # The pack stored the whole request as the record, so a listing answered
+  # with request bodies: every member the caller happened to send came back,
+  # and members ScalableTarget declares but the request does not carry never
+  # appeared. Only the declared members are stored here.
+  target:
+    collection: aastarget
+    id:
+      derive: "string(input.ResourceId) + '|' + string(input.ScalableDimension)"
+    record:
+      ResourceId: "string(input.ResourceId)"
+      ScalableDimension: "string(input.ScalableDimension)"
+      ServiceNamespace: "string(input.ServiceNamespace)"
+      MinCapacity: "'MinCapacity' in input ? input.MinCapacity : 0"
+      MaxCapacity: "'MaxCapacity' in input ? input.MaxCapacity : 0"
+      RoleARN: "'RoleARN' in input ? string(input.RoleARN) : ''"
+
+  policy:
+    collection: aaspol
+    id:
+      input_members: [PolicyName]
+    arn: "arn:{partition}:application-autoscaling:{region}:{account}:scaling-policy/{id}"
+    record:
+      PolicyName: id
+      PolicyARN: arn
+      ResourceId: "'ResourceId' in input ? string(input.ResourceId) : ''"
+      ScalableDimension: "'ScalableDimension' in input ? string(input.ScalableDimension) : ''"
+      ServiceNamespace: "'ServiceNamespace' in input ? string(input.ServiceNamespace) : ''"
+      PolicyType: "'PolicyType' in input ? string(input.PolicyType) : ''"
+
+  scheduledaction:
+    collection: aassched
+    id:
+      input_members: [ScheduledActionName]
+    record:
+      ScheduledActionName: id
+      ResourceId: "'ResourceId' in input ? string(input.ResourceId) : ''"
+      ScalableDimension: "'ScalableDimension' in input ? string(input.ScalableDimension) : ''"
+      ServiceNamespace: "'ServiceNamespace' in input ? string(input.ServiceNamespace) : ''"
+      Schedule: "'Schedule' in input ? string(input.Schedule) : ''"
+
+  # Tags are kept per resource ARN and replaced wholesale, as the pack did.
+  tagset:
+    collection: aastags
+    id:
+      input_members: [ResourceARN]
+    record:
+      Tags: "'Tags' in input ? input.Tags : {}"
+
+operations:
+  # The ARN answered with is generated per call and never stored, so
+  # registering the same target twice answers with two different ARNs and the
+  # listing shows neither.
+  RegisterScalableTarget:
+    effects:
+      - generate: { bind: tid, kind: hex, bytes: 8 }
+      - put: { resource: target }
+    output:
+      ScalableTargetARN: >
+        'arn:aws:application-autoscaling:' + identity.region + ':' + identity.account
+        + ':scalable-target/' + fx.tid
+
+  DeregisterScalableTarget:
+    effects:
+      - delete: { resource: target, missing: ignore }
+
+  DescribeScalableTargets:
+    list: { resource: target, member: ScalableTargets, paginate: model }
+
+  PutScalingPolicy:
+    effects:
+      - put: { resource: policy }
+    output:
+      PolicyARN: rec.PolicyARN
+
+  DeleteScalingPolicy:
+    effects:
+      - delete: { resource: policy, missing: ignore }
+
+  DescribeScalingPolicies:
+    list: { resource: policy, member: ScalingPolicies, paginate: model }
+
+  PutScheduledAction:
+    effects:
+      - put: { resource: scheduledaction }
+
+  DeleteScheduledAction:
+    effects:
+      - delete: { resource: scheduledaction, missing: ignore }
+
+  DescribeScheduledActions:
+    list: { resource: scheduledaction, member: ScheduledActions, paginate: model }
+
+  DescribeScalingActivities:
+    output:
+      ScalingActivities: "[]"
+
+  # CapacityForecast is declared as a structure and the pack answered with an
+  # empty list, which no SDK can deserialize. It is omitted rather than
+  # answered with the wrong type.
+  GetPredictiveScalingForecast:
+    output:
+      LoadForecast: "[]"
+
+  TagResource:
+    effects:
+      - put: { resource: tagset }
+
+  ListTagsForResource:
+    reads:
+      t: { resource: tagset }
+    output:
+      Tags: "t_found ? t.Tags : {}"
+
+  UntagResource:
+    effects:
+      - delete: { resource: tagset, missing: ignore }
+
+quirks:
+  - operation: DescribeScalableTargets
+    note: >
+      The pack stored the request verbatim as the record, so a listing
+      answered with request bodies: whatever the caller sent came back,
+      including members ScalableTarget does not declare, and the members it
+      does declare that the request does not carry were simply absent. Two
+      recorded steps are superseded for that: a listed policy carried no
+      PolicyARN, which ScalingPolicy declares required and PutScalingPolicy
+      answers with, and re-registering a target without a RoleARN dropped that
+      required member from the listing. The bundle writes every declared
+      member on every write, so neither can happen.
+  - operation: RegisterScalableTarget
+    note: >
+      The ScalableTargetARN answered with is generated fresh on every call and
+      never stored, so registering the same target twice answers with two
+      different ARNs, and the ARN a caller was given appears in no listing.
+      CreationTime, PredictedCapacity and SuspendedState are declared on a
+      scalable target and never set.
+  - operation: GetPredictiveScalingForecast
+    note: >
+      CapacityForecast is declared as a structure and the pack answered with
+      an empty list, which no SDK can deserialize. It is omitted here rather
+      than answered with the wrong type; the recorded step still matches,
+      because an empty list and an absent member are both blank. UpdateTime is
+      likewise never set, and no forecast is ever computed.
+  - operation: PutScheduledAction
+    note: >
+      ScheduledActionARN is required on a scheduled action and is not set,
+      where PolicyARN is. The difference is evidence, not taste: the pack built
+      a policy ARN and answered with it, so storing it recovers a member it
+      already had, while it never built a scheduled-action ARN anywhere, and
+      inventing a shape for one would be authoring behavior rather than
+      transcribing it. A probe settles the real format.
+  - operation: UntagResource
+    note: >
+      TagKeys is required and ignored: untagging removes every tag on the
+      resource rather than the keys named. Tagging replaces the whole set for
+      the same reason, so two TagResource calls do not accumulate.
+  - operation: DescribeScalingPolicies
+    note: >
+      ServiceNamespace is required on all three describes and narrows nothing:
+      every target, policy and scheduled action in the account and region is
+      answered for, whatever namespace was asked about. No alarm is ever
+      created for a policy, and DescribeScalingActivities is always empty
+      because nothing ever scales.

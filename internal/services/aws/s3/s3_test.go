@@ -983,13 +983,34 @@ func TestBucketNotificationConfigurationCharacterization(t *testing.T) {
 	configuration := map[string]any{"QueueConfigurations": []any{map[string]any{"Id": "images", "QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue", "Events": []any{"s3:ObjectCreated:*"}, "Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{map[string]any{"Name": "prefix", "Value": "images/"}}}}}}}
 	put := mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": configuration}, nil)
 	after := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": input["Bucket"], "Key": "images/photo.jpg"}, []byte("photo"))
+	messages, _, err := deps.Store.Scope(ident().Account, ident().Region).Collection("msgs:queue").List(context.Background(), "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery := map[string]any{}
+	for _, stored := range messages {
+		var message map[string]any
+		if err := json.Unmarshal(stored.Value, &message); err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(message["body"].(string)), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["Event"] == "s3:TestEvent" {
+			delivery["test"] = payload
+		} else {
+			delivery["object"] = payload
+		}
+	}
 	_, invalidErr := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:123456789012:missing", "Events": []any{"s3:ObjectCreated:*"}}}}}, nil)
 	invalid := asFault(t, invalidErr)
 	preserved := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil)
 	cleared := mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": map[string]any{}}, nil)
 	final := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil)
 	golden.AssertJSON(t, map[string]any{
-		"default": before.Output, "put": put.Output, "get": after.Output,
+		"default": before.Output, "put": put.Output, "get": after.Output, "delivery": delivery,
 		"invalid":   map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus, "argument": invalid.Fields["ArgumentName"], "value": invalid.Fields["ArgumentValue"]},
 		"preserved": preserved.Output, "clear": cleared.Output, "cleared": final.Output,
 	})

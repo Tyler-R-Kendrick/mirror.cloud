@@ -397,6 +397,21 @@ func TestBucketAccelerateConfiguration(t *testing.T) {
 	}
 }
 
+func TestBucketAccelerateConfigurationCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "accelerate-characterization"}, nil)
+	before := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization"}, nil)
+	put := mustInvoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization", "AccelerateConfiguration": map[string]any{"Status": "Enabled"}}, nil)
+	after := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization"}, nil)
+	_, invalidErr := invoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization", "AccelerateConfiguration": map[string]any{"Status": "Invalid"}}, nil)
+	invalid := asFault(t, invalidErr)
+	preserved := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization"}, nil)
+	golden.AssertJSON(t, map[string]any{
+		"default": before.Output, "put": put.Output, "get": after.Output,
+		"invalid": map[string]any{"code": invalid.Code, "status": invalid.HTTPStatus}, "preserved": preserved.Output,
+	})
+}
+
 func TestBucketRequestPaymentCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "request-payment-characterization"}, nil)

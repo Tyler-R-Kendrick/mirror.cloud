@@ -5505,10 +5505,14 @@ var mutants = []mutant{
 		run:  "TestStatesSyncServiceIntegrations",
 	},
 	{
+		// The Batch pack read both spellings of jobName; it is served from its
+		// own model now, which declares one, so the translation moved to the
+		// integration that introduces the discrepancy. The needle moved with
+		// the behavior rather than being retired with the pack.
 		name: "states-drop-batch-pascal-case",
-		file: filepath.Join("internal", "services", "aws", "batch", "batch.go"),
-		old:  `first(req.Input, "jobName", "JobName")`,
-		new:  `first(req.Input, "jobName")`,
+		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+		old:  `"JobName":       "jobName",`,
+		new:  `"JobName":       "JobName",`,
 		pkg:  "./internal/services/aws/states",
 		run:  "TestStatesSyncServiceIntegrations",
 	},

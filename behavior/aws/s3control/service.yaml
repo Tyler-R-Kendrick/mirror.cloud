@@ -1,0 +1,114 @@
+schema: bir/1
+service: aws.s3control
+
+# Transcribed from the hand-written pack, not established against the real
+# service. An access point points at a bucket that is never checked to exist,
+# and blocks no public access.
+provenance: authored
+
+resources:
+  accesspoint:
+    collection: s3cap
+    id:
+      input_members: [Name]
+    arn: "arn:{partition}:s3:{region}:{account}:accesspoint/{id}"
+    record:
+      Name: id
+      Bucket: "'Bucket' in input ? string(input.Bucket) : ''"
+      AccessPointArn: arn
+      NetworkOrigin: "'Internet'"
+
+  # There is one public-access block per account, and the account already
+  # scopes the store, so the key is a constant. The pack keyed on a Bucket
+  # member when the request carried one; no operation on this configuration
+  # declares a Bucket, so that branch could never be reached through the wire.
+  publicaccessblock:
+    collection: s3cpab
+    id:
+      derive: "'account'"
+    record:
+      PublicAccessBlockConfiguration: >
+        'PublicAccessBlockConfiguration' in input
+          ? input.PublicAccessBlockConfiguration
+          : {}
+
+errors:
+  InvalidRequest:
+    code: InvalidRequest
+    http: 400
+    fault: client
+  NoSuchAccessPoint:
+    code: NoSuchAccessPoint
+    http: 404
+    fault: client
+  NoSuchPublicAccessBlockConfiguration:
+    code: NoSuchPublicAccessBlockConfiguration
+    http: 404
+    fault: client
+
+operations:
+  CreateAccessPoint:
+    effects:
+      - put: { resource: accesspoint }
+    output:
+      AccessPointArn: rec.AccessPointArn
+
+  GetAccessPoint:
+    reads:
+      ap: { resource: accesspoint }
+    require:
+      - { cond: ap_found, error: NoSuchAccessPoint }
+    output:
+      Name: ap.Name
+      Bucket: ap.Bucket
+      AccessPointArn: ap.AccessPointArn
+      NetworkOrigin: ap.NetworkOrigin
+
+  ListAccessPoints:
+    list: { resource: accesspoint, member: AccessPointList, paginate: model }
+
+  DeleteAccessPoint:
+    effects:
+      - delete: { resource: accesspoint, missing: ignore }
+
+  PutPublicAccessBlock:
+    effects:
+      - put: { resource: publicaccessblock }
+
+  GetPublicAccessBlock:
+    reads:
+      pab: { resource: publicaccessblock }
+    require:
+      - { cond: pab_found, error: NoSuchPublicAccessBlockConfiguration }
+    output:
+      PublicAccessBlockConfiguration: pab.PublicAccessBlockConfiguration
+
+  DeletePublicAccessBlock:
+    effects:
+      - delete: { resource: publicaccessblock, missing: ignore }
+
+quirks:
+  - operation: CreateAccessPoint
+    note: >
+      The Bucket an access point names is stored without being checked, so an
+      access point can front a bucket that does not exist -- and nothing in the
+      S3 service consults these access points, so the access point does not
+      grant access to anything. Every access point's NetworkOrigin is Internet
+      whatever VpcConfiguration was given, and the VpcConfiguration itself is
+      dropped, so a VPC-only access point is indistinguishable from a public
+      one. Alias is declared on both the create and get answers and never set.
+      Creating an access point that already exists overwrites it.
+  - operation: PutPublicAccessBlock
+    note: >
+      The configuration is stored and consulted by nothing: blocking public
+      access here has no effect on any S3 operation. The pack keyed the
+      configuration on a Bucket when the request carried one, but no
+      public-access-block operation declares a Bucket, so only the per-account
+      form was ever reachable and the bundle keeps that alone.
+  - operation: GetPublicAccessBlock
+    note: >
+      Getting a configuration that was never put faults, which matches the real
+      service, but deleting one that was never put succeeds, which does not.
+      AccountId is required on every operation here and narrows nothing: the
+      account already scopes the store, so asking as one account for another's
+      access points answers with the caller's own.

@@ -20,10 +20,11 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/parquet-go/parquet-go"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/batch"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/codebuild"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ecs"
@@ -2714,13 +2715,13 @@ func TestStatesSyncServiceIntegrations(t *testing.T) {
 		return response.Output
 	}
 
-	definition := `{"StartAt":"Batch","States":{"Batch":{"Type":"Task","Resource":"arn:aws:states:::batch:submitJob.sync","Parameters":{"JobName":"job","JobQueue":"queue"},"ResultPath":null,"Next":"Build"},"Build":{"Type":"Task","Resource":"arn:aws:states:::codebuild:startBuild.sync","Parameters":{"ProjectName":"project"},"ResultPath":null,"Next":"Glue"},"Glue":{"Type":"Task","Resource":"arn:aws:states:::glue:startJobRun.sync","Parameters":{"JobName":"job"},"ResultPath":null,"Next":"Cluster"},"Cluster":{"Type":"Task","Resource":"arn:aws:states:::elasticmapreduce:createCluster.sync","Parameters":{"Name":"cluster"},"ResultPath":null,"Next":"Step"},"Step":{"Type":"Task","Resource":"arn:aws:states:::elasticmapreduce:addStep.sync","Parameters":{"JobFlowId":"j-test"},"End":true}}}`
+	definition := `{"StartAt":"Batch","States":{"Batch":{"Type":"Task","Resource":"arn:aws:states:::batch:submitJob.sync","Parameters":{"JobName":"job","JobQueue":"queue","JobDefinition":"definition"},"ResultPath":null,"Next":"Build"},"Build":{"Type":"Task","Resource":"arn:aws:states:::codebuild:startBuild.sync","Parameters":{"ProjectName":"project"},"ResultPath":null,"Next":"Glue"},"Glue":{"Type":"Task","Resource":"arn:aws:states:::glue:startJobRun.sync","Parameters":{"JobName":"job"},"ResultPath":null,"Next":"Cluster"},"Cluster":{"Type":"Task","Resource":"arn:aws:states:::elasticmapreduce:createCluster.sync","Parameters":{"Name":"cluster"},"ResultPath":null,"Next":"Step"},"Step":{"Type":"Task","Resource":"arn:aws:states:::elasticmapreduce:addStep.sync","Parameters":{"JobFlowId":"j-test"},"End":true}}}`
 	machine := must(p, "CreateStateMachine", map[string]any{"name": "sync-jobs", "definition": definition, "roleArn": testRoleARN})
 	executionARN := must(p, "StartExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"]})["executionArn"].(string)
 	if execution := must(p, "DescribeExecution", map[string]any{"executionArn": executionARN}); execution["status"] != "SUCCEEDED" || !strings.Contains(execution["output"].(string), "StepIds") {
 		t.Fatalf("sync execution %#v", execution)
 	}
-	if jobs := must(batch.New(deps), "DescribeJobs", nil)["jobs"].([]any); len(jobs) != 1 || jobs[0].(map[string]any)["jobName"] != "job" || jobs[0].(map[string]any)["status"] != "SUCCEEDED" {
+	if jobs := must(served(t, deps, "aws.batch"), "DescribeJobs", map[string]any{"jobs": []any{"any"}})["jobs"].([]any); len(jobs) != 1 || jobs[0].(map[string]any)["jobName"] != "job" || jobs[0].(map[string]any)["status"] != "SUCCEEDED" {
 		t.Fatalf("batch sync jobs %#v", jobs)
 	}
 	if builds := must(codebuild.New(deps), "ListBuilds", nil)["ids"].([]any); len(builds) != 1 || !strings.HasPrefix(builds[0].(string), "project:") {
@@ -4319,6 +4320,32 @@ func TestBootedServerStatesMapLambdaActivity(t *testing.T) {
 	if !strings.Contains(fmtString(ld["output"]), `"n":4`) {
 		t.Fatalf("lambda output %v", ld["output"])
 	}
+}
+
+// served builds whatever currently serves a service ID -- a hand-written pack
+// or a Behavior IR bundle -- so an assertion about a task integration survives
+// the extraction of the service it integrates with. The integration itself has
+// always resolved through the registry; only these assertions reached for the
+// Go type.
+func served(t *testing.T, deps spi.Deps, serviceID string) spi.BehaviorPack {
+	t.Helper()
+	for _, factory := range registry.Factories() {
+		if factory.ServiceID != serviceID {
+			continue
+		}
+		handler, err := factory.New(deps)
+		if err != nil {
+			t.Fatalf("build %s: %v", serviceID, err)
+		}
+		t.Cleanup(func() {
+			if closer, ok := handler.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
+		})
+		return handler
+	}
+	t.Fatalf("no factory serves %s", serviceID)
+	return nil
 }
 
 func mustJSON(s string) string {

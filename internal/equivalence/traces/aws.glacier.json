@@ -1,0 +1,376 @@
+{
+  "schema": "trace/1",
+  "service": "aws.glacier",
+  "source": "pack:internal/services/aws/glacier@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListVaults",
+      "input": {
+        "accountId": "-"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "VaultList": null
+      }
+    },
+    {
+      "operation": "DescribeVault",
+      "input": {
+        "accountId": "-",
+        "vaultName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateVault",
+      "input": {
+        "accountId": "-",
+        "vaultName": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "location": "/vaults/v1"
+      }
+    },
+    {
+      "operation": "DescribeVault",
+      "input": {
+        "accountId": "-",
+        "vaultName": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "NumberOfArchives": 0,
+        "SizeInBytes": 0,
+        "VaultARN": "arn:aws:glacier:us-east-1:000000000000:vaults/v1",
+        "VaultName": "v1"
+      }
+    },
+    {
+      "operation": "CreateVault",
+      "input": {
+        "accountId": "-",
+        "vaultName": "v2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "location": "/vaults/v2"
+      }
+    },
+    {
+      "operation": "ListVaults",
+      "input": {
+        "accountId": "-"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "VaultList": [
+          {
+            "NumberOfArchives": 0,
+            "SizeInBytes": 0,
+            "VaultARN": "arn:aws:glacier:us-east-1:000000000000:vaults/v1",
+            "VaultName": "v1"
+          },
+          {
+            "NumberOfArchives": 0,
+            "SizeInBytes": 0,
+            "VaultARN": "arn:aws:glacier:us-east-1:000000000000:vaults/v2",
+            "VaultName": "v2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UploadArchive",
+      "input": {
+        "accountId": "-",
+        "checksum": "abc",
+        "vaultName": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "archiveId": "7c589129",
+        "location": "/vaults/v1/archives/7c589129"
+      }
+    },
+    {
+      "operation": "DescribeVault",
+      "input": {
+        "accountId": "-",
+        "vaultName": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "NumberOfArchives": 0,
+        "SizeInBytes": 0,
+        "VaultARN": "arn:aws:glacier:us-east-1:000000000000:vaults/v1",
+        "VaultName": "v1"
+      }
+    },
+    {
+      "operation": "InitiateJob",
+      "input": {
+        "accountId": "-",
+        "jobParameters": {
+          "Type": "inventory-retrieval"
+        },
+        "vaultName": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobId": "5f59f223",
+        "location": "/vaults/v1/jobs/5f59f223"
+      }
+    },
+    {
+      "operation": "InitiateJob",
+      "input": {
+        "accountId": "-",
+        "jobParameters": {
+          "Type": "archive-retrieval"
+        },
+        "vaultName": "v2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "jobId": "9c8e2cb0",
+        "location": "/vaults/v2/jobs/9c8e2cb0"
+      }
+    },
+    {
+      "operation": "DescribeJob",
+      "input": {
+        "accountId": "-",
+        "jobId": {
+          "$fromPath": "jobId",
+          "$fromStep": 8
+        },
+        "vaultName": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Action": "",
+        "JobId": "5f59f223",
+        "StatusCode": "Succeeded",
+        "VaultName": "v1"
+      },
+      "superseded": "GlacierJobDescription declares no VaultName. The record keeps one -- the job listing needs it to hold one vault's jobs out of another's, which is what the pack got from a per-vault store collection -- and it is projected away on the way out. The declared shape outranks the pack's authored behavior."
+    },
+    {
+      "operation": "ListJobs",
+      "input": {
+        "accountId": "-",
+        "vaultName": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobList": [
+          {
+            "Action": "",
+            "JobId": "5f59f223",
+            "StatusCode": "Succeeded",
+            "VaultName": "v1"
+          }
+        ]
+      },
+      "superseded": "GlacierJobDescription declares no VaultName. The record keeps one -- the job listing needs it to hold one vault's jobs out of another's, which is what the pack got from a per-vault store collection -- and it is projected away on the way out. The declared shape outranks the pack's authored behavior."
+    },
+    {
+      "operation": "ListJobs",
+      "input": {
+        "accountId": "-",
+        "vaultName": "v2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobList": [
+          {
+            "Action": "",
+            "JobId": "9c8e2cb0",
+            "StatusCode": "Succeeded",
+            "VaultName": "v2"
+          }
+        ]
+      },
+      "superseded": "GlacierJobDescription declares no VaultName. The record keeps one -- the job listing needs it to hold one vault's jobs out of another's, which is what the pack got from a per-vault store collection -- and it is projected away on the way out. The declared shape outranks the pack's authored behavior."
+    },
+    {
+      "operation": "DeleteArchive",
+      "input": {
+        "accountId": "-",
+        "archiveId": {
+          "$fromPath": "archiveId",
+          "$fromStep": 6
+        },
+        "vaultName": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteVault",
+      "input": {
+        "accountId": "-",
+        "vaultName": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListVaults",
+      "input": {
+        "accountId": "-"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "VaultList": [
+          {
+            "NumberOfArchives": 0,
+            "SizeInBytes": 0,
+            "VaultARN": "arn:aws:glacier:us-east-1:000000000000:vaults/v2",
+            "VaultName": "v2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListJobs",
+      "input": {
+        "accountId": "-",
+        "vaultName": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobList": [
+          {
+            "Action": "",
+            "JobId": "5f59f223",
+            "StatusCode": "Succeeded",
+            "VaultName": "v1"
+          }
+        ]
+      },
+      "superseded": "GlacierJobDescription declares no VaultName. The record keeps one -- the job listing needs it to hold one vault's jobs out of another's, which is what the pack got from a per-vault store collection -- and it is projected away on the way out. The declared shape outranks the pack's authored behavior."
+    },
+    {
+      "operation": "DeleteVault",
+      "input": {
+        "accountId": "-",
+        "vaultName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

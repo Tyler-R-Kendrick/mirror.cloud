@@ -4923,6 +4923,22 @@ func (p *Pack) invokeTask(ctx context.Context, req *spi.Request, resource string
 		input = maps.Clone(input)
 		input["cluster"], input["taskDefinition"] = first(input, "cluster", "Cluster"), first(input, "taskDefinition", "TaskDefinition")
 	}
+	// An optimized integration names its parameters in PascalCase while the
+	// target API declares them camelCase, so the request has to be translated
+	// on the way through. The hand-written packs hid this by reading both
+	// spellings of every member they cared about; a service served from its
+	// own model cannot, because the model declares one name. The translation
+	// belongs here, at the one integration that introduces the discrepancy,
+	// rather than in every service that integration can reach.
+	if renames, ok := integrationMemberNames[resource]; ok {
+		input = maps.Clone(input)
+		for from, to := range renames {
+			if v, present := input[from]; present {
+				delete(input, from)
+				input[to] = v
+			}
+		}
+	}
 	for _, factory := range registry.Factories() {
 		if !matchesTaskService(factory.ServiceID, service) {
 			continue
@@ -5013,6 +5029,17 @@ func nestedExecutionOutput(execution map[string]any, jsonOutput bool) map[string
 		output["Output"] = parseJSON(first(execution, "output"))
 	}
 	return output
+}
+
+// integrationMemberNames maps an optimized integration's parameter names onto
+// the member names the target service's model declares. Only the integrations
+// whose two spellings actually differ appear here.
+var integrationMemberNames = map[string]map[string]string{
+	"arn:aws:states:::batch:submitJob": {
+		"JobName":       "jobName",
+		"JobQueue":      "jobQueue",
+		"JobDefinition": "jobDefinition",
+	},
 }
 
 func taskIntegration(resource string) (service, operation, prefix string, sdk, ok bool) {

@@ -410,6 +410,35 @@ func TestRESTXMLServiceDecodeContracts(t *testing.T) {
 			t.Errorf("invalid CORS decode %#v %v", decoded, err)
 		}
 	}
+	website := `<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><ErrorDocument><Key>error.html</Key></ErrorDocument><RoutingRules><RoutingRule><Condition><KeyPrefixEquals>docs/</KeyPrefixEquals></Condition><Redirect><HostName>example.test</HostName><Protocol>https</Protocol><ReplaceKeyPrefixWith>manual/</ReplaceKeyPrefixWith></Redirect></RoutingRule></RoutingRules></WebsiteConfiguration>`
+	decoded, err = codec.Decode(s3, &model.Operation{Name: "PutBucketWebsite"}, httptest.NewRequest(http.MethodPut, "/bucket?website", strings.NewReader(website)))
+	wantWebsite := map[string]any{
+		"IndexDocument": map[string]any{"Suffix": "index.html"},
+		"ErrorDocument": map[string]any{"Key": "error.html"},
+		"RoutingRules":  []any{map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "docs/"}, "Redirect": map[string]any{"HostName": "example.test", "Protocol": "https", "ReplaceKeyPrefixWith": "manual/"}}},
+	}
+	if err != nil || !reflect.DeepEqual(decoded.Input["WebsiteConfiguration"], wantWebsite) {
+		t.Fatalf("website decode %#v %v", decoded, err)
+	}
+	for _, test := range []struct {
+		body string
+		want map[string]any
+	}{
+		{`<WebsiteConfiguration><RedirectAllRequestsTo><HostName></HostName></RedirectAllRequestsTo></WebsiteConfiguration>`, map[string]any{"RedirectAllRequestsTo": map[string]any{"HostName": ""}}},
+		{`<WebsiteConfiguration><IndexDocument><Suffix/></IndexDocument><ErrorDocument/><RoutingRules><RoutingRule><Condition/><Redirect><ReplaceKeyPrefixWith/><ReplaceKeyWith/></Redirect></RoutingRule></RoutingRules></WebsiteConfiguration>`, map[string]any{"IndexDocument": map[string]any{"Suffix": ""}, "ErrorDocument": map[string]any{}, "RoutingRules": []any{map[string]any{"Condition": map[string]any{}, "Redirect": map[string]any{"ReplaceKeyPrefixWith": "", "ReplaceKeyWith": ""}}}}},
+		{`<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><RoutingRules/></WebsiteConfiguration>`, map[string]any{"IndexDocument": map[string]any{"Suffix": "index.html"}, "RoutingRules": []any{}}},
+	} {
+		decoded, err = codec.Decode(s3, &model.Operation{Name: "PutBucketWebsite"}, httptest.NewRequest(http.MethodPut, "/bucket?website", strings.NewReader(test.body)))
+		if err != nil || !reflect.DeepEqual(decoded.Input["WebsiteConfiguration"], test.want) {
+			t.Errorf("website decode %#v %v", decoded, err)
+		}
+	}
+	for _, body := range []string{`<broken`, `<IndexDocument/>`} {
+		decoded, err = codec.Decode(s3, &model.Operation{Name: "PutBucketWebsite"}, httptest.NewRequest(http.MethodPut, "/bucket?website", strings.NewReader(body)))
+		if err != nil || decoded.Input["_body"] != body {
+			t.Errorf("invalid website decode %#v %v", decoded, err)
+		}
+	}
 }
 
 func TestPostObjectProtocolContract(t *testing.T) {
@@ -497,6 +526,11 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	cors := map[string]any{"CORSRules": []any{map[string]any{"ID": "read", "AllowedHeaders": []any{"*"}, "AllowedMethods": []any{"GET", "HEAD"}, "AllowedOrigins": []any{"https://example.test"}, "ExposeHeaders": []any{"ETag"}, "MaxAgeSeconds": 300}}}
 	if err := codec.Encode(svc, &model.Operation{Name: "GetBucketCors"}, w, &spi.Response{Output: cors}); err != nil || !strings.Contains(w.Body.String(), `<CORSConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><CORSRule><ID>read</ID><AllowedHeader>*</AllowedHeader><AllowedMethod>GET</AllowedMethod><AllowedMethod>HEAD</AllowedMethod><AllowedOrigin>https://example.test</AllowedOrigin><ExposeHeader>ETag</ExposeHeader><MaxAgeSeconds>300</MaxAgeSeconds></CORSRule></CORSConfiguration>`) || strings.Contains(w.Body.String(), "<member>") {
 		t.Fatalf("CORS response %v %s", err, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	website := map[string]any{"IndexDocument": map[string]any{"Suffix": "index.html"}, "ErrorDocument": map[string]any{"Key": "error.html"}, "RoutingRules": []any{map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "docs/"}, "Redirect": map[string]any{"Protocol": "https", "ReplaceKeyPrefixWith": "manual/"}}}}
+	if err := codec.Encode(svc, &model.Operation{Name: "GetBucketWebsite"}, w, &spi.Response{Output: website}); err != nil || !strings.Contains(w.Body.String(), `<WebsiteConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><IndexDocument><Suffix>index.html</Suffix></IndexDocument><ErrorDocument><Key>error.html</Key></ErrorDocument><RoutingRules><RoutingRule><Condition><KeyPrefixEquals>docs/</KeyPrefixEquals></Condition><Redirect><Protocol>https</Protocol><ReplaceKeyPrefixWith>manual/</ReplaceKeyPrefixWith></Redirect></RoutingRule></RoutingRules></WebsiteConfiguration>`) || strings.Contains(w.Body.String(), "<member>") {
+		t.Fatalf("website response %v %s", err, w.Body.String())
 	}
 	w = httptest.NewRecorder()
 	if err := codec.EncodeFault(svc, &model.Operation{Name: "Missing"}, w, spi.NotImplemented(svc.ID, "Missing", "emulate"), "r<&"); err != nil {

@@ -111,6 +111,22 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.GetPublicAccessBlock(context.Background(), &s3.GetPublicAccessBlockInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchPublicAccessBlockConfiguration") {
 		t.Fatalf("get deleted public access block: %v", err)
 	}
+	if logging, err := s3c.GetBucketLogging(context.Background(), &s3.GetBucketLoggingInput{Bucket: aws.String("sdk")}); err != nil || logging.LoggingEnabled != nil {
+		t.Fatalf("default bucket logging: %#v %v", logging, err)
+	}
+	loggingStatus := &s3types.BucketLoggingStatus{LoggingEnabled: &s3types.LoggingEnabled{TargetBucket: aws.String("sdk"), TargetPrefix: aws.String("logs/")}}
+	if _, err := s3c.PutBucketLogging(context.Background(), &s3.PutBucketLoggingInput{Bucket: aws.String("sdk"), BucketLoggingStatus: loggingStatus}); err != nil {
+		t.Fatalf("put bucket logging: %v", err)
+	}
+	if logging, err := s3c.GetBucketLogging(context.Background(), &s3.GetBucketLoggingInput{Bucket: aws.String("sdk")}); err != nil || logging.LoggingEnabled == nil || aws.ToString(logging.LoggingEnabled.TargetBucket) != "sdk" || aws.ToString(logging.LoggingEnabled.TargetPrefix) != "logs/" {
+		t.Fatalf("bucket logging round trip: %#v %v", logging, err)
+	}
+	if _, err := s3c.PutBucketLogging(context.Background(), &s3.PutBucketLoggingInput{Bucket: aws.String("sdk"), BucketLoggingStatus: &s3types.BucketLoggingStatus{}}); err != nil {
+		t.Fatalf("disable bucket logging: %v", err)
+	}
+	if logging, err := s3c.GetBucketLogging(context.Background(), &s3.GetBucketLoggingInput{Bucket: aws.String("sdk")}); err != nil || logging.LoggingEnabled != nil {
+		t.Fatalf("disabled bucket logging: %#v %v", logging, err)
+	}
 	if payment, err := s3c.GetBucketRequestPayment(context.Background(), &s3.GetBucketRequestPaymentInput{Bucket: aws.String("sdk")}); err != nil || payment.Payer != s3types.PayerBucketOwner {
 		t.Fatalf("default request payer: %#v %v", payment, err)
 	}

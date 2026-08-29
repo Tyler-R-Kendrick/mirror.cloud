@@ -1,0 +1,109 @@
+schema: bir/1
+service: aws.iotwireless
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is provisioned or joined: a destination is a rule
+# expression that routes nothing, and a wireless device is a record.
+provenance: authored
+
+resources:
+  destination:
+    collection: iotwdst
+    id:
+      input_members: [Name, DestinationName]
+    arn: "arn:{partition}:iotwireless:{region}:{account}:Destination/{id}"
+    record:
+      Name: id
+      Arn: arn
+      Expression: "'Expression' in input ? string(input.Expression) : ''"
+      RoleArn: "'RoleArn' in input ? string(input.RoleArn) : ''"
+
+  device:
+    collection: iotwdev
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [Identifier, Id]
+    record:
+      Id: id
+      Name: "'Name' in input ? string(input.Name) : ''"
+      Type: "'Type' in input ? string(input.Type) : ''"
+      DestinationName: "'DestinationName' in input ? string(input.DestinationName) : ''"
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  # CreateDestination declares only Arn and Name. The pack answered with the
+  # whole stored record, so its Expression and RoleArn were members no SDK
+  # could read here -- GetDestination is where the model declares them.
+  CreateDestination:
+    require:
+      - { cond: "string(input.Name) != ''", error: Validation }
+    effects:
+      - put: { resource: destination }
+    output:
+      Name: rec.Name
+      Arn: rec.Arn
+
+  GetDestination:
+    reads:
+      dst: { resource: destination }
+    require:
+      - { cond: dst_found, error: NotFound }
+    output:
+      Name: dst.Name
+      Arn: dst.Arn
+      Expression: dst.Expression
+      RoleArn: dst.RoleArn
+
+  ListDestinations:
+    list: { resource: destination, member: DestinationList, paginate: model }
+
+  DeleteDestination:
+    effects:
+      - delete: { resource: destination, missing: ignore }
+    output: {}
+
+  CreateWirelessDevice:
+    effects:
+      - create: { resource: device }
+    output:
+      Id: rec.Id
+
+  GetWirelessDevice:
+    reads:
+      dev: { resource: device }
+    require:
+      - { cond: dev_found, error: NotFound }
+    output:
+      Id: dev.Id
+      Name: dev.Name
+      Type: dev.Type
+      DestinationName: dev.DestinationName
+
+quirks:
+  - operation: CreateDestination
+    note: >
+      ExpressionType is required by the model and is not stored, so
+      GetDestination and the listing both answer without the member they
+      declare, and nothing distinguishes a RuleName destination from an
+      MqttTopic one. The engine now rejects a request that omits it, which the
+      pack accepted.
+  - operation: CreateWirelessDevice
+    note: >
+      A device's Arn is declared on the answer and is never set, and nothing
+      relates a device to the destination it names: DestinationName is stored
+      as given and not checked against an existing destination, so a device
+      can point at one that was never created or has since been deleted.
+  - operation: GetWirelessDevice
+    note: >
+      IdentifierType is required and ignored: the identifier is always read as
+      a device id, so asking by ThingName or DevEui answers not-found. A probe
+      settles what each identifier type is meant to resolve.

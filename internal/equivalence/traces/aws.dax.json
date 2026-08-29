@@ -1,0 +1,291 @@
+{
+  "schema": "trace/1",
+  "service": "aws.dax",
+  "source": "pack:internal/services/aws/dax@44c2b1d",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DescribeClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": null
+      }
+    },
+    {
+      "operation": "CreateCluster",
+      "input": {
+        "ClusterName": "",
+        "IamRoleArn": "arn:aws:iam::000000000000:role/dax",
+        "NodeType": "dax.r4.large",
+        "ReplicationFactor": 3
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidParameterValueException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateCluster",
+      "input": {
+        "ClusterName": "cache-one",
+        "IamRoleArn": "arn:aws:iam::000000000000:role/dax",
+        "NodeType": "dax.r4.large",
+        "ReplicationFactor": 3
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Cluster": {
+          "ClusterArn": "arn:aws:dax:us-east-1:000000000000:cache/cache-one",
+          "ClusterName": "cache-one",
+          "NodeType": "dax.r4.large",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DescribeClusters",
+      "input": {
+        "ClusterName": "cache-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": [
+          {
+            "ClusterArn": "arn:aws:dax:us-east-1:000000000000:cache/cache-one",
+            "ClusterName": "cache-one",
+            "NodeType": "dax.r4.large",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeClusters",
+      "input": {
+        "ClusterName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": []
+      }
+    },
+    {
+      "operation": "CreateCluster",
+      "input": {
+        "ClusterName": "cache-two",
+        "IamRoleArn": "arn:aws:iam::000000000000:role/dax",
+        "NodeType": "dax.r4.large",
+        "ReplicationFactor": 3
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Cluster": {
+          "ClusterArn": "arn:aws:dax:us-east-1:000000000000:cache/cache-two",
+          "ClusterName": "cache-two",
+          "NodeType": "dax.r4.large",
+          "Status": "available"
+        }
+      }
+    },
+    {
+      "operation": "DescribeClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": [
+          {
+            "ClusterArn": "arn:aws:dax:us-east-1:000000000000:cache/cache-one",
+            "ClusterName": "cache-one",
+            "NodeType": "dax.r4.large",
+            "Status": "available"
+          },
+          {
+            "ClusterArn": "arn:aws:dax:us-east-1:000000000000:cache/cache-two",
+            "ClusterName": "cache-two",
+            "NodeType": "dax.r4.large",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateParameterGroup",
+      "input": {
+        "Description": "defaults",
+        "ParameterGroupName": "pg-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ParameterGroup": {
+          "Description": "defaults",
+          "ParameterGroupName": "pg-one"
+        }
+      }
+    },
+    {
+      "operation": "DescribeParameterGroups",
+      "input": {
+        "ParameterGroupName": "pg-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ParameterGroups": [
+          {
+            "Description": "defaults",
+            "ParameterGroupName": "pg-one"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeParameterGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ParameterGroups": [
+          {
+            "Description": "defaults",
+            "ParameterGroupName": "pg-one"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteParameterGroup",
+      "input": {
+        "ParameterGroupName": "pg-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeParameterGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ParameterGroups": null
+      }
+    },
+    {
+      "operation": "DeleteCluster",
+      "input": {
+        "ClusterName": "cache-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeClusters",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Clusters": [
+          {
+            "ClusterArn": "arn:aws:dax:us-east-1:000000000000:cache/cache-two",
+            "ClusterName": "cache-two",
+            "NodeType": "dax.r4.large",
+            "Status": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteCluster",
+      "input": {
+        "ClusterName": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

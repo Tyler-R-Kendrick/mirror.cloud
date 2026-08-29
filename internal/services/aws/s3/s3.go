@@ -2318,7 +2318,7 @@ func (p *Pack) versioning(ctx context.Context, req *spi.Request) (*spi.Response,
 			return nil, &spi.Fault{Code: "InvalidBucketState", Message: "An Object Lock configuration is present on this bucket, so the versioning state cannot be changed.", HTTPStatus: http.StatusConflict, Fault: "client"}
 		}
 		_ = p.col(req, "versioning").Put(ctx, b, []byte(st))
-		return &spi.Response{Status: 200, Output: map[string]any{}}, nil
+		return &spi.Response{Status: 200}, nil
 	}
 	raw, ok, _ := p.col(req, "versioning").Get(ctx, b)
 	if !ok || len(raw) == 0 {
@@ -2384,7 +2384,7 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 		}
 		raw, _ := json.Marshal(doc)
 		_ = col.Put(ctx, key, raw)
-		return &spi.Response{Status: 200, Output: doc}, nil
+		return &spi.Response{Status: 200}, nil
 	}
 	if strings.HasPrefix(req.Operation, "Delete") {
 		_ = col.Delete(ctx, key)

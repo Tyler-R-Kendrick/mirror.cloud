@@ -22,15 +22,7 @@
     "status": 404
   },
   "put": {
-    "output": {
-      "OwnershipControls": {
-        "Rules": [
-          {
-            "ObjectOwnership": "ObjectWriter"
-          }
-        ]
-      }
-    },
+    "output": null,
     "status": 200
   }
 }

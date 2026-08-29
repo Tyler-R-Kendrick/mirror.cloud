@@ -272,7 +272,9 @@ func TestBucketOwnershipControls(t *testing.T) {
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "ownership-controls"}, nil)
 	for _, ownership := range []string{"BucketOwnerPreferred", "ObjectWriter", "BucketOwnerEnforced"} {
 		controls := map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": ownership}}}
-		mustInvoke(t, p, "PutBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls", "OwnershipControls": controls}, nil)
+		if response := mustInvoke(t, p, "PutBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls", "OwnershipControls": controls}, nil); len(response.Output) != 0 {
+			t.Fatalf("%s put output = %#v", ownership, response.Output)
+		}
 		response := mustInvoke(t, p, "GetBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls"}, nil)
 		if !reflect.DeepEqual(response.Output["OwnershipControls"], controls) {
 			t.Fatalf("%s controls = %#v", ownership, response.Output)

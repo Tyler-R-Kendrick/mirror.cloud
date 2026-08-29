@@ -2942,7 +2942,7 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 		}
 		raw, _ := json.Marshal(configuration)
 		_ = p.col(req, "notify").Put(ctx, b, raw)
-		return &spi.Response{Status: 200, Output: map[string]any{}}, nil
+		return &spi.Response{Status: 200}, nil
 	case "GetBucketNotificationConfiguration":
 		raw, ok, _ := p.col(req, "notify").Get(ctx, b)
 		if !ok {

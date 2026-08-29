@@ -729,6 +729,30 @@ func TestBucketWebsiteCharacterization(t *testing.T) {
 	})
 }
 
+func TestBucketNotificationConfigurationCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	input := map[string]any{"Bucket": "notification-characterization"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	if err := deps.Store.Scope(ident().Account, ident().Region).Collection("queues").Put(context.Background(), "queue", []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	before := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil)
+	configuration := map[string]any{"QueueConfigurations": []any{map[string]any{"Id": "images", "QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue", "Events": []any{"s3:ObjectCreated:*"}, "Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{map[string]any{"Name": "prefix", "Value": "images/"}}}}}}}
+	put := mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": configuration}, nil)
+	after := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil)
+	_, invalidErr := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:123456789012:missing", "Events": []any{"s3:ObjectCreated:*"}}}}}, nil)
+	invalid := asFault(t, invalidErr)
+	preserved := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil)
+	cleared := mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": map[string]any{}}, nil)
+	final := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil)
+	golden.AssertJSON(t, map[string]any{
+		"default": before.Output, "put": put.Output, "get": after.Output,
+		"invalid":   map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus, "argument": invalid.Fields["ArgumentName"], "value": invalid.Fields["ArgumentValue"]},
+		"preserved": preserved.Output, "clear": cleared.Output, "cleared": final.Output,
+	})
+}
+
 func TestBucketLoggingCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	for _, bucket := range []string{"logging-characterization-source", "logging-characterization-target"} {

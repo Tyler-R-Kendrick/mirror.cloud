@@ -1,0 +1,55 @@
+{
+  "clear": {},
+  "cleared": {},
+  "default": {},
+  "get": {
+    "QueueConfigurations": [
+      {
+        "Events": [
+          "s3:ObjectCreated:*"
+        ],
+        "Filter": {
+          "Key": {
+            "FilterRules": [
+              {
+                "Name": "Prefix",
+                "Value": "images/"
+              }
+            ]
+          }
+        },
+        "Id": "images",
+        "QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue"
+      }
+    ]
+  },
+  "invalid": {
+    "argument": "arn:aws:sqs:us-east-1:123456789012:missing",
+    "code": "InvalidArgument",
+    "message": "Unable to validate the following destination configurations",
+    "status": 400,
+    "value": "The destination queue does not exist"
+  },
+  "preserved": {
+    "QueueConfigurations": [
+      {
+        "Events": [
+          "s3:ObjectCreated:*"
+        ],
+        "Filter": {
+          "Key": {
+            "FilterRules": [
+              {
+                "Name": "Prefix",
+                "Value": "images/"
+              }
+            ]
+          }
+        },
+        "Id": "images",
+        "QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue"
+      }
+    ]
+  },
+  "put": {}
+}

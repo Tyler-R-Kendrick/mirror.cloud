@@ -1,0 +1,317 @@
+{
+  "schema": "trace/1",
+  "service": "aws.appmesh",
+  "source": "pack:internal/services/aws/appmesh@c575425",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListMeshes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "meshes": null
+      }
+    },
+    {
+      "operation": "DescribeMesh",
+      "input": {
+        "meshName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateMesh",
+      "input": {
+        "meshName": ""
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "BadRequestException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateMesh",
+      "input": {
+        "meshName": "mesh-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "mesh": {
+          "arn": "arn:aws:appmesh:us-east-1:000000000000:mesh/mesh-one",
+          "meshName": "mesh-one",
+          "meshOwner": "000000000000",
+          "status": {
+            "status": "ACTIVE"
+          }
+        }
+      },
+      "superseded": "The pack answered a mesh with arn and meshOwner at the top of the structure. MeshData declares meshName, metadata, spec and status only -- the ARN and the owner live inside metadata -- so those were members no SDK could read. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "DescribeMesh",
+      "input": {
+        "meshName": "mesh-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "mesh": {
+          "arn": "arn:aws:appmesh:us-east-1:000000000000:mesh/mesh-one",
+          "meshName": "mesh-one",
+          "meshOwner": "000000000000",
+          "status": {
+            "status": "ACTIVE"
+          }
+        }
+      },
+      "superseded": "The pack answered a mesh with arn and meshOwner at the top of the structure. MeshData declares meshName, metadata, spec and status only -- the ARN and the owner live inside metadata -- so those were members no SDK could read. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "CreateMesh",
+      "input": {
+        "meshName": "mesh-two"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "mesh": {
+          "arn": "arn:aws:appmesh:us-east-1:000000000000:mesh/mesh-two",
+          "meshName": "mesh-two",
+          "meshOwner": "000000000000",
+          "status": {
+            "status": "ACTIVE"
+          }
+        }
+      },
+      "superseded": "The pack answered a mesh with arn and meshOwner at the top of the structure. MeshData declares meshName, metadata, spec and status only -- the ARN and the owner live inside metadata -- so those were members no SDK could read. The declared shape outranks the pack's authored behavior, so this step is compared without its body."
+    },
+    {
+      "operation": "ListMeshes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "meshes": [
+          {
+            "arn": "arn:aws:appmesh:us-east-1:000000000000:mesh/mesh-one",
+            "meshName": "mesh-one",
+            "meshOwner": "000000000000",
+            "status": {
+              "status": "ACTIVE"
+            }
+          },
+          {
+            "arn": "arn:aws:appmesh:us-east-1:000000000000:mesh/mesh-two",
+            "meshName": "mesh-two",
+            "meshOwner": "000000000000",
+            "status": {
+              "status": "ACTIVE"
+            }
+          }
+        ]
+      },
+      "superseded": "The pack listed a mesh with the status it stored. MeshRef declares no status, so the listing carried a member no SDK can read. The declared shape outranks the pack's authored behavior, so the bundle projects the listing and this step is compared without its body."
+    },
+    {
+      "operation": "CreateVirtualNode",
+      "input": {
+        "meshName": "mesh-one",
+        "spec": {
+          "listeners": []
+        },
+        "virtualNodeName": "node-a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "virtualNode": {
+          "meshName": "mesh-one",
+          "status": {
+            "status": "ACTIVE"
+          },
+          "virtualNodeName": "node-a"
+        }
+      }
+    },
+    {
+      "operation": "DescribeVirtualNode",
+      "input": {
+        "meshName": "mesh-one",
+        "virtualNodeName": "node-a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "virtualNode": {
+          "meshName": "mesh-one",
+          "status": {
+            "status": "ACTIVE"
+          },
+          "virtualNodeName": "node-a"
+        }
+      }
+    },
+    {
+      "operation": "DescribeVirtualNode",
+      "input": {
+        "meshName": "mesh-two",
+        "virtualNodeName": "node-a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteMesh",
+      "input": {
+        "meshName": "mesh-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListMeshes",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "meshes": [
+          {
+            "arn": "arn:aws:appmesh:us-east-1:000000000000:mesh/mesh-two",
+            "meshName": "mesh-two",
+            "meshOwner": "000000000000",
+            "status": {
+              "status": "ACTIVE"
+            }
+          }
+        ]
+      },
+      "superseded": "The pack listed a mesh with the status it stored. MeshRef declares no status, so the listing carried a member no SDK can read. The declared shape outranks the pack's authored behavior, so the bundle projects the listing and this step is compared without its body."
+    },
+    {
+      "operation": "DescribeVirtualNode",
+      "input": {
+        "meshName": "mesh-one",
+        "virtualNodeName": "node-a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "virtualNode": {
+          "meshName": "mesh-one",
+          "status": {
+            "status": "ACTIVE"
+          },
+          "virtualNodeName": "node-a"
+        }
+      }
+    },
+    {
+      "operation": "DeleteVirtualNode",
+      "input": {
+        "meshName": "mesh-one",
+        "virtualNodeName": "node-a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteMesh",
+      "input": {
+        "meshName": "gone"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

@@ -1,0 +1,109 @@
+schema: bir/1
+service: aws.serverlessrepo
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is published or deployed: an application is a name and an
+# author, and a version is a semantic version string beside it.
+provenance: authored
+
+missing_input_error: BadRequest
+
+resources:
+  application:
+    collection: sarapp
+    # An application is addressed by its ApplicationId, which is an ARN, and
+    # created by Name. Deriving the identifier covers both without needing to
+    # take an ARN apart.
+    id:
+      derive: >
+        'ApplicationId' in input
+          ? string(input.ApplicationId)
+          : 'arn:aws:serverlessrepo:' + identity.region + ':' + identity.account
+            + ':applications/' + string(input.Name)
+    record: {}
+
+  version:
+    collection: sarver
+    id:
+      derive: "string(input.ApplicationId) + '/' + string(input.SemanticVersion)"
+    record: {}
+
+errors:
+  BadRequest:
+    code: BadRequestException
+    http: 400
+    fault: client
+  NotFound:
+    code: NotFoundException
+    http: 404
+    fault: client
+
+operations:
+  CreateApplication:
+    require:
+      - { cond: "string(input.Name) != ''", error: BadRequest }
+    effects:
+      - put:
+          resource: application
+          record:
+            ApplicationId: id
+            Name: "string(input.Name)"
+            Author: "'Author' in input ? string(input.Author) : ''"
+    output:
+      ApplicationId: rec.ApplicationId
+      Name: rec.Name
+      Author: rec.Author
+
+  GetApplication:
+    reads:
+      app: { resource: application }
+    require:
+      - { cond: app_found, error: NotFound }
+    output:
+      ApplicationId: app.ApplicationId
+      Name: app.Name
+      Author: app.Author
+
+  ListApplications:
+    list: { resource: application, member: Applications, paginate: model }
+
+  DeleteApplication:
+    effects:
+      - delete: { resource: application, missing: ignore }
+
+  CreateApplicationVersion:
+    effects:
+      - put:
+          resource: version
+          record:
+            ApplicationId: "string(input.ApplicationId)"
+            SemanticVersion: "string(input.SemanticVersion)"
+    output:
+      ApplicationId: rec.ApplicationId
+      SemanticVersion: rec.SemanticVersion
+
+  # Every version in the account and region is listed, whatever application
+  # was asked about: the pack listed the whole collection and this transcribes
+  # that.
+  ListApplicationVersions:
+    list: { resource: version, member: Versions, paginate: model }
+
+quirks:
+  - operation: ListApplicationVersions
+    note: >
+      ApplicationId is required and ignored: the answer is every version ever
+      created, not the versions of the application asked about. Narrowing it
+      needs a filter over a key prefix, which is a small change once a probe
+      says what the real service returns for an application that has none.
+  - operation: CreateApplicationVersion
+    note: >
+      A version is not attached to its application in any way a read can
+      follow, and creating one for an application that does not exist
+      succeeds. Neither TemplateUrl, SourceCodeUrl nor any parameter
+      definition is stored, so a version is a string.
+  - operation: CreateApplication
+    note: >
+      Description is required by the model and is not stored, so GetApplication
+      answers without the member it declares. CreationTime, SpdxLicenseId and
+      the readme and licence URLs are likewise never set, and no version is
+      created alongside the application the way the real service does.

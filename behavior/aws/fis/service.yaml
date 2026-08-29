@@ -1,0 +1,103 @@
+schema: bir/1
+service: aws.fis
+
+# Transcribed from the hand-written pack, not established against the real
+# service. No fault is injected: a template is a description and a role, and
+# an experiment is completed before it is answered for.
+provenance: authored
+
+resources:
+  template:
+    collection: fistpl
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [id]
+    arn: "arn:{partition}:fis:{region}:{account}:experiment-template/{id}"
+    record:
+      id: id
+      arn: arn
+      description: "'description' in input ? string(input.description) : ''"
+      roleArn: "'roleArn' in input ? string(input.roleArn) : ''"
+
+  experiment:
+    collection: fisexp
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [id]
+    record:
+      id: id
+      experimentTemplateId: "'experimentTemplateId' in input ? string(input.experimentTemplateId) : ''"
+      state: "{'status': 'completed'}"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateExperimentTemplate:
+    effects:
+      - create: { resource: template }
+    output:
+      experimentTemplate: rec
+
+  GetExperimentTemplate:
+    reads:
+      tpl: { resource: template }
+    require:
+      - { cond: tpl_found, error: NotFound }
+    output:
+      experimentTemplate: tpl
+
+  # ExperimentTemplateSummary declares no roleArn, so the listed form is not
+  # the stored record; GetExperimentTemplate answers with the role.
+  ListExperimentTemplates:
+    list: { resource: template, member: experimentTemplates, paginate: model }
+    output:
+      experimentTemplates: >
+        items.map(t, {
+          'id': t.id,
+          'arn': t.arn,
+          'description': t.description
+        })
+
+  DeleteExperimentTemplate:
+    effects:
+      - delete: { resource: template, missing: ignore }
+    output: {}
+
+  StartExperiment:
+    effects:
+      - create: { resource: experiment }
+    output:
+      experiment: rec
+
+  GetExperiment:
+    reads:
+      exp: { resource: experiment }
+    require:
+      - { cond: exp_found, error: NotFound }
+    output:
+      experiment: exp
+
+quirks:
+  - operation: CreateExperimentTemplate
+    note: >
+      actions, stopConditions and clientToken are required by the model and
+      none is stored, so a template has nothing to inject and no condition to
+      stop on. The engine now rejects a request that omits them, which the
+      pack accepted. creationTime, lastUpdateTime and targets are declared and
+      never set.
+  - operation: StartExperiment
+    note: >
+      An experiment is completed before it is answered for, because nothing
+      runs it: nothing ever observes pending, initiating or running, and no
+      experiment can be stopped. It carries no arn, no startTime and no
+      endTime, and its experimentTemplateId is stored as given without
+      checking that the template exists.
+  - operation: DeleteExperimentTemplate
+    note: >
+      Deleting answers with nothing where the model declares the deleted
+      template, and deleting an absent one succeeds. Deleting a template
+      leaves experiments that name it behind.

@@ -568,6 +568,22 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 	if len(tags) > 0 {
 		tagDocument, _ = json.Marshal(tags)
 	}
+	ownership := str(req.Input["ObjectOwnership"])
+	_, ownershipSet := req.Input["ObjectOwnership"]
+	if !ownershipSet && req.HTTP != nil {
+		if values := req.HTTP.Header.Values("x-amz-object-ownership"); len(values) > 0 {
+			ownership, ownershipSet = values[0], true
+		}
+	}
+	if !ownershipSet {
+		ownership = "BucketOwnerEnforced"
+	}
+	switch ownership {
+	case "BucketOwnerPreferred", "ObjectWriter", "BucketOwnerEnforced":
+	default:
+		return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid x-amz-object-ownership header", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-object-ownership", "ArgumentValue": ownership}}
+	}
+	ownershipDocument, _ := json.Marshal(map[string]any{"OwnershipControls": map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": ownership}}}})
 	objectLock := truthy(req.Input["ObjectLockEnabledForBucket"])
 	if req.HTTP != nil {
 		objectLock = objectLock || strings.EqualFold(req.HTTP.Header.Get("x-amz-bucket-object-lock-enabled"), "true")
@@ -598,6 +614,18 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 	defer p.mu.Unlock()
 	bucketStore := p.deps.Store.Scope(req.Identity.Account, bucketRegion)
 	buckets := bucketStore.Collection("buckets")
+	persistConfigurations := func() error {
+		if len(tagDocument) > 0 {
+			if err := bucketStore.Collection("tags").Put(ctx, b, tagDocument); err != nil {
+				return err
+			}
+		}
+		if err := bucketStore.Collection("bktcfg").Put(ctx, b+"/ownershipcontrols", ownershipDocument); err != nil {
+			_ = bucketStore.Collection("tags").Delete(ctx, b)
+			return err
+		}
+		return nil
+	}
 	if accountRegional {
 		if _, exists, err := buckets.Get(ctx, b); err != nil {
 			return nil, err
@@ -608,11 +636,9 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		if err := buckets.Put(ctx, b, meta); err != nil {
 			return nil, err
 		}
-		if len(tagDocument) > 0 {
-			if err := bucketStore.Collection("tags").Put(ctx, b, tagDocument); err != nil {
-				_ = buckets.Delete(ctx, b)
-				return nil, err
-			}
+		if err := persistConfigurations(); err != nil {
+			_ = buckets.Delete(ctx, b)
+			return nil, err
 		}
 		if objectLock {
 			_ = p.deps.Store.Scope(req.Identity.Account, bucketRegion).Collection("versioning").Put(ctx, b, []byte("Enabled"))
@@ -650,12 +676,10 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 			_ = buckets.Delete(ctx, b)
 			return nil, err
 		}
-		if len(tagDocument) > 0 {
-			if err := bucketStore.Collection("tags").Put(ctx, b, tagDocument); err != nil {
-				_ = global.Delete(ctx, b)
-				_ = buckets.Delete(ctx, b)
-				return nil, err
-			}
+		if err := persistConfigurations(); err != nil {
+			_ = global.Delete(ctx, b)
+			_ = buckets.Delete(ctx, b)
+			return nil, err
 		}
 		if objectLock {
 			_ = p.deps.Store.Scope(req.Identity.Account, bucketRegion).Collection("versioning").Put(ctx, b, []byte("Enabled"))

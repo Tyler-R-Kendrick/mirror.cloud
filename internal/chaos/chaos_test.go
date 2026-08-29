@@ -637,6 +637,60 @@ func TestConcurrentCreateBucketTagsRemainAtomic(t *testing.T) {
 	}
 }
 
+func TestConcurrentCreateBucketOwnershipRemainsAtomic(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	bucket := "atomic-ownership-" + id.Account + "-" + id.Region + "-an"
+	type result struct {
+		ownership string
+		err       error
+	}
+	results := make(chan result, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(results); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			ownership := "invalid"
+			if n%2 == 0 {
+				ownership = []string{"BucketOwnerPreferred", "ObjectWriter", "BucketOwnerEnforced"}[n%3]
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{
+				"Bucket": bucket, "BucketNamespace": "account-regional", "ObjectOwnership": ownership,
+			}})
+			results <- result{ownership: ownership, err: err}
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+	successes, winner := 0, ""
+	for result := range results {
+		if result.err == nil {
+			successes++
+			winner = result.ownership
+			continue
+		}
+		var fault *spi.Fault
+		valid := result.ownership != "invalid"
+		if !errors.As(result.err, &fault) || valid && fault.Code != "BucketAlreadyOwnedByYou" || !valid && fault.Code != "InvalidArgument" && fault.Code != "BucketAlreadyOwnedByYou" {
+			t.Fatalf("concurrent create ownership=%s: %v", result.ownership, result.err)
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("successful creates = %d, want 1", successes)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBucketOwnershipControls", Input: map[string]any{"Bucket": bucket}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	controls, _ := response.Output["OwnershipControls"].(map[string]any)
+	rules, _ := controls["Rules"].([]any)
+	if len(rules) != 1 || rules[0].(map[string]any)["ObjectOwnership"] != winner {
+		t.Fatalf("persisted create ownership = %#v, want %s", response, winner)
+	}
+}
+
 func TestConcurrentInvalidVersioningWritesDoNotChangeState(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

@@ -267,6 +267,44 @@ func TestCreateBucketObjectOwnership(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestBucketOwnershipControls(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "ownership-controls"}, nil)
+	for _, ownership := range []string{"BucketOwnerPreferred", "ObjectWriter", "BucketOwnerEnforced"} {
+		controls := map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": ownership}}}
+		mustInvoke(t, p, "PutBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls", "OwnershipControls": controls}, nil)
+		response := mustInvoke(t, p, "GetBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls"}, nil)
+		if !reflect.DeepEqual(response.Output["OwnershipControls"], controls) {
+			t.Fatalf("%s controls = %#v", ownership, response.Output)
+		}
+	}
+
+	invalid := []any{
+		nil,
+		map[string]any{},
+		map[string]any{"Rules": []any{}},
+		map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": "ObjectWriter"}, map[string]any{"ObjectOwnership": "BucketOwnerPreferred"}}},
+		map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": ""}}},
+		map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": "invalid"}}},
+	}
+	for _, controls := range invalid {
+		_, err := invoke(t, p, "PutBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls", "OwnershipControls": controls}, nil)
+		if fault := asFault(t, err); fault.Code != "MalformedXML" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("controls %#v = %#v", controls, fault)
+		}
+	}
+
+	response := mustInvoke(t, p, "GetBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls"}, nil)
+	if got := asMapForTest(asSliceForTest(asMapForTest(response.Output["OwnershipControls"])["Rules"])[0])["ObjectOwnership"]; got != "BucketOwnerEnforced" {
+		t.Fatalf("invalid put replaced controls = %v", got)
+	}
+	mustInvoke(t, p, "DeleteBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls"}, nil)
+	mustInvoke(t, p, "DeleteBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls"}, nil)
+	if _, err := invoke(t, p, "GetBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls"}, nil); asFault(t, err).Code != "OwnershipControlsNotFoundError" {
+		t.Fatalf("get deleted controls: %v", err)
+	}
+}
+
 func TestCreateBucketAccountRegionalNamespace(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	east := ident()

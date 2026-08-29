@@ -220,6 +220,72 @@ func TestCreateBucketTags(t *testing.T) {
 	})
 }
 
+func TestBucketNotificationConfiguration(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	input := map[string]any{"Bucket": "notifications"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	if got := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(got) != 0 {
+		t.Fatalf("default notifications = %#v", got)
+	}
+	configuration := map[string]any{
+		"QueueConfigurations":          []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:queue", "Events": []any{"s3:ObjectCreated:*"}, "Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{map[string]any{"Name": "prefix", "Value": "images/"}}}}}},
+		"TopicConfigurations":          []any{map[string]any{"Id": "topic", "TopicArn": "arn:aws:sns:us-east-1:111111111111:topic", "Events": []any{"s3:ObjectRemoved:*"}}},
+		"LambdaFunctionConfigurations": []any{map[string]any{"LambdaFunctionArn": "arn:aws:lambda:us-east-1:111111111111:function:handler", "Events": []any{"s3:ObjectCreated:Put"}}},
+		"EventBridgeConfiguration":     map[string]any{},
+	}
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": configuration}, nil)
+	got := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output
+	queue := asMapForTest(asSliceForTest(got["QueueConfigurations"])[0])
+	id, _ := queue["Id"].(string)
+	if len(id) != 8 || asMapForTest(asSliceForTest(asMapForTest(asMapForTest(queue["Filter"])["Key"])["FilterRules"])[0])["Name"] != "Prefix" {
+		t.Fatalf("normalized queue = %#v", queue)
+	}
+	if !reflect.DeepEqual(got["EventBridgeConfiguration"], map[string]any{}) || asMapForTest(asSliceForTest(got["TopicConfigurations"])[0])["Id"] != "topic" {
+		t.Fatalf("notifications = %#v", got)
+	}
+	notificationWithFilter := func(rule map[string]any) map[string]any {
+		return map[string]any{
+			"QueueConfigurations": []any{
+				map[string]any{
+					"QueueArn": "arn:aws:sqs:us-east-1:111111111111:queue", "Events": []any{"s3:ObjectCreated:*"},
+					"Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{rule}}},
+				},
+			},
+		}
+	}
+	tests := []struct {
+		name, code string
+		config     any
+	}{
+		{"malformed document", "MalformedXML", nil},
+		{"missing events", "MalformedXML", map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:queue"}}}},
+		{"wrong arn service", "InvalidArgument", map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sns:us-east-1:111111111111:queue", "Events": []any{"s3:ObjectCreated:*"}}}}},
+		{"missing filter value", "MalformedXML", notificationWithFilter(map[string]any{"Name": "prefix"})},
+		{"invalid filter name", "InvalidArgument", notificationWithFilter(map[string]any{"Name": "contains", "Value": "x"})},
+		{"unknown field", "MalformedXML", map[string]any{"UnknownConfigurations": []any{}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			request := map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": tc.config}
+			if tc.name == "malformed document" {
+				delete(request, "NotificationConfiguration")
+				request["_body"] = "<broken"
+			}
+			_, err := invoke(t, p, "PutBucketNotificationConfiguration", request, nil)
+			if fault := asFault(t, err); fault.Code != tc.code {
+				t.Fatalf("fault = %#v", fault)
+			}
+		})
+	}
+	if preserved := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; !reflect.DeepEqual(preserved, got) {
+		t.Fatalf("invalid replacement = %#v", preserved)
+	}
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": map[string]any{}}, nil)
+	if cleared := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(cleared) != 0 {
+		t.Fatalf("cleared notifications = %#v", cleared)
+	}
+}
+
 func TestCreateBucketObjectOwnership(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	characterization := map[string]any{}

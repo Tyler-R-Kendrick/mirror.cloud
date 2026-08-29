@@ -2936,7 +2936,11 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 		}
 		return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"TagSet": tags}}, nil
 	case "PutBucketNotificationConfiguration":
-		raw, _ := json.Marshal(req.Input)
+		configuration, err := p.prepareNotificationConfiguration(req)
+		if err != nil {
+			return nil, err
+		}
+		raw, _ := json.Marshal(configuration)
 		_ = p.col(req, "notify").Put(ctx, b, raw)
 		return &spi.Response{Status: 200, Output: map[string]any{}}, nil
 	case "GetBucketNotificationConfiguration":
@@ -2950,6 +2954,101 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 	}
 	// Terraform refresh reads: empty document is the documented "not configured" response.
 	return &spi.Response{Status: 200, Output: map[string]any{}}, nil
+}
+
+func (p *Pack) prepareNotificationConfiguration(req *spi.Request) (map[string]any, error) {
+	configuration := map[string]any{}
+	if value, exists := req.Input["NotificationConfiguration"]; exists {
+		var ok bool
+		if configuration, ok = value.(map[string]any); !ok {
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+	} else {
+		if str(req.Input["_body"]) != "" {
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		for _, field := range []string{"QueueConfigurations", "TopicConfigurations", "LambdaFunctionConfigurations", "EventBridgeConfiguration"} {
+			if value, exists := req.Input[field]; exists {
+				configuration[field] = value
+			}
+		}
+	}
+	normalized := make(map[string]any, len(configuration))
+	for field, value := range configuration {
+		if field == "EventBridgeConfiguration" {
+			if eventBridge, ok := value.(map[string]any); !ok || len(eventBridge) != 0 {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			normalized[field] = map[string]any{}
+			continue
+		}
+		arnField, service, argumentName := "", "", ""
+		switch field {
+		case "QueueConfigurations":
+			arnField, service, argumentName = "QueueArn", "sqs", "Queue"
+		case "TopicConfigurations":
+			arnField, service, argumentName = "TopicArn", "sns", "TopicArn"
+		case "LambdaFunctionConfigurations":
+			arnField, service, argumentName = "LambdaFunctionArn", "lambda", "LambdaFunctionArn"
+		default:
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		configurations, ok := value.([]any)
+		if !ok {
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		items := make([]any, 0, len(configurations))
+		for _, value := range configurations {
+			configuration, ok := value.(map[string]any)
+			if !ok || len(asSlice(configuration["Events"])) == 0 {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			arn := str(configuration[arnField])
+			parts := strings.SplitN(arn, ":", 4)
+			if len(parts) != 4 || parts[0] != "arn" || parts[2] != service {
+				return nil, &spi.Fault{Code: "InvalidArgument", Message: "The ARN could not be parsed", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": argumentName, "ArgumentValue": arn}}
+			}
+			for key := range configuration {
+				if key != "Id" && key != arnField && key != "Events" && key != "Filter" {
+					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+				}
+			}
+			item := map[string]any{arnField: arn, "Events": configuration["Events"], "Id": str(configuration["Id"])}
+			if item["Id"] == "" {
+				item["Id"] = p.deps.Rand.Hex(8)
+			}
+			if value, exists := configuration["Filter"]; exists {
+				filter := asMap(value)
+				key := asMap(filter["Key"])
+				rules, ok := key["FilterRules"].([]any)
+				if !ok {
+					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+				}
+				normalizedRules := make([]any, 0, len(rules))
+				for _, value := range rules {
+					rule, ok := value.(map[string]any)
+					name, hasName := rule["Name"].(string)
+					value, hasValue := rule["Value"].(string)
+					if !ok || !hasName || !hasValue {
+						return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+					}
+					switch strings.ToLower(name) {
+					case "prefix":
+						name = "Prefix"
+					case "suffix":
+						name = "Suffix"
+					default:
+						return nil, &spi.Fault{Code: "InvalidArgument", Message: "filter rule name must be either prefix or suffix", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "FilterRule.Name", "ArgumentValue": name}}
+					}
+					normalizedRules = append(normalizedRules, map[string]any{"Name": name, "Value": value})
+				}
+				item["Filter"] = map[string]any{"Key": map[string]any{"FilterRules": normalizedRules}}
+			}
+			items = append(items, item)
+		}
+		normalized[field] = items
+	}
+	return normalized, nil
 }
 
 func validateTagSet(value any, limit int, kind string) error {

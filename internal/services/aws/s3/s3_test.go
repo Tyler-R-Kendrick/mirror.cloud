@@ -595,6 +595,30 @@ func TestBucketCorsCharacterization(t *testing.T) {
 	})
 }
 
+func TestBucketWebsiteCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	input := map[string]any{"Bucket": "website-characterization"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	_, beforeErr := invoke(t, p, "GetBucketWebsite", input, nil)
+	before := asFault(t, beforeErr)
+	website := map[string]any{"IndexDocument": map[string]any{"Suffix": "index.html"}, "ErrorDocument": map[string]any{"Key": "error.html"}}
+	put := mustInvoke(t, p, "PutBucketWebsite", map[string]any{"Bucket": input["Bucket"], "WebsiteConfiguration": website}, nil)
+	after := mustInvoke(t, p, "GetBucketWebsite", input, nil)
+	_, invalidErr := invoke(t, p, "PutBucketWebsite", map[string]any{"Bucket": input["Bucket"], "WebsiteConfiguration": map[string]any{"IndexDocument": map[string]any{"Suffix": "dir/index.html"}}}, nil)
+	invalid := asFault(t, invalidErr)
+	preserved := mustInvoke(t, p, "GetBucketWebsite", input, nil)
+	deleted := mustInvoke(t, p, "DeleteBucketWebsite", input, nil)
+	_, finalErr := invoke(t, p, "GetBucketWebsite", input, nil)
+	final := asFault(t, finalErr)
+	golden.AssertJSON(t, map[string]any{
+		"default": map[string]any{"code": before.Code, "message": before.Message, "status": before.HTTPStatus, "bucket": before.Fields["BucketName"]},
+		"put":     put.Output, "get": after.Output,
+		"invalid":   map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus, "argument": invalid.Fields["ArgumentName"], "value": invalid.Fields["ArgumentValue"]},
+		"preserved": preserved.Output, "delete": deleted.Output,
+		"deleted": map[string]any{"code": final.Code, "message": final.Message, "status": final.HTTPStatus, "bucket": final.Fields["BucketName"]},
+	})
+}
+
 func TestBucketLoggingCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	for _, bucket := range []string{"logging-characterization-source", "logging-characterization-target"} {

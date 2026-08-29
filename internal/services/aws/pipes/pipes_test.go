@@ -770,9 +770,11 @@ func TestPipesTargetInputTemplate(t *testing.T) {
 	if transformed["kind"] != "keep" || transformed["second"] != float64(2) || transformed["summary"] != "keep-transform" || len(transformed["all"].([]any)) != 2 || event["body"].(map[string]any)["kind"] != "keep" {
 		t.Fatalf("transformed %#v", transformed)
 	}
-	if len(storedMessages(t, deps, id, "source")) != 0 {
-		t.Fatal("transformed source message retained")
-	}
+	// The pipe deletes the source message after it has forwarded it, so the
+	// target arriving does not mean the source has drained yet: asserting that
+	// synchronously fails whenever the runner interleaves the two steps. Both
+	// halves are the same delivery, so both are waited for.
+	eventually(t, func() bool { return len(storedMessages(t, deps, id, "source")) == 0 })
 }
 
 func TestPipesLambdaPartialBatchResponse(t *testing.T) {

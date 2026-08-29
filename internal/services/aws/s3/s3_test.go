@@ -554,8 +554,12 @@ func TestBucketWebsite(t *testing.T) {
 				request["_body"] = "<broken"
 			}
 			_, err := invoke(t, p, "PutBucketWebsite", request, nil)
-			if fault := asFault(t, err); fault.Code != tc.code || fault.HTTPStatus != tc.status {
+			fault := asFault(t, err)
+			if fault.Code != tc.code || fault.HTTPStatus != tc.status {
 				t.Fatalf("fault = %#v", fault)
+			}
+			if tc.name == "missing index" && fault.Message != "A value for IndexDocument Suffix must be provided if RedirectAllRequestsTo is empty" {
+				t.Fatalf("missing index fault = %#v", fault)
 			}
 		})
 	}

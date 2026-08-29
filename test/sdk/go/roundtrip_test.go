@@ -194,7 +194,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		LambdaFunctionConfigurations: []s3types.LambdaFunctionConfiguration{{LambdaFunctionArn: aws.String("arn:aws:lambda:us-east-1:111111111111:function:handler"), Events: []s3types.Event{s3types.Event("s3:ObjectCreated:Put")}}},
 		EventBridgeConfiguration:     &s3types.EventBridgeConfiguration{},
 	}
-	if _, err := s3c.PutBucketNotificationConfiguration(context.Background(), &s3.PutBucketNotificationConfigurationInput{Bucket: aws.String("sdk"), NotificationConfiguration: notifications}); err != nil {
+	if _, err := s3c.PutBucketNotificationConfiguration(context.Background(), &s3.PutBucketNotificationConfigurationInput{Bucket: aws.String("sdk"), NotificationConfiguration: notifications, SkipDestinationValidation: aws.Bool(true)}); err != nil {
 		t.Fatalf("put bucket notifications: %v", err)
 	}
 	gotNotifications, err := s3c.GetBucketNotificationConfiguration(context.Background(), &s3.GetBucketNotificationConfigurationInput{Bucket: aws.String("sdk")})

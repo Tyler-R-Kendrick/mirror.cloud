@@ -221,9 +221,15 @@ func TestCreateBucketTags(t *testing.T) {
 }
 
 func TestBucketNotificationConfiguration(t *testing.T) {
-	p := s3.New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
 	input := map[string]any{"Bucket": "notifications"}
 	mustInvoke(t, p, "CreateBucket", input, nil)
+	for collection, name := range map[string]string{"queues": "queue", "topics": "topic", "lambda": "handler"} {
+		if err := deps.Store.Scope("111111111111", "us-east-1").Collection(collection).Put(context.Background(), name, []byte("{}")); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if got := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(got) != 0 {
 		t.Fatalf("default notifications = %#v", got)
 	}
@@ -260,6 +266,7 @@ func TestBucketNotificationConfiguration(t *testing.T) {
 		{"malformed document", "MalformedXML", nil},
 		{"missing events", "MalformedXML", map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:queue"}}}},
 		{"wrong arn service", "InvalidArgument", map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sns:us-east-1:111111111111:queue", "Events": []any{"s3:ObjectCreated:*"}}}}},
+		{"missing destination", "InvalidArgument", map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:missing", "Events": []any{"s3:ObjectCreated:*"}}}}},
 		{"missing filter value", "MalformedXML", notificationWithFilter(map[string]any{"Name": "prefix"})},
 		{"invalid filter name", "InvalidArgument", notificationWithFilter(map[string]any{"Name": "contains", "Value": "x"})},
 		{"unknown field", "MalformedXML", map[string]any{"UnknownConfigurations": []any{}}},
@@ -280,6 +287,11 @@ func TestBucketNotificationConfiguration(t *testing.T) {
 	if preserved := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; !reflect.DeepEqual(preserved, got) {
 		t.Fatalf("invalid replacement = %#v", preserved)
 	}
+	skipped := map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:missing", "Events": []any{"s3:ObjectCreated:*"}}}}
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": skipped, "SkipDestinationValidation": true}, nil)
+	if stored := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(asSliceForTest(stored["QueueConfigurations"])) != 1 {
+		t.Fatalf("skipped destination validation = %#v", stored)
+	}
 	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": map[string]any{}}, nil)
 	if cleared := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(cleared) != 0 {
 		t.Fatalf("cleared notifications = %#v", cleared)
@@ -291,6 +303,9 @@ func TestBucketNotificationDeliveryFilters(t *testing.T) {
 	p := s3.New(deps)
 	input := map[string]any{"Bucket": "notification-delivery"}
 	mustInvoke(t, p, "CreateBucket", input, nil)
+	if err := deps.Store.Scope("111111111111", "us-east-1").Collection("queues").Put(context.Background(), "queue", []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
 	configuration := map[string]any{"QueueConfigurations": []any{
 		map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:queue", "Events": []any{"s3:ObjectCreated:*"}, "Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{map[string]any{"Name": "prefix", "Value": "images/"}, map[string]any{"Name": "suffix", "Value": ".jpg"}}}}},
 		map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:queue", "Events": []any{"s3:ObjectRemoved:*"}},

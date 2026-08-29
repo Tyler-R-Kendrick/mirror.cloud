@@ -2936,7 +2936,7 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 		}
 		return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"TagSet": tags}}, nil
 	case "PutBucketNotificationConfiguration":
-		configuration, err := p.prepareNotificationConfiguration(req)
+		configuration, err := p.prepareNotificationConfiguration(ctx, req)
 		if err != nil {
 			return nil, err
 		}
@@ -2956,7 +2956,14 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 	return &spi.Response{Status: 200, Output: map[string]any{}}, nil
 }
 
-func (p *Pack) prepareNotificationConfiguration(req *spi.Request) (map[string]any, error) {
+func (p *Pack) prepareNotificationConfiguration(ctx context.Context, req *spi.Request) (map[string]any, error) {
+	skipDestinationValidation := false
+	if value, ok := req.Input["SkipDestinationValidation"].(bool); ok {
+		skipDestinationValidation = value
+	}
+	if req.HTTP != nil && strings.EqualFold(req.HTTP.Header.Get("x-amz-skip-destination-validation"), "true") {
+		skipDestinationValidation = true
+	}
 	configuration := map[string]any{}
 	if value, exists := req.Input["NotificationConfiguration"]; exists {
 		var ok bool
@@ -3007,6 +3014,24 @@ func (p *Pack) prepareNotificationConfiguration(req *spi.Request) (map[string]an
 			parts := strings.SplitN(arn, ":", 4)
 			if len(parts) != 4 || parts[0] != "arn" || parts[2] != service {
 				return nil, &spi.Fault{Code: "InvalidArgument", Message: "The ARN could not be parsed", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": argumentName, "ArgumentValue": arn}}
+			}
+			if !skipDestinationValidation {
+				arnParts := strings.Split(arn, ":")
+				if len(arnParts) < 6 {
+					return nil, &spi.Fault{Code: "InvalidArgument", Message: "The ARN could not be parsed", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": argumentName, "ArgumentValue": arn}}
+				}
+				name, collection, missing := arnParts[len(arnParts)-1], "", ""
+				switch service {
+				case "sqs":
+					collection, missing = "queues", "The destination queue does not exist"
+				case "sns":
+					collection, missing = "topics", "The destination topic does not exist"
+				case "lambda":
+					collection, missing = "lambda", "The destination Lambda does not exist"
+				}
+				if _, exists, _ := p.deps.Store.Scope(arnParts[4], arnParts[3]).Collection(collection).Get(ctx, name); !exists {
+					return nil, &spi.Fault{Code: "InvalidArgument", Message: "Unable to validate the following destination configurations", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": arn, "ArgumentValue": missing}}
+				}
 			}
 			for key := range configuration {
 				if key != "Id" && key != arnField && key != "Events" && key != "Filter" {

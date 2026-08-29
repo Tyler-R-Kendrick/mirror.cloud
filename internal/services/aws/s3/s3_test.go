@@ -206,6 +206,14 @@ func TestCreateBucketTags(t *testing.T) {
 	if invalidBucket.Code != "NoSuchBucket" {
 		t.Fatalf("invalid tags reserved bucket = %v", err)
 	}
+	identity := ident()
+	accountRegional := "tagged-" + identity.Account + "-" + identity.Region + "-an"
+	mustInvokeAs(t, p, identity, "CreateBucket", map[string]any{
+		"Bucket": accountRegional, "BucketNamespace": "account-regional", "CreateBucketConfiguration": map[string]any{"Tags": tags},
+	}, nil)
+	if response := mustInvokeAs(t, p, identity, "GetBucketTagging", map[string]any{"Bucket": accountRegional}, nil); !reflect.DeepEqual(response.Output["TagSet"], tags) {
+		t.Fatalf("account-regional create tags = %#v", response.Output["TagSet"])
+	}
 	golden.AssertJSON(t, map[string]any{
 		"tags": response.Output["TagSet"], "tagged recreation": recreate.Code,
 		"invalid tags": invalidTags.Code, "invalid bucket": invalidBucket.Code,

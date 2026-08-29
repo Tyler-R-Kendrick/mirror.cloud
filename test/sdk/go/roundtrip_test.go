@@ -75,6 +75,28 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if got := ownership.OwnershipControls.Rules[0].ObjectOwnership; got != s3types.ObjectOwnershipBucketOwnerPreferred {
 		t.Fatalf("create bucket ownership = %q", got)
 	}
+	controls := &s3types.OwnershipControls{Rules: []s3types.OwnershipControlsRule{{ObjectOwnership: s3types.ObjectOwnershipObjectWriter}}}
+	if _, err := s3c.PutBucketOwnershipControls(context.Background(), &s3.PutBucketOwnershipControlsInput{Bucket: aws.String("sdk"), OwnershipControls: controls}); err != nil {
+		t.Fatalf("put bucket ownership controls: %v", err)
+	}
+	ownership, err = s3c.GetBucketOwnershipControls(context.Background(), &s3.GetBucketOwnershipControlsInput{Bucket: aws.String("sdk")})
+	if err != nil || ownership.OwnershipControls == nil || len(ownership.OwnershipControls.Rules) != 1 || ownership.OwnershipControls.Rules[0].ObjectOwnership != s3types.ObjectOwnershipObjectWriter {
+		t.Fatalf("put bucket ownership round trip: %#v %v", ownership, err)
+	}
+	invalidControls := &s3types.OwnershipControls{Rules: []s3types.OwnershipControlsRule{{ObjectOwnership: s3types.ObjectOwnership("invalid")}}}
+	if _, err := s3c.PutBucketOwnershipControls(context.Background(), &s3.PutBucketOwnershipControlsInput{Bucket: aws.String("sdk"), OwnershipControls: invalidControls}); err == nil || !strings.Contains(err.Error(), "MalformedXML") {
+		t.Fatalf("invalid ownership controls: %v", err)
+	}
+	if _, err := s3c.DeleteBucketOwnershipControls(context.Background(), &s3.DeleteBucketOwnershipControlsInput{Bucket: aws.String("sdk")}); err != nil {
+		t.Fatalf("delete bucket ownership controls: %v", err)
+	}
+	if _, err := s3c.GetBucketOwnershipControls(context.Background(), &s3.GetBucketOwnershipControlsInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "OwnershipControlsNotFoundError") {
+		t.Fatalf("get deleted ownership controls: %v", err)
+	}
+	controls.Rules[0].ObjectOwnership = s3types.ObjectOwnershipBucketOwnerPreferred
+	if _, err := s3c.PutBucketOwnershipControls(context.Background(), &s3.PutBucketOwnershipControlsInput{Bucket: aws.String("sdk"), OwnershipControls: controls}); err != nil {
+		t.Fatalf("restore bucket ownership controls: %v", err)
+	}
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk")}); err != nil {
 		t.Fatalf("recreate us-east-1 bucket: %v", err)
 	}

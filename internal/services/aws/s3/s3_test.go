@@ -464,6 +464,56 @@ func TestBucketNotificationEventBridgeDelivery(t *testing.T) {
 	}
 }
 
+func TestBucketNotificationRestoreAndACLEvents(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	bucket := "notification-restore-acl"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	if err := deps.Store.Scope(ident().Account, ident().Region).Collection("queues").Put(context.Background(), "queue", []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{
+		"Bucket": bucket,
+		"NotificationConfiguration": map[string]any{"QueueConfigurations": []any{map[string]any{
+			"QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue", "Events": []any{"s3:ObjectRestore:*", "s3:ObjectAcl:*"},
+		}}},
+	}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "archived", "StorageClass": "GLACIER"}, []byte("archive"))
+	mustInvoke(t, p, "RestoreObject", map[string]any{"Bucket": bucket, "Key": "archived", "Days": 1}, nil)
+	if _, err := invoke(t, p, "PutObjectAcl", map[string]any{"Bucket": bucket, "Key": "missing", "ACL": "private"}, nil); asFault(t, err).Code != "NoSuchKey" {
+		t.Fatalf("missing object ACL = %v", err)
+	}
+	mustInvoke(t, p, "PutObjectAcl", map[string]any{"Bucket": bucket, "Key": "archived", "ACL": "private"}, nil)
+
+	messages, _, err := deps.Store.Scope(ident().Account, ident().Region).Collection("msgs:queue").List(context.Background(), "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := map[string]map[string]any{}
+	for _, stored := range messages {
+		var message map[string]any
+		if err := json.Unmarshal(stored.Value, &message); err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(message["body"].(string)), &payload); err != nil {
+			t.Fatal(err)
+		}
+		record := asMapForTest(asSliceForTest(payload["Records"])[0])
+		events[record["eventName"].(string)] = record
+	}
+	if len(events) != 3 || events["ObjectRestore:Post"] == nil || events["ObjectRestore:Completed"] == nil || events["ObjectAcl:Put"] == nil {
+		t.Fatalf("restore/ACL events = %#v", events)
+	}
+	restoreData := asMapForTest(asMapForTest(events["ObjectRestore:Completed"]["glacierEventData"])["restoreEventData"])
+	if restoreData["lifecycleRestoreStorageClass"] != "GLACIER" || restoreData["lifecycleRestorationExpiryTime"] == "" {
+		t.Fatalf("completed restore event = %#v", events["ObjectRestore:Completed"])
+	}
+	if events["ObjectAcl:Put"]["eventVersion"] != "2.3" {
+		t.Fatalf("ACL event = %#v", events["ObjectAcl:Put"])
+	}
+}
+
 func TestCreateBucketObjectOwnership(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	characterization := map[string]any{}

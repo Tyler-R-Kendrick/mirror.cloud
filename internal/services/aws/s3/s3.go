@@ -2356,8 +2356,25 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	kind, miss := cfgKind(req.Operation)
 	key := b + "/" + kind
+	var objectMeta map[string]any
 	if keyObj := str(req.Input["Key"]); keyObj != "" {
-		key = b + "/" + keyObj + "/" + kind
+		if req.Operation == "GetObjectAcl" || req.Operation == "PutObjectAcl" {
+			var exists bool
+			objectMeta, exists = p.objectMetadata(ctx, req, b, keyObj, str(req.Input["VersionId"]))
+			if !exists {
+				return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client"}
+			}
+			if truthy(objectMeta["deleteMarker"]) {
+				return nil, deleteMarkerReadFault(objectMeta, str(req.Input["VersionId"]) != "")
+			}
+			version := str(objectMeta["versionId"])
+			if version == "null" {
+				version = ""
+			}
+			key = objectTagKey(b, keyObj, version) + "/" + kind
+		} else {
+			key = b + "/" + keyObj + "/" + kind
+		}
 	}
 	col := p.col(req, "bktcfg")
 	if strings.HasPrefix(req.Operation, "Put") {
@@ -2498,6 +2515,9 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 		}
 		raw, _ := json.Marshal(doc)
 		_ = col.Put(ctx, key, raw)
+		if req.Operation == "PutObjectAcl" {
+			p.notify(ctx, req, b, str(req.Input["Key"]), "ObjectAcl:Put", objectMeta)
+		}
 		return &spi.Response{Status: 200}, nil
 	}
 	if strings.HasPrefix(req.Operation, "Delete") {
@@ -3551,6 +3571,10 @@ func (p *Pack) restoreObject(ctx context.Context, req *spi.Request) (*spi.Respon
 	expires := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, days+1)
 	restore := fmt.Sprintf(`ongoing-request="false", expiry-date="%s"`, expires.Format(http.TimeFormat))
 	_ = p.col(req, "objlock").Put(ctx, objectRestoreKey(b, key, meta), []byte(restore))
+	notificationMeta := cloneMap(meta)
+	notificationMeta["restoreExpiry"] = expires.UTC().Format("2006-01-02T15:04:05.000Z")
+	p.notify(ctx, req, b, key, "ObjectRestore:Post", notificationMeta)
+	p.notify(ctx, req, b, key, "ObjectRestore:Completed", notificationMeta)
 	status := http.StatusAccepted
 	if restored {
 		status = http.StatusOK
@@ -3732,6 +3756,11 @@ func (p *Pack) notificationPayload(req *spi.Request, bucket, key, event, configu
 			"object": object,
 		},
 	}
+	if strings.HasSuffix(event, "ObjectRestore:Completed") {
+		record["glacierEventData"] = map[string]any{"restoreEventData": map[string]any{
+			"lifecycleRestorationExpiryTime": str(meta["restoreExpiry"]), "lifecycleRestoreStorageClass": str(meta["storageClass"]),
+		}}
+	}
 	payload, _ := json.Marshal(map[string]any{"Records": []any{record}})
 	return payload
 }
@@ -3782,6 +3811,8 @@ func (p *Pack) eventBridgeEntry(req *spi.Request, bucket, key, event string, met
 		detailType = "Object Restore Initiated"
 		if strings.HasSuffix(event, ":Completed") {
 			detailType = "Object Restore Completed"
+			detail["restore-expiry-time"] = str(meta["restoreExpiry"])
+			delete(detail, "source-ip-address")
 		}
 		detail["source-storage-class"] = str(meta["storageClass"])
 		delete(object, "sequencer")

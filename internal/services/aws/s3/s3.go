@@ -2353,6 +2353,13 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	col := p.col(req, "bktcfg")
 	if strings.HasPrefix(req.Operation, "Put") {
+		if req.Operation == "PutBucketRequestPayment" {
+			payer := str(asMap(req.Input["RequestPaymentConfiguration"])["Payer"])
+			if payer != "Requester" && payer != "BucketOwner" {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			req.Input["RequestPaymentConfiguration"] = map[string]any{"Payer": payer}
+		}
 		if req.Operation == "PutPublicAccessBlock" {
 			configuration, err := normalizePublicAccessBlock(req.Input["PublicAccessBlockConfiguration"])
 			if err != nil {
@@ -2424,6 +2431,9 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	var doc map[string]any
 	_ = json.Unmarshal(raw, &doc)
+	if req.Operation == "GetBucketRequestPayment" {
+		return &spi.Response{Status: 200, Output: map[string]any{"Payer": asMap(doc["RequestPaymentConfiguration"])["Payer"]}}, nil
+	}
 	return &spi.Response{Status: 200, Output: doc}, nil
 }
 

@@ -94,7 +94,7 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv("PutBucketAccelerateConfiguration", map[string]any{"Bucket": "bucket"}, nil, "")
 		inv("PutPublicAccessBlock", map[string]any{"Bucket": "bucket"}, nil, "")
 		inv("DeletePublicAccessBlock", map[string]any{"Bucket": "bucket"}, nil, "")
-		inv("PutBucketOwnershipControls", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutBucketOwnershipControls", map[string]any{"Bucket": "bucket", "OwnershipControls": map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": "ObjectWriter"}}}}, nil, "")
 		inv("DeleteBucketOwnershipControls", map[string]any{"Bucket": "bucket"}, nil, "")
 		inv("DeleteBucketTagging", map[string]any{"Bucket": "bucket"}, nil, "")
 		inv("DeleteObjectTagging", map[string]any{"Bucket": "bucket", "Key": "k"}, nil, "")

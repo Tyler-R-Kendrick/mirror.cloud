@@ -1,0 +1,20 @@
+{
+  "delete": 204,
+  "get": {
+    "PublicAccessBlockConfiguration": {
+      "BlockPublicAcls": false,
+      "BlockPublicPolicy": false,
+      "IgnorePublicAcls": true,
+      "RestrictPublicBuckets": false
+    }
+  },
+  "invalid": {
+    "code": "MalformedXML",
+    "status": 400
+  },
+  "missing": {
+    "code": "NoSuchPublicAccessBlockConfiguration",
+    "status": 404
+  },
+  "put": null
+}

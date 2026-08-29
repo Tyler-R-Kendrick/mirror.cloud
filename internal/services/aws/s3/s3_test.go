@@ -338,6 +338,24 @@ func TestPublicAccessBlock(t *testing.T) {
 	}
 }
 
+func TestPublicAccessBlockCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "public-access-block-characterization"}, nil)
+	put := mustInvoke(t, p, "PutPublicAccessBlock", map[string]any{"Bucket": "public-access-block-characterization", "PublicAccessBlockConfiguration": map[string]any{"IgnorePublicAcls": true}}, nil)
+	get := mustInvoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block-characterization"}, nil)
+	_, invalidErr := invoke(t, p, "PutPublicAccessBlock", map[string]any{"Bucket": "public-access-block-characterization", "PublicAccessBlockConfiguration": map[string]any{"Unknown": true}}, nil)
+	invalid := asFault(t, invalidErr)
+	deleted := mustInvoke(t, p, "DeletePublicAccessBlock", map[string]any{"Bucket": "public-access-block-characterization"}, nil)
+	_, missingErr := invoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block-characterization"}, nil)
+	missing := asFault(t, missingErr)
+	golden.AssertJSON(t, map[string]any{
+		"put": put.Output, "get": get.Output,
+		"invalid": map[string]any{"code": invalid.Code, "status": invalid.HTTPStatus},
+		"delete":  deleted.Status,
+		"missing": map[string]any{"code": missing.Code, "status": missing.HTTPStatus},
+	})
+}
+
 func TestBucketOwnershipControlsCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "ownership-characterization"}, nil)

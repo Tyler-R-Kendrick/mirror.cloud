@@ -482,6 +482,55 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given ownership controls When replacing and deleting them Then S3 validates and persists the rule", func(t *testing.T) {
+		res := do(http.MethodPut, "/ownership-controls", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create ownership-controls bucket %d", res.StatusCode)
+		}
+		valid := []byte(`<OwnershipControls><Rule><ObjectOwnership>ObjectWriter</ObjectOwnership></Rule></OwnershipControls>`)
+		res = do(http.MethodPut, "/ownership-controls?ownershipControls", valid, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || len(body) != 0 {
+			t.Fatalf("put ownership controls %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/ownership-controls?ownershipControls", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Rule><ObjectOwnership>ObjectWriter</ObjectOwnership></Rule>")) {
+			t.Fatalf("get ownership controls %d %s", res.StatusCode, body)
+		}
+		multiple := []byte(`<OwnershipControls><Rule><ObjectOwnership>BucketOwnerPreferred</ObjectOwnership></Rule><Rule><ObjectOwnership>BucketOwnerEnforced</ObjectOwnership></Rule></OwnershipControls>`)
+		res = do(http.MethodPut, "/ownership-controls?ownershipControls", multiple, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("MalformedXML")) {
+			t.Fatalf("multiple ownership controls %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/ownership-controls?ownershipControls", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<ObjectOwnership>ObjectWriter</ObjectOwnership>")) {
+			t.Fatalf("controls after invalid put %d %s", res.StatusCode, body)
+		}
+		for range 2 {
+			res = do(http.MethodDelete, "/ownership-controls?ownershipControls", nil, "")
+			io.Copy(io.Discard, res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusNoContent {
+				t.Fatalf("delete ownership controls %d", res.StatusCode)
+			}
+		}
+		res = do(http.MethodGet, "/ownership-controls?ownershipControls", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("OwnershipControlsNotFoundError")) {
+			t.Fatalf("get deleted ownership controls %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given a globally owned bucket When another identity creates it Then ownership errors are returned", func(t *testing.T) {
 		create := func(account, region string) (int, []byte) {
 			t.Helper()
@@ -662,9 +711,10 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			t.Fatalf("missing versioning status %d %s", res.StatusCode, body)
 		}
 		res = do(http.MethodPut, "/versioning-state?versioning", []byte("<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"), "")
+		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK {
-			t.Fatalf("enable versioning %d", res.StatusCode)
+		if res.StatusCode != http.StatusOK || len(body) != 0 {
+			t.Fatalf("enable versioning %d %s", res.StatusCode, body)
 		}
 		res = do(http.MethodGet, "/versioning-state?versioning", nil, "")
 		body, _ = io.ReadAll(res.Body)

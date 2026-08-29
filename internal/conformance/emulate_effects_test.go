@@ -77,7 +77,7 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv("DeleteBucketPolicy", map[string]any{"Bucket": "bucket"}, nil, "")
 		inv("PutBucketCors", map[string]any{"Bucket": "bucket", "CORSConfiguration": map[string]any{"CORSRules": []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{"*"}}}}}, nil, "")
 		inv("DeleteBucketCors", map[string]any{"Bucket": "bucket"}, nil, "")
-		inv("PutBucketWebsite", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutBucketWebsite", map[string]any{"Bucket": "bucket", "WebsiteConfiguration": map[string]any{"IndexDocument": map[string]any{"Suffix": "index.html"}}}, nil, "")
 		inv("DeleteBucketWebsite", map[string]any{"Bucket": "bucket"}, nil, "")
 		inv("PutBucketLogging", map[string]any{"Bucket": "bucket"}, nil, "")
 		inv("PutBucketLifecycleConfiguration", map[string]any{"Bucket": "bucket"}, nil, "")

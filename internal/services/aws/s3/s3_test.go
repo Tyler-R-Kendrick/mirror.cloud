@@ -926,6 +926,80 @@ func TestBucketWebsite(t *testing.T) {
 	}
 }
 
+func TestBucketLifecycleConfiguration(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	input := map[string]any{"Bucket": "lifecycle"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	_, err := invoke(t, p, "GetBucketLifecycleConfiguration", input, nil)
+	if fault := asFault(t, err); fault.Code != "NoSuchLifecycleConfiguration" || fault.HTTPStatus != http.StatusNotFound || fault.Fields["BucketName"] != "lifecycle" {
+		t.Fatalf("default lifecycle fault = %#v", fault)
+	}
+	rules := []any{
+		map[string]any{
+			"ID": "expire-images", "Status": "Enabled",
+			"Filter":                         map[string]any{"And": map[string]any{"Prefix": "images/", "Tags": []any{map[string]any{"Key": "class", "Value": "temporary"}}}},
+			"Expiration":                     map[string]any{"Days": float64(7)},
+			"Transitions":                    []any{map[string]any{"Days": float64(1), "StorageClass": "GLACIER"}},
+			"NoncurrentVersionExpiration":    map[string]any{"NoncurrentDays": float64(30)},
+			"AbortIncompleteMultipartUpload": map[string]any{"DaysAfterInitiation": float64(2)},
+		},
+	}
+	put := mustInvoke(t, p, "PutBucketLifecycleConfiguration", map[string]any{"Bucket": "lifecycle", "LifecycleConfiguration": map[string]any{"Rules": rules}}, nil)
+	if put.Status != http.StatusOK || put.Headers.Get("x-amz-transition-default-minimum-object-size") != "all_storage_classes_128K" || len(put.Output) != 0 {
+		t.Fatalf("put lifecycle = %#v", put)
+	}
+	get := mustInvoke(t, p, "GetBucketLifecycleConfiguration", input, nil)
+	if get.Headers.Get("x-amz-transition-default-minimum-object-size") != "all_storage_classes_128K" || !reflect.DeepEqual(get.Output["Rules"], rules) {
+		t.Fatalf("get lifecycle = %#v", get)
+	}
+	mustInvoke(t, p, "PutBucketLifecycleConfiguration", map[string]any{
+		"Bucket": "lifecycle", "TransitionDefaultMinimumObjectSize": "varies_by_storage_class",
+		"LifecycleConfiguration": map[string]any{"Rules": rules},
+	}, nil)
+	if got := mustInvoke(t, p, "GetBucketLifecycleConfiguration", input, nil).Headers.Get("x-amz-transition-default-minimum-object-size"); got != "varies_by_storage_class" {
+		t.Fatalf("transition minimum = %q", got)
+	}
+	invalid := []struct {
+		name          string
+		configuration any
+		minimum       string
+		code          string
+	}{
+		{"missing rules", map[string]any{}, "", "MalformedXML"},
+		{"missing id", map[string]any{"Rules": []any{map[string]any{"Filter": map[string]any{}, "Status": "Enabled"}}}, "", "MalformedXML"},
+		{"missing filter", map[string]any{"Rules": []any{map[string]any{"ID": "id", "Status": "Enabled"}}}, "", "MalformedXML"},
+		{"missing status", map[string]any{"Rules": []any{map[string]any{"ID": "id", "Filter": map[string]any{}}}}, "", "MalformedXML"},
+		{"multiple filters", map[string]any{"Rules": []any{map[string]any{"ID": "id", "Status": "Enabled", "Filter": map[string]any{"Prefix": "a", "Tag": map[string]any{"Key": "k", "Value": "v"}}}}}, "", "MalformedXML"},
+		{"empty noncurrent expiration", map[string]any{"Rules": []any{map[string]any{"ID": "id", "Status": "Enabled", "Filter": map[string]any{}, "NoncurrentVersionExpiration": map[string]any{}}}}, "", "MalformedXML"},
+		{"delete marker with days", map[string]any{"Rules": []any{map[string]any{"ID": "id", "Status": "Enabled", "Filter": map[string]any{}, "Expiration": map[string]any{"Days": 1, "ExpiredObjectDeleteMarker": true}}}}, "", "MalformedXML"},
+		{"non-midnight date", map[string]any{"Rules": []any{map[string]any{"ID": "id", "Status": "Enabled", "Filter": map[string]any{}, "Expiration": map[string]any{"Date": "2030-01-01T01:00:00Z"}}}}, "", "InvalidArgument"},
+		{"duplicate tags", map[string]any{"Rules": []any{map[string]any{"ID": "id", "Status": "Enabled", "Filter": map[string]any{"And": map[string]any{"Tags": []any{map[string]any{"Key": "k", "Value": "a"}, map[string]any{"Key": "k", "Value": "b"}}}}}}}, "", "InvalidRequest"},
+		{"invalid transition minimum", map[string]any{"Rules": rules}, "invalid", "InvalidRequest"},
+	}
+	for _, test := range invalid {
+		t.Run(test.name, func(t *testing.T) {
+			request := map[string]any{"Bucket": "lifecycle", "LifecycleConfiguration": test.configuration}
+			if test.minimum != "" {
+				request["TransitionDefaultMinimumObjectSize"] = test.minimum
+			}
+			_, err := invoke(t, p, "PutBucketLifecycleConfiguration", request, nil)
+			if fault := asFault(t, err); fault.Code != test.code || fault.HTTPStatus != http.StatusBadRequest {
+				t.Fatalf("fault = %#v", fault)
+			}
+		})
+	}
+	if got := mustInvoke(t, p, "GetBucketLifecycleConfiguration", input, nil); got.Headers.Get("x-amz-transition-default-minimum-object-size") != "varies_by_storage_class" || !reflect.DeepEqual(got.Output["Rules"], rules) {
+		t.Fatalf("invalid put replaced lifecycle = %#v", got)
+	}
+	for range 2 {
+		mustInvoke(t, p, "DeleteBucketLifecycle", input, nil)
+	}
+	_, err = invoke(t, p, "GetBucketLifecycleConfiguration", input, nil)
+	if fault := asFault(t, err); fault.Code != "NoSuchLifecycleConfiguration" {
+		t.Fatalf("deleted lifecycle fault = %#v", fault)
+	}
+}
+
 func TestBucketCorsCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	input := map[string]any{"Bucket": "cors-characterization"}

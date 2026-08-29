@@ -258,12 +258,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.deleteObjects(ctx, req)
 	case "PutBucketVersioning", "GetBucketVersioning":
 		return p.versioning(ctx, req)
+	case "GetBucketLifecycleConfiguration", "PutBucketLifecycleConfiguration", "DeleteBucketLifecycle":
+		return p.bucketLifecycle(ctx, req)
 	case "GetBucketAcl", "PutBucketAcl", "GetObjectAcl", "PutObjectAcl",
 		"GetBucketPolicy", "PutBucketPolicy", "DeleteBucketPolicy",
 		"GetBucketCors", "PutBucketCors", "DeleteBucketCors",
 		"GetBucketWebsite", "PutBucketWebsite", "DeleteBucketWebsite",
 		"GetBucketLogging", "PutBucketLogging",
-		"GetBucketLifecycleConfiguration", "PutBucketLifecycleConfiguration", "DeleteBucketLifecycle",
 		"GetBucketReplication", "PutBucketReplication", "DeleteBucketReplication",
 		"GetBucketEncryption", "PutBucketEncryption", "DeleteBucketEncryption",
 		"GetBucketObjectLockConfiguration", "PutBucketObjectLockConfiguration",
@@ -2349,6 +2350,126 @@ func putGetDel(method, put, get, del string) string {
 	default:
 		return get
 	}
+}
+
+func (p *Pack) bucketLifecycle(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	bucket := str(req.Input["Bucket"])
+	if err := p.requireBucket(ctx, req, bucket); err != nil {
+		return nil, err
+	}
+	key := bucket + "/lifecycle"
+	collection := p.col(req, "bktcfg")
+	if req.Operation == "DeleteBucketLifecycle" {
+		_ = collection.Delete(ctx, key)
+		return &spi.Response{Status: http.StatusNoContent}, nil
+	}
+	if req.Operation == "PutBucketLifecycleConfiguration" {
+		configuration, err := validateLifecycleConfiguration(req.Input["LifecycleConfiguration"])
+		if err != nil {
+			return nil, err
+		}
+		minimum := requestCondition(req, "TransitionDefaultMinimumObjectSize", "x-amz-transition-default-minimum-object-size")
+		if minimum == "" {
+			minimum = "all_storage_classes_128K"
+		}
+		if minimum != "all_storage_classes_128K" && minimum != "varies_by_storage_class" {
+			return nil, &spi.Fault{Code: "InvalidRequest", Message: "Invalid TransitionDefaultMinimumObjectSize found: " + minimum, HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		document := map[string]any{"Rules": configuration["Rules"], "TransitionDefaultMinimumObjectSize": minimum}
+		raw, _ := json.Marshal(document)
+		_ = collection.Put(ctx, key, raw)
+		headers := http.Header{}
+		headers.Set("x-amz-transition-default-minimum-object-size", minimum)
+		return &spi.Response{Status: http.StatusOK, Headers: headers}, nil
+	}
+	raw, exists, _ := collection.Get(ctx, key)
+	if !exists {
+		return nil, &spi.Fault{Code: "NoSuchLifecycleConfiguration", Message: "The lifecycle configuration does not exist", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": bucket}}
+	}
+	var document map[string]any
+	_ = json.Unmarshal(raw, &document)
+	minimum := str(document["TransitionDefaultMinimumObjectSize"])
+	headers := http.Header{}
+	headers.Set("x-amz-transition-default-minimum-object-size", minimum)
+	return &spi.Response{Status: http.StatusOK, Headers: headers, Output: map[string]any{"Rules": asSlice(document["Rules"])}}, nil
+}
+
+func validateLifecycleConfiguration(value any) (map[string]any, error) {
+	configuration, ok := value.(map[string]any)
+	if !ok {
+		return nil, malformedXML()
+	}
+	rules, ok := configuration["Rules"].([]any)
+	if !ok || len(rules) == 0 {
+		return nil, malformedXML()
+	}
+	for _, value := range rules {
+		rule, ok := value.(map[string]any)
+		if !ok {
+			return nil, malformedXML()
+		}
+		for _, field := range []string{"ID", "Filter", "Status"} {
+			if _, exists := rule[field]; !exists {
+				return nil, malformedXML()
+			}
+		}
+		filter, ok := rule["Filter"].(map[string]any)
+		if !ok || len(filter) > 1 {
+			return nil, malformedXML()
+		}
+		if value, exists := rule["NoncurrentVersionExpiration"]; exists {
+			expiration, ok := value.(map[string]any)
+			if !ok {
+				return nil, malformedXML()
+			}
+			if _, newer := expiration["NewerNoncurrentVersions"]; !newer {
+				if _, days := expiration["NoncurrentDays"]; !days {
+					return nil, malformedXML()
+				}
+			}
+		}
+		if value, exists := rule["Expiration"]; exists {
+			expiration, ok := value.(map[string]any)
+			if !ok {
+				return nil, malformedXML()
+			}
+			if _, marker := expiration["ExpiredObjectDeleteMarker"]; marker && len(expiration) > 1 {
+				return nil, malformedXML()
+			}
+			if value, exists := expiration["Date"]; exists {
+				date, valid := lifecycleDate(value)
+				_, offset := date.Zone()
+				if !valid {
+					return nil, malformedXML()
+				}
+				if date.Hour() != 0 || date.Minute() != 0 || date.Second() != 0 || date.Nanosecond() != 0 || offset != 0 {
+					return nil, &spi.Fault{Code: "InvalidArgument", Message: "'Date' must be at midnight GMT", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "Date", "ArgumentValue": value}}
+				}
+			}
+		}
+		and := asMap(filter["And"])
+		seen := map[string]bool{}
+		for _, value := range asSlice(and["Tags"]) {
+			key := str(asMap(value)["Key"])
+			if seen[key] {
+				return nil, &spi.Fault{Code: "InvalidRequest", Message: "Duplicate Tag Keys are not allowed.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			seen[key] = true
+		}
+	}
+	return configuration, nil
+}
+
+func malformedXML() *spi.Fault {
+	return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+}
+
+func lifecycleDate(value any) (time.Time, bool) {
+	if date, ok := value.(time.Time); ok {
+		return date, true
+	}
+	date, err := time.Parse(time.RFC3339Nano, str(value))
+	return date, err == nil
 }
 
 func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, error) {

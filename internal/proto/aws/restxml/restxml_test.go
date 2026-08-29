@@ -363,6 +363,12 @@ func TestRESTXMLServiceDecodeContracts(t *testing.T) {
 	if err != nil || configuration["Payer"] != "Requester" {
 		t.Fatalf("request payment decode %#v %v", decoded, err)
 	}
+	accelerate := `<AccelerateConfiguration><Status>Enabled</Status></AccelerateConfiguration>`
+	decoded, err = codec.Decode(s3, &model.Operation{Name: "PutBucketAccelerateConfiguration"}, httptest.NewRequest(http.MethodPut, "/bucket?accelerate", strings.NewReader(accelerate)))
+	configuration, _ = decoded.Input["AccelerateConfiguration"].(map[string]any)
+	if err != nil || configuration["Status"] != "Enabled" {
+		t.Fatalf("accelerate decode %#v %v", decoded, err)
+	}
 }
 
 func TestPostObjectProtocolContract(t *testing.T) {
@@ -437,6 +443,10 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	w = httptest.NewRecorder()
 	if err := codec.Encode(svc, &model.Operation{Name: "GetBucketRequestPayment"}, w, &spi.Response{Output: map[string]any{"Payer": "Requester"}}); err != nil || !strings.Contains(w.Body.String(), `<RequestPaymentConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Payer>Requester</Payer></RequestPaymentConfiguration>`) {
 		t.Fatalf("request payment response %v %s", err, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(svc, &model.Operation{Name: "GetBucketAccelerateConfiguration"}, w, &spi.Response{Output: map[string]any{"Status": "Enabled"}}); err != nil || !strings.Contains(w.Body.String(), `<AccelerateConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>Enabled</Status></AccelerateConfiguration>`) {
+		t.Fatalf("accelerate response %v %s", err, w.Body.String())
 	}
 	w = httptest.NewRecorder()
 	if err := codec.EncodeFault(svc, &model.Operation{Name: "Missing"}, w, spi.NotImplemented(svc.ID, "Missing", "emulate"), "r<&"); err != nil {

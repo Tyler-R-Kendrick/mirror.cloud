@@ -545,6 +545,16 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 			return
 		}
 		in["RequestPaymentConfiguration"] = map[string]any{"Payer": configuration.Payer}
+	case "PutBucketAccelerateConfiguration":
+		var configuration struct {
+			XMLName xml.Name
+			Status  string `xml:"Status"`
+		}
+		if xml.Unmarshal(raw, &configuration) != nil || configuration.XMLName.Local != "AccelerateConfiguration" {
+			in["_body"] = string(raw)
+			return
+		}
+		in["AccelerateConfiguration"] = map[string]any{"Status": configuration.Status}
 	case "PutObjectLegalHold":
 		var hold struct {
 			Status string `xml:"Status"`
@@ -673,8 +683,7 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 		in["Policy"] = string(raw)
 	case "PutBucketCors", "PutBucketWebsite", "PutBucketLogging",
 		"PutBucketLifecycleConfiguration",
-		"PutBucketEncryption", "PutBucketAcl", "PutObjectAcl",
-		"PutBucketAccelerateConfiguration":
+		"PutBucketEncryption", "PutBucketAcl", "PutObjectAcl":
 		in["_body"] = string(raw)
 		in["Document"] = string(raw)
 	case "PutBucketVersioning":
@@ -758,6 +767,13 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		b.WriteString(`<RequestPaymentConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
 		write(resp.Output, &b)
 		b.WriteString("</RequestPaymentConfiguration>")
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
+	if op.Name == "GetBucketAccelerateConfiguration" {
+		b.WriteString(`<AccelerateConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
+		write(resp.Output, &b)
+		b.WriteString("</AccelerateConfiguration>")
 		_, err := io.WriteString(w, b.String())
 		return err
 	}

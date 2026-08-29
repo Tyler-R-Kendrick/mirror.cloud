@@ -873,29 +873,65 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 			in["_body"] = string(raw)
 		}
 	case "PutBucketNotificationConfiguration":
-		var n struct {
-			QueueConfiguration []struct {
-				Queue string   `xml:"Queue"`
-				Event []string `xml:"Event"`
-			} `xml:"QueueConfiguration"`
-			TopicConfiguration []struct {
-				Topic string   `xml:"Topic"`
-				Event []string `xml:"Event"`
-			} `xml:"TopicConfiguration"`
+		type notification struct {
+			ID            string   `xml:"Id"`
+			Queue         string   `xml:"Queue"`
+			Topic         string   `xml:"Topic"`
+			CloudFunction string   `xml:"CloudFunction"`
+			Events        []string `xml:"Event"`
+			Filter        *struct {
+				Key *struct {
+					Rules []struct {
+						Name  string `xml:"Name"`
+						Value string `xml:"Value"`
+					} `xml:"FilterRule"`
+				} `xml:"S3Key"`
+			} `xml:"Filter"`
 		}
-		if xml.Unmarshal(raw, &n) != nil {
+		var n struct {
+			XMLName                  xml.Name
+			QueueConfigurations      []notification `xml:"QueueConfiguration"`
+			TopicConfigurations      []notification `xml:"TopicConfiguration"`
+			LambdaConfigurations     []notification `xml:"CloudFunctionConfiguration"`
+			EventBridgeConfiguration *struct{}      `xml:"EventBridgeConfiguration"`
+		}
+		if xml.Unmarshal(raw, &n) != nil || n.XMLName.Local != "NotificationConfiguration" {
 			in["_body"] = string(raw)
 			break
 		}
-		var qs, ts []any
-		for _, q := range n.QueueConfiguration {
-			qs = append(qs, map[string]any{"QueueArn": q.Queue, "Queue": q.Queue, "Events": q.Event})
+		document := map[string]any{}
+		add := func(field, arnField string, sources []notification, arn func(notification) string) {
+			if len(sources) == 0 {
+				return
+			}
+			configurations := make([]any, 0, len(sources))
+			for _, source := range sources {
+				configuration := map[string]any{arnField: arn(source), "Events": stringsToAny(source.Events)}
+				if source.ID != "" {
+					configuration["Id"] = source.ID
+				}
+				if source.Filter != nil {
+					filter := map[string]any{}
+					if source.Filter.Key != nil {
+						rules := make([]any, 0, len(source.Filter.Key.Rules))
+						for _, rule := range source.Filter.Key.Rules {
+							rules = append(rules, map[string]any{"Name": rule.Name, "Value": rule.Value})
+						}
+						filter["Key"] = map[string]any{"FilterRules": rules}
+					}
+					configuration["Filter"] = filter
+				}
+				configurations = append(configurations, configuration)
+			}
+			document[field] = configurations
 		}
-		for _, t := range n.TopicConfiguration {
-			ts = append(ts, map[string]any{"TopicArn": t.Topic, "Events": t.Event})
+		add("QueueConfigurations", "QueueArn", n.QueueConfigurations, func(source notification) string { return source.Queue })
+		add("TopicConfigurations", "TopicArn", n.TopicConfigurations, func(source notification) string { return source.Topic })
+		add("LambdaFunctionConfigurations", "LambdaFunctionArn", n.LambdaConfigurations, func(source notification) string { return source.CloudFunction })
+		if n.EventBridgeConfiguration != nil {
+			document["EventBridgeConfiguration"] = map[string]any{}
 		}
-		in["QueueConfigurations"] = qs
-		in["TopicConfigurations"] = ts
+		in["NotificationConfiguration"] = document
 	default:
 		in["_body"] = string(raw)
 	}
@@ -1012,6 +1048,48 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 			b.WriteString("</RoutingRules>")
 		}
 		b.WriteString("</WebsiteConfiguration>")
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
+	if op.Name == "GetBucketNotificationConfiguration" {
+		b.WriteString(`<NotificationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
+		for _, destination := range []struct{ field, tag, arnField, arnTag string }{
+			{"TopicConfigurations", "TopicConfiguration", "TopicArn", "Topic"},
+			{"QueueConfigurations", "QueueConfiguration", "QueueArn", "Queue"},
+			{"LambdaFunctionConfigurations", "CloudFunctionConfiguration", "LambdaFunctionArn", "CloudFunction"},
+		} {
+			configurations, _ := resp.Output[destination.field].([]any)
+			for _, value := range configurations {
+				configuration, _ := value.(map[string]any)
+				fmt.Fprintf(&b, "<%s>", destination.tag)
+				id, _ := configuration["Id"].(string)
+				if id != "" {
+					fmt.Fprintf(&b, "<Id>%s</Id>", xmlEscape(id))
+				}
+				arn, _ := configuration[destination.arnField].(string)
+				fmt.Fprintf(&b, "<%s>%s</%s>", destination.arnTag, xmlEscape(arn), destination.arnTag)
+				events, _ := configuration["Events"].([]any)
+				for _, event := range events {
+					fmt.Fprintf(&b, "<Event>%s</Event>", xmlEscape(fmt.Sprint(event)))
+				}
+				if filter, ok := configuration["Filter"].(map[string]any); ok {
+					b.WriteString("<Filter><S3Key>")
+					key, _ := filter["Key"].(map[string]any)
+					rules, _ := key["FilterRules"].([]any)
+					for _, value := range rules {
+						b.WriteString("<FilterRule>")
+						write(value, &b)
+						b.WriteString("</FilterRule>")
+					}
+					b.WriteString("</S3Key></Filter>")
+				}
+				fmt.Fprintf(&b, "</%s>", destination.tag)
+			}
+		}
+		if _, ok := resp.Output["EventBridgeConfiguration"]; ok {
+			b.WriteString("<EventBridgeConfiguration></EventBridgeConfiguration>")
+		}
+		b.WriteString("</NotificationConfiguration>")
 		_, err := io.WriteString(w, b.String())
 		return err
 	}

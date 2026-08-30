@@ -65,6 +65,47 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if tagged, err := s3c.GetBucketTagging(context.Background(), &s3.GetBucketTaggingInput{Bucket: aws.String("sdk")}); err != nil || !reflect.DeepEqual(tagged.TagSet, createTags) {
 		t.Fatalf("create bucket tags: %#v %v", tagged, err)
 	}
+	bucketACL, err := s3c.GetBucketAcl(context.Background(), &s3.GetBucketAclInput{Bucket: aws.String("sdk")})
+	if err != nil || bucketACL.Owner == nil || aws.ToString(bucketACL.Owner.ID) != "000000000000" || len(bucketACL.Grants) != 1 {
+		t.Fatalf("default bucket ACL: %#v %v", bucketACL, err)
+	}
+	if _, err := s3c.PutBucketAcl(context.Background(), &s3.PutBucketAclInput{Bucket: aws.String("sdk"), ACL: s3types.BucketCannedACLPublicRead}); err != nil {
+		t.Fatalf("put bucket ACL: %v", err)
+	}
+	if bucketACL, err = s3c.GetBucketAcl(context.Background(), &s3.GetBucketAclInput{Bucket: aws.String("sdk")}); err != nil || len(bucketACL.Grants) != 2 || aws.ToString(bucketACL.Grants[1].Grantee.URI) != "http://acs.amazonaws.com/groups/global/AllUsers" {
+		t.Fatalf("public bucket ACL: %#v %v", bucketACL, err)
+	}
+	objectACLKey := "sdk-object-acl"
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String(objectACLKey), Body: strings.NewReader("acl"), ACL: s3types.ObjectCannedACLPublicRead}); err != nil {
+		t.Fatalf("put object ACL: %v", err)
+	}
+	if objectACL, err := s3c.GetObjectAcl(context.Background(), &s3.GetObjectAclInput{Bucket: aws.String("sdk"), Key: aws.String(objectACLKey)}); err != nil || len(objectACL.Grants) != 2 {
+		t.Fatalf("public object ACL: %#v %v", objectACL, err)
+	}
+	privatePolicy := &s3types.AccessControlPolicy{
+		Owner:  &s3types.Owner{ID: bucketACL.Owner.ID, DisplayName: bucketACL.Owner.DisplayName},
+		Grants: []s3types.Grant{{Grantee: &s3types.Grantee{ID: bucketACL.Owner.ID, Type: s3types.TypeCanonicalUser}, Permission: s3types.PermissionFullControl}},
+	}
+	if _, err := s3c.PutObjectAcl(context.Background(), &s3.PutObjectAclInput{Bucket: aws.String("sdk"), Key: aws.String(objectACLKey), AccessControlPolicy: privatePolicy}); err != nil {
+		t.Fatalf("put object ACP: %v", err)
+	}
+	if objectACL, err := s3c.GetObjectAcl(context.Background(), &s3.GetObjectAclInput{Bucket: aws.String("sdk"), Key: aws.String(objectACLKey)}); err != nil || len(objectACL.Grants) != 1 || objectACL.Grants[0].Permission != s3types.PermissionFullControl {
+		t.Fatalf("private object ACP: %#v %v", objectACL, err)
+	}
+	multipartACL, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-multipart-acl"), ACL: s3types.ObjectCannedACLPublicReadWrite})
+	if err != nil {
+		t.Fatalf("create multipart ACL: %v", err)
+	}
+	multipartACLPart, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-multipart-acl"), UploadId: multipartACL.UploadId, PartNumber: aws.Int32(1), Body: strings.NewReader("acl-part")})
+	if err != nil {
+		t.Fatalf("upload multipart ACL part: %v", err)
+	}
+	if _, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-multipart-acl"), UploadId: multipartACL.UploadId, MultipartUpload: &s3types.CompletedMultipartUpload{Parts: []s3types.CompletedPart{{PartNumber: aws.Int32(1), ETag: multipartACLPart.ETag}}}}); err != nil {
+		t.Fatalf("complete multipart ACL: %v", err)
+	}
+	if objectACL, err := s3c.GetObjectAcl(context.Background(), &s3.GetObjectAclInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-multipart-acl")}); err != nil || len(objectACL.Grants) != 3 {
+		t.Fatalf("multipart object ACL: %#v %v", objectACL, err)
+	}
 	ownership, err := s3c.GetBucketOwnershipControls(context.Background(), &s3.GetBucketOwnershipControlsInput{Bucket: aws.String("sdk")})
 	if err != nil || ownership.OwnershipControls == nil {
 		t.Fatalf("create bucket ownership rules: %#v %v", ownership.OwnershipControls, err)

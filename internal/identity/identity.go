@@ -35,6 +35,9 @@ func Parse(r *http.Request, defaultAcct, defaultReg string, now time.Time) spi.I
 	cred := r.Header.Get("Authorization")
 	if cred == "" {
 		cred = r.URL.Query().Get("X-Amz-Credential")
+		if cred == "" {
+			cred = r.URL.Query().Get("AWSAccessKeyId")
+		}
 		if expires, ok := PresignedExpiry(r); ok && !now.UTC().Before(expires) {
 			// expiry is enforced; identity still returned so the edge can
 			// return the service's modeled fault. Callers check Expired.

@@ -31,6 +31,9 @@ func TestParseAndExpiry(t *testing.T) {
 	if !Expired(Parse(v2, "", "", time.Unix(90, 0))) {
 		t.Fatal("SigV2 request should expire at its boundary")
 	}
+	if id := Parse(v2, "", "", time.Unix(0, 0)); id.AccessKeyID != "AKIATEST" {
+		t.Fatalf("SigV2 access key = %q", id.AccessKeyID)
+	}
 	tooLong := httptest.NewRequest("GET", "/x?X-Amz-Date=20200101T000000Z&X-Amz-Expires=604801", nil)
 	if expires, ok := PresignedExpiry(tooLong); ok {
 		t.Fatalf("accepted excessive SigV4 expiry %v", expires)

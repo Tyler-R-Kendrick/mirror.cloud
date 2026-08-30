@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -630,6 +631,46 @@ func TestPostObjectProtocolContract(t *testing.T) {
 	if err != nil || w.Code != http.StatusCreated || !strings.Contains(w.Body.String(), "<PostResponse>") || !strings.Contains(w.Body.String(), "<Key>key</Key>") {
 		t.Fatalf("encode %d %q %v", w.Code, w.Body.String(), err)
 	}
+}
+
+func TestEmptyResponseHeadersCharacterization(t *testing.T) {
+	codec := Codec{}
+	svc := &model.Service{ID: "aws.s3"}
+	characterization := map[string]any{}
+	for _, test := range []struct {
+		name, operation string
+		status          int
+		contentLength   string
+	}{{"upload_part", "UploadPart", http.StatusOK, "0"}, {"delete_object_tagging", "DeleteObjectTagging", http.StatusNoContent, ""}} {
+		w := httptest.NewRecorder()
+		response := &spi.Response{Status: test.status, Headers: http.Header{"Content-Type": {"application/xml"}, "Content-Length": {"7"}}}
+		if err := codec.Encode(svc, &model.Operation{Name: test.operation}, w, response); err != nil {
+			t.Fatal(err)
+		}
+		if w.Code != test.status || w.Body.Len() != 0 || w.Header().Get("Content-Type") != "" || w.Header().Get("Content-Length") != test.contentLength {
+			t.Fatalf("%s response %d %#v %q", test.operation, w.Code, w.Header(), w.Body.String())
+		}
+		characterization[test.name] = map[string]any{"content_length": w.Header().Get("Content-Length"), "content_type": w.Header().Get("Content-Type"), "status": w.Code}
+	}
+	golden.AssertJSON(t, characterization)
+}
+
+func FuzzEmptyResponseHeaders(f *testing.F) {
+	f.Add(uint8(0))
+	f.Add(uint8(1))
+	f.Fuzz(func(t *testing.T, selector uint8) {
+		operation, status, contentLength := "UploadPart", http.StatusOK, "0"
+		if selector%2 != 0 {
+			operation, status, contentLength = "DeleteObjectTagging", http.StatusNoContent, ""
+		}
+		w := httptest.NewRecorder()
+		if err := (Codec{}).Encode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: operation}, w, &spi.Response{Status: status}); err != nil {
+			t.Fatal(err)
+		}
+		if w.Body.Len() != 0 || w.Header().Get("Content-Type") != "" || w.Header().Get("Content-Length") != contentLength {
+			t.Fatalf("%s headers %#v body %q", operation, w.Header(), w.Body.String())
+		}
+	})
 }
 
 func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {

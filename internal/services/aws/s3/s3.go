@@ -2860,9 +2860,6 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if req.Operation == "GetBucketWebsite" {
 		return &spi.Response{Status: 200, Output: asMap(doc["WebsiteConfiguration"])}, nil
 	}
-	if req.Operation == "GetBucketPolicy" {
-		return &spi.Response{Status: 200, Output: map[string]any{"Policy": str(doc["Policy"])}}, nil
-	}
 	return &spi.Response{Status: 200, Output: doc}, nil
 }
 

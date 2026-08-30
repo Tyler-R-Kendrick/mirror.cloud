@@ -2643,6 +2643,15 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	col := p.col(req, "bktcfg")
 	if strings.HasPrefix(req.Operation, "Put") {
+		if req.Operation == "PutBucketEncryption" {
+			configuration, err := validateBucketEncryption(req.Input["ServerSideEncryptionConfiguration"])
+			if err != nil {
+				return nil, err
+			}
+			delete(req.Input, "Document")
+			delete(req.Input, "_body")
+			req.Input["ServerSideEncryptionConfiguration"] = configuration
+		}
 		if req.Operation == "PutBucketPolicy" {
 			if err := validateBucketPolicy(str(req.Input["Policy"])); err != nil {
 				return nil, err
@@ -2826,6 +2835,9 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 		if req.Operation == "GetBucketAccelerateConfiguration" {
 			return &spi.Response{Output: map[string]any{}}, nil
 		}
+		if req.Operation == "GetBucketEncryption" {
+			return &spi.Response{Output: map[string]any{}}, nil
+		}
 		if req.Operation == "GetBucketCors" {
 			return nil, &spi.Fault{Code: "NoSuchCORSConfiguration", Message: "The CORS configuration does not exist", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": b}}
 		}
@@ -2860,7 +2872,43 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if req.Operation == "GetBucketWebsite" {
 		return &spi.Response{Status: 200, Output: asMap(doc["WebsiteConfiguration"])}, nil
 	}
+	if req.Operation == "GetBucketEncryption" {
+		return &spi.Response{Status: 200, Output: map[string]any{"Rules": asMap(doc["ServerSideEncryptionConfiguration"])["Rules"]}}, nil
+	}
 	return &spi.Response{Status: 200, Output: doc}, nil
+}
+
+func validateBucketEncryption(value any) (map[string]any, error) {
+	malformed := func() error {
+		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	configuration, ok := value.(map[string]any)
+	if !ok {
+		return nil, malformed()
+	}
+	rules, ok := configuration["Rules"].([]any)
+	if !ok || len(rules) != 1 {
+		return nil, malformed()
+	}
+	rule, ok := rules[0].(map[string]any)
+	if !ok {
+		return nil, malformed()
+	}
+	defaults, ok := rule["ApplyServerSideEncryptionByDefault"].(map[string]any)
+	if !ok {
+		return nil, malformed()
+	}
+	algorithm := str(defaults["SSEAlgorithm"])
+	if algorithm != "AES256" && algorithm != "aws:fsx" && algorithm != "aws:backup" && algorithm != "aws:kms" && algorithm != "aws:kms:dsse" {
+		return nil, malformed()
+	}
+	if _, exists := defaults["KMSMasterKeyID"]; algorithm != "aws:kms" && exists {
+		return nil, &spi.Fault{
+			Code: "InvalidArgument", Message: "a KMSMasterKeyID is not applicable if the default sse algorithm is not aws:kms or aws:kms:dsse",
+			HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "ApplyServerSideEncryptionByDefault"},
+		}
+	}
+	return map[string]any{"Rules": rules}, nil
 }
 
 func validateBucketPolicy(policy string) error {
@@ -3747,7 +3795,7 @@ func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket st
 		}
 	}
 	bucketKey = bucketKey || defaultBucketKey
-	if algorithm != "AES256" && algorithm != "aws:kms" && algorithm != "aws:kms:dsse" {
+	if algorithm != "AES256" && algorithm != "aws:fsx" && algorithm != "aws:backup" && algorithm != "aws:kms" && algorithm != "aws:kms:dsse" {
 		return "", "", false, &spi.Fault{Code: "InvalidArgument", Message: "The encryption method specified is not supported", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
 	if algorithm == "aws:kms" && keyID == "" {

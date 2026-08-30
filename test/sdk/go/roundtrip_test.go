@@ -9,8 +9,10 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -67,6 +69,38 @@ func TestAWSSDKPresignedSignatureValidation(t *testing.T) {
 	})
 	if _, err := client.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("signed")}); err != nil {
 		t.Fatal(err)
+	}
+	policyRaw, _ := json.Marshal(map[string]any{"expiration": signedAt.Add(time.Hour).Format(time.RFC3339), "conditions": []any{map[string]any{"bucket": "signed"}}})
+	policy := base64.StdEncoding.EncodeToString(policyRaw)
+	postDate := signedAt.UTC().Format("20060102T150405Z")
+	postSignature := hex.EncodeToString(hmacSHA256Test(streamingV4SigningKey(postDate[:8]), policy))
+	for name, signature := range map[string]string{"valid post policy": postSignature, "tampered post policy": strings.Repeat("0", 64)} {
+		var payload bytes.Buffer
+		writer := multipart.NewWriter(&payload)
+		_ = writer.WriteField("key", strings.ReplaceAll(name, " ", "-"))
+		_ = writer.WriteField("policy", policy)
+		_ = writer.WriteField("x-amz-algorithm", "AWS4-HMAC-SHA256")
+		_ = writer.WriteField("x-amz-credential", "test/"+postDate[:8]+"/us-east-1/s3/aws4_request")
+		_ = writer.WriteField("x-amz-date", postDate)
+		_ = writer.WriteField("x-amz-signature", signature)
+		file, _ := writer.CreateFormFile("file", "file.txt")
+		_, _ = file.Write([]byte("browser upload"))
+		_ = writer.Close()
+		request, _ := http.NewRequest(http.MethodPost, ts.URL+"/signed", &payload)
+		request.Header.Set("Content-Type", writer.FormDataContentType())
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		want := http.StatusNoContent
+		if name == "tampered post policy" {
+			want = http.StatusForbidden
+		}
+		if response.StatusCode != want {
+			t.Fatalf("%s: %d %s", name, response.StatusCode, body)
+		}
 	}
 	if _, err := client.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("signed"), Key: aws.String("object"), Body: strings.NewReader("verified")}); err != nil {
 		t.Fatal(err)

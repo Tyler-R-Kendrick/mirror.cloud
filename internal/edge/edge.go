@@ -75,6 +75,8 @@ func New(cfg config.Config, deps spi.Deps, reg registry.Registry, version string
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var awsChunks [][]byte
+	var awsChunkSignatures []string
 	if r.Method == http.MethodOptions {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "*")
@@ -99,8 +101,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = r.Body.Close()
 		if err == nil {
 			body := raw
-			if deframed, err2 := deframeAWSChunked(bytes.NewReader(raw)); err2 == nil {
+			if deframed, chunks, signatures, err2 := parseAWSChunked(bytes.NewReader(raw)); err2 == nil {
 				body = deframed
+				awsChunks = chunks
+				awsChunkSignatures = signatures
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
 			r.ContentLength = int64(len(body))
@@ -149,6 +153,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			candidate := r.Clone(ctx)
 			candidate.Host = host
 			fault = identity.VerifyS3Signature(candidate, secret)
+		}
+		if fault == nil {
+			fault = identity.VerifyS3StreamingV4(r, secret, awsChunks, awsChunkSignatures)
 		}
 		if fault != nil {
 			s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, fault, rid)

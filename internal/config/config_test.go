@@ -7,6 +7,9 @@ import (
 )
 
 func TestFromEnvOverridesDefault(t *testing.T) {
+	if Default().S3ValidatePresignedSignatures {
+		t.Fatal("presigned signature validation must remain opt-in")
+	}
 	t.Setenv("MIRROR_BIND", "0.0.0.0:9")
 	t.Setenv("MIRROR_ADVERTISE_URL", "https://mirror.example")
 	t.Setenv("MIRROR_SEED", "abc")

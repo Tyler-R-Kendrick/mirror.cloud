@@ -1025,6 +1025,12 @@ func TestConcurrentBucketWebsiteRemainsValid(t *testing.T) {
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "website-chaos"}}); err != nil {
 		t.Fatal(err)
 	}
+	for i := 0; i < 32; i += 2 {
+		key := fmt.Sprintf("index-%d.html", i)
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "website-chaos", "Key": key}, Body: io.NopCloser(strings.NewReader(key))}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	errs := make(chan error, 32)
 	var wg sync.WaitGroup
 	for i := 0; i < cap(errs); i++ {
@@ -1060,6 +1066,38 @@ func TestConcurrentBucketWebsiteRemainsValid(t *testing.T) {
 	suffix, _ := index["Suffix"].(string)
 	if err != nil || !strings.HasPrefix(suffix, "index-") || strings.Contains(suffix, "/") {
 		t.Fatalf("persisted concurrent website = %#v, err=%v", response, err)
+	}
+	errs = make(chan error, 64)
+	for i := 0; i < 32; i++ {
+		wg.Add(2)
+		go func(n int) {
+			defer wg.Done()
+			suffix := fmt.Sprintf("index-%d.html", n*2%32)
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutBucketWebsite", Input: map[string]any{"Bucket": "website-chaos", "WebsiteConfiguration": map[string]any{"IndexDocument": map[string]any{"Suffix": suffix}}}})
+			errs <- err
+		}(i)
+		go func() {
+			defer wg.Done()
+			httpRequest := httptest.NewRequest(http.MethodGet, "http://website-chaos.s3-website.localhost.localstack.cloud/", nil)
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{}, HTTP: httpRequest})
+			if err == nil && response.Status == http.StatusOK {
+				body, readErr := io.ReadAll(response.Stream)
+				_ = response.Stream.Close()
+				if readErr != nil || !strings.HasPrefix(string(body), "index-") {
+					err = fmt.Errorf("website body %q: %v", body, readErr)
+				}
+			} else if err == nil {
+				err = fmt.Errorf("website status %d", response.Status)
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

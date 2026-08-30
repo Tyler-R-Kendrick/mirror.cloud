@@ -843,6 +843,21 @@ func TestS3ObjectLifecycle(t *testing.T) {
 	})
 
 	t.Run("Given a bucket website When replacing and deleting it Then S3 validates and persists the routing", func(t *testing.T) {
+		website := func(method, path string) (*http.Response, []byte) {
+			t.Helper()
+			req, err := http.NewRequest(method, ts.URL+path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Host = "website-bdd.s3-website.localhost.localstack.cloud"
+			response, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response, body
+		}
 		res := do(http.MethodPut, "/website-bdd", nil, "")
 		io.Copy(io.Discard, res.Body)
 		res.Body.Close()
@@ -854,6 +869,10 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchWebsiteConfiguration")) {
 			t.Fatalf("default website %d %s", res.StatusCode, body)
+		}
+		res, body = website(http.MethodGet, "/")
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<li>Code: NoSuchWebsiteConfiguration</li>")) {
+			t.Fatalf("unconfigured website endpoint %d %s", res.StatusCode, body)
 		}
 		valid := []byte(`<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><ErrorDocument><Key>error.html</Key></ErrorDocument><RoutingRules><RoutingRule><Condition><KeyPrefixEquals>docs/</KeyPrefixEquals></Condition><Redirect><Protocol>https</Protocol><ReplaceKeyPrefixWith>manual/</ReplaceKeyPrefixWith></Redirect></RoutingRule></RoutingRules></WebsiteConfiguration>`)
 		res = do(http.MethodPut, "/website-bdd?website", valid, "")
@@ -880,6 +899,29 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Suffix>index.html</Suffix>")) {
 			t.Fatalf("website after invalid put %d %s", res.StatusCode, body)
+		}
+		for _, object := range []struct{ key, body string }{{"index.html", "index"}, {"error.html", "error"}} {
+			res = do(http.MethodPut, "/website-bdd/"+object.key, []byte(object.body), "")
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("put website object %s = %d", object.key, res.StatusCode)
+			}
+		}
+		res, body = website(http.MethodGet, "/")
+		if res.StatusCode != http.StatusOK || string(body) != "index" {
+			t.Fatalf("website index %d %s", res.StatusCode, body)
+		}
+		res, body = website(http.MethodGet, "/missing")
+		if res.StatusCode != http.StatusNotFound || string(body) != "error" {
+			t.Fatalf("website error document %d %s", res.StatusCode, body)
+		}
+		res, body = website(http.MethodGet, "/docs/key")
+		if res.StatusCode != http.StatusMovedPermanently || res.Header.Get("Location") != "https://website-bdd.s3-website.localhost.localstack.cloud/manual/key" || len(body) != 0 {
+			t.Fatalf("website routing rule %d %#v %s", res.StatusCode, res.Header, body)
+		}
+		res, body = website(http.MethodPost, "/")
+		if res.StatusCode != http.StatusMethodNotAllowed || !bytes.Contains(body, []byte("<li>Method: POST</li>")) {
+			t.Fatalf("website method %d %s", res.StatusCode, body)
 		}
 		for range 2 {
 			res = do(http.MethodDelete, "/website-bdd?website", nil, "")

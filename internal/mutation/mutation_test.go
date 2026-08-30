@@ -496,8 +496,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-get-ignore-delete-marker",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "if truthy(meta[\"deleteMarker\"]) {\n\t\treturn nil, deleteMarkerReadFault(meta, wantVer != \"\")\n\t}\n\tif err := validateStoredSSECustomerKey(req, meta); err != nil {\n\t\treturn nil, err\n\t}\n\tif err := p.requireRestored(ctx, req, b, key, meta); err != nil {\n\t\treturn nil, err\n\t}\n\tbk := blobKey(req, b, key)\n\tif wantVer != \"\" {\n\t\tbk = bk +",
-			new:  "if false {\n\t\treturn nil, deleteMarkerReadFault(meta, wantVer != \"\")\n\t}\n\tif err := validateStoredSSECustomerKey(req, meta); err != nil {\n\t\treturn nil, err\n\t}\n\tif err := p.requireRestored(ctx, req, b, key, meta); err != nil {\n\t\treturn nil, err\n\t}\n\tbk := blobKey(req, b, key)\n\tif wantVer != \"\" {\n\t\tbk = bk +",
+			old:  "if truthy(meta[\"deleteMarker\"]) {\n\t\treturn nil, deleteMarkerReadFault(meta, wantVer != \"\")\n\t}",
+			new:  "if false {\n\t\treturn nil, deleteMarkerReadFault(meta, wantVer != \"\")\n\t}",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCopyObjectSourceVersions",
 		},

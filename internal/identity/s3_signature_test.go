@@ -141,6 +141,10 @@ func TestS3AuthorizationTimeFault(t *testing.T) {
 	if fault := S3AuthorizationTimeFault(request, now); fault == nil || fault.Code != "RequestTimeTooSkewed" {
 		t.Fatalf("future skew fault = %#v", fault)
 	}
+	request.Header.Set("X-Amz-Date", "invalid")
+	if fault := S3AuthorizationTimeFault(request, now); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("invalid timestamp fault = %#v", fault)
+	}
 	request.Header.Set("Authorization", "AWS test:signature")
 	request.Header.Set("X-Amz-Date", now.Format(http.TimeFormat))
 	if fault := S3AuthorizationTimeFault(request, now); fault != nil {

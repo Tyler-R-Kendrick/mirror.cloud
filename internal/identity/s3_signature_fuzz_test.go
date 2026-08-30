@@ -5,7 +5,26 @@ import (
 	"net/url"
 	"strconv"
 	"testing"
+	"time"
 )
+
+func FuzzS3AuthorizationTimeFault(f *testing.F) {
+	f.Add(uint8(0), "20990101T000000Z", int64(4070908800))
+	f.Add(uint8(1), "Thu, 01 Jan 2099 00:00:00 GMT", int64(4070908800))
+	f.Fuzz(func(t *testing.T, scheme uint8, date string, now int64) {
+		request, err := http.NewRequest(http.MethodGet, "https://example.test", nil)
+		if err != nil {
+			t.Skip()
+		}
+		if scheme%2 == 0 {
+			request.Header.Set("Authorization", "AWS4-HMAC-SHA256 signed")
+		} else {
+			request.Header.Set("Authorization", "AWS test:signature")
+		}
+		request.Header.Set("X-Amz-Date", date)
+		_ = S3AuthorizationTimeFault(request, time.Unix(now, 0))
+	})
+}
 
 func FuzzVerifyS3PresignedV4(f *testing.F) {
 	f.Add("GET", "/test.txt", "aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404", "examplebucket.s3.amazonaws.com", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")

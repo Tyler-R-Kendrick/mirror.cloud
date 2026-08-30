@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -229,6 +230,42 @@ func VerifyS3SessionToken(r *http.Request, expected string) *spi.Fault {
 		return &spi.Fault{Code: "InvalidToken", Message: "The provided token is malformed or otherwise invalid.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
 	return nil
+}
+
+// S3AuthorizationTimeFault enforces S3's 15-minute clock-skew window for header authentication.
+func S3AuthorizationTimeFault(r *http.Request, now time.Time) *spi.Fault {
+	authorization := r.Header.Get("Authorization")
+	var requestTime time.Time
+	var err error
+	switch {
+	case strings.HasPrefix(authorization, "AWS4-HMAC-SHA256 "):
+		requestTime, err = time.Parse("20060102T150405Z", r.Header.Get("X-Amz-Date"))
+	case strings.HasPrefix(authorization, "AWS "):
+		date := r.Header.Get("X-Amz-Date")
+		if date == "" {
+			date = r.Header.Get("Date")
+		}
+		requestTime, err = http.ParseTime(date)
+	default:
+		return nil
+	}
+	if err != nil {
+		return signatureFault()
+	}
+	now = now.UTC()
+	if !requestTime.Before(now.Add(-15*time.Minute)) && !requestTime.After(now.Add(15*time.Minute)) {
+		return nil
+	}
+	return &spi.Fault{
+		Code:       "RequestTimeTooSkewed",
+		Message:    "The difference between the request time and the server's time is too large.",
+		HTTPStatus: http.StatusForbidden,
+		Fault:      "client",
+		Fields: map[string]any{
+			"RequestTime": requestTime.UTC().Format(time.RFC3339),
+			"ServerTime":  now.Format(time.RFC3339),
+		},
+	}
 }
 
 // VerifyS3PresignedV4 verifies SigV4 query authentication when present.

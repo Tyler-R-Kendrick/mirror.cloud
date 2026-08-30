@@ -160,6 +160,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fault = identity.VerifyS3Signature(candidate, secret)
 		}
 		if fault == nil {
+			fault = identity.S3AuthorizationTimeFault(r, s.deps.Clock.Now())
+		}
+		if fault == nil {
 			fault = identity.VerifyS3StreamingV4(r, secret, awsChunks, awsChunkSignatures, awsTrailers)
 		}
 		if fault != nil {

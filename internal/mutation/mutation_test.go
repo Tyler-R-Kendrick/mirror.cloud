@@ -54,6 +54,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestCrossRegionBucketResolutionAndHeadMetadata",
 		},
 		{
+			name: "s3-drop-head-bucket-alias-flag",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `headers.Set("x-amz-access-point-alias", "false")`,
+			new:  `headers.Set("x-ignored-access-point-alias", "false")`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestCrossRegionBucketResolutionAndHeadMetadata",
+		},
+		{
 			name: "s3-skip-object-encryption-validation",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  "serverSideEncryption, sseKMSKeyID, bucketKeyEnabled, err = p.objectEncryption(ctx, req, b)\n\t\tif err != nil {",

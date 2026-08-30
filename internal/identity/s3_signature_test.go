@@ -205,6 +205,25 @@ func TestVerifyS3V4A(t *testing.T) {
 	if fault := VerifyS3Signature(header, accessKey, secret, "us-west-2"); fault != nil {
 		t.Fatalf("valid SigV4A header rejected: %#v", fault)
 	}
+	if fault := VerifyS3V4A(header, "wrong", secret, "us-west-2"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("wrong access key accepted: %#v", fault)
+	}
+	wrongCredential := append([]string(nil), credential...)
+	wrongCredential[0] = "wrong"
+	header.Header.Set("Authorization", s3V4AAlgorithm+" Credential="+strings.Join(wrongCredential, "/")+",SignedHeaders="+signedHeaders+",Signature="+sign(t, header, wrongCredential, signedHeaders, "UNSIGNED-PAYLOAD"))
+	if fault := VerifyS3V4A(header, accessKey, secret, "us-west-2"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("mismatched credential access key accepted: %#v", fault)
+	}
+	header.Header.Set("Authorization", s3V4AAlgorithm+" Credential="+strings.Join(credential, "/")+",SignedHeaders="+signedHeaders+",Signature="+sign(t, header, credential, signedHeaders, "UNSIGNED-PAYLOAD"))
+	unsignedRegion := httptest.NewRequest(http.MethodGet, "https://examplebucket.s3.amazonaws.com/test.txt", nil)
+	unsignedRegion.Header.Set("X-Amz-Content-Sha256", "UNSIGNED-PAYLOAD")
+	unsignedRegion.Header.Set("X-Amz-Date", date)
+	unsignedRegion.Header.Set("X-Amz-Region-Set", "us-east-1,us-west-*")
+	unsignedRegionHeaders := "host;x-amz-content-sha256;x-amz-date"
+	unsignedRegion.Header.Set("Authorization", s3V4AAlgorithm+" Credential="+strings.Join(credential, "/")+",SignedHeaders="+unsignedRegionHeaders+",Signature="+sign(t, unsignedRegion, credential, unsignedRegionHeaders, "UNSIGNED-PAYLOAD"))
+	if fault := VerifyS3V4A(unsignedRegion, accessKey, secret, "us-west-2"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("unsigned region set accepted: %#v", fault)
+	}
 	malformed := httptest.NewRequest(http.MethodGet, "https://examplebucket.s3.amazonaws.com/test.txt", nil)
 	malformed.Header.Set("Authorization", s3V4AAlgorithm+"broken")
 	if fault := VerifyS3Signature(malformed, accessKey, secret, "us-east-1"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
@@ -213,7 +232,9 @@ func TestVerifyS3V4A(t *testing.T) {
 	if fault := VerifyS3V4A(header, accessKey, secret, "eu-west-1"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 		t.Fatalf("out-of-set region accepted: %#v", fault)
 	}
-	header.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD")
+	streamingHash := "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD"
+	header.Header.Set("X-Amz-Content-Sha256", streamingHash)
+	header.Header.Set("Authorization", s3V4AAlgorithm+" Credential="+strings.Join(credential, "/")+",SignedHeaders="+signedHeaders+",Signature="+sign(t, header, credential, signedHeaders, streamingHash))
 	if fault := VerifyS3V4A(header, accessKey, secret, "us-west-2"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 		t.Fatalf("unsupported SigV4A stream accepted: %#v", fault)
 	}
@@ -232,6 +253,12 @@ func TestVerifyS3V4A(t *testing.T) {
 	if fault := VerifyS3Signature(query, accessKey, secret, "us-east-1"); fault != nil {
 		t.Fatalf("valid SigV4A query rejected: %#v", fault)
 	}
+	values.Set("X-Amz-Signature", "00")
+	query.URL.RawQuery = values.Encode()
+	if fault := VerifyS3V4A(query, accessKey, secret, "us-east-1"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("bad SigV4A signature accepted: %#v", fault)
+	}
+	values.Set("X-Amz-Signature", sign(t, query, credential, "host", "UNSIGNED-PAYLOAD"))
 	values.Set("X-Amz-Region-Set", "eu-*")
 	query.URL.RawQuery = values.Encode()
 	if fault := VerifyS3V4A(query, accessKey, secret, "us-east-1"); fault == nil || fault.Code != "SignatureDoesNotMatch" {

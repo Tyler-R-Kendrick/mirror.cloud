@@ -236,6 +236,7 @@ func TestBootedServerFirehoseDeliversToS3(t *testing.T) {
 		t.Fatalf("bucket %d %s", code, b)
 	}
 	kmsARN := "arn:aws:kms:us-east-1:000000000000:key/firehose"
+	spitest.SeedKMSKey(t, rt.Deps, spi.Identity{Account: "000000000000", Region: "us-east-1"}, kmsARN, "Enabled")
 	call("CreateDeliveryStream", `{"DeliveryStreamName":"ds1","S3DestinationConfiguration":{"RoleARN":"arn:aws:iam::000000000000:role/fh","BucketARN":"arn:aws:s3:::fhout","Prefix":"fh/","EncryptionConfiguration":{"KMSEncryptionConfig":{"AWSKMSKeyARN":"`+kmsARN+`"}}}}`)
 	data := base64.StdEncoding.EncodeToString([]byte("hello-firehose"))
 	put := call("PutRecord", `{"DeliveryStreamName":"ds1","Record":{"Data":"`+data+`"}}`)

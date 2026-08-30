@@ -1813,6 +1813,11 @@ func TestCreateBucketLocationConstraints(t *testing.T) {
 	} else {
 		characterization["EU-header"] = got
 	}
+	if got := mustInvokeAs(t, p, east, "HeadBucket", map[string]any{"Bucket": "eu-alias"}, nil).Headers.Get("x-amz-bucket-region"); got != "eu-west-1" {
+		t.Fatalf("EU bucket region = %q", got)
+	} else {
+		characterization["EU-region"] = got
+	}
 	europe := spi.Identity{Account: east.Account, Region: "eu-west-1"}
 	if got := mustInvokeAs(t, p, europe, "GetBucketLocation", map[string]any{"Bucket": "eu-alias"}, nil); got.Output["LocationConstraint"] != "EU" {
 		t.Fatalf("EU alias = %#v", got.Output)

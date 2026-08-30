@@ -16,6 +16,7 @@ import (
 
 func (p *Pack) createSession(req *spi.Request) (*spi.Response, error) {
 	ak := p.deps.Rand.Derive("s3sess/" + str(req.Input["Bucket"])).Hex(20)
+	_ = p.deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), ak, []byte(req.Identity.Account))
 	return &spi.Response{Output: map[string]any{
 		"Credentials": map[string]any{
 			"AccessKeyId":     ak,

@@ -137,6 +137,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if id.AccessKeyID != "test" {
 			secret = s.deps.Rand.Derive(id.AccessKeyID).Hex(40)
 		}
+		if _, temporary, _ := s.deps.Store.Scope("_mirror", "global").Collection("stsk").Get(ctx, id.AccessKeyID); temporary {
+			if fault := identity.VerifyS3SessionToken(r, s.deps.Rand.Derive(id.AccessKeyID+"tok").Hex(32)); fault != nil {
+				s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, fault, rid)
+				return
+			}
+		}
 		if fault := identity.VerifyS3Presigned(r, secret); fault != nil {
 			s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, fault, rid)
 			return

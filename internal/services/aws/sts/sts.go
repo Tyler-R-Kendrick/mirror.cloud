@@ -104,8 +104,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	}
 }
 
-func (p *Pack) col(req *spi.Request, n string) spi.Collection {
-	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection(n)
+func (p *Pack) col(_ *spi.Request, n string) spi.Collection {
+	return p.deps.Store.Scope("_mirror", "global").Collection(n)
 }
 
 func (p *Pack) assume(ctx context.Context, req *spi.Request, role, sess string) (*spi.Response, error) {

@@ -40,3 +40,19 @@ func TestVerifyS3PresignedV2AWSGrammar(t *testing.T) {
 		t.Fatalf("path-style subresource rejected: %#v", fault)
 	}
 }
+
+func TestVerifyS3SessionToken(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "https://localhost/key?X-Amz-Security-Token=session", nil)
+	if fault := VerifyS3SessionToken(request, "session"); fault != nil {
+		t.Fatalf("valid query token rejected: %#v", fault)
+	}
+	request.URL.RawQuery = ""
+	request.Header.Set("X-Amz-Security-Token", "session")
+	if fault := VerifyS3SessionToken(request, "session"); fault != nil {
+		t.Fatalf("valid header token rejected: %#v", fault)
+	}
+	request.Header.Del("X-Amz-Security-Token")
+	if fault := VerifyS3SessionToken(request, "session"); fault == nil || fault.Code != "InvalidToken" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("missing token accepted: %#v", fault)
+	}
+}

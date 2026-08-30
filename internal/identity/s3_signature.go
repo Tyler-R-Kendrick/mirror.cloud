@@ -33,6 +33,14 @@ func VerifyS3Signature(r *http.Request, accessKey, secret, region string) *spi.F
 	return VerifyS3AuthorizationV2(r, secret)
 }
 
+// VerifyS3StreamingSignature verifies the supported aws-chunked signature algorithm.
+func VerifyS3StreamingSignature(r *http.Request, accessKey, secret string, chunks [][]byte, signatures []string, trailers http.Header) *spi.Fault {
+	if strings.HasPrefix(r.Header.Get("Authorization"), s3V4AAlgorithm) {
+		return VerifyS3StreamingV4A(r, accessKey, secret, chunks, signatures, trailers)
+	}
+	return VerifyS3StreamingV4(r, secret, chunks, signatures, trailers)
+}
+
 // VerifyS3Presigned verifies supported query-signature versions when present.
 func VerifyS3Presigned(r *http.Request, secret string) *spi.Fault {
 	if fault := VerifyS3PresignedV4(r, secret); fault != nil {

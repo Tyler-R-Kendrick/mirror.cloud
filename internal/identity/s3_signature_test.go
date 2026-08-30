@@ -235,8 +235,14 @@ func TestVerifyS3V4A(t *testing.T) {
 	streamingHash := "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD"
 	header.Header.Set("X-Amz-Content-Sha256", streamingHash)
 	header.Header.Set("Authorization", s3V4AAlgorithm+" Credential="+strings.Join(credential, "/")+",SignedHeaders="+signedHeaders+",Signature="+sign(t, header, credential, signedHeaders, streamingHash))
+	if fault := VerifyS3V4A(header, accessKey, secret, "us-west-2"); fault != nil {
+		t.Fatalf("supported SigV4A stream seed rejected: %#v", fault)
+	}
+	unknownStreamingHash := "STREAMING-AWS4-ECDSA-P256-SHA256-UNKNOWN"
+	header.Header.Set("X-Amz-Content-Sha256", unknownStreamingHash)
+	header.Header.Set("Authorization", s3V4AAlgorithm+" Credential="+strings.Join(credential, "/")+",SignedHeaders="+signedHeaders+",Signature="+sign(t, header, credential, signedHeaders, unknownStreamingHash))
 	if fault := VerifyS3V4A(header, accessKey, secret, "us-west-2"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
-		t.Fatalf("unsupported SigV4A stream accepted: %#v", fault)
+		t.Fatalf("unknown SigV4A stream mode accepted: %#v", fault)
 	}
 
 	query := httptest.NewRequest(http.MethodGet, "https://examplebucket.s3.amazonaws.com/test.txt", nil)
@@ -332,6 +338,98 @@ func TestVerifyS3StreamingV4AWSExample(t *testing.T) {
 	chunks[1][0] = 'b'
 	if fault := VerifyS3StreamingV4(request, secret, chunks, signatures, nil); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 		t.Fatalf("tampered signed chunk accepted: %#v", fault)
+	}
+}
+
+func TestVerifyS3StreamingV4A(t *testing.T) {
+	const accessKey = "AKISORANDOMAASORANDOM"
+	const secret = "q+jcrXGc+0zWN6uzclKVhvMmUsIfRPa4rlRandom"
+	const date = "20990101T000000Z"
+	credential := []string{accessKey, "20990101", "s3", "aws4_request"}
+	key := s3V4AKey(accessKey, secret)
+	sign := func(t *testing.T, stringToSign string, padded bool) string {
+		t.Helper()
+		digest := sha256.Sum256([]byte(stringToSign))
+		encoded, err := ecdsa.SignASN1(bytes.NewReader(bytes.Repeat([]byte{0x42}, 1024)), key, digest[:])
+		if err != nil {
+			t.Fatal(err)
+		}
+		hexSignature := hex.EncodeToString(encoded)
+		if padded {
+			hexSignature = strings.Repeat("*", 144-len(hexSignature)) + hexSignature
+		}
+		return hexSignature
+	}
+	for _, trailerMode := range []bool{false, true} {
+		t.Run(map[bool]string{false: "payload", true: "trailer"}[trailerMode], func(t *testing.T) {
+			payloadHash := "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD"
+			signedHeaders := "content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-region-set"
+			if trailerMode {
+				payloadHash += "-TRAILER"
+				signedHeaders += ";x-amz-trailer"
+			}
+			request := httptest.NewRequest(http.MethodPut, "https://examplebucket.s3.amazonaws.com/object", nil)
+			request.Header.Set("Content-Encoding", "aws-chunked")
+			request.Header.Set("X-Amz-Content-Sha256", payloadHash)
+			request.Header.Set("X-Amz-Date", date)
+			request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+			request.Header.Set("X-Amz-Region-Set", "us-east-1")
+			if trailerMode {
+				request.Header.Set("X-Amz-Trailer", "x-amz-checksum-crc32c")
+			}
+			canonicalHeaders, ok := signedHeaderValues(request, strings.Split(signedHeaders, ";"))
+			if !ok {
+				t.Fatal("invalid test headers")
+			}
+			canonical := strings.Join([]string{request.Method, canonicalPath(request.URL), "", canonicalHeaders, signedHeaders, payloadHash}, "\n")
+			requestHash := sha256.Sum256([]byte(canonical))
+			scope := strings.Join(credential[1:], "/")
+			seed := sign(t, strings.Join([]string{s3V4AAlgorithm, date, scope, hex.EncodeToString(requestHash[:])}, "\n"), false)
+			request.Header.Set("Authorization", s3V4AAlgorithm+" Credential="+strings.Join(credential, "/")+",SignedHeaders="+signedHeaders+",Signature="+seed)
+			if fault := VerifyS3V4A(request, accessKey, secret, "us-east-1"); fault != nil {
+				t.Fatalf("stream seed rejected: %#v", fault)
+			}
+			chunks := [][]byte{[]byte("hello"), nil}
+			signatures := make([]string, len(chunks))
+			previous := seed
+			empty := sha256.Sum256(nil)
+			for i, chunk := range chunks {
+				chunkHash := sha256.Sum256(chunk)
+				payload := strings.Join([]string{strings.TrimLeft(previous, "*"), hex.EncodeToString(empty[:]), hex.EncodeToString(chunkHash[:])}, "\n")
+				signatures[i] = sign(t, strings.Join([]string{"AWS4-ECDSA-P256-SHA256-PAYLOAD", date, scope, payload}, "\n"), true)
+				previous = signatures[i]
+			}
+			trailers := http.Header(nil)
+			if trailerMode {
+				trailers = http.Header{"X-Amz-Checksum-Crc32c": {"mnG7TA=="}, "X-Amz-Trailer-Signature": {strings.Repeat("0", 144)}}
+				canonicalTrailer, ok := canonicalS3StreamingTrailers(request, trailers, true)
+				if !ok {
+					t.Fatal("invalid test trailers")
+				}
+				trailerHash := sha256.Sum256([]byte(canonicalTrailer))
+				payload := strings.TrimLeft(previous, "*") + "\n" + hex.EncodeToString(trailerHash[:])
+				trailers.Set("X-Amz-Trailer-Signature", sign(t, strings.Join([]string{"AWS4-ECDSA-P256-SHA256-TRAILER", date, scope, payload}, "\n"), true))
+			}
+			if fault := VerifyS3StreamingSignature(request, accessKey, secret, chunks, signatures, trailers); fault != nil {
+				t.Fatalf("valid SigV4A stream rejected: %#v", fault)
+			}
+			chunks[0][0] = 'j'
+			if fault := VerifyS3StreamingV4A(request, accessKey, secret, chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+				t.Fatalf("tampered SigV4A chunk accepted: %#v", fault)
+			}
+			chunks[0][0] = 'h'
+			if trailerMode {
+				trailers.Set("X-Amz-Checksum-Crc32c", "AAAAAA==")
+				if fault := VerifyS3StreamingV4A(request, accessKey, secret, chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+					t.Fatalf("tampered SigV4A trailer accepted: %#v", fault)
+				}
+				trailers.Set("X-Amz-Checksum-Crc32c", "mnG7TA==")
+			}
+			signatures[0] = signatures[0][1:]
+			if fault := VerifyS3StreamingV4A(request, accessKey, secret, chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+				t.Fatalf("unpadded SigV4A chunk accepted: %#v", fault)
+			}
+		})
 	}
 }
 

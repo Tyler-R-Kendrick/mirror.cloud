@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,7 +39,8 @@ func VerifyS3V4A(r *http.Request, accessKey, secret, region string) *spi.Fault {
 	if query && payloadHash == "" {
 		payloadHash = "UNSIGNED-PAYLOAD"
 	}
-	if payloadHash == "" || strings.HasPrefix(payloadHash, "STREAMING-") || !s3PayloadHashMatches(r, payloadHash) {
+	streaming := payloadHash == "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD" || payloadHash == "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD-TRAILER"
+	if payloadHash == "" || strings.HasPrefix(payloadHash, "STREAMING-") && !streaming || !s3PayloadHashMatches(r, payloadHash) {
 		return signatureFault()
 	}
 	canonicalRequest := strings.Join([]string{r.Method, canonicalPath(r.URL), canonicalQuery(r.URL.Query()), canonicalHeaders, signedHeaders, payloadHash}, "\n")
@@ -46,12 +48,72 @@ func VerifyS3V4A(r *http.Request, accessKey, secret, region string) *spi.Fault {
 	scope := strings.Join(credential[1:], "/")
 	stringToSign := strings.Join([]string{s3V4AAlgorithm, date, scope, hex.EncodeToString(requestHash[:])}, "\n")
 	digest := sha256.Sum256([]byte(stringToSign))
-	encoded, err := hex.DecodeString(signature)
 	key := s3V4AKey(accessKey, secret)
-	if err != nil || key == nil || !ecdsa.VerifyASN1(&key.PublicKey, digest[:], encoded) {
+	if key == nil || !s3V4ASignatureMatches(signature, key, digest[:]) {
 		return signatureFault()
 	}
 	return nil
+}
+
+// VerifyS3StreamingV4A verifies chained SigV4A aws-chunked payload and trailer signatures.
+func VerifyS3StreamingV4A(r *http.Request, accessKey, secret string, chunks [][]byte, signatures []string, trailers http.Header) *spi.Fault {
+	payloadHash := r.Header.Get("X-Amz-Content-Sha256")
+	signedTrailerMode := payloadHash == "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD-TRAILER"
+	if payloadHash != "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD" && !signedTrailerMode {
+		return nil
+	}
+	credential, signedHeaders, previous, date, _, query, ok := s3V4AFields(r)
+	decodedLength, err := strconv.ParseInt(r.Header.Get("X-Amz-Decoded-Content-Length"), 10, 64)
+	if query || !ok || len(credential) != 4 || credential[0] != accessKey || credential[2] != "s3" || credential[3] != "aws4_request" || !strings.Contains(strings.ToLower(r.Header.Get("Content-Encoding")), "aws-chunked") || decodedLength < 0 || err != nil || len(chunks) == 0 || len(chunks) != len(signatures) || len(chunks[len(chunks)-1]) != 0 {
+		return signatureFault()
+	}
+	if signedTrailerMode && !containsString(strings.Split(signedHeaders, ";"), "x-amz-trailer") {
+		return signatureFault()
+	}
+	var actualLength int64
+	for _, chunk := range chunks {
+		actualLength += int64(len(chunk))
+	}
+	key := s3V4AKey(accessKey, secret)
+	if actualLength != decodedLength || key == nil {
+		return signatureFault()
+	}
+	scope := strings.Join(credential[1:], "/")
+	emptyHash := sha256.Sum256(nil)
+	emptyHex := hex.EncodeToString(emptyHash[:])
+	for i, chunk := range chunks {
+		chunkHash := sha256.Sum256(chunk)
+		payload := strings.Join([]string{strings.TrimLeft(previous, "*"), emptyHex, hex.EncodeToString(chunkHash[:])}, "\n")
+		stringToSign := strings.Join([]string{"AWS4-ECDSA-P256-SHA256-PAYLOAD", date, scope, payload}, "\n")
+		digest := sha256.Sum256([]byte(stringToSign))
+		if len(signatures[i]) != 144 || !s3V4ASignatureMatches(signatures[i], key, digest[:]) {
+			return signatureFault()
+		}
+		previous = signatures[i]
+	}
+	if !signedTrailerMode {
+		if len(trailers) != 0 {
+			return signatureFault()
+		}
+		return nil
+	}
+	canonical, ok := canonicalS3StreamingTrailers(r, trailers, true)
+	if !ok {
+		return signatureFault()
+	}
+	trailerHash := sha256.Sum256([]byte(canonical))
+	payload := strings.TrimLeft(previous, "*") + "\n" + hex.EncodeToString(trailerHash[:])
+	stringToSign := strings.Join([]string{"AWS4-ECDSA-P256-SHA256-TRAILER", date, scope, payload}, "\n")
+	digest := sha256.Sum256([]byte(stringToSign))
+	if signature := trailers.Get("X-Amz-Trailer-Signature"); len(signature) != 144 || !s3V4ASignatureMatches(signature, key, digest[:]) {
+		return signatureFault()
+	}
+	return nil
+}
+
+func s3V4ASignatureMatches(signature string, key *ecdsa.PrivateKey, digest []byte) bool {
+	encoded, err := hex.DecodeString(strings.TrimLeft(signature, "*"))
+	return err == nil && ecdsa.VerifyASN1(&key.PublicKey, digest, encoded)
 }
 
 func s3V4AFields(r *http.Request) (credential []string, signedHeaders, signature, date, regionSet string, query, ok bool) {

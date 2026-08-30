@@ -24,6 +24,8 @@ import (
 
 	mcfg "github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
@@ -93,6 +95,8 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		t.Fatalf("default bucket encryption: %#v %v", got, err)
 	}
 	bucketEncryptionKey := "arn:aws:kms:us-east-1:000000000000:key/sdk-default"
+	kmsIdentity := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	spitest.SeedKMSKey(t, rt.Deps, kmsIdentity, bucketEncryptionKey, "Enabled")
 	bucketEncryption := &s3types.ServerSideEncryptionConfiguration{Rules: []s3types.ServerSideEncryptionRule{{
 		ApplyServerSideEncryptionByDefault: &s3types.ServerSideEncryptionByDefault{SSEAlgorithm: s3types.ServerSideEncryptionAwsKms, KMSMasterKeyID: aws.String(bucketEncryptionKey)},
 		BucketKeyEnabled:                   aws.Bool(true),
@@ -108,6 +112,17 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || inheritedEncryption.ServerSideEncryption != s3types.ServerSideEncryptionAwsKms || aws.ToString(inheritedEncryption.SSEKMSKeyId) != bucketEncryptionKey || !aws.ToBool(inheritedEncryption.BucketKeyEnabled) {
 		t.Fatalf("inherited bucket encryption: %#v %v", inheritedEncryption, err)
 	}
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-explicit-kms"), Body: strings.NewReader("encrypted"), ServerSideEncryption: s3types.ServerSideEncryptionAwsKms, SSEKMSKeyId: aws.String(bucketEncryptionKey)}); err != nil {
+		t.Fatalf("explicit kms put: %v", err)
+	}
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-missing-kms"), Body: strings.NewReader("rejected"), ServerSideEncryption: s3types.ServerSideEncryptionAwsKms, SSEKMSKeyId: aws.String("arn:aws:kms:us-east-1:000000000000:key/missing")}); err == nil || !strings.Contains(err.Error(), "KMS.NotFoundException") {
+		t.Fatalf("missing kms key: %v", err)
+	}
+	spitest.SeedKMSKey(t, rt.Deps, kmsIdentity, bucketEncryptionKey, "Disabled")
+	if _, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-explicit-kms")}); err == nil || !strings.Contains(err.Error(), "KMS.DisabledException") {
+		t.Fatalf("disabled kms read: %v", err)
+	}
+	spitest.SeedKMSKey(t, rt.Deps, kmsIdentity, bucketEncryptionKey, "Enabled")
 	invalidEncryption := &s3types.ServerSideEncryptionConfiguration{Rules: []s3types.ServerSideEncryptionRule{{ApplyServerSideEncryptionByDefault: &s3types.ServerSideEncryptionByDefault{SSEAlgorithm: s3types.ServerSideEncryptionAes256, KMSMasterKeyID: aws.String(bucketEncryptionKey)}}}}
 	if _, err := s3c.PutBucketEncryption(context.Background(), &s3.PutBucketEncryptionInput{Bucket: aws.String("sdk"), ServerSideEncryptionConfiguration: invalidEncryption}); err == nil || !strings.Contains(err.Error(), "InvalidArgument") {
 		t.Fatalf("invalid bucket encryption: %v", err)

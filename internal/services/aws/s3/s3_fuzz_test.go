@@ -1613,11 +1613,13 @@ func FuzzObjectServerSideEncryption(f *testing.F) {
 		}
 		algorithms := []string{"AES256", "aws:kms", "aws:kms:dsse", "invalid"}
 		algorithm := algorithms[int(algorithmIndex)%len(algorithms)]
-		p := s3.New(spitest.Deps(t))
+		deps := spitest.Deps(t)
+		p := s3.New(deps)
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "encryption-fuzz"}, nil)
 		input := map[string]any{"Bucket": "encryption-fuzz", "Key": "object", "ServerSideEncryption": algorithm, "BucketKeyEnabled": bucketKey}
 		keyID := "arn:aws:kms:us-east-1:123456789012:key/fuzz"
 		if algorithm == "aws:kms" {
+			spitest.SeedKMSKey(t, deps, ident(), keyID, "Enabled")
 			input["SSEKMSKeyId"] = keyID
 		}
 		response, err := invoke(t, p, "PutObject", input, []byte(body))
@@ -1639,6 +1641,53 @@ func FuzzObjectServerSideEncryption(f *testing.F) {
 		}
 		if algorithm == "aws:kms" && (get.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || bucketKey && get.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true") {
 			t.Fatalf("stored kms headers=%v", get.Headers)
+		}
+	})
+}
+
+func FuzzExplicitKMSKeyValidation(f *testing.F) {
+	f.Add(false, "Enabled", uint8(0))
+	f.Add(true, "Enabled", uint8(1))
+	f.Add(false, "Disabled", uint8(2))
+	f.Add(false, "PendingDeletion", uint8(0))
+	f.Add(false, "PendingImport", uint8(1))
+	f.Fuzz(func(t *testing.T, missing bool, state string, operationIndex uint8) {
+		if len(state) > 32 {
+			t.Skip()
+		}
+		deps := spitest.Deps(t)
+		p := s3.New(deps)
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "kms-validation-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "kms-validation-fuzz", "Key": "source"}, []byte("source"))
+		keyID := "arn:aws:kms:us-east-1:123456789012:key/fuzz-validation"
+		if !missing {
+			spitest.SeedKMSKey(t, deps, ident(), keyID, state)
+		}
+		operation := []string{"PutObject", "CreateMultipartUpload", "CopyObject"}[int(operationIndex)%3]
+		input := map[string]any{"Bucket": "kms-validation-fuzz", "Key": "destination", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID}
+		if operation == "CopyObject" {
+			input["CopySource"] = "kms-validation-fuzz/source"
+		}
+		_, err := invoke(t, p, operation, input, []byte("body"))
+		if missing {
+			if fault := asFault(t, err); fault.Code != "KMS.NotFoundException" {
+				t.Fatalf("missing key fault = %#v", fault)
+			}
+			return
+		}
+		switch state {
+		case "Enabled":
+			if err != nil {
+				t.Fatal(err)
+			}
+		case "PendingDeletion":
+			if fault := asFault(t, err); fault.Code != "KMS.KMSInvalidStateException" {
+				t.Fatalf("pending deletion fault = %#v", fault)
+			}
+		default:
+			if fault := asFault(t, err); fault.Code != "KMS.DisabledException" {
+				t.Fatalf("disabled fault = %#v", fault)
+			}
 		}
 	})
 }
@@ -1707,11 +1756,13 @@ func FuzzMultipartServerSideEncryption(f *testing.F) {
 		}
 		algorithms := []string{"AES256", "aws:kms", "aws:kms:dsse", "invalid"}
 		algorithm := algorithms[int(algorithmIndex)%len(algorithms)]
-		p := s3.New(spitest.Deps(t))
+		deps := spitest.Deps(t)
+		p := s3.New(deps)
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-encryption-fuzz"}, nil)
 		input := map[string]any{"Bucket": "multipart-encryption-fuzz", "Key": "object", "ServerSideEncryption": algorithm, "BucketKeyEnabled": bucketKey}
 		keyID := "arn:aws:kms:us-east-1:123456789012:key/multipart-fuzz"
 		if algorithm == "aws:kms" {
+			spitest.SeedKMSKey(t, deps, ident(), keyID, "Enabled")
 			input["SSEKMSKeyId"] = keyID
 		}
 		created, err := invoke(t, p, "CreateMultipartUpload", input, nil)

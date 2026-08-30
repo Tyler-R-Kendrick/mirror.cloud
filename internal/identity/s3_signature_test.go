@@ -118,6 +118,17 @@ func TestVerifyS3StreamingTrailerV4AWSExample(t *testing.T) {
 	if fault := VerifyS3StreamingV4(request, secret, chunks, signatures, trailers); fault != nil {
 		t.Fatalf("official AWS trailer signature rejected: %#v", fault)
 	}
+	authorization := request.Header.Get("Authorization")
+	request.Header.Set("Authorization", strings.Replace(authorization, ";x-amz-trailer", "", 1))
+	if fault := VerifyS3StreamingV4(request, secret, chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("unsigned trailer declaration accepted: %#v", fault)
+	}
+	request.Header.Set("Authorization", authorization)
+	extra := trailers.Clone()
+	extra.Set("X-Amz-Extra", "value")
+	if fault := VerifyS3StreamingV4(request, secret, chunks, signatures, extra); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("undeclared trailer accepted: %#v", fault)
+	}
 	trailers.Set("X-Amz-Checksum-Crc32c", "AAAAAA==")
 	if fault := VerifyS3StreamingV4(request, secret, chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 		t.Fatalf("tampered signed trailer accepted: %#v", fault)

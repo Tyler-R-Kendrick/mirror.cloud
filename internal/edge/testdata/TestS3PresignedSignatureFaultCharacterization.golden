@@ -18,6 +18,12 @@
     "message": "The request signature we calculated does not match the signature you provided.",
     "status": 403
   },
+  "authorization_v4a": {
+    "code": "SignatureDoesNotMatch",
+    "content_type": "application/xml",
+    "message": "The request signature we calculated does not match the signature you provided.",
+    "status": 403
+  },
   "gateway_port_443": 404,
   "gateway_port_none": 404,
   "sigv2": {
@@ -28,6 +34,12 @@
   },
   "sigv2_valid_status": 404,
   "sigv4": {
+    "code": "SignatureDoesNotMatch",
+    "content_type": "application/xml",
+    "message": "The request signature we calculated does not match the signature you provided.",
+    "status": 403
+  },
+  "sigv4a": {
     "code": "SignatureDoesNotMatch",
     "content_type": "application/xml",
     "message": "The request signature we calculated does not match the signature you provided.",

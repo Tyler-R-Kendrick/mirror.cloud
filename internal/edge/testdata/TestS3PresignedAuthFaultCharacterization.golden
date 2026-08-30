@@ -10,5 +10,11 @@
     "content_type": "application/xml",
     "message": "Query-string authentication version 4 requires the X-Amz-Algorithm, X-Amz-Credential, X-Amz-Signature, X-Amz-Date, X-Amz-SignedHeaders, and X-Amz-Expires parameters.",
     "status": 400
+  },
+  "sigv4a": {
+    "code": "AuthorizationQueryParametersError",
+    "content_type": "application/xml",
+    "message": "Query-string authentication version 4A requires the X-Amz-Region-Set parameter.",
+    "status": 400
   }
 }

@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -1679,6 +1680,30 @@ func FuzzGetObjectResponseOverrides(f *testing.F) {
 		stored := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "override-fuzz", "Key": "object"}, nil)
 		if stored.Headers.Get("Content-Type") != "application/json" {
 			t.Fatalf("stored content type = %q", stored.Headers.Get("Content-Type"))
+		}
+	})
+}
+
+func FuzzUserMetadataRFC2047(f *testing.F) {
+	for _, value := range []string{"S3", "—_é_2?.pdf", "\x00\x01\x02\x03", "�������"} {
+		f.Add(value)
+	}
+	f.Fuzz(func(t *testing.T, suffix string) {
+		if len(suffix) > 256 || !utf8.ValidString(suffix) {
+			t.Skip()
+		}
+		value := "Ä" + suffix
+		deps := spitest.Deps(t)
+		p := s3.New(deps)
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "rfc2047-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{
+			"Bucket": "rfc2047-fuzz", "Key": "object", "Metadata": map[string]any{"value": mime.BEncoding.Encode("UTF-8", value)},
+		}, []byte("body"))
+		response := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "rfc2047-fuzz", "Key": "object"}, nil)
+		wire := response.Headers.Get("x-amz-meta-value")
+		decoded, err := new(mime.WordDecoder).DecodeHeader(wire)
+		if err != nil || decoded != value {
+			t.Fatalf("metadata %q decoded to %q from %q: %v", value, decoded, wire, err)
 		}
 	})
 }

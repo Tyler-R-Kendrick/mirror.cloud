@@ -525,8 +525,9 @@ func FuzzBucketLifecycle(f *testing.F) {
 	}{{0, "images/", 5}, {0, "", 0}, {1, "images/", 5}, {2, "images/", 5}, {3, "images/", 5}, {4, "images/", 5}} {
 		f.Add(seed.mode, seed.prefix, seed.size)
 	}
+	f.Add(uint8(0), strings.Repeat("a", 1022), uint8(0))
 	f.Fuzz(func(t *testing.T, mode uint8, prefix string, sizeSeed uint8) {
-		if !utf8.ValidString(prefix) {
+		if !utf8.ValidString(prefix) || len(prefix) > 1021 {
 			t.Skip()
 		}
 		p := s3.New(spitest.Deps(t))

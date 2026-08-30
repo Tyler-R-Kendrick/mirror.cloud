@@ -170,6 +170,37 @@ func TestS3ObjectLifecycle(t *testing.T) {
 				t.Fatalf("%s tampered presign %d %s", name, response.StatusCode, body)
 			}
 		}
+		createPostBucket, _ := http.NewRequest(http.MethodPut, strictServer.URL+"/post-signature", nil)
+		response, err = http.DefaultClient.Do(createPostBucket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("create POST signature bucket %d", response.StatusCode)
+		}
+		var postPayload bytes.Buffer
+		postWriter := multipart.NewWriter(&postPayload)
+		_ = postWriter.WriteField("key", "browser-upload")
+		_ = postWriter.WriteField("policy", base64.StdEncoding.EncodeToString([]byte(`{"expiration":"2099-01-01T01:00:00Z","conditions":[{"bucket":"post-signature"}]}`)))
+		_ = postWriter.WriteField("x-amz-algorithm", "AWS4-HMAC-SHA256")
+		_ = postWriter.WriteField("x-amz-credential", "test/20990101/us-east-1/s3/aws4_request")
+		_ = postWriter.WriteField("x-amz-date", "20990101T000000Z")
+		_ = postWriter.WriteField("x-amz-signature", strings.Repeat("0", 64))
+		postFile, _ := postWriter.CreateFormFile("file", "file.txt")
+		_, _ = postFile.Write([]byte("body"))
+		_ = postWriter.Close()
+		postRequest, _ := http.NewRequest(http.MethodPost, strictServer.URL+"/post-signature", &postPayload)
+		postRequest.Header.Set("Content-Type", postWriter.FormDataContentType())
+		response, err = http.DefaultClient.Do(postRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
+			t.Fatalf("tampered browser POST policy %d %s", response.StatusCode, body)
+		}
 		authorization, err := http.NewRequest(http.MethodGet, strictServer.URL+"/bucket/key", nil)
 		if err != nil {
 			t.Fatal(err)

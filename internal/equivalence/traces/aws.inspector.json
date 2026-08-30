@@ -1,0 +1,561 @@
+{
+  "schema": "trace/1",
+  "service": "aws.inspector",
+  "source": "internal/services/aws/inspector",
+  "note": "Targets, templates and runs, each keyed by the ARN its create minted.",
+  "steps": [
+    {
+      "operation": "DescribeAssessmentTargets",
+      "input": {
+        "assessmentTargetArns": []
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentTargets": null
+      }
+    },
+    {
+      "operation": "CreateAssessmentTarget",
+      "input": {
+        "assessmentTargetName": "all-instances"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentTargetArn": "arn:aws:inspector:us-east-1:000000000000:target/7c589129"
+      }
+    },
+    {
+      "operation": "CreateAssessmentTarget",
+      "input": {
+        "assessmentTargetName": "web-tier",
+        "resourceGroupArn": "arn:aws:inspector:us-east-1:000000000000:resourcegroup/0-abc"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentTargetArn": "arn:aws:inspector:us-east-1:000000000000:target/5f59f223"
+      }
+    },
+    {
+      "operation": "DescribeAssessmentTargets",
+      "input": {
+        "assessmentTargetArns": []
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentTargets": [
+          {
+            "arn": "arn:aws:inspector:us-east-1:000000000000:target/5f59f223",
+            "name": "web-tier"
+          },
+          {
+            "arn": "arn:aws:inspector:us-east-1:000000000000:target/7c589129",
+            "name": "all-instances"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAssessmentTargets",
+      "input": {
+        "assessmentTargetArns": [
+          {
+            "$fromPath": "assessmentTargetArn",
+            "$fromStep": 1
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentTargets": [
+          {
+            "arn": "arn:aws:inspector:us-east-1:000000000000:target/7c589129",
+            "name": "all-instances"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAssessmentTargets",
+      "input": {
+        "assessmentTargetArns": [
+          "arn:aws:inspector:us-east-1:000000000000:target/nope"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentTargets": null
+      }
+    },
+    {
+      "operation": "CreateAssessmentTemplate",
+      "input": {
+        "assessmentTargetArn": {
+          "$fromPath": "assessmentTargetArn",
+          "$fromStep": 1
+        },
+        "assessmentTemplateName": "weekly",
+        "durationInSeconds": 3600,
+        "rulesPackageArns": [
+          "arn:aws:inspector:us-east-1:316112463485:rulespackage/0-gEjTy7T7"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentTemplateArn": "arn:aws:inspector:us-east-1:000000000000:template/9c8e2cb0"
+      }
+    },
+    {
+      "operation": "CreateAssessmentTemplate",
+      "input": {
+        "assessmentTargetArn": "arn:aws:inspector:us-east-1:000000000000:target/ghost",
+        "assessmentTemplateName": "orphan",
+        "durationInSeconds": 900,
+        "rulesPackageArns": [
+          "arn:aws:inspector:us-east-1:316112463485:rulespackage/0-gEjTy7T7"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentTemplateArn": "arn:aws:inspector:us-east-1:000000000000:template/33f6fc5d"
+      }
+    },
+    {
+      "operation": "DescribeAssessmentTemplates",
+      "input": {
+        "assessmentTemplateArns": [
+          {
+            "$fromPath": "assessmentTemplateArn",
+            "$fromStep": 6
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentTemplates": [
+          {
+            "arn": "arn:aws:inspector:us-east-1:000000000000:template/9c8e2cb0",
+            "assessmentTargetArn": "arn:aws:inspector:us-east-1:000000000000:target/7c589129",
+            "name": "weekly"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAssessmentTemplates",
+      "input": {
+        "assessmentTemplateArns": []
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentTemplates": [
+          {
+            "arn": "arn:aws:inspector:us-east-1:000000000000:template/33f6fc5d",
+            "assessmentTargetArn": "arn:aws:inspector:us-east-1:000000000000:target/ghost",
+            "name": "orphan"
+          },
+          {
+            "arn": "arn:aws:inspector:us-east-1:000000000000:template/9c8e2cb0",
+            "assessmentTargetArn": "arn:aws:inspector:us-east-1:000000000000:target/7c589129",
+            "name": "weekly"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StartAssessmentRun",
+      "input": {
+        "assessmentRunName": "run-1",
+        "assessmentTemplateArn": {
+          "$fromPath": "assessmentTemplateArn",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentRunArn": "arn:aws:inspector:us-east-1:000000000000:run/83d4958a"
+      }
+    },
+    {
+      "operation": "StartAssessmentRun",
+      "input": {
+        "assessmentRunName": "run-2",
+        "assessmentTemplateArn": {
+          "$fromPath": "assessmentTemplateArn",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentRunArn": "arn:aws:inspector:us-east-1:000000000000:run/100aa4e6"
+      }
+    },
+    {
+      "operation": "DescribeAssessmentRuns",
+      "input": {
+        "assessmentRunArns": [
+          {
+            "$fromPath": "assessmentRunArn",
+            "$fromStep": 10
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentRuns": [
+          {
+            "arn": "arn:aws:inspector:us-east-1:000000000000:run/83d4958a",
+            "assessmentTemplateArn": "arn:aws:inspector:us-east-1:000000000000:template/9c8e2cb0",
+            "state": "COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAssessmentRuns",
+      "input": {
+        "assessmentRunArns": []
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentRuns": [
+          {
+            "arn": "arn:aws:inspector:us-east-1:000000000000:run/100aa4e6",
+            "assessmentTemplateArn": "arn:aws:inspector:us-east-1:000000000000:template/9c8e2cb0",
+            "state": "COMPLETED"
+          },
+          {
+            "arn": "arn:aws:inspector:us-east-1:000000000000:run/83d4958a",
+            "assessmentTemplateArn": "arn:aws:inspector:us-east-1:000000000000:template/9c8e2cb0",
+            "state": "COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListAssessmentRuns",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentRunArns": [
+          "arn:aws:inspector:us-east-1:000000000000:run/100aa4e6",
+          "arn:aws:inspector:us-east-1:000000000000:run/83d4958a"
+        ]
+      }
+    },
+    {
+      "operation": "ListAssessmentRuns",
+      "input": {
+        "assessmentTemplateArns": [
+          "arn:aws:inspector:us-east-1:000000000000:template/nope"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentRunArns": [
+          "arn:aws:inspector:us-east-1:000000000000:run/100aa4e6",
+          "arn:aws:inspector:us-east-1:000000000000:run/83d4958a"
+        ]
+      }
+    },
+    {
+      "operation": "StopAssessmentRun",
+      "input": {
+        "assessmentRunArn": {
+          "$fromPath": "assessmentRunArn",
+          "$fromStep": 10
+        },
+        "stopAction": "SKIP_EVALUATION"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeAssessmentRuns",
+      "input": {
+        "assessmentRunArns": [
+          {
+            "$fromPath": "assessmentRunArn",
+            "$fromStep": 10
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentRuns": [
+          {
+            "arn": "arn:aws:inspector:us-east-1:000000000000:run/83d4958a",
+            "assessmentTemplateArn": "arn:aws:inspector:us-east-1:000000000000:template/9c8e2cb0",
+            "state": "COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StopAssessmentRun",
+      "input": {
+        "assessmentRunArn": "arn:aws:inspector:us-east-1:000000000000:run/nope",
+        "stopAction": "START_EVALUATION"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListAssessmentRuns",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentRunArns": [
+          "arn:aws:inspector:us-east-1:000000000000:run/100aa4e6",
+          "arn:aws:inspector:us-east-1:000000000000:run/83d4958a"
+        ]
+      }
+    },
+    {
+      "operation": "DeleteAssessmentTemplate",
+      "input": {
+        "assessmentTemplateArn": {
+          "$fromPath": "assessmentTemplateArn",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeAssessmentTemplates",
+      "input": {
+        "assessmentTemplateArns": []
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentTemplates": [
+          {
+            "arn": "arn:aws:inspector:us-east-1:000000000000:template/9c8e2cb0",
+            "assessmentTargetArn": "arn:aws:inspector:us-east-1:000000000000:target/7c589129",
+            "name": "weekly"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteAssessmentTemplate",
+      "input": {
+        "assessmentTemplateArn": {
+          "$fromPath": "assessmentTemplateArn",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteAssessmentTarget",
+      "input": {
+        "assessmentTargetArn": {
+          "$fromPath": "assessmentTargetArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeAssessmentTargets",
+      "input": {
+        "assessmentTargetArns": []
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentTargets": [
+          {
+            "arn": "arn:aws:inspector:us-east-1:000000000000:target/7c589129",
+            "name": "all-instances"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeAssessmentTemplates",
+      "input": {
+        "assessmentTemplateArns": []
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "assessmentTemplates": [
+          {
+            "arn": "arn:aws:inspector:us-east-1:000000000000:template/9c8e2cb0",
+            "assessmentTargetArn": "arn:aws:inspector:us-east-1:000000000000:target/7c589129",
+            "name": "weekly"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteAssessmentTarget",
+      "input": {
+        "assessmentTargetArn": {
+          "$fromPath": "assessmentTargetArn",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

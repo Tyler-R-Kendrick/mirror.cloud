@@ -70,7 +70,10 @@ func VerifyS3PresignedV2(r *http.Request, secret string) *spi.Fault {
 	stringToSign := strings.Join([]string{r.Method, r.Header.Get("Content-MD5"), r.Header.Get("Content-Type"), q.Get("Expires"), canonicalV2AmzHeaders(r) + canonicalV2Resource(r)}, "\n")
 	want := hmacSHA1([]byte(secret), stringToSign)
 	got, err := base64.StdEncoding.DecodeString(q.Get("Signature"))
-	if err != nil || len(got) != len(want) || subtle.ConstantTimeCompare(got, want) != 1 {
+	if err != nil {
+		return signatureFault()
+	}
+	if len(got) != len(want) || subtle.ConstantTimeCompare(got, want) != 1 {
 		return signatureFault()
 	}
 	return nil

@@ -158,8 +158,13 @@ func TestCreateBucketGlobalCollisions(t *testing.T) {
 		if fault.Code != want || fault.HTTPStatus != http.StatusConflict || fault.Fields["BucketName"] != "shared-bucket" {
 			t.Fatalf("%s collision = %#v", name, fault)
 		}
-		if _, err := invokeAs(t, p, identity, "HeadBucket", input, nil); asFault(t, err).Code != "NoSuchBucket" {
-			t.Fatalf("%s collision created local bucket: %v", name, err)
+		head, headErr := invokeAs(t, p, identity, "HeadBucket", input, nil)
+		if identity.Account == owner.Account {
+			if headErr != nil || head.Headers.Get("x-amz-bucket-region") != owner.Region {
+				t.Fatalf("%s cross-region head = %#v %v", name, head, headErr)
+			}
+		} else if asFault(t, headErr).Code != "NoSuchBucket" {
+			t.Fatalf("%s collision exposed foreign bucket: %v", name, headErr)
 		}
 		collisions[name] = fault.Code
 	}

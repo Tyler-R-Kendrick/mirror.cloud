@@ -100,11 +100,18 @@ func TestVerifyS3AuthorizationV2DateAndGrammar(t *testing.T) {
 	if fault := VerifyS3AuthorizationV2(request, "test"); fault != nil {
 		t.Fatalf("Date overrode x-amz-date: %#v", fault)
 	}
-	for _, authorization := range []string{"AWS ", "AWS test", "AWS :signature", "AWS test:", "AWS test:bad:signature"} {
+	for _, authorization := range []string{"AWS ", "AWS test", "AWS :" + signature, "AWS test:", "AWS test:" + signature + ":extra"} {
 		request.Header.Set("Authorization", authorization)
 		if fault := VerifyS3AuthorizationV2(request, "test"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 			t.Fatalf("malformed %q accepted: %#v", authorization, fault)
 		}
+	}
+	request.Header.Del("Date")
+	request.Header.Del("X-Amz-Date")
+	emptyDateSignature := base64.StdEncoding.EncodeToString(hmacSHA1([]byte("test"), "DELETE\n\n\n\n/bucket/key"))
+	request.Header.Set("Authorization", "AWS test:"+emptyDateSignature)
+	if fault := VerifyS3AuthorizationV2(request, "test"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("missing timestamp accepted: %#v", fault)
 	}
 	request.Header.Set("Authorization", "Bearer token")
 	if fault := VerifyS3AuthorizationV2(request, "test"); fault != nil {

@@ -77,6 +77,8 @@ func New(cfg config.Config, deps spi.Deps, reg registry.Registry, version string
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var awsChunks [][]byte
 	var awsChunkSignatures []string
+	var awsDecodedLength int64
+	awsChunkedDecoded := false
 	if r.Method == http.MethodOptions {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "*")
@@ -105,9 +107,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				body = deframed
 				awsChunks = chunks
 				awsChunkSignatures = signatures
+				awsDecodedLength = int64(len(body))
+				awsChunkedDecoded = true
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
-			r.ContentLength = int64(len(body))
 		}
 	}
 
@@ -161,6 +164,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, fault, rid)
 			return
 		}
+	}
+	if awsChunkedDecoded {
+		r.ContentLength = awsDecodedLength
 	}
 
 	if svc == nil {

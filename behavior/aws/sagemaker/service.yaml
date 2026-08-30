@@ -1,0 +1,218 @@
+schema: bir/1
+service: aws.sagemaker
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is trained and nothing is served: a notebook and an
+# endpoint are InService the moment they are created, and no inference is
+# possible against either.
+provenance: authored
+
+resources:
+  notebook:
+    collection: smnb
+    id:
+      input_members: [NotebookInstanceName]
+    arn: "arn:{partition}:sagemaker:{region}:{account}:notebook-instance/{id}"
+    record:
+      NotebookInstanceName: id
+      NotebookInstanceArn: arn
+      NotebookInstanceStatus: "'InService'"
+      InstanceType: "'InstanceType' in input ? string(input.InstanceType) : ''"
+
+  model:
+    collection: smmodel
+    id:
+      input_members: [ModelName]
+    arn: "arn:{partition}:sagemaker:{region}:{account}:model/{id}"
+    record:
+      ModelName: id
+      ModelArn: arn
+      ExecutionRoleArn: "'ExecutionRoleArn' in input ? string(input.ExecutionRoleArn) : ''"
+
+  endpointconfig:
+    collection: smec
+    id:
+      input_members: [EndpointConfigName]
+    arn: "arn:{partition}:sagemaker:{region}:{account}:endpoint-config/{id}"
+    record:
+      EndpointConfigName: id
+      EndpointConfigArn: arn
+      ProductionVariants: "'ProductionVariants' in input ? input.ProductionVariants : null"
+
+  # Not named `endpoint`: that is the base URL the caller reached, and a
+  # resource may not shadow it.
+  inferenceendpoint:
+    collection: smep
+    id:
+      input_members: [EndpointName]
+    arn: "arn:{partition}:sagemaker:{region}:{account}:endpoint/{id}"
+    record:
+      EndpointName: id
+      EndpointArn: arn
+      EndpointStatus: "'InService'"
+      EndpointConfigName: >
+        'EndpointConfigName' in input ? string(input.EndpointConfigName) : ''
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+
+operations:
+  CreateNotebookInstance:
+    effects:
+      - put: { resource: notebook }
+    output:
+      NotebookInstanceArn: rec.NotebookInstanceArn
+
+  DescribeNotebookInstance:
+    reads:
+      n: { resource: notebook }
+    require:
+      - { cond: n_found, error: Validation }
+    output:
+      NotebookInstanceName: "n.NotebookInstanceName"
+      NotebookInstanceStatus: "n.NotebookInstanceStatus"
+      InstanceType: "n.InstanceType"
+
+  # The record carries an ARN the pack's did not, because a create has to
+  # answer with one and `arn` is bound only in a resource record. It is
+  # projected away everywhere the pack did not emit it.
+  ListNotebookInstances:
+    list: { resource: notebook, member: NotebookInstances, paginate: model }
+    output:
+      NotebookInstances: >
+        items.map(n, {
+          'NotebookInstanceName': n.NotebookInstanceName,
+          'NotebookInstanceStatus': n.NotebookInstanceStatus,
+          'InstanceType': n.InstanceType
+        })
+
+  DeleteNotebookInstance:
+    effects:
+      - delete: { resource: notebook, missing: ignore }
+
+  CreateModel:
+    effects:
+      - put: { resource: model }
+    output:
+      ModelArn: rec.ModelArn
+
+  DescribeModel:
+    reads:
+      m: { resource: model }
+    require:
+      - { cond: m_found, error: Validation }
+    output:
+      ModelName: "m.ModelName"
+      ExecutionRoleArn: "m.ExecutionRoleArn"
+
+  # ModelSummary declares no ExecutionRoleArn, so the listed form of a model is
+  # not the stored record.
+  ListModels:
+    list: { resource: model, member: Models, paginate: model }
+    output:
+      Models: "items.map(m, {'ModelName': m.ModelName})"
+
+  DeleteModel:
+    effects:
+      - delete: { resource: model, missing: ignore }
+
+  CreateEndpointConfig:
+    effects:
+      - put: { resource: endpointconfig }
+    output:
+      EndpointConfigArn: rec.EndpointConfigArn
+
+  DescribeEndpointConfig:
+    reads:
+      c: { resource: endpointconfig }
+    require:
+      - { cond: c_found, error: Validation }
+    output:
+      EndpointConfigName: "c.EndpointConfigName"
+      ProductionVariants: "c.ProductionVariants"
+
+  DeleteEndpointConfig:
+    effects:
+      - delete: { resource: endpointconfig, missing: ignore }
+
+  CreateEndpoint:
+    effects:
+      - put: { resource: inferenceendpoint }
+    output:
+      EndpointArn: rec.EndpointArn
+
+  DescribeEndpoint:
+    reads:
+      e: { resource: inferenceendpoint }
+    require:
+      - { cond: e_found, error: Validation }
+    output:
+      EndpointName: "e.EndpointName"
+      EndpointStatus: "e.EndpointStatus"
+      EndpointConfigName: "e.EndpointConfigName"
+
+  # EndpointSummary declares no EndpointConfigName, for the same reason.
+  ListEndpoints:
+    list: { resource: inferenceendpoint, member: Endpoints, paginate: model }
+    output:
+      Endpoints: >
+        items.map(e, {
+          'EndpointName': e.EndpointName,
+          'EndpointStatus': e.EndpointStatus
+        })
+
+  DeleteEndpoint:
+    effects:
+      - delete: { resource: inferenceendpoint, missing: ignore }
+
+quirks:
+  - operation: DescribeNotebookInstance
+    note: >
+      All four describes fault with ValidationException on a record that does
+      not exist -- the pack shared one getter and one code for every
+      resource -- where the real service distinguishes them and answers
+      ValidationException only for a malformed request. A probe settles which
+      code each should be; every delete, by contrast, succeeds on an absent
+      record.
+  - operation: ListModels
+    note: >
+      A listed model carries only its name: ModelSummary declares no
+      ExecutionRoleArn and the pack listed the stored record, which has one.
+      A listed endpoint loses its EndpointConfigName for the same reason. Both
+      recorded steps are superseded with that reason, and both summaries
+      declare an ARN and a CreationTime that stay unset, because the pack set
+      neither.
+  - operation: CreateEndpoint
+    note: >
+      An endpoint is InService the moment it is created, so nothing observes
+      Creating, and the EndpointConfigName it names is stored without being
+      checked -- an endpoint can name a config that was never created, and
+      survives that config being deleted. No inference is possible against it
+      in any case: InvokeEndpoint belongs to the sagemaker-runtime service,
+      which this pack did not serve, so an endpoint is a record and nothing
+      more.
+  - operation: CreateModel
+    note: >
+      The required PrimaryContainer or Containers is dropped, so a model names
+      no image and no artifact -- there is nothing to serve. ModelArn,
+      CreationTime and the VPC and network settings are declared on the
+      describe answer and never set, and the ExecutionRoleArn is stored without
+      being validated. Creating a model that already exists overwrites it,
+      where the real service refuses a duplicate name.
+  - operation: CreateEndpointConfig
+    note: >
+      The ProductionVariants are stored and read by nothing: no variant is ever
+      instantiated, so the instance counts and types in them describe capacity
+      that does not exist. An endpoint config cannot be listed at all -- the
+      pack served no ListEndpointConfigs -- so a config is reachable only by a
+      name the caller kept.
+  - operation: CreateNotebookInstance
+    note: >
+      A notebook instance is InService with no volume, no role and no URL: the
+      required RoleArn is dropped along with the volume size and the lifecycle
+      configuration, and NotebookInstanceArn and Url are declared on the
+      describe answer and never set. Nothing runs, so the notebook cannot be
+      opened.

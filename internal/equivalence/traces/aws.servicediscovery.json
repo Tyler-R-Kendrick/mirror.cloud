@@ -1,0 +1,482 @@
+{
+  "schema": "trace/1",
+  "service": "aws.servicediscovery",
+  "source": "pack:internal/services/aws/servicediscovery@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListNamespaces",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Namespaces": null
+      }
+    },
+    {
+      "operation": "GetNamespace",
+      "input": {
+        "Id": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NamespaceNotFound",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateHttpNamespace",
+      "input": {
+        "CreatorRequestId": "r1",
+        "Name": "ns-http"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Namespace": {
+          "Id": "7c589129",
+          "Name": "ns-http",
+          "Type": "HTTP"
+        },
+        "OperationId": "7c589129"
+      },
+      "superseded": "Neither create answer declares a Namespace -- both declare an OperationId and nothing else -- and the pack answered with the namespace it had just built. The record is still stored and GetNamespace answers with it, where the model does declare one; only the create's copy is gone."
+    },
+    {
+      "operation": "GetNamespace",
+      "input": {
+        "Id": {
+          "$fromPath": "OperationId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Namespace": {
+          "Id": "7c589129",
+          "Name": "ns-http",
+          "Type": "HTTP"
+        }
+      }
+    },
+    {
+      "operation": "CreatePrivateDnsNamespace",
+      "input": {
+        "CreatorRequestId": "r2",
+        "Name": "ns-dns",
+        "Vpc": "vpc-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Namespace": {
+          "Id": "5f59f223",
+          "Name": "ns-dns",
+          "Type": "DNS_PRIVATE"
+        },
+        "OperationId": "5f59f223"
+      },
+      "superseded": "Neither create answer declares a Namespace -- both declare an OperationId and nothing else -- and the pack answered with the namespace it had just built. The record is still stored and GetNamespace answers with it, where the model does declare one; only the create's copy is gone."
+    },
+    {
+      "operation": "ListNamespaces",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Namespaces": [
+          {
+            "Id": "5f59f223",
+            "Name": "ns-dns",
+            "Type": "DNS_PRIVATE"
+          },
+          {
+            "Id": "7c589129",
+            "Name": "ns-http",
+            "Type": "HTTP"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateService",
+      "input": {
+        "Name": "svc",
+        "NamespaceId": {
+          "$fromPath": "OperationId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Service": {
+          "Id": "9c8e2cb0",
+          "Name": "svc",
+          "NamespaceId": "7c589129"
+        }
+      }
+    },
+    {
+      "operation": "GetService",
+      "input": {
+        "Id": {
+          "$fromPath": "Service.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Service": {
+          "Id": "9c8e2cb0",
+          "Name": "svc",
+          "NamespaceId": "7c589129"
+        }
+      }
+    },
+    {
+      "operation": "ListServices",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Services": [
+          {
+            "Id": "9c8e2cb0",
+            "Name": "svc",
+            "NamespaceId": "7c589129"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RegisterInstance",
+      "input": {
+        "Attributes": {
+          "AWS_INSTANCE_IPV4": "192.0.2.1"
+        },
+        "InstanceId": "inst-1",
+        "ServiceId": {
+          "$fromPath": "Service.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OperationId": "inst-1"
+      }
+    },
+    {
+      "operation": "GetInstance",
+      "input": {
+        "InstanceId": "inst-1",
+        "ServiceId": {
+          "$fromPath": "Service.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Instance": {
+          "Attributes": {
+            "AWS_INSTANCE_IPV4": "192.0.2.1"
+          },
+          "Id": "inst-1",
+          "ServiceId": "9c8e2cb0"
+        }
+      }
+    },
+    {
+      "operation": "GetInstance",
+      "input": {
+        "InstanceId": "inst-1",
+        "ServiceId": "other"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InstanceNotFound",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "RegisterInstance",
+      "input": {
+        "Attributes": {
+          "AWS_INSTANCE_IPV4": "192.0.2.2"
+        },
+        "InstanceId": "inst-2",
+        "ServiceId": {
+          "$fromPath": "Service.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OperationId": "inst-2"
+      }
+    },
+    {
+      "operation": "GetInstance",
+      "input": {
+        "InstanceId": "inst-2",
+        "ServiceId": {
+          "$fromPath": "Service.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Instance": {
+          "Attributes": {
+            "AWS_INSTANCE_IPV4": "192.0.2.2"
+          },
+          "Id": "inst-2",
+          "ServiceId": "9c8e2cb0"
+        }
+      }
+    },
+    {
+      "operation": "ListInstances",
+      "input": {
+        "ServiceId": "other"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Instances": [
+          {
+            "Attributes": {
+              "AWS_INSTANCE_IPV4": "192.0.2.1"
+            },
+            "Id": "inst-1",
+            "ServiceId": "9c8e2cb0"
+          },
+          {
+            "Attributes": {
+              "AWS_INSTANCE_IPV4": "192.0.2.2"
+            },
+            "Id": "inst-2",
+            "ServiceId": "9c8e2cb0"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeregisterInstance",
+      "input": {
+        "InstanceId": "inst-1",
+        "ServiceId": {
+          "$fromPath": "Service.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OperationId": "33f6fc5d"
+      }
+    },
+    {
+      "operation": "ListInstances",
+      "input": {
+        "ServiceId": {
+          "$fromPath": "Service.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Instances": [
+          {
+            "Attributes": {
+              "AWS_INSTANCE_IPV4": "192.0.2.2"
+            },
+            "Id": "inst-2",
+            "ServiceId": "9c8e2cb0"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteService",
+      "input": {
+        "Id": {
+          "$fromPath": "Service.Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListServices",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Services": null
+      }
+    },
+    {
+      "operation": "DeleteNamespace",
+      "input": {
+        "Id": {
+          "$fromPath": "OperationId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OperationId": "83d4958a"
+      }
+    },
+    {
+      "operation": "ListNamespaces",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Namespaces": [
+          {
+            "Id": "5f59f223",
+            "Name": "ns-dns",
+            "Type": "DNS_PRIVATE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteNamespace",
+      "input": {
+        "Id": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "OperationId": "100aa4e6"
+      }
+    }
+  ]
+}

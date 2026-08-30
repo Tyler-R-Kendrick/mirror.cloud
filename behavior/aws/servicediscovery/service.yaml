@@ -1,0 +1,197 @@
+schema: bir/1
+service: aws.servicediscovery
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is discoverable: no DNS record is created, no health check
+# runs, and DiscoverInstances is not served at all.
+provenance: authored
+
+resources:
+  namespace:
+    collection: sdns
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record: {}
+
+  service:
+    collection: sdsvc
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record: {}
+
+  # An instance is filed under its service and its own id together, which is
+  # how the pack keyed it: asking the wrong service for an instance does not
+  # find it.
+  instance:
+    collection: sdinst
+    id:
+      derive: "string(input.ServiceId) + '/' + string(input.InstanceId)"
+    record: {}
+
+errors:
+  NamespaceNotFound:
+    code: NamespaceNotFound
+    http: 400
+    fault: client
+  ServiceNotFound:
+    code: ServiceNotFound
+    http: 400
+    fault: client
+  InstanceNotFound:
+    code: InstanceNotFound
+    http: 400
+    fault: client
+
+operations:
+  CreateHttpNamespace:
+    effects:
+      - create:
+          resource: namespace
+          record:
+            Id: id
+            Name: "'Name' in input ? string(input.Name) : ''"
+            Type: "'HTTP'"
+    output:
+      OperationId: rec.Id
+
+  # The same operation but for the type it records: the pack served both from
+  # one branch and differed only in the Type it stored.
+  CreatePrivateDnsNamespace:
+    effects:
+      - create:
+          resource: namespace
+          record:
+            Id: id
+            Name: "'Name' in input ? string(input.Name) : ''"
+            Type: "'DNS_PRIVATE'"
+    output:
+      OperationId: rec.Id
+
+  GetNamespace:
+    reads:
+      n: { resource: namespace, key: "string(input.Id)" }
+    require:
+      - { cond: n_found, error: NamespaceNotFound }
+    output:
+      Namespace: n
+
+  ListNamespaces:
+    list: { resource: namespace, member: Namespaces, paginate: model }
+
+  # Deleting answers a fresh identifier that names no operation, because
+  # nothing here records one.
+  DeleteNamespace:
+    effects:
+      - generate: { bind: op, kind: hex, bytes: 8 }
+      - delete: { resource: namespace, key: "string(input.Id)", missing: ignore }
+    output:
+      OperationId: fx.op
+
+  CreateService:
+    effects:
+      - create:
+          resource: service
+          record:
+            Id: id
+            Name: "'Name' in input ? string(input.Name) : ''"
+            NamespaceId: "'NamespaceId' in input ? string(input.NamespaceId) : ''"
+    output:
+      Service: rec
+
+  GetService:
+    reads:
+      s: { resource: service, key: "string(input.Id)" }
+    require:
+      - { cond: s_found, error: ServiceNotFound }
+    output:
+      Service: s
+
+  ListServices:
+    list: { resource: service, member: Services, paginate: model }
+
+  DeleteService:
+    effects:
+      - delete: { resource: service, key: "string(input.Id)", missing: ignore }
+
+  # The pack generated an instance id when the request carried none.
+  # InstanceId is required, so that branch was never reachable through the
+  # wire and is not expressed -- expressing it would draw from the
+  # deterministic source on every call, which the pack did not.
+  RegisterInstance:
+    effects:
+      - put:
+          resource: instance
+          record:
+            Id: "string(input.InstanceId)"
+            ServiceId: "string(input.ServiceId)"
+            Attributes: "'Attributes' in input ? input.Attributes : null"
+    output:
+      OperationId: rec.Id
+
+  GetInstance:
+    reads:
+      i: { resource: instance }
+    require:
+      - { cond: i_found, error: InstanceNotFound }
+    output:
+      Instance: i
+
+  # Every instance in the account and region, not the service's own: the pack
+  # listed the whole collection and the required ServiceId narrows nothing.
+  ListInstances:
+    list: { resource: instance, member: Instances, paginate: model }
+
+  DeregisterInstance:
+    effects:
+      - generate: { bind: op, kind: hex, bytes: 8 }
+      - delete: { resource: instance, missing: ignore }
+    output:
+      OperationId: fx.op
+
+quirks:
+  - operation: CreateHttpNamespace
+    note: >
+      Neither create answer declares a Namespace -- both declare an OperationId
+      and nothing else -- and the pack answered with the namespace it had just
+      built. The record is still stored and GetNamespace answers with it, where
+      the model does declare one; only the create's copy is gone, and the
+      recorded steps are superseded with that reason.
+  - operation: RegisterInstance
+    note: >
+      The pack minted an instance id when the request carried none. InstanceId
+      is required, so the engine rejects such a request before the fallback
+      could run and the branch was unreachable through the wire in the pack
+      too. It is not expressed, because expressing it would draw from the
+      deterministic source on every registration where the pack drew on none.
+
+      An instance's OperationId is its own instance id, not an operation
+      identifier -- the pack answered the one it had just computed. Deleting a
+      namespace or deregistering an instance answers a freshly generated
+      identifier instead, which names nothing either: there is no
+      GetOperation here, so no OperationId this service issues can ever be
+      polled, and a caller that waits for an operation to finish waits forever.
+  - operation: ListInstances
+    note: >
+      The required ServiceId narrows nothing: every instance in the account and
+      region is listed, not the service's own. GetInstance does honour the pair,
+      so an instance can be fetched only through the service it belongs to but
+      listed through any.
+  - operation: CreateHttpNamespace
+    note: >
+      A namespace is an id, a name and a type. Arn, CreatorRequestId,
+      Description, ServiceCount, Properties and CreateDate are all declared and
+      never set, and a private DNS namespace stores no Vpc -- which the model
+      requires -- so nothing associates it with a network. No DNS record is
+      created for anything here.
+  - operation: CreateService
+    note: >
+      The NamespaceId a service names is stored without being checked, so a
+      service can belong to a namespace that was never created and survives
+      that namespace being deleted. DnsConfig and HealthCheckConfig are
+      dropped, so a registered instance is resolvable by nothing and its health
+      is never checked -- every instance is healthy because nothing looks.
+  - operation: GetInstance
+    note: >
+      DiscoverInstances is not served at all, which is the operation this whole
+      service exists for: instances can be registered and fetched by id, and
+      never discovered by name. Its absence falls to the mock tier.

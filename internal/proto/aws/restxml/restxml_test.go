@@ -712,6 +712,14 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	if w.Code != http.StatusNotImplemented || w.Header().Get("x-mirror-not-implemented") != "aws.s3.Missing" || !strings.Contains(w.Body.String(), "r&lt;&amp;") {
 		t.Fatalf("fault %d %#v %s", w.Code, w.Header(), w.Body.String())
 	}
+	w = httptest.NewRecorder()
+	fault := &spi.Fault{Code: "AuthorizationHeaderMalformed", Message: "wrong region", HTTPStatus: http.StatusBadRequest, Fields: map[string]any{"Region": "us-east-1", "BucketName": "bucket<&"}}
+	if err := codec.EncodeFault(svc, &model.Operation{Name: "HeadBucket"}, w, fault, "request"); err != nil {
+		t.Fatal(err)
+	}
+	if w.Header().Get("x-amz-bucket-region") != "us-east-1" || !strings.Contains(w.Body.String(), "<BucketName>bucket&lt;&amp;</BucketName><Region>us-east-1</Region>") {
+		t.Fatalf("structured fault %d %#v %s", w.Code, w.Header(), w.Body.String())
+	}
 }
 
 func str(v any) string {

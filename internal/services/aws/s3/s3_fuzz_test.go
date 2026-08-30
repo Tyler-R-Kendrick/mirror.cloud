@@ -909,6 +909,29 @@ func FuzzCreateBucketLocations(f *testing.F) {
 	})
 }
 
+func FuzzCrossRegionBucketResolution(f *testing.F) {
+	f.Add("key", "body", uint8(0))
+	f.Add("nested/object", "", uint8(1))
+	f.Fuzz(func(t *testing.T, key, body string, regionSeed uint8) {
+		if key == "" || len([]byte(key)) > 1024 || len(body) > 4096 || !utf8.ValidString(key) || !utf8.ValidString(body) {
+			t.Skip()
+		}
+		regions := []string{"us-west-2", "eu-west-1", "ap-southeast-2"}
+		region := regions[int(regionSeed)%len(regions)]
+		p := s3.New(spitest.Deps(t))
+		east := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+		mustInvokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "cross-region-fuzz", "LocationConstraint": region}, nil)
+		if got := mustInvokeAs(t, p, east, "HeadBucket", map[string]any{"Bucket": "cross-region-fuzz"}, nil).Headers.Get("x-amz-bucket-region"); got != region {
+			t.Fatalf("head region = %q want %q", got, region)
+		}
+		mustInvokeAs(t, p, east, "PutObject", map[string]any{"Bucket": "cross-region-fuzz", "Key": key}, []byte(body))
+		response := mustInvokeAs(t, p, east, "GetObject", map[string]any{"Bucket": "cross-region-fuzz", "Key": key}, nil)
+		if stored := string(readStream(t, response)); stored != body {
+			t.Fatalf("body = %q want %q", stored, body)
+		}
+	})
+}
+
 func FuzzBucketVersioningState(f *testing.F) {
 	for _, status := range []string{"", "Enabled", "Suspended", "Invalid", "enabled"} {
 		f.Add(status)

@@ -67,6 +67,33 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		return res
 	}
 
+	t.Run("Given a bucket in another Region When accessed Then S3 resolves it and reports its Region", func(t *testing.T) {
+		configuration := []byte(`<CreateBucketConfiguration><LocationConstraint>us-west-2</LocationConstraint></CreateBucketConfiguration>`)
+		res := do(http.MethodPut, "/cross-region-bdd", configuration, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create cross-region bucket %d", res.StatusCode)
+		}
+		res = do(http.MethodHead, "/cross-region-bdd", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-bucket-region") != "us-west-2" || res.Header.Get("x-amz-bucket-arn") != "arn:aws:s3:::cross-region-bdd" {
+			t.Fatalf("cross-region head %d %#v", res.StatusCode, res.Header)
+		}
+		res = do(http.MethodPut, "/cross-region-bdd/key", []byte("body"), "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("cross-region put %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/cross-region-bdd?list-type=2", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-bucket-region") != "us-west-2" || !bytes.Contains(body, []byte("<Key>key</Key>")) {
+			t.Fatalf("cross-region list %d %#v %s", res.StatusCode, res.Header, body)
+		}
+	})
+
 	t.Run("Given no bucket When PUT object Then not found or created after bucket", func(t *testing.T) {
 		// Given a fresh emulator
 		// When the user creates a bucket

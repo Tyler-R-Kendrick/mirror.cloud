@@ -1817,6 +1817,36 @@ func TestCreateBucketLocationConstraints(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestCrossRegionBucketResolutionAndHeadMetadata(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	east := ident()
+	mustInvokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "cross-region", "LocationConstraint": "us-west-2"}, nil)
+
+	head := mustInvokeAs(t, p, east, "HeadBucket", map[string]any{"Bucket": "cross-region"}, nil)
+	if head.Headers.Get("x-amz-bucket-region") != "us-west-2" || head.Headers.Get("x-amz-bucket-arn") != "arn:aws:s3:::cross-region" {
+		t.Fatalf("head headers = %#v", head.Headers)
+	}
+	mustInvokeAs(t, p, east, "PutObject", map[string]any{"Bucket": "cross-region", "Key": "key"}, []byte("body"))
+	listed := mustInvokeAs(t, p, east, "ListObjectsV2", map[string]any{"Bucket": "cross-region"}, nil)
+	if listed.Headers.Get("x-amz-bucket-region") != "us-west-2" || len(asSliceForTest(listed.Output["Contents"])) != 1 {
+		t.Fatalf("list = %#v headers=%#v", listed.Output, listed.Headers)
+	}
+
+	global := east
+	global.Region = "aws-global"
+	_, err := invokeAs(t, p, global, "HeadBucket", map[string]any{"Bucket": "cross-region"}, nil)
+	fault := asFault(t, err)
+	if fault.Code != "AuthorizationHeaderMalformed" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["Region"] != "us-east-1" {
+		t.Fatalf("global head = %#v", fault)
+	}
+	foreign := east
+	foreign.Account = "999999999999"
+	if _, err := invokeAs(t, p, foreign, "HeadBucket", map[string]any{"Bucket": "cross-region"}, nil); asFault(t, err).Code != "NoSuchBucket" {
+		t.Fatalf("foreign head = %v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"head": head.Headers, "list": listed.Headers, "global": map[string]any{"code": fault.Code, "region": fault.Fields["Region"], "status": fault.HTTPStatus}})
+}
+
 func TestCreateBucketValidatesGlobalNames(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	characterization := map[string]any{"invalid": map[string]any{}, "valid": map[string]any{}}

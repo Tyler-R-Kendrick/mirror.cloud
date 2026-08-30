@@ -479,6 +479,15 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if location, err := west.GetBucketLocation(context.Background(), &s3.GetBucketLocationInput{Bucket: aws.String("sdk-west")}); err != nil || location.LocationConstraint != s3types.BucketLocationConstraintUsWest2 {
 		t.Fatalf("stored regional location: %#v %v", location, err)
 	}
+	if head, err := s3c.HeadBucket(context.Background(), &s3.HeadBucketInput{Bucket: aws.String("sdk-west")}); err != nil || aws.ToString(head.BucketRegion) != "us-west-2" || aws.ToString(head.BucketArn) != "arn:aws:s3:::sdk-west" {
+		t.Fatalf("cross-region head: %#v %v", head, err)
+	}
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-west"), Key: aws.String("cross-region"), Body: strings.NewReader("body")}); err != nil {
+		t.Fatalf("cross-region put: %v", err)
+	}
+	if listed, err := s3c.ListObjectsV2(context.Background(), &s3.ListObjectsV2Input{Bucket: aws.String("sdk-west")}); err != nil || len(listed.Contents) != 1 {
+		t.Fatalf("cross-region list: %#v %v", listed, err)
+	}
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-invalid-location"), CreateBucketConfiguration: &s3types.CreateBucketConfiguration{LocationConstraint: s3types.BucketLocationConstraint("moon-west-1")}}); err == nil || !strings.Contains(err.Error(), "InvalidLocationConstraint") {
 		t.Fatalf("invalid location constraint: %v", err)
 	}

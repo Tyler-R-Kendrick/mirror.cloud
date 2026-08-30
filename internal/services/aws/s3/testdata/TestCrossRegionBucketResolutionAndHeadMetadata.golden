@@ -1,0 +1,20 @@
+{
+  "global": {
+    "code": "AuthorizationHeaderMalformed",
+    "region": "us-east-1",
+    "status": 400
+  },
+  "head": {
+    "X-Amz-Bucket-Arn": [
+      "arn:aws:s3:::cross-region"
+    ],
+    "X-Amz-Bucket-Region": [
+      "us-west-2"
+    ]
+  },
+  "list": {
+    "X-Amz-Bucket-Region": [
+      "us-west-2"
+    ]
+  }
+}

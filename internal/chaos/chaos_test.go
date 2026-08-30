@@ -70,6 +70,51 @@ func TestReplicaVersionBlobFailureLeavesNoPartialCurrent(t *testing.T) {
 	}
 }
 
+func TestConcurrentCrossRegionBucketResolution(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	east := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != nil {
+			stream = io.NopCloser(bytes.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: east, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "cross-region-chaos", "LocationConstraint": "us-west-2"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutObject", map[string]any{"Bucket": "cross-region-chaos", "Key": "key"}, []byte("body")); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 64)
+	for i := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			operation := "HeadBucket"
+			input := map[string]any{"Bucket": "cross-region-chaos"}
+			if i%2 != 0 {
+				operation = "ListObjectsV2"
+			}
+			response, err := call(operation, input, nil)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if response.Headers.Get("x-amz-bucket-region") != "us-west-2" {
+				errs <- fmt.Errorf("%s region headers: %#v", operation, response.Headers)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestRejectedReplicationConfigurationPreservesCurrent(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

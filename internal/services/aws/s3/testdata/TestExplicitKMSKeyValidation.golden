@@ -1,0 +1,16 @@
+{
+  "accepted": [
+    "bare-key-id",
+    "cross-account-arn"
+  ],
+  "faults": {
+    "copyMissing": "KMS.NotFoundException",
+    "crossRegion": "KMS.NotFoundException",
+    "disabledRead": "KMS.DisabledException",
+    "disabledWrite": "KMS.DisabledException",
+    "multipartMissing": "KMS.NotFoundException",
+    "pendingDeletion": "KMS.KMSInvalidStateException",
+    "pendingImport": "KMS.DisabledException",
+    "putMissing": "KMS.NotFoundException"
+  }
+}

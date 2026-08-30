@@ -8,6 +8,9 @@
     "Content-Type": [
       "application/xml"
     ],
+    "X-Amz-Access-Point-Alias": [
+      "false"
+    ],
     "X-Amz-Bucket-Arn": [
       "arn:aws:s3:::cross-region"
     ],

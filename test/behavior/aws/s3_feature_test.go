@@ -82,7 +82,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		res = do(http.MethodHead, "/cross-region-bdd", nil, "")
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "application/xml" || res.Header.Get("x-amz-bucket-region") != "us-west-2" || res.Header.Get("x-amz-bucket-arn") != "arn:aws:s3:::cross-region-bdd" || res.Header.Get("x-amz-request-id") == "" || res.Header.Get("x-amz-id-2") == "" {
+		if res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "application/xml" || res.Header.Get("x-amz-access-point-alias") != "false" || res.Header.Get("x-amz-bucket-region") != "us-west-2" || res.Header.Get("x-amz-bucket-arn") != "arn:aws:s3:::cross-region-bdd" || res.Header.Get("x-amz-request-id") == "" || res.Header.Get("x-amz-id-2") == "" {
 			t.Fatalf("cross-region head %d %#v", res.StatusCode, res.Header)
 		}
 		res = do(http.MethodPut, "/cross-region-bdd/key", []byte("body"), "")

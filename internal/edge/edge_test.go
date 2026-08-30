@@ -304,18 +304,26 @@ func TestS3PresignedSignatureFaultCharacterization(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := edge.New(cfg, deps, reg, "test").Handler()
+	if err := deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), "temporary", []byte("000000000000")); err != nil {
+		t.Fatal(err)
+	}
 	results := map[string]any{}
-	for name, target := range map[string]string{
-		"sigv2": "/bucket/key?AWSAccessKeyId=test&Expires=4070908800&Signature=AAAAAAAAAAAAAAAAAAAAAAAAAAA%3D",
-		"sigv4": "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=" + strings.Repeat("0", 64),
+	for name, tc := range map[string]struct {
+		target string
+		status int
+		code   string
+	}{
+		"sigv2": {"/bucket/key?AWSAccessKeyId=test&Expires=4070908800&Signature=AAAAAAAAAAAAAAAAAAAAAAAAAAA%3D", http.StatusForbidden, "SignatureDoesNotMatch"},
+		"sigv4": {"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=" + strings.Repeat("0", 64), http.StatusForbidden, "SignatureDoesNotMatch"},
+		"token": {"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=temporary%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-Security-Token=wrong&X-Amz-SignedHeaders=host&X-Amz-Signature=" + strings.Repeat("0", 64), http.StatusBadRequest, "InvalidToken"},
 	} {
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, tc.target, nil))
 		var fault struct{ Code, Message string }
 		if err := xml.Unmarshal(recorder.Body.Bytes(), &fault); err != nil {
 			t.Fatal(err)
 		}
-		if recorder.Code != http.StatusForbidden || fault.Code != "SignatureDoesNotMatch" || fault.Message == "" {
+		if recorder.Code != tc.status || fault.Code != tc.code || fault.Message == "" {
 			t.Fatalf("%s status=%d headers=%#v body=%s", name, recorder.Code, recorder.Header(), recorder.Body.String())
 		}
 		results[name] = map[string]any{"code": fault.Code, "content_type": recorder.Header().Get("Content-Type"), "message": fault.Message, "status": recorder.Code}

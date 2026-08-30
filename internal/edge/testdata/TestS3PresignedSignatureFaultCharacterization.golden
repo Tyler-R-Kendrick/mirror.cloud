@@ -11,5 +11,11 @@
     "content_type": "application/xml",
     "message": "The request signature we calculated does not match the signature you provided.",
     "status": 403
+  },
+  "token": {
+    "code": "InvalidToken",
+    "content_type": "application/xml",
+    "message": "The provided token is malformed or otherwise invalid.",
+    "status": 400
   }
 }

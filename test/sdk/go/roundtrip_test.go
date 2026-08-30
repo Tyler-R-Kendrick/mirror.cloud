@@ -90,6 +90,55 @@ func TestAWSSDKPresignedSignatureValidation(t *testing.T) {
 	if response, body := do(tampered.String()); response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
 		t.Fatalf("tampered presign %d %s", response.StatusCode, body)
 	}
+	temporaryKey := "temporary"
+	temporarySecret := rt.Deps.Rand.Derive(temporaryKey).Hex(40)
+	temporaryToken := rt.Deps.Rand.Derive(temporaryKey + "tok").Hex(32)
+	if err := rt.Deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), temporaryKey, []byte("000000000000")); err != nil {
+		t.Fatal(err)
+	}
+	temporaryConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(temporaryKey, temporarySecret, temporaryToken)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	temporaryClient := s3.NewFromConfig(temporaryConfig, func(options *s3.Options) {
+		options.BaseEndpoint = aws.String(ts.URL)
+		options.UsePathStyle = true
+	})
+	temporaryPresign, err := s3.NewPresignClient(temporaryClient).PresignGetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("signed"), Key: aws.String("object")}, func(options *s3.PresignOptions) { options.Expires = time.Minute })
+	if err != nil {
+		t.Fatal(err)
+	}
+	temporaryRequest, err := http.NewRequest(temporaryPresign.Method, temporaryPresign.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	temporaryRequest.Header = temporaryPresign.SignedHeader.Clone()
+	temporaryResponse, err := http.DefaultClient.Do(temporaryRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	temporaryBody, _ := io.ReadAll(temporaryResponse.Body)
+	temporaryResponse.Body.Close()
+	if temporaryResponse.StatusCode != http.StatusOK || string(temporaryBody) != "verified" {
+		t.Fatalf("valid session presign %d %s", temporaryResponse.StatusCode, temporaryBody)
+	}
+	invalidTokenURL, err := url.Parse(temporaryPresign.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidTokenQuery := invalidTokenURL.Query()
+	invalidTokenQuery.Set("X-Amz-Security-Token", "wrong")
+	invalidTokenURL.RawQuery = invalidTokenQuery.Encode()
+	temporaryRequest.URL = invalidTokenURL
+	temporaryResponse, err = http.DefaultClient.Do(temporaryRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	temporaryBody, _ = io.ReadAll(temporaryResponse.Body)
+	temporaryResponse.Body.Close()
+	if temporaryResponse.StatusCode != http.StatusBadRequest || !bytes.Contains(temporaryBody, []byte("<Code>InvalidToken</Code>")) {
+		t.Fatalf("invalid session token %d %s", temporaryResponse.StatusCode, temporaryBody)
+	}
 }
 
 func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {

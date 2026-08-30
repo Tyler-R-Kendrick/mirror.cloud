@@ -230,6 +230,57 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.GetBucketLifecycleConfiguration(context.Background(), &s3.GetBucketLifecycleConfigurationInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchLifecycleConfiguration") {
 		t.Fatalf("get deleted bucket lifecycle: %v", err)
 	}
+	analytics := &s3types.AnalyticsConfiguration{
+		Id: aws.String("analysis"), Filter: &s3types.AnalyticsFilterMemberPrefix{Value: "logs/"},
+		StorageClassAnalysis: &s3types.StorageClassAnalysis{DataExport: &s3types.StorageClassAnalysisDataExport{
+			OutputSchemaVersion: s3types.StorageClassAnalysisSchemaVersionV1,
+			Destination: &s3types.AnalyticsExportDestination{S3BucketDestination: &s3types.AnalyticsS3BucketDestination{
+				Bucket: aws.String("arn:aws:s3:::sdk"), Format: s3types.AnalyticsS3ExportFileFormatCsv,
+			}},
+		}},
+	}
+	if _, err := s3c.PutBucketAnalyticsConfiguration(context.Background(), &s3.PutBucketAnalyticsConfigurationInput{Bucket: aws.String("sdk"), Id: aws.String("analysis"), AnalyticsConfiguration: analytics}); err != nil {
+		t.Fatalf("put analytics configuration: %v", err)
+	}
+	gotAnalytics, err := s3c.GetBucketAnalyticsConfiguration(context.Background(), &s3.GetBucketAnalyticsConfigurationInput{Bucket: aws.String("sdk"), Id: aws.String("analysis")})
+	if err != nil || gotAnalytics.AnalyticsConfiguration == nil || aws.ToString(gotAnalytics.AnalyticsConfiguration.Id) != "analysis" {
+		t.Fatalf("analytics round trip: %#v %v", gotAnalytics, err)
+	}
+	listedAnalytics, err := s3c.ListBucketAnalyticsConfigurations(context.Background(), &s3.ListBucketAnalyticsConfigurationsInput{Bucket: aws.String("sdk")})
+	if err != nil || len(listedAnalytics.AnalyticsConfigurationList) != 1 || aws.ToString(listedAnalytics.AnalyticsConfigurationList[0].Id) != "analysis" {
+		t.Fatalf("analytics list: %#v %v", listedAnalytics, err)
+	}
+
+	inventory := &s3types.InventoryConfiguration{
+		Id: aws.String("inventory"), IsEnabled: aws.Bool(true), IncludedObjectVersions: s3types.InventoryIncludedObjectVersionsAll,
+		Destination: &s3types.InventoryDestination{S3BucketDestination: &s3types.InventoryS3BucketDestination{Bucket: aws.String("arn:aws:s3:::sdk"), Format: s3types.InventoryFormatCsv}},
+		Schedule:    &s3types.InventorySchedule{Frequency: s3types.InventoryFrequencyDaily}, OptionalFields: []s3types.InventoryOptionalField{s3types.InventoryOptionalFieldSize, s3types.InventoryOptionalFieldETag},
+	}
+	if _, err := s3c.PutBucketInventoryConfiguration(context.Background(), &s3.PutBucketInventoryConfigurationInput{Bucket: aws.String("sdk"), Id: aws.String("inventory"), InventoryConfiguration: inventory}); err != nil {
+		t.Fatalf("put inventory configuration: %v", err)
+	}
+	gotInventory, err := s3c.GetBucketInventoryConfiguration(context.Background(), &s3.GetBucketInventoryConfigurationInput{Bucket: aws.String("sdk"), Id: aws.String("inventory")})
+	if err != nil || gotInventory.InventoryConfiguration == nil || !aws.ToBool(gotInventory.InventoryConfiguration.IsEnabled) || !reflect.DeepEqual(gotInventory.InventoryConfiguration.OptionalFields, inventory.OptionalFields) {
+		t.Fatalf("inventory round trip: %#v %v", gotInventory, err)
+	}
+
+	tiering := &s3types.IntelligentTieringConfiguration{Id: aws.String("tiering"), Status: s3types.IntelligentTieringStatusEnabled, Tierings: []s3types.Tiering{{Days: aws.Int32(90), AccessTier: s3types.IntelligentTieringAccessTierArchiveAccess}}}
+	if _, err := s3c.PutBucketIntelligentTieringConfiguration(context.Background(), &s3.PutBucketIntelligentTieringConfigurationInput{Bucket: aws.String("sdk"), Id: aws.String("tiering"), IntelligentTieringConfiguration: tiering}); err != nil {
+		t.Fatalf("put intelligent tiering configuration: %v", err)
+	}
+	listedTiering, err := s3c.ListBucketIntelligentTieringConfigurations(context.Background(), &s3.ListBucketIntelligentTieringConfigurationsInput{Bucket: aws.String("sdk")})
+	if err != nil || len(listedTiering.IntelligentTieringConfigurationList) != 1 || len(listedTiering.IntelligentTieringConfigurationList[0].Tierings) != 1 || aws.ToInt32(listedTiering.IntelligentTieringConfigurationList[0].Tierings[0].Days) != 90 {
+		t.Fatalf("intelligent tiering list: %#v %v", listedTiering, err)
+	}
+
+	metrics := &s3types.MetricsConfiguration{Id: aws.String("metrics"), Filter: &s3types.MetricsFilterMemberPrefix{Value: "images/"}}
+	if _, err := s3c.PutBucketMetricsConfiguration(context.Background(), &s3.PutBucketMetricsConfigurationInput{Bucket: aws.String("sdk"), Id: aws.String("metrics"), MetricsConfiguration: metrics}); err != nil {
+		t.Fatalf("put metrics configuration: %v", err)
+	}
+	gotMetrics, err := s3c.GetBucketMetricsConfiguration(context.Background(), &s3.GetBucketMetricsConfigurationInput{Bucket: aws.String("sdk"), Id: aws.String("metrics")})
+	if err != nil || gotMetrics.MetricsConfiguration == nil || aws.ToString(gotMetrics.MetricsConfiguration.Id) != "metrics" {
+		t.Fatalf("metrics round trip: %#v %v", gotMetrics, err)
+	}
 	if got, err := s3c.GetBucketNotificationConfiguration(context.Background(), &s3.GetBucketNotificationConfigurationInput{Bucket: aws.String("sdk")}); err != nil || len(got.QueueConfigurations) != 0 || len(got.TopicConfigurations) != 0 || len(got.LambdaFunctionConfigurations) != 0 || got.EventBridgeConfiguration != nil {
 		t.Fatalf("default bucket notifications: %#v %v", got, err)
 	}

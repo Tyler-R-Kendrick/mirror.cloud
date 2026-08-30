@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -405,6 +406,13 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 
 func parseXMLInput(op string, raw []byte, in map[string]any) {
 	switch op {
+	case "PutBucketAnalyticsConfiguration", "PutBucketInventoryConfiguration", "PutBucketIntelligentTieringConfiguration", "PutBucketMetricsConfiguration":
+		configuration, ok := parseNamedConfiguration(raw, namedConfigurationShape(op).configuration)
+		if !ok {
+			in["_body"] = string(raw)
+			return
+		}
+		in[namedConfigurationShape(op).configuration] = configuration
 	case "CreateBucket":
 		var cfg struct {
 			LocationConstraint string `xml:"LocationConstraint"`
@@ -1093,6 +1101,63 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 	}
 }
 
+type namedXMLNode struct {
+	XMLName  xml.Name
+	Text     string         `xml:",chardata"`
+	Children []namedXMLNode `xml:",any"`
+}
+
+func parseNamedConfiguration(raw []byte, root string) (map[string]any, bool) {
+	var document namedXMLNode
+	if xml.Unmarshal(raw, &document) != nil || document.XMLName.Local != root {
+		return nil, false
+	}
+	configuration, ok := namedXMLValue(document).(map[string]any)
+	return configuration, ok
+}
+
+func namedXMLValue(node namedXMLNode) any {
+	if len(node.Children) == 0 {
+		value := strings.TrimSpace(node.Text)
+		switch node.XMLName.Local {
+		case "IsEnabled":
+			parsed, _ := strconv.ParseBool(value)
+			return parsed
+		case "Days":
+			parsed, _ := strconv.Atoi(value)
+			return parsed
+		}
+		return value
+	}
+	if node.XMLName.Local == "OptionalFields" {
+		fields := make([]any, 0, len(node.Children))
+		for _, child := range node.Children {
+			fields = append(fields, namedXMLValue(child))
+		}
+		return fields
+	}
+	result := map[string]any{}
+	for _, child := range node.Children {
+		key := child.XMLName.Local
+		if key == "Tiering" || (key == "Tag" && node.XMLName.Local == "And") {
+			key += "s"
+		}
+		value := namedXMLValue(child)
+		if existing, ok := result[key]; ok {
+			if values, ok := existing.([]any); ok {
+				result[key] = append(values, value)
+			} else {
+				result[key] = []any{existing, value}
+			}
+		} else if key == "Tierings" || key == "Tags" {
+			result[key] = []any{value}
+		} else {
+			result[key] = value
+		}
+	}
+	return result
+}
+
 func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWriter, resp *spi.Response) error {
 	status := resp.Status
 	if status == 0 {
@@ -1256,6 +1321,34 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
+	if shape := namedConfigurationShape(op.Name); shape.configuration != "" {
+		if strings.HasPrefix(op.Name, "Get") {
+			fmt.Fprintf(&b, `<%s xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`, shape.configuration)
+			writeNamedConfiguration(resp.Output[shape.configuration], &b)
+			fmt.Fprintf(&b, "</%s>", shape.configuration)
+			_, err := io.WriteString(w, b.String())
+			return err
+		}
+		if strings.HasPrefix(op.Name, "List") {
+			root := op.Name + "Result"
+			fmt.Fprintf(&b, `<%s xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`, root)
+			for _, field := range []string{"ContinuationToken", "NextContinuationToken", "IsTruncated"} {
+				if value, ok := resp.Output[field]; ok {
+					fmt.Fprintf(&b, "<%s>", field)
+					writeNamedConfiguration(value, &b)
+					fmt.Fprintf(&b, "</%s>", field)
+				}
+			}
+			for _, value := range asAnySlice(resp.Output[shape.list]) {
+				fmt.Fprintf(&b, "<%s>", shape.configuration)
+				writeNamedConfiguration(value, &b)
+				fmt.Fprintf(&b, "</%s>", shape.configuration)
+			}
+			fmt.Fprintf(&b, "</%s>", root)
+			_, err := io.WriteString(w, b.String())
+			return err
+		}
+	}
 	configurationRoot := map[string]string{
 		"GetBucketObjectLockConfiguration": "ObjectLockConfiguration",
 		"GetObjectLockConfiguration":       "ObjectLockConfiguration",
@@ -1414,6 +1507,70 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	fmt.Fprintf(&b, "</%s>", root)
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+type namedConfigurationXMLShape struct{ configuration, list string }
+
+func namedConfigurationShape(operation string) namedConfigurationXMLShape {
+	if !strings.Contains(operation, "Bucket") || (!strings.HasPrefix(operation, "Put") && !strings.HasPrefix(operation, "Get") && !strings.HasPrefix(operation, "List")) {
+		return namedConfigurationXMLShape{}
+	}
+	switch {
+	case strings.Contains(operation, "AnalyticsConfiguration"):
+		return namedConfigurationXMLShape{"AnalyticsConfiguration", "AnalyticsConfigurationList"}
+	case strings.Contains(operation, "InventoryConfiguration"):
+		return namedConfigurationXMLShape{"InventoryConfiguration", "InventoryConfigurationList"}
+	case strings.Contains(operation, "IntelligentTieringConfiguration"):
+		return namedConfigurationXMLShape{"IntelligentTieringConfiguration", "IntelligentTieringConfigurationList"}
+	case strings.Contains(operation, "MetricsConfiguration"):
+		return namedConfigurationXMLShape{"MetricsConfiguration", "MetricsConfigurationList"}
+	default:
+		return namedConfigurationXMLShape{}
+	}
+}
+
+func asAnySlice(value any) []any {
+	result, _ := value.([]any)
+	return result
+}
+
+func writeNamedConfiguration(value any, b *strings.Builder) {
+	switch value := value.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(value))
+		for key := range value {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			items, isSlice := value[key].([]any)
+			if key == "OptionalFields" && isSlice {
+				b.WriteString("<OptionalFields>")
+				for _, item := range items {
+					b.WriteString("<Field>")
+					writeNamedConfiguration(item, b)
+					b.WriteString("</Field>")
+				}
+				b.WriteString("</OptionalFields>")
+				continue
+			}
+			if (key == "Tags" || key == "Tierings") && isSlice {
+				tag := strings.TrimSuffix(key, "s")
+				for _, item := range items {
+					fmt.Fprintf(b, "<%s>", tag)
+					writeNamedConfiguration(item, b)
+					fmt.Fprintf(b, "</%s>", tag)
+				}
+				continue
+			}
+			fmt.Fprintf(b, "<%s>", key)
+			writeNamedConfiguration(value[key], b)
+			fmt.Fprintf(b, "</%s>", key)
+		}
+	case nil:
+	default:
+		b.WriteString(xmlEscape(fmt.Sprint(value)))
+	}
 }
 
 func writeFlattened(output map[string]any, b *strings.Builder, members [][2]string) {

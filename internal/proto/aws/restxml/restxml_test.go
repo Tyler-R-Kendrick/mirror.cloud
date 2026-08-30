@@ -223,6 +223,72 @@ func TestLifecycleXML(t *testing.T) {
 	}
 }
 
+func TestNamedConfigurationXML(t *testing.T) {
+	tests := []struct {
+		operation, query, field, body string
+		want                          map[string]any
+	}{
+		{
+			"PutBucketAnalyticsConfiguration", "analytics&id=analysis", "AnalyticsConfiguration",
+			`<AnalyticsConfiguration><Id>analysis</Id><Filter><And><Prefix>logs/</Prefix><Tag><Key>team</Key><Value>storage</Value></Tag></And></Filter></AnalyticsConfiguration>`,
+			map[string]any{"Id": "analysis", "Filter": map[string]any{"And": map[string]any{"Prefix": "logs/", "Tags": []any{map[string]any{"Key": "team", "Value": "storage"}}}}},
+		},
+		{
+			"PutBucketInventoryConfiguration", "inventory&id=inventory", "InventoryConfiguration",
+			`<InventoryConfiguration><Destination><S3BucketDestination><Bucket>arn:aws:s3:::destination</Bucket><Format>CSV</Format><Encryption><SSE-S3/></Encryption></S3BucketDestination></Destination><Id>inventory</Id><IncludedObjectVersions>All</IncludedObjectVersions><IsEnabled>true</IsEnabled><OptionalFields><Field>Size</Field><Field>ETag</Field></OptionalFields><Schedule><Frequency>Daily</Frequency></Schedule></InventoryConfiguration>`,
+			map[string]any{"Destination": map[string]any{"S3BucketDestination": map[string]any{"Bucket": "arn:aws:s3:::destination", "Format": "CSV", "Encryption": map[string]any{"SSE-S3": ""}}}, "Id": "inventory", "IncludedObjectVersions": "All", "IsEnabled": true, "OptionalFields": []any{"Size", "ETag"}, "Schedule": map[string]any{"Frequency": "Daily"}},
+		},
+		{
+			"PutBucketIntelligentTieringConfiguration", "intelligent-tiering&id=tiering", "IntelligentTieringConfiguration",
+			`<IntelligentTieringConfiguration><Id>tiering</Id><Status>Enabled</Status><Tiering><Days>90</Days><AccessTier>ARCHIVE_ACCESS</AccessTier></Tiering><Tiering><Days>180</Days><AccessTier>DEEP_ARCHIVE_ACCESS</AccessTier></Tiering></IntelligentTieringConfiguration>`,
+			map[string]any{"Id": "tiering", "Status": "Enabled", "Tierings": []any{map[string]any{"Days": 90, "AccessTier": "ARCHIVE_ACCESS"}, map[string]any{"Days": 180, "AccessTier": "DEEP_ARCHIVE_ACCESS"}}},
+		},
+		{
+			"PutBucketMetricsConfiguration", "metrics&id=metrics", "MetricsConfiguration",
+			`<MetricsConfiguration><Id>metrics</Id><Filter><Prefix>images/</Prefix></Filter></MetricsConfiguration>`,
+			map[string]any{"Id": "metrics", "Filter": map[string]any{"Prefix": "images/"}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.operation, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPut, "http://127.0.0.1/b?"+test.query, strings.NewReader(test.body))
+			req, err := Codec{}.Decode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: test.operation}, r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(req.Input[test.field], test.want) {
+				t.Fatalf("configuration = %#v", req.Input[test.field])
+			}
+		})
+	}
+
+	w := httptest.NewRecorder()
+	inventory := tests[1]
+	if err := (Codec{}).Encode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "GetBucketInventoryConfiguration"}, w, &spi.Response{Output: map[string]any{inventory.field: inventory.want}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`<InventoryConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`, `<SSE-S3></SSE-S3>`, `<OptionalFields><Field>Size</Field><Field>ETag</Field></OptionalFields>`} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Fatalf("inventory XML %q missing %q", w.Body.String(), want)
+		}
+	}
+
+	w = httptest.NewRecorder()
+	tiering := tests[2]
+	if err := (Codec{}).Encode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "ListBucketIntelligentTieringConfigurations"}, w, &spi.Response{Output: map[string]any{"IsTruncated": false, "IntelligentTieringConfigurationList": []any{tiering.want}}}); err != nil {
+		t.Fatal(err)
+	}
+	if body := w.Body.String(); strings.Contains(body, "<member>") || strings.Contains(body, "<Tierings>") || strings.Count(body, "<Tiering>") != 2 || !strings.Contains(body, `<ListBucketIntelligentTieringConfigurationsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`) {
+		t.Fatalf("tiering XML %q", body)
+	}
+
+	r := httptest.NewRequest(http.MethodPut, "http://127.0.0.1/b?analytics&id=a", strings.NewReader(`<MetricsConfiguration><Id>a</Id></MetricsConfiguration>`))
+	req, err := Codec{}.Decode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "PutBucketAnalyticsConfiguration"}, r)
+	if err != nil || req.Input["_body"] == nil || req.Input["AnalyticsConfiguration"] != nil {
+		t.Fatalf("wrong root = %#v, %v", req.Input, err)
+	}
+}
+
 func TestDecodeCompleteMultipartUploadXML(t *testing.T) {
 	body := `<CompleteMultipartUpload><Part><ETag>"first"</ETag><PartNumber>1</PartNumber></Part><Part><ETag>"third"</ETag><PartNumber>3</PartNumber></Part></CompleteMultipartUpload>`
 	r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/b/k?uploadId=id", strings.NewReader(body))

@@ -107,21 +107,32 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := identity.Parse(r, s.cfg.DefaultAccount, s.cfg.DefaultRegion, s.deps.Clock.Now())
+	svc := s.demux(r)
+	w.Header().Set("x-mirror-request-id", rid)
+	if svc != nil && svc.ID == "aws.s3" {
+		w.Header().Set("x-amz-request-id", rid)
+		w.Header().Set("x-amz-id-2", "mirror-"+rid)
+	}
 	if identity.Expired(id) {
+		if svc != nil && svc.ID == "aws.s3" {
+			fields := map[string]any{"ServerTime": s.deps.Clock.Now().UTC().Format(time.RFC3339)}
+			if expires, ok := identity.PresignedExpiry(r); ok {
+				fields["Expires"] = expires.UTC().Format(time.RFC3339)
+			}
+			if value := r.URL.Query().Get("X-Amz-Expires"); value != "" {
+				fields["X-Amz-Expires"] = value
+			}
+			s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, &spi.Fault{Code: "AccessDenied", Message: "Request has expired", HTTPStatus: http.StatusForbidden, Fault: "client", Fields: fields}, rid)
+			return
+		}
 		http.Error(w, "Request has expired", http.StatusForbidden)
 		return
 	}
 
-	svc := s.demux(r)
-	w.Header().Set("x-mirror-request-id", rid)
 	if svc == nil {
 		w.Header().Set("x-mirror-fidelity", "emulate")
 		http.Error(w, "MirrorNotImplemented: unknown service", http.StatusNotImplemented)
 		return
-	}
-	if svc.ID == "aws.s3" {
-		w.Header().Set("x-amz-request-id", rid)
-		w.Header().Set("x-amz-id-2", "mirror-"+rid)
 	}
 	codec := s.codecs[svc.Protocol]
 	if codec == nil {

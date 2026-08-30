@@ -937,6 +937,55 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given bucket encryption When replacing it Then S3 validates and applies the default", func(t *testing.T) {
+		res := do(http.MethodPut, "/encryption-bdd", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create encryption bucket %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/encryption-bdd?encryption", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || len(body) != 0 {
+			t.Fatalf("default encryption %d %s", res.StatusCode, body)
+		}
+		valid := []byte(`<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>arn:aws:kms:us-east-1:000000000000:key/bdd</KMSMasterKeyID></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`)
+		res = do(http.MethodPut, "/encryption-bdd?encryption", valid, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("put encryption %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/encryption-bdd?encryption", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<ServerSideEncryptionConfiguration")) || !bytes.Contains(body, []byte("<SSEAlgorithm>aws:kms</SSEAlgorithm>")) || !bytes.Contains(body, []byte("<BucketKeyEnabled>true</BucketKeyEnabled>")) || bytes.Contains(body, []byte("<member>")) {
+			t.Fatalf("get encryption %d %s", res.StatusCode, body)
+		}
+		invalid := []byte(`<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm><KMSMasterKeyID>key-id</KMSMasterKeyID></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>`)
+		res = do(http.MethodPut, "/encryption-bdd?encryption", invalid, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidArgument")) {
+			t.Fatalf("invalid encryption %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodPut, "/encryption-bdd/object", []byte("body"), "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-server-side-encryption") != "aws:kms" || res.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != "arn:aws:kms:us-east-1:000000000000:key/bdd" || res.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+			t.Fatalf("inherited encryption %d %v", res.StatusCode, res.Header)
+		}
+		for range 2 {
+			res = do(http.MethodDelete, "/encryption-bdd?encryption", nil, "")
+			io.Copy(io.Discard, res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusNoContent {
+				t.Fatalf("delete encryption %d", res.StatusCode)
+			}
+		}
+	})
+
 	t.Run("Given bucket notifications When configuring and clearing them Then matching objects reach the queue", func(t *testing.T) {
 		res := do(http.MethodPut, "/notification-bdd", nil, "")
 		io.Copy(io.Discard, res.Body)

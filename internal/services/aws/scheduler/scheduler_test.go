@@ -71,12 +71,17 @@ func TestSchedulerWaitsForAbsoluteDeadline(t *testing.T) {
 	}
 	p := New(deps)
 	defer p.Close()
-	deadline := time.Now().Add(time.Second)
-	for len(queueBodies(t, deps, id, "jobs")) == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if got := queueBodies(t, deps, id, "jobs"); len(got) != 1 || got[0] != "work" {
-		t.Fatalf("absolute deadline delivery: %v", got)
+	deadline := time.After(time.Second)
+	for {
+		if got := queueBodies(t, deps, id, "jobs"); len(got) == 1 && got[0] == "work" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("absolute deadline was not delivered")
+		default:
+			time.Sleep(time.Millisecond)
+		}
 	}
 }
 

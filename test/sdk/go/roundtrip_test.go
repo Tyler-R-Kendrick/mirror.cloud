@@ -3,8 +3,12 @@ package sdk_test
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/md5"
+	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -80,8 +84,11 @@ func TestAWSSDKPresignedSignatureValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sigV2.Header.Set("Date", "Tue, 27 Mar 2007 19:36:42 +0000")
-	sigV2.Header.Set("Authorization", "AWS test:SCXHUxO6W8++sAUnYeZoKDLfDiU=")
+	sigV2Date := time.Now().UTC().Format(http.TimeFormat)
+	sigV2MAC := hmac.New(sha1.New, []byte("test"))
+	_, _ = sigV2MAC.Write([]byte("GET\n\n\n" + sigV2Date + "\n/signed/object"))
+	sigV2.Header.Set("Date", sigV2Date)
+	sigV2.Header.Set("Authorization", "AWS test:"+base64.StdEncoding.EncodeToString(sigV2MAC.Sum(nil)))
 	response, err := http.DefaultClient.Do(sigV2)
 	if err != nil {
 		t.Fatal(err)
@@ -139,14 +146,14 @@ func TestAWSSDKPresignedSignatureValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, tc := range map[string]struct {
-		checksum, signature string
-		status              int
+		checksum, signedChecksum string
+		status                   int
 	}{
-		"valid trailer":    {"mnG7TA==", "67f7b779024ca973ddf6705b8ad24ecfc6f79f5242ff1d050fd8f830ae2071aa", http.StatusOK},
-		"tampered trailer": {"AAAAAA==", "67f7b779024ca973ddf6705b8ad24ecfc6f79f5242ff1d050fd8f830ae2071aa", http.StatusForbidden},
-		"bad checksum":     {"AAAAAA==", "0ef78e944cd5e61df18db7d6b99929d6871152b34d021274be44c9b5b113eeda", http.StatusBadRequest},
+		"valid trailer":    {"mnG7TA==", "mnG7TA==", http.StatusOK},
+		"tampered trailer": {"AAAAAA==", "mnG7TA==", http.StatusForbidden},
+		"bad checksum":     {"AAAAAA==", "AAAAAA==", http.StatusBadRequest},
 	} {
-		response, err := http.DefaultClient.Do(streamingTrailerSignatureRequest(ts.URL, tc.checksum, tc.signature))
+		response, err := http.DefaultClient.Do(streamingTrailerSignatureRequest(ts.URL, tc.checksum, tc.signedChecksum))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -273,27 +280,38 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
 
 func streamingSignatureRequest(endpoint, payload string) *http.Request {
-	raw := "5;chunk-signature=87081aa8d08ebfccd3aa73e18ac88541cf2050c23a5a49a9e46d94a70d84f2a4\r\n" + payload + "\r\n0;chunk-signature=eaf2700e23d624c531f0f9a0c7312b66470ab3aee81742bfa00dfc9cf6ca0f4e\r\n\r\n"
-	request, _ := http.NewRequest(http.MethodPut, endpoint+"/streaming/object", strings.NewReader(raw))
+	request, _ := http.NewRequest(http.MethodPut, endpoint+"/streaming/object", nil)
 	request.Host = "s3.localhost.localstack.cloud:4566"
 	request.Header.Set("Content-Encoding", "aws-chunked")
 	request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
-	request.Header.Set("X-Amz-Date", "20990101T000000Z")
+	request.Header.Set("X-Amz-Date", time.Now().UTC().Format("20060102T150405Z"))
 	request.Header.Set("X-Amz-Decoded-Content-Length", "5")
-	request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20990101/us-east-1/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length,Signature=d32bab45d70b05d89ada2e57acc27c4117cf31f7ce3de470cf916b8f89558054")
+	signedHeaders := "content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length"
+	seed := signStreamingV4Authorization(request, signedHeaders)
+	signatures := signStreamingV4Chunks(request.Header.Get("X-Amz-Date"), seed, [][]byte{[]byte("hello"), nil})
+	raw := "5;chunk-signature=" + signatures[0] + "\r\n" + payload + "\r\n0;chunk-signature=" + signatures[1] + "\r\n\r\n"
+	request.Body = io.NopCloser(strings.NewReader(raw))
+	request.ContentLength = int64(len(raw))
+	request.Header.Set("Authorization", streamingV4Authorization(request, signedHeaders, seed))
 	return request
 }
 
-func streamingTrailerSignatureRequest(endpoint, checksum, trailerSignature string) *http.Request {
-	raw := "5;chunk-signature=c83b0404927860c2dfacb114cd53dfe5505c5b4ad4dc605cc4e53806d4bb0d74\r\nhello\r\n0;chunk-signature=ffc89ae66d2e00900ad958aa09d8ea91ab7e1cb1938d6f4a5a30821f8fbe297f\r\nx-amz-checksum-crc32c:" + checksum + "\r\nx-amz-trailer-signature:" + trailerSignature + "\r\n\r\n"
-	request, _ := http.NewRequest(http.MethodPut, endpoint+"/trailers/object", strings.NewReader(raw))
+func streamingTrailerSignatureRequest(endpoint, checksum, signedChecksum string) *http.Request {
+	request, _ := http.NewRequest(http.MethodPut, endpoint+"/trailers/object", nil)
 	request.Host = "s3.localhost.localstack.cloud:4566"
 	request.Header.Set("Content-Encoding", "aws-chunked")
 	request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER")
-	request.Header.Set("X-Amz-Date", "20990101T000000Z")
+	request.Header.Set("X-Amz-Date", time.Now().UTC().Format("20060102T150405Z"))
 	request.Header.Set("X-Amz-Decoded-Content-Length", "5")
 	request.Header.Set("X-Amz-Trailer", "x-amz-checksum-crc32c")
-	request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20990101/us-east-1/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-trailer,Signature=378380e9501dea596cd83a9661c42fc2603dbd37872ab598316173a4d9244821")
+	signedHeaders := "content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-trailer"
+	seed := signStreamingV4Authorization(request, signedHeaders)
+	signatures := signStreamingV4Chunks(request.Header.Get("X-Amz-Date"), seed, [][]byte{[]byte("hello"), nil})
+	trailerSignature := signStreamingV4Trailer(request.Header.Get("X-Amz-Date"), signatures[1], "x-amz-checksum-crc32c", signedChecksum)
+	raw := "5;chunk-signature=" + signatures[0] + "\r\nhello\r\n0;chunk-signature=" + signatures[1] + "\r\nx-amz-checksum-crc32c:" + checksum + "\r\nx-amz-trailer-signature:" + trailerSignature + "\r\n\r\n"
+	request.Body = io.NopCloser(strings.NewReader(raw))
+	request.ContentLength = int64(len(raw))
+	request.Header.Set("Authorization", streamingV4Authorization(request, signedHeaders, seed))
 	return request
 }
 
@@ -303,11 +321,68 @@ func streamingUnsignedTrailerRequest(endpoint, checksum string) *http.Request {
 	request.Host = "s3.localhost.localstack.cloud:4566"
 	request.Header.Set("Content-Encoding", "aws-chunked")
 	request.Header.Set("X-Amz-Content-Sha256", "STREAMING-UNSIGNED-PAYLOAD-TRAILER")
-	request.Header.Set("X-Amz-Date", "20990101T000000Z")
+	request.Header.Set("X-Amz-Date", time.Now().UTC().Format("20060102T150405Z"))
 	request.Header.Set("X-Amz-Decoded-Content-Length", "5")
 	request.Header.Set("X-Amz-Trailer", "x-amz-checksum-crc32c")
-	request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20990101/us-east-1/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-trailer,Signature=fcefc9ae2b8230495738dd184bf82843d23e54dc536efdf1dcdd0acb7fe9277a")
+	signedHeaders := "content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-trailer"
+	signature := signStreamingV4Authorization(request, signedHeaders)
+	request.Header.Set("Authorization", streamingV4Authorization(request, signedHeaders, signature))
 	return request
+}
+
+func signStreamingV4Authorization(request *http.Request, signedHeaders string) string {
+	var canonicalHeaders strings.Builder
+	for _, name := range strings.Split(signedHeaders, ";") {
+		value := request.Header.Get(name)
+		if name == "host" {
+			value = request.Host
+		}
+		canonicalHeaders.WriteString(name + ":" + value + "\n")
+	}
+	canonical := strings.Join([]string{request.Method, request.URL.EscapedPath(), "", canonicalHeaders.String(), signedHeaders, request.Header.Get("X-Amz-Content-Sha256")}, "\n")
+	requestHash := sha256.Sum256([]byte(canonical))
+	date := request.Header.Get("X-Amz-Date")
+	scope := date[:8] + "/us-east-1/s3/aws4_request"
+	stringToSign := strings.Join([]string{"AWS4-HMAC-SHA256", date, scope, hex.EncodeToString(requestHash[:])}, "\n")
+	return hex.EncodeToString(hmacSHA256Test(streamingV4SigningKey(date[:8]), stringToSign))
+}
+
+func streamingV4Authorization(request *http.Request, signedHeaders, signature string) string {
+	date := request.Header.Get("X-Amz-Date")
+	return "AWS4-HMAC-SHA256 Credential=test/" + date[:8] + "/us-east-1/s3/aws4_request,SignedHeaders=" + signedHeaders + ",Signature=" + signature
+}
+
+func signStreamingV4Chunks(date, previous string, chunks [][]byte) []string {
+	empty := sha256.Sum256(nil)
+	scope := date[:8] + "/us-east-1/s3/aws4_request"
+	key := streamingV4SigningKey(date[:8])
+	signatures := make([]string, len(chunks))
+	for i, chunk := range chunks {
+		hash := sha256.Sum256(chunk)
+		stringToSign := strings.Join([]string{"AWS4-HMAC-SHA256-PAYLOAD", date, scope, previous, hex.EncodeToString(empty[:]), hex.EncodeToString(hash[:])}, "\n")
+		signatures[i] = hex.EncodeToString(hmacSHA256Test(key, stringToSign))
+		previous = signatures[i]
+	}
+	return signatures
+}
+
+func signStreamingV4Trailer(date, previous, name, value string) string {
+	hash := sha256.Sum256([]byte(name + ":" + value + "\n"))
+	stringToSign := strings.Join([]string{"AWS4-HMAC-SHA256-TRAILER", date, date[:8] + "/us-east-1/s3/aws4_request", previous, hex.EncodeToString(hash[:])}, "\n")
+	return hex.EncodeToString(hmacSHA256Test(streamingV4SigningKey(date[:8]), stringToSign))
+}
+
+func streamingV4SigningKey(date string) []byte {
+	dateKey := hmacSHA256Test([]byte("AWS4test"), date)
+	regionKey := hmacSHA256Test(dateKey, "us-east-1")
+	serviceKey := hmacSHA256Test(regionKey, "s3")
+	return hmacSHA256Test(serviceKey, "aws4_request")
+}
+
+func hmacSHA256Test(key []byte, value string) []byte {
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write([]byte(value))
+	return mac.Sum(nil)
 }
 
 func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {

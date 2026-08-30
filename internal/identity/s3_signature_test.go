@@ -150,6 +150,11 @@ func TestS3AuthorizationTimeFault(t *testing.T) {
 	if fault := S3AuthorizationTimeFault(request, now); fault != nil {
 		t.Fatalf("SigV2 x-amz-date rejected: %#v", fault)
 	}
+	request.Header.Del("X-Amz-Date")
+	request.Header.Set("Date", now.Format(http.TimeFormat))
+	if fault := S3AuthorizationTimeFault(request, now); fault != nil {
+		t.Fatalf("SigV2 Date rejected: %#v", fault)
+	}
 	request.Header.Set("Authorization", "Bearer token")
 	request.Header.Set("X-Amz-Date", "invalid")
 	if fault := S3AuthorizationTimeFault(request, now); fault != nil {

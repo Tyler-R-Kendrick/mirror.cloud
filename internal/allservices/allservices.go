@@ -55,7 +55,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kafka"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lakeformation"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lexmodels"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lightsail"

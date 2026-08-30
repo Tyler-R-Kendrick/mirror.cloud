@@ -1,0 +1,125 @@
+schema: bir/1
+service: aws.lakeformation
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is governed: a grant is a row, no permission is ever
+# evaluated, and no S3 or Glue operation consults one.
+provenance: authored
+
+resources:
+  # There is one settings record per account, and the account already scopes
+  # the store, so the key is a constant -- which is what the pack used.
+  settings:
+    collection: lfset
+    id:
+      derive: "'settings'"
+    record:
+      DataLakeSettings: >
+        'DataLakeSettings' in input ? input.DataLakeSettings : {}
+
+  # A grant is a row keyed by a generated identifier: nothing addresses one, so
+  # nothing needs to name it, and a revoke describes which rows to drop rather
+  # than naming one.
+  permission:
+    collection: lfperm
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      Principal: "'Principal' in input ? input.Principal : null"
+      Resource: "'Resource' in input ? input.Resource : null"
+      Permissions: "'Permissions' in input ? input.Permissions : []"
+
+  resource:
+    collection: lfres
+    id:
+      input_members: [ResourceArn]
+    record:
+      ResourceArn: id
+      RoleArn: "'RoleArn' in input ? string(input.RoleArn) : ''"
+
+operations:
+  PutDataLakeSettings:
+    effects:
+      - put: { resource: settings }
+
+  # Answering an empty admin list when nothing has been put, rather than
+  # faulting, is the pack's behavior.
+  GetDataLakeSettings:
+    reads:
+      s: { resource: settings }
+    output:
+      DataLakeSettings: "s_found ? s.DataLakeSettings : {'DataLakeAdmins': []}"
+
+  GrantPermissions:
+    effects:
+      - create: { resource: permission }
+
+  ListPermissions:
+    list: { resource: permission, member: PrincipalResourcePermissions, paginate: model }
+
+  # A revoke names no row: it describes which rows to drop. The pack compared
+  # the whole Principal structure and nothing else, so the resource and the
+  # permissions the request names are ignored.
+  RevokePermissions:
+    effects:
+      - delete:
+          resource: permission
+          where: "item.Principal == input.Principal"
+
+  RegisterResource:
+    effects:
+      - put: { resource: resource }
+
+  ListResources:
+    list: { resource: resource, member: ResourceInfoList, paginate: model }
+
+  DeregisterResource:
+    effects:
+      - delete: { resource: resource, missing: ignore }
+
+quirks:
+  - operation: RevokePermissions
+    note: >
+      A revoke matches on the whole Principal structure and nothing else. The
+      request also names a Resource and a Permissions list, both required, and
+      neither narrows anything -- so revoking SELECT on one table from a
+      principal removes every permission that principal holds, on every
+      resource. That is the second service in this batch where a revoke is
+      broader than the request that asked for it, and the failure mode is the
+      same: a test written against this emulator would see the revoke succeed
+      and would not see how much it took.
+
+      The comparison is structural: two principals are the same when their
+      whole structure matches, which is what the pack got by comparing the
+      JSON it had marshalled.
+  - operation: GrantPermissions
+    note: >
+      A grant is stored and consulted by nothing. No S3, Glue or Athena
+      operation in this emulator asks Lake Formation whether a principal may
+      read a table, so a grant changes nothing about what any other service
+      answers, and neither does a revoke. Granting the same principal the same
+      permission twice stores two rows, because a grant is keyed by a fresh
+      identifier rather than by what it grants -- so ListPermissions can show
+      duplicates the real service would not.
+
+      Condition and PermissionsWithGrantOption are dropped, so a
+      grantable permission is indistinguishable from a plain one.
+  - operation: ListPermissions
+    note: >
+      Principal, Resource and ResourceType are all accepted and ignored: every
+      permission in the account and region is listed, whatever was asked
+      about. ListResources ignores its FilterConditionList the same way.
+  - operation: RegisterResource
+    note: >
+      A resource is an ARN and a role, and the ARN is not checked to name
+      anything -- a bucket that does not exist can be registered. The
+      registration is consulted by nothing, so registering a location does not
+      make it governed, and UseServiceLinkedRole, HybridAccessEnabled and
+      WithFederation are dropped. Registering the same ARN twice overwrites.
+  - operation: GetDataLakeSettings
+    note: >
+      Settings are stored whole and read back whole: whatever DataLakeSettings
+      structure was put is what comes back, unvalidated, and the CatalogId is
+      ignored, so an account has exactly one settings record. Nothing consults
+      it -- the DataLakeAdmins it names are not admins of anything, since no
+      permission is ever evaluated.

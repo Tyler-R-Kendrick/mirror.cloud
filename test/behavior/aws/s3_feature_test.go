@@ -1046,6 +1046,45 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given an object delete marker When reading or writing its ACL Then S3 returns LocalStack faults", func(t *testing.T) {
+		for _, request := range []struct {
+			method, path, body string
+		}{
+			{http.MethodPut, "/acl-marker-bdd", ""},
+			{http.MethodPut, "/acl-marker-bdd?versioning", "<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"},
+			{http.MethodPut, "/acl-marker-bdd/object", "body"},
+		} {
+			res := do(request.method, request.path, []byte(request.body), "")
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("%s %s = %d", request.method, request.path, res.StatusCode)
+			}
+		}
+		res := do(http.MethodDelete, "/acl-marker-bdd/object", nil, "")
+		res.Body.Close()
+		versionID := res.Header.Get("x-amz-version-id")
+		if res.StatusCode != http.StatusNoContent || res.Header.Get("x-amz-delete-marker") != "true" || versionID == "" {
+			t.Fatalf("delete marker %d %#v", res.StatusCode, res.Header)
+		}
+		for _, request := range []struct {
+			method, path string
+			status       int
+			code, field  string
+		}{
+			{http.MethodPut, "/acl-marker-bdd/object?acl", http.StatusMethodNotAllowed, "MethodNotAllowed", "<Method>PUT</Method>"},
+			{http.MethodGet, "/acl-marker-bdd/object?acl", http.StatusNotFound, "NoSuchKey", "<Key>object</Key>"},
+			{http.MethodPut, "/acl-marker-bdd/object?acl&versionId=" + url.QueryEscape(versionID), http.StatusMethodNotAllowed, "MethodNotAllowed", "<Method>PUT</Method>"},
+			{http.MethodGet, "/acl-marker-bdd/object?acl&versionId=" + url.QueryEscape(versionID), http.StatusMethodNotAllowed, "MethodNotAllowed", "<Method>GET</Method>"},
+		} {
+			res = do(request.method, request.path, nil, "")
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != request.status || !bytes.Contains(body, []byte("<Code>"+request.code+"</Code>")) || !bytes.Contains(body, []byte(request.field)) {
+				t.Fatalf("%s %s = %d %s", request.method, request.path, res.StatusCode, body)
+			}
+		}
+	})
+
 	t.Run("Given a bucket policy When replacing it Then S3 validates and returns the exact JSON", func(t *testing.T) {
 		res := do(http.MethodPut, "/policy-bdd", nil, "")
 		io.Copy(io.Discard, res.Body)

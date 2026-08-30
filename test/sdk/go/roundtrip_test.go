@@ -165,6 +165,39 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if objectACL, err := s3c.GetObjectAcl(context.Background(), &s3.GetObjectAclInput{Bucket: aws.String("sdk"), Key: aws.String(objectACLKey)}); err != nil || len(objectACL.Grants) != 1 || objectACL.Grants[0].Permission != s3types.PermissionFullControl {
 		t.Fatalf("private object ACP: %#v %v", objectACL, err)
 	}
+	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-acl-marker")}); err != nil {
+		t.Fatalf("create acl marker bucket: %v", err)
+	}
+	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String("sdk-acl-marker"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusEnabled}}); err != nil {
+		t.Fatalf("enable acl marker versioning: %v", err)
+	}
+	object, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-acl-marker"), Key: aws.String("object"), Body: bytes.NewReader([]byte("body"))})
+	if err != nil {
+		t.Fatalf("put acl marker object: %v", err)
+	}
+	marker, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk-acl-marker"), Key: aws.String("object")})
+	if err != nil || !aws.ToBool(marker.DeleteMarker) || aws.ToString(marker.VersionId) == "" {
+		t.Fatalf("create acl delete marker: %#v %v", marker, err)
+	}
+	for _, versionID := range []*string{nil, marker.VersionId} {
+		if _, err := s3c.PutObjectAcl(context.Background(), &s3.PutObjectAclInput{Bucket: aws.String("sdk-acl-marker"), Key: aws.String("object"), VersionId: versionID, ACL: s3types.ObjectCannedACLPublicRead}); err == nil || !strings.Contains(err.Error(), "MethodNotAllowed") {
+			t.Fatalf("put delete marker acl version=%v: %v", versionID, err)
+		}
+	}
+	if _, err := s3c.GetObjectAcl(context.Background(), &s3.GetObjectAclInput{Bucket: aws.String("sdk-acl-marker"), Key: aws.String("object")}); err == nil || !strings.Contains(err.Error(), "NoSuchKey") {
+		t.Fatalf("get current delete marker acl: %v", err)
+	}
+	if _, err := s3c.GetObjectAcl(context.Background(), &s3.GetObjectAclInput{Bucket: aws.String("sdk-acl-marker"), Key: aws.String("object"), VersionId: marker.VersionId}); err == nil || !strings.Contains(err.Error(), "MethodNotAllowed") {
+		t.Fatalf("get explicit delete marker acl: %v", err)
+	}
+	for _, versionID := range []*string{marker.VersionId, object.VersionId} {
+		if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk-acl-marker"), Key: aws.String("object"), VersionId: versionID}); err != nil {
+			t.Fatalf("delete acl marker version %v: %v", versionID, err)
+		}
+	}
+	if _, err := s3c.DeleteBucket(context.Background(), &s3.DeleteBucketInput{Bucket: aws.String("sdk-acl-marker")}); err != nil {
+		t.Fatalf("delete acl marker bucket: %v", err)
+	}
 	multipartACL, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-multipart-acl"), ACL: s3types.ObjectCannedACLPublicReadWrite})
 	if err != nil {
 		t.Fatalf("create multipart ACL: %v", err)

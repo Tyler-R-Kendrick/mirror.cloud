@@ -735,7 +735,7 @@ func FuzzACLConfigurations(f *testing.F) {
 	for _, seed := range []struct {
 		mode  uint8
 		value string
-	}{{0, "private"}, {0, "public-read"}, {0, "invalid"}, {1, "http://acs.amazonaws.com/groups/global/AllUsers"}, {1, "invalid"}, {2, "123456789012"}, {2, "wrong-id"}, {3, "FULL_CONTROL"}, {3, "INVALID"}} {
+	}{{0, "private"}, {0, "public-read"}, {0, "invalid"}, {1, "http://acs.amazonaws.com/groups/global/AllUsers"}, {1, "invalid"}, {2, "123456789012"}, {2, "wrong-id"}, {3, "FULL_CONTROL"}, {3, "INVALID"}, {4, ""}, {5, ""}, {6, ""}, {7, ""}} {
 		f.Add(seed.mode, seed.value)
 	}
 	f.Fuzz(func(t *testing.T, mode uint8, value string) {
@@ -746,10 +746,32 @@ func FuzzACLConfigurations(f *testing.F) {
 		bucket, key := "acl-fuzz", "object"
 		account := ident().Account
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+		mode %= 8
+		if mode >= 4 {
+			mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}, nil)
+		}
 		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key, "ACL": "public-read"}, []byte("body"))
+		if mode >= 4 {
+			marker := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": key}, nil)
+			input := map[string]any{"Bucket": bucket, "Key": key}
+			if mode%2 == 1 {
+				input["VersionId"] = marker.Headers.Get("x-amz-version-id")
+			}
+			operation, wantCode := "GetObjectAcl", "MethodNotAllowed"
+			if mode >= 6 {
+				operation, input["ACL"] = "PutObjectAcl", "private"
+			} else if mode == 4 {
+				wantCode = "NoSuchKey"
+			}
+			_, err := invoke(t, p, operation, input, nil)
+			if fault := asFault(t, err); fault.Code != wantCode {
+				t.Fatalf("mode=%d fault=%#v", mode, fault)
+			}
+			return
+		}
 		input := map[string]any{"Bucket": bucket, "Key": key}
 		valid, wantFault := false, "InvalidArgument"
-		switch mode % 4 {
+		switch mode {
 		case 0:
 			input["ACL"] = value
 			valid = value == "private" || value == "public-read" || value == "public-read-write" || value == "authenticated-read" || value == "bucket-owner-read" || value == "bucket-owner-full-control" || value == "aws-exec-read" || value == "log-delivery-write"
@@ -772,7 +794,7 @@ func FuzzACLConfigurations(f *testing.F) {
 			t.Fatal(err)
 		}
 		if !valid && asFault(t, err).Code != wantFault {
-			t.Fatalf("mode=%d value=%q fault=%v", mode%4, value, err)
+			t.Fatalf("mode=%d value=%q fault=%v", mode, value, err)
 		}
 		grants := asSliceForTest(mustInvoke(t, p, "GetObjectAcl", map[string]any{"Bucket": bucket, "Key": key}, nil).Output["Grants"])
 		if valid && len(grants) == 0 || !valid && len(grants) != 2 {

@@ -77,6 +77,24 @@ func FuzzVerifyS3AuthorizationV2(f *testing.F) {
 	})
 }
 
+func FuzzVerifyS3PostPolicy(f *testing.F) {
+	f.Add(true, "cG9saWN5", "test/20990101/us-east-1/s3/aws4_request", "20990101T000000Z", "signature", "test")
+	f.Add(false, "cG9saWN5", "test", "", "signature", "test")
+	f.Fuzz(func(t *testing.T, v4 bool, policy, credential, date, signature, secret string) {
+		fields := map[string]string{"policy": policy}
+		if v4 {
+			fields["x-amz-algorithm"] = "AWS4-HMAC-SHA256"
+			fields["x-amz-credential"] = credential
+			fields["x-amz-date"] = date
+			fields["x-amz-signature"] = signature
+		} else {
+			fields["AWSAccessKeyId"] = credential
+			fields["signature"] = signature
+		}
+		_ = VerifyS3PostPolicy(fields, secret)
+	})
+}
+
 func FuzzVerifyS3StreamingV4(f *testing.F) {
 	f.Add([]byte("hello"), "87081aa8d08ebfccd3aa73e18ac88541cf2050c23a5a49a9e46d94a70d84f2a4", "eaf2700e23d624c531f0f9a0c7312b66470ab3aee81742bfa00dfc9cf6ca0f4e", "test")
 	f.Fuzz(func(t *testing.T, data []byte, signature, finalSignature, secret string) {

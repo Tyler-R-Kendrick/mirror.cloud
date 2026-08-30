@@ -147,14 +147,19 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		strict.S3ValidatePresignedSignatures = true
 		strictServer := httptest.NewServer(edge.New(strict, deps, reg, "test").Handler())
 		defer strictServer.Close()
-		response, err = http.Get(strictServer.URL + target)
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, _ = io.ReadAll(response.Body)
-		response.Body.Close()
-		if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
-			t.Fatalf("tampered presign %d %s", response.StatusCode, body)
+		for name, strictTarget := range map[string]string{
+			"sigv2": "/bucket/key?AWSAccessKeyId=test&Expires=4070908800&Signature=AAAAAAAAAAAAAAAAAAAAAAAAAAA%3D",
+			"sigv4": target,
+		} {
+			response, err = http.Get(strictServer.URL + strictTarget)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ = io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
+				t.Fatalf("%s tampered presign %d %s", name, response.StatusCode, body)
+			}
 		}
 	})
 

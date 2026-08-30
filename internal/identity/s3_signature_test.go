@@ -35,4 +35,8 @@ func TestVerifyS3PresignedV2AWSGrammar(t *testing.T) {
 	if fault := VerifyS3PresignedV2(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 		t.Fatalf("tampered signature accepted: %#v", fault)
 	}
+	pathStyle := httptest.NewRequest(http.MethodGet, "https://localhost/bucket/key?acl&AWSAccessKeyId=test&Expires=4070908800&Signature=wUhjtATf5qx6xYeZ1XjoZQHJKjg%3D", nil)
+	if fault := VerifyS3PresignedV2(pathStyle, "test"); fault != nil {
+		t.Fatalf("path-style subresource rejected: %#v", fault)
+	}
 }

@@ -2,6 +2,7 @@ package identity
 
 import (
 	"net/http"
+	"net/url"
 	"testing"
 )
 
@@ -18,5 +19,20 @@ func FuzzVerifyS3PresignedV4(f *testing.F) {
 		}
 		request.Host = host
 		_ = VerifyS3PresignedV4(request, secret)
+	})
+}
+
+func FuzzVerifyS3PresignedV2(f *testing.F) {
+	f.Add("GET", "/bucket/key", "signature", "localhost", "test")
+	f.Fuzz(func(t *testing.T, method, path, signature, host, secret string) {
+		if method == "" || path == "" || path[0] != '/' {
+			t.Skip()
+		}
+		request, err := http.NewRequest(method, "https://example.test"+path+"?AWSAccessKeyId=test&Expires=4070908800&Signature="+url.QueryEscape(signature), nil)
+		if err != nil {
+			t.Skip()
+		}
+		request.Host = host
+		_ = VerifyS3PresignedV2(request, secret)
 	})
 }

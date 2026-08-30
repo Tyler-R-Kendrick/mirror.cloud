@@ -303,19 +303,30 @@ func TestS3PresignedSignatureFaultCharacterization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=" + strings.Repeat("0", 64)
-	recorder := httptest.NewRecorder()
-	edge.New(cfg, deps, reg, "test").Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
-	var fault struct {
-		Code, Message string
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	results := map[string]any{}
+	for name, target := range map[string]string{
+		"sigv2": "/bucket/key?AWSAccessKeyId=test&Expires=4070908800&Signature=AAAAAAAAAAAAAAAAAAAAAAAAAAA%3D",
+		"sigv4": "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=" + strings.Repeat("0", 64),
+	} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
+		var fault struct{ Code, Message string }
+		if err := xml.Unmarshal(recorder.Body.Bytes(), &fault); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != http.StatusForbidden || fault.Code != "SignatureDoesNotMatch" || fault.Message == "" {
+			t.Fatalf("%s status=%d headers=%#v body=%s", name, recorder.Code, recorder.Header(), recorder.Body.String())
+		}
+		results[name] = map[string]any{"code": fault.Code, "content_type": recorder.Header().Get("Content-Type"), "message": fault.Message, "status": recorder.Code}
 	}
-	if err := xml.Unmarshal(recorder.Body.Bytes(), &fault); err != nil {
-		t.Fatal(err)
+	valid := httptest.NewRecorder()
+	handler.ServeHTTP(valid, httptest.NewRequest(http.MethodGet, "/bucket/key?AWSAccessKeyId=test&Expires=4070908800&Signature=B7s4qHMXncO2jDe59MhIDTHOODk%3D", nil))
+	if valid.Code != http.StatusNotFound || bytes.Contains(valid.Body.Bytes(), []byte("SignatureDoesNotMatch")) {
+		t.Fatalf("valid SigV2 rejected: %d %s", valid.Code, valid.Body.String())
 	}
-	if recorder.Code != http.StatusForbidden || fault.Code != "SignatureDoesNotMatch" || fault.Message == "" {
-		t.Fatalf("status=%d headers=%#v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
-	}
-	golden.AssertJSON(t, map[string]any{"code": fault.Code, "content_type": recorder.Header().Get("Content-Type"), "message": fault.Message, "status": recorder.Code})
+	results["sigv2_valid_status"] = valid.Code
+	golden.AssertJSON(t, results)
 }
 
 func FuzzS3ResponseEnvelope(f *testing.F) {

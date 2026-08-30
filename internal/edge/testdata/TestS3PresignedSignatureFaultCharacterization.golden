@@ -1,4 +1,6 @@
 {
+  "gateway_port_443": 404,
+  "gateway_port_none": 404,
   "sigv2": {
     "code": "SignatureDoesNotMatch",
     "content_type": "application/xml",
@@ -17,5 +19,6 @@
     "content_type": "application/xml",
     "message": "The provided token is malformed or otherwise invalid.",
     "status": 400
-  }
+  },
+  "unrelated_port": 403
 }

@@ -16,3 +16,10 @@ func TestSignedGatewayHost(t *testing.T) {
 		}
 	}
 }
+
+func FuzzSignedGatewayHost(f *testing.F) {
+	f.Add("s3.localhost.localstack.cloud:443", "127.0.0.1:4566")
+	f.Fuzz(func(t *testing.T, host, bind string) {
+		_ = signedGatewayHost(host, bind)
+	})
+}

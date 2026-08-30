@@ -1,0 +1,64 @@
+{
+  "bucketDefault": {
+    "Grants": [
+      {
+        "Grantee": {
+          "ID": "123456789012",
+          "Type": "CanonicalUser"
+        },
+        "Permission": "FULL_CONTROL"
+      }
+    ],
+    "Owner": {
+      "DisplayName": "mirror",
+      "ID": "123456789012"
+    }
+  },
+  "bucketPublic": {
+    "Grants": [
+      {
+        "Grantee": {
+          "DisplayName": "mirror",
+          "ID": "123456789012",
+          "Type": "CanonicalUser"
+        },
+        "Permission": "FULL_CONTROL"
+      },
+      {
+        "Grantee": {
+          "Type": "Group",
+          "URI": "http://acs.amazonaws.com/groups/global/AllUsers"
+        },
+        "Permission": "READ"
+      }
+    ],
+    "Owner": {
+      "DisplayName": "mirror",
+      "ID": "123456789012"
+    }
+  },
+  "invalid": "InvalidArgument",
+  "object": {
+    "Grants": [
+      {
+        "Grantee": {
+          "DisplayName": "mirror",
+          "ID": "123456789012",
+          "Type": "CanonicalUser"
+        },
+        "Permission": "FULL_CONTROL"
+      },
+      {
+        "Grantee": {
+          "Type": "Group",
+          "URI": "http://acs.amazonaws.com/groups/global/AuthenticatedUsers"
+        },
+        "Permission": "READ"
+      }
+    ],
+    "Owner": {
+      "DisplayName": "mirror",
+      "ID": "123456789012"
+    }
+  }
+}

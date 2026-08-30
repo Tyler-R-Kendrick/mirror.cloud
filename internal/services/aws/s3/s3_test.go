@@ -1207,6 +1207,19 @@ func TestBucketAndObjectACLConfigurations(t *testing.T) {
 		"Grants": []any{map[string]any{"Grantee": map[string]any{"Type": "CanonicalUser", "ID": ident().Account}, "Permission": "FULL_CONTROL"}},
 	}
 	mustInvoke(t, p, "PutBucketAcl", map[string]any{"Bucket": bucket["Bucket"], "AccessControlPolicy": validPolicy}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "object-acl"}, []byte("body"))
+	for _, put := range []map[string]any{
+		{"ACL": "public-read"},
+		{"GrantRead": `uri="http://acs.amazonaws.com/groups/s3/LogDelivery"`},
+		{"AccessControlPolicy": validPolicy},
+		{"GrantRead": `id="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"`},
+	} {
+		put["Bucket"], put["Key"] = bucket["Bucket"], "object-acl"
+		mustInvoke(t, p, "PutObjectAcl", put, nil)
+	}
+	if grants := asSliceForTest(mustInvoke(t, p, "GetObjectAcl", map[string]any{"Bucket": bucket["Bucket"], "Key": "object-acl"}, nil).Output["Grants"]); len(grants) != 1 || asMapForTest(asMapForTest(grants[0])["Grantee"])["ID"] != "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" {
+		t.Fatalf("object ACL replacement = %#v", grants)
+	}
 	invalid := []struct {
 		name, code string
 		input      map[string]any
@@ -1216,6 +1229,11 @@ func TestBucketAndObjectACLConfigurations(t *testing.T) {
 		{"invalid grant URI", "InvalidArgument", map[string]any{"GrantWrite": `uri="http://acs.amazonaws.com/groups/s3/FakeGroup"`}},
 		{"invalid grant ID", "InvalidArgument", map[string]any{"GrantWrite": `id="wrong-id"`}},
 		{"empty policy", "MalformedACLError", map[string]any{"AccessControlPolicy": map[string]any{}}},
+		{"missing policy owner", "MalformedACLError", map[string]any{"AccessControlPolicy": map[string]any{"Grants": validPolicy["Grants"]}}},
+		{"invalid policy permission", "MalformedACLError", map[string]any{"AccessControlPolicy": map[string]any{"Owner": validPolicy["Owner"], "Grants": []any{map[string]any{"Grantee": map[string]any{"Type": "CanonicalUser", "ID": ident().Account}, "Permission": "INVALID"}}}}},
+		{"invalid policy owner", "InvalidArgument", map[string]any{"AccessControlPolicy": map[string]any{"Owner": map[string]any{"ID": "wrong-id"}, "Grants": validPolicy["Grants"]}}},
+		{"invalid policy group", "InvalidArgument", map[string]any{"AccessControlPolicy": map[string]any{"Owner": validPolicy["Owner"], "Grants": []any{map[string]any{"Grantee": map[string]any{"Type": "Group", "URI": "http://acs.amazonaws.com/groups/s3/FakeGroup"}, "Permission": "READ"}}}}},
+		{"invalid policy grantee type", "MalformedACLError", map[string]any{"AccessControlPolicy": map[string]any{"Owner": validPolicy["Owner"], "Grants": []any{map[string]any{"Grantee": map[string]any{"Type": "BadType"}, "Permission": "READ"}}}}},
 		{"missing ACL", "MissingSecurityHeader", map[string]any{}},
 		{"canned and grant", "InvalidRequest", map[string]any{"ACL": "private", "GrantRead": `uri="http://acs.amazonaws.com/groups/s3/LogDelivery"`}},
 		{"canned and policy", "UnexpectedContent", map[string]any{"ACL": "private", "AccessControlPolicy": validPolicy}},
@@ -1264,6 +1282,19 @@ func TestBucketAndObjectACLConfigurations(t *testing.T) {
 			t.Fatalf("%s ACL grants = %d, want %d: %#v", test.key, grants, test.grants, acl)
 		}
 	}
+}
+
+func TestACLCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	bucket := map[string]any{"Bucket": "acl-characterization"}
+	mustInvoke(t, p, "CreateBucket", bucket, nil)
+	before := mustInvoke(t, p, "GetBucketAcl", bucket, nil).Output
+	mustInvoke(t, p, "PutBucketAcl", map[string]any{"Bucket": bucket["Bucket"], "ACL": "public-read"}, nil)
+	after := mustInvoke(t, p, "GetBucketAcl", bucket, nil).Output
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "object", "ACL": "authenticated-read"}, []byte("body"))
+	object := mustInvoke(t, p, "GetObjectAcl", map[string]any{"Bucket": bucket["Bucket"], "Key": "object"}, nil).Output
+	_, invalidErr := invoke(t, p, "PutObjectAcl", map[string]any{"Bucket": bucket["Bucket"], "Key": "object", "GrantRead": `uri="invalid"`}, nil)
+	golden.AssertJSON(t, map[string]any{"bucketDefault": before, "bucketPublic": after, "invalid": asFault(t, invalidErr).Code, "object": object})
 }
 
 func TestBucketLifecycleCharacterization(t *testing.T) {

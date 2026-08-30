@@ -837,6 +837,58 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given bucket and object ACLs When replacing policies Then S3 validates and round trips AWS XML", func(t *testing.T) {
+		res := do(http.MethodPut, "/acl-bdd", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create ACL bucket %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/acl-bdd?acl", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Owner>")) || !bytes.Contains(body, []byte("<Permission>FULL_CONTROL</Permission>")) || bytes.Contains(body, []byte("GetBucketAclResult")) {
+			t.Fatalf("default bucket ACL %d %s", res.StatusCode, body)
+		}
+		public := []byte(`<AccessControlPolicy><Owner><ID>000000000000</ID><DisplayName>mirror</DisplayName></Owner><AccessControlList><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser"><ID>000000000000</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="Group"><URI>http://acs.amazonaws.com/groups/global/AllUsers</URI></Grantee><Permission>READ</Permission></Grant></AccessControlList></AccessControlPolicy>`)
+		res = do(http.MethodPut, "/acl-bdd?acl", public, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("put bucket ACL %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/acl-bdd?acl", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<URI>http://acs.amazonaws.com/groups/global/AllUsers</URI>")) || strings.Count(string(body), "<Grant>") != 2 {
+			t.Fatalf("public bucket ACL %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodPut, "/acl-bdd/object", []byte("body"), "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("put ACL object %d", res.StatusCode)
+		}
+		res = do(http.MethodPut, "/acl-bdd/object?acl", []byte(`<AccessControlPolicy/>`), "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("MalformedACLError")) {
+			t.Fatalf("invalid object ACL %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodPut, "/acl-bdd/object?acl", public, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("put object ACL %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/acl-bdd/object?acl", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || strings.Count(string(body), "<Grant>") != 2 || bytes.Contains(body, []byte("GetObjectAclResult")) {
+			t.Fatalf("public object ACL %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given bucket notifications When configuring and clearing them Then matching objects reach the queue", func(t *testing.T) {
 		res := do(http.MethodPut, "/notification-bdd", nil, "")
 		io.Copy(io.Discard, res.Body)

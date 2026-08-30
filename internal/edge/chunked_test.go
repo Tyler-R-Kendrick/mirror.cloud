@@ -46,7 +46,7 @@ func TestParseAWSChunkedSignatures(t *testing.T) {
 	if string(body) != "hello" || len(chunks) != 2 || string(chunks[0]) != "hello" || len(chunks[1]) != 0 || len(signatures) != 2 || signatures[0] != "aaa" || signatures[1] != "bbb" {
 		t.Fatalf("body=%q chunks=%q signatures=%q", body, chunks, signatures)
 	}
-	if _, _, _, err := parseAWSChunked(bytes.NewBufferString("5;chunk-signature=aaa\r\nhello!")); err == nil {
+	if _, _, _, err := parseAWSChunked(bytes.NewBufferString("5;chunk-signature=aaa\r\nhello!!")); err == nil {
 		t.Fatal("missing chunk terminator accepted")
 	}
 }

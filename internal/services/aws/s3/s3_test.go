@@ -1186,6 +1186,86 @@ func TestNamedBucketConfigurations(t *testing.T) {
 	})
 }
 
+func TestBucketAndObjectACLConfigurations(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	bucket := map[string]any{"Bucket": "acl-configurations"}
+	mustInvoke(t, p, "CreateBucket", bucket, nil)
+	defaultACL := mustInvoke(t, p, "GetBucketAcl", bucket, nil).Output
+	if len(asSliceForTest(defaultACL["Grants"])) != 1 || asMapForTest(defaultACL["Owner"])["ID"] != ident().Account {
+		t.Fatalf("default bucket ACL = %#v", defaultACL)
+	}
+	mustInvoke(t, p, "PutBucketAcl", map[string]any{"Bucket": bucket["Bucket"], "ACL": "public-read"}, nil)
+	if grants := asSliceForTest(mustInvoke(t, p, "GetBucketAcl", bucket, nil).Output["Grants"]); len(grants) != 2 || asMapForTest(asMapForTest(grants[1])["Grantee"])["URI"] != "http://acs.amazonaws.com/groups/global/AllUsers" {
+		t.Fatalf("public bucket ACL = %#v", grants)
+	}
+	mustInvoke(t, p, "PutBucketAcl", map[string]any{"Bucket": bucket["Bucket"], "GrantRead": `uri="http://acs.amazonaws.com/groups/s3/LogDelivery"`}, nil)
+	if grants := asSliceForTest(mustInvoke(t, p, "GetBucketAcl", bucket, nil).Output["Grants"]); len(grants) != 1 || asMapForTest(grants[0])["Permission"] != "READ" {
+		t.Fatalf("grant-header bucket ACL = %#v", grants)
+	}
+	validPolicy := map[string]any{
+		"Owner":  map[string]any{"ID": ident().Account},
+		"Grants": []any{map[string]any{"Grantee": map[string]any{"Type": "CanonicalUser", "ID": ident().Account}, "Permission": "FULL_CONTROL"}},
+	}
+	mustInvoke(t, p, "PutBucketAcl", map[string]any{"Bucket": bucket["Bucket"], "AccessControlPolicy": validPolicy}, nil)
+	invalid := []struct {
+		name, code string
+		input      map[string]any
+	}{
+		{"invalid canned ACL", "InvalidArgument", map[string]any{"ACL": "fake-acl"}},
+		{"invalid grant key", "InvalidArgument", map[string]any{"GrantWrite": `fakekey="1234"`}},
+		{"invalid grant URI", "InvalidArgument", map[string]any{"GrantWrite": `uri="http://acs.amazonaws.com/groups/s3/FakeGroup"`}},
+		{"invalid grant ID", "InvalidArgument", map[string]any{"GrantWrite": `id="wrong-id"`}},
+		{"empty policy", "MalformedACLError", map[string]any{"AccessControlPolicy": map[string]any{}}},
+		{"missing ACL", "MissingSecurityHeader", map[string]any{}},
+		{"canned and grant", "InvalidRequest", map[string]any{"ACL": "private", "GrantRead": `uri="http://acs.amazonaws.com/groups/s3/LogDelivery"`}},
+		{"canned and policy", "UnexpectedContent", map[string]any{"ACL": "private", "AccessControlPolicy": validPolicy}},
+	}
+	for _, test := range invalid {
+		t.Run(test.name, func(t *testing.T) {
+			test.input["Bucket"] = bucket["Bucket"]
+			_, err := invoke(t, p, "PutBucketAcl", test.input, nil)
+			if fault := asFault(t, err); fault.Code != test.code {
+				t.Fatalf("fault = %#v", fault)
+			}
+		})
+	}
+
+	if _, err := invoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "rejected", "ACL": "fake-acl"}, []byte("body")); asFault(t, err).Code != "InvalidArgument" {
+		t.Fatalf("invalid object canned ACL = %v", err)
+	}
+	if _, err := invoke(t, p, "HeadObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "rejected"}, nil); asFault(t, err).Code != "NoSuchKey" {
+		t.Fatalf("invalid ACL created object = %v", err)
+	}
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket["Bucket"], "Status": "Enabled"}, nil)
+	first := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "versioned", "ACL": "public-read"}, []byte("one"))
+	firstVersion := first.Headers.Get("x-amz-version-id")
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "versioned"}, []byte("two"))
+	current := mustInvoke(t, p, "GetObjectAcl", map[string]any{"Bucket": bucket["Bucket"], "Key": "versioned"}, nil).Output
+	old := mustInvoke(t, p, "GetObjectAcl", map[string]any{"Bucket": bucket["Bucket"], "Key": "versioned", "VersionId": firstVersion}, nil).Output
+	if len(asSliceForTest(current["Grants"])) != 1 || len(asSliceForTest(old["Grants"])) != 2 {
+		t.Fatalf("versioned ACLs current=%#v old=%#v", current, old)
+	}
+	for _, test := range []struct {
+		key, acl string
+		grants   int
+	}{{"multipart-private", "", 1}, {"multipart-public", "public-read-write", 3}} {
+		input := map[string]any{"Bucket": bucket["Bucket"], "Key": test.key}
+		if test.acl != "" {
+			input["ACL"] = test.acl
+		}
+		created := mustInvoke(t, p, "CreateMultipartUpload", input, nil)
+		uploadID := created.Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": bucket["Bucket"], "Key": test.key, "UploadId": uploadID, "PartNumber": 1}, []byte("part"))
+		complete := completeInput(uploadID, map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")})
+		complete["Bucket"], complete["Key"] = bucket["Bucket"], test.key
+		mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
+		acl := mustInvoke(t, p, "GetObjectAcl", map[string]any{"Bucket": bucket["Bucket"], "Key": test.key}, nil).Output
+		if grants := len(asSliceForTest(acl["Grants"])); grants != test.grants {
+			t.Fatalf("%s ACL grants = %d, want %d: %#v", test.key, grants, test.grants, acl)
+		}
+	}
+}
+
 func TestBucketLifecycleCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	input := map[string]any{"Bucket": "lifecycle-characterization"}

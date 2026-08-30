@@ -59,6 +59,7 @@ type mpu struct {
 	serverSideEncryption, sseKMSKeyID string
 	sseCustomerKeyMD5                 string
 	bucketKeyEnabled                  bool
+	acl                               map[string]any
 	lockDocs                          map[string][]byte
 	parts                             map[int]multipartPart
 }
@@ -880,6 +881,10 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
+	acl, explicitACL, err := requestACL(req, false)
+	if err != nil {
+		return nil, err
+	}
 	storageClass, err := requestStorageClass(req)
 	if err != nil {
 		return nil, err
@@ -989,6 +994,13 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	}
 	for kind, raw := range lockDocs {
 		_ = p.col(req, "objlock").Put(ctx, objectLockKey(b, key, vid, kind), raw)
+	}
+	aclKey := objectTagKey(b, key, vid) + "/acl"
+	if explicitACL {
+		raw, _ := json.Marshal(acl)
+		_ = p.col(req, "bktcfg").Put(ctx, aclKey, raw)
+	} else {
+		_ = p.col(req, "bktcfg").Delete(ctx, aclKey)
 	}
 	h := http.Header{}
 	h.Set("ETag", etag)
@@ -1834,6 +1846,13 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if err := validateObjectKey(key); err != nil {
 		return nil, err
 	}
+	acl, explicitACL, err := requestACL(req, false)
+	if err != nil {
+		return nil, err
+	}
+	if !explicitACL {
+		acl = nil
+	}
 	if _, err := requestTags(req); err != nil {
 		return nil, err
 	}
@@ -1864,7 +1883,7 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	id := p.deps.Rand.Hex(16)
 	p.mu.Lock()
-	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), tagging: requestCondition(req, "Tagging", "x-amz-tagging"), checksumAlgorithm: algorithm, checksumType: checksumType, serverSideEncryption: serverSideEncryption, sseKMSKeyID: sseKMSKeyID, sseCustomerKeyMD5: sseCustomerKeyMD5, bucketKeyEnabled: bucketKeyEnabled, lockDocs: lockDocs, parts: map[int]multipartPart{}}
+	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), tagging: requestCondition(req, "Tagging", "x-amz-tagging"), checksumAlgorithm: algorithm, checksumType: checksumType, serverSideEncryption: serverSideEncryption, sseKMSKeyID: sseKMSKeyID, sseCustomerKeyMD5: sseCustomerKeyMD5, bucketKeyEnabled: bucketKeyEnabled, acl: acl, lockDocs: lockDocs, parts: map[int]multipartPart{}}
 	p.mu.Unlock()
 	h := http.Header{}
 	h.Set("x-amz-checksum-algorithm", algorithm)
@@ -2039,6 +2058,9 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	}
 	req.Input[checksum.input], req.Input["ChecksumType"] = objectChecksum, u.checksumType
 	req.Input["Bucket"], req.Input["Key"], req.Input["StorageClass"], req.Input["Tagging"] = bucket, key, u.storageClass, u.tagging
+	if u.acl != nil {
+		req.Input["AccessControlPolicy"] = u.acl
+	}
 	req.Input["_ObjectEncryption"] = map[string]any{"serverSideEncryption": u.serverSideEncryption, "ssekmsKeyId": u.sseKMSKeyID, "sseCustomerKeyMD5": u.sseCustomerKeyMD5, "bucketKeyEnabled": u.bucketKeyEnabled}
 	req.Body = io.NopCloser(&buf)
 	resp, err := p.putObject(ctx, req, etag, u.checksumType, completedParts, u.lockDocs)
@@ -2621,6 +2643,18 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	col := p.col(req, "bktcfg")
 	if strings.HasPrefix(req.Operation, "Put") {
+		if req.Operation == "PutBucketAcl" || req.Operation == "PutObjectAcl" {
+			acl, _, err := requestACL(req, true)
+			if err != nil {
+				return nil, err
+			}
+			raw, _ := json.Marshal(acl)
+			_ = col.Put(ctx, key, raw)
+			if req.Operation == "PutObjectAcl" {
+				p.notify(ctx, req, b, str(req.Input["Key"]), "ObjectAcl:Put", objectMeta)
+			}
+			return &spi.Response{Status: http.StatusOK}, nil
+		}
 		if req.Operation == "PutBucketWebsite" {
 			if str(req.Input["_body"]) != "" {
 				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
@@ -2800,6 +2834,9 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	var doc map[string]any
 	_ = json.Unmarshal(raw, &doc)
+	if req.Operation == "GetBucketAcl" || req.Operation == "GetObjectAcl" {
+		return &spi.Response{Status: http.StatusOK, Output: doc}, nil
+	}
 	if req.Operation == "GetBucketRequestPayment" {
 		return &spi.Response{Status: 200, Output: map[string]any{"Payer": asMap(doc["RequestPaymentConfiguration"])["Payer"]}}, nil
 	}
@@ -2816,6 +2853,172 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 		return &spi.Response{Status: 200, Output: asMap(doc["WebsiteConfiguration"])}, nil
 	}
 	return &spi.Response{Status: 200, Output: doc}, nil
+}
+
+func requestACL(req *spi.Request, required bool) (map[string]any, bool, error) {
+	owner := map[string]any{"ID": req.Identity.Account, "DisplayName": "mirror"}
+	private := func() map[string]any {
+		return map[string]any{"Owner": owner, "Grants": []any{map[string]any{"Grantee": map[string]any{"ID": owner["ID"], "DisplayName": owner["DisplayName"], "Type": "CanonicalUser"}, "Permission": "FULL_CONTROL"}}}
+	}
+	canned := requestCondition(req, "ACL", "x-amz-acl")
+	type grantHeader struct{ input, header, permission string }
+	headers := []grantHeader{
+		{"GrantFullControl", "x-amz-grant-full-control", "FULL_CONTROL"},
+		{"GrantRead", "x-amz-grant-read", "READ"},
+		{"GrantReadACP", "x-amz-grant-read-acp", "READ_ACP"},
+		{"GrantWrite", "x-amz-grant-write", "WRITE"},
+		{"GrantWriteACP", "x-amz-grant-write-acp", "WRITE_ACP"},
+	}
+	var grants []grantHeader
+	for _, header := range headers {
+		if requestCondition(req, header.input, header.header) != "" {
+			grants = append(grants, header)
+		}
+	}
+	policy, hasPolicy := req.Input["AccessControlPolicy"].(map[string]any)
+	if canned == "" && len(grants) == 0 && !hasPolicy {
+		if str(req.Input["_body"]) != "" {
+			return nil, false, malformedACL()
+		}
+		if required {
+			return nil, false, &spi.Fault{Code: "MissingSecurityHeader", Message: "Your request was missing a required header", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"MissingHeaderName": "x-amz-acl"}}
+		}
+		return private(), false, nil
+	}
+	if canned != "" && len(grants) != 0 {
+		return nil, false, &spi.Fault{Code: "InvalidRequest", Message: "Specifying both Canned ACLs and Header Grants is not allowed", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if (canned != "" || len(grants) != 0) && hasPolicy {
+		return nil, false, &spi.Fault{Code: "UnexpectedContent", Message: "This request does not support content", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if canned != "" {
+		acl := private()
+		allUsers := map[string]any{"Type": "Group", "URI": "http://acs.amazonaws.com/groups/global/AllUsers"}
+		authenticated := map[string]any{"Type": "Group", "URI": "http://acs.amazonaws.com/groups/global/AuthenticatedUsers"}
+		logDelivery := map[string]any{"Type": "Group", "URI": "http://acs.amazonaws.com/groups/s3/LogDelivery"}
+		appendGrant := func(grantee map[string]any, permission string) {
+			acl["Grants"] = append(asSlice(acl["Grants"]), map[string]any{"Grantee": grantee, "Permission": permission})
+		}
+		switch canned {
+		case "private", "bucket-owner-read", "bucket-owner-full-control", "aws-exec-read":
+		case "public-read":
+			appendGrant(allUsers, "READ")
+		case "public-read-write":
+			appendGrant(allUsers, "READ")
+			appendGrant(allUsers, "WRITE")
+		case "authenticated-read":
+			appendGrant(authenticated, "READ")
+		case "log-delivery-write":
+			appendGrant(logDelivery, "READ_ACP")
+			appendGrant(logDelivery, "WRITE")
+		default:
+			return nil, false, invalidACLArgument("x-amz-acl", canned, "")
+		}
+		return acl, true, nil
+	}
+	if len(grants) != 0 {
+		acl := private()
+		acl["Grants"] = []any{}
+		for _, header := range grants {
+			for _, serialized := range strings.Split(requestCondition(req, header.input, header.header), ",") {
+				parts := strings.SplitN(strings.TrimSpace(serialized), "=", 2)
+				if len(parts) != 2 {
+					return nil, false, invalidACLArgument(header.header, serialized, "Argument format not recognized")
+				}
+				kind, value := parts[0], strings.Trim(strings.TrimSpace(parts[1]), `"`)
+				grantee := map[string]any{}
+				switch kind {
+				case "uri":
+					if !validACLGroup(value) {
+						return nil, false, invalidACLArgument("uri", value, "Invalid group uri")
+					}
+					grantee = map[string]any{"Type": "Group", "URI": value}
+				case "id":
+					if !validCanonicalID(value, req.Identity.Account) {
+						return nil, false, invalidACLArgument("id", value, "Invalid id")
+					}
+					grantee = map[string]any{"Type": "CanonicalUser", "ID": value, "DisplayName": "webfile"}
+				case "emailAddress":
+					grantee = map[string]any{"Type": "AmazonCustomerByEmail", "EmailAddress": value}
+				default:
+					return nil, false, invalidACLArgument(header.header, serialized, "Argument format not recognized")
+				}
+				acl["Grants"] = append(asSlice(acl["Grants"]), map[string]any{"Grantee": grantee, "Permission": header.permission})
+			}
+		}
+		return acl, true, nil
+	}
+	if err := validateACLPolicy(policy, req.Identity.Account); err != nil {
+		return nil, false, err
+	}
+	return policy, true, nil
+}
+
+func validateACLPolicy(policy map[string]any, account string) error {
+	owner, ownerOK := policy["Owner"].(map[string]any)
+	grants, grantsOK := policy["Grants"].([]any)
+	if !ownerOK || !grantsOK {
+		return malformedACL()
+	}
+	if id := str(owner["ID"]); !validCanonicalID(id, account) {
+		return invalidACLArgument("CanonicalUser/ID", id, "Invalid id")
+	}
+	for _, value := range grants {
+		grant, ok := value.(map[string]any)
+		if !ok {
+			return malformedACL()
+		}
+		switch str(grant["Permission"]) {
+		case "FULL_CONTROL", "READ", "WRITE", "READ_ACP", "WRITE_ACP":
+		default:
+			return malformedACL()
+		}
+		grantee, ok := grant["Grantee"].(map[string]any)
+		if !ok {
+			return malformedACL()
+		}
+		switch str(grantee["Type"]) {
+		case "Group":
+			if uri := str(grantee["URI"]); !validACLGroup(uri) {
+				return invalidACLArgument("Group/URI", uri, "Invalid group uri")
+			}
+		case "CanonicalUser":
+			if id := str(grantee["ID"]); !validCanonicalID(id, account) {
+				return invalidACLArgument("CanonicalUser/ID", id, "Invalid id")
+			}
+		case "AmazonCustomerByEmail":
+		default:
+			return malformedACL()
+		}
+	}
+	return nil
+}
+
+func validCanonicalID(value, account string) bool {
+	if value == account {
+		return true
+	}
+	if len(value) != 64 {
+		return false
+	}
+	for _, r := range value {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+func validACLGroup(value string) bool {
+	return value == "http://acs.amazonaws.com/groups/global/AllUsers" || value == "http://acs.amazonaws.com/groups/global/AuthenticatedUsers" || value == "http://acs.amazonaws.com/groups/s3/LogDelivery"
+}
+
+func malformedACL() *spi.Fault {
+	return &spi.Fault{Code: "MalformedACLError", Message: "The XML you provided was not well-formed or did not validate against our published schema", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+}
+
+func invalidACLArgument(name, value, message string) *spi.Fault {
+	return &spi.Fault{Code: "InvalidArgument", Message: message, HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": name, "ArgumentValue": value}}
 }
 
 func validateWebsiteConfiguration(value any) error {

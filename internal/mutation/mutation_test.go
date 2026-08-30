@@ -214,6 +214,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestExplicitKMSKeyValidation",
 		},
 		{
+			name: "s3-ignore-kms-alias-resolution",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if strings.HasPrefix(keyID, "alias/") || strings.Contains(keyID, ":alias/") {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestExplicitKMSKeyValidation",
+		},
+		{
 			name: "s3-drop-kms-fault-namespace",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `return &spi.Fault{Code: "KMS.NotFoundException", HTTPStatus: http.StatusBadRequest, Fault: "client"}`,

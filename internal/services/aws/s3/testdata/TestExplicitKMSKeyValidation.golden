@@ -1,5 +1,6 @@
 {
   "accepted": [
+    "alias-arn",
     "bare-key-id",
     "cross-account-arn",
     "managed-key"

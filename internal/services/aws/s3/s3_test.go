@@ -2139,6 +2139,8 @@ func TestExplicitKMSKeyValidation(t *testing.T) {
 	mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "source"}, []byte("source"))
 	keyID, keyARN := createKey(t, owner)
 	mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "enabled", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID}, []byte("body"))
+	kmsCall(t, owner, "CreateAlias", map[string]any{"AliasName": "alias/s3", "TargetKeyId": keyID})
+	mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "alias", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": "arn:aws:kms:us-east-1:123456789012:alias/s3"}, []byte("body"))
 	mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "managed", "ServerSideEncryption": "aws:kms"}, []byte("body"))
 	mustInvoke(t, s3Pack, "GetObject", map[string]any{"Bucket": "kms-validation", "Key": "managed"}, nil)
 
@@ -2171,7 +2173,7 @@ func TestExplicitKMSKeyValidation(t *testing.T) {
 	other := spi.Identity{Account: "999999999999", Region: owner.Region}
 	_, otherARN := createKey(t, other)
 	mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "cross-account", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": otherARN}, []byte("body"))
-	golden.AssertJSON(t, map[string]any{"accepted": []any{"bare-key-id", "cross-account-arn", "managed-key"}, "faults": faults})
+	golden.AssertJSON(t, map[string]any{"accepted": []any{"alias-arn", "bare-key-id", "cross-account-arn", "managed-key"}, "faults": faults})
 }
 
 func TestBucketEncryptionConfiguration(t *testing.T) {

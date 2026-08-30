@@ -7,7 +7,9 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -31,6 +33,64 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 )
+
+func TestAWSSDKPresignedSignatureValidation(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.s3"}
+	cfg.S3ValidatePresignedSignatures = true
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	awscfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := s3.NewFromConfig(awscfg, func(options *s3.Options) {
+		options.BaseEndpoint = aws.String(ts.URL)
+		options.UsePathStyle = true
+	})
+	if _, err := client.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("signed")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("signed"), Key: aws.String("object"), Body: strings.NewReader("verified")}); err != nil {
+		t.Fatal(err)
+	}
+	presigned, err := s3.NewPresignClient(client).PresignGetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("signed"), Key: aws.String("object")}, func(options *s3.PresignOptions) { options.Expires = time.Minute })
+	if err != nil {
+		t.Fatal(err)
+	}
+	do := func(rawURL string) (*http.Response, []byte) {
+		t.Helper()
+		request, err := http.NewRequest(presigned.Method, rawURL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header = presigned.SignedHeader.Clone()
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		return response, body
+	}
+	if response, body := do(presigned.URL); response.StatusCode != http.StatusOK || string(body) != "verified" {
+		t.Fatalf("valid presign %d %s", response.StatusCode, body)
+	}
+	tampered, err := url.Parse(presigned.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := tampered.Query()
+	query.Set("X-Amz-Signature", strings.Repeat("0", 64))
+	tampered.RawQuery = query.Encode()
+	if response, body := do(tampered.String()); response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
+		t.Fatalf("tampered presign %d %s", response.StatusCode, body)
+	}
+}
 
 func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	cfg := mcfg.Default()

@@ -3,6 +3,7 @@ package identity
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -120,6 +121,48 @@ func TestVerifyS3AuthorizationV2DateAndGrammar(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer token")
 	if fault := VerifyS3AuthorizationV2(request, "test"); fault != nil {
 		t.Fatalf("unrelated authorization rejected: %#v", fault)
+	}
+}
+
+func TestVerifyS3PostPolicy(t *testing.T) {
+	policy := base64.StdEncoding.EncodeToString([]byte(`{"expiration":"2099-01-01T00:00:00Z","conditions":[]}`))
+	credential := []string{"test", "20990101", "us-east-1", "s3", "aws4_request"}
+	v4 := map[string]string{
+		"policy":           policy,
+		"x-amz-algorithm":  "AWS4-HMAC-SHA256",
+		"x-amz-credential": strings.Join(credential, "/"),
+		"x-amz-date":       "20990101T000000Z",
+		"x-amz-signature":  hex.EncodeToString(hmacSHA256(s3V4SigningKey(credential, "test"), policy)),
+	}
+	if fault := VerifyS3PostPolicy(v4, "test"); fault != nil {
+		t.Fatalf("valid SigV4 policy rejected: %#v", fault)
+	}
+	for name, value := range map[string]string{"signature": "00", "algorithm": "AWS4-ECDSA-P256-SHA256", "date": "20990102T000000Z"} {
+		t.Run(name, func(t *testing.T) {
+			fields := make(map[string]string, len(v4))
+			for key, original := range v4 {
+				fields[key] = original
+			}
+			switch name {
+			case "signature":
+				fields["x-amz-signature"] = value
+			case "algorithm":
+				fields["x-amz-algorithm"] = value
+			case "date":
+				fields["x-amz-date"] = value
+			}
+			if fault := VerifyS3PostPolicy(fields, "test"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+				t.Fatalf("tampered policy accepted: %#v", fault)
+			}
+		})
+	}
+	v2 := map[string]string{"policy": policy, "AWSAccessKeyId": "test", "signature": base64.StdEncoding.EncodeToString(hmacSHA1([]byte("test"), policy))}
+	if fault := VerifyS3PostPolicy(v2, "test"); fault != nil {
+		t.Fatalf("valid SigV2 policy rejected: %#v", fault)
+	}
+	v2["signature"] = "tampered"
+	if fault := VerifyS3PostPolicy(v2, "test"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("tampered SigV2 policy accepted: %#v", fault)
 	}
 }
 

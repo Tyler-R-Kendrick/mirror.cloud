@@ -800,6 +800,43 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given named bucket configurations When managing them Then S3 preserves LocalStack ordering and errors", func(t *testing.T) {
+		res := do(http.MethodPut, "/named-configuration-bdd", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create named configuration bucket %d", res.StatusCode)
+		}
+		for _, configurationID := range []string{"z-analysis", "a-analysis"} {
+			body := []byte(`<AnalyticsConfiguration><Id>` + configurationID + `</Id><Filter><Prefix>` + configurationID + `/</Prefix></Filter></AnalyticsConfiguration>`)
+			res = do(http.MethodPut, "/named-configuration-bdd?analytics&id="+configurationID, body, "")
+			io.Copy(io.Discard, res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("put analytics configuration %d", res.StatusCode)
+			}
+		}
+		res = do(http.MethodGet, "/named-configuration-bdd?analytics", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if first, second := bytes.Index(body, []byte("<Id>a-analysis</Id>")), bytes.Index(body, []byte("<Id>z-analysis</Id>")); res.StatusCode != http.StatusOK || first < 0 || second < first || strings.Count(string(body), "<AnalyticsConfiguration>") != 2 || bytes.Contains(body, []byte("<member>")) {
+			t.Fatalf("list analytics configurations %d %s", res.StatusCode, body)
+		}
+		invalid := []byte(`<AnalyticsConfiguration><Id>body-id</Id></AnalyticsConfiguration>`)
+		res = do(http.MethodPut, "/named-configuration-bdd?analytics&id=request-id", invalid, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("MalformedXML")) {
+			t.Fatalf("mismatched analytics configuration %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodDelete, "/named-configuration-bdd?analytics&id=missing", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchConfiguration")) {
+			t.Fatalf("delete missing analytics configuration %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given bucket notifications When configuring and clearing them Then matching objects reach the queue", func(t *testing.T) {
 		res := do(http.MethodPut, "/notification-bdd", nil, "")
 		io.Copy(io.Discard, res.Body)

@@ -1062,6 +1062,47 @@ func TestConcurrentBucketLifecycleRemainsValid(t *testing.T) {
 	}
 }
 
+func TestConcurrentNamedBucketConfigurationsRemainValid(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "named-configuration-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			configurationID := fmt.Sprintf("configuration-%02d", n%8)
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutBucketAnalyticsConfiguration", Input: map[string]any{
+				"Bucket": "named-configuration-chaos", "Id": configurationID,
+				"AnalyticsConfiguration": map[string]any{"Id": configurationID, "Filter": map[string]any{"Prefix": fmt.Sprintf("objects/%02d/", n)}},
+			}})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent named configuration put: %v", err)
+		}
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListBucketAnalyticsConfigurations", Input: map[string]any{"Bucket": "named-configuration-chaos"}})
+	configurations, _ := response.Output["AnalyticsConfigurationList"].([]any)
+	if err != nil || len(configurations) != 8 {
+		t.Fatalf("persisted concurrent named configurations = %#v, err=%v", response, err)
+	}
+	for index, value := range configurations {
+		configuration, _ := value.(map[string]any)
+		if configuration["Id"] != fmt.Sprintf("configuration-%02d", index) {
+			t.Fatalf("configuration order = %#v", configurations)
+		}
+	}
+}
+
 func TestConcurrentBucketNotificationsRemainValid(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

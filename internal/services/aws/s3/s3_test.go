@@ -1138,6 +1138,7 @@ func TestNamedBucketConfigurations(t *testing.T) {
 		{"invalid versions", "MalformedXML", func(v map[string]any) { v["IncludedObjectVersions"] = "Previous" }},
 		{"invalid optional field", "MalformedXML", func(v map[string]any) { v["OptionalFields"] = []any{"Unknown"} }},
 	}
+	invalidInventoryCodes := map[string]any{}
 	for _, test := range invalidInventory {
 		t.Run(test.name, func(t *testing.T) {
 			configuration := inventory()
@@ -1145,6 +1146,8 @@ func TestNamedBucketConfigurations(t *testing.T) {
 			_, err := put("PutBucketInventoryConfiguration", "InventoryConfiguration", "inventory", configuration)
 			if fault := asFault(t, err); fault.Code != test.code {
 				t.Fatalf("fault = %#v", fault)
+			} else {
+				invalidInventoryCodes[test.name] = fault.Code
 			}
 		})
 	}
@@ -1175,6 +1178,12 @@ func TestNamedBucketConfigurations(t *testing.T) {
 	if _, err := invoke(t, p, "ListBucketMetricsConfigurations", map[string]any{"Bucket": bucket["Bucket"], "ContinuationToken": "invalid"}, nil); asFault(t, err).Code != "InvalidToken" {
 		t.Fatalf("invalid metrics token = %v", err)
 	}
+	golden.AssertJSON(t, map[string]any{
+		"analytics":          analytics.Output,
+		"inventory":          map[string]any{"configuration": storedInventory, "invalid": invalidInventoryCodes},
+		"intelligentTiering": mustInvoke(t, p, "ListBucketIntelligentTieringConfigurations", bucket, nil).Output,
+		"metrics":            map[string]any{"firstCount": len(firstPage), "firstId": asMapForTest(firstPage[0])["Id"], "secondCount": len(secondPage), "secondId": asMapForTest(secondPage[0])["Id"], "truncated": first.Output["IsTruncated"]},
+	})
 }
 
 func TestBucketLifecycleCharacterization(t *testing.T) {

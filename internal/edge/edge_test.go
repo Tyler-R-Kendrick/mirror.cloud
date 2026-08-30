@@ -379,10 +379,12 @@ func TestS3StreamingSignatureCharacterization(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := edge.New(cfg, deps, reg, "test").Handler()
-	created := httptest.NewRecorder()
-	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/streaming", nil))
-	if created.Code != http.StatusOK {
-		t.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
+	for _, bucket := range []string{"streaming", "trailers"} {
+		created := httptest.NewRecorder()
+		handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/"+bucket, nil))
+		if created.Code != http.StatusOK {
+			t.Fatalf("create bucket %s: %d %s", bucket, created.Code, created.Body.String())
+		}
 	}
 	results := map[string]any{}
 	for name, payload := range map[string]string{"valid": "hello", "tampered": "jello"} {
@@ -398,10 +400,45 @@ func TestS3StreamingSignatureCharacterization(t *testing.T) {
 		}
 		results[name] = result
 	}
+	for name, tc := range map[string]struct {
+		checksum, signature string
+	}{
+		"trailer_valid":        {"mnG7TA==", "67f7b779024ca973ddf6705b8ad24ecfc6f79f5242ff1d050fd8f830ae2071aa"},
+		"trailer_tampered":     {"AAAAAA==", "67f7b779024ca973ddf6705b8ad24ecfc6f79f5242ff1d050fd8f830ae2071aa"},
+		"trailer_bad_checksum": {"AAAAAA==", "0ef78e944cd5e61df18db7d6b99929d6871152b34d021274be44c9b5b113eeda"},
+	} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, streamingTrailerSignatureRequest(tc.checksum, tc.signature))
+		result := map[string]any{"status": recorder.Code}
+		if recorder.Code != http.StatusOK {
+			var fault struct{ Code string }
+			if err := xml.Unmarshal(recorder.Body.Bytes(), &fault); err != nil {
+				t.Fatal(err)
+			}
+			result["code"] = fault.Code
+		}
+		results[name] = result
+	}
 	read := httptest.NewRecorder()
 	handler.ServeHTTP(read, httptest.NewRequest(http.MethodGet, "/streaming/object", nil))
 	results["stored"] = map[string]any{"body": read.Body.String(), "status": read.Code}
+	trailerRead := httptest.NewRecorder()
+	handler.ServeHTTP(trailerRead, httptest.NewRequest(http.MethodGet, "/trailers/object", nil))
+	results["trailer_stored"] = map[string]any{"body": trailerRead.Body.String(), "status": trailerRead.Code}
 	golden.AssertJSON(t, results)
+}
+
+func streamingTrailerSignatureRequest(checksum, trailerSignature string) *http.Request {
+	raw := "5;chunk-signature=c83b0404927860c2dfacb114cd53dfe5505c5b4ad4dc605cc4e53806d4bb0d74\r\nhello\r\n0;chunk-signature=ffc89ae66d2e00900ad958aa09d8ea91ab7e1cb1938d6f4a5a30821f8fbe297f\r\nx-amz-checksum-crc32c:" + checksum + "\r\nx-amz-trailer-signature:" + trailerSignature + "\r\n\r\n"
+	request := httptest.NewRequest(http.MethodPut, "/trailers/object", strings.NewReader(raw))
+	request.Host = "s3.localhost.localstack.cloud:4566"
+	request.Header.Set("Content-Encoding", "aws-chunked")
+	request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER")
+	request.Header.Set("X-Amz-Date", "20990101T000000Z")
+	request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+	request.Header.Set("X-Amz-Trailer", "x-amz-checksum-crc32c")
+	request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20990101/us-east-1/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-trailer,Signature=378380e9501dea596cd83a9661c42fc2603dbd37872ab598316173a4d9244821")
+	return request
 }
 
 func streamingSignatureRequest(payload string) *http.Request {

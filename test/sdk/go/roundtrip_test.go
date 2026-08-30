@@ -93,6 +93,27 @@ func TestAWSSDKPresignedSignatureValidation(t *testing.T) {
 			t.Fatalf("%s: %d %s", name, response.StatusCode, body)
 		}
 	}
+	if _, err := client.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("trailers")}); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		checksum, signature string
+		status              int
+	}{
+		"valid trailer":    {"mnG7TA==", "67f7b779024ca973ddf6705b8ad24ecfc6f79f5242ff1d050fd8f830ae2071aa", http.StatusOK},
+		"tampered trailer": {"AAAAAA==", "67f7b779024ca973ddf6705b8ad24ecfc6f79f5242ff1d050fd8f830ae2071aa", http.StatusForbidden},
+		"bad checksum":     {"AAAAAA==", "0ef78e944cd5e61df18db7d6b99929d6871152b34d021274be44c9b5b113eeda", http.StatusBadRequest},
+	} {
+		response, err := http.DefaultClient.Do(streamingTrailerSignatureRequest(ts.URL, tc.checksum, tc.signature))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != tc.status {
+			t.Fatalf("%s: %d %s", name, response.StatusCode, body)
+		}
+	}
 	presigned, err := s3.NewPresignClient(client).PresignGetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("signed"), Key: aws.String("object")}, func(options *s3.PresignOptions) { options.Expires = time.Minute })
 	if err != nil {
 		t.Fatal(err)
@@ -218,6 +239,19 @@ func streamingSignatureRequest(endpoint, payload string) *http.Request {
 	request.Header.Set("X-Amz-Date", "20990101T000000Z")
 	request.Header.Set("X-Amz-Decoded-Content-Length", "5")
 	request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20990101/us-east-1/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length,Signature=d32bab45d70b05d89ada2e57acc27c4117cf31f7ce3de470cf916b8f89558054")
+	return request
+}
+
+func streamingTrailerSignatureRequest(endpoint, checksum, trailerSignature string) *http.Request {
+	raw := "5;chunk-signature=c83b0404927860c2dfacb114cd53dfe5505c5b4ad4dc605cc4e53806d4bb0d74\r\nhello\r\n0;chunk-signature=ffc89ae66d2e00900ad958aa09d8ea91ab7e1cb1938d6f4a5a30821f8fbe297f\r\nx-amz-checksum-crc32c:" + checksum + "\r\nx-amz-trailer-signature:" + trailerSignature + "\r\n\r\n"
+	request, _ := http.NewRequest(http.MethodPut, endpoint+"/trailers/object", strings.NewReader(raw))
+	request.Host = "s3.localhost.localstack.cloud:4566"
+	request.Header.Set("Content-Encoding", "aws-chunked")
+	request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER")
+	request.Header.Set("X-Amz-Date", "20990101T000000Z")
+	request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+	request.Header.Set("X-Amz-Trailer", "x-amz-checksum-crc32c")
+	request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20990101/us-east-1/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-trailer,Signature=378380e9501dea596cd83a9661c42fc2603dbd37872ab598316173a4d9244821")
 	return request
 }
 

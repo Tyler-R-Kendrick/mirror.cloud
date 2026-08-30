@@ -89,6 +89,9 @@ func TestVerifyS3StreamingV4AWSExample(t *testing.T) {
 	if fault := VerifyS3StreamingV4(request, secret, chunks, signatures); fault != nil {
 		t.Fatalf("official AWS chunk signatures rejected: %#v", fault)
 	}
+	if fault := VerifyS3StreamingV4(request, secret, chunks[:2], signatures[:2]); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("stream without final chunk accepted: %#v", fault)
+	}
 	chunks[1][0] = 'b'
 	if fault := VerifyS3StreamingV4(request, secret, chunks, signatures); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 		t.Fatalf("tampered signed chunk accepted: %#v", fault)

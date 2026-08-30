@@ -65,7 +65,15 @@ func VerifyS3StreamingV4(r *http.Request, secret string, chunks [][]byte, signat
 		return nil
 	}
 	credential, _, previous, present, ok := s3AuthorizationV4(r)
-	if !present || !ok || len(chunks) == 0 || len(chunks) != len(signatures) || len(chunks[len(chunks)-1]) != 0 {
+	decodedLength, err := strconv.ParseInt(r.Header.Get("X-Amz-Decoded-Content-Length"), 10, 64)
+	if !present || !ok || !strings.Contains(strings.ToLower(r.Header.Get("Content-Encoding")), "aws-chunked") || decodedLength < 0 || err != nil || len(chunks) == 0 || len(chunks) != len(signatures) || len(chunks[len(chunks)-1]) != 0 {
+		return signatureFault()
+	}
+	var actualLength int64
+	for _, chunk := range chunks {
+		actualLength += int64(len(chunk))
+	}
+	if actualLength != decodedLength {
 		return signatureFault()
 	}
 	date := r.Header.Get("X-Amz-Date")

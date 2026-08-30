@@ -20,6 +20,21 @@ func TestVerifyS3PresignedV4AWSExample(t *testing.T) {
 	}
 }
 
+func TestVerifyS3AuthorizationV4AWSExample(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "https://examplebucket.s3.amazonaws.com/test.txt", nil)
+	request.Header.Set("Range", "bytes=0-9")
+	request.Header.Set("X-Amz-Content-Sha256", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+	request.Header.Set("X-Amz-Date", "20130524T000000Z")
+	request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request,SignedHeaders=host;range;x-amz-content-sha256;x-amz-date,Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41")
+	if fault := VerifyS3AuthorizationV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault != nil {
+		t.Fatalf("official AWS example rejected: %#v", fault)
+	}
+	request.Header.Set("Range", "bytes=1-9")
+	if fault := VerifyS3AuthorizationV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("tampered signed header accepted: %#v", fault)
+	}
+}
+
 func TestVerifyS3PresignedV2AWSGrammar(t *testing.T) {
 	// AWS documents this exact query-auth string-to-sign grammar. The
 	// published signature uses unrelated legacy credentials, so this fixture's

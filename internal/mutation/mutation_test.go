@@ -13662,6 +13662,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestVerifyS3AuthorizationV4AWSExample",
 		},
 		{
+			name: "identity-ignore-authorization-v4-payload",
+			file: filepath.Join("internal", "identity", "s3_signature.go"),
+			old:  `if !s3PayloadHashMatches(r, payloadHash) {`,
+			new:  `if false {`,
+			pkg:  "./internal/identity",
+			run:  "TestVerifyS3AuthorizationV4AWSExample",
+		},
+		{
 			name: "identity-sign-presigned-v4-including-signature",
 			file: filepath.Join("internal", "identity", "s3_signature.go"),
 			old:  `if key == "X-Amz-Signature" {`,

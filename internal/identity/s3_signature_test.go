@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,6 +30,11 @@ func TestVerifyS3AuthorizationV4AWSExample(t *testing.T) {
 	request.Header.Set("Range", "bytes=1-9")
 	if fault := VerifyS3AuthorizationV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 		t.Fatalf("tampered signed header accepted: %#v", fault)
+	}
+	request = awsAuthorizationExample()
+	request.Body = io.NopCloser(strings.NewReader("tampered"))
+	if fault := VerifyS3AuthorizationV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("tampered payload accepted: %#v", fault)
 	}
 }
 

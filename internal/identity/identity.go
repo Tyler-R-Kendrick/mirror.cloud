@@ -1,4 +1,4 @@
-// Package identity parses SigV4 credentials and never verifies signatures.
+// Package identity parses cloud credentials and verifies supported S3 signatures.
 package identity
 
 import (

@@ -1,12 +1,14 @@
 package identity
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -67,6 +69,9 @@ func VerifyS3AuthorizationV4(r *http.Request, secret string) *spi.Fault {
 	if date == "" || payloadHash == "" {
 		return signatureFault()
 	}
+	if !s3PayloadHashMatches(r, payloadHash) {
+		return signatureFault()
+	}
 	canonicalRequest := strings.Join([]string{r.Method, canonicalPath(r.URL), canonicalQuery(r.URL.Query()), canonicalHeaders, signedHeaders, payloadHash}, "\n")
 	return verifyS3V4Signature(credential, date, canonicalRequest, fields["Signature"], secret)
 }
@@ -104,6 +109,9 @@ func VerifyS3PresignedV4(r *http.Request, secret string) *spi.Fault {
 	}
 	if payloadHash == "" {
 		payloadHash = "UNSIGNED-PAYLOAD"
+	}
+	if !s3PayloadHashMatches(r, payloadHash) {
+		return signatureFault()
 	}
 	canonicalRequest := strings.Join([]string{r.Method, canonicalPath(r.URL), canonicalQuery(q), canonicalHeaders, signedHeaders, payloadHash}, "\n")
 	return verifyS3V4Signature(credential, q.Get("X-Amz-Date"), canonicalRequest, q.Get("X-Amz-Signature"), secret)
@@ -249,6 +257,23 @@ func canonicalQuery(q url.Values) string {
 
 func awsEscape(value string) string {
 	return strings.ReplaceAll(url.QueryEscape(value), "+", "%20")
+}
+
+func s3PayloadHashMatches(r *http.Request, payloadHash string) bool {
+	if payloadHash == "UNSIGNED-PAYLOAD" || strings.HasPrefix(payloadHash, "STREAMING-") {
+		return true
+	}
+	want, err := hex.DecodeString(payloadHash)
+	if err != nil || len(want) != sha256.Size {
+		return false
+	}
+	var body []byte
+	if r.Body != nil {
+		body, err = io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(body))
+	}
+	got := sha256.Sum256(body)
+	return err == nil && subtle.ConstantTimeCompare(got[:], want) == 1
 }
 
 func hmacSHA256(key []byte, value string) []byte {

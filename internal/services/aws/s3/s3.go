@@ -17,6 +17,7 @@ import (
 	"hash/crc32"
 	"hash/crc64"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"sort"
@@ -3743,12 +3744,12 @@ func requestObjectMetadata(req *spi.Request) map[string]any {
 	}
 	user := map[string]any{}
 	for key, value := range asMap(req.Input["Metadata"]) {
-		user[strings.ToLower(key)] = str(value)
+		user[strings.ToLower(key)] = decodeRFC2047Header(str(value))
 	}
 	if req.HTTP != nil {
 		for key, values := range req.HTTP.Header {
 			if name, ok := strings.CutPrefix(strings.ToLower(key), "x-amz-meta-"); ok && len(values) > 0 {
-				user[name] = strings.Join(values, ",")
+				user[name] = decodeRFC2047Header(strings.Join(values, ","))
 			}
 		}
 	}
@@ -3954,11 +3955,51 @@ func setObjectMetadataHeaders(headers http.Header, meta map[string]any) {
 		}
 	}
 	for key, value := range asMap(metadata["user"]) {
-		headers.Set("x-amz-meta-"+key, str(value))
+		headers.Set("x-amz-meta-"+key, encodeRFC2047Header(str(value)))
 	}
 	if redirect := str(meta["websiteRedirectLocation"]); redirect != "" {
 		headers.Set("x-amz-website-redirect-location", redirect)
 	}
+}
+
+func decodeRFC2047Header(value string) string {
+	decoded, err := new(mime.WordDecoder).DecodeHeader(value)
+	if err != nil {
+		return value
+	}
+	return decoded
+}
+
+func encodeRFC2047Header(value string) string {
+	const safe = "!\"#$%&'()*+,-./0123456789:;<>@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^`abcdefghijklmnopqrstuvwxyz{|}~\t"
+	const unencoded = safe + " _=?"
+	if strings.IndexFunc(value, func(r rune) bool {
+		return r > unicode.MaxASCII || !strings.ContainsRune(unencoded, r)
+	}) < 0 {
+		return value
+	}
+	for _, r := range value {
+		if r == utf8.RuneError || unicode.In(r, unicode.Cc, unicode.Cf, unicode.Co, unicode.Cs) {
+			return "=?UTF-8?B?" + base64.StdEncoding.EncodeToString([]byte(value)) + "?="
+		}
+	}
+	var encoded strings.Builder
+	encoded.WriteString("=?UTF-8?Q?")
+	const hex = "0123456789ABCDEF"
+	for _, b := range []byte(value) {
+		switch {
+		case b == ' ':
+			encoded.WriteByte('_')
+		case strings.IndexByte(safe, b) >= 0:
+			encoded.WriteByte(b)
+		default:
+			encoded.WriteByte('=')
+			encoded.WriteByte(hex[b>>4])
+			encoded.WriteByte(hex[b&15])
+		}
+	}
+	encoded.WriteString("?=")
+	return encoded.String()
 }
 
 func setObjectEncryptionHeaders(headers http.Header, meta map[string]any) {

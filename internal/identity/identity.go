@@ -73,7 +73,7 @@ func PresignedExpiry(r *http.Request) (time.Time, bool) {
 	if raw := q.Get("X-Amz-Expires"); raw != "" {
 		secs, err := strconv.ParseInt(raw, 10, 64)
 		started, dateErr := time.Parse("20060102T150405Z", q.Get("X-Amz-Date"))
-		if err == nil && dateErr == nil && secs >= 0 {
+		if err == nil && dateErr == nil && secs >= 0 && secs <= 7*24*60*60 {
 			return started.Add(time.Duration(secs) * time.Second), true
 		}
 	}

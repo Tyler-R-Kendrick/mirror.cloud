@@ -13582,6 +13582,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestParseAndExpiry",
 		},
 		{
+			name: "identity-accept-excessive-sigv4-expiry",
+			file: filepath.Join("internal", "identity", "identity.go"),
+			old:  `secs <= 7*24*60*60`,
+			new:  `true`,
+			pkg:  "./internal/identity",
+			run:  "TestParseAndExpiry",
+		},
+		{
 			name: "identity-region-segment",
 			file: filepath.Join("internal", "identity", "identity.go"),
 			old:  "region = parts[2]",

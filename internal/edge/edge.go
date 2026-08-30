@@ -266,7 +266,7 @@ func (s *Server) demux(r *http.Request) *model.Service {
 	if i := strings.IndexByte(host, ':'); i >= 0 {
 		host = host[:i]
 	}
-	if strings.Contains(host, ".s3.") || strings.HasPrefix(host, "s3.") {
+	if strings.Contains(host, ".s3.") || strings.Contains(host, ".s3-website.") || strings.Contains(host, ".s3-website-") || strings.HasPrefix(host, "s3.") {
 		return s.bundle.ServiceByID("aws.s3")
 	}
 	if target := r.Header.Get("X-Amz-Target"); target != "" {

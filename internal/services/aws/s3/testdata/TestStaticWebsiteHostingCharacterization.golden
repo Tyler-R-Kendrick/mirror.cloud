@@ -1,0 +1,72 @@
+{
+  "directory": {
+    "body": "docs",
+    "etag": "\"e3e2a9bfd88566b05001b02a3f51d286\"",
+    "status": 200,
+    "type": "text/html",
+    "where": ""
+  },
+  "directory-hop": {
+    "body": "",
+    "etag": "",
+    "status": 302,
+    "type": "",
+    "where": "/docs/"
+  },
+  "error-rule": {
+    "body": "",
+    "etag": "",
+    "status": 301,
+    "type": "",
+    "where": "http://website-hosting.s3-website.localhost.localstack.cloud/redirected.html"
+  },
+  "method": {
+    "body": "\u003chtml\u003e\n\u003chead\u003e\u003ctitle\u003e405 Method Not Allowed\u003c/title\u003e\u003c/head\u003e\n\u003cbody\u003e\n\u003ch1\u003e405 Method Not Allowed\u003c/h1\u003e\n\u003cul\u003e\n\u003cli\u003eCode: MethodNotAllowed\u003c/li\u003e\n\u003cli\u003eMessage: The specified method is not allowed against this resource.\u003c/li\u003e\n\u003cli\u003eMethod: POST\u003c/li\u003e\n\u003cli\u003eResourceType: OBJECT\u003c/li\u003e\n\u003cli\u003eRequestId: request-id\u003c/li\u003e\n\u003cli\u003eHostId: h6t23Wl2Ndijztq+COn9kvx32omFVRLLtwk36D6+2/CIYSey+Uox6kBxRgcnAASsgnGwctU6zzU=\u003c/li\u003e\n\u003c/ul\u003e\n\u003chr/\u003e\n\u003c/body\u003e\n\u003c/html\u003e\n",
+    "etag": "",
+    "status": 405,
+    "type": "text/html; charset=utf-8",
+    "where": ""
+  },
+  "missing": {
+    "body": "error",
+    "etag": "\"cb5e100e5a9a3e7f6d1fd97512215282\"",
+    "status": 404,
+    "type": "text/html",
+    "where": ""
+  },
+  "not-modified": {
+    "body": "",
+    "etag": "\"6a992d5529f459a44fee58c733255e86\"",
+    "status": 304,
+    "type": "text/html",
+    "where": ""
+  },
+  "object-hop": {
+    "body": "",
+    "etag": "",
+    "status": 301,
+    "type": "",
+    "where": "/redirected.html"
+  },
+  "prefix-rule": {
+    "body": "",
+    "etag": "",
+    "status": 301,
+    "type": "",
+    "where": "http://website-hosting.s3-website.localhost.localstack.cloud/index.html"
+  },
+  "redirect-all": {
+    "body": "",
+    "etag": "",
+    "status": 301,
+    "type": "",
+    "where": "https://example.test/path?q=1"
+  },
+  "root": {
+    "body": "index",
+    "etag": "\"6a992d5529f459a44fee58c733255e86\"",
+    "status": 200,
+    "type": "text/html",
+    "where": ""
+  }
+}

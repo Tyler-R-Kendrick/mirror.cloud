@@ -30,6 +30,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bus"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/logging"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
@@ -930,6 +931,76 @@ func TestBucketWebsite(t *testing.T) {
 	if fault := asFault(t, err); fault.Code != "NoSuchWebsiteConfiguration" {
 		t.Fatalf("deleted website fault = %#v", fault)
 	}
+}
+
+func TestStaticWebsiteHostingCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := logging.WithRequestID(context.Background(), "request-id")
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "website-hosting"}, nil)
+	put := func(key, body, redirect string) {
+		t.Helper()
+		input := map[string]any{"Bucket": "website-hosting", "Key": key, "ContentType": "text/html"}
+		if redirect != "" {
+			input["WebsiteRedirectLocation"] = redirect
+		}
+		mustInvoke(t, p, "PutObject", input, []byte(body))
+	}
+	put("index.html", "index", "")
+	put("docs/index.html", "docs", "")
+	put("error.html", "error", "")
+	put("redirected.html", "redirected", "")
+	put("object-redirect", "", "/redirected.html")
+	configuration := map[string]any{
+		"IndexDocument": map[string]any{"Suffix": "index.html"},
+		"ErrorDocument": map[string]any{"Key": "error.html"},
+	}
+	mustInvoke(t, p, "PutBucketWebsite", map[string]any{"Bucket": "website-hosting", "WebsiteConfiguration": configuration}, nil)
+
+	request := func(method, path string, headers ...http.Header) map[string]any {
+		t.Helper()
+		httpRequest := httptest.NewRequest(method, "http://website-hosting.s3-website.localhost.localstack.cloud"+path, nil)
+		if len(headers) != 0 {
+			httpRequest.Header = headers[0]
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: ident(), Operation: "GetObject", Input: map[string]any{}, HTTP: httpRequest})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := ""
+		if response.Stream != nil {
+			body = string(readStream(t, response))
+		}
+		return map[string]any{
+			"status": response.Status,
+			"body":   body,
+			"type":   response.Headers.Get("Content-Type"),
+			"etag":   response.Headers.Get("ETag"),
+			"where":  response.Headers.Get("Location"),
+		}
+	}
+
+	characterization := map[string]any{
+		"root":          request(http.MethodGet, "/"),
+		"directory":     request(http.MethodGet, "/docs/"),
+		"directory-hop": request(http.MethodGet, "/docs"),
+		"missing":       request(http.MethodGet, "/missing"),
+		"object-hop":    request(http.MethodGet, "/object-redirect"),
+		"method":        request(http.MethodPost, "/"),
+	}
+	etag, _ := characterization["root"].(map[string]any)["etag"].(string)
+	characterization["not-modified"] = request(http.MethodGet, "/", http.Header{"If-None-Match": []string{etag}})
+
+	configuration["RoutingRules"] = []any{
+		map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "old/"}, "Redirect": map[string]any{"ReplaceKeyPrefixWith": ""}},
+		map[string]any{"Condition": map[string]any{"HttpErrorCodeReturnedEquals": "404"}, "Redirect": map[string]any{"ReplaceKeyWith": "redirected.html"}},
+	}
+	mustInvoke(t, p, "PutBucketWebsite", map[string]any{"Bucket": "website-hosting", "WebsiteConfiguration": configuration}, nil)
+	characterization["prefix-rule"] = request(http.MethodGet, "/old/index.html")
+	characterization["error-rule"] = request(http.MethodGet, "/still-missing")
+
+	mustInvoke(t, p, "PutBucketWebsite", map[string]any{"Bucket": "website-hosting", "WebsiteConfiguration": map[string]any{"RedirectAllRequestsTo": map[string]any{"HostName": "example.test", "Protocol": "https"}}}, nil)
+	characterization["redirect-all"] = request(http.MethodGet, "/path?q=1")
+	golden.AssertJSON(t, characterization)
 }
 
 func TestBucketLifecycleConfiguration(t *testing.T) {

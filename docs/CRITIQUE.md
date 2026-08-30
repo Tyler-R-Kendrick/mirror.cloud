@@ -418,3 +418,20 @@ There is a second-order consequence worth stating: the members that *can* safely
 **C20. There is no filtered delete, and two services need one.** `ssoadmin.DeleteAccountAssignment` deletes every assignment matching a principal; `lakeformation.RevokePermissions` deletes every grant matching a filter. `DeleteEffect` addresses one record by key, so neither can be expressed and both services stay hand-written. Two independent callers is the threshold this document set for adding to the schema rather than fitting one caller (C14), and a `where:` on delete is the same predicate `list.filter` already evaluates. It is not being added inside a batch for the same reason as above.
 
 **A smaller thing, recorded because it is not obvious.** A projection member whose expression evaluates to `null` is omitted from the answer rather than emitted as empty. That is what lets `TerminateEnvironment` answer a two-member body for an environment that never existed, matching a pack that built a two-member map — where an empty string would have been a fifth member no caller asked for. Absent and empty are not the same thing to the gate, and `blank()` unifies an empty map or list with absence but not an empty string.
+
+### What the remaining packs still need, counted honestly
+
+Wave 1 has surfaced four gaps in the schema. Two of them (C19, C20) are stated above; the other two are a missing `map`-with-index in the expression layer, which `comprehend.BatchDetectSentiment` needs to correlate a result to its input, and a way to write N records from one list input, which no effect expresses.
+
+**C21. Three of the four gaps have more callers than the one that found them, and the count is not reliably measurable.** Reading the packs one at a time is how each gap was found, and it is also the only way to count them: a structural scan cannot separate "iterate a list of entities and write one record each" from "iterate a map of attributes", and a scan for the second shape returns twenty-seven packs of which most are the first. What can be stated is what was confirmed by reading:
+
+| gap | confirmed callers |
+|---|---|
+| filtered delete (C20) | `ssoadmin`, `lakeformation` |
+| N records from one list input | `lightsail`, `emr`, `tagging` |
+| resource-level recompute on `patch` (C19) | six services, all worked around |
+| list index in an expression | `comprehend` |
+
+Two of those four are hard blocks: a service that needs a filtered delete or an N-record write cannot be extracted at all, and five services are parked on them today. The other two are workarounds — a discipline the schema does not enforce, and an operation left unexpressed — so they cost correctness risk rather than progress.
+
+The honest reading is that the schema is not short of *expressiveness* so much as short of two specific bulk operations, and that both were predictable from the idiom catalogue the packs were built from. Whoever settles C19 and C20 should settle these two at the same time, because they are the same kind of decision and the same replay proves all four.

@@ -31,7 +31,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/codebuild"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/codecommit"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/codedeploy"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/codepipeline"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cognitoidp"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/comprehend"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/configservice"

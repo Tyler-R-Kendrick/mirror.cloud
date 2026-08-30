@@ -1,0 +1,178 @@
+schema: bir/1
+service: aws.codepipeline
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is built: an execution has Succeeded before the call
+# returns, without running a stage or an action.
+provenance: authored
+
+resources:
+  # The pack stored the caller's whole pipeline structure with the name forced
+  # into it, so a pipeline answered back whatever the caller had sent --
+  # including members PipelineDeclaration does not declare. Only the declared
+  # members are stored here.
+  pipeline:
+    collection: cp
+    id:
+      derive: >
+        'pipeline' in input && 'name' in input.pipeline
+          ? string(input.pipeline.name)
+          : ('name' in input ? string(input.name) : '')
+    record:
+      name: id
+      roleArn: >
+        'pipeline' in input && 'roleArn' in input.pipeline
+          ? string(input.pipeline.roleArn) : ''
+      artifactStore: >
+        'pipeline' in input && 'artifactStore' in input.pipeline
+          ? input.pipeline.artifactStore : null
+      stages: >
+        'pipeline' in input && 'stages' in input.pipeline
+          ? input.pipeline.stages : []
+
+  # An execution is keyed by an identifier that carries the pipeline's name,
+  # which is how the pack built it.
+  execution:
+    collection: cpex
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record: {}
+
+errors:
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+  PipelineNotFound:
+    code: PipelineNotFoundException
+    http: 400
+    fault: client
+  ExecutionNotFound:
+    code: PipelineExecutionNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  # Create and update are one write: both replace the whole record, so an
+  # update that omits a stage list empties it.
+  CreatePipeline:
+    effects:
+      - put: { resource: pipeline }
+    output:
+      pipeline: rec
+
+  UpdatePipeline:
+    effects:
+      - put: { resource: pipeline }
+    output:
+      pipeline: rec
+
+  GetPipeline:
+    reads:
+      p: { resource: pipeline, key: "string(input.name)" }
+    require:
+      - { cond: p_found, error: PipelineNotFound }
+    output:
+      pipeline: p
+
+  # A pipeline has no stage states, so nothing reports what a stage did.
+  GetPipelineState:
+    reads:
+      p: { resource: pipeline, key: "string(input.name)" }
+    require:
+      - { cond: p_found, error: PipelineNotFound }
+    output:
+      pipelineName: p.name
+      stageStates: "[]"
+
+  ListPipelines:
+    list: { resource: pipeline, member: pipelines, paginate: model }
+    output:
+      pipelines: "items.map(p, {'name': p.name})"
+
+  DeletePipeline:
+    effects:
+      - delete: { resource: pipeline, key: "string(input.name)", missing: ignore }
+
+  StartPipelineExecution:
+    effects:
+      - generate: { bind: run, kind: hex, bytes: 8 }
+      - put:
+          resource: execution
+          key: "string(input.name) + '-' + fx.run"
+          record:
+            pipelineName: "string(input.name)"
+            pipelineExecutionId: "string(input.name) + '-' + fx.run"
+            status: "'Succeeded'"
+    output:
+      pipelineExecutionId: rec.pipelineExecutionId
+
+  GetPipelineExecution:
+    reads:
+      e: { resource: execution, key: "string(input.pipelineExecutionId)" }
+    require:
+      - { cond: e_found, error: ExecutionNotFound }
+    output:
+      pipelineExecution: e
+
+  ListPipelineExecutions:
+    list: { resource: execution, member: pipelineExecutionSummaries, paginate: model }
+
+  # Stopping answers the id whether or not there was an execution to stop, and
+  # only writes when there was one.
+  StopPipelineExecution:
+    reads:
+      e: { resource: execution, key: "string(input.pipelineExecutionId)" }
+    effects:
+      - patch:
+          resource: execution
+          key: "string(input.pipelineExecutionId)"
+          when: e_found
+          record:
+            status: "'Stopped'"
+    output:
+      pipelineExecutionId: "string(input.pipelineExecutionId)"
+
+quirks:
+  - operation: CreatePipeline
+    note: >
+      The pack stored the caller's whole pipeline structure with the name
+      forced into it, so a pipeline answered back whatever had been sent --
+      including members PipelineDeclaration does not declare, and omitting the
+      ones it declares that the request did not carry. Only the declared
+      members are stored now: name, roleArn, artifactStore and stages. The
+      version the model declares is never set, so a pipeline has no version
+      however many times it is updated.
+
+      Create and update are one write, replacing the whole record, so an update
+      that omits the stages empties them rather than leaving them alone. The
+      required roleArn is stored without being validated, and no stage or
+      action is ever inspected.
+  - operation: StartPipelineExecution
+    note: >
+      An execution has Succeeded before the call returns, so nothing observes
+      InProgress and no stage or action ever runs: GetPipelineState answers an
+      empty stageStates for every pipeline, so a caller cannot see which stage
+      a build reached because none was entered. The pipeline the execution
+      names is not checked to exist, so an execution can be started for a
+      pipeline that was never created.
+  - operation: ListPipelineExecutions
+    note: >
+      Every execution in the account and region is listed, not the named
+      pipeline's -- the required pipelineName narrows nothing. The summaries
+      answered are the stored executions, which carry a pipelineName the
+      summary shape does not, so a caller sees which pipeline each belongs to
+      only because the member survives the shape it is listed in.
+  - operation: StopPipelineExecution
+    note: >
+      Stopping answers the id whether or not an execution of that id exists, so
+      the answer does not distinguish a stopped execution from one that was
+      never started -- but one that does exist really is moved to Stopped.
+      Since every execution Succeeded the moment it started, stopping moves a
+      finished execution backwards, which the real service refuses. The
+      required abandon and reason members are ignored.
+  - operation: DeletePipeline
+    note: >
+      Deleting an absent pipeline succeeds where getting it faults, and
+      deleting a pipeline leaves its executions behind, still naming it and
+      still listed.

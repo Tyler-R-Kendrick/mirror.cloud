@@ -843,13 +843,13 @@ func TestS3ObjectLifecycle(t *testing.T) {
 	})
 
 	t.Run("Given a bucket website When replacing and deleting it Then S3 validates and persists the routing", func(t *testing.T) {
-		website := func(method, path string) (*http.Response, []byte) {
+		websiteBucket := func(bucket, method, path string) (*http.Response, []byte) {
 			t.Helper()
 			req, err := http.NewRequest(method, ts.URL+path, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			req.Host = "website-bdd.s3-website.localhost.localstack.cloud"
+			req.Host = bucket + ".s3-website.localhost.localstack.cloud"
 			response, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
 			if err != nil {
 				t.Fatal(err)
@@ -857,6 +857,9 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			body, _ := io.ReadAll(response.Body)
 			response.Body.Close()
 			return response, body
+		}
+		website := func(method, path string) (*http.Response, []byte) {
+			return websiteBucket("website-bdd", method, path)
 		}
 		res := do(http.MethodPut, "/website-bdd", nil, "")
 		io.Copy(io.Discard, res.Body)
@@ -873,6 +876,10 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res, body = website(http.MethodGet, "/")
 		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<li>Code: NoSuchWebsiteConfiguration</li>")) {
 			t.Fatalf("unconfigured website endpoint %d %s", res.StatusCode, body)
+		}
+		res, body = websiteBucket("missing-website-bdd", http.MethodGet, "/")
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<li>Code: NoSuchBucket</li>")) {
+			t.Fatalf("missing website bucket %d %s", res.StatusCode, body)
 		}
 		valid := []byte(`<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><ErrorDocument><Key>error.html</Key></ErrorDocument><RoutingRules><RoutingRule><Condition><KeyPrefixEquals>docs/</KeyPrefixEquals></Condition><Redirect><Protocol>https</Protocol><ReplaceKeyPrefixWith>manual/</ReplaceKeyPrefixWith></Redirect></RoutingRule></RoutingRules></WebsiteConfiguration>`)
 		res = do(http.MethodPut, "/website-bdd?website", valid, "")

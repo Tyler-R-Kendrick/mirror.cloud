@@ -950,6 +950,9 @@ func TestStaticWebsiteHostingCharacterization(t *testing.T) {
 	put("error.html", "error", "")
 	put("redirected.html", "redirected", "")
 	put("object-redirect", "", "/redirected.html")
+	put("error-redirect", "", "/redirected.html")
+	put("prefixed-object", "prefixed", "/object-target.html")
+	put("both/existing", "existing", "")
 	configuration := map[string]any{
 		"IndexDocument": map[string]any{"Suffix": "index.html"},
 		"ErrorDocument": map[string]any{"Key": "error.html"},
@@ -989,14 +992,34 @@ func TestStaticWebsiteHostingCharacterization(t *testing.T) {
 	}
 	etag, _ := characterization["root"].(map[string]any)["etag"].(string)
 	characterization["not-modified"] = request(http.MethodGet, "/", http.Header{"If-None-Match": []string{etag}})
+	configuration["ErrorDocument"] = map[string]any{"Key": "missing-error.html"}
+	mustInvoke(t, p, "PutBucketWebsite", map[string]any{"Bucket": "website-hosting", "WebsiteConfiguration": configuration}, nil)
+	characterization["missing-error-document"] = request(http.MethodGet, "/missing")
+	configuration["ErrorDocument"] = map[string]any{"Key": "error-redirect"}
+	mustInvoke(t, p, "PutBucketWebsite", map[string]any{"Bucket": "website-hosting", "WebsiteConfiguration": configuration}, nil)
+	characterization["error-document-hop"] = request(http.MethodGet, "/missing")
+	configuration["ErrorDocument"] = map[string]any{"Key": "error.html"}
 
 	configuration["RoutingRules"] = []any{
+		map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "both/", "HttpErrorCodeReturnedEquals": "404"}, "Redirect": map[string]any{"ReplaceKeyWith": "redirected.html"}},
+		map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "host/"}, "Redirect": map[string]any{"HostName": "example.test"}},
+		map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "protocol/"}, "Redirect": map[string]any{"Protocol": "https"}},
+		map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "code/"}, "Redirect": map[string]any{"HttpRedirectCode": "307"}},
+		map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "prefixed"}, "Redirect": map[string]any{"ReplaceKeyWith": "redirected.html"}},
 		map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "old/"}, "Redirect": map[string]any{"ReplaceKeyPrefixWith": ""}},
+		map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "index"}, "Redirect": map[string]any{"ReplaceKeyWith": "redirected.html"}},
 		map[string]any{"Condition": map[string]any{"HttpErrorCodeReturnedEquals": "404"}, "Redirect": map[string]any{"ReplaceKeyWith": "redirected.html"}},
 	}
 	mustInvoke(t, p, "PutBucketWebsite", map[string]any{"Bucket": "website-hosting", "WebsiteConfiguration": configuration}, nil)
+	characterization["combined-rule"] = request(http.MethodGet, "/both/missing")
+	characterization["combined-existing"] = request(http.MethodGet, "/both/existing")
+	characterization["host-rule"] = request(http.MethodGet, "/host/key")
+	characterization["protocol-rule"] = request(http.MethodGet, "/protocol/key")
+	characterization["status-rule"] = request(http.MethodGet, "/code/key")
+	characterization["rule-before-object"] = request(http.MethodGet, "/prefixed-object")
 	characterization["prefix-rule"] = request(http.MethodGet, "/old/index.html")
 	characterization["error-rule"] = request(http.MethodGet, "/still-missing")
+	characterization["root-with-rules"] = request(http.MethodGet, "/")
 
 	mustInvoke(t, p, "PutBucketWebsite", map[string]any{"Bucket": "website-hosting", "WebsiteConfiguration": map[string]any{"RedirectAllRequestsTo": map[string]any{"HostName": "example.test", "Protocol": "https"}}}, nil)
 	characterization["redirect-all"] = request(http.MethodGet, "/path?q=1")

@@ -16,6 +16,8 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 )
@@ -199,6 +201,7 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 	}
 
 	multipartKeyID := "arn:aws:kms:us-east-1:000000000000:key/multipart-contract"
+	spitest.SeedKMSKey(t, rt.Deps, spi.Identity{Account: "000000000000", Region: "us-east-1"}, multipartKeyID, "Enabled")
 	assertMultipartEncryption := func(name string, headers http.Header) {
 		t.Helper()
 		if headers.Get("x-amz-server-side-encryption") != "aws:kms" || headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != multipartKeyID || headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {

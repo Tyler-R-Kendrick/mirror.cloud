@@ -30,7 +30,6 @@ import (
 	"github.com/cespare/xxhash/v2"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
@@ -3821,16 +3820,26 @@ func (p *Pack) validateKMSKey(ctx context.Context, req *spi.Request, keyID strin
 		}
 		identity.Account = arn[4]
 	}
-	response, err := kms.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "DescribeKey", Input: map[string]any{"KeyId": keyID}})
-	if err != nil {
-		if fault, ok := err.(*spi.Fault); ok && fault.Code == "NotFoundException" {
-			return &spi.Fault{Code: "KMS.NotFoundException", Message: fault.Message, HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	scope := p.deps.Store.Scope(identity.Account, identity.Region)
+	if strings.HasPrefix(keyID, "alias/") || strings.Contains(keyID, ":alias/") {
+		name := keyID[strings.Index(keyID, "alias/"):]
+		if raw, ok, _ := scope.Collection("kmsalias").Get(ctx, name); ok {
+			var alias map[string]any
+			_ = json.Unmarshal(raw, &alias)
+			keyID = str(alias["TargetKeyId"])
 		}
-		return err
 	}
-	metadata := asMap(response.Output["KeyMetadata"])
-	arn := str(metadata["Arn"])
-	switch str(metadata["KeyState"]) {
+	if slash := strings.LastIndex(keyID, "/"); slash >= 0 {
+		keyID = keyID[slash+1:]
+	}
+	raw, ok, _ := scope.Collection("kms").Get(ctx, keyID)
+	if !ok {
+		return &spi.Fault{Code: "KMS.NotFoundException", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	var key map[string]any
+	_ = json.Unmarshal(raw, &key)
+	arn := str(key["Arn"])
+	switch str(key["KeyState"]) {
 	case "Enabled":
 		return nil
 	case "PendingDeletion":

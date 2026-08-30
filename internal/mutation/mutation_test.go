@@ -216,8 +216,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-drop-kms-fault-namespace",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `return &spi.Fault{Code: "KMS.NotFoundException", Message: fault.Message, HTTPStatus: http.StatusBadRequest, Fault: "client"}`,
-			new:  `return &spi.Fault{Code: "NotFoundException", Message: fault.Message, HTTPStatus: http.StatusBadRequest, Fault: "client"}`,
+			old:  `return &spi.Fault{Code: "KMS.NotFoundException", HTTPStatus: http.StatusBadRequest, Fault: "client"}`,
+			new:  `return &spi.Fault{Code: "NotFoundException", HTTPStatus: http.StatusBadRequest, Fault: "client"}`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestExplicitKMSKeyValidation",
 		},

@@ -1,11 +1,15 @@
 {
   "accepted": [
     "bare-key-id",
-    "cross-account-arn"
+    "cross-account-arn",
+    "managed-key"
   ],
   "faults": {
     "copyMissing": "KMS.NotFoundException",
-    "crossRegion": "KMS.NotFoundException",
+    "crossRegion": {
+      "code": "KMS.NotFoundException",
+      "message": "Invalid arn us-west-2"
+    },
     "disabledRead": "KMS.DisabledException",
     "disabledWrite": "KMS.DisabledException",
     "multipartMissing": "KMS.NotFoundException",

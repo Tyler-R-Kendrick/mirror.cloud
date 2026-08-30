@@ -2139,6 +2139,8 @@ func TestExplicitKMSKeyValidation(t *testing.T) {
 	mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "source"}, []byte("source"))
 	keyID, keyARN := createKey(t, owner)
 	mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "enabled", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID}, []byte("body"))
+	mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "managed", "ServerSideEncryption": "aws:kms"}, []byte("body"))
+	mustInvoke(t, s3Pack, "GetObject", map[string]any{"Bucket": "kms-validation", "Key": "managed"}, nil)
 
 	faults := map[string]any{}
 	faults["putMissing"] = wantFault(t, "PutObject", "arn:aws:kms:us-east-1:123456789012:key/missing", "KMS.NotFoundException").Code
@@ -2146,7 +2148,11 @@ func TestExplicitKMSKeyValidation(t *testing.T) {
 	faults["copyMissing"] = wantFault(t, "CopyObject", "arn:aws:kms:us-east-1:123456789012:key/missing", "KMS.NotFoundException").Code
 
 	_, westARN := createKey(t, spi.Identity{Account: owner.Account, Region: "us-west-2"})
-	faults["crossRegion"] = wantFault(t, "PutObject", westARN, "KMS.NotFoundException").Code
+	crossRegion := wantFault(t, "PutObject", westARN, "KMS.NotFoundException")
+	if crossRegion.Message != "Invalid arn us-west-2" {
+		t.Fatalf("cross-region message = %q", crossRegion.Message)
+	}
+	faults["crossRegion"] = map[string]any{"code": crossRegion.Code, "message": crossRegion.Message}
 	kmsCall(t, owner, "DisableKey", map[string]any{"KeyId": keyID})
 	faults["disabledWrite"] = wantFault(t, "PutObject", keyARN, "KMS.DisabledException").Code
 	if _, err := invoke(t, s3Pack, "GetObject", map[string]any{"Bucket": "kms-validation", "Key": "enabled"}, nil); asFault(t, err).Code != "KMS.DisabledException" {
@@ -2165,7 +2171,7 @@ func TestExplicitKMSKeyValidation(t *testing.T) {
 	other := spi.Identity{Account: "999999999999", Region: owner.Region}
 	_, otherARN := createKey(t, other)
 	mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "cross-account", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": otherARN}, []byte("body"))
-	golden.AssertJSON(t, map[string]any{"accepted": []any{"bare-key-id", "cross-account-arn"}, "faults": faults})
+	golden.AssertJSON(t, map[string]any{"accepted": []any{"bare-key-id", "cross-account-arn", "managed-key"}, "faults": faults})
 }
 
 func TestBucketEncryptionConfiguration(t *testing.T) {

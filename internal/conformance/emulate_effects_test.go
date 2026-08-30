@@ -102,13 +102,17 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv("PutObjectRetention", map[string]any{"Bucket": "bucket", "Key": "k"}, nil, "")
 		inv("PutObject", map[string]any{"Bucket": "bucket", "Key": "archive", "StorageClass": "GLACIER"}, bytes.NewReader([]byte("cold")), "")
 		inv("RestoreObject", map[string]any{"Bucket": "bucket", "Key": "archive", "RestoreRequest": map[string]any{"Days": 1}}, nil, "")
-		inv("PutBucketAnalyticsConfiguration", map[string]any{"Bucket": "bucket", "Id": "a"}, nil, "")
+		inv("PutBucketAnalyticsConfiguration", map[string]any{"Bucket": "bucket", "Id": "a", "AnalyticsConfiguration": map[string]any{"Id": "a"}}, nil, "")
 		inv("DeleteBucketAnalyticsConfiguration", map[string]any{"Bucket": "bucket", "Id": "a"}, nil, "")
-		inv("PutBucketInventoryConfiguration", map[string]any{"Bucket": "bucket", "Id": "i"}, nil, "")
+		inv("PutBucketInventoryConfiguration", map[string]any{"Bucket": "bucket", "Id": "i", "InventoryConfiguration": map[string]any{
+			"Id": "i", "IsEnabled": true, "IncludedObjectVersions": "All",
+			"Destination": map[string]any{"S3BucketDestination": map[string]any{"Bucket": "arn:aws:s3:::bucket", "Format": "CSV"}},
+			"Schedule":    map[string]any{"Frequency": "Daily"},
+		}}, nil, "")
 		inv("DeleteBucketInventoryConfiguration", map[string]any{"Bucket": "bucket", "Id": "i"}, nil, "")
-		inv("PutBucketMetricsConfiguration", map[string]any{"Bucket": "bucket", "Id": "m"}, nil, "")
+		inv("PutBucketMetricsConfiguration", map[string]any{"Bucket": "bucket", "Id": "m", "MetricsConfiguration": map[string]any{"Id": "m"}}, nil, "")
 		inv("DeleteBucketMetricsConfiguration", map[string]any{"Bucket": "bucket", "Id": "m"}, nil, "")
-		inv("PutBucketIntelligentTieringConfiguration", map[string]any{"Bucket": "bucket", "Id": "t"}, nil, "")
+		inv("PutBucketIntelligentTieringConfiguration", map[string]any{"Bucket": "bucket", "Id": "t", "IntelligentTieringConfiguration": map[string]any{"Id": "t", "Status": "Enabled"}}, nil, "")
 		inv("DeleteBucketIntelligentTieringConfiguration", map[string]any{"Bucket": "bucket", "Id": "t"}, nil, "")
 		del := inv("DeleteObjects", map[string]any{"Bucket": "bucket", "Objects": []any{map[string]any{"Key": "k"}}}, nil, "")
 		if n := len(del.Output["Deleted"].([]any)); n != 1 {

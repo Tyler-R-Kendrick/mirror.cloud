@@ -86,6 +86,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestS3PresignedExpiryFaultCharacterization",
 		},
 		{
+			name: "s3-accept-incomplete-presigned-auth",
+			file: filepath.Join("internal", "edge", "edge.go"),
+			old:  `if fault := identity.PresignedAuthFault(r); fault != nil {`,
+			new:  `if fault := identity.PresignedAuthFault(r); false {`,
+			pkg:  "./internal/edge",
+			run:  "TestS3PresignedAuthFaultCharacterization",
+		},
+		{
 			name: "s3-drop-head-bucket-content-type",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `headers.Set("Content-Type", "application/xml")`,
@@ -13588,6 +13596,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  `true`,
 			pkg:  "./internal/identity",
 			run:  "TestParseAndExpiry",
+		},
+		{
+			name: "identity-accept-incomplete-presigned-auth",
+			file: filepath.Join("internal", "identity", "identity.go"),
+			old:  `if present && !complete {`,
+			new:  `if false {`,
+			pkg:  "./internal/identity",
+			run:  "TestPresignedAuthFault",
 		},
 		{
 			name: "identity-region-segment",

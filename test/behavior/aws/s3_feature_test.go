@@ -115,6 +115,23 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given incomplete presigned authentication When requested Then S3 rejects the query", func(t *testing.T) {
+		for name, target := range map[string]string{
+			"sigv2": "/bucket/key?AWSAccessKeyId=test&Signature=00",
+			"sigv4": "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test&X-Amz-Signature=00&X-Amz-Expires=60&X-Amz-SignedHeaders=host",
+		} {
+			response, err := http.Get(ts.URL + target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.Header.Get("Content-Type") != "application/xml" || response.Header.Get("x-amz-request-id") == "" || response.Header.Get("x-amz-id-2") == "" || !bytes.Contains(body, []byte("Query-string authentication")) {
+				t.Fatalf("%s incomplete presign %d %#v %s", name, response.StatusCode, response.Header, body)
+			}
+		}
+	})
+
 	t.Run("Given explicit KMS keys When writing and reading Then S3 validates their regional state", func(t *testing.T) {
 		res := do(http.MethodPut, "/kms-validation-bdd", nil, "")
 		res.Body.Close()

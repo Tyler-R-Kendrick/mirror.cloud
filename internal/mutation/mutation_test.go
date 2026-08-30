@@ -5505,6 +5505,19 @@ var mutants = []mutant{
 		run:  "TestStatesSyncServiceIntegrations",
 	},
 	{
+		// Inverting the predicate revokes exactly the assignments the request
+		// did not name and keeps the ones it did. A revoke that removes the
+		// wrong rows is the worst failure a permissions operation has, and it
+		// is invisible to any test that only checks the call succeeded -- so
+		// the test this names has to assert which rows survived.
+		name: "engine-delete-where-inverts-the-predicate",
+		file: filepath.Join("internal", "engine", "eval.go"),
+		old:  `if keep {`,
+		new:  `if !keep {`,
+		pkg:  "./internal/engine",
+		run:  "TestDeleteWhereRemovesEveryMatch",
+	},
+	{
 		// The Batch pack read both spellings of jobName; it is served from its
 		// own model now, which declares one, so the translation moved to the
 		// integration that introduces the discrepancy. The needle moved with

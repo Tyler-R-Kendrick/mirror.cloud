@@ -79,7 +79,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ssm"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ssoadmin"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sts"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/swf"

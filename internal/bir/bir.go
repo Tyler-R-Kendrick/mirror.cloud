@@ -380,6 +380,16 @@ type DeleteEffect struct {
 	Key      string `yaml:"key,omitempty"`
 	When     string `yaml:"when,omitempty"`
 	Missing  string `yaml:"missing,omitempty"`
+	// Where removes every record the predicate accepts, rather than the one
+	// record Key addresses. It is evaluated per record with the candidate
+	// bound to `item`, exactly as a list filter is, and Key must be empty.
+	//
+	// A revoke is not a delete of something the caller can name: IAM-shaped
+	// services grant permissions as rows and revoke them by describing which
+	// rows to drop. Without this such a service cannot be expressed at all,
+	// which is why it exists rather than being left to a bundle to fake with
+	// a read and a loop it has no way to write.
+	Where string `yaml:"where,omitempty"`
 }
 
 // CounterSpec increments a named monotonic counter, for sequence numbers.

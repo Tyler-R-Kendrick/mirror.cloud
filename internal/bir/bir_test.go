@@ -277,6 +277,7 @@ func listModel() *model.Service {
 		Protocol: model.ProtoAWSJSON10,
 		Operations: []model.Operation{
 			{Name: "ListThings", Output: "com.demo#ListThingsResponse"},
+			{Name: "DeleteThings"},
 		},
 		Shapes: map[string]model.Shape{
 			"com.demo#ListThingsResponse": {Kind: model.KindStructure, Members: map[string]model.Member{
@@ -353,6 +354,53 @@ func TestListItemMembersMustBeDeclared(t *testing.T) {
 			"    output:\n      Things: \"items.map(t, {'ThingId': t.ThingId})\"\n"
 		if _, err := loadList(t, body); err != nil {
 			t.Fatalf("a projected listing must load: %v", err)
+		}
+	})
+}
+
+// TestDeleteWhereIsCheckedLikeAFilter covers the loader's half of the filtered
+// delete: the predicate sees the candidate as `item` the way a list filter
+// does, and naming both a key and a predicate is refused rather than silently
+// resolved one way.
+func TestDeleteWhereIsCheckedLikeAFilter(t *testing.T) {
+	const deleting = `
+  DeleteThings:
+    effects:
+      - delete: { resource: thing, where: "string(item.ThingId) != ''" }
+`
+	if _, err := loadList(t, listBundle+deleting); err != nil {
+		t.Fatalf("a delete predicate over `item` must load: %v", err)
+	}
+
+	t.Run("the predicate is compiled", func(t *testing.T) {
+		body := strings.Replace(listBundle+deleting,
+			`where: "string(item.ThingId) != ''"`, `where: "string(item.Nope"`, 1)
+		if _, err := loadList(t, body); err == nil {
+			t.Fatal("a predicate that does not compile must be rejected")
+		}
+	})
+
+	t.Run("the predicate does not see a record it was not given", func(t *testing.T) {
+		body := strings.Replace(listBundle+deleting,
+			`where: "string(item.ThingId) != ''"`, `where: "string(other.ThingId) != ''"`, 1)
+		_, err := loadList(t, body)
+		if err == nil {
+			t.Fatal("a predicate naming an unbound value must be rejected")
+		}
+		if !strings.Contains(err.Error(), "other") {
+			t.Fatalf("the error must name what is unbound: %v", err)
+		}
+	})
+
+	t.Run("a key and a predicate together are refused", func(t *testing.T) {
+		body := strings.Replace(listBundle+deleting,
+			`{ resource: thing, where:`, `{ resource: thing, key: "'x'", where:`, 1)
+		_, err := loadList(t, body)
+		if err == nil {
+			t.Fatal("naming both a key and a predicate must be rejected")
+		}
+		if !strings.Contains(err.Error(), "only one of them") {
+			t.Fatalf("the error must say why: %v", err)
 		}
 	})
 }

@@ -661,6 +661,13 @@ func (ev *eval) remove(ctx context.Context, path string, d bir.DeleteEffect) err
 			return nil
 		}
 	}
+	col, err := ev.collection(res)
+	if err != nil {
+		return err
+	}
+	if d.Where != "" {
+		return ev.removeWhere(ctx, path, col)
+	}
 	key := ev.id
 	if key == "" {
 		k, err := ev.resourceKey(res, d.Key, path+".key")
@@ -669,11 +676,43 @@ func (ev *eval) remove(ctx context.Context, path string, d bir.DeleteEffect) err
 		}
 		key = k
 	}
-	col, err := ev.collection(res)
+	return col.Delete(ctx, key)
+}
+
+// removeWhere deletes every record the predicate accepts. The candidate is
+// bound to `item` for the predicate and unbound afterwards, the same contract
+// a list filter has, so a bundle reads the same either way.
+//
+// The keys are collected before anything is deleted: mutating a collection
+// while iterating it is the kind of thing that works until the store changes
+// underneath it.
+func (ev *eval) removeWhere(ctx context.Context, path string, col spi.Collection) error {
+	entries, _, err := col.List(ctx, "", "", 0)
 	if err != nil {
 		return err
 	}
-	return col.Delete(ctx, key)
+	var doomed []string
+	for _, kv := range entries {
+		rec := map[string]any{}
+		if err := unmarshal(kv.Value, &rec); err != nil {
+			return err
+		}
+		ev.binds["item"] = rec
+		keep, evalErr := ev.evalBool(path + ".where")
+		delete(ev.binds, "item")
+		if evalErr != nil {
+			return evalErr
+		}
+		if keep {
+			doomed = append(doomed, kv.Key)
+		}
+	}
+	for _, key := range doomed {
+		if err := col.Delete(ctx, key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // generate produces an identifier from the deterministic Rand, so the same

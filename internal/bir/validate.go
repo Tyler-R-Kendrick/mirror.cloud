@@ -252,7 +252,8 @@ func Validate(s *Service, svc *model.Service) error {
 		}
 
 		for i, eff := range op.Effects {
-			validateEffect(s, fmt.Sprintf("%s.effects[%d]", where, i), eff, compile, &problems)
+			validateEffect(s, fmt.Sprintf("%s.effects[%d]", where, i), eff, compile,
+				compilerFor(append(append([]string{}, scope...), "item")...), &problems)
 		}
 
 		if l := op.List; l != nil {
@@ -474,7 +475,9 @@ func validateStatechart(s *Service, where string, sc *Statechart, compile func(s
 	}
 }
 
-func validateEffect(s *Service, where string, eff Effect, compile func(string, string), problems *Errors) {
+// perItem compiles the expressions an effect evaluates once per stored record,
+// which see the candidate as `item` and nothing else an effect ordinarily sees.
+func validateEffect(s *Service, where string, eff Effect, compile, perItem func(string, string), problems *Errors) {
 	set := 0
 	res := func(name, field string) {
 		set++
@@ -518,6 +521,12 @@ func validateEffect(s *Service, where string, eff Effect, compile func(string, s
 		res(e.Resource, "delete")
 		compile(where+".delete.key", e.Key)
 		compile(where+".delete.when", e.When)
+		perItem(where+".delete.where", e.Where)
+		if e.Where != "" && e.Key != "" {
+			*problems = append(*problems, fmt.Errorf(
+				"%s: %s.delete: `where` removes every record it accepts and `key` "+
+					"removes one, so a delete may name only one of them", s.ServiceID, where))
+		}
 	}
 	if e := eff.Counter; e != nil {
 		set++

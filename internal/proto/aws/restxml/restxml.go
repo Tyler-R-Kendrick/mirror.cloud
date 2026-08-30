@@ -1220,6 +1220,12 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		w.WriteHeader(status)
 		return nil
 	}
+	if op.Name == "GetBucketPolicy" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, err := io.WriteString(w, fmt.Sprint(resp.Output["Policy"]))
+		return err
+	}
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(status)
 	if resp.Output == nil {

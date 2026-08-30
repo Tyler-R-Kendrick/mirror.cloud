@@ -151,6 +151,20 @@ func TestEncodeDeleteObjectsXML(t *testing.T) {
 	}
 }
 
+func TestBucketPolicyPayload(t *testing.T) {
+	policy := `{"Version":"2012-10-17","Statement":[]}`
+	r := httptest.NewRequest(http.MethodPut, "http://127.0.0.1/b?policy", strings.NewReader(policy))
+	decoded, err := (Codec{}).Decode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "PutBucketPolicy"}, r)
+	if err != nil || decoded.Input["Policy"] != policy {
+		t.Fatalf("decoded policy = %#v, err=%v", decoded.Input, err)
+	}
+	w := httptest.NewRecorder()
+	err = (Codec{}).Encode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "GetBucketPolicy"}, w, &spi.Response{Output: map[string]any{"Policy": policy}})
+	if err != nil || w.Code != http.StatusOK || w.Header().Get("Content-Type") != "application/json" || w.Body.String() != policy {
+		t.Fatalf("encoded policy = code %d headers=%v body=%q err=%v", w.Code, w.Header(), w.Body.String(), err)
+	}
+}
+
 func TestDecodeObjectLockXML(t *testing.T) {
 	tests := []struct {
 		op, body, field string

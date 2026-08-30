@@ -2643,6 +2643,11 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	col := p.col(req, "bktcfg")
 	if strings.HasPrefix(req.Operation, "Put") {
+		if req.Operation == "PutBucketPolicy" {
+			if err := validateBucketPolicy(str(req.Input["Policy"])); err != nil {
+				return nil, err
+			}
+		}
 		if req.Operation == "PutBucketAcl" || req.Operation == "PutObjectAcl" {
 			acl, _, err := requestACL(req, true)
 			if err != nil {
@@ -2828,6 +2833,9 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 			return nil, &spi.Fault{Code: "NoSuchWebsiteConfiguration", Message: "The specified bucket does not have a website configuration", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": b}}
 		}
 		if miss != nil {
+			if req.Operation == "GetBucketPolicy" {
+				miss.Fields = map[string]any{"BucketName": b}
+			}
 			return nil, miss
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
@@ -2852,7 +2860,27 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if req.Operation == "GetBucketWebsite" {
 		return &spi.Response{Status: 200, Output: asMap(doc["WebsiteConfiguration"])}, nil
 	}
+	if req.Operation == "GetBucketPolicy" {
+		return &spi.Response{Status: 200, Output: map[string]any{"Policy": str(doc["Policy"])}}, nil
+	}
 	return &spi.Response{Status: 200, Output: doc}, nil
+}
+
+func validateBucketPolicy(policy string) error {
+	malformed := func(message string) error {
+		return &spi.Fault{Code: "MalformedPolicy", Message: message, HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if policy == "" || policy[0] != '{' {
+		return malformed("Policies must be valid JSON and the first byte must be '{'")
+	}
+	var document map[string]any
+	if json.Unmarshal([]byte(policy), &document) != nil {
+		return malformed("Policies must be valid JSON and the first byte must be '{'")
+	}
+	if len(document) == 0 {
+		return malformed("Missing required field Statement")
+	}
+	return nil
 }
 
 func requestACL(req *spi.Request, required bool) (map[string]any, bool, error) {

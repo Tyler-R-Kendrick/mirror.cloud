@@ -2440,8 +2440,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-archive-hide-get-restore-header",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "h.Set(\"ETag\", etag)\n\th.Set(\"Accept-Ranges\", \"bytes\")\n\tsetObjectMetadataHeaders(h, meta)\n\tif restore, ok := p.restoreState(ctx, req, b, key, meta); ok {",
-			new:  "h.Set(\"ETag\", etag)\n\th.Set(\"Accept-Ranges\", \"bytes\")\n\tsetObjectMetadataHeaders(h, meta)\n\tif restore, ok := \"\", false; ok {",
+			old:  `if restore, ok := p.restoreState(ctx, req, b, key, meta); ok {`,
+			new:  `if restore, ok := "", false; ok {`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestArchiveRestoreCharacterization",
 		},

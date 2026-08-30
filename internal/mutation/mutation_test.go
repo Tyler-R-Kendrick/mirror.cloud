@@ -13642,8 +13642,8 @@ func TestMutantsAreKilled(t *testing.T) {
 			file: filepath.Join("internal", "identity", "s3_signature.go"),
 			old:  `return VerifyS3AuthorizationV2(r, secret)`,
 			new:  `return nil`,
-			pkg:  "./internal/edge",
-			run:  "TestS3PresignedSignatureFaultCharacterization",
+			pkg:  "./internal/identity",
+			run:  "TestVerifyS3AuthorizationV2AWSExample",
 		},
 		{
 			name: "edge-skip-s3-authorization-time-skew",

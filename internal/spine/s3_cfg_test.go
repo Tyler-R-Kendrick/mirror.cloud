@@ -50,14 +50,14 @@ func TestBootedServerS3BucketConfigsRoundTrip(t *testing.T) {
 	if code, b := do(http.MethodPut, "/cfgb", ""); code >= 300 {
 		t.Fatalf("mb %d %s", code, b)
 	}
-	if code, b := do(http.MethodGet, "/cfgb?encryption", ""); code != 404 || !bytes.Contains(b, []byte("ServerSideEncryptionConfigurationNotFoundError")) && !bytes.Contains(b, []byte("encryption")) {
-		t.Fatalf("missing encryption want 404, %d %s", code, b)
+	if code, b := do(http.MethodGet, "/cfgb?encryption", ""); code != http.StatusOK || len(b) != 0 {
+		t.Fatalf("default encryption %d %s", code, b)
 	}
 	enc := `<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>arn:aws:kms:us-east-1:000000000000:key/contract</KMSMasterKeyID></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`
 	if code, b := do(http.MethodPut, "/cfgb?encryption", enc); code >= 300 {
 		t.Fatalf("put enc %d %s", code, b)
 	}
-	if code, b := do(http.MethodGet, "/cfgb?encryption", ""); code != 200 || !bytes.Contains(b, []byte("aws:kms")) && !bytes.Contains(b, []byte("Document")) && !bytes.Contains(b, []byte("_body")) {
+	if code, b := do(http.MethodGet, "/cfgb?encryption", ""); code != http.StatusOK || !bytes.Contains(b, []byte("<ServerSideEncryptionConfiguration")) || !bytes.Contains(b, []byte("<SSEAlgorithm>aws:kms</SSEAlgorithm>")) || !bytes.Contains(b, []byte("<KMSMasterKeyID>arn:aws:kms:us-east-1:000000000000:key/contract</KMSMasterKeyID>")) || !bytes.Contains(b, []byte("<BucketKeyEnabled>true</BucketKeyEnabled>")) || bytes.Contains(b, []byte("Document")) {
 		t.Fatalf("get enc %d %s", code, b)
 	}
 	pol := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:*","Resource":"*"}]}`

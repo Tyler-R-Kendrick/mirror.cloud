@@ -41,6 +41,23 @@ func FuzzVerifyS3AuthorizationV4(f *testing.F) {
 	})
 }
 
+func FuzzVerifyS3AuthorizationV2(f *testing.F) {
+	f.Add("GET", "/photos/puppy.jpg", "AKIAIOSFODNN7EXAMPLE", "qgk2+6Sv9/oM7G3qLEjTH1a1l1g=", "awsexamplebucket1.s3.us-west-1.amazonaws.com", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+	f.Fuzz(func(t *testing.T, method, path, accessKey, signature, host, secret string) {
+		if method == "" || path == "" || path[0] != '/' {
+			t.Skip()
+		}
+		request, err := http.NewRequest(method, "https://example.test"+path, nil)
+		if err != nil {
+			t.Skip()
+		}
+		request.Host = host
+		request.Header.Set("Date", "Tue, 27 Mar 2007 19:36:42 +0000")
+		request.Header.Set("Authorization", "AWS "+accessKey+":"+signature)
+		_ = VerifyS3AuthorizationV2(request, secret)
+	})
+}
+
 func FuzzVerifyS3StreamingV4(f *testing.F) {
 	f.Add([]byte("hello"), "87081aa8d08ebfccd3aa73e18ac88541cf2050c23a5a49a9e46d94a70d84f2a4", "eaf2700e23d624c531f0f9a0c7312b66470ab3aee81742bfa00dfc9cf6ca0f4e", "test")
 	f.Fuzz(func(t *testing.T, data []byte, signature, finalSignature, secret string) {

@@ -76,6 +76,31 @@ func TestAWSSDKPresignedSignatureValidation(t *testing.T) {
 	if _, err := tamperedClient.ListBuckets(context.Background(), &s3.ListBucketsInput{}); err == nil || !strings.Contains(err.Error(), "SignatureDoesNotMatch") {
 		t.Fatalf("tampered authorization: %v", err)
 	}
+	sigV2, err := http.NewRequest(http.MethodGet, ts.URL+"/signed/object", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sigV2.Header.Set("Date", "Tue, 27 Mar 2007 19:36:42 +0000")
+	sigV2.Header.Set("Authorization", "AWS test:SCXHUxO6W8++sAUnYeZoKDLfDiU=")
+	response, err := http.DefaultClient.Do(sigV2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || string(body) != "verified" {
+		t.Fatalf("valid SigV2 authorization: %d %s", response.StatusCode, body)
+	}
+	sigV2.Header.Set("Authorization", "AWS test:AAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	response, err = http.DefaultClient.Do(sigV2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
+		t.Fatalf("tampered SigV2 authorization: %d %s", response.StatusCode, body)
+	}
 	if _, err := client.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("streaming")}); err != nil {
 		t.Fatal(err)
 	}

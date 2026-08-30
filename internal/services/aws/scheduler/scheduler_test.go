@@ -31,6 +31,55 @@ func TestSchedulerHTTPProvenOps(t *testing.T) {
 	}
 }
 
+type deadlineRaceClock struct {
+	*clock.Controllable
+	advanced atomic.Bool
+}
+
+func (c *deadlineRaceClock) jump() {
+	if c.advanced.CompareAndSwap(false, true) {
+		_ = c.Advance(2 * time.Minute)
+	}
+}
+
+func (c *deadlineRaceClock) After(d time.Duration) <-chan time.Time {
+	c.jump()
+	return c.Controllable.After(d)
+}
+
+func (c *deadlineRaceClock) AfterUntil(at time.Time) <-chan time.Time {
+	c.jump()
+	return c.Controllable.AfterUntil(at)
+}
+
+func TestSchedulerWaitsForAbsoluteDeadline(t *testing.T) {
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	deps.Clock = &deadlineRaceClock{Controllable: clock.NewControllable()}
+	queue := sqs.New(deps)
+	if _, err := queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "jobs"}}); err != nil {
+		t.Fatal(err)
+	}
+	arn := "arn:aws:scheduler:us-east-1:123456789012:schedule/default/once"
+	rec, fault := (&Pack{deps: deps}).scheduleRecord(scheduleInput("once", "at(1970-01-01T00:01:00)", time.Time{}, "jobs", "work"), "once", "default", arn)
+	if fault != nil {
+		t.Fatal(fault)
+	}
+	if err := putRecord(ctx, deps.Store.Scope(id.Account, id.Region).Collection("sch:default"), "once", rec); err != nil {
+		t.Fatal(err)
+	}
+	p := New(deps)
+	defer p.Close()
+	deadline := time.Now().Add(time.Second)
+	for len(queueBodies(t, deps, id, "jobs")) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := queueBodies(t, deps, id, "jobs"); len(got) != 1 || got[0] != "work" {
+		t.Fatalf("absolute deadline delivery: %v", got)
+	}
+}
+
 func TestBootedServerSchedulerCreateGetDelete(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []string{"aws.scheduler"}

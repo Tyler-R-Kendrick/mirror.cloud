@@ -48,8 +48,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-return-upload-part-xml-body",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "\tsetObjectEncryptionHeaders(h, encryption)\n\treturn &spi.Response{Headers: h}, nil\n}\n\nfunc (p *Pack) completeMPU",
-			new:  "\tsetObjectEncryptionHeaders(h, encryption)\n\treturn &spi.Response{Headers: h, Output: map[string]any{\"ETag\": etag}}, nil\n}\n\nfunc (p *Pack) completeMPU",
+			old:  `if req.Operation == "UploadPartCopy" {`,
+			new:  `if true {`,
 			pkg:  "./test/behavior/aws",
 			run:  "TestS3ObjectLifecycle/Given_KMS_multipart_encryption",
 		},

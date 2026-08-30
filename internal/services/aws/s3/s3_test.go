@@ -2049,6 +2049,39 @@ func TestObjectMetadata(t *testing.T) {
 	})
 }
 
+func TestGetObjectResponseHeaderOverrides(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "response-overrides"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{
+		"Bucket": "response-overrides", "Key": "object", "CacheControl": "stored", "ContentDisposition": "inline",
+		"ContentEncoding": "gzip", "ContentLanguage": "en-US", "ContentType": "application/json", "Expires": "Thu, 22 Oct 2026 07:28:00 GMT",
+	}, []byte("body"))
+	overrides := map[string]any{
+		"Bucket": "response-overrides", "Key": "object", "ResponseCacheControl": "max-age=74",
+		"ResponseContentDisposition": `attachment; filename="foo.jpg"`, "ResponseContentEncoding": "identity",
+		"ResponseContentLanguage": "de-DE", "ResponseContentType": "image/jpeg", "ResponseExpires": "Wed, 21 Oct 2015 07:28:00 GMT",
+	}
+	response := mustInvoke(t, p, "GetObject", overrides, nil)
+	if string(readStream(t, response)) != "body" {
+		t.Fatal("response override changed body")
+	}
+	got := map[string]any{
+		"cacheControl": response.Headers.Get("Cache-Control"), "contentDisposition": response.Headers.Get("Content-Disposition"),
+		"contentEncoding": response.Headers.Get("Content-Encoding"), "contentLanguage": response.Headers.Get("Content-Language"),
+		"contentType": response.Headers.Get("Content-Type"), "expires": response.Headers.Get("Expires"),
+	}
+	ranged := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "response-overrides", "Key": "object", "Range": "bytes=0-1", "response-content-type": "text/csv"}, nil)
+	if ranged.Status != http.StatusPartialContent || ranged.Headers.Get("Content-Type") != "text/csv" || string(readStream(t, ranged)) != "bo" {
+		t.Fatalf("ranged override = %d %v", ranged.Status, ranged.Headers)
+	}
+	stored := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "response-overrides", "Key": "object"}, nil)
+	readStream(t, stored)
+	if stored.Headers.Get("Cache-Control") != "stored" || stored.Headers.Get("Content-Type") != "application/json" || stored.Headers.Get("Expires") != "Thu, 22 Oct 2026 07:28:00 GMT" {
+		t.Fatalf("overrides changed stored metadata = %v", stored.Headers)
+	}
+	golden.AssertJSON(t, map[string]any{"overrides": got, "range": map[string]any{"body": "bo", "contentType": ranged.Headers.Get("Content-Type"), "status": ranged.Status}, "stored": map[string]any{"cacheControl": stored.Headers.Get("Cache-Control"), "contentType": stored.Headers.Get("Content-Type"), "expires": stored.Headers.Get("Expires")}})
+}
+
 func TestObjectServerSideEncryption(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

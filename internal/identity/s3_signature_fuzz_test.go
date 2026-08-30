@@ -40,6 +40,20 @@ func FuzzVerifyS3AuthorizationV4(f *testing.F) {
 	})
 }
 
+func FuzzVerifyS3StreamingV4(f *testing.F) {
+	f.Add([]byte("hello"), "87081aa8d08ebfccd3aa73e18ac88541cf2050c23a5a49a9e46d94a70d84f2a4", "eaf2700e23d624c531f0f9a0c7312b66470ab3aee81742bfa00dfc9cf6ca0f4e", "test")
+	f.Fuzz(func(t *testing.T, data []byte, signature, finalSignature, secret string) {
+		request, err := http.NewRequest(http.MethodPut, "https://s3.localhost.localstack.cloud:4566/streaming/object", nil)
+		if err != nil {
+			t.Skip()
+		}
+		request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+		request.Header.Set("X-Amz-Date", "20990101T000000Z")
+		request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20990101/us-east-1/s3/aws4_request,SignedHeaders=host;x-amz-content-sha256;x-amz-date,Signature=d32bab45d70b05d89ada2e57acc27c4117cf31f7ce3de470cf916b8f89558054")
+		_ = VerifyS3StreamingV4(request, secret, [][]byte{data, nil}, []string{signature, finalSignature})
+	})
+}
+
 func FuzzVerifyS3PresignedV2(f *testing.F) {
 	f.Add("GET", "/bucket/key", "signature", "localhost", "test")
 	f.Fuzz(func(t *testing.T, method, path, signature, host, secret string) {

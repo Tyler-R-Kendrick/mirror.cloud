@@ -1,0 +1,13 @@
+{
+  "stored": {
+    "body": "hello",
+    "status": 200
+  },
+  "tampered": {
+    "code": "SignatureDoesNotMatch",
+    "status": 403
+  },
+  "valid": {
+    "status": 200
+  }
+}

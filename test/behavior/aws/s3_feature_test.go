@@ -177,6 +177,40 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
 			t.Fatalf("tampered authorization %d %s", response.StatusCode, body)
 		}
+		createStreaming, err := http.NewRequest(http.MethodPut, strictServer.URL+"/streaming", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err = http.DefaultClient.Do(createStreaming)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		for name, tc := range map[string]struct {
+			payload string
+			status  int
+		}{"valid stream": {"hello", http.StatusOK}, "tampered stream": {"jello", http.StatusForbidden}} {
+			raw := "5;chunk-signature=87081aa8d08ebfccd3aa73e18ac88541cf2050c23a5a49a9e46d94a70d84f2a4\r\n" + tc.payload + "\r\n0;chunk-signature=eaf2700e23d624c531f0f9a0c7312b66470ab3aee81742bfa00dfc9cf6ca0f4e\r\n\r\n"
+			stream, err := http.NewRequest(http.MethodPut, strictServer.URL+"/streaming/object", strings.NewReader(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream.Host = "s3.localhost.localstack.cloud:4566"
+			stream.Header.Set("Content-Encoding", "aws-chunked")
+			stream.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+			stream.Header.Set("X-Amz-Date", "20990101T000000Z")
+			stream.Header.Set("X-Amz-Decoded-Content-Length", "5")
+			stream.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20990101/us-east-1/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length,Signature=d32bab45d70b05d89ada2e57acc27c4117cf31f7ce3de470cf916b8f89558054")
+			response, err = http.DefaultClient.Do(stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ = io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != tc.status {
+				t.Fatalf("%s: %d %s", name, response.StatusCode, body)
+			}
+		}
 		if err := deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), "temporary", []byte("000000000000")); err != nil {
 			t.Fatal(err)
 		}

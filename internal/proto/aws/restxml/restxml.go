@@ -413,6 +413,48 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 			return
 		}
 		in[namedConfigurationShape(op).configuration] = configuration
+	case "PutBucketAcl", "PutObjectAcl":
+		var policy struct {
+			XMLName xml.Name
+			Owner   *struct {
+				ID          string `xml:"ID"`
+				DisplayName string `xml:"DisplayName"`
+			} `xml:"Owner"`
+			AccessControlList *struct {
+				Grants []struct {
+					Grantee struct {
+						Type         string `xml:"type,attr"`
+						ID           string `xml:"ID"`
+						DisplayName  string `xml:"DisplayName"`
+						URI          string `xml:"URI"`
+						EmailAddress string `xml:"EmailAddress"`
+					} `xml:"Grantee"`
+					Permission string `xml:"Permission"`
+				} `xml:"Grant"`
+			} `xml:"AccessControlList"`
+		}
+		if xml.Unmarshal(raw, &policy) != nil || policy.XMLName.Local != "AccessControlPolicy" {
+			in["_body"] = string(raw)
+			return
+		}
+		document := map[string]any{}
+		if policy.Owner != nil {
+			document["Owner"] = map[string]any{"ID": policy.Owner.ID, "DisplayName": policy.Owner.DisplayName}
+		}
+		if policy.AccessControlList != nil {
+			grants := make([]any, 0, len(policy.AccessControlList.Grants))
+			for _, grant := range policy.AccessControlList.Grants {
+				grantee := map[string]any{"Type": grant.Grantee.Type}
+				for field, value := range map[string]string{"ID": grant.Grantee.ID, "DisplayName": grant.Grantee.DisplayName, "URI": grant.Grantee.URI, "EmailAddress": grant.Grantee.EmailAddress} {
+					if value != "" {
+						grantee[field] = value
+					}
+				}
+				grants = append(grants, map[string]any{"Grantee": grantee, "Permission": grant.Permission})
+			}
+			document["Grants"] = grants
+		}
+		in["AccessControlPolicy"] = document
 	case "CreateBucket":
 		var cfg struct {
 			LocationConstraint string `xml:"LocationConstraint"`
@@ -1024,7 +1066,7 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 			rules = append(rules, rule)
 		}
 		in["LifecycleConfiguration"] = map[string]any{"Rules": rules}
-	case "PutBucketEncryption", "PutBucketAcl", "PutObjectAcl":
+	case "PutBucketEncryption":
 		in["_body"] = string(raw)
 		in["Document"] = string(raw)
 	case "PutBucketVersioning":
@@ -1318,6 +1360,31 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 			b.WriteString("<EventBridgeConfiguration></EventBridgeConfiguration>")
 		}
 		b.WriteString("</NotificationConfiguration>")
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
+	if op.Name == "GetBucketAcl" || op.Name == "GetObjectAcl" {
+		b.WriteString(`<AccessControlPolicy xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
+		owner, _ := resp.Output["Owner"].(map[string]any)
+		b.WriteString("<Owner>")
+		for _, field := range []string{"ID", "DisplayName"} {
+			if value := xmlString(owner[field]); value != "" {
+				fmt.Fprintf(&b, "<%s>%s</%s>", field, xmlEscape(value), field)
+			}
+		}
+		b.WriteString("</Owner><AccessControlList>")
+		for _, value := range asAnySlice(resp.Output["Grants"]) {
+			grant, _ := value.(map[string]any)
+			grantee, _ := grant["Grantee"].(map[string]any)
+			b.WriteString(`<Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="` + xmlEscape(xmlString(grantee["Type"])) + `">`)
+			for _, field := range []string{"ID", "DisplayName", "URI", "EmailAddress"} {
+				if value := xmlString(grantee[field]); value != "" {
+					fmt.Fprintf(&b, "<%s>%s</%s>", field, xmlEscape(value), field)
+				}
+			}
+			b.WriteString("</Grantee><Permission>" + xmlEscape(xmlString(grant["Permission"])) + "</Permission></Grant>")
+		}
+		b.WriteString("</AccessControlList></AccessControlPolicy>")
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
@@ -1677,4 +1744,9 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 func xmlEscape(s string) string {
 	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 	return r.Replace(s)
+}
+
+func xmlString(value any) string {
+	result, _ := value.(string)
+	return result
 }

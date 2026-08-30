@@ -86,7 +86,7 @@ func TestVerifyS3AuthorizationV2AWSExample(t *testing.T) {
 	if fault := VerifyS3AuthorizationV2(request, secret); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 		t.Fatalf("tampered date accepted: %#v", fault)
 	}
-	if fault := VerifyS3Signature(request, secret); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+	if fault := VerifyS3Signature(request, "AKIAIOSFODNN7EXAMPLE", secret, "us-west-1"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 		t.Fatalf("dispatcher accepted tampered SigV2 authorization: %#v", fault)
 	}
 }

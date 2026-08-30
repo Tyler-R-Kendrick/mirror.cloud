@@ -153,11 +153,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		fault := identity.VerifyS3Signature(r, secret)
+		fault := identity.VerifyS3Signature(r, id.AccessKeyID, secret, id.Region)
 		if host := signedGatewayHost(r.Host, s.cfg.Bind); fault != nil && host != "" {
 			candidate := r.Clone(ctx)
 			candidate.Host = host
-			fault = identity.VerifyS3Signature(candidate, secret)
+			fault = identity.VerifyS3Signature(candidate, id.AccessKeyID, secret, id.Region)
 		}
 		if fault == nil {
 			fault = identity.S3AuthorizationTimeFault(r, s.deps.Clock.Now())

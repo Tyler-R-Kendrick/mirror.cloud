@@ -1,0 +1,6 @@
+{
+  "code": "SignatureDoesNotMatch",
+  "content_type": "application/xml",
+  "message": "The request signature we calculated does not match the signature you provided.",
+  "status": 403
+}

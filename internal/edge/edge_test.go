@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -210,6 +211,50 @@ func TestS3PutGetAndForeignService501(t *testing.T) {
 		t.Fatalf("unknown service %d %s", ures.StatusCode, ubody)
 	}
 	golden.AssertJSON(t, map[string]any{"create": createEnvelope, "get": getEnvelope, "head": headEnvelope, "missing": missingEnvelope, "put": putEnvelope})
+}
+
+func TestS3PresignedExpiryFaultCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	results := map[string]any{}
+	for name, target := range map[string]string{
+		"sigv2": "/bucket/key?AWSAccessKeyId=AKIATEST&Expires=-1&Signature=00",
+		"sigv4": "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIATEST%2F19691231%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=19691231T235900Z&X-Amz-Expires=30&X-Amz-SignedHeaders=host&X-Amz-Signature=00",
+	} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
+		var fault struct {
+			Code       string `xml:"Code"`
+			Message    string `xml:"Message"`
+			Expires    string `xml:"Expires"`
+			ServerTime string `xml:"ServerTime"`
+			AmzExpires string `xml:"X-Amz-Expires"`
+			RequestID  string `xml:"RequestId"`
+			HostID     string `xml:"HostId"`
+		}
+		if err := xml.Unmarshal(recorder.Body.Bytes(), &fault); err != nil {
+			t.Fatalf("%s decode: %v: %s", name, err, recorder.Body.String())
+		}
+		if recorder.Code != http.StatusForbidden || fault.Code != "AccessDenied" || fault.Message != "Request has expired" || fault.Expires == "" || fault.ServerTime == "" || fault.RequestID == "" || fault.HostID == "" {
+			t.Fatalf("%s response: status=%d headers=%#v fault=%#v", name, recorder.Code, recorder.Header(), fault)
+		}
+		results[name] = map[string]any{
+			"amz_expires":  fault.AmzExpires,
+			"code":         fault.Code,
+			"content_type": recorder.Header().Get("Content-Type"),
+			"expires":      fault.Expires,
+			"message":      fault.Message,
+			"server_time":  fault.ServerTime,
+			"status":       recorder.Code,
+		}
+	}
+	golden.AssertJSON(t, results)
 }
 
 func FuzzS3ResponseEnvelope(f *testing.F) {

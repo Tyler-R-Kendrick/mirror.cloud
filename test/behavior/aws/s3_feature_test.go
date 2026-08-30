@@ -120,6 +120,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		for name, target := range map[string]string{
 			"sigv2": "/bucket/key?AWSAccessKeyId=test&Signature=00",
 			"sigv4": "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test&X-Amz-Signature=00&X-Amz-Expires=60&X-Amz-SignedHeaders=host",
+			"sigv4a": "/bucket/key?X-Amz-Algorithm=AWS4-ECDSA-P256-SHA256&X-Amz-Credential=test%2F20990101%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=00",
 		} {
 			response, err := http.Get(ts.URL + target)
 			if err != nil {
@@ -159,6 +160,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		for name, strictTarget := range map[string]string{
 			"sigv2": "/bucket/key?AWSAccessKeyId=test&Expires=4070908800&Signature=AAAAAAAAAAAAAAAAAAAAAAAAAAA%3D",
 			"sigv4": target,
+			"sigv4a": "/bucket/key?X-Amz-Algorithm=AWS4-ECDSA-P256-SHA256&X-Amz-Credential=test%2F20990101%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-Region-Set=us-east-1&X-Amz-SignedHeaders=host&X-Amz-Signature=00",
 		} {
 			response, err = http.Get(strictServer.URL + strictTarget)
 			if err != nil {

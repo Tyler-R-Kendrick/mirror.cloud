@@ -1410,10 +1410,10 @@ func FuzzReplicationDestinations(f *testing.F) {
 }
 
 func FuzzPostObjectMultipart(f *testing.F) {
-	f.Add("file.txt", "body", true)
-	f.Add("", "", false)
-	f.Fuzz(func(t *testing.T, filename, body string, created bool) {
-		if len(filename) > 512 || len(body) > 4096 || !utf8.ValidString(filename) || strings.IndexFunc(filename, func(r rune) bool { return r < ' ' || r == 0x7f }) >= 0 {
+	f.Add("file.txt", "body", true, "metadata")
+	f.Add("", "", false, "—_é")
+	f.Fuzz(func(t *testing.T, filename, body string, created bool, metadata string) {
+		if len(filename) > 512 || len(body) > 4096 || len(metadata) > 256 || !utf8.ValidString(filename) || !utf8.ValidString(metadata) || strings.IndexFunc(filename, func(r rune) bool { return r < ' ' || r == 0x7f }) >= 0 {
 			t.Skip()
 		}
 		p := s3.New(spitest.Deps(t))
@@ -1424,6 +1424,8 @@ func FuzzPostObjectMultipart(f *testing.F) {
 		if created {
 			_ = writer.WriteField("success_action_status", "201")
 		}
+		metadata = "Ä" + metadata
+		_ = writer.WriteField("x-amz-meta-value", metadata)
 		file, err := writer.CreateFormFile("file", filename)
 		if err != nil {
 			t.Skip()
@@ -1450,6 +1452,10 @@ func FuzzPostObjectMultipart(f *testing.F) {
 		got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "post-fuzz", "Key": "fuzz/" + effectiveFilename}, nil)
 		if stored := string(readStream(t, got)); stored != body {
 			t.Fatalf("body=%q want=%q", stored, body)
+		}
+		decoded, err := new(mime.WordDecoder).DecodeHeader(got.Headers.Get("x-amz-meta-value"))
+		if err != nil || decoded != metadata {
+			t.Fatalf("metadata=%q decoded=%q: %v", metadata, decoded, err)
 		}
 	})
 }

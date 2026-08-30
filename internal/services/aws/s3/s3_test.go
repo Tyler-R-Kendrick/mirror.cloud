@@ -4738,6 +4738,10 @@ func TestPostObjectMultipartUpload(t *testing.T) {
 	_ = writer.WriteField("success_action_status", "201")
 	_ = writer.WriteField("Content-Type", "text/plain")
 	_ = writer.WriteField("x-amz-meta-owner", "mirror")
+	_ = writer.WriteField("x-amz-meta-non-ascii", "ÄMÄZÕÑ S3")
+	_ = writer.WriteField("x-amz-meta-q-encoded", "=?UTF-8?Q?actually-ascii?=")
+	_ = writer.WriteField("x-amz-meta-b-encoded", "=?UTF-8?B?YWJj?=")
+	_ = writer.WriteField("x-amz-meta-control", "\x00\x01\x02\x03")
 	file, err := writer.CreateFormFile("file", "hello world.txt")
 	if err != nil {
 		t.Fatal(err)
@@ -4760,7 +4764,7 @@ func TestPostObjectMultipartUpload(t *testing.T) {
 	}
 	golden.AssertJSON(t, map[string]any{"status": response.Status, "headers": response.Headers, "output": response.Output})
 	got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "post-object", "Key": "uploads/hello world.txt"}, nil)
-	if body := string(readStream(t, got)); body != "browser upload" || got.Headers.Get("Content-Type") != "text/plain" || got.Headers.Get("x-amz-meta-owner") != "mirror" {
+	if body := string(readStream(t, got)); body != "browser upload" || got.Headers.Get("Content-Type") != "text/plain" || got.Headers.Get("x-amz-meta-owner") != "mirror" || got.Headers.Get("x-amz-meta-non-ascii") != "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=" || got.Headers.Get("x-amz-meta-q-encoded") != "=?UTF-8?Q?actually-ascii?=" || got.Headers.Get("x-amz-meta-b-encoded") != "=?UTF-8?B?YWJj?=" || got.Headers.Get("x-amz-meta-control") != "=?UTF-8?B?AAECAw==?=" {
 		t.Fatalf("stored body=%q headers=%v", body, got.Headers)
 	}
 }

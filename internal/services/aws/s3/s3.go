@@ -3744,7 +3744,11 @@ func requestObjectMetadata(req *spi.Request) map[string]any {
 	}
 	user := map[string]any{}
 	for key, value := range asMap(req.Input["Metadata"]) {
-		user[strings.ToLower(key)] = decodeRFC2047Header(str(value))
+		metadataValue := str(value)
+		if req.Operation != "PostObject" {
+			metadataValue = decodeRFC2047Header(metadataValue)
+		}
+		user[strings.ToLower(key)] = metadataValue
 	}
 	if req.HTTP != nil {
 		for key, values := range req.HTTP.Header {

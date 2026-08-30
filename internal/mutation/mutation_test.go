@@ -312,10 +312,18 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-skip-modeled-rfc2047-metadata-decode",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `user[strings.ToLower(key)] = decodeRFC2047Header(str(value))`,
-			new:  `user[strings.ToLower(key)] = str(value)`,
+			old:  `if req.Operation != "PostObject" {`,
+			new:  `if false {`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestUserMetadataRFC2047Characterization",
+		},
+		{
+			name: "s3-decode-post-rfc2047-metadata",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if req.Operation != "PostObject" {`,
+			new:  `if true {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestPostObjectMultipartUpload",
 		},
 		{
 			name: "s3-skip-http-rfc2047-metadata-decode",

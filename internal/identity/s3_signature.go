@@ -23,7 +23,10 @@ func VerifyS3Signature(r *http.Request, secret string) *spi.Fault {
 	if fault := VerifyS3Presigned(r, secret); fault != nil {
 		return fault
 	}
-	return VerifyS3AuthorizationV4(r, secret)
+	if fault := VerifyS3AuthorizationV4(r, secret); fault != nil {
+		return fault
+	}
+	return VerifyS3AuthorizationV2(r, secret)
 }
 
 // VerifyS3Presigned verifies supported query-signature versions when present.
@@ -57,6 +60,26 @@ func VerifyS3AuthorizationV4(r *http.Request, secret string) *spi.Fault {
 	}
 	canonicalRequest := strings.Join([]string{r.Method, canonicalPath(r.URL), canonicalQuery(r.URL.Query()), canonicalHeaders, signedHeaders, payloadHash}, "\n")
 	return verifyS3V4Signature(credential, date, canonicalRequest, signature, secret)
+}
+
+// VerifyS3AuthorizationV2 verifies SigV2 Authorization-header authentication when present.
+func VerifyS3AuthorizationV2(r *http.Request, secret string) *spi.Fault {
+	authorization, present := strings.CutPrefix(r.Header.Get("Authorization"), "AWS ")
+	if !present {
+		return nil
+	}
+	accessKey, signature, ok := strings.Cut(authorization, ":")
+	if !ok || accessKey == "" || signature == "" || strings.Contains(signature, ":") {
+		return signatureFault()
+	}
+	date := r.Header.Get("Date")
+	if r.Header.Get("X-Amz-Date") != "" {
+		date = ""
+	} else if date == "" {
+		return signatureFault()
+	}
+	stringToSign := strings.Join([]string{r.Method, r.Header.Get("Content-MD5"), r.Header.Get("Content-Type"), date, canonicalV2AmzHeaders(r) + canonicalV2Resource(r)}, "\n")
+	return verifyS3V2Signature(signature, secret, stringToSign)
 }
 
 // VerifyS3StreamingV4 verifies the chained signatures of a signed aws-chunked payload and trailers.
@@ -244,8 +267,12 @@ func VerifyS3PresignedV2(r *http.Request, secret string) *spi.Fault {
 		return nil
 	}
 	stringToSign := strings.Join([]string{r.Method, r.Header.Get("Content-MD5"), r.Header.Get("Content-Type"), q.Get("Expires"), canonicalV2AmzHeaders(r) + canonicalV2Resource(r)}, "\n")
+	return verifyS3V2Signature(q.Get("Signature"), secret, stringToSign)
+}
+
+func verifyS3V2Signature(signature, secret, stringToSign string) *spi.Fault {
 	want := hmacSHA1([]byte(secret), stringToSign)
-	got, err := base64.StdEncoding.DecodeString(q.Get("Signature"))
+	got, err := base64.StdEncoding.DecodeString(signature)
 	if err != nil {
 		return signatureFault()
 	}

@@ -2,6 +2,7 @@ package identity
 
 import (
 	"bytes"
+	"encoding/base64"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -67,6 +68,46 @@ func TestVerifyS3AuthorizationV4RejectsMalformed(t *testing.T) {
 	request := awsAuthorizationExample()
 	request.Header.Set("Authorization", "Bearer token")
 	if fault := VerifyS3AuthorizationV4(request, "unused"); fault != nil {
+		t.Fatalf("unrelated authorization rejected: %#v", fault)
+	}
+}
+
+func TestVerifyS3AuthorizationV2AWSExample(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "https://awsexamplebucket1.s3.us-west-1.amazonaws.com/photos/puppy.jpg", nil)
+	request.Header.Set("Date", "Tue, 27 Mar 2007 19:36:42 +0000")
+	request.Header.Set("Authorization", "AWS AKIAIOSFODNN7EXAMPLE:qgk2+6Sv9/oM7G3qLEjTH1a1l1g=")
+	secret := "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+	if fault := VerifyS3AuthorizationV2(request, secret); fault != nil {
+		t.Fatalf("official AWS example rejected: %#v", fault)
+	}
+	request.Header.Set("Date", "Tue, 27 Mar 2007 19:36:43 +0000")
+	if fault := VerifyS3AuthorizationV2(request, secret); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("tampered date accepted: %#v", fault)
+	}
+}
+
+func TestVerifyS3AuthorizationV2DateAndGrammar(t *testing.T) {
+	request := httptest.NewRequest(http.MethodDelete, "https://localhost/bucket/key", nil)
+	request.Header.Set("Date", "ignored")
+	request.Header.Set("X-Amz-Date", "Tue, 27 Mar 2007 21:20:26 +0000")
+	stringToSign := "DELETE\n\n\n\nx-amz-date:Tue, 27 Mar 2007 21:20:26 +0000\n/bucket/key"
+	signature := base64.StdEncoding.EncodeToString(hmacSHA1([]byte("test"), stringToSign))
+	request.Header.Set("Authorization", "AWS test:"+signature)
+	if fault := VerifyS3AuthorizationV2(request, "test"); fault != nil {
+		t.Fatalf("x-amz-date request rejected: %#v", fault)
+	}
+	request.Header.Set("Date", "still ignored")
+	if fault := VerifyS3AuthorizationV2(request, "test"); fault != nil {
+		t.Fatalf("Date overrode x-amz-date: %#v", fault)
+	}
+	for _, authorization := range []string{"AWS ", "AWS test", "AWS :signature", "AWS test:", "AWS test:bad:signature"} {
+		request.Header.Set("Authorization", authorization)
+		if fault := VerifyS3AuthorizationV2(request, "test"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+			t.Fatalf("malformed %q accepted: %#v", authorization, fault)
+		}
+	}
+	request.Header.Set("Authorization", "Bearer token")
+	if fault := VerifyS3AuthorizationV2(request, "test"); fault != nil {
 		t.Fatalf("unrelated authorization rejected: %#v", fault)
 	}
 }

@@ -38,6 +38,33 @@ func VerifyS3Presigned(r *http.Request, secret string) *spi.Fault {
 	return VerifyS3PresignedV2(r, secret)
 }
 
+// VerifyS3PostPolicy verifies supported browser-upload policy signatures when present.
+func VerifyS3PostPolicy(fields map[string]string, secret string) *spi.Fault {
+	form := make(map[string]string, len(fields))
+	for key, value := range fields {
+		form[strings.ToLower(key)] = value
+	}
+	policy := form["policy"]
+	if policy == "" {
+		return nil
+	}
+	if form["x-amz-signature"] != "" {
+		credential := strings.Split(form["x-amz-credential"], "/")
+		date, err := time.Parse("20060102T150405Z", form["x-amz-date"])
+		if form["x-amz-algorithm"] != "AWS4-HMAC-SHA256" || err != nil || len(credential) != 5 || credential[1] != date.Format("20060102") || credential[3] != "s3" || credential[4] != "aws4_request" {
+			return signatureFault()
+		}
+		if !s3V4SignatureMatches(form["x-amz-signature"], hmacSHA256(s3V4SigningKey(credential, secret), policy)) {
+			return signatureFault()
+		}
+		return nil
+	}
+	if form["signature"] != "" {
+		return verifyS3V2Signature(form["signature"], secret, policy)
+	}
+	return nil
+}
+
 // VerifyS3AuthorizationV4 verifies SigV4 Authorization-header authentication when present.
 func VerifyS3AuthorizationV4(r *http.Request, secret string) *spi.Fault {
 	credential, signedHeaders, signature, present, ok := s3AuthorizationV4(r)
@@ -226,6 +253,11 @@ func VerifyS3SessionToken(r *http.Request, expected string) *spi.Fault {
 	if token == "" {
 		token = r.Header.Get("X-Amz-Security-Token")
 	}
+	return VerifyS3SessionTokenValue(token, expected)
+}
+
+// VerifyS3SessionTokenValue verifies a temporary credential token supplied outside headers or query parameters.
+func VerifyS3SessionTokenValue(token, expected string) *spi.Fault {
 	if subtle.ConstantTimeCompare([]byte(token), []byte(expected)) != 1 {
 		return &spi.Fault{Code: "InvalidToken", Message: "The provided token is malformed or otherwise invalid.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}

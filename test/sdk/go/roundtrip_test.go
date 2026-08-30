@@ -607,6 +607,20 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if aws.ToString(got.ContentType) != "text/plain" || aws.ToString(got.CacheControl) != "max-age=60" || got.Metadata["owner"] != "mirror" || aws.ToString(got.WebsiteRedirectLocation) != "/old" {
 		t.Fatalf("s3 metadata %#v", got)
 	}
+	overrideExpiry := time.Date(2015, time.October, 21, 7, 28, 0, 0, time.UTC)
+	overridden, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{
+		Bucket: aws.String("sdk"), Key: aws.String("k"), ResponseCacheControl: aws.String("max-age=74"),
+		ResponseContentDisposition: aws.String(`attachment; filename="foo.jpg"`), ResponseContentEncoding: aws.String("identity"),
+		ResponseContentLanguage: aws.String("de-DE"), ResponseContentType: aws.String("image/jpeg"), ResponseExpires: aws.Time(overrideExpiry),
+	})
+	if err != nil {
+		t.Fatalf("get response overrides: %v", err)
+	}
+	overriddenBody, _ := io.ReadAll(overridden.Body)
+	_ = overridden.Body.Close()
+	if string(overriddenBody) != "hello-sdk" || aws.ToString(overridden.CacheControl) != "max-age=74" || aws.ToString(overridden.ContentDisposition) != `attachment; filename="foo.jpg"` || aws.ToString(overridden.ContentEncoding) != "identity" || aws.ToString(overridden.ContentLanguage) != "de-DE" || aws.ToString(overridden.ContentType) != "image/jpeg" || overridden.Expires == nil || !overridden.Expires.Equal(overrideExpiry) {
+		t.Fatalf("response overrides %#v body=%q", overridden, overriddenBody)
+	}
 	customerKey := []byte("0123456789abcdef0123456789abcdef")
 	customerKeyDigest := md5.Sum(customerKey)
 	customerKey64, customerKeyMD5 := base64.StdEncoding.EncodeToString(customerKey), base64.StdEncoding.EncodeToString(customerKeyDigest[:])

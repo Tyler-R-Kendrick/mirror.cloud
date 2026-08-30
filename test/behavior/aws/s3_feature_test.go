@@ -140,6 +140,33 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given signed GetObject response overrides When reading Then S3 returns the requested headers", func(t *testing.T) {
+		res := do(http.MethodPut, "/response-overrides-bdd", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		res = do(http.MethodPut, "/response-overrides-bdd/object", []byte("body"), "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("put object %d", res.StatusCode)
+		}
+		query := url.Values{
+			"response-cache-control":       {"max-age=74"},
+			"response-content-disposition": {`attachment; filename="foo.jpg"`},
+			"response-content-encoding":    {"identity"},
+			"response-content-language":    {"de-DE"},
+			"response-content-type":        {"image/jpeg"},
+			"response-expires":             {"Wed, 21 Oct 2015 07:28:00 GMT"},
+		}
+		res = do(http.MethodGet, "/response-overrides-bdd/object?"+query.Encode(), nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(body) != "body" || res.Header.Get("Cache-Control") != "max-age=74" || res.Header.Get("Content-Disposition") != `attachment; filename="foo.jpg"` || res.Header.Get("Content-Encoding") != "identity" || res.Header.Get("Content-Language") != "de-DE" || res.Header.Get("Content-Type") != "image/jpeg" || res.Header.Get("Expires") != "Wed, 21 Oct 2015 07:28:00 GMT" {
+			t.Fatalf("response overrides %d %v %q", res.StatusCode, res.Header, body)
+		}
+	})
+
 	t.Run("Given no bucket When PUT object Then not found or created after bucket", func(t *testing.T) {
 		// Given a fresh emulator
 		// When the user creates a bucket

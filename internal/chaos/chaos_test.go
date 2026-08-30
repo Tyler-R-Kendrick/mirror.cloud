@@ -1543,6 +1543,54 @@ func TestConcurrentKMSKeyValidation(t *testing.T) {
 	}
 }
 
+func TestConcurrentGetObjectResponseOverrides(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "override-chaos"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutObject", map[string]any{"Bucket": "override-chaos", "Key": "object", "ContentType": "application/json"}, "body"); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			contentType := fmt.Sprintf("application/x-%d", i)
+			response, err := call("GetObject", map[string]any{"Bucket": "override-chaos", "Key": "object", "ResponseContentType": contentType}, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			body, _ := io.ReadAll(response.Stream)
+			_ = response.Stream.Close()
+			if response.Headers.Get("Content-Type") != contentType || string(body) != "body" {
+				errs <- fmt.Errorf("override %d: %q %q", i, response.Headers.Get("Content-Type"), body)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	stored, err := call("HeadObject", map[string]any{"Bucket": "override-chaos", "Key": "object"}, "")
+	if err != nil || stored.Headers.Get("Content-Type") != "application/json" {
+		t.Fatalf("stored metadata changed: %#v %v", stored, err)
+	}
+}
+
 func TestEncryptedMultipartCompletionFailurePreservesUpload(t *testing.T) {
 	deps := spitest.Deps(t)
 	blobs := &failBlobs{BlobStore: deps.Blobs}

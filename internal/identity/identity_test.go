@@ -36,3 +36,29 @@ func TestParseAndExpiry(t *testing.T) {
 		t.Fatalf("accepted excessive SigV4 expiry %v", expires)
 	}
 }
+
+func TestPresignedAuthFault(t *testing.T) {
+	for name, target := range map[string]string{
+		"none":       "/x?list-type=2",
+		"sigv2":      "/x?AWSAccessKeyId=test&Signature=00",
+		"sigv2-full": "/x?AWSAccessKeyId=test&Signature=00&Expires=90",
+		"sigv4":      "/x?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test&X-Amz-Signature=00&X-Amz-Expires=60&X-Amz-SignedHeaders=host",
+		"sigv4-full": "/x?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test&X-Amz-Signature=00&X-Amz-Date=20200101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host",
+	} {
+		fault := PresignedAuthFault(httptest.NewRequest("GET", target, nil))
+		switch name {
+		case "sigv2":
+			if fault == nil || fault.Code != "AccessDenied" || fault.HTTPStatus != 403 {
+				t.Fatalf("%s fault %#v", name, fault)
+			}
+		case "sigv4":
+			if fault == nil || fault.Code != "AuthorizationQueryParametersError" || fault.HTTPStatus != 400 {
+				t.Fatalf("%s fault %#v", name, fault)
+			}
+		default:
+			if fault != nil {
+				t.Fatalf("%s unexpected fault %#v", name, fault)
+			}
+		}
+	}
+}

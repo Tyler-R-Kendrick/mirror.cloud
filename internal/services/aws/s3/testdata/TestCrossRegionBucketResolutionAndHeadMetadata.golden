@@ -5,6 +5,9 @@
     "status": 400
   },
   "head": {
+    "Content-Type": [
+      "application/xml"
+    ],
     "X-Amz-Bucket-Arn": [
       "arn:aws:s3:::cross-region"
     ],

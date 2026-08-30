@@ -119,6 +119,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "MirrorNotImplemented: unknown service", http.StatusNotImplemented)
 		return
 	}
+	if svc.ID == "aws.s3" {
+		w.Header().Set("x-amz-request-id", rid)
+		w.Header().Set("x-amz-id-2", "mirror-"+rid)
+	}
 	codec := s.codecs[svc.Protocol]
 	if codec == nil {
 		http.Error(w, "no codec", 500)

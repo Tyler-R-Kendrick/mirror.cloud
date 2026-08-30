@@ -1970,7 +1970,7 @@ func TestCrossRegionBucketResolutionAndHeadMetadata(t *testing.T) {
 	mustInvokeAs(t, p, east, "CreateBucket", map[string]any{"Bucket": "cross-region", "LocationConstraint": "us-west-2"}, nil)
 
 	head := mustInvokeAs(t, p, east, "HeadBucket", map[string]any{"Bucket": "cross-region"}, nil)
-	if head.Headers.Get("x-amz-bucket-region") != "us-west-2" || head.Headers.Get("x-amz-bucket-arn") != "arn:aws:s3:::cross-region" {
+	if head.Headers.Get("Content-Type") != "application/xml" || head.Headers.Get("x-amz-bucket-region") != "us-west-2" || head.Headers.Get("x-amz-bucket-arn") != "arn:aws:s3:::cross-region" {
 		t.Fatalf("head headers = %#v", head.Headers)
 	}
 	mustInvokeAs(t, p, east, "PutObject", map[string]any{"Bucket": "cross-region", "Key": "key"}, []byte("body"))

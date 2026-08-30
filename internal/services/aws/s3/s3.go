@@ -783,6 +783,7 @@ func (p *Pack) headBucket(ctx context.Context, req *spi.Request) (*spi.Response,
 		return nil, err
 	}
 	headers := http.Header{}
+	headers.Set("Content-Type", "application/xml")
 	headers.Set("x-amz-bucket-region", req.Identity.Region)
 	headers.Set("x-amz-bucket-arn", "arn:aws:s3:::"+bucket)
 	return &spi.Response{Status: 200, Headers: headers}, nil

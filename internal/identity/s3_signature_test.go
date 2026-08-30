@@ -3,6 +3,7 @@ package identity
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -21,11 +22,7 @@ func TestVerifyS3PresignedV4AWSExample(t *testing.T) {
 }
 
 func TestVerifyS3AuthorizationV4AWSExample(t *testing.T) {
-	request := httptest.NewRequest(http.MethodGet, "https://examplebucket.s3.amazonaws.com/test.txt", nil)
-	request.Header.Set("Range", "bytes=0-9")
-	request.Header.Set("X-Amz-Content-Sha256", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
-	request.Header.Set("X-Amz-Date", "20130524T000000Z")
-	request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request,SignedHeaders=host;range;x-amz-content-sha256;x-amz-date,Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41")
+	request := awsAuthorizationExample()
 	if fault := VerifyS3AuthorizationV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault != nil {
 		t.Fatalf("official AWS example rejected: %#v", fault)
 	}
@@ -33,6 +30,47 @@ func TestVerifyS3AuthorizationV4AWSExample(t *testing.T) {
 	if fault := VerifyS3AuthorizationV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 		t.Fatalf("tampered signed header accepted: %#v", fault)
 	}
+}
+
+func TestVerifyS3AuthorizationV4RejectsMalformed(t *testing.T) {
+	for name, mutate := range map[string]func(*http.Request){
+		"duplicate field": func(r *http.Request) { r.Header.Set("Authorization", r.Header.Get("Authorization")+",Signature=00") },
+		"missing date": func(r *http.Request) {
+			r.Header.Del("X-Amz-Date")
+			r.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request,SignedHeaders=host;x-amz-content-sha256,Signature=29575ca434952f9bf8b87b84161cfacd0a7809cc36a3c12984abaef2bdc7e4f6")
+		},
+		"missing payload": func(r *http.Request) {
+			r.Header.Del("X-Amz-Content-Sha256")
+			r.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request,SignedHeaders=host;x-amz-date,Signature=1b0e851a1c8d0a8c713d10578e54ae3d418b1d457acf62c7a22dd66c3b50f178")
+		},
+		"missing header": func(r *http.Request) { r.Header.Del("Range") },
+		"wrong service": func(r *http.Request) {
+			r.Header.Set("Authorization", strings.Replace(r.Header.Get("Authorization"), "/s3/", "/sts/", 1))
+			r.Header.Set("Authorization", strings.Replace(r.Header.Get("Authorization"), "f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41", "138618539e0e3b441c624f9b403b36cd3c81c715ee31d553b9c17446d453bf4c", 1))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := awsAuthorizationExample()
+			mutate(request)
+			if fault := VerifyS3AuthorizationV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+				t.Fatalf("malformed authorization accepted: %#v", fault)
+			}
+		})
+	}
+	request := awsAuthorizationExample()
+	request.Header.Set("Authorization", "Bearer token")
+	if fault := VerifyS3AuthorizationV4(request, "unused"); fault != nil {
+		t.Fatalf("unrelated authorization rejected: %#v", fault)
+	}
+}
+
+func awsAuthorizationExample() *http.Request {
+	request := httptest.NewRequest(http.MethodGet, "https://examplebucket.s3.amazonaws.com/test.txt", nil)
+	request.Header.Set("Range", "bytes=0-9")
+	request.Header.Set("X-Amz-Content-Sha256", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+	request.Header.Set("X-Amz-Date", "20130524T000000Z")
+	request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request,SignedHeaders=host;range;x-amz-content-sha256;x-amz-date,Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41")
+	return request
 }
 
 func TestVerifyS3PresignedV2AWSGrammar(t *testing.T) {

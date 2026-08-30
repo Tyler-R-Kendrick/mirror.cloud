@@ -53,7 +53,7 @@ func FuzzVerifyS3StreamingV4(f *testing.F) {
 		request.Header.Set("X-Amz-Date", "20990101T000000Z")
 		request.Header.Set("X-Amz-Decoded-Content-Length", strconv.Itoa(len(data)))
 		request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20990101/us-east-1/s3/aws4_request,SignedHeaders=host;x-amz-content-sha256;x-amz-date,Signature=d32bab45d70b05d89ada2e57acc27c4117cf31f7ce3de470cf916b8f89558054")
-		_ = VerifyS3StreamingV4(request, secret, [][]byte{data, nil}, []string{signature, finalSignature})
+		_ = VerifyS3StreamingV4(request, secret, [][]byte{data, nil}, []string{signature, finalSignature}, nil)
 	})
 }
 

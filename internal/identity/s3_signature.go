@@ -59,14 +59,19 @@ func VerifyS3AuthorizationV4(r *http.Request, secret string) *spi.Fault {
 	return verifyS3V4Signature(credential, date, canonicalRequest, signature, secret)
 }
 
-// VerifyS3StreamingV4 verifies the chained signatures of a signed aws-chunked payload.
-func VerifyS3StreamingV4(r *http.Request, secret string, chunks [][]byte, signatures []string) *spi.Fault {
-	if r.Header.Get("X-Amz-Content-Sha256") != "STREAMING-AWS4-HMAC-SHA256-PAYLOAD" {
+// VerifyS3StreamingV4 verifies the chained signatures of a signed aws-chunked payload and trailers.
+func VerifyS3StreamingV4(r *http.Request, secret string, chunks [][]byte, signatures []string, trailers http.Header) *spi.Fault {
+	payloadHash := r.Header.Get("X-Amz-Content-Sha256")
+	trailerMode := payloadHash == "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER"
+	if payloadHash != "STREAMING-AWS4-HMAC-SHA256-PAYLOAD" && !trailerMode {
 		return nil
 	}
-	credential, _, previous, present, ok := s3AuthorizationV4(r)
+	credential, signedHeaders, previous, present, ok := s3AuthorizationV4(r)
 	decodedLength, err := strconv.ParseInt(r.Header.Get("X-Amz-Decoded-Content-Length"), 10, 64)
 	if !present || !ok || !strings.Contains(strings.ToLower(r.Header.Get("Content-Encoding")), "aws-chunked") || decodedLength < 0 || err != nil || len(chunks) == 0 || len(chunks) != len(signatures) || len(chunks[len(chunks)-1]) != 0 {
+		return signatureFault()
+	}
+	if trailerMode && !containsString(strings.Split(signedHeaders, ";"), "x-amz-trailer") {
 		return signatureFault()
 	}
 	var actualLength int64
@@ -90,7 +95,52 @@ func VerifyS3StreamingV4(r *http.Request, secret string, chunks [][]byte, signat
 		}
 		previous = signatures[i]
 	}
+	if !trailerMode {
+		if len(trailers) != 0 {
+			return signatureFault()
+		}
+		return nil
+	}
+	declared := strings.Split(strings.ToLower(r.Header.Get("X-Amz-Trailer")), ",")
+	for i := range declared {
+		declared[i] = strings.TrimSpace(declared[i])
+		if declared[i] == "" {
+			return signatureFault()
+		}
+	}
+	sort.Strings(declared)
+	if len(trailers) != len(declared)+1 || len(trailers.Values("X-Amz-Trailer-Signature")) != 1 {
+		return signatureFault()
+	}
+	var canonical strings.Builder
+	for i, name := range declared {
+		if i > 0 && name == declared[i-1] {
+			return signatureFault()
+		}
+		values := trailers.Values(name)
+		if len(values) != 1 {
+			return signatureFault()
+		}
+		canonical.WriteString(name)
+		canonical.WriteByte(':')
+		canonical.WriteString(strings.Join(strings.Fields(values[0]), " "))
+		canonical.WriteByte('\n')
+	}
+	trailerHash := sha256.Sum256([]byte(canonical.String()))
+	stringToSign := strings.Join([]string{"AWS4-HMAC-SHA256-TRAILER", date, scope, previous, hex.EncodeToString(trailerHash[:])}, "\n")
+	if !s3V4SignatureMatches(trailers.Get("X-Amz-Trailer-Signature"), hmacSHA256(signingKey, stringToSign)) {
+		return signatureFault()
+	}
 	return nil
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func s3AuthorizationV4(r *http.Request) (credential []string, signedHeaders, signature string, present, ok bool) {

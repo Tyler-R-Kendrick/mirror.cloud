@@ -3964,10 +3964,52 @@ func setObjectMetadataHeaders(headers http.Header, meta map[string]any) {
 
 func decodeRFC2047Header(value string) string {
 	decoded, err := new(mime.WordDecoder).DecodeHeader(value)
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(lower, "=?utf-8?b?") && strings.HasSuffix(value, "?=") && len(value) > 13 && (err != nil || decoded == value) {
+		return strings.Repeat(string(utf8.RuneError), len(value)-13)
+	}
+	if strings.HasPrefix(lower, "=?utf-8?q?") && strings.HasSuffix(value, "?=") && decoded == value {
+		payload := value[len("=?UTF-8?Q?") : len(value)-2]
+		return decodeRFC2047Q(payload)
+	}
 	if err != nil {
 		return value
 	}
 	return decoded
+}
+
+func decodeRFC2047Q(value string) string {
+	var decoded strings.Builder
+	for i := 0; i < len(value); i++ {
+		if value[i] == '_' {
+			decoded.WriteByte(' ')
+			continue
+		}
+		if value[i] == '=' && i+2 < len(value) {
+			high, highOK := hexDigit(value[i+1])
+			low, lowOK := hexDigit(value[i+2])
+			if highOK && lowOK {
+				decoded.WriteByte(high<<4 | low)
+				i += 2
+				continue
+			}
+		}
+		decoded.WriteByte(value[i])
+	}
+	return decoded.String()
+}
+
+func hexDigit(value byte) (byte, bool) {
+	switch {
+	case value >= '0' && value <= '9':
+		return value - '0', true
+	case value >= 'A' && value <= 'F':
+		return value - 'A' + 10, true
+	case value >= 'a' && value <= 'f':
+		return value - 'a' + 10, true
+	default:
+		return 0, false
+	}
 }
 
 func encodeRFC2047Header(value string) string {

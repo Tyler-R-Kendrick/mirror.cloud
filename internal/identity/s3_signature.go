@@ -85,8 +85,9 @@ func VerifyS3AuthorizationV2(r *http.Request, secret string) *spi.Fault {
 // VerifyS3StreamingV4 verifies the chained signatures of a signed aws-chunked payload and trailers.
 func VerifyS3StreamingV4(r *http.Request, secret string, chunks [][]byte, signatures []string, trailers http.Header) *spi.Fault {
 	payloadHash := r.Header.Get("X-Amz-Content-Sha256")
-	trailerMode := payloadHash == "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER"
-	if payloadHash != "STREAMING-AWS4-HMAC-SHA256-PAYLOAD" && !trailerMode {
+	signedTrailerMode := payloadHash == "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER"
+	unsignedTrailerMode := payloadHash == "STREAMING-UNSIGNED-PAYLOAD-TRAILER"
+	if payloadHash != "STREAMING-AWS4-HMAC-SHA256-PAYLOAD" && !signedTrailerMode && !unsignedTrailerMode {
 		return nil
 	}
 	credential, signedHeaders, previous, present, ok := s3AuthorizationV4(r)
@@ -94,7 +95,7 @@ func VerifyS3StreamingV4(r *http.Request, secret string, chunks [][]byte, signat
 	if !present || !ok || !strings.Contains(strings.ToLower(r.Header.Get("Content-Encoding")), "aws-chunked") || decodedLength < 0 || err != nil || len(chunks) == 0 || len(chunks) != len(signatures) || len(chunks[len(chunks)-1]) != 0 {
 		return signatureFault()
 	}
-	if trailerMode && !containsString(strings.Split(signedHeaders, ";"), "x-amz-trailer") {
+	if (signedTrailerMode || unsignedTrailerMode) && !containsString(strings.Split(signedHeaders, ";"), "x-amz-trailer") {
 		return signatureFault()
 	}
 	var actualLength int64
@@ -103,6 +104,17 @@ func VerifyS3StreamingV4(r *http.Request, secret string, chunks [][]byte, signat
 	}
 	if actualLength != decodedLength {
 		return signatureFault()
+	}
+	if unsignedTrailerMode {
+		for _, signature := range signatures {
+			if signature != "" {
+				return signatureFault()
+			}
+		}
+		if _, ok := canonicalS3StreamingTrailers(r, trailers, false); !ok {
+			return signatureFault()
+		}
+		return nil
 	}
 	date := r.Header.Get("X-Amz-Date")
 	scope := strings.Join(credential[1:], "/")
@@ -118,43 +130,55 @@ func VerifyS3StreamingV4(r *http.Request, secret string, chunks [][]byte, signat
 		}
 		previous = signatures[i]
 	}
-	if !trailerMode {
+	if !signedTrailerMode {
 		if len(trailers) != 0 {
 			return signatureFault()
 		}
 		return nil
 	}
+	canonical, ok := canonicalS3StreamingTrailers(r, trailers, true)
+	if !ok {
+		return signatureFault()
+	}
+	trailerHash := sha256.Sum256([]byte(canonical))
+	stringToSign := strings.Join([]string{"AWS4-HMAC-SHA256-TRAILER", date, scope, previous, hex.EncodeToString(trailerHash[:])}, "\n")
+	if !s3V4SignatureMatches(trailers.Get("X-Amz-Trailer-Signature"), hmacSHA256(signingKey, stringToSign)) {
+		return signatureFault()
+	}
+	return nil
+}
+
+func canonicalS3StreamingTrailers(r *http.Request, trailers http.Header, signed bool) (string, bool) {
 	declared := strings.Split(strings.ToLower(r.Header.Get("X-Amz-Trailer")), ",")
 	for i := range declared {
 		declared[i] = strings.TrimSpace(declared[i])
 		if declared[i] == "" {
-			return signatureFault()
+			return "", false
 		}
 	}
 	sort.Strings(declared)
-	if len(trailers) != len(declared)+1 || len(trailers.Values("X-Amz-Trailer-Signature")) != 1 {
-		return signatureFault()
+	want := len(declared)
+	if signed {
+		want++
+	}
+	if len(trailers) != want || signed != (len(trailers.Values("X-Amz-Trailer-Signature")) == 1) {
+		return "", false
 	}
 	var canonical strings.Builder
 	for i, name := range declared {
 		if i > 0 && name == declared[i-1] {
-			return signatureFault()
+			return "", false
 		}
 		values := trailers.Values(name)
 		if len(values) != 1 {
-			return signatureFault()
+			return "", false
 		}
 		canonical.WriteString(name)
 		canonical.WriteByte(':')
 		canonical.WriteString(strings.Join(strings.Fields(values[0]), " "))
 		canonical.WriteByte('\n')
 	}
-	trailerHash := sha256.Sum256([]byte(canonical.String()))
-	stringToSign := strings.Join([]string{"AWS4-HMAC-SHA256-TRAILER", date, scope, previous, hex.EncodeToString(trailerHash[:])}, "\n")
-	if !s3V4SignatureMatches(trailers.Get("X-Amz-Trailer-Signature"), hmacSHA256(signingKey, stringToSign)) {
-		return signatureFault()
-	}
-	return nil
+	return canonical.String(), true
 }
 
 func containsString(values []string, want string) bool {

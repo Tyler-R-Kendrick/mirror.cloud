@@ -2376,8 +2376,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-get-skip-expected-owner",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tb, key := str(req.Input[\"Bucket\"]), str(req.Input[\"Key\"])\n\tif err := p.requireBucket(ctx, req, b); err != nil {",
-			new:  "func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tb, key := str(req.Input[\"Bucket\"]), str(req.Input[\"Key\"])\n\tif err := p.requireBucket(ctx, req, b); err != nil && false {",
+			old:  "func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tif websiteRequest(req) && !truthy(req.Input[\"_websiteRaw\"]) {\n\t\treturn p.websiteObject(ctx, req)\n\t}\n\tb, key := str(req.Input[\"Bucket\"]), str(req.Input[\"Key\"])\n\tif err := p.requireBucket(ctx, req, b); err != nil {",
+			new:  "func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tif websiteRequest(req) && !truthy(req.Input[\"_websiteRaw\"]) {\n\t\treturn p.websiteObject(ctx, req)\n\t}\n\tb, key := str(req.Input[\"Bucket\"]), str(req.Input[\"Key\"])\n\tif err := p.requireBucket(ctx, req, b); err != nil && false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestExpectedBucketOwnerAndDeleteBoundary",
 		},

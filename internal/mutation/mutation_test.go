@@ -30,6 +30,30 @@ func TestMutantsAreKilled(t *testing.T) {
 	}
 	mutants := []mutant{
 		{
+			name: "s3-drop-amz-request-id",
+			file: filepath.Join("internal", "edge", "edge.go"),
+			old:  `w.Header().Set("x-amz-request-id", rid)`,
+			new:  `w.Header().Set("x-ignored-request-id", rid)`,
+			pkg:  "./internal/edge",
+			run:  "TestS3PutGetAndForeignService501",
+		},
+		{
+			name: "s3-drop-amz-host-id",
+			file: filepath.Join("internal", "edge", "edge.go"),
+			old:  `w.Header().Set("x-amz-id-2", "mirror-"+rid)`,
+			new:  `w.Header().Set("x-ignored-id-2", "mirror-"+rid)`,
+			pkg:  "./internal/edge",
+			run:  "TestS3PutGetAndForeignService501",
+		},
+		{
+			name: "s3-drop-head-bucket-content-type",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `headers.Set("Content-Type", "application/xml")`,
+			new:  `headers.Set("Ignored-Content-Type", "application/xml")`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestCrossRegionBucketResolutionAndHeadMetadata",
+		},
+		{
 			name: "s3-skip-object-encryption-validation",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  "serverSideEncryption, sseKMSKeyID, bucketKeyEnabled, err = p.objectEncryption(ctx, req, b)\n\t\tif err != nil {",

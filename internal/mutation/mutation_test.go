@@ -14430,6 +14430,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSchedulerStateUpdateAndGroups",
 		},
 		{
+			name: "scheduler-use-relative-deadline",
+			file: filepath.Join("internal", "services", "aws", "scheduler", "scheduler.go"),
+			old:  `case <-p.deps.Clock.AfterUntil(next):`,
+			new:  `case <-p.deps.Clock.After(next.Sub(p.deps.Clock.Now())):`,
+			pkg:  "./internal/services/aws/scheduler",
+			run:  "TestSchedulerWaitsForAbsoluteDeadline",
+		},
+		{
 			name: "scheduler-drop-target-arn",
 			file: filepath.Join("internal", "services", "aws", "scheduler", "scheduler.go"),
 			old:  `first(target, "Arn", "arn"), target, payload`,

@@ -1,0 +1,197 @@
+schema: bir/1
+service: aws.elasticbeanstalk
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is deployed: an environment is Ready and Green the moment
+# it is created, with no instances behind it.
+provenance: authored
+
+resources:
+  application:
+    collection: ebapp
+    id:
+      input_members: [ApplicationName]
+    record:
+      ApplicationName: id
+      Description: "'Description' in input ? string(input.Description) : ''"
+
+  # The pack kept versions in a store collection named per application, so one
+  # application's versions could not appear in another's. The relationship is a
+  # member here and the listing filters on it.
+  version:
+    collection: ebver
+    id:
+      derive: "string(input.ApplicationName) + '/' + string(input.VersionLabel)"
+    record:
+      ApplicationName: "string(input.ApplicationName)"
+      VersionLabel: "string(input.VersionLabel)"
+      Status: "'UNPROCESSED'"
+
+  environment:
+    collection: ebenv
+    key: EnvironmentName
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      EnvironmentName: "'EnvironmentName' in input ? string(input.EnvironmentName) : ''"
+
+errors:
+  InvalidParameterValue:
+    code: InvalidParameterValue
+    http: 400
+    fault: client
+
+operations:
+  # Create and update are one write: both replace the whole record, so an
+  # update that omits the description blanks it.
+  CreateApplication:
+    effects:
+      - put: { resource: application }
+    output:
+      Application: rec
+
+  UpdateApplication:
+    effects:
+      - put: { resource: application }
+    output:
+      Application: rec
+
+  # Named or not: one application when ApplicationNames names one, the page
+  # when it does not.
+  DescribeApplications:
+    list:
+      resource: application
+      member: Applications
+      key: "'ApplicationName' in input ? string(input.ApplicationName) : ''"
+      paginate: model
+
+  DeleteApplication:
+    effects:
+      - delete: { resource: application, missing: ignore }
+
+  CreateApplicationVersion:
+    effects:
+      - put: { resource: version }
+    output:
+      ApplicationVersion: rec
+
+  DescribeApplicationVersions:
+    list:
+      resource: version
+      member: ApplicationVersions
+      key: >
+        'VersionLabel' in input && string(input.VersionLabel) != ''
+          ? string(input.ApplicationName) + '/' + string(input.VersionLabel)
+          : ''
+      filter: "string(item.ApplicationName) == string(input.ApplicationName)"
+      paginate: model
+
+  DeleteApplicationVersion:
+    effects:
+      - delete: { resource: version, missing: ignore }
+
+  # Create and update are one write here too, and both mint a fresh
+  # EnvironmentId -- so updating an environment changes its identifier.
+  CreateEnvironment:
+    effects:
+      - create:
+          resource: environment
+          record:
+            ApplicationName: "'ApplicationName' in input ? string(input.ApplicationName) : ''"
+            Status: "'Ready'"
+            Health: "'Green'"
+            EnvironmentId: "'e-' + id"
+            VersionLabel: "'VersionLabel' in input ? string(input.VersionLabel) : ''"
+    output:
+      EnvironmentName: rec.EnvironmentName
+      ApplicationName: rec.ApplicationName
+      Status: rec.Status
+      Health: rec.Health
+      EnvironmentId: rec.EnvironmentId
+      VersionLabel: rec.VersionLabel
+
+  UpdateEnvironment:
+    effects:
+      - create:
+          resource: environment
+          record:
+            ApplicationName: "'ApplicationName' in input ? string(input.ApplicationName) : ''"
+            Status: "'Ready'"
+            Health: "'Green'"
+            EnvironmentId: "'e-' + id"
+            VersionLabel: "'VersionLabel' in input ? string(input.VersionLabel) : ''"
+    output:
+      EnvironmentName: rec.EnvironmentName
+      ApplicationName: rec.ApplicationName
+      Status: rec.Status
+      Health: rec.Health
+      EnvironmentId: rec.EnvironmentId
+      VersionLabel: rec.VersionLabel
+
+  DescribeEnvironments:
+    list:
+      resource: environment
+      member: Environments
+      key: "'EnvironmentName' in input ? string(input.EnvironmentName) : ''"
+      paginate: model
+
+  # Terminating deletes the environment and answers the record it deleted with
+  # its status overwritten, so the answer describes a state nothing can observe
+  # afterwards.
+  TerminateEnvironment:
+    reads:
+      e: { resource: environment, key: "string(input.EnvironmentName)" }
+    effects:
+      - delete: { resource: environment, key: "string(input.EnvironmentName)", missing: ignore }
+    output:
+      EnvironmentName: "string(input.EnvironmentName)"
+      # Absent rather than empty when there was no environment: the pack built
+      # a two-member record in that case, so an answer about an environment
+      # that never existed says nothing about it beyond the name it was asked
+      # for and the status it did not have.
+      ApplicationName: "e_found ? e.ApplicationName : null"
+      Status: "'Terminated'"
+      Health: "e_found ? e.Health : null"
+      EnvironmentId: "e_found ? e.EnvironmentId : null"
+      VersionLabel: "e_found ? e.VersionLabel : null"
+
+quirks:
+  - operation: UpdateEnvironment
+    note: >
+      CreateEnvironment and UpdateEnvironment are one write, and it mints a
+      fresh EnvironmentId every time -- so updating an environment changes the
+      identifier a caller was given, and the old one refers to nothing. The
+      write also resets Status and Health, so an update always answers Ready
+      and Green whatever it was asked to change. OptionSettings, Tier,
+      SolutionStackName and CNAMEPrefix are all dropped: nothing is deployed
+      and no instance exists, so EndpointURL and CNAME are declared and never
+      set.
+  - operation: UpdateApplication
+    note: >
+      CreateApplication and UpdateApplication are also one write, replacing the
+      whole record -- so an update that omits the Description blanks it rather
+      than leaving it alone, which is the opposite of what an update means.
+      Both answer with the record; ConfigurationTemplates, DateCreated and
+      DateUpdated are declared and never set.
+  - operation: CreateApplicationVersion
+    note: >
+      A version is UNPROCESSED forever: nothing processes it, the SourceBundle
+      is dropped, and the ApplicationName it names is not checked to exist. An
+      environment's VersionLabel is likewise stored without being checked
+      against a version that exists, so an environment can name a version that
+      was never created.
+  - operation: TerminateEnvironment
+    note: >
+      Terminating deletes the environment outright and answers the record it
+      just removed with its status set to Terminated -- so the answer describes
+      a state no later describe can observe, and terminating an environment
+      that does not exist succeeds and answers a Terminated environment with
+      nothing but the name it was asked for. The real service leaves a
+      terminated environment visible for a while.
+  - operation: DescribeApplications
+    note: >
+      Only one name narrows a listing, and only the singular ApplicationName --
+      the plural ApplicationNames and EnvironmentNames the model declares are
+      ignored, so asking about three applications answers with all of them.
+      DeleteApplication does not remove the application's versions or
+      environments, which survive naming an application that is gone.

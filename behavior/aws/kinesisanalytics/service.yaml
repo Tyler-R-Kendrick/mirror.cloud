@@ -1,0 +1,156 @@
+schema: bir/1
+service: aws.kinesisanalytics
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing streams: an application has no inputs, no outputs and no
+# SQL, and starting it changes a status and nothing else.
+provenance: authored
+
+resources:
+  application:
+    collection: kaapp
+    id:
+      input_members: [ApplicationName]
+    arn: "arn:{partition}:kinesisanalytics:{region}:{account}:application/{id}"
+    # Only the key member lives here. Resource-level members are re-evaluated
+    # on every write, and this service has four partial updates --
+    # UpdateApplication, AddApplicationInput, AddApplicationOutput and the two
+    # status changes -- none of which carries the ARN or the status. Anything
+    # else here would be recomputed from a request that does not have it.
+    record:
+      ApplicationName: id
+      # Safe to recompute on every write, unlike the status and the version:
+      # it derives from the name, and every operation here supplies one. `arn`
+      # is bound only in a resource record, which is the other reason it lives
+      # here rather than on the create.
+      ApplicationARN: arn
+
+errors:
+  InvalidArgument:
+    code: InvalidArgumentException
+    http: 400
+    fault: client
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateApplication:
+    effects:
+      - put:
+          resource: application
+          record:
+            ApplicationStatus: "'READY'"
+            ApplicationVersionId: "1.0"
+    output:
+      ApplicationSummary: rec
+
+  DescribeApplication:
+    reads:
+      a: { resource: application }
+    require:
+      - { cond: a_found, error: NotFound }
+    output:
+      ApplicationDetail: a
+
+  ListApplications:
+    list: { resource: application, member: ApplicationSummaries, paginate: model }
+
+  # The three updates share one behavior: they check the application exists and
+  # bump its version, and change nothing else. Whatever was being added is
+  # dropped.
+  UpdateApplication:
+    reads:
+      a: { resource: application }
+    require:
+      - { cond: a_found, error: NotFound }
+    effects:
+      - patch:
+          resource: application
+          record:
+            ApplicationVersionId: "double(a.ApplicationVersionId) + 1.0"
+
+  AddApplicationInput:
+    reads:
+      a: { resource: application }
+    require:
+      - { cond: a_found, error: NotFound }
+    effects:
+      - patch:
+          resource: application
+          record:
+            ApplicationVersionId: "double(a.ApplicationVersionId) + 1.0"
+
+  AddApplicationOutput:
+    reads:
+      a: { resource: application }
+    require:
+      - { cond: a_found, error: NotFound }
+    effects:
+      - patch:
+          resource: application
+          record:
+            ApplicationVersionId: "double(a.ApplicationVersionId) + 1.0"
+
+  StartApplication:
+    reads:
+      a: { resource: application }
+    require:
+      - { cond: a_found, error: NotFound }
+    effects:
+      - patch:
+          resource: application
+          record:
+            ApplicationStatus: "'RUNNING'"
+
+  StopApplication:
+    reads:
+      a: { resource: application }
+    require:
+      - { cond: a_found, error: NotFound }
+    effects:
+      - patch:
+          resource: application
+          record:
+            ApplicationStatus: "'READY'"
+
+  DeleteApplication:
+    effects:
+      - delete: { resource: application, missing: ignore }
+
+quirks:
+  - operation: UpdateApplication
+    note: >
+      UpdateApplication, AddApplicationInput and AddApplicationOutput are one
+      behavior: check the application exists, add one to its version, and drop
+      what was being added. So an application never gains an input or an
+      output -- its InputDescriptions and OutputDescriptions are always
+      absent -- while its version climbs as though it had. Nothing reads the
+      version either, since no operation takes a CurrentApplicationVersionId
+      that is checked.
+  - operation: CreateApplication
+    note: >
+      An application is READY with no ApplicationCode, no inputs, no outputs
+      and no CloudWatch logging options: all are accepted and dropped, so there
+      is no SQL to run and nothing for it to run on. CreateTimestamp and
+      LastUpdateTimestamp are declared and never set.
+  - operation: StartApplication
+    note: >
+      Starting moves the status to RUNNING and stopping moves it back to READY,
+      immediately and with nothing in between -- so nothing observes STARTING
+      or STOPPING, and starting an application that is already running
+      succeeds. No data moves in either state. The required InputConfigurations
+      on a start are dropped.
+  - operation: DescribeApplication
+    note: >
+      An application detail is answered with the same four members a summary
+      carries. ApplicationDescription, ApplicationCode, InputDescriptions,
+      OutputDescriptions, ReferenceDataSourceDescriptions and
+      CloudWatchLoggingOptionDescriptions are all declared and never set, so
+      the detail says nothing the summary does not.
+  - operation: DeleteApplication
+    note: >
+      Deleting an absent application succeeds, where describing it faults, and
+      the required CreateTimestamp on the delete request is ignored -- the real
+      service uses it to refuse a delete racing a concurrent update.

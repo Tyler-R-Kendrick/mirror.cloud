@@ -1,0 +1,340 @@
+{
+  "schema": "trace/1",
+  "service": "aws.backup",
+  "source": "pack:internal/services/aws/backup@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListBackupVaults",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BackupVaultList": null
+      }
+    },
+    {
+      "operation": "DescribeBackupVault",
+      "input": {
+        "BackupVaultName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateBackupVault",
+      "input": {
+        "BackupVaultName": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BackupVaultArn": "arn:aws:backup:us-east-1:000000000000:backup-vault:v1",
+        "BackupVaultName": "v1"
+      }
+    },
+    {
+      "operation": "DescribeBackupVault",
+      "input": {
+        "BackupVaultName": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BackupVaultArn": "arn:aws:backup:us-east-1:000000000000:backup-vault:v1",
+        "BackupVaultName": "v1"
+      }
+    },
+    {
+      "operation": "CreateBackupVault",
+      "input": {
+        "BackupVaultName": "v2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BackupVaultArn": "arn:aws:backup:us-east-1:000000000000:backup-vault:v2",
+        "BackupVaultName": "v2"
+      }
+    },
+    {
+      "operation": "ListBackupVaults",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BackupVaultList": [
+          {
+            "BackupVaultArn": "arn:aws:backup:us-east-1:000000000000:backup-vault:v1",
+            "BackupVaultName": "v1"
+          },
+          {
+            "BackupVaultArn": "arn:aws:backup:us-east-1:000000000000:backup-vault:v2",
+            "BackupVaultName": "v2"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateBackupPlan",
+      "input": {
+        "BackupPlan": {
+          "BackupPlanName": "nightly",
+          "Rules": [
+            {
+              "RuleName": "r1",
+              "TargetBackupVaultName": "v1"
+            }
+          ]
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BackupPlanArn": "arn:aws:backup:us-east-1:000000000000:backup-plan:7c589129",
+        "BackupPlanId": "7c589129"
+      }
+    },
+    {
+      "operation": "GetBackupPlan",
+      "input": {
+        "BackupPlanId": {
+          "$fromPath": "BackupPlanId",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BackupPlan": {
+          "BackupPlanName": "nightly",
+          "Rules": [
+            {
+              "RuleName": "r1",
+              "TargetBackupVaultName": "v1"
+            }
+          ]
+        },
+        "BackupPlanArn": "arn:aws:backup:us-east-1:000000000000:backup-plan:7c589129",
+        "BackupPlanId": "7c589129",
+        "BackupPlanName": "nightly"
+      },
+      "superseded": "A plan is answered three ways and the shapes disagree: the stored record carries both a BackupPlanName and the nested BackupPlan, GetBackupPlanOutput declares the plan and not the name, and BackupPlansListMember declares the name and not the plan. The pack answered the whole record to both, so each carried a member no SDK could read. The declared shapes outrank the pack's authored behavior."
+    },
+    {
+      "operation": "ListBackupPlans",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BackupPlansList": [
+          {
+            "BackupPlan": {
+              "BackupPlanName": "nightly",
+              "Rules": [
+                {
+                  "RuleName": "r1",
+                  "TargetBackupVaultName": "v1"
+                }
+              ]
+            },
+            "BackupPlanArn": "arn:aws:backup:us-east-1:000000000000:backup-plan:7c589129",
+            "BackupPlanId": "7c589129",
+            "BackupPlanName": "nightly"
+          }
+        ]
+      },
+      "superseded": "A plan is answered three ways and the shapes disagree: the stored record carries both a BackupPlanName and the nested BackupPlan, GetBackupPlanOutput declares the plan and not the name, and BackupPlansListMember declares the name and not the plan. The pack answered the whole record to both, so each carried a member no SDK could read. The declared shapes outrank the pack's authored behavior."
+    },
+    {
+      "operation": "StartBackupJob",
+      "input": {
+        "BackupVaultName": "v1",
+        "IamRoleArn": "arn:aws:iam::000000000000:role/backup",
+        "ResourceArn": "arn:aws:ec2:us-east-1:000000000000:volume/vol-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BackupJobId": "5f59f223d7974d14"
+      }
+    },
+    {
+      "operation": "DescribeBackupJob",
+      "input": {
+        "BackupJobId": {
+          "$fromPath": "BackupJobId",
+          "$fromStep": 9
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BackupJobId": "5f59f223d7974d14",
+        "BackupVaultName": "v1",
+        "ResourceArn": "arn:aws:ec2:us-east-1:000000000000:volume/vol-1",
+        "State": "COMPLETED"
+      }
+    },
+    {
+      "operation": "ListBackupJobs",
+      "input": {
+        "ByBackupVaultName": "v2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BackupJobs": [
+          {
+            "BackupJobId": "5f59f223d7974d14",
+            "BackupVaultName": "v1",
+            "ResourceArn": "arn:aws:ec2:us-east-1:000000000000:volume/vol-1",
+            "State": "COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteBackupPlan",
+      "input": {
+        "BackupPlanId": {
+          "$fromPath": "BackupPlanId",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListBackupPlans",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BackupPlansList": null
+      }
+    },
+    {
+      "operation": "DeleteBackupVault",
+      "input": {
+        "BackupVaultName": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListBackupJobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "BackupJobs": [
+          {
+            "BackupJobId": "5f59f223d7974d14",
+            "BackupVaultName": "v1",
+            "ResourceArn": "arn:aws:ec2:us-east-1:000000000000:volume/vol-1",
+            "State": "COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteBackupVault",
+      "input": {
+        "BackupVaultName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

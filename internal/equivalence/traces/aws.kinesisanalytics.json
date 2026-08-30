@@ -1,0 +1,360 @@
+{
+  "schema": "trace/1",
+  "service": "aws.kinesisanalytics",
+  "source": "pack:internal/services/aws/kinesisanalytics@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListApplications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationSummaries": null
+      }
+    },
+    {
+      "operation": "DescribeApplication",
+      "input": {
+        "ApplicationName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateApplication",
+      "input": {
+        "ApplicationName": "app1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationSummary": {
+          "ApplicationARN": "arn:aws:kinesisanalytics:us-east-1:000000000000:application/app1",
+          "ApplicationName": "app1",
+          "ApplicationStatus": "READY",
+          "ApplicationVersionId": 1
+        }
+      }
+    },
+    {
+      "operation": "DescribeApplication",
+      "input": {
+        "ApplicationName": "app1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationDetail": {
+          "ApplicationARN": "arn:aws:kinesisanalytics:us-east-1:000000000000:application/app1",
+          "ApplicationName": "app1",
+          "ApplicationStatus": "READY",
+          "ApplicationVersionId": 1
+        }
+      }
+    },
+    {
+      "operation": "CreateApplication",
+      "input": {
+        "ApplicationName": "app2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationSummary": {
+          "ApplicationARN": "arn:aws:kinesisanalytics:us-east-1:000000000000:application/app2",
+          "ApplicationName": "app2",
+          "ApplicationStatus": "READY",
+          "ApplicationVersionId": 1
+        }
+      }
+    },
+    {
+      "operation": "ListApplications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationSummaries": [
+          {
+            "ApplicationARN": "arn:aws:kinesisanalytics:us-east-1:000000000000:application/app1",
+            "ApplicationName": "app1",
+            "ApplicationStatus": "READY",
+            "ApplicationVersionId": 1
+          },
+          {
+            "ApplicationARN": "arn:aws:kinesisanalytics:us-east-1:000000000000:application/app2",
+            "ApplicationName": "app2",
+            "ApplicationStatus": "READY",
+            "ApplicationVersionId": 1
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateApplication",
+      "input": {
+        "ApplicationName": "app1",
+        "ApplicationUpdate": {
+          "ApplicationCodeUpdate": "SELECT 1"
+        },
+        "CurrentApplicationVersionId": 1
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeApplication",
+      "input": {
+        "ApplicationName": "app1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationDetail": {
+          "ApplicationARN": "arn:aws:kinesisanalytics:us-east-1:000000000000:application/app1",
+          "ApplicationName": "app1",
+          "ApplicationStatus": "READY",
+          "ApplicationVersionId": 2
+        }
+      }
+    },
+    {
+      "operation": "AddApplicationInput",
+      "input": {
+        "ApplicationName": "app1",
+        "CurrentApplicationVersionId": 2,
+        "Input": {
+          "NamePrefix": "SOURCE_SQL_STREAM"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "AddApplicationOutput",
+      "input": {
+        "ApplicationName": "app1",
+        "CurrentApplicationVersionId": 3,
+        "Output": {
+          "Name": "DESTINATION_SQL_STREAM"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeApplication",
+      "input": {
+        "ApplicationName": "app1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationDetail": {
+          "ApplicationARN": "arn:aws:kinesisanalytics:us-east-1:000000000000:application/app1",
+          "ApplicationName": "app1",
+          "ApplicationStatus": "READY",
+          "ApplicationVersionId": 4
+        }
+      }
+    },
+    {
+      "operation": "StartApplication",
+      "input": {
+        "ApplicationName": "app1",
+        "InputConfigurations": []
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeApplication",
+      "input": {
+        "ApplicationName": "app1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationDetail": {
+          "ApplicationARN": "arn:aws:kinesisanalytics:us-east-1:000000000000:application/app1",
+          "ApplicationName": "app1",
+          "ApplicationStatus": "RUNNING",
+          "ApplicationVersionId": 4
+        }
+      }
+    },
+    {
+      "operation": "StopApplication",
+      "input": {
+        "ApplicationName": "app1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeApplication",
+      "input": {
+        "ApplicationName": "app1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationDetail": {
+          "ApplicationARN": "arn:aws:kinesisanalytics:us-east-1:000000000000:application/app1",
+          "ApplicationName": "app1",
+          "ApplicationStatus": "READY",
+          "ApplicationVersionId": 4
+        }
+      }
+    },
+    {
+      "operation": "StartApplication",
+      "input": {
+        "ApplicationName": "absent",
+        "InputConfigurations": []
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteApplication",
+      "input": {
+        "ApplicationName": "app1",
+        "CreateTimestamp": 1700000000
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListApplications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationSummaries": [
+          {
+            "ApplicationARN": "arn:aws:kinesisanalytics:us-east-1:000000000000:application/app2",
+            "ApplicationName": "app2",
+            "ApplicationStatus": "READY",
+            "ApplicationVersionId": 1
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteApplication",
+      "input": {
+        "ApplicationName": "app1",
+        "CreateTimestamp": 1700000000
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

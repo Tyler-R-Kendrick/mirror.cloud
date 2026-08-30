@@ -1,0 +1,169 @@
+schema: bir/1
+service: aws.backup
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is backed up: a job is COMPLETED before it returns and no
+# recovery point is ever created.
+provenance: authored
+
+resources:
+  vault:
+    collection: bv
+    id:
+      input_members: [BackupVaultName]
+    arn: "arn:{partition}:backup:{region}:{account}:backup-vault:{id}"
+    record:
+      BackupVaultName: id
+      BackupVaultArn: arn
+
+  plan:
+    collection: bp
+    id:
+      generate: { kind: hex, bytes: 8 }
+    arn: "arn:{partition}:backup:{region}:{account}:backup-plan:{id}"
+    record:
+      BackupPlanId: id
+      BackupPlanArn: arn
+      # The pack read the plan's name out of the nested BackupPlan structure,
+      # which is where the model puts it.
+      BackupPlanName: >
+        'BackupPlan' in input && 'BackupPlanName' in input.BackupPlan
+          ? string(input.BackupPlan.BackupPlanName)
+          : ''
+      BackupPlan: "'BackupPlan' in input ? input.BackupPlan : {}"
+
+  job:
+    collection: bj
+    id:
+      generate: { kind: hex, bytes: 16 }
+    record:
+      BackupJobId: id
+      State: "'COMPLETED'"
+      BackupVaultName: "'BackupVaultName' in input ? string(input.BackupVaultName) : ''"
+      ResourceArn: "'ResourceArn' in input ? string(input.ResourceArn) : ''"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateBackupVault:
+    effects:
+      - put: { resource: vault }
+    output:
+      BackupVaultName: rec.BackupVaultName
+      BackupVaultArn: rec.BackupVaultArn
+
+  DescribeBackupVault:
+    reads:
+      v: { resource: vault }
+    require:
+      - { cond: v_found, error: NotFound }
+    output:
+      BackupVaultName: v.BackupVaultName
+      BackupVaultArn: v.BackupVaultArn
+
+  ListBackupVaults:
+    list: { resource: vault, member: BackupVaultList, paginate: model }
+
+  DeleteBackupVault:
+    effects:
+      - delete: { resource: vault, missing: ignore }
+
+  CreateBackupPlan:
+    effects:
+      - create: { resource: plan }
+    output:
+      BackupPlanId: rec.BackupPlanId
+      BackupPlanArn: rec.BackupPlanArn
+
+  # GetBackupPlanOutput declares no BackupPlanName, so the fetched form of a
+  # plan is not the stored record.
+  GetBackupPlan:
+    reads:
+      p: { resource: plan, key: "string(input.BackupPlanId)" }
+    require:
+      - { cond: p_found, error: NotFound }
+    output:
+      BackupPlanId: p.BackupPlanId
+      BackupPlanArn: p.BackupPlanArn
+      BackupPlan: p.BackupPlan
+
+  # BackupPlansListMember declares no BackupPlan, so the listed form is not the
+  # stored record either -- and the two differ from each other.
+  ListBackupPlans:
+    list: { resource: plan, member: BackupPlansList, paginate: model }
+    output:
+      BackupPlansList: >
+        items.map(p, {
+          'BackupPlanId': p.BackupPlanId,
+          'BackupPlanArn': p.BackupPlanArn,
+          'BackupPlanName': p.BackupPlanName
+        })
+
+  DeleteBackupPlan:
+    effects:
+      - delete: { resource: plan, key: "string(input.BackupPlanId)", missing: ignore }
+
+  StartBackupJob:
+    effects:
+      - create: { resource: job }
+    output:
+      BackupJobId: rec.BackupJobId
+
+  DescribeBackupJob:
+    reads:
+      j: { resource: job, key: "string(input.BackupJobId)" }
+    require:
+      - { cond: j_found, error: NotFound }
+    output:
+      BackupJobId: j.BackupJobId
+      State: j.State
+      BackupVaultName: j.BackupVaultName
+      ResourceArn: j.ResourceArn
+
+  ListBackupJobs:
+    list: { resource: job, member: BackupJobs, paginate: model }
+
+quirks:
+  - operation: GetBackupPlan
+    note: >
+      A plan is answered three ways and the shapes disagree: the stored record
+      carries both a BackupPlanName and the nested BackupPlan, GetBackupPlan
+      declares the plan and not the name, and BackupPlansListMember declares
+      the name and not the plan. The pack answered the whole record to both, so
+      each carried a member no SDK could read; each is projected to its own
+      shape and the recorded steps are superseded with that reason.
+  - operation: StartBackupJob
+    note: >
+      A job is COMPLETED the moment it starts, so nothing observes CREATED,
+      PENDING or RUNNING and a caller polling for completion gets it on the
+      first poll. Nothing is copied: no recovery point is created, so
+      RecoveryPointArn is declared on the answer and absent, and
+      BackupSizeInBytes, BytesTransferred, PercentDone and every timestamp on
+      the job are declared and never set. The required IamRoleArn is dropped
+      and the ResourceArn is stored without being read, so a job can back up a
+      resource that does not exist.
+  - operation: DescribeBackupVault
+    note: >
+      A vault is a name and an ARN. CreationDate, NumberOfRecoveryPoints,
+      Locked, MinRetentionDays and MaxRetentionDays are all declared and never
+      set, so a vault is never locked and never holds anything -- and since the
+      backup jobs create no recovery points, the count would be zero in any
+      case. EncryptionKeyArn is accepted and dropped.
+  - operation: ListBackupJobs
+    note: >
+      Every filter is ignored -- ByBackupVaultName, ByState, ByResourceArn and
+      the date ranges -- so every job in the account and region is listed
+      whatever was asked for. ListBackupVaults ignores ByVaultType and ByShared
+      the same way.
+  - operation: DeleteBackupVault
+    note: >
+      Deleting an absent vault, plan or job succeeds where describing it
+      faults, and deleting answers with nothing where DeleteBackupPlan declares
+      a BackupPlanId, BackupPlanArn, VersionId and DeletionDate. Deleting a
+      vault does not check whether jobs still name it, and the jobs survive.
+      Every plan is created with no VersionId, so the versioning the model
+      describes does not exist here.

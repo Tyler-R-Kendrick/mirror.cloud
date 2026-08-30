@@ -1,0 +1,465 @@
+{
+  "schema": "trace/1",
+  "service": "aws.elasticbeanstalk",
+  "source": "pack:internal/services/aws/elasticbeanstalk@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DescribeApplications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Applications": null
+      }
+    },
+    {
+      "operation": "CreateApplication",
+      "input": {
+        "ApplicationName": "app1",
+        "Description": "first"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Application": {
+          "ApplicationName": "app1",
+          "Description": "first"
+        }
+      }
+    },
+    {
+      "operation": "DescribeApplications",
+      "input": {
+        "ApplicationName": "app1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Applications": [
+          {
+            "ApplicationName": "app1",
+            "Description": "first"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateApplication",
+      "input": {
+        "ApplicationName": "app1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Application": {
+          "ApplicationName": "app1",
+          "Description": ""
+        }
+      }
+    },
+    {
+      "operation": "DescribeApplications",
+      "input": {
+        "ApplicationName": "app1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Applications": [
+          {
+            "ApplicationName": "app1",
+            "Description": ""
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateApplication",
+      "input": {
+        "ApplicationName": "app2",
+        "Description": "second"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Application": {
+          "ApplicationName": "app2",
+          "Description": "second"
+        }
+      }
+    },
+    {
+      "operation": "DescribeApplications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Applications": [
+          {
+            "ApplicationName": "app1",
+            "Description": ""
+          },
+          {
+            "ApplicationName": "app2",
+            "Description": "second"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateApplicationVersion",
+      "input": {
+        "ApplicationName": "app1",
+        "VersionLabel": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationVersion": {
+          "ApplicationName": "app1",
+          "Status": "UNPROCESSED",
+          "VersionLabel": "v1"
+        }
+      }
+    },
+    {
+      "operation": "CreateApplicationVersion",
+      "input": {
+        "ApplicationName": "app2",
+        "VersionLabel": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationVersion": {
+          "ApplicationName": "app2",
+          "Status": "UNPROCESSED",
+          "VersionLabel": "v1"
+        }
+      }
+    },
+    {
+      "operation": "DescribeApplicationVersions",
+      "input": {
+        "ApplicationName": "app1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationVersions": [
+          {
+            "ApplicationName": "app1",
+            "Status": "UNPROCESSED",
+            "VersionLabel": "v1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeApplicationVersions",
+      "input": {
+        "ApplicationName": "app1",
+        "VersionLabel": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationVersions": [
+          {
+            "ApplicationName": "app1",
+            "Status": "UNPROCESSED",
+            "VersionLabel": "v1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateEnvironment",
+      "input": {
+        "ApplicationName": "app1",
+        "EnvironmentName": "env1",
+        "SolutionStackName": "64bit Amazon Linux",
+        "VersionLabel": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationName": "app1",
+        "EnvironmentId": "e-7c589129",
+        "EnvironmentName": "env1",
+        "Health": "Green",
+        "Status": "Ready",
+        "VersionLabel": "v1"
+      }
+    },
+    {
+      "operation": "DescribeEnvironments",
+      "input": {
+        "EnvironmentName": "env1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Environments": [
+          {
+            "ApplicationName": "app1",
+            "EnvironmentId": "e-7c589129",
+            "EnvironmentName": "env1",
+            "Health": "Green",
+            "Status": "Ready",
+            "VersionLabel": "v1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateEnvironment",
+      "input": {
+        "ApplicationName": "app1",
+        "EnvironmentName": "env1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationName": "app1",
+        "EnvironmentId": "e-5f59f223",
+        "EnvironmentName": "env1",
+        "Health": "Green",
+        "Status": "Ready",
+        "VersionLabel": ""
+      }
+    },
+    {
+      "operation": "DescribeEnvironments",
+      "input": {
+        "EnvironmentName": "env1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Environments": [
+          {
+            "ApplicationName": "app1",
+            "EnvironmentId": "e-5f59f223",
+            "EnvironmentName": "env1",
+            "Health": "Green",
+            "Status": "Ready",
+            "VersionLabel": ""
+          }
+        ]
+      }
+    },
+    {
+      "operation": "TerminateEnvironment",
+      "input": {
+        "EnvironmentName": "env1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationName": "app1",
+        "EnvironmentId": "e-5f59f223",
+        "EnvironmentName": "env1",
+        "Health": "Green",
+        "Status": "Terminated",
+        "VersionLabel": ""
+      }
+    },
+    {
+      "operation": "DescribeEnvironments",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Environments": null
+      }
+    },
+    {
+      "operation": "TerminateEnvironment",
+      "input": {
+        "EnvironmentName": "env1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EnvironmentName": "env1",
+        "Status": "Terminated"
+      }
+    },
+    {
+      "operation": "DeleteApplicationVersion",
+      "input": {
+        "ApplicationName": "app1",
+        "VersionLabel": "v1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeApplicationVersions",
+      "input": {
+        "ApplicationName": "app1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationVersions": null
+      }
+    },
+    {
+      "operation": "DeleteApplication",
+      "input": {
+        "ApplicationName": "app1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeApplications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Applications": [
+          {
+            "ApplicationName": "app2",
+            "Description": "second"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeApplicationVersions",
+      "input": {
+        "ApplicationName": "app2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationVersions": [
+          {
+            "ApplicationName": "app2",
+            "Status": "UNPROCESSED",
+            "VersionLabel": "v1"
+          }
+        ]
+      }
+    }
+  ]
+}

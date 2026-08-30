@@ -60,6 +60,38 @@ func FuzzVerifyS3AuthorizationV4(f *testing.F) {
 	})
 }
 
+func FuzzVerifyS3V4A(f *testing.F) {
+	f.Add(false, "GET", "/test.txt", "host;x-amz-content-sha256;x-amz-date;x-amz-region-set", "00", "us-east-1", "examplebucket.s3.amazonaws.com", "test")
+	f.Add(true, "GET", "/test.txt", "host", "00", "us-east-1,*", "examplebucket.s3.amazonaws.com", "test")
+	f.Fuzz(func(t *testing.T, query bool, method, path, signedHeaders, signature, regionSet, host, secret string) {
+		if method == "" || path == "" || path[0] != '/' {
+			t.Skip()
+		}
+		request, err := http.NewRequest(method, "https://example.test"+path, nil)
+		if err != nil {
+			t.Skip()
+		}
+		request.Host = host
+		if query {
+			values := request.URL.Query()
+			values.Set("X-Amz-Algorithm", s3V4AAlgorithm)
+			values.Set("X-Amz-Credential", "test/20130524/s3/aws4_request")
+			values.Set("X-Amz-Date", "20130524T000000Z")
+			values.Set("X-Amz-Expires", "60")
+			values.Set("X-Amz-Region-Set", regionSet)
+			values.Set("X-Amz-SignedHeaders", signedHeaders)
+			values.Set("X-Amz-Signature", signature)
+			request.URL.RawQuery = values.Encode()
+		} else {
+			request.Header.Set("X-Amz-Content-Sha256", "UNSIGNED-PAYLOAD")
+			request.Header.Set("X-Amz-Date", "20130524T000000Z")
+			request.Header.Set("X-Amz-Region-Set", regionSet)
+			request.Header.Set("Authorization", s3V4AAlgorithm+" Credential=test/20130524/s3/aws4_request,SignedHeaders="+signedHeaders+",Signature="+signature)
+		}
+		_ = VerifyS3V4A(request, "test", secret, "us-east-1")
+	})
+}
+
 func FuzzVerifyS3AuthorizationV2(f *testing.F) {
 	f.Add("GET", "/photos/puppy.jpg", "AKIAIOSFODNN7EXAMPLE", "qgk2+6Sv9/oM7G3qLEjTH1a1l1g=", "awsexamplebucket1.s3.us-west-1.amazonaws.com", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
 	f.Fuzz(func(t *testing.T, method, path, accessKey, signature, host, secret string) {

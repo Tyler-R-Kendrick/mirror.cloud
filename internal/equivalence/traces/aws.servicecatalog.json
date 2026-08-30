@@ -1,0 +1,294 @@
+{
+  "schema": "trace/1",
+  "service": "aws.servicecatalog",
+  "source": "pack:internal/services/aws/servicecatalog@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListPortfolios",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PortfolioDetails": null
+      }
+    },
+    {
+      "operation": "DescribeProduct",
+      "input": {
+        "Id": "prod-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateProduct",
+      "input": {
+        "IdempotencyToken": "tok-1",
+        "Name": "widget",
+        "Owner": "team",
+        "ProductType": "CLOUD_FORMATION_TEMPLATE"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProductViewDetail": {
+          "ProductViewSummary": {
+            "Id": "prod-7c589129",
+            "Name": "widget",
+            "Owner": "team",
+            "ProductType": "CLOUD_FORMATION_TEMPLATE"
+          }
+        }
+      },
+      "superseded": "ProductViewSummary declares Type and no ProductType, and the pack stored and answered with ProductType -- so the member no SDK could read was the one the caller had just supplied. It is stored under the declared name; the value and its CLOUD_FORMATION_TEMPLATE default are unchanged."
+    },
+    {
+      "operation": "DescribeProduct",
+      "input": {
+        "Id": {
+          "$fromPath": "ProductViewDetail.ProductViewSummary.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ProductViewSummary": {
+          "Id": "prod-7c589129",
+          "Name": "widget",
+          "Owner": "team",
+          "ProductType": "CLOUD_FORMATION_TEMPLATE"
+        }
+      },
+      "superseded": "ProductViewSummary declares Type and no ProductType, and the pack stored and answered with ProductType -- so the member no SDK could read was the one the caller had just supplied. It is stored under the declared name; the value and its CLOUD_FORMATION_TEMPLATE default are unchanged."
+    },
+    {
+      "operation": "CreatePortfolio",
+      "input": {
+        "DisplayName": "catalog",
+        "IdempotencyToken": "tok-2",
+        "ProviderName": "team"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PortfolioDetail": {
+          "DisplayName": "catalog",
+          "Id": "port-5f59f223",
+          "ProviderName": "team"
+        }
+      }
+    },
+    {
+      "operation": "DescribePortfolio",
+      "input": {
+        "Id": {
+          "$fromPath": "PortfolioDetail.Id",
+          "$fromStep": 4
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PortfolioDetail": {
+          "DisplayName": "catalog",
+          "Id": "port-5f59f223",
+          "ProviderName": "team"
+        }
+      }
+    },
+    {
+      "operation": "ListPortfolios",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PortfolioDetails": [
+          {
+            "DisplayName": "catalog",
+            "Id": "port-5f59f223",
+            "ProviderName": "team"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "AssociateProductWithPortfolio",
+      "input": {
+        "PortfolioId": {
+          "$fromPath": "PortfolioDetail.Id",
+          "$fromStep": 4
+        },
+        "ProductId": {
+          "$fromPath": "ProductViewDetail.ProductViewSummary.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "AssociateProductWithPortfolio",
+      "input": {
+        "PortfolioId": "port-absent",
+        "ProductId": {
+          "$fromPath": "ProductViewDetail.ProductViewSummary.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DisassociateProductFromPortfolio",
+      "input": {
+        "PortfolioId": {
+          "$fromPath": "PortfolioDetail.Id",
+          "$fromStep": 4
+        },
+        "ProductId": {
+          "$fromPath": "ProductViewDetail.ProductViewSummary.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeletePortfolio",
+      "input": {
+        "Id": {
+          "$fromPath": "PortfolioDetail.Id",
+          "$fromStep": 4
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListPortfolios",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PortfolioDetails": null
+      }
+    },
+    {
+      "operation": "DeleteProduct",
+      "input": {
+        "Id": {
+          "$fromPath": "ProductViewDetail.ProductViewSummary.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeProduct",
+      "input": {
+        "Id": {
+          "$fromPath": "ProductViewDetail.ProductViewSummary.Id",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteProduct",
+      "input": {
+        "Id": "prod-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

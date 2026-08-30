@@ -1,0 +1,135 @@
+schema: bir/1
+service: aws.servicecatalog
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is provisioned: a product carries no template, a portfolio
+# grants nothing, and an association is a record nothing ever reads.
+provenance: authored
+
+resources:
+  product:
+    collection: scprod
+    # The identifier answered with carries a prod- prefix, so the record member
+    # rather than the raw generated id is the store key.
+    key: Id
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      Id: "'prod-' + id"
+      Name: "'Name' in input ? string(input.Name) : ''"
+      Owner: "'Owner' in input ? string(input.Owner) : ''"
+      # The pack stored this as ProductType, which ProductViewSummary does not
+      # declare -- it declares Type. Stored under the declared name; the
+      # default for an absent value is the pack's.
+      Type: >
+        'ProductType' in input && string(input.ProductType) != ''
+          ? string(input.ProductType)
+          : 'CLOUD_FORMATION_TEMPLATE'
+
+  portfolio:
+    collection: scport
+    key: Id
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      Id: "'port-' + id"
+      DisplayName: "'DisplayName' in input ? string(input.DisplayName) : ''"
+      ProviderName: "'ProviderName' in input ? string(input.ProviderName) : ''"
+
+  # An association is keyed by both ids together and read by nothing: no
+  # operation lists a portfolio's products or a product's portfolios.
+  association:
+    collection: scassoc
+    id:
+      derive: "string(input.ProductId) + '/' + string(input.PortfolioId)"
+    record:
+      ProductId: "string(input.ProductId)"
+      PortfolioId: "string(input.PortfolioId)"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateProduct:
+    effects:
+      - create: { resource: product }
+    output:
+      ProductViewDetail: "{'ProductViewSummary': rec}"
+
+  DescribeProduct:
+    reads:
+      p: { resource: product, key: "string(input.Id)" }
+    require:
+      - { cond: p_found, error: NotFound }
+    output:
+      ProductViewSummary: p
+
+  DeleteProduct:
+    effects:
+      - delete: { resource: product, key: "string(input.Id)", missing: ignore }
+
+  CreatePortfolio:
+    effects:
+      - create: { resource: portfolio }
+    output:
+      PortfolioDetail: rec
+
+  DescribePortfolio:
+    reads:
+      f: { resource: portfolio, key: "string(input.Id)" }
+    require:
+      - { cond: f_found, error: NotFound }
+    output:
+      PortfolioDetail: f
+
+  ListPortfolios:
+    list: { resource: portfolio, member: PortfolioDetails, paginate: model }
+
+  DeletePortfolio:
+    effects:
+      - delete: { resource: portfolio, key: "string(input.Id)", missing: ignore }
+
+  AssociateProductWithPortfolio:
+    effects:
+      - put: { resource: association }
+
+  DisassociateProductFromPortfolio:
+    effects:
+      - delete: { resource: association, missing: ignore }
+
+quirks:
+  - operation: CreateProduct
+    note: >
+      The pack stored a product's type as ProductType and answered with it
+      inside a ProductViewSummary, which declares Type and no ProductType -- so
+      the member no SDK could read was the one the caller had just supplied.
+      It is stored under the declared name and the recorded steps are
+      superseded with that reason; the value and its CLOUD_FORMATION_TEMPLATE
+      default are unchanged.
+
+      ProvisioningArtifactParameters is dropped, so a product carries no
+      template and cannot be provisioned, and ProvisioningArtifactDetail is
+      declared on the answer and absent. ProductARN, CreatedTime and Status are
+      never set.
+  - operation: AssociateProductWithPortfolio
+    note: >
+      An association is stored and read by nothing: no operation here lists a
+      portfolio's products or a product's portfolios, so associating is
+      unobservable through this service. Neither id is checked to exist, so a
+      product can be associated with a portfolio that was never created, and
+      deleting either leaves the association behind.
+  - operation: DescribeProduct
+    note: >
+      A product is found by Id alone; the Name the model also accepts is
+      ignored, so asking by name finds nothing. Budgets, LaunchPaths and
+      ProvisioningArtifacts are declared on the answer and always absent, as
+      are a portfolio's Budgets, Tags and TagOptions.
+  - operation: DeleteProduct
+    note: >
+      Deleting an absent product or portfolio succeeds, where describing it
+      faults, and deleting a portfolio does not check whether products are
+      still associated with it -- the real service refuses that. AcceptLanguage
+      is accepted everywhere and ignored.

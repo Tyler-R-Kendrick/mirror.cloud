@@ -1,0 +1,428 @@
+{
+  "schema": "trace/1",
+  "service": "aws.ram",
+  "source": "pack:internal/services/aws/ram@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "GetResourceShares",
+      "input": {
+        "resourceOwner": "SELF"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceShares": null
+      }
+    },
+    {
+      "operation": "CreateResourceShare",
+      "input": {
+        "name": "share-one",
+        "principals": [
+          "000000000001"
+        ],
+        "resourceArns": [
+          "arn:aws:ec2:us-east-1:000000000000:subnet/subnet-1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceShare": {
+          "name": "share-one",
+          "principals": [
+            "000000000001"
+          ],
+          "resourceArns": [
+            "arn:aws:ec2:us-east-1:000000000000:subnet/subnet-1"
+          ],
+          "resourceShareArn": "arn:aws:ram:us-east-1:000000000000:resource-share/7c589129",
+          "status": "ACTIVE"
+        }
+      },
+      "superseded": "The pack stored one record per share and served it unchanged as a ResourceShare, as a ResourceShareAssociation and as a Resource. Those shapes disagree -- a share declares no resourceArns or principals, an association declares neither those nor a name -- so the pack's answers carried members no SDK could read. Each answer is projected to what its own shape declares; the members stay in the record, because the pack stored them, but nothing answers with them."
+    },
+    {
+      "operation": "GetResourceShares",
+      "input": {
+        "resourceOwner": "SELF"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceShares": [
+          {
+            "name": "share-one",
+            "principals": [
+              "000000000001"
+            ],
+            "resourceArns": [
+              "arn:aws:ec2:us-east-1:000000000000:subnet/subnet-1"
+            ],
+            "resourceShareArn": "arn:aws:ram:us-east-1:000000000000:resource-share/7c589129",
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "superseded": "The pack stored one record per share and served it unchanged as a ResourceShare, as a ResourceShareAssociation and as a Resource. Those shapes disagree -- a share declares no resourceArns or principals, an association declares neither those nor a name -- so the pack's answers carried members no SDK could read. Each answer is projected to what its own shape declares; the members stay in the record, because the pack stored them, but nothing answers with them."
+    },
+    {
+      "operation": "GetResourceShares",
+      "input": {
+        "resourceOwner": "SELF",
+        "resourceShareArns": [
+          {
+            "$fromPath": "resourceShare.resourceShareArn",
+            "$fromStep": 1
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceShares": [
+          {
+            "name": "share-one",
+            "principals": [
+              "000000000001"
+            ],
+            "resourceArns": [
+              "arn:aws:ec2:us-east-1:000000000000:subnet/subnet-1"
+            ],
+            "resourceShareArn": "arn:aws:ram:us-east-1:000000000000:resource-share/7c589129",
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "superseded": "The pack stored one record per share and served it unchanged as a ResourceShare, as a ResourceShareAssociation and as a Resource. Those shapes disagree -- a share declares no resourceArns or principals, an association declares neither those nor a name -- so the pack's answers carried members no SDK could read. Each answer is projected to what its own shape declares; the members stay in the record, because the pack stored them, but nothing answers with them."
+    },
+    {
+      "operation": "AssociateResourceShare",
+      "input": {
+        "principals": [
+          "000000000002"
+        ],
+        "resourceArns": [
+          "arn:aws:ec2:us-east-1:000000000000:subnet/subnet-2"
+        ],
+        "resourceShareArn": {
+          "$fromPath": "resourceShare.resourceShareArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceShareAssociations": [
+          {
+            "name": "share-one",
+            "principals": [
+              "000000000002"
+            ],
+            "resourceArns": [
+              "arn:aws:ec2:us-east-1:000000000000:subnet/subnet-2"
+            ],
+            "resourceShareArn": "arn:aws:ram:us-east-1:000000000000:resource-share/7c589129",
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "superseded": "The pack stored one record per share and served it unchanged as a ResourceShare, as a ResourceShareAssociation and as a Resource. Those shapes disagree -- a share declares no resourceArns or principals, an association declares neither those nor a name -- so the pack's answers carried members no SDK could read. Each answer is projected to what its own shape declares; the members stay in the record, because the pack stored them, but nothing answers with them."
+    },
+    {
+      "operation": "GetResourceShareAssociations",
+      "input": {
+        "associationType": "PRINCIPAL"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceShareAssociations": [
+          {
+            "name": "share-one",
+            "principals": [
+              "000000000002"
+            ],
+            "resourceArns": [
+              "arn:aws:ec2:us-east-1:000000000000:subnet/subnet-2"
+            ],
+            "resourceShareArn": "arn:aws:ram:us-east-1:000000000000:resource-share/7c589129",
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "superseded": "The pack stored one record per share and served it unchanged as a ResourceShare, as a ResourceShareAssociation and as a Resource. Those shapes disagree -- a share declares no resourceArns or principals, an association declares neither those nor a name -- so the pack's answers carried members no SDK could read. Each answer is projected to what its own shape declares; the members stay in the record, because the pack stored them, but nothing answers with them."
+    },
+    {
+      "operation": "GetResourceShareAssociations",
+      "input": {
+        "associationType": "RESOURCE"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceShareAssociations": [
+          {
+            "name": "share-one",
+            "principals": [
+              "000000000002"
+            ],
+            "resourceArns": [
+              "arn:aws:ec2:us-east-1:000000000000:subnet/subnet-2"
+            ],
+            "resourceShareArn": "arn:aws:ram:us-east-1:000000000000:resource-share/7c589129",
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "superseded": "The pack stored one record per share and served it unchanged as a ResourceShare, as a ResourceShareAssociation and as a Resource. Those shapes disagree -- a share declares no resourceArns or principals, an association declares neither those nor a name -- so the pack's answers carried members no SDK could read. Each answer is projected to what its own shape declares; the members stay in the record, because the pack stored them, but nothing answers with them."
+    },
+    {
+      "operation": "ListResources",
+      "input": {
+        "resourceOwner": "SELF"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resources": [
+          {
+            "name": "share-one",
+            "principals": [
+              "000000000002"
+            ],
+            "resourceArns": [
+              "arn:aws:ec2:us-east-1:000000000000:subnet/subnet-2"
+            ],
+            "resourceShareArn": "arn:aws:ram:us-east-1:000000000000:resource-share/7c589129",
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "superseded": "The pack stored one record per share and served it unchanged as a ResourceShare, as a ResourceShareAssociation and as a Resource. Those shapes disagree -- a share declares no resourceArns or principals, an association declares neither those nor a name -- so the pack's answers carried members no SDK could read. Each answer is projected to what its own shape declares; the members stay in the record, because the pack stored them, but nothing answers with them."
+    },
+    {
+      "operation": "DisassociateResourceShare",
+      "input": {
+        "principals": [
+          "000000000002"
+        ],
+        "resourceShareArn": {
+          "$fromPath": "resourceShare.resourceShareArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceShareAssociations": [
+          {
+            "name": "share-one",
+            "principals": [
+              "000000000002"
+            ],
+            "resourceArns": [
+              "arn:aws:ec2:us-east-1:000000000000:subnet/subnet-2"
+            ],
+            "resourceShareArn": "arn:aws:ram:us-east-1:000000000000:resource-share/7c589129",
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "superseded": "The pack stored one record per share and served it unchanged as a ResourceShare, as a ResourceShareAssociation and as a Resource. Those shapes disagree -- a share declares no resourceArns or principals, an association declares neither those nor a name -- so the pack's answers carried members no SDK could read. Each answer is projected to what its own shape declares; the members stay in the record, because the pack stored them, but nothing answers with them."
+    },
+    {
+      "operation": "GetResourceShares",
+      "input": {
+        "resourceOwner": "SELF"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceShares": [
+          {
+            "name": "share-one",
+            "principals": [
+              "000000000002"
+            ],
+            "resourceArns": [
+              "arn:aws:ec2:us-east-1:000000000000:subnet/subnet-2"
+            ],
+            "resourceShareArn": "arn:aws:ram:us-east-1:000000000000:resource-share/7c589129",
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "superseded": "The pack stored one record per share and served it unchanged as a ResourceShare, as a ResourceShareAssociation and as a Resource. Those shapes disagree -- a share declares no resourceArns or principals, an association declares neither those nor a name -- so the pack's answers carried members no SDK could read. Each answer is projected to what its own shape declares; the members stay in the record, because the pack stored them, but nothing answers with them."
+    },
+    {
+      "operation": "UpdateResourceShare",
+      "input": {
+        "name": "share-two",
+        "resourceShareArn": "arn:aws:ram:us-east-1:000000000000:resource-share/invented"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceShare": {
+          "name": "share-two",
+          "principals": null,
+          "resourceArns": null,
+          "resourceShareArn": "arn:aws:ram:us-east-1:000000000000:resource-share/invented",
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "GetResourceShares",
+      "input": {
+        "resourceOwner": "SELF"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceShares": [
+          {
+            "name": "share-one",
+            "principals": [
+              "000000000002"
+            ],
+            "resourceArns": [
+              "arn:aws:ec2:us-east-1:000000000000:subnet/subnet-2"
+            ],
+            "resourceShareArn": "arn:aws:ram:us-east-1:000000000000:resource-share/7c589129",
+            "status": "ACTIVE"
+          },
+          {
+            "name": "share-two",
+            "principals": null,
+            "resourceArns": null,
+            "resourceShareArn": "arn:aws:ram:us-east-1:000000000000:resource-share/invented",
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "superseded": "The pack stored one record per share and served it unchanged as a ResourceShare, as a ResourceShareAssociation and as a Resource. Those shapes disagree -- a share declares no resourceArns or principals, an association declares neither those nor a name -- so the pack's answers carried members no SDK could read. Each answer is projected to what its own shape declares; the members stay in the record, because the pack stored them, but nothing answers with them."
+    },
+    {
+      "operation": "DeleteResourceShare",
+      "input": {
+        "resourceShareArn": {
+          "$fromPath": "resourceShare.resourceShareArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "returnValue": true
+      }
+    },
+    {
+      "operation": "GetResourceShares",
+      "input": {
+        "resourceOwner": "SELF"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceShares": [
+          {
+            "name": "share-two",
+            "principals": null,
+            "resourceArns": null,
+            "resourceShareArn": "arn:aws:ram:us-east-1:000000000000:resource-share/invented",
+            "status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteResourceShare",
+      "input": {
+        "resourceShareArn": "arn:aws:ram:us-east-1:000000000000:resource-share/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "returnValue": true
+      }
+    }
+  ]
+}

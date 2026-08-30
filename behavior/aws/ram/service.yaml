@@ -1,0 +1,188 @@
+schema: bir/1
+service: aws.ram
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is shared: a resource share is a record, and no other
+# service in this emulator consults one.
+provenance: authored
+
+resources:
+  # There is one record type behind four differently-shaped answers: the pack
+  # stored a share and served it as a share, as an association and as a
+  # resource. Only the members each declares survive the projection.
+  share:
+    collection: ram
+    key: resourceShareArn
+    # Only the key member lives here. Resource-level members are re-evaluated
+    # on every write, and DisassociateResourceShare is a write that carries
+    # neither a name nor the resources it is supposedly removing -- anything
+    # else here would be recomputed from a request that does not have it,
+    # blanking what the create stored. The pack wrote the record back
+    # untouched, which is what an effect-level record of nothing does.
+    #
+    # `arn` is only bound where the resource's own id is -- a create -- and
+    # every other write here arrives carrying the ARN it means, which is what
+    # the ternary reaches for first.
+    id:
+      generate: { kind: hex, bytes: 8 }
+    arn: "arn:{partition}:ram:{region}:{account}:resource-share/{id}"
+    record:
+      resourceShareArn: >
+        'resourceShareArn' in input && string(input.resourceShareArn) != ''
+          ? string(input.resourceShareArn)
+          : arn
+
+operations:
+  CreateResourceShare:
+    effects:
+      - create:
+          resource: share
+          record:
+            name: "'name' in input ? string(input.name) : ''"
+            status: "'ACTIVE'"
+            resourceArns: "'resourceArns' in input ? input.resourceArns : []"
+            principals: "'principals' in input ? input.principals : []"
+    output:
+      resourceShare: >
+        {
+          'resourceShareArn': rec.resourceShareArn,
+          'name': rec.name,
+          'status': rec.status
+        }
+
+  # An update is the same write: it reuses the ARN it was given, so a share
+  # that does not exist is created by updating it.
+  UpdateResourceShare:
+    effects:
+      - put:
+          resource: share
+          key: "string(input.resourceShareArn)"
+          record:
+            name: "'name' in input ? string(input.name) : ''"
+            status: "'ACTIVE'"
+            resourceArns: "'resourceArns' in input ? input.resourceArns : []"
+            principals: "'principals' in input ? input.principals : []"
+    output:
+      resourceShare: >
+        {
+          'resourceShareArn': rec.resourceShareArn,
+          'name': rec.name,
+          'status': rec.status
+        }
+
+  # resourceShareArns is a list, and the pack read it as a string -- so it never
+  # matched and every share was always answered for. Transcribed.
+  GetResourceShares:
+    list: { resource: share, member: resourceShares, paginate: model }
+    output:
+      resourceShares: >
+        items.map(s, {
+          'resourceShareArn': s.resourceShareArn,
+          'name': s.name,
+          'status': s.status
+        })
+
+  DeleteResourceShare:
+    effects:
+      - delete: { resource: share, key: "string(input.resourceShareArn)", missing: ignore }
+    output:
+      returnValue: "true"
+
+  # Associating rewrites the share's resources and principals; disassociating
+  # writes the record back unchanged. Both answer the share as an association.
+  AssociateResourceShare:
+    effects:
+      - patch:
+          resource: share
+          key: "string(input.resourceShareArn)"
+          record:
+            resourceArns: "'resourceArns' in input ? input.resourceArns : []"
+            principals: "'principals' in input ? input.principals : []"
+    output:
+      resourceShareAssociations: >
+        [{
+          'resourceShareArn': rec.resourceShareArn,
+          'status': rec.status
+        }]
+
+  DisassociateResourceShare:
+    effects:
+      # An effect-level record of nothing: the stored record is read, the key
+      # member recomputed to the same value, and everything else left as it
+      # was. That is exactly what the pack did.
+      - patch:
+          resource: share
+          key: "string(input.resourceShareArn)"
+          record: {}
+    output:
+      resourceShareAssociations: >
+        [{
+          'resourceShareArn': rec.resourceShareArn,
+          'status': rec.status
+        }]
+
+  GetResourceShareAssociations:
+    list: { resource: share, member: resourceShareAssociations, paginate: model }
+    output:
+      resourceShareAssociations: >
+        items.map(s, {
+          'resourceShareArn': s.resourceShareArn,
+          'status': s.status
+        })
+
+  ListResources:
+    list: { resource: share, member: resources, paginate: model }
+    output:
+      resources: >
+        items.map(s, {
+          'resourceShareArn': s.resourceShareArn,
+          'status': s.status
+        })
+
+quirks:
+  - operation: GetResourceShares
+    note: >
+      The pack stored one record per share and served it unchanged as a
+      ResourceShare, as a ResourceShareAssociation and as a Resource. Those
+      three shapes disagree: a share declares no resourceArns and no
+      principals, an association declares neither those nor a name, and a
+      Resource declares an arn and a type the record never had. So the pack's
+      answers carried members no SDK could read and omitted the ones each shape
+      does declare. Each answer is projected to what its own shape declares and
+      the recorded steps are superseded with that reason; the resources and
+      principals stay in the record, since the pack stored them, but nothing
+      answers with them any more.
+
+      ListResources is the clearest case: it answers one entry per resource
+      *share*, not per shared resource, so a share holding three resource ARNs
+      still lists as one. That is the pack's behavior, and it is wrong in a way
+      no projection can fix -- the record does not hold what the operation is
+      being asked for.
+  - operation: UpdateResourceShare
+    note: >
+      Update and create are one write. Update reuses the ARN it was given
+      rather than requiring the share to exist, so updating a share that was
+      never created creates it, under whatever ARN string the caller sent --
+      including one that is not an ARN. name is required on create and optional
+      on update, so an update that omits it blanks the name.
+  - operation: AssociateResourceShare
+    note: >
+      Associating replaces the share's resources and principals wholesale
+      rather than adding to them, so associating twice keeps only the second
+      set. Disassociating removes nothing at all -- the pack wrote the record
+      back untouched -- so a resource can never be unshared. Neither checks the
+      share exists; both create one if it does not.
+  - operation: GetResourceShareAssociations
+    note: >
+      The required associationType is ignored, so asking for PRINCIPAL
+      associations and RESOURCE associations answers identically. The required
+      resourceOwner on GetResourceShares and ListResources is ignored too, so a
+      caller asking for shares owned by others gets its own. associatedEntity
+      is the member that says what an association is *to*, and it is never set,
+      so nothing distinguishes one association from another.
+  - operation: DeleteResourceShare
+    note: >
+      Deleting an absent share succeeds and answers returnValue true, so the
+      answer never says no. creationTime, lastUpdatedTime, owningAccountId and
+      allowExternalPrincipals are declared on a share and never set, and every
+      share is ACTIVE from creation, so nothing observes PENDING or DELETING.

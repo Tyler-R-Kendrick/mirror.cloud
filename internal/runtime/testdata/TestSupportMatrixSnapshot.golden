@@ -91,7 +91,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.comprehend` | `awsJson1_1` | 12 | 0 |
 | `aws.mediastore` | `awsJson1_1` | 6 | 0 |
 | `aws.kinesisanalytics` | `awsJson1_1` | 9 | 0 |
-| `aws.translate` | `awsJson1_1` | 9 | 0 |
+| `aws.translate` | `awsJson1_1` | 8 | 1 |
 | `aws.textract` | `awsJson1_1` | 6 | 0 |
 | `aws.polly` | `awsJson1_1` | 5 | 0 |
 | `aws.fsx` | `awsJson1_1` | 7 | 0 |

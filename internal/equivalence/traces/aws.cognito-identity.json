@@ -1,0 +1,386 @@
+{
+  "schema": "trace/1",
+  "service": "aws.cognito-identity",
+  "source": "pack:internal/services/aws/cognitoidentity@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListIdentityPools",
+      "input": {
+        "MaxResults": 10
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IdentityPools": null
+      }
+    },
+    {
+      "operation": "DescribeIdentityPool",
+      "input": {
+        "IdentityPoolId": "us-east-1:absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateIdentityPool",
+      "input": {
+        "AllowUnauthenticatedIdentities": true,
+        "IdentityPoolName": "pool-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AllowUnauthenticatedIdentities": true,
+        "IdentityPoolId": "us-east-1:7c589129-5f59",
+        "IdentityPoolName": "pool-one"
+      }
+    },
+    {
+      "operation": "DescribeIdentityPool",
+      "input": {
+        "IdentityPoolId": {
+          "$fromPath": "IdentityPoolId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AllowUnauthenticatedIdentities": true,
+        "IdentityPoolId": "us-east-1:7c589129-5f59",
+        "IdentityPoolName": "pool-one"
+      }
+    },
+    {
+      "operation": "CreateIdentityPool",
+      "input": {
+        "AllowUnauthenticatedIdentities": false,
+        "IdentityPoolName": "pool-two"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AllowUnauthenticatedIdentities": false,
+        "IdentityPoolId": "us-east-1:9c8e2cb0-33f6",
+        "IdentityPoolName": "pool-two"
+      }
+    },
+    {
+      "operation": "ListIdentityPools",
+      "input": {
+        "MaxResults": 10
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IdentityPools": [
+          {
+            "AllowUnauthenticatedIdentities": true,
+            "IdentityPoolId": "us-east-1:7c589129-5f59",
+            "IdentityPoolName": "pool-one"
+          },
+          {
+            "AllowUnauthenticatedIdentities": false,
+            "IdentityPoolId": "us-east-1:9c8e2cb0-33f6",
+            "IdentityPoolName": "pool-two"
+          }
+        ]
+      },
+      "superseded": "IdentityPoolShortDescription declares only IdentityPoolId and IdentityPoolName, and the pack listed the stored record, which also carries AllowUnauthenticatedIdentities -- a member no SDK could read in a listing. The declared shape outranks the pack's authored behavior; the same pool described still carries it, because the describe answer declares it required."
+    },
+    {
+      "operation": "UpdateIdentityPool",
+      "input": {
+        "AllowUnauthenticatedIdentities": false,
+        "IdentityPoolId": {
+          "$fromPath": "IdentityPoolId",
+          "$fromStep": 2
+        },
+        "IdentityPoolName": "pool-renamed"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AllowUnauthenticatedIdentities": true,
+        "IdentityPoolId": "us-east-1:7c589129-5f59",
+        "IdentityPoolName": "pool-renamed"
+      }
+    },
+    {
+      "operation": "DescribeIdentityPool",
+      "input": {
+        "IdentityPoolId": {
+          "$fromPath": "IdentityPoolId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "AllowUnauthenticatedIdentities": true,
+        "IdentityPoolId": "us-east-1:7c589129-5f59",
+        "IdentityPoolName": "pool-renamed"
+      }
+    },
+    {
+      "operation": "GetId",
+      "input": {
+        "IdentityPoolId": {
+          "$fromPath": "IdentityPoolId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IdentityId": "us-east-1:7c589129-5f59:83d4958a"
+      }
+    },
+    {
+      "operation": "GetId",
+      "input": {
+        "IdentityPoolId": "us-east-1:absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IdentityId": "us-east-1:absent:100aa4e6"
+      }
+    },
+    {
+      "operation": "GetCredentialsForIdentity",
+      "input": {
+        "IdentityId": {
+          "$fromPath": "IdentityId",
+          "$fromStep": 8
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Credentials": {
+          "AccessKeyId": "ASIATEST3ed10eca",
+          "SecretKey": "4da7b6a4902c3235",
+          "SessionToken": "e7175ec1cd1d60f2"
+        },
+        "IdentityId": "us-east-1:7c589129-5f59:83d4958a"
+      }
+    },
+    {
+      "operation": "GetCredentialsForIdentity",
+      "input": {
+        "IdentityId": "us-east-1:invented"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Credentials": {
+          "AccessKeyId": "ASIATEST77df676f",
+          "SecretKey": "9045051ba67c4ee8",
+          "SessionToken": "ac1d53d812211c9d"
+        },
+        "IdentityId": "us-east-1:invented"
+      }
+    },
+    {
+      "operation": "GetOpenIdToken",
+      "input": {
+        "IdentityId": {
+          "$fromPath": "IdentityId",
+          "$fromStep": 8
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IdentityId": "us-east-1:7c589129-5f59:83d4958a",
+        "Token": "mirror.71a868c4bfb93e84"
+      }
+    },
+    {
+      "operation": "GetIdentityPoolRoles",
+      "input": {
+        "IdentityPoolId": {
+          "$fromPath": "IdentityPoolId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IdentityPoolId": "us-east-1:7c589129-5f59",
+        "Roles": {}
+      }
+    },
+    {
+      "operation": "SetIdentityPoolRoles",
+      "input": {
+        "IdentityPoolId": {
+          "$fromPath": "IdentityPoolId",
+          "$fromStep": 2
+        },
+        "Roles": {
+          "authenticated": "arn:aws:iam::000000000000:role/auth"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetIdentityPoolRoles",
+      "input": {
+        "IdentityPoolId": {
+          "$fromPath": "IdentityPoolId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IdentityPoolId": "us-east-1:7c589129-5f59",
+        "Roles": {
+          "authenticated": "arn:aws:iam::000000000000:role/auth"
+        }
+      }
+    },
+    {
+      "operation": "DeleteIdentityPool",
+      "input": {
+        "IdentityPoolId": {
+          "$fromPath": "IdentityPoolId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListIdentityPools",
+      "input": {
+        "MaxResults": 10
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IdentityPools": [
+          {
+            "AllowUnauthenticatedIdentities": false,
+            "IdentityPoolId": "us-east-1:9c8e2cb0-33f6",
+            "IdentityPoolName": "pool-two"
+          }
+        ]
+      },
+      "superseded": "IdentityPoolShortDescription declares only IdentityPoolId and IdentityPoolName, and the pack listed the stored record, which also carries AllowUnauthenticatedIdentities -- a member no SDK could read in a listing. The declared shape outranks the pack's authored behavior; the same pool described still carries it, because the describe answer declares it required."
+    },
+    {
+      "operation": "DeleteIdentityPool",
+      "input": {
+        "IdentityPoolId": "us-east-1:absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

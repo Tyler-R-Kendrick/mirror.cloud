@@ -1,0 +1,195 @@
+schema: bir/1
+service: aws.cognito-identity
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing authenticates: the Logins map is never read, so any caller
+# gets an identity and credentials for any pool.
+provenance: authored
+
+resources:
+  # Not named `identity`: that is the request's own identity, and a resource
+  # may not shadow it.
+  pool:
+    collection: cip
+    # The pool id the real service issues is region-scoped and
+    # hyphen-separated, and the pack built that shape from two draws on the
+    # deterministic source. Two draws cannot come from the resource's own
+    # single generated id, so the create binds both itself and names the store
+    # key outright; every other operation arrives carrying the id it means,
+    # which is what `derive` reaches for.
+    #
+    # The record is deliberately empty for the reason it is empty everywhere
+    # else: resource-level members are re-evaluated on every write, and
+    # UpdateIdentityPool carries an AllowUnauthenticatedIdentities the pack
+    # ignored. Recomputing it here would let an update change a flag the pack
+    # could not.
+    id:
+      derive: "string(input.IdentityPoolId)"
+    record: {}
+
+  # An issued identity is write-only: no operation reads one back, and
+  # GetCredentialsForIdentity does not check that the identity exists.
+  poolidentity:
+    collection: cid
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      IdentityId: "string(input.IdentityPoolId) + ':' + id"
+
+  # Roles are kept per pool and replaced wholesale.
+  poolroles:
+    collection: ciprole
+    id:
+      input_members: [IdentityPoolId]
+    record:
+      Roles: "'Roles' in input ? input.Roles : {}"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateIdentityPool:
+    effects:
+      - generate: { bind: hi, kind: hex, bytes: 8 }
+      - generate: { bind: lo, kind: hex, bytes: 4 }
+      - put:
+          resource: pool
+          key: "identity.region + ':' + fx.hi + '-' + fx.lo"
+          record:
+            IdentityPoolId: "identity.region + ':' + fx.hi + '-' + fx.lo"
+            IdentityPoolName: "'IdentityPoolName' in input ? string(input.IdentityPoolName) : ''"
+            AllowUnauthenticatedIdentities: >
+              'AllowUnauthenticatedIdentities' in input
+                ? input.AllowUnauthenticatedIdentities
+                : false
+    output:
+      IdentityPoolId: rec.IdentityPoolId
+      IdentityPoolName: rec.IdentityPoolName
+      AllowUnauthenticatedIdentities: rec.AllowUnauthenticatedIdentities
+
+  DescribeIdentityPool:
+    reads:
+      p: { resource: pool, key: "string(input.IdentityPoolId)" }
+    require:
+      - { cond: p_found, error: NotFound }
+    output:
+      IdentityPoolId: p.IdentityPoolId
+      IdentityPoolName: p.IdentityPoolName
+      AllowUnauthenticatedIdentities: p.AllowUnauthenticatedIdentities
+
+  # An update is a describe that may replace the name, and answers the record
+  # as it stands afterwards. A blank name leaves the stored one alone.
+  UpdateIdentityPool:
+    reads:
+      p: { resource: pool, key: "string(input.IdentityPoolId)" }
+    require:
+      - { cond: p_found, error: NotFound }
+    effects:
+      - patch:
+          resource: pool
+          key: "string(input.IdentityPoolId)"
+          record:
+            IdentityPoolName: >
+              'IdentityPoolName' in input && string(input.IdentityPoolName) != ''
+                ? string(input.IdentityPoolName)
+                : string(p.IdentityPoolName)
+            AllowUnauthenticatedIdentities: p.AllowUnauthenticatedIdentities
+    output:
+      IdentityPoolId: rec.IdentityPoolId
+      IdentityPoolName: rec.IdentityPoolName
+      AllowUnauthenticatedIdentities: rec.AllowUnauthenticatedIdentities
+
+  # IdentityPoolShortDescription declares the id and the name and nothing else,
+  # so the listed form of a pool is not the stored record.
+  ListIdentityPools:
+    list: { resource: pool, member: IdentityPools, paginate: model }
+    output:
+      IdentityPools: >
+        items.map(p, {
+          'IdentityPoolId': p.IdentityPoolId,
+          'IdentityPoolName': p.IdentityPoolName
+        })
+
+  DeleteIdentityPool:
+    effects:
+      - delete: { resource: pool, key: "string(input.IdentityPoolId)", missing: ignore }
+
+  GetId:
+    effects:
+      - create: { resource: poolidentity }
+    output:
+      IdentityId: rec.IdentityId
+
+  GetCredentialsForIdentity:
+    effects:
+      - generate: { bind: ak, kind: hex, bytes: 8 }
+      - generate: { bind: sk, kind: hex, bytes: 16 }
+      - generate: { bind: st, kind: hex, bytes: 16 }
+    output:
+      IdentityId: "string(input.IdentityId)"
+      Credentials: >
+        {
+          'AccessKeyId': 'ASIATEST' + fx.ak,
+          'SecretKey': fx.sk,
+          'SessionToken': fx.st
+        }
+
+  GetOpenIdToken:
+    effects:
+      - generate: { bind: tok, kind: hex, bytes: 16 }
+    output:
+      IdentityId: "string(input.IdentityId)"
+      Token: "'mirror.' + fx.tok"
+
+  SetIdentityPoolRoles:
+    effects:
+      - put: { resource: poolroles }
+
+  GetIdentityPoolRoles:
+    reads:
+      r: { resource: poolroles }
+    output:
+      IdentityPoolId: "string(input.IdentityPoolId)"
+      Roles: "r_found ? r.Roles : {}"
+
+quirks:
+  - operation: GetCredentialsForIdentity
+    note: >
+      The Logins map is required in practice and never read, and the IdentityId
+      is not checked against one that was issued, so any caller gets working
+      credentials for any identity string it invents. The credentials are
+      random and grant nothing: no other service in this emulator consults
+      them, and Expiration is declared and never set, so they never expire.
+      GetOpenIdToken is the same -- the token is a prefix and sixteen random
+      bytes, signed by nothing and verifiable by nothing.
+  - operation: GetId
+    note: >
+      An identity is issued for any pool id, existing or not, and is stored
+      where nothing reads it. AccountId is ignored. Two calls with the same
+      Logins yield two different identities, where the real service returns the
+      same identity for the same login -- that is the whole point of GetId, and
+      nothing here implements it.
+  - operation: ListIdentityPools
+    note: >
+      A listed pool carries only its id and name, because
+      IdentityPoolShortDescription declares only those, while the same pool
+      described also carries AllowUnauthenticatedIdentities. The pack listed the
+      stored record, so the listing carried a member no SDK could read, and the
+      recorded step is superseded with that reason.
+  - operation: UpdateIdentityPool
+    note: >
+      Only the name can be changed, and only to a non-empty value: the required
+      AllowUnauthenticatedIdentities in the request is ignored, so a pool
+      cannot be switched between allowing and forbidding unauthenticated
+      identities. CognitoIdentityProviders, SupportedLoginProviders,
+      DeveloperProviderName and the SAML and OIDC provider lists are dropped on
+      both create and update, so a pool trusts no identity provider at all.
+  - operation: SetIdentityPoolRoles
+    note: >
+      Roles are stored per pool, replaced wholesale, and consulted by nothing:
+      the credentials GetCredentialsForIdentity issues do not come from them.
+      RoleMappings is dropped, so GetIdentityPoolRoles never answers one. The
+      pool id is not checked to exist.

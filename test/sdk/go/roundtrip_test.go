@@ -58,6 +58,24 @@ func TestAWSSDKPresignedSignatureValidation(t *testing.T) {
 	if _, err := client.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("signed"), Key: aws.String("object"), Body: strings.NewReader("verified")}); err != nil {
 		t.Fatal(err)
 	}
+	tamperedConfig := awscfg
+	tamperedConfig.HTTPClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		request = request.Clone(request.Context())
+		request.Header = request.Header.Clone()
+		before, _, ok := strings.Cut(request.Header.Get("Authorization"), "Signature=")
+		if !ok {
+			return nil, fmt.Errorf("signed request has no signature")
+		}
+		request.Header.Set("Authorization", before+"Signature="+strings.Repeat("0", 64))
+		return http.DefaultTransport.RoundTrip(request)
+	})}
+	tamperedClient := s3.NewFromConfig(tamperedConfig, func(options *s3.Options) {
+		options.BaseEndpoint = aws.String(ts.URL)
+		options.UsePathStyle = true
+	})
+	if _, err := tamperedClient.ListBuckets(context.Background(), &s3.ListBucketsInput{}); err == nil || !strings.Contains(err.Error(), "SignatureDoesNotMatch") {
+		t.Fatalf("tampered authorization: %v", err)
+	}
 	presigned, err := s3.NewPresignClient(client).PresignGetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("signed"), Key: aws.String("object")}, func(options *s3.PresignOptions) { options.Expires = time.Minute })
 	if err != nil {
 		t.Fatal(err)
@@ -169,6 +187,10 @@ func TestAWSSDKPresignedSignatureValidation(t *testing.T) {
 		}
 	}
 }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
 
 func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	cfg := mcfg.Default()

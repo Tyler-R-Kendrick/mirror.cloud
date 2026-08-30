@@ -276,8 +276,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		"PutPublicAccessBlock", "GetPublicAccessBlock", "DeletePublicAccessBlock",
 		"PutBucketOwnershipControls", "GetBucketOwnershipControls", "DeleteBucketOwnershipControls":
 		return p.bucketCfg(ctx, req)
-	case "GetBucketPolicyStatus":
-		return p.policyStatus(ctx, req)
 	case "GetObjectAttributes":
 		return p.objectAttributes(ctx, req)
 	case "GetBucketTagging", "GetBucketNotificationConfiguration",
@@ -308,8 +306,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.renameObject(ctx, req)
 	case "SelectObjectContent":
 		return p.selectObject(ctx, req)
-	case "GetObjectTorrent":
-		return p.objectTorrent(ctx, req)
 	case "ListDirectoryBuckets":
 		return p.listBuckets(ctx, req)
 	case "WriteGetObjectResponse":
@@ -3242,19 +3238,6 @@ func cfgKind(op string) (string, *spi.Fault) {
 		return "ownershipcontrols", n("OwnershipControlsNotFoundError", "The bucket ownership controls were not found")
 	}
 	return strings.ToLower(op), nil
-}
-
-func (p *Pack) policyStatus(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b := str(req.Input["Bucket"])
-	if err := p.requireBucket(ctx, req, b); err != nil {
-		return nil, err
-	}
-	raw, ok, _ := p.col(req, "bktcfg").Get(ctx, b+"/policy")
-	pub := false
-	if ok && bytes.Contains(raw, []byte(`"AWS":"*"`)) || ok && bytes.Contains(raw, []byte(`"Principal":"*"`)) {
-		pub = true
-	}
-	return &spi.Response{Output: map[string]any{"PolicyStatus": map[string]any{"IsPublic": pub}}}, nil
 }
 
 func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Response, error) {

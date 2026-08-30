@@ -4454,14 +4454,6 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestExpectedBucketOwnerAcrossBucketScopedOperations",
 		},
 		{
-			name: "s3-torrent-skip-owner",
-			file: filepath.Join("internal", "services", "aws", "s3", "s3_extra.go"),
-			old:  "func (p *Pack) objectTorrent(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tb, key := str(req.Input[\"Bucket\"]), str(req.Input[\"Key\"])\n\tif err := p.requireBucket(ctx, req, b); err != nil {",
-			new:  "func (p *Pack) objectTorrent(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tb, key := str(req.Input[\"Bucket\"]), str(req.Input[\"Key\"])\n\tif err := p.requireBucket(ctx, req, b); err != nil && false {",
-			pkg:  "./internal/services/aws/s3",
-			run:  "TestExpectedBucketOwnerAcrossBucketScopedOperations",
-		},
-		{
 			name: "s3-annotation-skip-owner",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3_extra.go"),
 			old:  "func (p *Pack) objectAnnotation(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tb, key := str(req.Input[\"Bucket\"]), str(req.Input[\"Key\"])\n\tif err := p.requireBucket(ctx, req, b); err != nil {",

@@ -937,6 +937,23 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given LocalStack-unsupported operations When requested Then S3 reports them explicitly", func(t *testing.T) {
+		for _, test := range []struct {
+			path      string
+			operation string
+		}{
+			{"/unsupported-bdd?policyStatus", "GetBucketPolicyStatus"},
+			{"/unsupported-bdd/key?torrent", "GetObjectTorrent"},
+		} {
+			res := do(http.MethodGet, test.path, nil, "")
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusNotImplemented || res.Header.Get("x-mirror-not-implemented") != "aws.s3."+test.operation || !bytes.Contains(body, []byte("MirrorNotImplemented")) {
+				t.Fatalf("%s: %d %#v %s", test.operation, res.StatusCode, res.Header, body)
+			}
+		}
+	})
+
 	t.Run("Given bucket encryption When replacing it Then S3 validates and applies the default", func(t *testing.T) {
 		res := do(http.MethodPut, "/encryption-bdd", nil, "")
 		io.Copy(io.Discard, res.Body)

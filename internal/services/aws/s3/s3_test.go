@@ -2810,7 +2810,6 @@ func TestExpectedBucketOwnerAcrossBucketScopedOperations(t *testing.T) {
 		{"AbortMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "multipart", "UploadId": uploadID}, nil},
 		{"ListParts", map[string]any{"Bucket": "bucket", "Key": "multipart", "UploadId": uploadID}, nil},
 		{"SelectObjectContent", map[string]any{"Bucket": "bucket", "Key": "k", "Expression": "SELECT * FROM S3Object"}, nil},
-		{"GetObjectTorrent", map[string]any{"Bucket": "bucket", "Key": "k"}, nil},
 		{"PutObjectAnnotation", map[string]any{"Bucket": "bucket", "Key": "k", "AnnotationId": "a"}, nil},
 	}
 	errors := map[string]any{}
@@ -2847,6 +2846,25 @@ func TestExpectedBucketOwnerAcrossBucketScopedOperations(t *testing.T) {
 		t.Fatalf("rejected annotation persisted: %v", err)
 	}
 	golden.AssertJSON(t, errors)
+}
+
+func TestLocalStackUnsupportedOperations(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	for _, test := range []struct {
+		operation string
+		input     map[string]any
+	}{
+		{"GetBucketPolicyStatus", map[string]any{"Bucket": "bucket"}},
+		{"GetObjectTorrent", map[string]any{"Bucket": "bucket", "Key": "key"}},
+	} {
+		t.Run(test.operation, func(t *testing.T) {
+			_, err := invoke(t, p, test.operation, test.input, nil)
+			fault := asFault(t, err)
+			if fault.Code != "MirrorNotImplemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fields["operation"] != test.operation {
+				t.Fatalf("fault = %#v", fault)
+			}
+		})
+	}
 }
 
 func TestTagValidationAndBucketSemantics(t *testing.T) {

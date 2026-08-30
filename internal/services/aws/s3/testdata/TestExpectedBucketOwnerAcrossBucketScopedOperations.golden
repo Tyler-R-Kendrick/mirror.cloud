@@ -7,8 +7,6 @@
   "CopyObjectMissing": "NoSuchBucket",
   "DeleteObjects": "AccessDenied",
   "DeleteObjectsMissing": "NoSuchBucket",
-  "GetObjectTorrent": "AccessDenied",
-  "GetObjectTorrentMissing": "NoSuchBucket",
   "ListParts": "AccessDenied",
   "ListPartsMissing": "NoSuchBucket",
   "PutBucketVersioning": "AccessDenied",

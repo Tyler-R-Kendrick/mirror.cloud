@@ -1350,6 +1350,48 @@ func TestACLCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"bucketDefault": before, "bucketPublic": after, "invalid": asFault(t, invalidErr).Code, "object": object})
 }
 
+func TestObjectACLDeleteMarkerCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	base := map[string]any{"Bucket": "acl-delete-marker", "Key": "versioned"}
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": base["Bucket"]}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": base["Bucket"], "Status": "Enabled"}, nil)
+	mustInvoke(t, p, "PutObject", base, []byte("body"))
+	marker := mustInvoke(t, p, "DeleteObject", base, nil).Headers.Get("x-amz-version-id")
+	characterization := map[string]any{}
+	for _, test := range []struct {
+		name, operation, version, code string
+		status                         int
+		method                         string
+	}{
+		{"put current", "PutObjectAcl", "", "MethodNotAllowed", http.StatusMethodNotAllowed, "PUT"},
+		{"get current", "GetObjectAcl", "", "NoSuchKey", http.StatusNotFound, ""},
+		{"put explicit", "PutObjectAcl", marker, "MethodNotAllowed", http.StatusMethodNotAllowed, "PUT"},
+		{"get explicit", "GetObjectAcl", marker, "MethodNotAllowed", http.StatusMethodNotAllowed, "GET"},
+	} {
+		input := maps.Clone(base)
+		if test.version != "" {
+			input["VersionId"] = test.version
+		}
+		if test.operation == "PutObjectAcl" {
+			input["ACL"] = "public-read"
+		}
+		_, err := invoke(t, p, test.operation, input, nil)
+		fault := asFault(t, err)
+		if fault.Code != test.code || fault.HTTPStatus != test.status || fault.Headers.Get("x-amz-delete-marker") != "true" || fault.Headers.Get("x-amz-version-id") != marker {
+			t.Fatalf("%s fault = %#v", test.name, fault)
+		}
+		if test.method == "" {
+			if fault.Fields["Key"] != base["Key"] {
+				t.Fatalf("%s fields = %#v", test.name, fault.Fields)
+			}
+		} else if fault.Message != "The specified method is not allowed against this resource." || fault.Fields["Method"] != test.method || fault.Fields["ResourceType"] != "DeleteMarker" {
+			t.Fatalf("%s fields = %#v message=%q", test.name, fault.Fields, fault.Message)
+		}
+		characterization[test.name] = map[string]any{"code": fault.Code, "status": fault.HTTPStatus, "message": fault.Message, "fields": fault.Fields, "headers": fault.Headers}
+	}
+	golden.AssertJSON(t, characterization)
+}
+
 func TestBucketPolicyCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	input := map[string]any{"Bucket": "policy-characterization"}

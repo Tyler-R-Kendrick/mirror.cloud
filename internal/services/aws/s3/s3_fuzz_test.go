@@ -518,6 +518,9 @@ func FuzzBucketWebsite(f *testing.F) {
 		if !valid {
 			return
 		}
+		if mode%9 == 0 && len([]byte(suffix)) > 1024 {
+			return // valid website suffix, but no valid S3 object key can exercise it
+		}
 		path, wantStatus := "/key", http.StatusMovedPermanently
 		if mode%9 == 0 {
 			path, wantStatus = "/", http.StatusOK

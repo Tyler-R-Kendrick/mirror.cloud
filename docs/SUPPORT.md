@@ -49,7 +49,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.organizations` | `awsJson1_1` | 24 | 0 |
 | `aws.transfer` | `awsJson1_1` | 12 | 0 |
 | `aws.wafv2` | `awsJson1_1` | 13 | 0 |
-| `aws.appconfig` | `awsJson1_1` | 18 | 0 |
+| `aws.appconfig` | `awsJson1_1` | 17 | 0 |
 | `aws.codebuild` | `awsJson1_1` | 9 | 0 |
 | `aws.batch` | `awsJson1_1` | 13 | 0 |
 | `aws.elasticmapreduce` | `awsJson1_1` | 8 | 0 |
@@ -68,7 +68,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `aws.codepipeline` | `awsJson1_1` | 10 | 0 |
 | `aws.appsync` | `awsJson1_1` | 15 | 0 |
 | `aws.apigatewayv2` | `awsJson1_1` | 17 | 0 |
-| `aws.codecommit` | `awsJson1_1` | 12 | 0 |
+| `aws.codecommit` | `awsJson1_1` | 11 | 0 |
 | `aws.codedeploy` | `awsJson1_1` | 12 | 0 |
 | `aws.amplify` | `awsJson1_1` | 12 | 0 |
 | `aws.inspector` | `awsJson1_1` | 10 | 0 |

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -252,6 +253,14 @@ func indexOutput(step int, prefix string, v any, origin map[string][2]any) {
 		for k, vv := range t {
 			indexOutput(step, join(prefix, k), vv, origin)
 		}
+	case []any:
+		// An identifier is not always answered at the top of a response:
+		// CreateWorkspaces answers the workspace it created inside
+		// PendingRequests, and a later step that names that workspace has to
+		// be able to point at it.
+		for i, vv := range t {
+			indexOutput(step, join(prefix, strconv.Itoa(i)), vv, origin)
+		}
 	case string:
 		// Short values are caller-chosen names, not issued identifiers, and
 		// linking them would turn a literal into a reference for no reason.
@@ -345,12 +354,22 @@ func asRef(m map[string]any) (step int, path string, ok bool) {
 func lookupPath(out map[string]any, path string) (any, bool) {
 	var cur any = out
 	for _, part := range strings.Split(path, ".") {
-		m, ok := cur.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		cur, ok = m[part]
-		if !ok {
+		switch c := cur.(type) {
+		case map[string]any:
+			v, ok := c[part]
+			if !ok {
+				return nil, false
+			}
+			cur = v
+		case []any:
+			// A numeric segment indexes a list, which is how a reference
+			// reaches an identifier answered inside one.
+			i, err := strconv.Atoi(part)
+			if err != nil || i < 0 || i >= len(c) {
+				return nil, false
+			}
+			cur = c[i]
+		default:
 			return nil, false
 		}
 	}

@@ -1,0 +1,560 @@
+{
+  "schema": "trace/1",
+  "service": "aws.codecommit",
+  "source": "internal/services/aws/codecommit",
+  "note": "Repositories, branches and files, including the ARN member no SDK can read.",
+  "steps": [
+    {
+      "operation": "ListRepositories",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repositories": null
+      }
+    },
+    {
+      "operation": "CreateRepository",
+      "input": {
+        "repositoryDescription": "the app",
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repositoryMetadata": {
+          "arn": "arn:aws:codecommit:us-east-1:000000000000:app",
+          "cloneUrlHttp": "http://127.0.0.1/codecommit/app",
+          "repositoryDescription": "the app",
+          "repositoryId": "7c589129",
+          "repositoryName": "app"
+        }
+      }
+    },
+    {
+      "operation": "CreateRepository",
+      "input": {
+        "repositoryName": "lib"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repositoryMetadata": {
+          "arn": "arn:aws:codecommit:us-east-1:000000000000:lib",
+          "cloneUrlHttp": "http://127.0.0.1/codecommit/lib",
+          "repositoryId": "5f59f223",
+          "repositoryName": "lib"
+        }
+      }
+    },
+    {
+      "operation": "GetRepository",
+      "input": {
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repositoryMetadata": {
+          "arn": "arn:aws:codecommit:us-east-1:000000000000:app",
+          "cloneUrlHttp": "http://127.0.0.1/codecommit/app",
+          "repositoryDescription": "the app",
+          "repositoryId": "7c589129",
+          "repositoryName": "app"
+        }
+      }
+    },
+    {
+      "operation": "GetRepository",
+      "input": {
+        "repositoryName": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "RepositoryDoesNotExistException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListRepositories",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repositories": [
+          {
+            "repositoryName": "app"
+          },
+          {
+            "repositoryName": "lib"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateBranch",
+      "input": {
+        "branchName": "main",
+        "commitId": "0123456789abcdef",
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateBranch",
+      "input": {
+        "branchName": "dev",
+        "commitId": "fedcba9876543210",
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateBranch",
+      "input": {
+        "branchName": "main",
+        "commitId": "aaaabbbbccccdddd",
+        "repositoryName": "lib"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetBranch",
+      "input": {
+        "branchName": "main",
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branch": {
+          "branchName": "main",
+          "commitId": "0123456789abcdef"
+        }
+      }
+    },
+    {
+      "operation": "GetBranch",
+      "input": {
+        "branchName": "main",
+        "repositoryName": "lib"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branch": {
+          "branchName": "main",
+          "commitId": "aaaabbbbccccdddd"
+        }
+      }
+    },
+    {
+      "operation": "GetBranch",
+      "input": {
+        "branchName": "nope",
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "BranchDoesNotExistException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListBranches",
+      "input": {
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branches": [
+          "dev",
+          "main"
+        ]
+      }
+    },
+    {
+      "operation": "ListBranches",
+      "input": {
+        "repositoryName": "lib"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branches": [
+          "main"
+        ]
+      }
+    },
+    {
+      "operation": "ListBranches",
+      "input": {
+        "repositoryName": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branches": null
+      }
+    },
+    {
+      "operation": "PutFile",
+      "input": {
+        "branchName": "main",
+        "commitMessage": "add readme",
+        "email": "amy@example.com",
+        "fileContent": "aGVsbG8=",
+        "filePath": "README.md",
+        "name": "amy",
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "blobId": "33f6fc5d",
+        "commitId": "9c8e2cb0",
+        "fileContent": "aGVsbG8=",
+        "filePath": "README.md"
+      },
+      "superseded": "PutFileOutput declares blobId, commitId and treeId; the pack answered the whole stored record, so filePath and fileContent travelled in a response with no place for them. The declared shape outranks the pack."
+    },
+    {
+      "operation": "PutFile",
+      "input": {
+        "branchName": "dev",
+        "fileContent": "Ynll",
+        "filePath": "README.md",
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "blobId": "100aa4e6",
+        "commitId": "83d4958a",
+        "fileContent": "Ynll",
+        "filePath": "README.md"
+      },
+      "superseded": "Same as step 15: the pack answered filePath and fileContent, which PutFileOutput does not declare."
+    },
+    {
+      "operation": "GetFile",
+      "input": {
+        "commitSpecifier": "main",
+        "filePath": "README.md",
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "blobId": "100aa4e6",
+        "commitId": "83d4958a",
+        "fileContent": "Ynll",
+        "filePath": "README.md"
+      }
+    },
+    {
+      "operation": "GetFile",
+      "input": {
+        "commitSpecifier": "nope",
+        "filePath": "missing.txt",
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "FileDoesNotExistException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteFile",
+      "input": {
+        "branchName": "main",
+        "commitMessage": "drop",
+        "filePath": "README.md",
+        "parentCommitId": "0123456789abcdef",
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "commitId": "3ed10eca"
+      }
+    },
+    {
+      "operation": "GetFile",
+      "input": {
+        "commitSpecifier": "main",
+        "filePath": "README.md",
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "FileDoesNotExistException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteFile",
+      "input": {
+        "branchName": "main",
+        "commitMessage": "drop again",
+        "filePath": "README.md",
+        "parentCommitId": "0123456789abcdef",
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "commitId": "4da7b6a4"
+      }
+    },
+    {
+      "operation": "DeleteBranch",
+      "input": {
+        "branchName": "dev",
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListBranches",
+      "input": {
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branches": [
+          "main"
+        ]
+      }
+    },
+    {
+      "operation": "DeleteBranch",
+      "input": {
+        "branchName": "dev",
+        "repositoryName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteRepository",
+      "input": {
+        "repositoryName": "lib"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetRepository",
+      "input": {
+        "repositoryName": "lib"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "RepositoryDoesNotExistException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListBranches",
+      "input": {
+        "repositoryName": "lib"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "branches": [
+          "main"
+        ]
+      }
+    },
+    {
+      "operation": "DeleteRepository",
+      "input": {
+        "repositoryName": "lib"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListRepositories",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "repositories": [
+          {
+            "repositoryName": "app"
+          }
+        ]
+      }
+    }
+  ]
+}

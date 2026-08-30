@@ -2637,8 +2637,7 @@
       "GetHostedConfigurationVersion",
       "ListHostedConfigurationVersions",
       "StartDeployment",
-      "GetDeployment",
-      "GetLatestConfiguration"
+      "GetDeployment"
     ]
   },
   {
@@ -2990,7 +2989,6 @@
       "CreateRepository",
       "GetRepository",
       "ListRepositories",
-      "UpdateRepository",
       "DeleteRepository",
       "CreateBranch",
       "GetBranch",

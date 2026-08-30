@@ -1,0 +1,229 @@
+schema: bir/1
+service: aws.transfer
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing transfers: there is no SFTP, FTPS or AS2 endpoint listening,
+# so a server is a record that says ONLINE and a user is a row beside it.
+provenance: authored
+
+resources:
+  # A server's id is minted with an "s-" prefix on the way in, so the prefix is
+  # part of the store key rather than of the record: every later request names
+  # the prefixed form, and the record's ServerId is just the key echoed back.
+  # Deriving it as `'s-' + id` at the resource level instead would re-derive it
+  # on every patch, prefixing the prefix.
+  server:
+    collection: xfer
+    arn: "arn:aws:transfer:{region}:{account}:server/{id}"
+    id:
+      input_members: [ServerId]
+    record:
+      ServerId: id
+      Arn: arn
+
+  # Users are scoped to their server rather than filtered out of one shared
+  # collection, which is what the pack's "xferu:"+serverID did. Every operation
+  # on a user therefore reads its server first -- not to check it exists, which
+  # this service never does, but because the collection is named for it.
+  user:
+    collection: "xferu:{server.id}"
+    parent: server
+    id:
+      input_members: [UserName]
+    record:
+      UserName: id
+
+  # Keys are scoped one level deeper still, to the user. The user's name comes
+  # from a let rather than from a read, because nothing here ever loads the
+  # user record -- a key can be imported for a user that was never created.
+  sshkey:
+    collection: "xferk:{server.id}:{username}"
+    parent: user
+    key: SshPublicKeyId
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      SshPublicKeyId: "'key-' + id"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  CreateServer:
+    effects:
+      - generate: { bind: sid, kind: hex, bytes: 8 }
+      - create:
+          resource: server
+          key: "'s-' + fx.sid"
+          record:
+            State: "'ONLINE'"
+            Domain: >
+              'Domain' in input && string(input.Domain) != ''
+                ? string(input.Domain) : 'S3'
+            EndpointType: "'EndpointType' in input ? string(input.EndpointType) : ''"
+            Protocols: "'Protocols' in input ? input.Protocols : null"
+    output:
+      ServerId: rec.ServerId
+
+  DescribeServer:
+    reads:
+      server: { resource: server }
+    require:
+      - { cond: server_found, error: NotFound }
+    output:
+      Server: server
+
+  ListServers:
+    list: { resource: server, member: Servers, paginate: model }
+
+  DeleteServer:
+    effects:
+      - delete: { resource: server, missing: ignore }
+
+  # Starting and stopping move the state and answer nothing, so a caller learns
+  # the server stopped only by describing it again.
+  StartServer:
+    reads:
+      server: { resource: server }
+    require:
+      - { cond: server_found, error: NotFound }
+    effects:
+      - patch:
+          resource: server
+          record:
+            State: "'ONLINE'"
+
+  StopServer:
+    reads:
+      server: { resource: server }
+    require:
+      - { cond: server_found, error: NotFound }
+    effects:
+      - patch:
+          resource: server
+          record:
+            State: "'OFFLINE'"
+
+  CreateUser:
+    reads:
+      server: { resource: server }
+    effects:
+      - create:
+          resource: user
+          record:
+            ServerId: "'ServerId' in input ? string(input.ServerId) : ''"
+            Role: "'Role' in input ? string(input.Role) : ''"
+            HomeDirectory: "'HomeDirectory' in input ? string(input.HomeDirectory) : ''"
+    output:
+      ServerId: rec.ServerId
+      UserName: rec.UserName
+
+  DescribeUser:
+    reads:
+      # The server read is what resolves the user collection's template; reads
+      # run in dependency order, so it does not matter which is written first.
+      server: { resource: server }
+      user: { resource: user }
+    require:
+      - { cond: user_found, error: NotFound }
+    output:
+      ServerId: "'ServerId' in input ? string(input.ServerId) : ''"
+      User: user
+
+  ListUsers:
+    reads:
+      server: { resource: server }
+    list: { resource: user, member: Users, paginate: model }
+
+  DeleteUser:
+    reads:
+      server: { resource: server }
+    effects:
+      - delete: { resource: user, missing: ignore }
+
+  ImportSshPublicKey:
+    reads:
+      server: { resource: server }
+    let:
+      username: "'UserName' in input ? string(input.UserName) : ''"
+    effects:
+      - create:
+          resource: sshkey
+          record:
+            SshPublicKeyBody: >
+              'SshPublicKeyBody' in input ? string(input.SshPublicKeyBody) : ''
+    output:
+      ServerId: "'ServerId' in input ? string(input.ServerId) : ''"
+      UserName: username
+      SshPublicKeyId: rec.SshPublicKeyId
+
+  DeleteSshPublicKey:
+    reads:
+      server: { resource: server }
+    let:
+      username: "'UserName' in input ? string(input.UserName) : ''"
+    effects:
+      - delete:
+          resource: sshkey
+          key: "string(input.SshPublicKeyId)"
+          missing: ignore
+
+quirks:
+  - operation: CreateServer
+    note: >
+      A server is ONLINE the moment it is created, so nothing observes
+      STARTING and no protocol is ever bound: there is no SFTP, FTPS or AS2
+      listener, and the EndpointDetails, IdentityProviderDetails, HostKey and
+      LoggingRole the request may carry are all dropped. Only Domain,
+      EndpointType and Protocols survive, and none of them changes anything --
+      a server declaring SFTP behaves exactly like one declaring FTPS, which is
+      to say it does nothing.
+
+      Domain defaults to S3 when the request omits it, and the S3 or EFS bucket
+      it names is not checked to exist and is never read: a user's
+      HomeDirectory points at nothing.
+  - operation: StopServer
+    note: >
+      Stopping and starting move State between OFFLINE and ONLINE and answer an
+      empty body, so a caller learns the outcome only by describing the server
+      again. Neither transition is checked against the current state, so a
+      server can be stopped twice or started while already online, both of
+      which the real service refuses. Since nothing ever connects, an OFFLINE
+      server refuses no connection.
+  - operation: CreateUser
+    note: >
+      A user is stored under its server without the server being checked to
+      exist, so a user can be created for a server that was never created and
+      will be listed there forever. Only UserName, ServerId, Role and
+      HomeDirectory are kept: HomeDirectoryType, HomeDirectoryMappings, Policy,
+      PosixProfile and the SshPublicKeyBody a create may carry are all dropped,
+      so a user created with a key has no key.
+
+      Deleting a server leaves its users behind in their own collection. They
+      are unreachable through Describe once the server is gone, but recreating
+      a server with the same id would find them again -- and since ids are
+      generated, that cannot happen by accident.
+  - operation: ImportSshPublicKey
+    note: >
+      A key is stored under the server and user the request names, neither of
+      which is checked to exist, and the body is not parsed -- an
+      SshPublicKeyBody that is not a public key at all is accepted and given an
+      id. Nothing reads keys back: there is no DescribeUser projection of them
+      and no ListSshPublicKeys operation, so an imported key can be deleted by
+      id and otherwise never seen again. DateImported is never set.
+  - operation: ListUsers
+    note: >
+      ListUsers and ListServers answer every record in the account and region,
+      and ListUsers declares a ServerId in its response that this service does
+      not send -- a caller reading it gets nothing. The pack answered users as
+      the whole stored record where the model declares the narrower
+      ListedUser, so members it does not declare travel in a list that has no
+      place for them.
+  - operation: DeleteServer
+    note: >
+      Deleting an absent server succeeds where describing one faults, and the
+      same asymmetry holds for users and keys: every delete here is silent
+      about whether it removed anything.

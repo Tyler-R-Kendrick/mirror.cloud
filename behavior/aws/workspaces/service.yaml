@@ -1,0 +1,153 @@
+schema: bir/1
+service: aws.workspaces
+
+# Transcribed from the hand-written pack, not established against the real
+# service. There is no desktop: a workspace is a row that says AVAILABLE, and
+# nothing ever connects to one.
+provenance: authored
+
+resources:
+  workspace:
+    collection: ws
+    id:
+      # What the pack's firstID did: a scalar WorkspaceId, else the first entry
+      # of a WorkspaceIds list. Only DescribeWorkspaces and ModifyWorkspaceState
+      # send either -- see the quirk on StopWorkspaces for what that means for
+      # the rest.
+      derive: >
+        'WorkspaceId' in input && string(input.WorkspaceId) != ''
+          ? string(input.WorkspaceId)
+          : ('WorkspaceIds' in input && size(input.WorkspaceIds) > 0
+              ? string(input.WorkspaceIds[0]) : '')
+    record:
+      WorkspaceId: id
+
+operations:
+  # Only the first entry of the Workspaces list is created; the rest are
+  # dropped without appearing in FailedRequests.
+  CreateWorkspaces:
+    let:
+      ws: >
+        'Workspaces' in input && size(input.Workspaces) > 0
+          ? input.Workspaces[0] : input
+    effects:
+      - generate: { bind: wid, kind: hex, bytes: 8 }
+      - create:
+          resource: workspace
+          key: "'ws-' + fx.wid"
+          record:
+            State: "'AVAILABLE'"
+            UserName: "'UserName' in ws ? string(ws.UserName) : ''"
+            DirectoryId: "'DirectoryId' in ws ? string(ws.DirectoryId) : ''"
+            BundleId: "'BundleId' in ws ? string(ws.BundleId) : ''"
+    output:
+      PendingRequests: "[rec]"
+
+  DescribeWorkspaces:
+    list:
+      resource: workspace
+      member: Workspaces
+      paginate: model
+      key: >
+        'WorkspaceId' in input && string(input.WorkspaceId) != ''
+          ? string(input.WorkspaceId)
+          : ('WorkspaceIds' in input && size(input.WorkspaceIds) > 0
+              ? string(input.WorkspaceIds[0]) : '')
+
+  # Each of these writes whether or not the workspace exists, creating a bare
+  # record when it does not.
+  StopWorkspaces:
+    effects:
+      - put:
+          resource: workspace
+          record:
+            State: "'STOPPED'"
+
+  StartWorkspaces:
+    effects:
+      - put:
+          resource: workspace
+          record:
+            State: "'AVAILABLE'"
+
+  RebootWorkspaces:
+    effects:
+      - put:
+          resource: workspace
+          record:
+            State: "'AVAILABLE'"
+
+  ModifyWorkspaceState:
+    effects:
+      - put:
+          resource: workspace
+          record:
+            State: "string(input.WorkspaceState)"
+
+  TerminateWorkspaces:
+    effects:
+      - delete: { resource: workspace, missing: ignore }
+
+  DescribeWorkspaceBundles:
+    output:
+      Bundles: "[]"
+
+  DescribeWorkspaceDirectories:
+    output:
+      Directories: "[]"
+
+quirks:
+  - operation: StopWorkspaces
+    note: >
+      StopWorkspaces, StartWorkspaces, RebootWorkspaces and TerminateWorkspaces
+      each take a list of request objects -- StopWorkspaceRequests,
+      StartWorkspaceRequests, RebootWorkspaceRequests,
+      TerminateWorkspaceRequests -- and the pack looked for a WorkspaceId or a
+      WorkspaceIds list instead, neither of which any of those four operations
+      declares. So an SDK call to stop a workspace resolves no id at all, and
+      the write lands on the empty key: one shared phantom record that every
+      such call overwrites, while the workspace the caller named is untouched.
+
+      The failure is silent in both directions. The call succeeds, answering
+      the empty body it always answers; DescribeWorkspaces still reports the
+      workspace AVAILABLE; and the phantom record is itself listed by
+      DescribeWorkspaces, so an account that has stopped one workspace appears
+      to have an extra workspace with no id.
+
+      That is transcribed rather than corrected: the recording is what the pack
+      did. It is also the single most useful thing to know about this service,
+      because a test that stops a workspace and asserts the call succeeded
+      passes, and one that then asserts the state changed does not.
+  - operation: ModifyWorkspaceState
+    note: >
+      ModifyWorkspaceState is the one state operation that names a WorkspaceId,
+      so it is the one that works -- and it accepts any WorkspaceState string
+      at all. The pack also defaulted to AVAILABLE when the request omitted the
+      state, which ModifyWorkspaceStateRequest declares as required: no SDK
+      could send a request that reached that branch, so the bundle does not
+      carry it. No transition is checked, so a TERMINATED workspace can be
+      moved back to AVAILABLE, and the state a workspace is in constrains
+      nothing else in this service.
+  - operation: CreateWorkspaces
+    note: >
+      Only the first entry of the Workspaces list is created. The rest are
+      dropped without landing in FailedRequests, so a caller creating five
+      workspaces is told all five succeeded and finds one. Nothing is
+      validated: the DirectoryId and BundleId are stored as given and never
+      checked against anything, which is unsurprising since
+      DescribeWorkspaceBundles and DescribeWorkspaceDirectories both answer
+      empty lists -- there is no bundle or directory in this emulator that
+      could have matched.
+
+      A workspace is AVAILABLE the moment it is created, so nothing observes
+      PENDING, and the created record is answered as a PendingRequest even
+      though it is not pending. ComputerName, IpAddress, ErrorCode,
+      VolumeEncryptionKey and the rest of the declared Workspace are never set.
+  - operation: DescribeWorkspaces
+    note: >
+      DescribeWorkspaces narrows on the first WorkspaceId only: given several
+      it answers at most one, and given a DirectoryId, UserName, BundleId or
+      WorkspaceName it ignores them and answers everything. A workspace id that
+      does not exist answers an empty list rather than faulting, which is what
+      the real service does too -- the one place this pack and the real service
+      agree by accident rather than by construction.

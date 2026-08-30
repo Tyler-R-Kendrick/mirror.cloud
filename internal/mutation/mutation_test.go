@@ -5518,6 +5518,41 @@ var mutants = []mutant{
 		run:  "TestDeleteWhereRemovesEveryMatch",
 	},
 	{
+		// Taking the last id any read resolved, rather than the one resolved
+		// for this effect's own resource, addresses a child by its parent's
+		// key: every user in a service lands under its server's id. The write
+		// succeeds and the record is unreachable, so only a test that reads
+		// the child back by name notices.
+		name: "engine-effect-inherits-any-resolved-id",
+		file: filepath.Join("internal", "engine", "eval.go"),
+		old:  `key := ev.carriedKey(w.Resource, w.Key)`,
+		new:  `key := ev.id`,
+		pkg:  "./internal/engine",
+		run:  "TestChildIsAddressedByItsOwnKey",
+	},
+	{
+		// Resolving reads in name order rather than dependency order expands a
+		// child's collection template before the parent it names has been
+		// resolved. Which bundles break depends on which letters their binding
+		// names start with, which is not a contract anyone can keep.
+		name: "engine-reads-ignore-dependency-order",
+		file: filepath.Join("internal", "engine", "eval.go"),
+		old:  `ready, err := ev.readIsReady(op.Reads[name])`,
+		new:  `ready, err := true, error(nil)`,
+		pkg:  "./internal/engine",
+		run:  "TestReadsRunInDependencyOrder",
+	},
+	{
+		// CEL's null converts to a protobuf enum, which is an int32: a member
+		// a bundle set to null starts answering 0 once it travels inside a map.
+		name: "engine-null-inside-a-container-becomes-zero",
+		file: filepath.Join("internal", "engine", "eval.go"),
+		old:  `	case structpb.NullValue:`,
+		new:  `	case structpb.ListValue:`,
+		pkg:  "./internal/engine",
+		run:  "TestNullSurvivesInsideARecord",
+	},
+	{
 		// The Batch pack read both spellings of jobName; it is served from its
 		// own model now, which declares one, so the translation moved to the
 		// integration that introduces the discrepancy. The needle moved with

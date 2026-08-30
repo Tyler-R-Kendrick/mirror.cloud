@@ -9,6 +9,7 @@ import (
 
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bir"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -109,52 +110,138 @@ func (ev *eval) evalBool(path string) (bool, error) {
 
 // resolveReads loads every declared read before any expression runs. Each
 // binding x also binds x_found, so a bundle can distinguish absent from empty.
+//
+// Reads run in dependency order, not name order. A parent-scoped resource
+// lives in a collection named for its parent -- "ccbr:{repository.id}" -- so
+// reading a branch requires the repository's id to be resolved already.
+// Ordering by name would make that work or not work according to which letter
+// the bundle author reached for, which is not a contract anyone should have to
+// keep. So each pass resolves whatever it can and repeats while it makes
+// progress, the same way derived bindings are resolved.
+//
+// Name order still decides between reads that are equally ready, so a run is
+// deterministic and a bundle with no parent scoping behaves exactly as before.
 func (ev *eval) resolveReads(ctx context.Context, op bir.Operation) error {
-	names := make([]string, 0, len(op.Reads))
+	pending := make([]string, 0, len(op.Reads))
 	for n := range op.Reads {
-		names = append(names, n)
+		pending = append(pending, n)
 	}
-	sort.Strings(names)
+	sort.Strings(pending)
 
-	for _, name := range names {
-		read := op.Reads[name]
-		res, ok := ev.e.ir.Resources[read.Resource]
-		if !ok {
-			return fmt.Errorf("engine: unknown resource %q", read.Resource)
-		}
-		key, err := ev.resourceKey(res, read.Key,
-			"operations."+ev.req.Operation+".reads."+name+".key")
-		if err != nil {
-			return err
-		}
-		ev.id = key
-		ev.resIDs[read.Resource] = key
-
-		col, err := ev.collection(res)
-		if err != nil {
-			return err
-		}
-		raw, found, err := col.Get(ctx, key)
-		if err != nil {
-			return err
-		}
-		rec := map[string]any{}
-		if found {
-			if err := unmarshal(raw, &rec); err != nil {
+	for len(pending) > 0 {
+		var blocked []string
+		progress := false
+		for _, name := range pending {
+			ready, err := ev.readIsReady(op.Reads[name])
+			if err != nil {
 				return err
 			}
-		}
-		// Views derive from a record, so there is nothing to derive when there
-		// is none. An operation that names a view guards on _found first, and
-		// the require rule that does so runs before anything reads it.
-		if found {
-			if err := ev.applyViews(read.Resource, res, rec); err != nil {
+			if !ready && len(pending) > 1 {
+				blocked = append(blocked, name)
+				continue
+			}
+			// The last read standing runs whether or not its scope resolved:
+			// a genuine mistake -- a collection naming a resource this
+			// operation never reads -- should report itself as that, rather
+			// than as a stall with no failing expression to look at.
+			if err := ev.resolveRead(ctx, name, op.Reads[name]); err != nil {
 				return err
 			}
+			progress = true
 		}
-		ev.binds[name] = rec
-		ev.binds[name+"_found"] = found
+		if !progress {
+			// Every remaining read waits on another; running one surfaces the
+			// cycle as the unresolved template it actually is.
+			if err := ev.resolveRead(ctx, blocked[0], op.Reads[blocked[0]]); err != nil {
+				return err
+			}
+			blocked = blocked[1:]
+		}
+		pending = blocked
 	}
+	return nil
+}
+
+// readIsReady reports whether a read's collection template can be expanded
+// yet: every resource id it names must already have been resolved by an
+// earlier read. A template naming the read's own resource is not a dependency
+// -- it would be satisfied by this very read -- and is left to fail as itself.
+func (ev *eval) readIsReady(read bir.Read) (bool, error) {
+	res, ok := ev.e.ir.Resources[read.Resource]
+	if !ok {
+		return false, fmt.Errorf("engine: unknown resource %q", read.Resource)
+	}
+	for _, ref := range templateRefs(res.Collection) {
+		head, rest, _ := strings.Cut(ref, ".")
+		if rest != "id" || head == read.Resource {
+			continue
+		}
+		if _, declared := ev.e.ir.Resources[head]; !declared {
+			continue
+		}
+		if _, resolved := ev.resIDs[head]; !resolved {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// templateRefs lists the {x.y} references in a template, ignoring malformed
+// ones: expanding the template is what reports those, with the whole string
+// in the message.
+func templateRefs(s string) []string {
+	var refs []string
+	for {
+		i := strings.Index(s, "{")
+		if i < 0 {
+			return refs
+		}
+		j := strings.Index(s[i:], "}")
+		if j < 0 {
+			return refs
+		}
+		refs = append(refs, s[i+1:i+j])
+		s = s[i+j+1:]
+	}
+}
+
+func (ev *eval) resolveRead(ctx context.Context, name string, read bir.Read) error {
+	res, ok := ev.e.ir.Resources[read.Resource]
+	if !ok {
+		return fmt.Errorf("engine: unknown resource %q", read.Resource)
+	}
+	key, err := ev.resourceKey(res, read.Key,
+		"operations."+ev.req.Operation+".reads."+name+".key")
+	if err != nil {
+		return err
+	}
+	ev.id = key
+	ev.resIDs[read.Resource] = key
+
+	col, err := ev.collection(res)
+	if err != nil {
+		return err
+	}
+	raw, found, err := col.Get(ctx, key)
+	if err != nil {
+		return err
+	}
+	rec := map[string]any{}
+	if found {
+		if err := unmarshal(raw, &rec); err != nil {
+			return err
+		}
+	}
+	// Views derive from a record, so there is nothing to derive when there
+	// is none. An operation that names a view guards on _found first, and
+	// the require rule that does so runs before anything reads it.
+	if found {
+		if err := ev.applyViews(read.Resource, res, rec); err != nil {
+			return err
+		}
+	}
+	ev.binds[name] = rec
+	ev.binds[name+"_found"] = found
 	return nil
 }
 
@@ -202,6 +289,26 @@ func (ev *eval) applyViews(resource string, res bir.Resource, rec map[string]any
 // worked only for reads, and left every effect asking for a `reads..key` that
 // was never compiled -- which surfaced only when the effect also had no id
 // already bound, since an id in hand skips this entirely.
+// carriedKey is the key an effect inherits when it does not compute one.
+//
+// Resolving a read binds the key it used, and an effect on the same resource
+// should address the record the operation has already been talking about --
+// a patch after a read does not repeat the key expression. What it must not
+// do is inherit a key resolved for a *different* resource: an operation that
+// reads a parent and then writes a child would otherwise address the child by
+// the parent's key, which is a silent write to the wrong row rather than an
+// error. So only this resource's own resolved id carries over.
+//
+// An explicit key on the effect outranks even that, because it says outright
+// which record is meant. send_event has always worked this way; write and
+// delete did not, which is the inconsistency this closes.
+func (ev *eval) carriedKey(resource, keyExpr string) string {
+	if keyExpr != "" {
+		return ""
+	}
+	return ev.resIDs[resource]
+}
+
 func (ev *eval) resourceKey(res bir.Resource, keyExpr, keyPath string) (string, error) {
 	if keyExpr != "" {
 		v, err := ev.eval(keyPath)
@@ -389,7 +496,7 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 	// The identity first: record expressions may name `id`, and a generated ID
 	// must be drawn from the deterministic Rand rather than computed by an
 	// expression, so that a recorded run replays.
-	key := ev.id
+	key := ev.carriedKey(w.Resource, w.Key)
 	if create && res.ID.Generate != nil {
 		key = ev.generate(*res.ID.Generate)
 	}
@@ -668,7 +775,7 @@ func (ev *eval) remove(ctx context.Context, path string, d bir.DeleteEffect) err
 	if d.Where != "" {
 		return ev.removeWhere(ctx, path, col)
 	}
-	key := ev.id
+	key := ev.carriedKey(d.Resource, d.Key)
 	if key == "" {
 		k, err := ev.resourceKey(res, d.Key, path+".key")
 		if err != nil {
@@ -993,6 +1100,13 @@ func normalize(v any) any {
 		return out
 	case ref.Val:
 		return fromCEL(t)
+	case structpb.NullValue:
+		// A null inside a container does not convert to Go's nil: CEL hands
+		// back the protobuf enum, which is an int32. Left alone it reaches
+		// encoding/json as 0 and a comparison as the string NULL_VALUE, so a
+		// member a bundle deliberately set to null stops being null the moment
+		// it travels inside a map or a list.
+		return nil
 	}
 
 	switch rv := reflect.ValueOf(v); rv.Kind() {

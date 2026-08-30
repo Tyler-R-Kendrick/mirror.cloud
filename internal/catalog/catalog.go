@@ -786,7 +786,10 @@ func Bundle() *model.Bundle {
 		"CreateEnvironment", "GetEnvironment", "ListEnvironments", "DeleteEnvironment",
 		"CreateConfigurationProfile", "GetConfigurationProfile", "ListConfigurationProfiles", "DeleteConfigurationProfile",
 		"CreateHostedConfigurationVersion", "GetHostedConfigurationVersion", "ListHostedConfigurationVersions",
-		"StartDeployment", "GetDeployment", "GetLatestConfiguration",
+		// Retrieval lives in AppConfig Data, a separate service with its own
+		// endpoint, so GetLatestConfiguration is not an AppConfig operation and
+		// is not listed here.
+		"StartDeployment", "GetDeployment",
 	}
 	codebuild := []string{
 		"CreateProject", "BatchGetProjects", "ListProjects", "UpdateProject", "DeleteProject",
@@ -890,7 +893,10 @@ func Bundle() *model.Bundle {
 		"CreateStage", "GetStage", "GetStages", "DeleteStage",
 	}
 	codecommit := []string{
-		"CreateRepository", "GetRepository", "ListRepositories", "UpdateRepository", "DeleteRepository",
+		// CodeCommit has no UpdateRepository: the real service splits it into
+		// UpdateRepositoryDescription, UpdateRepositoryName and
+		// UpdateRepositoryEncryptionKey.
+		"CreateRepository", "GetRepository", "ListRepositories", "DeleteRepository",
 		"CreateBranch", "GetBranch", "ListBranches", "DeleteBranch",
 		"PutFile", "GetFile", "DeleteFile",
 	}

@@ -1,0 +1,745 @@
+{
+  "schema": "trace/1",
+  "service": "aws.transfer",
+  "source": "internal/services/aws/transfer",
+  "note": "Servers, users and keys, including the nested collections a user and a key live in.",
+  "steps": [
+    {
+      "operation": "ListServers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Servers": null
+      }
+    },
+    {
+      "operation": "CreateServer",
+      "input": {
+        "Domain": "S3",
+        "EndpointType": "PUBLIC",
+        "Protocols": [
+          "SFTP"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerId": "s-7c589129"
+      }
+    },
+    {
+      "operation": "CreateServer",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerId": "s-5f59f223"
+      }
+    },
+    {
+      "operation": "DescribeServer",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Server": {
+          "Arn": "arn:aws:transfer:us-east-1:000000000000:server/s-7c589129",
+          "Domain": "S3",
+          "EndpointType": "PUBLIC",
+          "Protocols": [
+            "SFTP"
+          ],
+          "ServerId": "s-7c589129",
+          "State": "ONLINE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeServer",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Server": {
+          "Arn": "arn:aws:transfer:us-east-1:000000000000:server/s-5f59f223",
+          "Domain": "S3",
+          "EndpointType": "",
+          "Protocols": null,
+          "ServerId": "s-5f59f223",
+          "State": "ONLINE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeServer",
+      "input": {
+        "ServerId": "s-nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListServers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Servers": [
+          {
+            "Arn": "arn:aws:transfer:us-east-1:000000000000:server/s-5f59f223",
+            "Domain": "S3",
+            "EndpointType": "",
+            "Protocols": null,
+            "ServerId": "s-5f59f223",
+            "State": "ONLINE"
+          },
+          {
+            "Arn": "arn:aws:transfer:us-east-1:000000000000:server/s-7c589129",
+            "Domain": "S3",
+            "EndpointType": "PUBLIC",
+            "Protocols": [
+              "SFTP"
+            ],
+            "ServerId": "s-7c589129",
+            "State": "ONLINE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StopServer",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeServer",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Server": {
+          "Arn": "arn:aws:transfer:us-east-1:000000000000:server/s-7c589129",
+          "Domain": "S3",
+          "EndpointType": "PUBLIC",
+          "Protocols": [
+            "SFTP"
+          ],
+          "ServerId": "s-7c589129",
+          "State": "OFFLINE"
+        }
+      }
+    },
+    {
+      "operation": "StopServer",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "StartServer",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeServer",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Server": {
+          "Arn": "arn:aws:transfer:us-east-1:000000000000:server/s-7c589129",
+          "Domain": "S3",
+          "EndpointType": "PUBLIC",
+          "Protocols": [
+            "SFTP"
+          ],
+          "ServerId": "s-7c589129",
+          "State": "ONLINE"
+        }
+      }
+    },
+    {
+      "operation": "StartServer",
+      "input": {
+        "ServerId": "s-nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateUser",
+      "input": {
+        "HomeDirectory": "/bucket/amy",
+        "Role": "arn:aws:iam::000000000000:role/xfer",
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        },
+        "UserName": "amy"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerId": "s-7c589129",
+        "UserName": "amy"
+      }
+    },
+    {
+      "operation": "CreateUser",
+      "input": {
+        "Role": "arn:aws:iam::000000000000:role/xfer",
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        },
+        "UserName": "bob"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerId": "s-7c589129",
+        "UserName": "bob"
+      }
+    },
+    {
+      "operation": "CreateUser",
+      "input": {
+        "HomeDirectory": "/other/amy",
+        "Role": "arn:aws:iam::000000000000:role/other",
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 2
+        },
+        "UserName": "amy"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerId": "s-5f59f223",
+        "UserName": "amy"
+      }
+    },
+    {
+      "operation": "DescribeUser",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        },
+        "UserName": "amy"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerId": "s-7c589129",
+        "User": {
+          "HomeDirectory": "/bucket/amy",
+          "Role": "arn:aws:iam::000000000000:role/xfer",
+          "ServerId": "s-7c589129",
+          "UserName": "amy"
+        }
+      }
+    },
+    {
+      "operation": "DescribeUser",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 2
+        },
+        "UserName": "amy"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerId": "s-5f59f223",
+        "User": {
+          "HomeDirectory": "/other/amy",
+          "Role": "arn:aws:iam::000000000000:role/other",
+          "ServerId": "s-5f59f223",
+          "UserName": "amy"
+        }
+      }
+    },
+    {
+      "operation": "DescribeUser",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        },
+        "UserName": "nobody"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "HomeDirectory": "/bucket/amy",
+            "Role": "arn:aws:iam::000000000000:role/xfer",
+            "ServerId": "s-7c589129",
+            "UserName": "amy"
+          },
+          {
+            "HomeDirectory": "",
+            "Role": "arn:aws:iam::000000000000:role/xfer",
+            "ServerId": "s-7c589129",
+            "UserName": "bob"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "HomeDirectory": "/other/amy",
+            "Role": "arn:aws:iam::000000000000:role/other",
+            "ServerId": "s-5f59f223",
+            "UserName": "amy"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "ServerId": "s-nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": null
+      }
+    },
+    {
+      "operation": "ImportSshPublicKey",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        },
+        "SshPublicKeyBody": "ssh-rsa AAAAB3",
+        "UserName": "amy"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerId": "s-7c589129",
+        "SshPublicKeyId": "key-9c8e2cb0",
+        "UserName": "amy"
+      }
+    },
+    {
+      "operation": "ImportSshPublicKey",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        },
+        "SshPublicKeyBody": "not a key at all",
+        "UserName": "amy"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ServerId": "s-7c589129",
+        "SshPublicKeyId": "key-33f6fc5d",
+        "UserName": "amy"
+      }
+    },
+    {
+      "operation": "DeleteSshPublicKey",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        },
+        "SshPublicKeyId": {
+          "$fromPath": "SshPublicKeyId",
+          "$fromStep": 23
+        },
+        "UserName": "amy"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteSshPublicKey",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        },
+        "SshPublicKeyId": "key-nope",
+        "UserName": "amy"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteUser",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        },
+        "UserName": "bob"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "HomeDirectory": "/bucket/amy",
+            "Role": "arn:aws:iam::000000000000:role/xfer",
+            "ServerId": "s-7c589129",
+            "UserName": "amy"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteUser",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 1
+        },
+        "UserName": "bob"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteServer",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeServer",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListUsers",
+      "input": {
+        "ServerId": {
+          "$fromPath": "ServerId",
+          "$fromStep": 2
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Users": [
+          {
+            "HomeDirectory": "/other/amy",
+            "Role": "arn:aws:iam::000000000000:role/other",
+            "ServerId": "s-5f59f223",
+            "UserName": "amy"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteServer",
+      "input": {
+        "ServerId": "s-nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListServers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Servers": [
+          {
+            "Arn": "arn:aws:transfer:us-east-1:000000000000:server/s-7c589129",
+            "Domain": "S3",
+            "EndpointType": "PUBLIC",
+            "Protocols": [
+              "SFTP"
+            ],
+            "ServerId": "s-7c589129",
+            "State": "ONLINE"
+          }
+        ]
+      }
+    }
+  ]
+}

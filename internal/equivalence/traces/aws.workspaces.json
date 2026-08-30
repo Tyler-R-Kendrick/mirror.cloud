@@ -1,0 +1,498 @@
+{
+  "schema": "trace/1",
+  "service": "aws.workspaces",
+  "source": "internal/services/aws/workspaces",
+  "note": "Workspaces, including the phantom empty-key record every state operation writes.",
+  "steps": [
+    {
+      "operation": "DescribeWorkspaces",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Workspaces": null
+      }
+    },
+    {
+      "operation": "CreateWorkspaces",
+      "input": {
+        "Workspaces": [
+          {
+            "BundleId": "wsb-1",
+            "DirectoryId": "d-1",
+            "UserName": "amy"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PendingRequests": [
+          {
+            "BundleId": "wsb-1",
+            "DirectoryId": "d-1",
+            "State": "AVAILABLE",
+            "UserName": "amy",
+            "WorkspaceId": "ws-7c589129"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateWorkspaces",
+      "input": {
+        "Workspaces": [
+          {
+            "BundleId": "wsb-1",
+            "DirectoryId": "d-1",
+            "UserName": "bob"
+          },
+          {
+            "BundleId": "wsb-2",
+            "DirectoryId": "d-1",
+            "UserName": "cal"
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "PendingRequests": [
+          {
+            "BundleId": "wsb-1",
+            "DirectoryId": "d-1",
+            "State": "AVAILABLE",
+            "UserName": "bob",
+            "WorkspaceId": "ws-5f59f223"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeWorkspaces",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Workspaces": [
+          {
+            "BundleId": "wsb-1",
+            "DirectoryId": "d-1",
+            "State": "AVAILABLE",
+            "UserName": "bob",
+            "WorkspaceId": "ws-5f59f223"
+          },
+          {
+            "BundleId": "wsb-1",
+            "DirectoryId": "d-1",
+            "State": "AVAILABLE",
+            "UserName": "amy",
+            "WorkspaceId": "ws-7c589129"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeWorkspaces",
+      "input": {
+        "WorkspaceIds": [
+          {
+            "$fromPath": "PendingRequests.0.WorkspaceId",
+            "$fromStep": 1
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Workspaces": [
+          {
+            "BundleId": "wsb-1",
+            "DirectoryId": "d-1",
+            "State": "AVAILABLE",
+            "UserName": "amy",
+            "WorkspaceId": "ws-7c589129"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeWorkspaces",
+      "input": {
+        "WorkspaceIds": [
+          "ws-nope"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Workspaces": []
+      }
+    },
+    {
+      "operation": "StopWorkspaces",
+      "input": {
+        "StopWorkspaceRequests": [
+          {
+            "WorkspaceId": {
+              "$fromPath": "PendingRequests.0.WorkspaceId",
+              "$fromStep": 1
+            }
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeWorkspaces",
+      "input": {
+        "WorkspaceIds": [
+          {
+            "$fromPath": "PendingRequests.0.WorkspaceId",
+            "$fromStep": 1
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Workspaces": [
+          {
+            "BundleId": "wsb-1",
+            "DirectoryId": "d-1",
+            "State": "AVAILABLE",
+            "UserName": "amy",
+            "WorkspaceId": "ws-7c589129"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeWorkspaces",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Workspaces": [
+          {
+            "State": "STOPPED",
+            "WorkspaceId": ""
+          },
+          {
+            "BundleId": "wsb-1",
+            "DirectoryId": "d-1",
+            "State": "AVAILABLE",
+            "UserName": "bob",
+            "WorkspaceId": "ws-5f59f223"
+          },
+          {
+            "BundleId": "wsb-1",
+            "DirectoryId": "d-1",
+            "State": "AVAILABLE",
+            "UserName": "amy",
+            "WorkspaceId": "ws-7c589129"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StartWorkspaces",
+      "input": {
+        "StartWorkspaceRequests": [
+          {
+            "WorkspaceId": {
+              "$fromPath": "PendingRequests.0.WorkspaceId",
+              "$fromStep": 1
+            }
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "RebootWorkspaces",
+      "input": {
+        "RebootWorkspaceRequests": [
+          {
+            "WorkspaceId": {
+              "$fromPath": "PendingRequests.0.WorkspaceId",
+              "$fromStep": 1
+            }
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ModifyWorkspaceState",
+      "input": {
+        "WorkspaceId": {
+          "$fromPath": "PendingRequests.0.WorkspaceId",
+          "$fromStep": 1
+        },
+        "WorkspaceState": "ADMIN_MAINTENANCE"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeWorkspaces",
+      "input": {
+        "WorkspaceIds": [
+          {
+            "$fromPath": "PendingRequests.0.WorkspaceId",
+            "$fromStep": 1
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Workspaces": [
+          {
+            "BundleId": "wsb-1",
+            "DirectoryId": "d-1",
+            "State": "ADMIN_MAINTENANCE",
+            "UserName": "amy",
+            "WorkspaceId": "ws-7c589129"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ModifyWorkspaceState",
+      "input": {
+        "WorkspaceId": {
+          "$fromPath": "PendingRequests.0.WorkspaceId",
+          "$fromStep": 1
+        },
+        "WorkspaceState": {
+          "$fromPath": "PendingRequests.0.State",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeWorkspaces",
+      "input": {
+        "WorkspaceIds": [
+          {
+            "$fromPath": "PendingRequests.0.WorkspaceId",
+            "$fromStep": 1
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Workspaces": [
+          {
+            "BundleId": "wsb-1",
+            "DirectoryId": "d-1",
+            "State": "AVAILABLE",
+            "UserName": "amy",
+            "WorkspaceId": "ws-7c589129"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ModifyWorkspaceState",
+      "input": {
+        "WorkspaceId": "ws-nope",
+        "WorkspaceState": "TERMINATED"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeWorkspaces",
+      "input": {
+        "WorkspaceIds": [
+          "ws-nope"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Workspaces": [
+          {
+            "State": "TERMINATED",
+            "WorkspaceId": "ws-nope"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeWorkspaceBundles",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Bundles": []
+      }
+    },
+    {
+      "operation": "DescribeWorkspaceDirectories",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Directories": []
+      }
+    },
+    {
+      "operation": "TerminateWorkspaces",
+      "input": {
+        "TerminateWorkspaceRequests": [
+          {
+            "WorkspaceId": {
+              "$fromPath": "PendingRequests.0.WorkspaceId",
+              "$fromStep": 1
+            }
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeWorkspaces",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Workspaces": [
+          {
+            "BundleId": "wsb-1",
+            "DirectoryId": "d-1",
+            "State": "AVAILABLE",
+            "UserName": "bob",
+            "WorkspaceId": "ws-5f59f223"
+          },
+          {
+            "BundleId": "wsb-1",
+            "DirectoryId": "d-1",
+            "State": "AVAILABLE",
+            "UserName": "amy",
+            "WorkspaceId": "ws-7c589129"
+          },
+          {
+            "State": "TERMINATED",
+            "WorkspaceId": "ws-nope"
+          }
+        ]
+      }
+    }
+  ]
+}

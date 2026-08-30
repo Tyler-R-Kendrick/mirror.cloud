@@ -1,0 +1,938 @@
+{
+  "schema": "trace/1",
+  "service": "aws.appconfig",
+  "source": "internal/services/aws/appconfig",
+  "note": "Applications, environments, profiles, hosted versions and the one deployment.",
+  "steps": [
+    {
+      "operation": "ListApplications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": null
+      }
+    },
+    {
+      "operation": "CreateApplication",
+      "input": {
+        "Description": "the checkout service",
+        "Name": "checkout"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "7c589129",
+        "Name": "checkout"
+      }
+    },
+    {
+      "operation": "CreateApplication",
+      "input": {
+        "Name": "checkout"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "5f59f223",
+        "Name": "checkout"
+      }
+    },
+    {
+      "operation": "GetApplication",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Id": "7c589129",
+        "Name": "checkout"
+      }
+    },
+    {
+      "operation": "GetApplication",
+      "input": {
+        "ApplicationId": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListApplications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": [
+          {
+            "Id": "5f59f223",
+            "Name": "checkout"
+          },
+          {
+            "Id": "7c589129",
+            "Name": "checkout"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateEnvironment",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "Name": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationId": "7c589129",
+        "Id": "9c8e2cb0",
+        "Name": "prod",
+        "State": "ReadyForDeployment"
+      }
+    },
+    {
+      "operation": "CreateEnvironment",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "Name": "staging"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationId": "7c589129",
+        "Id": "33f6fc5d",
+        "Name": "staging",
+        "State": "ReadyForDeployment"
+      }
+    },
+    {
+      "operation": "CreateEnvironment",
+      "input": {
+        "ApplicationId": "ghost",
+        "Name": "prod"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationId": "ghost",
+        "Id": "83d4958a",
+        "Name": "prod",
+        "State": "ReadyForDeployment"
+      }
+    },
+    {
+      "operation": "GetEnvironment",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "EnvironmentId": {
+          "$fromPath": "Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationId": "7c589129",
+        "Id": "9c8e2cb0",
+        "Name": "prod",
+        "State": "ReadyForDeployment"
+      }
+    },
+    {
+      "operation": "GetEnvironment",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "EnvironmentId": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListEnvironments",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": [
+          {
+            "ApplicationId": "7c589129",
+            "Id": "33f6fc5d",
+            "Name": "staging",
+            "State": "ReadyForDeployment"
+          },
+          {
+            "ApplicationId": "7c589129",
+            "Id": "9c8e2cb0",
+            "Name": "prod",
+            "State": "ReadyForDeployment"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListEnvironments",
+      "input": {
+        "ApplicationId": "ghost"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": [
+          {
+            "ApplicationId": "ghost",
+            "Id": "83d4958a",
+            "Name": "prod",
+            "State": "ReadyForDeployment"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateConfigurationProfile",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "LocationUri": "hosted",
+        "Name": "flags"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationId": "7c589129",
+        "Id": "100aa4e6",
+        "LocationUri": "hosted",
+        "Name": "flags"
+      }
+    },
+    {
+      "operation": "CreateConfigurationProfile",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "LocationUri": "hosted",
+        "Name": "limits"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationId": "7c589129",
+        "Id": "3ed10eca",
+        "LocationUri": "hosted",
+        "Name": "limits"
+      }
+    },
+    {
+      "operation": "GetConfigurationProfile",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "ConfigurationProfileId": {
+          "$fromPath": "Id",
+          "$fromStep": 13
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationId": "7c589129",
+        "Id": "100aa4e6",
+        "LocationUri": "hosted",
+        "Name": "flags"
+      }
+    },
+    {
+      "operation": "GetConfigurationProfile",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "ConfigurationProfileId": "nope"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListConfigurationProfiles",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": [
+          {
+            "ApplicationId": "7c589129",
+            "Id": "100aa4e6",
+            "LocationUri": "hosted",
+            "Name": "flags"
+          },
+          {
+            "ApplicationId": "7c589129",
+            "Id": "3ed10eca",
+            "LocationUri": "hosted",
+            "Name": "limits"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateHostedConfigurationVersion",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "ConfigurationProfileId": {
+          "$fromPath": "Id",
+          "$fromStep": 13
+        },
+        "Content": "eyJhIjoxfQ==",
+        "ContentType": "application/json",
+        "LatestVersionNumber": 0
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Content": "eyJhIjoxfQ==",
+        "ContentType": "application/json",
+        "VersionNumber": 1
+      }
+    },
+    {
+      "operation": "CreateHostedConfigurationVersion",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "ConfigurationProfileId": {
+          "$fromPath": "Id",
+          "$fromStep": 13
+        },
+        "Content": "eyJhIjoyfQ==",
+        "ContentType": "application/json",
+        "LatestVersionNumber": 0
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Content": "eyJhIjoyfQ==",
+        "ContentType": "application/json",
+        "VersionNumber": 2
+      }
+    },
+    {
+      "operation": "CreateHostedConfigurationVersion",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "ConfigurationProfileId": {
+          "$fromPath": "Id",
+          "$fromStep": 14
+        },
+        "Content": "eyJiIjoxfQ==",
+        "ContentType": "application/json"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Content": "eyJiIjoxfQ==",
+        "ContentType": "application/json",
+        "VersionNumber": 1
+      }
+    },
+    {
+      "operation": "GetHostedConfigurationVersion",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "ConfigurationProfileId": {
+          "$fromPath": "Id",
+          "$fromStep": 13
+        },
+        "VersionNumber": 2
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Content": "eyJhIjoyfQ==",
+        "ContentType": "application/json",
+        "VersionNumber": 2
+      }
+    },
+    {
+      "operation": "GetHostedConfigurationVersion",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "ConfigurationProfileId": {
+          "$fromPath": "Id",
+          "$fromStep": 14
+        },
+        "VersionNumber": 1
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Content": "eyJiIjoxfQ==",
+        "ContentType": "application/json",
+        "VersionNumber": 1
+      }
+    },
+    {
+      "operation": "GetHostedConfigurationVersion",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "ConfigurationProfileId": {
+          "$fromPath": "Id",
+          "$fromStep": 13
+        },
+        "VersionNumber": 9
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListHostedConfigurationVersions",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "ConfigurationProfileId": {
+          "$fromPath": "Id",
+          "$fromStep": 13
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": [
+          {
+            "Content": "eyJhIjoxfQ==",
+            "ContentType": "application/json",
+            "VersionNumber": 1
+          },
+          {
+            "Content": "eyJhIjoyfQ==",
+            "ContentType": "application/json",
+            "VersionNumber": 2
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StartDeployment",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "ConfigurationProfileId": {
+          "$fromPath": "Id",
+          "$fromStep": 13
+        },
+        "ConfigurationVersion": "2",
+        "DeploymentStrategyId": "AppConfig.AllAtOnce",
+        "EnvironmentId": {
+          "$fromPath": "Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationId": "7c589129",
+        "DeploymentNumber": 1,
+        "EnvironmentId": "9c8e2cb0",
+        "State": "COMPLETE"
+      }
+    },
+    {
+      "operation": "GetDeployment",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "DeploymentNumber": 1,
+        "EnvironmentId": {
+          "$fromPath": "Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationId": "7c589129",
+        "DeploymentNumber": 1,
+        "EnvironmentId": "9c8e2cb0",
+        "State": "COMPLETE"
+      }
+    },
+    {
+      "operation": "StartDeployment",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "ConfigurationProfileId": {
+          "$fromPath": "Id",
+          "$fromStep": 14
+        },
+        "ConfigurationVersion": "1",
+        "DeploymentStrategyId": "AppConfig.AllAtOnce",
+        "EnvironmentId": {
+          "$fromPath": "Id",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationId": "7c589129",
+        "DeploymentNumber": 1,
+        "EnvironmentId": "33f6fc5d",
+        "State": "COMPLETE"
+      }
+    },
+    {
+      "operation": "GetDeployment",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "DeploymentNumber": 1,
+        "EnvironmentId": {
+          "$fromPath": "Id",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ApplicationId": "7c589129",
+        "DeploymentNumber": 1,
+        "EnvironmentId": "33f6fc5d",
+        "State": "COMPLETE"
+      }
+    },
+    {
+      "operation": "DeleteEnvironment",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "EnvironmentId": {
+          "$fromPath": "Id",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListEnvironments",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": [
+          {
+            "ApplicationId": "7c589129",
+            "Id": "9c8e2cb0",
+            "Name": "prod",
+            "State": "ReadyForDeployment"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteEnvironment",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "EnvironmentId": {
+          "$fromPath": "Id",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteConfigurationProfile",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        },
+        "ConfigurationProfileId": {
+          "$fromPath": "Id",
+          "$fromStep": 14
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListConfigurationProfiles",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": [
+          {
+            "ApplicationId": "7c589129",
+            "Id": "100aa4e6",
+            "LocationUri": "hosted",
+            "Name": "flags"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteApplication",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetApplication",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListEnvironments",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": [
+          {
+            "ApplicationId": "7c589129",
+            "Id": "9c8e2cb0",
+            "Name": "prod",
+            "State": "ReadyForDeployment"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteApplication",
+      "input": {
+        "ApplicationId": {
+          "$fromPath": "Id",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListApplications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Items": [
+          {
+            "Id": "5f59f223",
+            "Name": "checkout"
+          }
+        ]
+      }
+    }
+  ]
+}

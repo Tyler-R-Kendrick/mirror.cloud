@@ -1,0 +1,454 @@
+{
+  "schema": "trace/1",
+  "service": "aws.fsx",
+  "source": "pack:internal/services/aws/fsx@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DescribeFileSystems",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FileSystems": null
+      }
+    },
+    {
+      "operation": "CreateFileSystem",
+      "input": {
+        "ClientRequestToken": "t1",
+        "FileSystemType": "LUSTRE",
+        "StorageCapacity": 1200,
+        "SubnetIds": [
+          "subnet-1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FileSystem": {
+          "FileSystemId": "fs-7c589129",
+          "FileSystemType": "LUSTRE",
+          "Lifecycle": "AVAILABLE",
+          "StorageCapacity": 1200,
+          "SubnetIds": [
+            "subnet-1"
+          ]
+        }
+      }
+    },
+    {
+      "operation": "DescribeFileSystems",
+      "input": {
+        "FileSystemIds": [
+          {
+            "$fromPath": "FileSystem.FileSystemId",
+            "$fromStep": 1
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FileSystems": [
+          {
+            "FileSystemId": "fs-7c589129",
+            "FileSystemType": "LUSTRE",
+            "Lifecycle": "AVAILABLE",
+            "StorageCapacity": 1200,
+            "SubnetIds": [
+              "subnet-1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateFileSystem",
+      "input": {
+        "ClientRequestToken": "t2",
+        "FileSystemType": "WINDOWS",
+        "StorageCapacity": 32,
+        "SubnetIds": [
+          "subnet-2"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FileSystem": {
+          "FileSystemId": "fs-5f59f223",
+          "FileSystemType": "WINDOWS",
+          "Lifecycle": "AVAILABLE",
+          "StorageCapacity": 32,
+          "SubnetIds": [
+            "subnet-2"
+          ]
+        }
+      }
+    },
+    {
+      "operation": "DescribeFileSystems",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FileSystems": [
+          {
+            "FileSystemId": "fs-5f59f223",
+            "FileSystemType": "WINDOWS",
+            "Lifecycle": "AVAILABLE",
+            "StorageCapacity": 32,
+            "SubnetIds": [
+              "subnet-2"
+            ]
+          },
+          {
+            "FileSystemId": "fs-7c589129",
+            "FileSystemType": "LUSTRE",
+            "Lifecycle": "AVAILABLE",
+            "StorageCapacity": 1200,
+            "SubnetIds": [
+              "subnet-1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateFileSystem",
+      "input": {
+        "FileSystemId": {
+          "$fromPath": "FileSystem.FileSystemId",
+          "$fromStep": 1
+        },
+        "StorageCapacity": 2400
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FileSystem": {
+          "FileSystemId": "fs-7c589129",
+          "FileSystemType": "LUSTRE",
+          "Lifecycle": "AVAILABLE",
+          "StorageCapacity": 2400,
+          "SubnetIds": [
+            "subnet-1"
+          ]
+        }
+      }
+    },
+    {
+      "operation": "DescribeFileSystems",
+      "input": {
+        "FileSystemIds": [
+          {
+            "$fromPath": "FileSystem.FileSystemId",
+            "$fromStep": 1
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FileSystems": [
+          {
+            "FileSystemId": "fs-7c589129",
+            "FileSystemType": "LUSTRE",
+            "Lifecycle": "AVAILABLE",
+            "StorageCapacity": 2400,
+            "SubnetIds": [
+              "subnet-1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateFileSystem",
+      "input": {
+        "FileSystemId": {
+          "$fromPath": "FileSystem.FileSystemId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FileSystem": {
+          "FileSystemId": "fs-7c589129",
+          "FileSystemType": "LUSTRE",
+          "Lifecycle": "AVAILABLE",
+          "StorageCapacity": 2400,
+          "SubnetIds": [
+            "subnet-1"
+          ]
+        }
+      }
+    },
+    {
+      "operation": "DescribeFileSystems",
+      "input": {
+        "FileSystemIds": [
+          {
+            "$fromPath": "FileSystem.FileSystemId",
+            "$fromStep": 1
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FileSystems": [
+          {
+            "FileSystemId": "fs-7c589129",
+            "FileSystemType": "LUSTRE",
+            "Lifecycle": "AVAILABLE",
+            "StorageCapacity": 2400,
+            "SubnetIds": [
+              "subnet-1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "UpdateFileSystem",
+      "input": {
+        "FileSystemId": "fs-absent",
+        "StorageCapacity": 100
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "FileSystemNotFound",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateBackup",
+      "input": {
+        "ClientRequestToken": "b1",
+        "FileSystemId": {
+          "$fromPath": "FileSystem.FileSystemId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Backup": {
+          "BackupId": "backup-9c8e2cb0",
+          "FileSystemId": "fs-7c589129",
+          "Lifecycle": "AVAILABLE"
+        }
+      }
+    },
+    {
+      "operation": "DescribeBackups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Backups": [
+          {
+            "BackupId": "backup-9c8e2cb0",
+            "FileSystemId": "fs-7c589129",
+            "Lifecycle": "AVAILABLE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeBackups",
+      "input": {
+        "BackupIds": [
+          {
+            "$fromPath": "Backup.BackupId",
+            "$fromStep": 10
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Backups": [
+          {
+            "BackupId": "backup-9c8e2cb0",
+            "FileSystemId": "fs-7c589129",
+            "Lifecycle": "AVAILABLE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteFileSystem",
+      "input": {
+        "FileSystemId": {
+          "$fromPath": "FileSystem.FileSystemId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeFileSystems",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FileSystems": [
+          {
+            "FileSystemId": "fs-5f59f223",
+            "FileSystemType": "WINDOWS",
+            "Lifecycle": "AVAILABLE",
+            "StorageCapacity": 32,
+            "SubnetIds": [
+              "subnet-2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeBackups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Backups": [
+          {
+            "BackupId": "backup-9c8e2cb0",
+            "FileSystemId": "fs-7c589129",
+            "Lifecycle": "AVAILABLE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteBackup",
+      "input": {
+        "BackupId": {
+          "$fromPath": "Backup.BackupId",
+          "$fromStep": 10
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeBackups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Backups": null
+      }
+    },
+    {
+      "operation": "DeleteFileSystem",
+      "input": {
+        "FileSystemId": "fs-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

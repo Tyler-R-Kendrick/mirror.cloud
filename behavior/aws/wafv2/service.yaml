@@ -1,0 +1,237 @@
+schema: bir/1
+service: aws.wafv2
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is inspected: a web ACL is a record, it is associated with
+# no resource, and no request is ever matched against a rule.
+provenance: authored
+
+resources:
+  # The pack kept each of the three resource kinds in a store collection named
+  # per scope -- wafacl:REGIONAL and wafacl:CLOUDFRONT are different
+  # collections -- so a REGIONAL ACL could not be fetched as a CLOUDFRONT one.
+  # The scope is a record member here and every read filters on it, which is
+  # the same separation expressed as data rather than as a key prefix.
+  webacl:
+    collection: wafacl
+    key: Id
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      Id: "'Id' in input && string(input.Id) != '' ? string(input.Id) : 'acl-' + id"
+
+  ipset:
+    collection: wafip
+    key: Id
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      Id: "'Id' in input && string(input.Id) != '' ? string(input.Id) : 'ipset-' + id"
+
+  rulegroup:
+    collection: wafrg
+    key: Id
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      Id: "'Id' in input && string(input.Id) != '' ? string(input.Id) : 'rg-' + id"
+
+errors:
+  NonexistentItem:
+    code: WAFNonexistentItemException
+    http: 400
+    fault: client
+
+operations:
+  CreateWebACL:
+    effects:
+      - create:
+          resource: webacl
+          record:
+            Name: "'Name' in input ? string(input.Name) : ''"
+            ARN: >
+              'arn:aws:wafv2:' + identity.region + ':' + identity.account + ':regional/webacl/acl-' + id
+            Scope: >
+              'Scope' in input && string(input.Scope) != '' ? string(input.Scope) : 'REGIONAL'
+            DefaultAction: "'DefaultAction' in input ? input.DefaultAction : null"
+    output:
+      Summary: rec
+
+  GetWebACL:
+    reads:
+      w: { resource: webacl, key: "string(input.Id)" }
+    require:
+      - { cond: w_found, error: NonexistentItem }
+      - cond: >
+          string(w.Scope) ==
+          ('Scope' in input && string(input.Scope) != '' ? string(input.Scope) : 'REGIONAL')
+        error: NonexistentItem
+    output:
+      WebACL: w
+
+  ListWebACLs:
+    list:
+      resource: webacl
+      member: WebACLs
+      filter: >
+        string(item.Scope) ==
+        ('Scope' in input && string(input.Scope) != '' ? string(input.Scope) : 'REGIONAL')
+      paginate: model
+
+  # An update replaces the record and loses the ARN: the pack wrote a
+  # four-member map with no ARN in it.
+  # A delete before the write, because `put` merges onto the stored record and
+  # the pack replaced it: it marshalled a fresh four-member map with no ARN in
+  # it. Removing the record first is the only way to express a replace, and it
+  # is what makes the lost ARN reproducible rather than a member that survives
+  # by accident.
+  UpdateWebACL:
+    effects:
+      - delete: { resource: webacl, key: "string(input.Id)", missing: ignore }
+      - put:
+          resource: webacl
+          key: "string(input.Id)"
+          record:
+            Name: "'Name' in input ? string(input.Name) : ''"
+            Scope: >
+              'Scope' in input && string(input.Scope) != '' ? string(input.Scope) : 'REGIONAL'
+            DefaultAction: "'DefaultAction' in input ? input.DefaultAction : null"
+
+  DeleteWebACL:
+    effects:
+      - delete: { resource: webacl, key: "string(input.Id)", missing: ignore }
+
+  CreateIPSet:
+    effects:
+      - create:
+          resource: ipset
+          record:
+            Name: "'Name' in input ? string(input.Name) : ''"
+            ARN: >
+              'arn:aws:wafv2:' + identity.region + ':' + identity.account + ':regional/ipset/ipset-' + id
+            Scope: >
+              'Scope' in input && string(input.Scope) != '' ? string(input.Scope) : 'REGIONAL'
+            Addresses: "'Addresses' in input ? input.Addresses : null"
+    output:
+      Summary: rec
+
+  GetIPSet:
+    reads:
+      s: { resource: ipset, key: "string(input.Id)" }
+    require:
+      - { cond: s_found, error: NonexistentItem }
+      - cond: >
+          string(s.Scope) ==
+          ('Scope' in input && string(input.Scope) != '' ? string(input.Scope) : 'REGIONAL')
+        error: NonexistentItem
+    output:
+      IPSet: s
+
+  ListIPSets:
+    list:
+      resource: ipset
+      member: IPSets
+      filter: >
+        string(item.Scope) ==
+        ('Scope' in input && string(input.Scope) != '' ? string(input.Scope) : 'REGIONAL')
+      paginate: model
+
+  DeleteIPSet:
+    effects:
+      - delete: { resource: ipset, key: "string(input.Id)", missing: ignore }
+
+  CreateRuleGroup:
+    effects:
+      - create:
+          resource: rulegroup
+          record:
+            Name: "'Name' in input ? string(input.Name) : ''"
+            ARN: >
+              'arn:aws:wafv2:' + identity.region + ':' + identity.account + ':regional/rulegroup/rg-' + id
+            Scope: >
+              'Scope' in input && string(input.Scope) != '' ? string(input.Scope) : 'REGIONAL'
+    output:
+      Summary: rec
+
+  GetRuleGroup:
+    reads:
+      g: { resource: rulegroup, key: "string(input.Id)" }
+    require:
+      - { cond: g_found, error: NonexistentItem }
+      - cond: >
+          string(g.Scope) ==
+          ('Scope' in input && string(input.Scope) != '' ? string(input.Scope) : 'REGIONAL')
+        error: NonexistentItem
+    output:
+      RuleGroup: g
+
+  ListRuleGroups:
+    list:
+      resource: rulegroup
+      member: RuleGroups
+      filter: >
+        string(item.Scope) ==
+        ('Scope' in input && string(input.Scope) != '' ? string(input.Scope) : 'REGIONAL')
+      paginate: model
+
+  DeleteRuleGroup:
+    effects:
+      - delete: { resource: rulegroup, key: "string(input.Id)", missing: ignore }
+
+quirks:
+  - operation: CreateWebACL
+    note: >
+      The pack kept each resource kind in a store collection named per scope,
+      so the same identifier in REGIONAL and CLOUDFRONT addressed different
+      records. The scope is a member here and every read and listing filters on
+      it, which reproduces that separation -- fetching a REGIONAL ACL as a
+      CLOUDFRONT one still faults. Deletes do not filter on scope, because the
+      pack's delete did not either: it deleted from the scope's collection
+      without checking anything, and an id is unique across both in practice
+      since it is generated.
+
+      Every ARN is built with a regional/ path segment whatever Scope was
+      asked for, so a CLOUDFRONT ACL carries an ARN that says regional. That is
+      the pack's behavior.
+  - operation: CreateWebACL
+    note: >
+      Every create answered a bare Id beside the Summary, and none of the three
+      create answers declares an Id at all -- the Summary carries it. The
+      member no SDK could read was the identifier the caller most wanted, and
+      it is dropped here; it is still inside the Summary, where the model puts
+      it. The recorded steps are superseded with that reason.
+  - operation: UpdateWebACL
+    note: >
+      UpdateWebACLResponse declares one member, NextLockToken, and the pack
+      answered a Summary and an Id -- neither declared, and no NextLockToken.
+      So the whole update answer was unreadable, and the bundle answers nothing
+      rather than answering a token it does not have. The recorded step is
+      superseded with that reason.
+
+      The update itself replaces the whole record with a four-member map that
+      has no ARN in it, so a web ACL that has been updated has no ARN at all -- the
+      member the caller needs to associate it with anything. The required
+      LockToken is ignored, so the optimistic-concurrency check the real
+      service performs does not happen, and the answer's NextLockToken is never
+      set. Only web ACLs can be updated; there is no UpdateIPSet or
+      UpdateRuleGroup here, so an IP set's addresses can never change.
+  - operation: CreateWebACL
+    note: >
+      Rules are dropped on every kind: a web ACL has no Rules, a rule group has
+      neither Rules nor a Capacity, and neither has VisibilityConfig -- which
+      the model requires on both. So nothing can match a request, and nothing
+      counts one. The DefaultAction a web ACL stores is never consulted.
+  - operation: CreateIPSet
+    note: >
+      An IP set stores the Addresses it was given and nothing reads them:
+      IPAddressVersion is required and dropped, so a set of IPv6 addresses is
+      indistinguishable from a set of IPv4 ones, and no operation associates a
+      set with an ACL. Nothing here associates anything with a protected
+      resource at all -- AssociateWebACL is not served -- so a web ACL protects
+      nothing.
+  - operation: GetWebACL
+    note: >
+      A get is by Id alone; the Name the model also requires is ignored, so
+      fetching with the right id and the wrong name succeeds. LockToken is
+      declared on the answer and never set, which is what an update would need
+      if it checked one.

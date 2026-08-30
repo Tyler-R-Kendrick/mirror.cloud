@@ -1,0 +1,153 @@
+schema: bir/1
+service: aws.fsx
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is provisioned: a file system is AVAILABLE the moment it is
+# created, with no DNS name and nothing mounted.
+provenance: authored
+
+resources:
+  filesystem:
+    collection: fsxfs
+    # The identifier answered with carries an fs- prefix, so the record member
+    # rather than the raw generated id is the store key.
+    key: FileSystemId
+    id:
+      generate: { kind: hex, bytes: 8 }
+    # Only the key member lives here. Resource-level members are re-evaluated
+    # on every write, and UpdateFileSystem carries neither a type nor subnets
+    # -- anything else here would be recomputed from a request that does not
+    # have it, blanking what the create stored.
+    record:
+      FileSystemId: >
+        'FileSystemId' in input ? string(input.FileSystemId) : 'fs-' + id
+
+  backup:
+    collection: fsxbk
+    key: BackupId
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record:
+      BackupId: "'BackupId' in input ? string(input.BackupId) : 'backup-' + id"
+
+errors:
+  FileSystemNotFound:
+    code: FileSystemNotFound
+    http: 400
+    fault: client
+
+operations:
+  CreateFileSystem:
+    effects:
+      - create:
+          resource: filesystem
+          record:
+            Lifecycle: "'AVAILABLE'"
+            FileSystemType: >
+              'FileSystemType' in input && string(input.FileSystemType) != ''
+                ? string(input.FileSystemType)
+                : 'LUSTRE'
+            StorageCapacity: "'StorageCapacity' in input ? input.StorageCapacity : null"
+            SubnetIds: "'SubnetIds' in input ? input.SubnetIds : null"
+    output:
+      FileSystem: rec
+
+  # Named or not: one file system when FileSystemIds names one, the page when
+  # it does not. Only the first id in the list is read, which is the pack's
+  # behavior.
+  DescribeFileSystems:
+    list:
+      resource: filesystem
+      member: FileSystems
+      key: >
+        'FileSystemIds' in input && size(input.FileSystemIds) > 0
+          ? string(input.FileSystemIds[0])
+          : ''
+      paginate: model
+
+  # The one real partial update in this service: only the storage capacity
+  # changes, and everything else survives.
+  UpdateFileSystem:
+    reads:
+      f: { resource: filesystem, key: "string(input.FileSystemId)" }
+    require:
+      - { cond: f_found, error: FileSystemNotFound }
+    effects:
+      - patch:
+          resource: filesystem
+          key: "string(input.FileSystemId)"
+          record:
+            StorageCapacity: >
+              'StorageCapacity' in input
+                ? input.StorageCapacity
+                : ('StorageCapacity' in f ? f.StorageCapacity : null)
+    output:
+      FileSystem: rec
+
+  DeleteFileSystem:
+    effects:
+      - delete: { resource: filesystem, key: "string(input.FileSystemId)", missing: ignore }
+
+  CreateBackup:
+    effects:
+      - create:
+          resource: backup
+          record:
+            Lifecycle: "'AVAILABLE'"
+            FileSystemId: "'FileSystemId' in input ? string(input.FileSystemId) : ''"
+    output:
+      Backup: rec
+
+  DescribeBackups:
+    list:
+      resource: backup
+      member: Backups
+      key: >
+        'BackupIds' in input && size(input.BackupIds) > 0
+          ? string(input.BackupIds[0])
+          : ''
+      paginate: model
+
+  DeleteBackup:
+    effects:
+      - delete: { resource: backup, key: "string(input.BackupId)", missing: ignore }
+
+quirks:
+  - operation: CreateFileSystem
+    note: >
+      A file system is AVAILABLE immediately, so nothing observes CREATING, and
+      it has no DNSName, no OwnerId, no ResourceARN, no VpcId and no
+      CreationTime -- all declared and never set. The SubnetIds it names are
+      stored without being checked, and the storage capacity is stored without
+      being validated against the minimum the type requires, so a one-gigabyte
+      Lustre file system is accepted. Nothing is mounted: the DNS name a client
+      would mount is absent, so no client can reach it.
+  - operation: UpdateFileSystem
+    note: >
+      Only StorageCapacity changes, and it changes with no minimum, no
+      increment rule and no pending-update state -- so the new capacity is
+      visible instantly where the real service reports an update in progress.
+      WindowsConfiguration, LustreConfiguration and every other update member
+      is dropped. An update to a file system that does not exist faults, which
+      is the one place in this service where an absent record is refused.
+  - operation: CreateBackup
+    note: >
+      A backup is AVAILABLE and copies nothing: it stores the FileSystemId it
+      was given without checking it, so a file system that never existed can be
+      backed up, and the backup outlives a file system that is deleted.
+      Type, CreationTime, ProgressPercent and the KMS key are declared and
+      never set, and no operation restores from a backup -- there is no
+      CreateFileSystemFromBackup here -- so a backup can only be listed and
+      deleted.
+  - operation: DescribeFileSystems
+    note: >
+      Only the first id in FileSystemIds narrows the answer, so asking about
+      three file systems answers with one; asking about none answers with every
+      file system in the account and region. DescribeBackups has the same shape,
+      and its Filters are ignored entirely.
+  - operation: DeleteFileSystem
+    note: >
+      Deleting an absent file system or backup succeeds and answers with
+      nothing, where the model declares a FileSystemId and Lifecycle on the
+      delete answer. Deleting a file system leaves its backups behind, still
+      naming it.

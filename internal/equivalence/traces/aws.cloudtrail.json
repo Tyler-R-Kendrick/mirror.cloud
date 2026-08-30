@@ -1,0 +1,497 @@
+{
+  "schema": "trace/1",
+  "service": "aws.cloudtrail",
+  "source": "pack:internal/services/aws/cloudtrail@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "DescribeTrails",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "trailList": null
+      }
+    },
+    {
+      "operation": "GetTrail",
+      "input": {
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "TrailNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateTrail",
+      "input": {
+        "IsMultiRegionTrail": true,
+        "Name": "trail-one",
+        "S3BucketName": "audit-bucket"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IsLogging": true,
+        "IsMultiRegionTrail": true,
+        "Name": "trail-one",
+        "S3BucketName": "audit-bucket",
+        "TrailARN": "arn:aws:cloudtrail:us-east-1:000000000000:trail/trail-one"
+      },
+      "superseded": "IsLogging is declared on no trail shape -- not on Trail, not on the create or update answers -- and the pack emitted it in all of them. It exists only on GetTrailStatusResponse, which is the one place the bundle answers with it. The declared shapes outrank the pack's authored behavior."
+    },
+    {
+      "operation": "GetTrail",
+      "input": {
+        "Name": "trail-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Trail": {
+          "IsLogging": true,
+          "IsMultiRegionTrail": true,
+          "Name": "trail-one",
+          "S3BucketName": "audit-bucket",
+          "TrailARN": "arn:aws:cloudtrail:us-east-1:000000000000:trail/trail-one"
+        }
+      },
+      "superseded": "IsLogging is declared on no trail shape -- not on Trail, not on the create or update answers -- and the pack emitted it in all of them. It exists only on GetTrailStatusResponse, which is the one place the bundle answers with it. The declared shapes outrank the pack's authored behavior."
+    },
+    {
+      "operation": "GetTrailStatus",
+      "input": {
+        "Name": "trail-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IsLogging": true
+      }
+    },
+    {
+      "operation": "CreateTrail",
+      "input": {
+        "Name": "trail-two",
+        "S3BucketName": "other-bucket"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IsLogging": true,
+        "IsMultiRegionTrail": null,
+        "Name": "trail-two",
+        "S3BucketName": "other-bucket",
+        "TrailARN": "arn:aws:cloudtrail:us-east-1:000000000000:trail/trail-two"
+      },
+      "superseded": "IsLogging is declared on no trail shape -- not on Trail, not on the create or update answers -- and the pack emitted it in all of them. It exists only on GetTrailStatusResponse, which is the one place the bundle answers with it. The declared shapes outrank the pack's authored behavior."
+    },
+    {
+      "operation": "DescribeTrails",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "trailList": [
+          {
+            "IsLogging": true,
+            "IsMultiRegionTrail": true,
+            "Name": "trail-one",
+            "S3BucketName": "audit-bucket",
+            "TrailARN": "arn:aws:cloudtrail:us-east-1:000000000000:trail/trail-one"
+          },
+          {
+            "IsLogging": true,
+            "IsMultiRegionTrail": null,
+            "Name": "trail-two",
+            "S3BucketName": "other-bucket",
+            "TrailARN": "arn:aws:cloudtrail:us-east-1:000000000000:trail/trail-two"
+          }
+        ]
+      },
+      "superseded": "IsLogging is declared on no trail shape -- not on Trail, not on the create or update answers -- and the pack emitted it in all of them. It exists only on GetTrailStatusResponse, which is the one place the bundle answers with it. The declared shapes outrank the pack's authored behavior."
+    },
+    {
+      "operation": "StopLogging",
+      "input": {
+        "Name": "trail-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetTrailStatus",
+      "input": {
+        "Name": "trail-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IsLogging": false
+      }
+    },
+    {
+      "operation": "StartLogging",
+      "input": {
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetTrailStatus",
+      "input": {
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IsLogging": false
+      }
+    },
+    {
+      "operation": "StartLogging",
+      "input": {
+        "Name": "trail-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetTrailStatus",
+      "input": {
+        "Name": "trail-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IsLogging": true
+      }
+    },
+    {
+      "operation": "UpdateTrail",
+      "input": {
+        "Name": "trail-one",
+        "S3BucketName": "new-bucket"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IsLogging": true,
+        "IsMultiRegionTrail": true,
+        "Name": "trail-one",
+        "S3BucketName": "new-bucket",
+        "TrailARN": "arn:aws:cloudtrail:us-east-1:000000000000:trail/trail-one"
+      },
+      "superseded": "IsLogging is declared on no trail shape -- not on Trail, not on the create or update answers -- and the pack emitted it in all of them. It exists only on GetTrailStatusResponse, which is the one place the bundle answers with it. The declared shapes outrank the pack's authored behavior."
+    },
+    {
+      "operation": "GetTrail",
+      "input": {
+        "Name": "trail-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Trail": {
+          "IsLogging": true,
+          "IsMultiRegionTrail": true,
+          "Name": "trail-one",
+          "S3BucketName": "new-bucket",
+          "TrailARN": "arn:aws:cloudtrail:us-east-1:000000000000:trail/trail-one"
+        }
+      },
+      "superseded": "IsLogging is declared on no trail shape -- not on Trail, not on the create or update answers -- and the pack emitted it in all of them. It exists only on GetTrailStatusResponse, which is the one place the bundle answers with it. The declared shapes outrank the pack's authored behavior."
+    },
+    {
+      "operation": "UpdateTrail",
+      "input": {
+        "Name": "trail-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "IsLogging": true,
+        "IsMultiRegionTrail": true,
+        "Name": "trail-one",
+        "S3BucketName": "new-bucket",
+        "TrailARN": "arn:aws:cloudtrail:us-east-1:000000000000:trail/trail-one"
+      },
+      "superseded": "IsLogging is declared on no trail shape -- not on Trail, not on the create or update answers -- and the pack emitted it in all of them. It exists only on GetTrailStatusResponse, which is the one place the bundle answers with it. The declared shapes outrank the pack's authored behavior."
+    },
+    {
+      "operation": "GetTrail",
+      "input": {
+        "Name": "trail-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Trail": {
+          "IsLogging": true,
+          "IsMultiRegionTrail": true,
+          "Name": "trail-one",
+          "S3BucketName": "new-bucket",
+          "TrailARN": "arn:aws:cloudtrail:us-east-1:000000000000:trail/trail-one"
+        }
+      },
+      "superseded": "IsLogging is declared on no trail shape -- not on Trail, not on the create or update answers -- and the pack emitted it in all of them. It exists only on GetTrailStatusResponse, which is the one place the bundle answers with it. The declared shapes outrank the pack's authored behavior."
+    },
+    {
+      "operation": "UpdateTrail",
+      "input": {
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "TrailNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetEventSelectors",
+      "input": {
+        "TrailName": "trail-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EventSelectors": []
+      }
+    },
+    {
+      "operation": "PutEventSelectors",
+      "input": {
+        "EventSelectors": [
+          {
+            "IncludeManagementEvents": true,
+            "ReadWriteType": "All"
+          }
+        ],
+        "TrailName": "trail-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EventSelectors": [
+          {
+            "IncludeManagementEvents": true,
+            "ReadWriteType": "All"
+          }
+        ],
+        "TrailARN": ""
+      }
+    },
+    {
+      "operation": "GetEventSelectors",
+      "input": {
+        "TrailName": "trail-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EventSelectors": [
+          {
+            "IncludeManagementEvents": true,
+            "ReadWriteType": "All"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "LookupEvents",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Events": null
+      }
+    },
+    {
+      "operation": "DeleteTrail",
+      "input": {
+        "Name": "trail-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeTrails",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "trailList": [
+          {
+            "IsLogging": true,
+            "IsMultiRegionTrail": null,
+            "Name": "trail-two",
+            "S3BucketName": "other-bucket",
+            "TrailARN": "arn:aws:cloudtrail:us-east-1:000000000000:trail/trail-two"
+          }
+        ]
+      },
+      "superseded": "IsLogging is declared on no trail shape -- not on Trail, not on the create or update answers -- and the pack emitted it in all of them. It exists only on GetTrailStatusResponse, which is the one place the bundle answers with it. The declared shapes outrank the pack's authored behavior."
+    },
+    {
+      "operation": "GetEventSelectors",
+      "input": {
+        "TrailName": "trail-one"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EventSelectors": [
+          {
+            "IncludeManagementEvents": true,
+            "ReadWriteType": "All"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteTrail",
+      "input": {
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

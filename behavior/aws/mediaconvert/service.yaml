@@ -1,0 +1,166 @@
+schema: bir/1
+service: aws.mediaconvert
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is transcoded: a job is COMPLETE before the call returns
+# and no output file is ever written.
+provenance: authored
+
+resources:
+  queue:
+    collection: mcq
+    id:
+      input_members: [Name]
+    arn: "arn:{partition}:mediaconvert:{region}:{account}:queues/{id}"
+    record:
+      Name: id
+      Status: "'ACTIVE'"
+      Arn: arn
+
+  jobtemplate:
+    collection: mctpl
+    id:
+      input_members: [Name]
+    arn: "arn:{partition}:mediaconvert:{region}:{account}:jobTemplates/{id}"
+    record:
+      Name: id
+      Arn: arn
+
+  # Deliberately empty: resource-level members are re-evaluated on every write,
+  # and CancelJob is a write that carries no Queue, Role or JobTemplate.
+  job:
+    collection: mcjob
+    id:
+      generate: { kind: hex, bytes: 8 }
+    record: {}
+
+errors:
+  BadRequest:
+    code: BadRequestException
+    http: 400
+    fault: client
+  NotFound:
+    code: NotFoundException
+    http: 404
+    fault: client
+
+operations:
+  CreateQueue:
+    effects:
+      - put: { resource: queue }
+    output:
+      Queue: rec
+
+  GetQueue:
+    reads:
+      q: { resource: queue }
+    require:
+      - { cond: q_found, error: NotFound }
+    output:
+      Queue: q
+
+  ListQueues:
+    list: { resource: queue, member: Queues, paginate: model }
+
+  DeleteQueue:
+    effects:
+      - delete: { resource: queue, missing: ignore }
+
+  CreateJobTemplate:
+    effects:
+      - put: { resource: jobtemplate }
+    output:
+      JobTemplate: rec
+
+  GetJobTemplate:
+    reads:
+      t: { resource: jobtemplate }
+    require:
+      - { cond: t_found, error: NotFound }
+    output:
+      JobTemplate: t
+
+  ListJobTemplates:
+    list: { resource: jobtemplate, member: JobTemplates, paginate: model }
+
+  DeleteJobTemplate:
+    effects:
+      - delete: { resource: jobtemplate, missing: ignore }
+
+  CreateJob:
+    effects:
+      - create:
+          resource: job
+          record:
+            Id: id
+            Status: "'COMPLETE'"
+            Queue: "'Queue' in input ? string(input.Queue) : ''"
+            Role: "'Role' in input ? string(input.Role) : ''"
+            JobTemplate: "'JobTemplate' in input ? string(input.JobTemplate) : ''"
+    output:
+      Job: rec
+
+  GetJob:
+    reads:
+      j: { resource: job, key: "string(input.Id)" }
+    require:
+      - { cond: j_found, error: NotFound }
+    output:
+      Job: j
+
+  ListJobs:
+    list: { resource: job, member: Jobs, paginate: model }
+
+  # Cancelling a job that does not exist invents one carrying that id and the
+  # cancelled status, which is then listed and fetched like any other. That is
+  # the pack's behavior.
+  CancelJob:
+    effects:
+      - patch:
+          resource: job
+          key: "string(input.Id)"
+          record:
+            Id: "string(input.Id)"
+            Status: "'CANCELED'"
+
+quirks:
+  - operation: CreateJob
+    note: >
+      A job is COMPLETE before the call returns, so nothing observes SUBMITTED
+      or PROGRESSING and a caller polling for completion gets it on the first
+      poll. The required Settings are dropped, so no input file is read and no
+      output file is written -- a caller that waits for the job and then reads
+      its destination finds nothing. CreatedAt, Timing, OutputGroupDetails and
+      ErrorMessage are declared on a job and never set. Neither the Queue nor
+      the JobTemplate it names is checked to exist.
+  - operation: CancelJob
+    note: >
+      CancelJobResponse declares no members at all, and the pack answered with
+      the cancelled Job -- so the whole answer was unreadable by any SDK. The
+      bundle answers nothing, and the recorded steps are superseded with that
+      reason.
+
+      Cancelling a job that does not exist succeeds and creates one, carrying
+      the id it was asked about and a CANCELED status and nothing else -- which
+      then appears in ListJobs and can be fetched. It is the one write here
+      that invents a resource. Cancelling a job that is already COMPLETE
+      succeeds too and moves it backwards into CANCELED, which the real service
+      refuses.
+  - operation: CreateQueue
+    note: >
+      A queue is ACTIVE with no pricing plan, no reservation and no concurrent
+      job limit: PricingPlan and ReservationPlanSettings are dropped, and
+      SubmittedJobsCount, ProgressingJobsCount, CreatedAt and LastUpdated are
+      declared and never set. No job is ever scheduled through a queue, so a
+      queue is a record and nothing more. Creating one that already exists
+      overwrites it.
+  - operation: CreateJobTemplate
+    note: >
+      A job template stores a name and an ARN and drops its Settings, which the
+      model requires -- so a template describes no transcode and a job created
+      from one gets nothing. Category, Description and Queue are dropped too.
+  - operation: DeleteQueue
+    note: >
+      Deleting an absent queue or template succeeds, where getting it faults.
+      There is no DeleteJob and no UpdateQueue here, so a job can only be
+      cancelled and a queue can only be replaced by creating it again.

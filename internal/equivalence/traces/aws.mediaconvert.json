@@ -1,0 +1,403 @@
+{
+  "schema": "trace/1",
+  "service": "aws.mediaconvert",
+  "source": "pack:internal/services/aws/mediaconvert@HEAD",
+  "note": "Recorded from the hand-written pack in the commit that deleted it. Every expectation describes that pack, not the real service; a probe run replaces cells with observed evidence and cites the cassette.",
+  "steps": [
+    {
+      "operation": "ListQueues",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Queues": null
+      }
+    },
+    {
+      "operation": "GetQueue",
+      "input": {
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 404,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateQueue",
+      "input": {
+        "Name": "q1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Queue": {
+          "Arn": "arn:aws:mediaconvert:us-east-1:000000000000:queues/q1",
+          "Name": "q1",
+          "Status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "GetQueue",
+      "input": {
+        "Name": "q1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Queue": {
+          "Arn": "arn:aws:mediaconvert:us-east-1:000000000000:queues/q1",
+          "Name": "q1",
+          "Status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "operation": "ListQueues",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Queues": [
+          {
+            "Arn": "arn:aws:mediaconvert:us-east-1:000000000000:queues/q1",
+            "Name": "q1",
+            "Status": "ACTIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateJobTemplate",
+      "input": {
+        "Name": "tpl1",
+        "Settings": {
+          "OutputGroups": []
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobTemplate": {
+          "Arn": "arn:aws:mediaconvert:us-east-1:000000000000:jobTemplates/tpl1",
+          "Name": "tpl1"
+        }
+      }
+    },
+    {
+      "operation": "GetJobTemplate",
+      "input": {
+        "Name": "tpl1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobTemplate": {
+          "Arn": "arn:aws:mediaconvert:us-east-1:000000000000:jobTemplates/tpl1",
+          "Name": "tpl1"
+        }
+      }
+    },
+    {
+      "operation": "ListJobTemplates",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobTemplates": [
+          {
+            "Arn": "arn:aws:mediaconvert:us-east-1:000000000000:jobTemplates/tpl1",
+            "Name": "tpl1"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateJob",
+      "input": {
+        "JobTemplate": "tpl1",
+        "Queue": "q1",
+        "Role": "arn:aws:iam::000000000000:role/mc",
+        "Settings": {
+          "OutputGroups": []
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Job": {
+          "Id": "7c589129",
+          "JobTemplate": "tpl1",
+          "Queue": "q1",
+          "Role": "arn:aws:iam::000000000000:role/mc",
+          "Status": "COMPLETE"
+        }
+      }
+    },
+    {
+      "operation": "GetJob",
+      "input": {
+        "Id": {
+          "$fromPath": "Job.Id",
+          "$fromStep": 8
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Job": {
+          "Id": "7c589129",
+          "JobTemplate": "tpl1",
+          "Queue": "q1",
+          "Role": "arn:aws:iam::000000000000:role/mc",
+          "Status": "COMPLETE"
+        }
+      }
+    },
+    {
+      "operation": "ListJobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Jobs": [
+          {
+            "Id": "7c589129",
+            "JobTemplate": "tpl1",
+            "Queue": "q1",
+            "Role": "arn:aws:iam::000000000000:role/mc",
+            "Status": "COMPLETE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CancelJob",
+      "input": {
+        "Id": {
+          "$fromPath": "Job.Id",
+          "$fromStep": 8
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Job": {
+          "Id": "7c589129",
+          "JobTemplate": "tpl1",
+          "Queue": "q1",
+          "Role": "arn:aws:iam::000000000000:role/mc",
+          "Status": "CANCELED"
+        }
+      },
+      "superseded": "CancelJobResponse declares no members at all, and the pack answered with the cancelled Job -- so the whole answer was unreadable by any SDK. The bundle answers nothing; the cancellation itself still happens and the next GetJob sees it."
+    },
+    {
+      "operation": "GetJob",
+      "input": {
+        "Id": {
+          "$fromPath": "Job.Id",
+          "$fromStep": 8
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Job": {
+          "Id": "7c589129",
+          "JobTemplate": "tpl1",
+          "Queue": "q1",
+          "Role": "arn:aws:iam::000000000000:role/mc",
+          "Status": "CANCELED"
+        }
+      }
+    },
+    {
+      "operation": "CancelJob",
+      "input": {
+        "Id": "invented"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Job": {
+          "Id": "invented",
+          "Status": "CANCELED"
+        }
+      },
+      "superseded": "CancelJobResponse declares no members at all, and the pack answered with the cancelled Job -- so the whole answer was unreadable by any SDK. The bundle answers nothing; the cancellation itself still happens and the next GetJob sees it."
+    },
+    {
+      "operation": "GetJob",
+      "input": {
+        "Id": "invented"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Job": {
+          "Id": "invented",
+          "Status": "CANCELED"
+        }
+      }
+    },
+    {
+      "operation": "ListJobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Jobs": [
+          {
+            "Id": "7c589129",
+            "JobTemplate": "tpl1",
+            "Queue": "q1",
+            "Role": "arn:aws:iam::000000000000:role/mc",
+            "Status": "CANCELED"
+          },
+          {
+            "Id": "invented",
+            "Status": "CANCELED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteJobTemplate",
+      "input": {
+        "Name": "tpl1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteQueue",
+      "input": {
+        "Name": "q1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListQueues",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Queues": null
+      }
+    },
+    {
+      "operation": "DeleteQueue",
+      "input": {
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

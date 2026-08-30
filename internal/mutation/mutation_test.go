@@ -2320,8 +2320,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-storage-class-skip-put-validation",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumType string, parts []any, lockDocs map[string][]byte) (*spi.Response, error) {\n\tb, key := str(req.Input[\"Bucket\"]), str(req.Input[\"Key\"])\n\tif err := p.requireBucket(ctx, req, b); err != nil {\n\t\treturn nil, err\n\t}\n\tstorageClass, err := requestStorageClass(req)\n\tif err != nil {",
-			new:  "func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumType string, parts []any, lockDocs map[string][]byte) (*spi.Response, error) {\n\tb, key := str(req.Input[\"Bucket\"]), str(req.Input[\"Key\"])\n\tif err := p.requireBucket(ctx, req, b); err != nil {\n\t\treturn nil, err\n\t}\n\tstorageClass, err := requestStorageClass(req)\n\tif false {",
+			old:  "storageClass, err := requestStorageClass(req)\n\tif err != nil {",
+			new:  "storageClass, err := requestStorageClass(req)\n\tif false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestStorageClassValidation",
 		},

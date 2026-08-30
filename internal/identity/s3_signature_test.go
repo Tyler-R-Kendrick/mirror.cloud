@@ -19,3 +19,20 @@ func TestVerifyS3PresignedV4AWSExample(t *testing.T) {
 		t.Fatalf("tampered signature accepted: %#v", fault)
 	}
 }
+
+func TestVerifyS3PresignedV2AWSGrammar(t *testing.T) {
+	// AWS documents this exact query-auth string-to-sign grammar. The
+	// published signature uses unrelated legacy credentials, so this fixture's
+	// signature was independently reproduced with Python's stdlib HMAC-SHA1.
+	const rawURL = "https://awsexamplebucket1.s3.us-west-1.amazonaws.com/photos/puppy.jpg?AWSAccessKeyId=AKIAIOSFODNN7EXAMPLE&Expires=1175139620&Signature=1No4mq5ETf02z8aet9voy6gui6E%3D"
+	request := httptest.NewRequest(http.MethodGet, rawURL, nil)
+	if fault := VerifyS3PresignedV2(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault != nil {
+		t.Fatalf("AWS grammar fixture rejected: %#v", fault)
+	}
+	query := request.URL.Query()
+	query.Set("Signature", "AAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	request.URL.RawQuery = query.Encode()
+	if fault := VerifyS3PresignedV2(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("tampered signature accepted: %#v", fault)
+	}
+}

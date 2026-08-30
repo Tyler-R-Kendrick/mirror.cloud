@@ -137,7 +137,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if id.AccessKeyID != "test" {
 			secret = s.deps.Rand.Derive(id.AccessKeyID).Hex(40)
 		}
-		if fault := identity.VerifyS3PresignedV4(r, secret); fault != nil {
+		if fault := identity.VerifyS3Presigned(r, secret); fault != nil {
 			s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, fault, rid)
 			return
 		}

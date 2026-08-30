@@ -1368,6 +1368,33 @@ func TestBucketPolicyCharacterization(t *testing.T) {
 	})
 }
 
+func TestBucketEncryptionCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	bucket := map[string]any{"Bucket": "encryption-characterization"}
+	mustInvoke(t, p, "CreateBucket", bucket, nil)
+	before := mustInvoke(t, p, "GetBucketEncryption", bucket, nil)
+	keyID := "arn:aws:kms:us-east-1:000000000000:key/characterization"
+	rules := []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "aws:kms", "KMSMasterKeyID": keyID}, "BucketKeyEnabled": true}}
+	put := mustInvoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": bucket["Bucket"], "ServerSideEncryptionConfiguration": map[string]any{"Rules": rules}}, nil)
+	configured := mustInvoke(t, p, "GetBucketEncryption", bucket, nil)
+	_, invalidErr := invoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": bucket["Bucket"], "ServerSideEncryptionConfiguration": map[string]any{"Rules": []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256", "KMSMasterKeyID": keyID}}}}}, nil)
+	preserved := mustInvoke(t, p, "GetBucketEncryption", bucket, nil)
+	object := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "object"}, []byte("body"))
+	deleted := mustInvoke(t, p, "DeleteBucketEncryption", bucket, nil)
+	after := mustInvoke(t, p, "GetBucketEncryption", bucket, nil)
+	invalid := asFault(t, invalidErr)
+	golden.AssertJSON(t, map[string]any{
+		"afterDelete": after.Output,
+		"before":      before.Output,
+		"configured":  configured.Output,
+		"deleted":     deleted.Status,
+		"inherited":   map[string]any{"algorithm": object.Headers.Get("x-amz-server-side-encryption"), "bucketKey": object.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled"), "key": object.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id")},
+		"invalid":     map[string]any{"argument": invalid.Fields["ArgumentName"], "code": invalid.Code, "message": invalid.Message},
+		"preserved":   preserved.Output,
+		"put":         put.Status,
+	})
+}
+
 func TestBucketLifecycleCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	input := map[string]any{"Bucket": "lifecycle-characterization"}

@@ -89,6 +89,40 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.GetBucketPolicy(context.Background(), &s3.GetBucketPolicyInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchBucketPolicy") {
 		t.Fatalf("get deleted bucket policy: %v", err)
 	}
+	if got, err := s3c.GetBucketEncryption(context.Background(), &s3.GetBucketEncryptionInput{Bucket: aws.String("sdk")}); err != nil || got.ServerSideEncryptionConfiguration != nil {
+		t.Fatalf("default bucket encryption: %#v %v", got, err)
+	}
+	bucketEncryptionKey := "arn:aws:kms:us-east-1:000000000000:key/sdk-default"
+	bucketEncryption := &s3types.ServerSideEncryptionConfiguration{Rules: []s3types.ServerSideEncryptionRule{{
+		ApplyServerSideEncryptionByDefault: &s3types.ServerSideEncryptionByDefault{SSEAlgorithm: s3types.ServerSideEncryptionAwsKms, KMSMasterKeyID: aws.String(bucketEncryptionKey)},
+		BucketKeyEnabled:                   aws.Bool(true),
+	}}}
+	if _, err := s3c.PutBucketEncryption(context.Background(), &s3.PutBucketEncryptionInput{Bucket: aws.String("sdk"), ServerSideEncryptionConfiguration: bucketEncryption}); err != nil {
+		t.Fatalf("put bucket encryption: %v", err)
+	}
+	gotEncryption, err := s3c.GetBucketEncryption(context.Background(), &s3.GetBucketEncryptionInput{Bucket: aws.String("sdk")})
+	if err != nil || gotEncryption.ServerSideEncryptionConfiguration == nil || len(gotEncryption.ServerSideEncryptionConfiguration.Rules) != 1 || gotEncryption.ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault == nil || gotEncryption.ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault.SSEAlgorithm != s3types.ServerSideEncryptionAwsKms || aws.ToString(gotEncryption.ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault.KMSMasterKeyID) != bucketEncryptionKey || !aws.ToBool(gotEncryption.ServerSideEncryptionConfiguration.Rules[0].BucketKeyEnabled) {
+		t.Fatalf("bucket encryption round trip: %#v %v", gotEncryption, err)
+	}
+	inheritedEncryption, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-bucket-encryption"), Body: strings.NewReader("encrypted")})
+	if err != nil || inheritedEncryption.ServerSideEncryption != s3types.ServerSideEncryptionAwsKms || aws.ToString(inheritedEncryption.SSEKMSKeyId) != bucketEncryptionKey || !aws.ToBool(inheritedEncryption.BucketKeyEnabled) {
+		t.Fatalf("inherited bucket encryption: %#v %v", inheritedEncryption, err)
+	}
+	invalidEncryption := &s3types.ServerSideEncryptionConfiguration{Rules: []s3types.ServerSideEncryptionRule{{ApplyServerSideEncryptionByDefault: &s3types.ServerSideEncryptionByDefault{SSEAlgorithm: s3types.ServerSideEncryptionAes256, KMSMasterKeyID: aws.String(bucketEncryptionKey)}}}}
+	if _, err := s3c.PutBucketEncryption(context.Background(), &s3.PutBucketEncryptionInput{Bucket: aws.String("sdk"), ServerSideEncryptionConfiguration: invalidEncryption}); err == nil || !strings.Contains(err.Error(), "InvalidArgument") {
+		t.Fatalf("invalid bucket encryption: %v", err)
+	}
+	if gotEncryption, err = s3c.GetBucketEncryption(context.Background(), &s3.GetBucketEncryptionInput{Bucket: aws.String("sdk")}); err != nil || gotEncryption.ServerSideEncryptionConfiguration == nil || gotEncryption.ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault.SSEAlgorithm != s3types.ServerSideEncryptionAwsKms {
+		t.Fatalf("invalid encryption replaced configuration: %#v %v", gotEncryption, err)
+	}
+	for range 2 {
+		if _, err := s3c.DeleteBucketEncryption(context.Background(), &s3.DeleteBucketEncryptionInput{Bucket: aws.String("sdk")}); err != nil {
+			t.Fatalf("delete bucket encryption: %v", err)
+		}
+	}
+	if got, err := s3c.GetBucketEncryption(context.Background(), &s3.GetBucketEncryptionInput{Bucket: aws.String("sdk")}); err != nil || got.ServerSideEncryptionConfiguration != nil {
+		t.Fatalf("deleted bucket encryption: %#v %v", got, err)
+	}
 	bucketACL, err := s3c.GetBucketAcl(context.Background(), &s3.GetBucketAclInput{Bucket: aws.String("sdk")})
 	if err != nil || bucketACL.Owner == nil || aws.ToString(bucketACL.Owner.ID) != "000000000000" || len(bucketACL.Grants) != 1 {
 		t.Fatalf("default bucket ACL: %#v %v", bucketACL, err)

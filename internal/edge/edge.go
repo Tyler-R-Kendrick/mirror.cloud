@@ -132,6 +132,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Request has expired", http.StatusForbidden)
 		return
 	}
+	if svc != nil && svc.ID == "aws.s3" && s.cfg.S3ValidatePresignedSignatures {
+		secret := "test"
+		if id.AccessKeyID != "test" {
+			secret = s.deps.Rand.Derive(id.AccessKeyID).Hex(40)
+		}
+		if fault := identity.VerifyS3PresignedV4(r, secret); fault != nil {
+			s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, fault, rid)
+			return
+		}
+	}
 
 	if svc == nil {
 		w.Header().Set("x-mirror-fidelity", "emulate")

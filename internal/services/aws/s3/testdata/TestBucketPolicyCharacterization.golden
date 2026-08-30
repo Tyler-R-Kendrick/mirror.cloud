@@ -1,0 +1,22 @@
+{
+  "configured": {
+    "Policy": "{\"Version\":\"2012-10-17\", \"Statement\":[{\"Effect\":\"Allow\",\"Principal\":\"*\"}]}"
+  },
+  "deleted": 204,
+  "final": {
+    "bucket": "policy-characterization",
+    "code": "NoSuchBucketPolicy"
+  },
+  "invalid": {
+    "code": "MalformedPolicy",
+    "message": "Missing required field Statement"
+  },
+  "missing": {
+    "bucket": "policy-characterization",
+    "code": "NoSuchBucketPolicy"
+  },
+  "preserved": {
+    "Policy": "{\"Version\":\"2012-10-17\", \"Statement\":[{\"Effect\":\"Allow\",\"Principal\":\"*\"}]}"
+  },
+  "put": 200
+}

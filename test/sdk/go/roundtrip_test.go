@@ -65,6 +65,30 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if tagged, err := s3c.GetBucketTagging(context.Background(), &s3.GetBucketTaggingInput{Bucket: aws.String("sdk")}); err != nil || !reflect.DeepEqual(tagged.TagSet, createTags) {
 		t.Fatalf("create bucket tags: %#v %v", tagged, err)
 	}
+	if _, err := s3c.GetBucketPolicy(context.Background(), &s3.GetBucketPolicyInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchBucketPolicy") {
+		t.Fatalf("default bucket policy: %v", err)
+	}
+	bucketPolicy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::sdk/*"}]}`
+	if _, err := s3c.PutBucketPolicy(context.Background(), &s3.PutBucketPolicyInput{Bucket: aws.String("sdk"), Policy: aws.String(bucketPolicy)}); err != nil {
+		t.Fatalf("put bucket policy: %v", err)
+	}
+	if got, err := s3c.GetBucketPolicy(context.Background(), &s3.GetBucketPolicyInput{Bucket: aws.String("sdk")}); err != nil || aws.ToString(got.Policy) != bucketPolicy {
+		t.Fatalf("bucket policy round trip: %#v %v", got, err)
+	}
+	if _, err := s3c.PutBucketPolicy(context.Background(), &s3.PutBucketPolicyInput{Bucket: aws.String("sdk"), Policy: aws.String(" " + bucketPolicy)}); err == nil || !strings.Contains(err.Error(), "MalformedPolicy") {
+		t.Fatalf("invalid bucket policy: %v", err)
+	}
+	if got, err := s3c.GetBucketPolicy(context.Background(), &s3.GetBucketPolicyInput{Bucket: aws.String("sdk")}); err != nil || aws.ToString(got.Policy) != bucketPolicy {
+		t.Fatalf("invalid policy replaced configuration: %#v %v", got, err)
+	}
+	for range 2 {
+		if _, err := s3c.DeleteBucketPolicy(context.Background(), &s3.DeleteBucketPolicyInput{Bucket: aws.String("sdk")}); err != nil {
+			t.Fatalf("delete bucket policy: %v", err)
+		}
+	}
+	if _, err := s3c.GetBucketPolicy(context.Background(), &s3.GetBucketPolicyInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchBucketPolicy") {
+		t.Fatalf("get deleted bucket policy: %v", err)
+	}
 	bucketACL, err := s3c.GetBucketAcl(context.Background(), &s3.GetBucketAclInput{Bucket: aws.String("sdk")})
 	if err != nil || bucketACL.Owner == nil || aws.ToString(bucketACL.Owner.ID) != "000000000000" || len(bucketACL.Grants) != 1 {
 		t.Fatalf("default bucket ACL: %#v %v", bucketACL, err)

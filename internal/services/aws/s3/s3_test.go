@@ -1344,6 +1344,30 @@ func TestACLCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"bucketDefault": before, "bucketPublic": after, "invalid": asFault(t, invalidErr).Code, "object": object})
 }
 
+func TestBucketPolicyCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	input := map[string]any{"Bucket": "policy-characterization"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	_, missingErr := invoke(t, p, "GetBucketPolicy", input, nil)
+	policy := `{"Version":"2012-10-17", "Statement":[{"Effect":"Allow","Principal":"*"}]}`
+	put := mustInvoke(t, p, "PutBucketPolicy", map[string]any{"Bucket": input["Bucket"], "Policy": policy}, nil)
+	configured := mustInvoke(t, p, "GetBucketPolicy", input, nil)
+	_, invalidErr := invoke(t, p, "PutBucketPolicy", map[string]any{"Bucket": input["Bucket"], "Policy": `{}`}, nil)
+	preserved := mustInvoke(t, p, "GetBucketPolicy", input, nil)
+	deleted := mustInvoke(t, p, "DeleteBucketPolicy", input, nil)
+	_, finalErr := invoke(t, p, "GetBucketPolicy", input, nil)
+	missing, invalid, final := asFault(t, missingErr), asFault(t, invalidErr), asFault(t, finalErr)
+	golden.AssertJSON(t, map[string]any{
+		"configured": configured.Output,
+		"deleted":    deleted.Status,
+		"final":      map[string]any{"code": final.Code, "bucket": final.Fields["BucketName"]},
+		"invalid":    map[string]any{"code": invalid.Code, "message": invalid.Message},
+		"missing":    map[string]any{"code": missing.Code, "bucket": missing.Fields["BucketName"]},
+		"preserved":  preserved.Output,
+		"put":        put.Status,
+	})
+}
+
 func TestBucketLifecycleCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	input := map[string]any{"Bucket": "lifecycle-characterization"}

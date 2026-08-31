@@ -2446,8 +2446,8 @@ func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, 
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
 	marker := asInt(req.Input["PartNumberMarker"])
 	maxParts := 1000
-	if _, provided := req.Input["MaxParts"]; provided {
-		maxParts = asInt(req.Input["MaxParts"])
+	if value := asInt(req.Input["MaxParts"]); value != 0 {
+		maxParts = value
 	}
 	if req.HTTP != nil {
 		if raw := req.HTTP.URL.Query().Get("part-number-marker"); raw != "" {
@@ -2489,7 +2489,11 @@ func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, 
 	for _, number := range numbers {
 		part := u.parts[number]
 		sum := md5.Sum(part.body)
-		row := map[string]any{"PartNumber": number, "ETag": `"` + hex.EncodeToString(sum[:]) + `"`, "Size": len(part.body), "LastModified": part.modified}
+		modified := part.modified
+		if parsed, err := time.Parse(time.RFC3339Nano, modified); err == nil {
+			modified = parsed.UTC().Format("2006-01-02T15:04:05.000Z")
+		}
+		row := map[string]any{"PartNumber": number, "ETag": `"` + hex.EncodeToString(sum[:]) + `"`, "Size": len(part.body), "LastModified": modified}
 		for _, checksum := range checksums {
 			if value := part.checksums[checksum.header]; value != "" {
 				row[checksum.input] = value
@@ -2497,16 +2501,15 @@ func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, 
 		}
 		parts = append(parts, row)
 	}
+	identity := map[string]any{"ID": req.Identity.Account}
 	out := map[string]any{
 		"Bucket": b, "Key": key, "UploadId": id, "PartNumberMarker": marker,
 		"MaxParts": maxParts, "IsTruncated": truncated, "Parts": parts, "StorageClass": u.storageClass,
 		"ChecksumAlgorithm": u.checksumAlgorithm, "ChecksumType": u.checksumType,
+		"Initiator": identity, "Owner": identity, "NextPartNumberMarker": 0,
 	}
-	if truncated {
-		out["NextPartNumberMarker"] = marker
-		if len(numbers) > 0 {
-			out["NextPartNumberMarker"] = numbers[len(numbers)-1]
-		}
+	if len(numbers) > 0 {
+		out["NextPartNumberMarker"] = numbers[len(numbers)-1]
 	}
 	return &spi.Response{Output: out}, nil
 }

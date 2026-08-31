@@ -242,6 +242,54 @@ func FuzzBucketOwnershipControls(f *testing.F) {
 	})
 }
 
+func FuzzPublicAccessBlock(f *testing.F) {
+	for _, seed := range []struct {
+		mode uint8
+		flag bool
+		text string
+	}{{0, false, ""}, {1, true, ""}, {2, false, ""}, {3, true, "unknown"}, {4, false, "true"}, {5, false, ""}} {
+		f.Add(seed.mode, seed.flag, seed.text)
+	}
+	f.Fuzz(func(t *testing.T, mode uint8, flag bool, text string) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "public-access-block-fuzz"}, nil)
+		baseline := map[string]any{"BlockPublicPolicy": true}
+		mustInvoke(t, p, "PutPublicAccessBlock", map[string]any{"Bucket": "public-access-block-fuzz", "PublicAccessBlockConfiguration": baseline}, nil)
+		var configuration any
+		valid := true
+		switch mode % 6 {
+		case 0:
+			configuration = map[string]any{}
+		case 1:
+			configuration = map[string]any{"BlockPublicAcls": flag}
+		case 2:
+			configuration = map[string]any{"BlockPublicAcls": flag, "BlockPublicPolicy": !flag, "IgnorePublicAcls": flag, "RestrictPublicBuckets": !flag}
+		case 3:
+			configuration, valid = map[string]any{"Unknown": flag}, false
+		case 4:
+			configuration, valid = map[string]any{"BlockPublicAcls": text}, false
+		case 5:
+			valid = false
+		}
+		_, err := invoke(t, p, "PutPublicAccessBlock", map[string]any{"Bucket": "public-access-block-fuzz", "PublicAccessBlockConfiguration": configuration}, nil)
+		if !valid {
+			if fault := asFault(t, err); fault.Code != "MalformedXML" {
+				t.Fatalf("mode=%d configuration=%#v: %#v", mode%6, configuration, fault)
+			}
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		response := mustInvoke(t, p, "GetPublicAccessBlock", map[string]any{"Bucket": "public-access-block-fuzz"}, nil)
+		stored := asMapForTest(response.Output["PublicAccessBlockConfiguration"])
+		if len(stored) != 4 {
+			t.Fatalf("stored configuration = %#v", stored)
+		}
+		if !valid && stored["BlockPublicPolicy"] != true || valid && mode%6 == 1 && stored["BlockPublicAcls"] != flag {
+			t.Fatalf("stored configuration = %#v", stored)
+		}
+	})
+}
+
 func FuzzDeleteBucketEmptiness(f *testing.F) {
 	for _, seed := range []struct {
 		versioned bool

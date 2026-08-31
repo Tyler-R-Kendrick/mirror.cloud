@@ -531,6 +531,55 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a public access block When replacing and deleting it Then S3 validates and defaults the flags", func(t *testing.T) {
+		res := do(http.MethodPut, "/public-access-block", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create public-access-block bucket %d", res.StatusCode)
+		}
+		valid := []byte(`<PublicAccessBlockConfiguration><BlockPublicAcls>true</BlockPublicAcls></PublicAccessBlockConfiguration>`)
+		res = do(http.MethodPut, "/public-access-block?publicAccessBlock", valid, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || len(body) != 0 {
+			t.Fatalf("put public access block %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/public-access-block?publicAccessBlock", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<BlockPublicAcls>true</BlockPublicAcls>")) || !bytes.Contains(body, []byte("<BlockPublicPolicy>false</BlockPublicPolicy>")) || !bytes.Contains(body, []byte("<IgnorePublicAcls>false</IgnorePublicAcls>")) || !bytes.Contains(body, []byte("<RestrictPublicBuckets>false</RestrictPublicBuckets>")) || bytes.Contains(body, []byte("GetPublicAccessBlockResult")) {
+			t.Fatalf("get public access block %d %s", res.StatusCode, body)
+		}
+		invalid := []byte(`<PublicAccessBlockConfiguration><Unknown>true</Unknown></PublicAccessBlockConfiguration>`)
+		res = do(http.MethodPut, "/public-access-block?publicAccessBlock", invalid, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("MalformedXML")) {
+			t.Fatalf("invalid public access block %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/public-access-block?publicAccessBlock", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<BlockPublicAcls>true</BlockPublicAcls>")) {
+			t.Fatalf("public access block after invalid put %d %s", res.StatusCode, body)
+		}
+		for range 2 {
+			res = do(http.MethodDelete, "/public-access-block?publicAccessBlock", nil, "")
+			io.Copy(io.Discard, res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusNoContent {
+				t.Fatalf("delete public access block %d", res.StatusCode)
+			}
+		}
+		res = do(http.MethodGet, "/public-access-block?publicAccessBlock", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchPublicAccessBlockConfiguration")) {
+			t.Fatalf("get deleted public access block %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given a globally owned bucket When another identity creates it Then ownership errors are returned", func(t *testing.T) {
 		create := func(account, region string) (int, []byte) {
 			t.Helper()

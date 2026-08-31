@@ -2353,6 +2353,13 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	col := p.col(req, "bktcfg")
 	if strings.HasPrefix(req.Operation, "Put") {
+		if req.Operation == "PutPublicAccessBlock" {
+			configuration, err := normalizePublicAccessBlock(req.Input["PublicAccessBlockConfiguration"])
+			if err != nil {
+				return nil, err
+			}
+			req.Input["PublicAccessBlockConfiguration"] = configuration
+		}
 		if req.Operation == "PutBucketOwnershipControls" {
 			if err := validateOwnershipControls(req.Input["OwnershipControls"]); err != nil {
 				return nil, err
@@ -2418,6 +2425,25 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	var doc map[string]any
 	_ = json.Unmarshal(raw, &doc)
 	return &spi.Response{Status: 200, Output: doc}, nil
+}
+
+func normalizePublicAccessBlock(value any) (map[string]any, error) {
+	configuration, ok := value.(map[string]any)
+	if !ok {
+		return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	normalized := map[string]any{"BlockPublicAcls": false, "BlockPublicPolicy": false, "IgnorePublicAcls": false, "RestrictPublicBuckets": false}
+	for field, value := range configuration {
+		if _, ok := normalized[field]; !ok {
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		flag, ok := value.(bool)
+		if !ok {
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		normalized[field] = flag
+	}
+	return normalized, nil
 }
 
 func validateOwnershipControls(value any) error {

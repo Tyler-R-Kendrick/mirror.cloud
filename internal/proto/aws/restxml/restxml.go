@@ -509,6 +509,32 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 			rules = append(rules, map[string]any{"ObjectOwnership": rule.ObjectOwnership})
 		}
 		in["OwnershipControls"] = map[string]any{"Rules": rules}
+	case "PutPublicAccessBlock":
+		var configuration struct {
+			XMLName               xml.Name
+			BlockPublicAcls       *bool                        `xml:"BlockPublicAcls"`
+			BlockPublicPolicy     *bool                        `xml:"BlockPublicPolicy"`
+			IgnorePublicAcls      *bool                        `xml:"IgnorePublicAcls"`
+			RestrictPublicBuckets *bool                        `xml:"RestrictPublicBuckets"`
+			Unknown               []struct{ XMLName xml.Name } `xml:",any"`
+		}
+		if xml.Unmarshal(raw, &configuration) != nil || configuration.XMLName.Local != "PublicAccessBlockConfiguration" {
+			in["_body"] = string(raw)
+			return
+		}
+		publicAccessBlock := map[string]any{}
+		for field, value := range map[string]*bool{
+			"BlockPublicAcls": configuration.BlockPublicAcls, "BlockPublicPolicy": configuration.BlockPublicPolicy,
+			"IgnorePublicAcls": configuration.IgnorePublicAcls, "RestrictPublicBuckets": configuration.RestrictPublicBuckets,
+		} {
+			if value != nil {
+				publicAccessBlock[field] = *value
+			}
+		}
+		for _, field := range configuration.Unknown {
+			publicAccessBlock[field.XMLName.Local] = nil
+		}
+		in["PublicAccessBlockConfiguration"] = publicAccessBlock
 	case "PutObjectLegalHold":
 		var hold struct {
 			Status string `xml:"Status"`
@@ -719,16 +745,17 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
-	objectLockRoot := map[string]string{
+	configurationRoot := map[string]string{
 		"GetBucketObjectLockConfiguration": "ObjectLockConfiguration",
 		"GetObjectLockConfiguration":       "ObjectLockConfiguration",
 		"GetObjectLegalHold":               "LegalHold",
 		"GetObjectRetention":               "Retention",
+		"GetPublicAccessBlock":             "PublicAccessBlockConfiguration",
 	}[op.Name]
-	if objectLockRoot != "" {
-		fmt.Fprintf(&b, `<%s xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`, objectLockRoot)
-		write(resp.Output[objectLockRoot], &b)
-		fmt.Fprintf(&b, "</%s>", objectLockRoot)
+	if configurationRoot != "" {
+		fmt.Fprintf(&b, `<%s xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`, configurationRoot)
+		write(resp.Output[configurationRoot], &b)
+		fmt.Fprintf(&b, "</%s>", configurationRoot)
 		_, err := io.WriteString(w, b.String())
 		return err
 	}

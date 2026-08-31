@@ -5189,6 +5189,20 @@ func TestListMultipartUploadsPaginationAndDelimiter(t *testing.T) {
 	}
 }
 
+func TestListMultipartUploadsCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-list-golden"}, nil)
+	ids := map[string]string{}
+	for _, key := range []string{"folder/a/one", "folder/a/two", "folder/file1", "folder/file2"} {
+		ids[key] = mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-list-golden", "Key": key}, nil).Output["UploadId"].(string)
+	}
+	first := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "multipart-list-golden", "Prefix": "folder/", "Delimiter": "/", "MaxUploads": 1}, nil).Output
+	next := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "multipart-list-golden", "Prefix": "folder/", "Delimiter": "/", "MaxUploads": 1, "KeyMarker": "folder/a/"}, nil).Output
+	_, err := invoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "multipart-list-golden", "KeyMarker": "folder/file1", "UploadIdMarker": ids["folder/file2"]}, nil)
+	fault := asFault(t, err)
+	golden.AssertJSON(t, map[string]any{"first": first, "next": next, "invalid": map[string]any{"code": fault.Code, "message": fault.Message, "fields": fault.Fields}})
+}
+
 func TestMultipartOperationsRejectMissingUpload(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

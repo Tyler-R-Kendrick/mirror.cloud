@@ -1894,6 +1894,9 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.ListParts(context.Background(), &s3.ListPartsInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, ExpectedBucketOwner: aws.String("999999999999")}); err == nil || !strings.Contains(err.Error(), "AccessDenied") {
 		t.Fatalf("list parts mismatched expected owner: %v", err)
 	}
+	if _, err := s3c.ListParts(context.Background(), &s3.ListPartsInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: aws.String("missing")}); err == nil || !strings.Contains(err.Error(), "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.") {
+		t.Fatalf("list parts missing upload: %v", err)
+	}
 	if _, err := s3c.UploadPartCopy(context.Background(), &s3.UploadPartCopyInput{
 		Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, PartNumber: aws.Int32(1), CopySource: aws.String("sdk/large"), ExpectedSourceBucketOwner: aws.String("999999999999"),
 	}); err == nil || !strings.Contains(err.Error(), "AccessDenied") {

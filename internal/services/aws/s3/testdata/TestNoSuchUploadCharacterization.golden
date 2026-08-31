@@ -1,0 +1,34 @@
+{
+  "AbortMultipartUpload": {
+    "code": "NoSuchUpload",
+    "fields": {
+      "UploadId": "missing"
+    },
+    "message": "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.",
+    "status": 404
+  },
+  "CompleteMultipartUpload": {
+    "code": "NoSuchUpload",
+    "fields": {
+      "UploadId": "missing"
+    },
+    "message": "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.",
+    "status": 404
+  },
+  "ListParts": {
+    "code": "NoSuchUpload",
+    "fields": {
+      "UploadId": "missing"
+    },
+    "message": "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.",
+    "status": 404
+  },
+  "UploadPart": {
+    "code": "NoSuchUpload",
+    "fields": {
+      "UploadId": "missing"
+    },
+    "message": "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.",
+    "status": 404
+  }
+}

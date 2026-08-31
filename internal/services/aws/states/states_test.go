@@ -4386,9 +4386,12 @@ def change(path, delta):
         json.dump(state, f)
         f.flush()
         fcntl.flock(f, fcntl.LOCK_UN)
+        return state["maximum"]
 def lambda_handler(event, context):
     change(event["path"], 1)
-    time.sleep(event["delay"])
+    deadline = time.time() + 5
+    while change(event["path"], 0) < event["expected"] and time.time() < deadline:
+        time.sleep(0.01)
     change(event["path"], -1)
     return event
 `
@@ -4414,7 +4417,7 @@ def lambda_handler(event, context):
 	}
 	task := `{"Type":"Task","Resource":"arn:aws:lambda:us-east-1:1:function:concurrency-worker","End":true}`
 	parallelPath := t.TempDir() + "/parallel.json"
-	parallel := p.walk(ctx, &spi.Request{Identity: id, Input: map[string]any{"_executionArn": "parallel-concurrency"}}, `{"StartAt":"P","States":{"P":{"Type":"Parallel","Branches":[{"StartAt":"T","States":{"T":`+task+`}},{"StartAt":"T","States":{"T":`+task+`}}],"End":true}}}`, "", map[string]any{"path": parallelPath, "delay": 0.2}, nil)
+	parallel := p.walk(ctx, &spi.Request{Identity: id, Input: map[string]any{"_executionArn": "parallel-concurrency"}}, `{"StartAt":"P","States":{"P":{"Type":"Parallel","Branches":[{"StartAt":"T","States":{"T":`+task+`}},{"StartAt":"T","States":{"T":`+task+`}}],"End":true}}}`, "", map[string]any{"path": parallelPath, "expected": 2.0}, nil)
 	if parallel.status != "SUCCEEDED" || len(parallel.out.([]any)) != 2 || maximum(parallelPath) != 2 {
 		t.Fatalf("parallel did not overlap %#v maximum=%d", parallel, maximum(parallelPath))
 	}
@@ -4422,7 +4425,7 @@ def lambda_handler(event, context):
 	mapPath := t.TempDir() + "/map.json"
 	items := make([]any, 4)
 	for index := range items {
-		items[index] = map[string]any{"path": mapPath, "delay": 0.2, "index": float64(index)}
+		items[index] = map[string]any{"path": mapPath, "expected": 2.0, "index": float64(index)}
 	}
 	mapped := p.walk(ctx, &spi.Request{Identity: id, Input: map[string]any{"_executionArn": "map-concurrency"}}, `{"StartAt":"M","States":{"M":{"Type":"Map","ItemsPath":"$.items","MaxConcurrency":2,"ItemProcessor":{"StartAt":"T","States":{"T":`+task+`}},"End":true}}}`, "", map[string]any{"items": items}, nil)
 	outputs, ok := mapped.out.([]any)

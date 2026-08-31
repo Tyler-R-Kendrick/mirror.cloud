@@ -580,6 +580,41 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given request payment When changing the payer Then S3 validates and persists it", func(t *testing.T) {
+		res := do(http.MethodPut, "/request-payment", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create request-payment bucket %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/request-payment?requestPayment", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Payer>BucketOwner</Payer>")) {
+			t.Fatalf("default request payer %d %s", res.StatusCode, body)
+		}
+		valid := []byte(`<RequestPaymentConfiguration><Payer>Requester</Payer></RequestPaymentConfiguration>`)
+		res = do(http.MethodPut, "/request-payment?requestPayment", valid, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || len(body) != 0 {
+			t.Fatalf("put request payer %d %s", res.StatusCode, body)
+		}
+		invalid := []byte(`<RequestPaymentConfiguration><Payer>Invalid</Payer></RequestPaymentConfiguration>`)
+		res = do(http.MethodPut, "/request-payment?requestPayment", invalid, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("MalformedXML")) {
+			t.Fatalf("invalid request payer %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/request-payment?requestPayment", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Payer>Requester</Payer>")) || bytes.Contains(body, []byte("GetBucketRequestPaymentResult")) {
+			t.Fatalf("request payer after invalid put %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given a globally owned bucket When another identity creates it Then ownership errors are returned", func(t *testing.T) {
 		create := func(account, region string) (int, []byte) {
 			t.Helper()

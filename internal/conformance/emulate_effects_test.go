@@ -90,7 +90,7 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv("DeleteBucketEncryption", map[string]any{"Bucket": "bucket"}, nil, "")
 		inv("PutObjectLockConfiguration", map[string]any{"Bucket": "bucket", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled"}}, nil, "")
 		inv("PutBucketObjectLockConfiguration", map[string]any{"Bucket": "bucket", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled"}}, nil, "")
-		inv("PutBucketRequestPayment", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutBucketRequestPayment", map[string]any{"Bucket": "bucket", "RequestPaymentConfiguration": map[string]any{"Payer": "BucketOwner"}}, nil, "")
 		inv("PutBucketAccelerateConfiguration", map[string]any{"Bucket": "bucket"}, nil, "")
 		inv("PutPublicAccessBlock", map[string]any{"Bucket": "bucket", "PublicAccessBlockConfiguration": map[string]any{}}, nil, "")
 		inv("DeletePublicAccessBlock", map[string]any{"Bucket": "bucket"}, nil, "")

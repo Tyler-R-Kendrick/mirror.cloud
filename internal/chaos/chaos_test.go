@@ -791,6 +791,49 @@ func TestConcurrentPublicAccessBlockRemainsValid(t *testing.T) {
 	}
 }
 
+func TestConcurrentBucketRequestPaymentRemainsValid(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "request-payment-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			payer := "Invalid"
+			if n%2 == 0 {
+				payer = []string{"Requester", "BucketOwner"}[(n/2)%2]
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutBucketRequestPayment", Input: map[string]any{"Bucket": "request-payment-chaos", "RequestPaymentConfiguration": map[string]any{"Payer": payer}}})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	successes := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "MalformedXML" {
+			t.Fatalf("concurrent request-payment put: %v", err)
+		}
+	}
+	if successes != 16 {
+		t.Fatalf("successful request-payment puts = %d, want 16", successes)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBucketRequestPayment", Input: map[string]any{"Bucket": "request-payment-chaos"}})
+	if err != nil || response.Output["Payer"] != "Requester" && response.Output["Payer"] != "BucketOwner" {
+		t.Fatalf("persisted request payer = %#v, err=%v", response, err)
+	}
+}
+
 func TestConcurrentInvalidVersioningWritesDoNotChangeState(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

@@ -290,6 +290,30 @@ func FuzzPublicAccessBlock(f *testing.F) {
 	})
 }
 
+func FuzzBucketRequestPayment(f *testing.F) {
+	for _, payer := range []string{"Requester", "BucketOwner", "", "Invalid", "requester"} {
+		f.Add(payer)
+	}
+	f.Fuzz(func(t *testing.T, payer string) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "request-payment-fuzz"}, nil)
+		_, err := invoke(t, p, "PutBucketRequestPayment", map[string]any{"Bucket": "request-payment-fuzz", "RequestPaymentConfiguration": map[string]any{"Payer": payer}}, nil)
+		valid := payer == "Requester" || payer == "BucketOwner"
+		if !valid {
+			if fault := asFault(t, err); fault.Code != "MalformedXML" {
+				t.Fatalf("payer=%q: %#v", payer, fault)
+			}
+			payer = "BucketOwner"
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		response := mustInvoke(t, p, "GetBucketRequestPayment", map[string]any{"Bucket": "request-payment-fuzz"}, nil)
+		if response.Output["Payer"] != payer {
+			t.Fatalf("stored payer = %#v, want %q", response.Output, payer)
+		}
+	})
+}
+
 func FuzzDeleteBucketEmptiness(f *testing.F) {
 	for _, seed := range []struct {
 		versioned bool

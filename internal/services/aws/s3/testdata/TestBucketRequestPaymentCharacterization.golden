@@ -1,0 +1,16 @@
+{
+  "default": {
+    "Payer": "BucketOwner"
+  },
+  "get": {
+    "Payer": "Requester"
+  },
+  "invalid": {
+    "code": "MalformedXML",
+    "status": 400
+  },
+  "preserved": {
+    "Payer": "Requester"
+  },
+  "put": null
+}

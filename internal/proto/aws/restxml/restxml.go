@@ -535,6 +535,16 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 			publicAccessBlock[field.XMLName.Local] = nil
 		}
 		in["PublicAccessBlockConfiguration"] = publicAccessBlock
+	case "PutBucketRequestPayment":
+		var configuration struct {
+			XMLName xml.Name
+			Payer   string `xml:"Payer"`
+		}
+		if xml.Unmarshal(raw, &configuration) != nil || configuration.XMLName.Local != "RequestPaymentConfiguration" {
+			in["_body"] = string(raw)
+			return
+		}
+		in["RequestPaymentConfiguration"] = map[string]any{"Payer": configuration.Payer}
 	case "PutObjectLegalHold":
 		var hold struct {
 			Status string `xml:"Status"`
@@ -664,7 +674,6 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 	case "PutBucketCors", "PutBucketWebsite", "PutBucketLogging",
 		"PutBucketLifecycleConfiguration",
 		"PutBucketEncryption", "PutBucketAcl", "PutObjectAcl",
-		"PutBucketRequestPayment",
 		"PutBucketAccelerateConfiguration":
 		in["_body"] = string(raw)
 		in["Document"] = string(raw)
@@ -742,6 +751,13 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		b.WriteString(`<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
 		_ = xml.EscapeText(&b, []byte(fmt.Sprint(resp.Output["LocationConstraint"])))
 		b.WriteString(`</LocationConstraint>`)
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
+	if op.Name == "GetBucketRequestPayment" {
+		b.WriteString(`<RequestPaymentConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
+		write(resp.Output, &b)
+		b.WriteString("</RequestPaymentConfiguration>")
 		_, err := io.WriteString(w, b.String())
 		return err
 	}

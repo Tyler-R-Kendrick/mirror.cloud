@@ -338,6 +338,48 @@ func TestPublicAccessBlock(t *testing.T) {
 	}
 }
 
+func TestBucketRequestPayment(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "request-payment"}, nil)
+	get := func() string {
+		payer, _ := mustInvoke(t, p, "GetBucketRequestPayment", map[string]any{"Bucket": "request-payment"}, nil).Output["Payer"].(string)
+		return payer
+	}
+	if got := get(); got != "BucketOwner" {
+		t.Fatalf("default payer = %q", got)
+	}
+	for _, payer := range []string{"Requester", "BucketOwner"} {
+		response := mustInvoke(t, p, "PutBucketRequestPayment", map[string]any{"Bucket": "request-payment", "RequestPaymentConfiguration": map[string]any{"Payer": payer}}, nil)
+		if len(response.Output) != 0 || get() != payer {
+			t.Fatalf("payer %q response=%#v got=%q", payer, response, get())
+		}
+	}
+	for _, payer := range []string{"", "Invalid"} {
+		_, err := invoke(t, p, "PutBucketRequestPayment", map[string]any{"Bucket": "request-payment", "RequestPaymentConfiguration": map[string]any{"Payer": payer}}, nil)
+		if fault := asFault(t, err); fault.Code != "MalformedXML" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("payer %q fault=%#v", payer, fault)
+		}
+	}
+	if got := get(); got != "BucketOwner" {
+		t.Fatalf("invalid put replaced payer = %q", got)
+	}
+}
+
+func TestBucketRequestPaymentCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "request-payment-characterization"}, nil)
+	before := mustInvoke(t, p, "GetBucketRequestPayment", map[string]any{"Bucket": "request-payment-characterization"}, nil)
+	put := mustInvoke(t, p, "PutBucketRequestPayment", map[string]any{"Bucket": "request-payment-characterization", "RequestPaymentConfiguration": map[string]any{"Payer": "Requester"}}, nil)
+	after := mustInvoke(t, p, "GetBucketRequestPayment", map[string]any{"Bucket": "request-payment-characterization"}, nil)
+	_, invalidErr := invoke(t, p, "PutBucketRequestPayment", map[string]any{"Bucket": "request-payment-characterization", "RequestPaymentConfiguration": map[string]any{"Payer": "Invalid"}}, nil)
+	invalid := asFault(t, invalidErr)
+	preserved := mustInvoke(t, p, "GetBucketRequestPayment", map[string]any{"Bucket": "request-payment-characterization"}, nil)
+	golden.AssertJSON(t, map[string]any{
+		"default": before.Output, "put": put.Output, "get": after.Output,
+		"invalid": map[string]any{"code": invalid.Code, "status": invalid.HTTPStatus}, "preserved": preserved.Output,
+	})
+}
+
 func TestPublicAccessBlockCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "public-access-block-characterization"}, nil)

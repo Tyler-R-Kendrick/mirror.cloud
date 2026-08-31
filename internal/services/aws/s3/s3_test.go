@@ -1752,9 +1752,20 @@ func TestBucketCorsCharacterization(t *testing.T) {
 	mustInvoke(t, p, "CreateBucket", input, nil)
 	_, beforeErr := invoke(t, p, "GetBucketCors", input, nil)
 	before := asFault(t, beforeErr)
-	rules := []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{"*"}, "ID": "read"}}
+	rules := []any{map[string]any{"AllowedMethods": []any{"GET", "PUT"}, "AllowedOrigins": []any{"https://*.example.test"}, "AllowedHeaders": []any{"x-amz-*"}, "ExposeHeaders": []any{"ETag"}, "MaxAgeSeconds": float64(300), "ID": "read"}}
 	put := mustInvoke(t, p, "PutBucketCors", map[string]any{"Bucket": input["Bucket"], "CORSConfiguration": map[string]any{"CORSRules": rules}}, nil)
 	after := mustInvoke(t, p, "GetBucketCors", input, nil)
+	preflightRequest := httptest.NewRequest(http.MethodOptions, "https://cors-characterization.s3.us-east-1.amazonaws.com/key", nil)
+	preflightRequest.Header.Set("Origin", "https://app.example.test")
+	preflightRequest.Header.Set("Access-Control-Request-Method", "GET")
+	preflightRequest.Header.Set("Access-Control-Request-Headers", "x-amz-request-payer,x-amz-meta-team")
+	preflight, preflightErr := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: preflightRequest})
+	if preflightErr != nil {
+		t.Fatal(preflightErr)
+	}
+	preflightRequest.Header.Set("Origin", "https://wrong.test")
+	_, rejectedErr := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: preflightRequest})
+	rejected := asFault(t, rejectedErr)
 	_, invalidErr := invoke(t, p, "PutBucketCors", map[string]any{"Bucket": input["Bucket"], "CORSRules": []any{map[string]any{"AllowedMethods": []any{"OPTIONS"}, "AllowedOrigins": []any{"*"}}}}, nil)
 	invalid := asFault(t, invalidErr)
 	preserved := mustInvoke(t, p, "GetBucketCors", input, nil)
@@ -1764,6 +1775,8 @@ func TestBucketCorsCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{
 		"default": map[string]any{"code": before.Code, "status": before.HTTPStatus, "bucket": before.Fields["BucketName"]},
 		"put":     put.Output, "get": after.Output,
+		"preflight": map[string]any{"status": preflight.Status, "headers": preflight.Headers},
+		"rejected":  map[string]any{"code": rejected.Code, "message": rejected.Message, "method": rejected.Fields["Method"], "resourceType": rejected.Fields["ResourceType"], "status": rejected.HTTPStatus},
 		"invalid":   map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus},
 		"preserved": preserved.Output, "delete": deleted.Output,
 		"deleted": map[string]any{"code": final.Code, "status": final.HTTPStatus, "bucket": final.Fields["BucketName"]},

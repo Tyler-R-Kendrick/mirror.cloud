@@ -1067,8 +1067,35 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 		}
 		in["LifecycleConfiguration"] = map[string]any{"Rules": rules}
 	case "PutBucketEncryption":
-		in["_body"] = string(raw)
-		in["Document"] = string(raw)
+		var configuration struct {
+			Rules []struct {
+				Defaults *struct {
+					Algorithm string  `xml:"SSEAlgorithm"`
+					KeyID     *string `xml:"KMSMasterKeyID"`
+				} `xml:"ApplyServerSideEncryptionByDefault"`
+				BucketKeyEnabled *bool `xml:"BucketKeyEnabled"`
+			} `xml:"Rule"`
+		}
+		if xml.Unmarshal(raw, &configuration) != nil {
+			in["_body"] = string(raw)
+			return
+		}
+		rules := make([]any, 0, len(configuration.Rules))
+		for _, source := range configuration.Rules {
+			rule := map[string]any{}
+			if source.Defaults != nil {
+				defaults := map[string]any{"SSEAlgorithm": source.Defaults.Algorithm}
+				if source.Defaults.KeyID != nil {
+					defaults["KMSMasterKeyID"] = *source.Defaults.KeyID
+				}
+				rule["ApplyServerSideEncryptionByDefault"] = defaults
+			}
+			if source.BucketKeyEnabled != nil {
+				rule["BucketKeyEnabled"] = *source.BucketKeyEnabled
+			}
+			rules = append(rules, rule)
+		}
+		in["ServerSideEncryptionConfiguration"] = map[string]any{"Rules": rules}
 	case "PutBucketVersioning":
 		var v struct {
 			Status string `xml:"Status"`
@@ -1224,6 +1251,34 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_, err := io.WriteString(w, fmt.Sprint(resp.Output["Policy"]))
+		return err
+	}
+	if op.Name == "GetBucketEncryption" {
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(status)
+		if len(resp.Output) == 0 {
+			return nil
+		}
+		var b strings.Builder
+		b.WriteString(`<?xml version="1.0" encoding="UTF-8"?><ServerSideEncryptionConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
+		for _, value := range resp.Output["Rules"].([]any) {
+			rule, _ := value.(map[string]any)
+			b.WriteString("<Rule>")
+			if defaults, ok := rule["ApplyServerSideEncryptionByDefault"].(map[string]any); ok {
+				b.WriteString("<ApplyServerSideEncryptionByDefault>")
+				fmt.Fprintf(&b, "<SSEAlgorithm>%s</SSEAlgorithm>", xmlEscape(fmt.Sprint(defaults["SSEAlgorithm"])))
+				if keyID, exists := defaults["KMSMasterKeyID"]; exists {
+					fmt.Fprintf(&b, "<KMSMasterKeyID>%s</KMSMasterKeyID>", xmlEscape(fmt.Sprint(keyID)))
+				}
+				b.WriteString("</ApplyServerSideEncryptionByDefault>")
+			}
+			if enabled, exists := rule["BucketKeyEnabled"]; exists {
+				fmt.Fprintf(&b, "<BucketKeyEnabled>%v</BucketKeyEnabled>", enabled)
+			}
+			b.WriteString("</Rule>")
+		}
+		b.WriteString("</ServerSideEncryptionConfiguration>")
+		_, err := io.WriteString(w, b.String())
 		return err
 	}
 	w.Header().Set("Content-Type", "application/xml")

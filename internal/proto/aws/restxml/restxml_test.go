@@ -165,6 +165,29 @@ func TestBucketPolicyPayload(t *testing.T) {
 	}
 }
 
+func TestBucketEncryptionXML(t *testing.T) {
+	body := `<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>key-id</KMSMasterKeyID></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`
+	r := httptest.NewRequest(http.MethodPut, "http://127.0.0.1/b?encryption", strings.NewReader(body))
+	decoded, err := (Codec{}).Decode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "PutBucketEncryption"}, r)
+	configuration := decoded.Input["ServerSideEncryptionConfiguration"].(map[string]any)
+	rules := configuration["Rules"].([]any)
+	rule := rules[0].(map[string]any)
+	defaults := rule["ApplyServerSideEncryptionByDefault"].(map[string]any)
+	if err != nil || len(rules) != 1 || defaults["SSEAlgorithm"] != "aws:kms" || defaults["KMSMasterKeyID"] != "key-id" || rule["BucketKeyEnabled"] != true {
+		t.Fatalf("decoded encryption = %#v, err=%v", decoded.Input, err)
+	}
+	w := httptest.NewRecorder()
+	err = (Codec{}).Encode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "GetBucketEncryption"}, w, &spi.Response{Output: map[string]any{"Rules": rules}})
+	want := `<?xml version="1.0" encoding="UTF-8"?><ServerSideEncryptionConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>key-id</KMSMasterKeyID></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`
+	if err != nil || w.Code != http.StatusOK || w.Header().Get("Content-Type") != "application/xml" || w.Body.String() != want {
+		t.Fatalf("encoded encryption = code %d headers=%v body=%q err=%v", w.Code, w.Header(), w.Body.String(), err)
+	}
+	empty := httptest.NewRecorder()
+	if err := (Codec{}).Encode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "GetBucketEncryption"}, empty, &spi.Response{Output: map[string]any{}}); err != nil || empty.Body.Len() != 0 {
+		t.Fatalf("empty encryption = code %d body=%q err=%v", empty.Code, empty.Body.String(), err)
+	}
+}
+
 func TestDecodeObjectLockXML(t *testing.T) {
 	tests := []struct {
 		op, body, field string

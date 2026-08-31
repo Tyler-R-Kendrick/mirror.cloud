@@ -1146,6 +1146,48 @@ func TestConcurrentBucketPolicyWritesRemainValid(t *testing.T) {
 	}
 }
 
+func TestConcurrentBucketEncryptionWritesRemainValid(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "encryption-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			rule := map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256"}}
+			rules := []any{rule}
+			if n%2 != 0 {
+				rules = append(rules, rule)
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutBucketEncryption", Input: map[string]any{"Bucket": "encryption-chaos", "ServerSideEncryptionConfiguration": map[string]any{"Rules": rules}}})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	successes := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "MalformedXML" {
+			t.Fatalf("concurrent encryption put: %v", err)
+		}
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBucketEncryption", Input: map[string]any{"Bucket": "encryption-chaos"}})
+	rules, _ := response.Output["Rules"].([]any)
+	if err != nil || successes != 16 || len(rules) != 1 || rules[0].(map[string]any)["ApplyServerSideEncryptionByDefault"].(map[string]any)["SSEAlgorithm"] != "AES256" {
+		t.Fatalf("persisted concurrent encryption = %#v, successes=%d, err=%v", response, successes, err)
+	}
+}
+
 func TestConcurrentObjectACLWritesRemainValid(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

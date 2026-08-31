@@ -1,0 +1,38 @@
+{
+  "afterDelete": {},
+  "before": {},
+  "configured": {
+    "Rules": [
+      {
+        "ApplyServerSideEncryptionByDefault": {
+          "KMSMasterKeyID": "arn:aws:kms:us-east-1:000000000000:key/characterization",
+          "SSEAlgorithm": "aws:kms"
+        },
+        "BucketKeyEnabled": true
+      }
+    ]
+  },
+  "deleted": 204,
+  "inherited": {
+    "algorithm": "aws:kms",
+    "bucketKey": "true",
+    "key": "arn:aws:kms:us-east-1:000000000000:key/characterization"
+  },
+  "invalid": {
+    "argument": "ApplyServerSideEncryptionByDefault",
+    "code": "InvalidArgument",
+    "message": "a KMSMasterKeyID is not applicable if the default sse algorithm is not aws:kms or aws:kms:dsse"
+  },
+  "preserved": {
+    "Rules": [
+      {
+        "ApplyServerSideEncryptionByDefault": {
+          "KMSMasterKeyID": "arn:aws:kms:us-east-1:000000000000:key/characterization",
+          "SSEAlgorithm": "aws:kms"
+        },
+        "BucketKeyEnabled": true
+      }
+    ]
+  },
+  "put": 200
+}

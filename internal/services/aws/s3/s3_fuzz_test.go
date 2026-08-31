@@ -615,6 +615,58 @@ func FuzzBucketPolicy(f *testing.F) {
 	})
 }
 
+func FuzzBucketEncryption(f *testing.F) {
+	for _, seed := range []struct {
+		mode      uint8
+		algorithm string
+		withKey   bool
+	}{{0, "AES256", false}, {0, "aws:kms", true}, {0, "aws:kms:dsse", false}, {0, "aws:fsx", false}, {0, "aws:backup", false}, {0, "invalid", false}, {0, "AES256", true}, {1, "AES256", false}, {2, "AES256", false}, {3, "AES256", false}} {
+		f.Add(seed.mode, seed.algorithm, seed.withKey)
+	}
+	f.Fuzz(func(t *testing.T, mode uint8, algorithm string, withKey bool) {
+		if !utf8.ValidString(algorithm) {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		bucket := map[string]any{"Bucket": "encryption-fuzz"}
+		mustInvoke(t, p, "CreateBucket", bucket, nil)
+		baseline := []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "aws:kms"}}}
+		mustInvoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": bucket["Bucket"], "ServerSideEncryptionConfiguration": map[string]any{"Rules": baseline}}, nil)
+
+		defaults := map[string]any{"SSEAlgorithm": algorithm}
+		if withKey {
+			defaults["KMSMasterKeyID"] = "key-id"
+		}
+		rules := []any{map[string]any{"ApplyServerSideEncryptionByDefault": defaults}}
+		configuration := map[string]any{"Rules": rules}
+		valid, wantFault := false, "MalformedXML"
+		switch mode % 4 {
+		case 0:
+			valid = map[string]bool{"AES256": true, "aws:fsx": true, "aws:backup": true, "aws:kms": true, "aws:kms:dsse": true}[algorithm] && (!withKey || algorithm == "aws:kms")
+			if !valid && withKey && algorithm != "aws:kms" && map[string]bool{"AES256": true, "aws:fsx": true, "aws:backup": true, "aws:kms:dsse": true}[algorithm] {
+				wantFault = "InvalidArgument"
+			}
+		case 1:
+			configuration["Rules"] = []any{}
+		case 2:
+			configuration["Rules"] = append(rules, rules[0])
+		case 3:
+			configuration["Rules"] = []any{map[string]any{}}
+		}
+		_, err := invoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": bucket["Bucket"], "ServerSideEncryptionConfiguration": configuration}, nil)
+		if valid && err != nil {
+			t.Fatal(err)
+		}
+		if !valid && asFault(t, err).Code != wantFault {
+			t.Fatalf("mode=%d algorithm=%q key=%v fault=%v", mode%4, algorithm, withKey, err)
+		}
+		stored := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["Rules"]
+		if valid && !reflect.DeepEqual(stored, rules) || !valid && !reflect.DeepEqual(stored, baseline) {
+			t.Fatalf("stored encryption = %#v", stored)
+		}
+	})
+}
+
 func FuzzNamedBucketConfigurations(f *testing.F) {
 	for _, seed := range []struct {
 		mode  uint8

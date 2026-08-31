@@ -86,7 +86,7 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 			"Role":  "arn:aws:iam::000000000000:role/replication",
 			"Rules": []any{map[string]any{"Status": "Enabled", "Destination": map[string]any{"Bucket": "arn:aws:s3:::bucket"}}},
 		}}, nil, "")
-		inv("PutBucketEncryption", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutBucketEncryption", map[string]any{"Bucket": "bucket", "ServerSideEncryptionConfiguration": map[string]any{"Rules": []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256"}}}}}, nil, "")
 		inv("DeleteBucketEncryption", map[string]any{"Bucket": "bucket"}, nil, "")
 		inv("PutObjectLockConfiguration", map[string]any{"Bucket": "bucket", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled"}}, nil, "")
 		inv("PutBucketObjectLockConfiguration", map[string]any{"Bucket": "bucket", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled"}}, nil, "")

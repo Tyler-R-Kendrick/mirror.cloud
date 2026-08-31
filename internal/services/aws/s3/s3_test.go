@@ -1368,6 +1368,33 @@ func TestBucketPolicyCharacterization(t *testing.T) {
 	})
 }
 
+func TestBucketEncryptionCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	bucket := map[string]any{"Bucket": "encryption-characterization"}
+	mustInvoke(t, p, "CreateBucket", bucket, nil)
+	before := mustInvoke(t, p, "GetBucketEncryption", bucket, nil)
+	keyID := "arn:aws:kms:us-east-1:000000000000:key/characterization"
+	rules := []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "aws:kms", "KMSMasterKeyID": keyID}, "BucketKeyEnabled": true}}
+	put := mustInvoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": bucket["Bucket"], "ServerSideEncryptionConfiguration": map[string]any{"Rules": rules}}, nil)
+	configured := mustInvoke(t, p, "GetBucketEncryption", bucket, nil)
+	_, invalidErr := invoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": bucket["Bucket"], "ServerSideEncryptionConfiguration": map[string]any{"Rules": []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256", "KMSMasterKeyID": keyID}}}}}, nil)
+	preserved := mustInvoke(t, p, "GetBucketEncryption", bucket, nil)
+	object := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "object"}, []byte("body"))
+	deleted := mustInvoke(t, p, "DeleteBucketEncryption", bucket, nil)
+	after := mustInvoke(t, p, "GetBucketEncryption", bucket, nil)
+	invalid := asFault(t, invalidErr)
+	golden.AssertJSON(t, map[string]any{
+		"afterDelete": after.Output,
+		"before":      before.Output,
+		"configured":  configured.Output,
+		"deleted":     deleted.Status,
+		"inherited":   map[string]any{"algorithm": object.Headers.Get("x-amz-server-side-encryption"), "bucketKey": object.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled"), "key": object.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id")},
+		"invalid":     map[string]any{"argument": invalid.Fields["ArgumentName"], "code": invalid.Code, "message": invalid.Message},
+		"preserved":   preserved.Output,
+		"put":         put.Status,
+	})
+}
+
 func TestBucketLifecycleCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	input := map[string]any{"Bucket": "lifecycle-characterization"}
@@ -2034,6 +2061,84 @@ func TestObjectServerSideEncryption(t *testing.T) {
 	})
 }
 
+func TestBucketEncryptionConfiguration(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	bucket := map[string]any{"Bucket": "bucket-encryption"}
+	mustInvoke(t, p, "CreateBucket", bucket, nil)
+	if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output; len(got) != 0 {
+		t.Fatalf("default encryption = %#v", got)
+	}
+	rule := func(algorithm string, keyID any, bucketKey bool) map[string]any {
+		defaults := map[string]any{"SSEAlgorithm": algorithm}
+		if keyID != nil {
+			defaults["KMSMasterKeyID"] = keyID
+		}
+		return map[string]any{"ApplyServerSideEncryptionByDefault": defaults, "BucketKeyEnabled": bucketKey}
+	}
+	put := func(value map[string]any) (*spi.Response, error) {
+		return invoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": bucket["Bucket"], "ServerSideEncryptionConfiguration": value}, nil)
+	}
+	for _, algorithm := range []string{"AES256", "aws:fsx", "aws:backup", "aws:kms", "aws:kms:dsse"} {
+		configuration := map[string]any{"Rules": []any{rule(algorithm, nil, false)}}
+		if _, err := put(configuration); err != nil {
+			t.Fatalf("put %s: %v", algorithm, err)
+		}
+		if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["Rules"]; !reflect.DeepEqual(got, configuration["Rules"]) {
+			t.Fatalf("get %s = %#v", algorithm, got)
+		}
+		object := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "object-" + strings.ReplaceAll(algorithm, ":", "-")}, []byte("body"))
+		if got := object.Headers.Get("x-amz-server-side-encryption"); got != algorithm {
+			t.Fatalf("%s object encryption = %q", algorithm, got)
+		}
+	}
+	keyID := "arn:aws:kms:us-east-1:000000000000:key/bucket-default"
+	baseline := map[string]any{"Rules": []any{rule("aws:kms", keyID, true)}}
+	if _, err := put(baseline); err != nil {
+		t.Fatal(err)
+	}
+	inherited := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "kms-default"}, []byte("body"))
+	if inherited.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || inherited.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || inherited.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+		t.Fatalf("inherited bucket encryption = %v", inherited.Headers)
+	}
+
+	invalid := []struct {
+		name, code string
+		value      any
+	}{
+		{"missing configuration", "MalformedXML", nil},
+		{"missing rules", "MalformedXML", map[string]any{}},
+		{"empty rules", "MalformedXML", map[string]any{"Rules": []any{}}},
+		{"multiple rules", "MalformedXML", map[string]any{"Rules": []any{rule("AES256", nil, false), rule("AES256", nil, false)}}},
+		{"invalid rule", "MalformedXML", map[string]any{"Rules": []any{"rule"}}},
+		{"missing defaults", "MalformedXML", map[string]any{"Rules": []any{map[string]any{}}}},
+		{"missing algorithm", "MalformedXML", map[string]any{"Rules": []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{}}}}},
+		{"invalid algorithm", "MalformedXML", map[string]any{"Rules": []any{rule("invalid", nil, false)}}},
+		{"AES key id", "InvalidArgument", map[string]any{"Rules": []any{rule("AES256", keyID, false)}}},
+		{"DSSE key id", "InvalidArgument", map[string]any{"Rules": []any{rule("aws:kms:dsse", keyID, false)}}},
+	}
+	for _, test := range invalid {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := invoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": bucket["Bucket"], "ServerSideEncryptionConfiguration": test.value}, nil)
+			fault := asFault(t, err)
+			if fault.Code != test.code || fault.HTTPStatus != http.StatusBadRequest {
+				t.Fatalf("fault = %#v", fault)
+			}
+			if test.code == "InvalidArgument" && (fault.Message != "a KMSMasterKeyID is not applicable if the default sse algorithm is not aws:kms or aws:kms:dsse" || fault.Fields["ArgumentName"] != "ApplyServerSideEncryptionByDefault") {
+				t.Fatalf("invalid key fault = %#v", fault)
+			}
+			if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["Rules"]; !reflect.DeepEqual(got, baseline["Rules"]) {
+				t.Fatalf("invalid put replaced baseline = %#v", got)
+			}
+		})
+	}
+	for range 2 {
+		mustInvoke(t, p, "DeleteBucketEncryption", bucket, nil)
+	}
+	if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output; len(got) != 0 {
+		t.Fatalf("deleted encryption = %#v", got)
+	}
+}
+
 func TestObjectSSECustomerKey(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "sse-c"}, nil)
@@ -2355,7 +2460,7 @@ func TestCopyObjectRejectsUnchangedSelfCopy(t *testing.T) {
 	}
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "encrypted"}, nil)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "encrypted", "Key": "k"}, []byte("body"))
-	mustInvoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": "encrypted", "Rules": []any{}}, nil)
+	mustInvoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": "encrypted", "ServerSideEncryptionConfiguration": map[string]any{"Rules": []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256"}}}}}, nil)
 	if _, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "encrypted", "Key": "k", "CopySource": "encrypted/k"}, nil); err != nil {
 		t.Fatalf("default-encrypted bucket self-copy: %v", err)
 	}

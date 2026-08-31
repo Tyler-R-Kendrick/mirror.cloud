@@ -334,6 +334,24 @@ func TestS3PresignedSignatureFaultCharacterization(t *testing.T) {
 		t.Fatalf("valid SigV2 rejected: %d %s", valid.Code, valid.Body.String())
 	}
 	results["sigv2_valid_status"] = valid.Code
+	portTarget := "/signed/object?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=8752c43939826ec5e949abb74845c6ac5a92ea98f5114bbdc6db1e78fe2b7e5e"
+	for name, tc := range map[string]struct {
+		host   string
+		status int
+	}{
+		"gateway_port_443":  {"s3.localhost.localstack.cloud:443", http.StatusNotFound},
+		"gateway_port_none": {"s3.localhost.localstack.cloud", http.StatusNotFound},
+		"unrelated_port":    {"s3.localhost.localstack.cloud:8443", http.StatusForbidden},
+	} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, portTarget, nil)
+		request.Host = tc.host
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != tc.status {
+			t.Fatalf("%s status=%d body=%s", name, recorder.Code, recorder.Body.String())
+		}
+		results[name] = recorder.Code
+	}
 	golden.AssertJSON(t, results)
 }
 

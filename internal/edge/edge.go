@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -143,7 +144,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if fault := identity.VerifyS3Presigned(r, secret); fault != nil {
+		fault := identity.VerifyS3Presigned(r, secret)
+		if host := signedGatewayHost(r.Host, s.cfg.Bind); fault != nil && host != "" {
+			candidate := r.Clone(ctx)
+			candidate.Host = host
+			fault = identity.VerifyS3Presigned(candidate, secret)
+		}
+		if fault != nil {
 			s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, fault, rid)
 			return
 		}
@@ -247,6 +254,26 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp.Headers.Set("x-mirror-fidelity", string(tier))
 	resp.Headers.Set("x-mirror-request-id", rid)
 	_ = codec.Encode(svc, op, w, resp)
+}
+
+func signedGatewayHost(host, bind string) string {
+	_, port, err := net.SplitHostPort(bind)
+	if err != nil || port == "" || port == "0" {
+		return ""
+	}
+	hostname := host
+	if parsedHost, parsedPort, splitErr := net.SplitHostPort(host); splitErr == nil {
+		if parsedPort != "443" {
+			return ""
+		}
+		hostname = parsedHost
+	} else {
+		hostname = strings.Trim(hostname, "[]")
+		if hostname == "" || strings.Contains(hostname, ":") && net.ParseIP(hostname) == nil {
+			return ""
+		}
+	}
+	return net.JoinHostPort(hostname, port)
 }
 
 type authorizationCheck struct{ operation, resource string }

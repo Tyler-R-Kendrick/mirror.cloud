@@ -15082,6 +15082,30 @@ var mutants = []mutant{
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestCreateSessionRegistersTemporaryCredential",
 	},
+	{
+		name: "edge-skip-signed-gateway-port-fallback",
+		file: filepath.Join("internal", "edge", "edge.go"),
+		old:  `if host := signedGatewayHost(r.Host, s.cfg.Bind); fault != nil && host != "" {`,
+		new:  `if false {`,
+		pkg:  "./internal/edge",
+		run:  "TestS3PresignedSignatureFaultCharacterization",
+	},
+	{
+		name: "edge-accept-unrelated-signed-host-port",
+		file: filepath.Join("internal", "edge", "edge.go"),
+		old:  `if parsedPort != "443" {`,
+		new:  `if false {`,
+		pkg:  "./internal/edge",
+		run:  "TestS3PresignedSignatureFaultCharacterization",
+	},
+	{
+		name: "edge-use-disabled-signed-gateway-port",
+		file: filepath.Join("internal", "edge", "edge.go"),
+		old:  `if err != nil || port == "" || port == "0" {`,
+		new:  `if err != nil || port == "" {`,
+		pkg:  "./internal/edge",
+		run:  "TestSignedGatewayHost",
+	},
 }
 
 func TestMutantsAreKilled(t *testing.T) {

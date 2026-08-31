@@ -139,6 +139,35 @@ func TestAWSSDKPresignedSignatureValidation(t *testing.T) {
 	if temporaryResponse.StatusCode != http.StatusBadRequest || !bytes.Contains(temporaryBody, []byte("<Code>InvalidToken</Code>")) {
 		t.Fatalf("invalid session token %d %s", temporaryResponse.StatusCode, temporaryBody)
 	}
+	portClient := s3.NewFromConfig(awscfg, func(options *s3.Options) {
+		options.BaseEndpoint = aws.String("http://s3.localhost.localstack.cloud:4566")
+		options.UsePathStyle = true
+	})
+	portPresign, err := s3.NewPresignClient(portClient).PresignGetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("signed"), Key: aws.String("object")}, func(options *s3.PresignOptions) { options.Expires = time.Minute })
+	if err != nil {
+		t.Fatal(err)
+	}
+	signedPortURL, err := url.Parse(portPresign.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range []string{"s3.localhost.localstack.cloud:443", "s3.localhost.localstack.cloud"} {
+		request, err := http.NewRequest(portPresign.Method, ts.URL+signedPortURL.RequestURI(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Host = host
+		request.Header = portPresign.SignedHeader.Clone()
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK || string(body) != "verified" {
+			t.Fatalf("signed gateway host %q: %d %s", host, response.StatusCode, body)
+		}
+	}
 }
 
 func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {

@@ -1,0 +1,8 @@
+{
+  "account-regional": "ObjectWriter",
+  "bucketownerenforced": "BucketOwnerEnforced",
+  "bucketownerpreferred": "BucketOwnerPreferred",
+  "default-ownership": "BucketOwnerEnforced",
+  "invalid": "InvalidArgument",
+  "objectwriter": "ObjectWriter"
+}

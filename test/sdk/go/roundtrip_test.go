@@ -59,11 +59,21 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		}
 	}
 	createTags := []s3types.Tag{{Key: aws.String("team"), Value: aws.String("storage")}, {Key: aws.String("env"), Value: aws.String("test")}}
-	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk"), CreateBucketConfiguration: &s3types.CreateBucketConfiguration{Tags: createTags}}); err != nil {
+	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk"), CreateBucketConfiguration: &s3types.CreateBucketConfiguration{Tags: createTags}, ObjectOwnership: s3types.ObjectOwnershipBucketOwnerPreferred}); err != nil {
 		t.Fatalf("create bucket: %v", err)
 	}
 	if tagged, err := s3c.GetBucketTagging(context.Background(), &s3.GetBucketTaggingInput{Bucket: aws.String("sdk")}); err != nil || !reflect.DeepEqual(tagged.TagSet, createTags) {
 		t.Fatalf("create bucket tags: %#v %v", tagged, err)
+	}
+	ownership, err := s3c.GetBucketOwnershipControls(context.Background(), &s3.GetBucketOwnershipControlsInput{Bucket: aws.String("sdk")})
+	if err != nil || ownership.OwnershipControls == nil {
+		t.Fatalf("create bucket ownership rules: %#v %v", ownership.OwnershipControls, err)
+	}
+	if len(ownership.OwnershipControls.Rules) != 1 {
+		t.Fatalf("create bucket ownership rule count = %d", len(ownership.OwnershipControls.Rules))
+	}
+	if got := ownership.OwnershipControls.Rules[0].ObjectOwnership; got != s3types.ObjectOwnershipBucketOwnerPreferred {
+		t.Fatalf("create bucket ownership = %q", got)
 	}
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk")}); err != nil {
 		t.Fatalf("recreate us-east-1 bucket: %v", err)

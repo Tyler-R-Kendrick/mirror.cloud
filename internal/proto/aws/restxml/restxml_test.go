@@ -408,6 +408,10 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 		t.Fatalf("bucket location response %v %s", err, w.Body.String())
 	}
 	w = httptest.NewRecorder()
+	if err := codec.Encode(svc, &model.Operation{Name: "GetBucketOwnershipControls"}, w, &spi.Response{Output: map[string]any{"OwnershipControls": map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": "BucketOwnerPreferred"}}}}}); err != nil || !strings.Contains(w.Body.String(), `<OwnershipControls xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><ObjectOwnership>BucketOwnerPreferred</ObjectOwnership></Rule></OwnershipControls>`) || strings.Contains(w.Body.String(), "<member>") {
+		t.Fatalf("bucket ownership response %v %s", err, w.Body.String())
+	}
+	w = httptest.NewRecorder()
 	if err := codec.EncodeFault(svc, &model.Operation{Name: "Missing"}, w, spi.NotImplemented(svc.ID, "Missing", "emulate"), "r<&"); err != nil {
 		t.Fatal(err)
 	}

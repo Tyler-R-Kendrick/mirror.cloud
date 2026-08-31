@@ -13298,6 +13298,46 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restxml",
 		run:  "TestDecodeCreateBucketXML",
 	},
+	{
+		name: "s3-create-ownership-default-object-writer",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  "if !ownershipSet {\n\t\townership = \"BucketOwnerEnforced\"\n\t}",
+		new:  "if !ownershipSet {\n\t\townership = \"ObjectWriter\"\n\t}",
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestCreateBucketObjectOwnership",
+	},
+	{
+		name: "s3-create-ownership-accept-invalid",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `return &spi.Fault{Code: "InvalidArgument", Message: "Invalid x-amz-object-ownership header", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-object-ownership", "ArgumentValue": ownership}}`,
+		new:  `ownership = "BucketOwnerEnforced"`,
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestCreateBucketObjectOwnership",
+	},
+	{
+		name: "s3-create-ownership-drop-persistence",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `if err := bucketStore.Collection("bktcfg").Put(ctx, b+"/ownershipcontrols", ownershipDocument); err != nil {`,
+		new:  `if err := error(nil); err != nil {`,
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestCreateBucketObjectOwnership",
+	},
+	{
+		name: "s3-create-ownership-reject-idempotent-recreation",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `if bucketRegion != "us-east-1" || location.Region != bucketRegion || len(tags) > 0 {`,
+		new:  `if bucketRegion != "us-east-1" || location.Region != bucketRegion || len(tags) > 0 || ownershipSet {`,
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestCreateBucketObjectOwnership",
+	},
+	{
+		name: "s3-restxml-drop-ownership-rules",
+		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
+		old:  "controls, _ := resp.Output[\"OwnershipControls\"].(map[string]any)\n\t\trules, _ := controls[\"Rules\"].([]any)\n\t\tfor _, rule := range rules {",
+		new:  "controls, _ := resp.Output[\"OwnershipControls\"].(map[string]any)\n\t\t_, _ = controls[\"Rules\"].([]any)\n\t\tfor _, rule := range []any{} {",
+		pkg:  "./internal/proto/aws/restxml",
+		run:  "TestRESTXMLEncodeAndFaultContracts",
+	},
 }
 
 func TestMutantsAreKilled(t *testing.T) {

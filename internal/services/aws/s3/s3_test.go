@@ -220,6 +220,53 @@ func TestCreateBucketTags(t *testing.T) {
 	})
 }
 
+func TestCreateBucketObjectOwnership(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	characterization := map[string]any{}
+	assertOwnership := func(bucket, want string) {
+		t.Helper()
+		response := mustInvoke(t, p, "GetBucketOwnershipControls", map[string]any{"Bucket": bucket}, nil)
+		rules := asSliceForTest(asMapForTest(response.Output["OwnershipControls"])["Rules"])
+		if len(rules) != 1 || asMapForTest(rules[0])["ObjectOwnership"] != want {
+			t.Fatalf("%s ownership = %#v", bucket, response.Output)
+		}
+		characterization[bucket] = want
+	}
+
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "default-ownership"}, nil)
+	assertOwnership("default-ownership", "BucketOwnerEnforced")
+	for _, ownership := range []string{"BucketOwnerPreferred", "ObjectWriter", "BucketOwnerEnforced"} {
+		bucket := strings.ToLower(ownership)
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket, "ObjectOwnership": ownership}, nil)
+		assertOwnership(bucket, ownership)
+	}
+	if _, err := invoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucketownerpreferred", "ObjectOwnership": ""}, nil); err != nil {
+		t.Fatalf("us-east-1 ownership recreation: %v", err)
+	}
+	assertOwnership("bucketownerpreferred", "BucketOwnerPreferred")
+
+	_, err := invoke(t, p, "CreateBucket", map[string]any{"Bucket": "invalid-ownership", "ObjectOwnership": ""}, nil)
+	fault := asFault(t, err)
+	if fault.Code != "InvalidArgument" || fault.Fields["ArgumentName"] != "x-amz-object-ownership" {
+		t.Fatalf("invalid ownership = %#v", fault)
+	}
+	characterization["invalid"] = fault.Code
+	if _, err := invoke(t, p, "HeadBucket", map[string]any{"Bucket": "invalid-ownership"}, nil); asFault(t, err).Code != "NoSuchBucket" {
+		t.Fatalf("invalid ownership reserved bucket: %v", err)
+	}
+
+	id := ident()
+	regional := "owned-" + id.Account + "-" + id.Region + "-an"
+	mustInvokeAs(t, p, id, "CreateBucket", map[string]any{"Bucket": regional, "BucketNamespace": "account-regional", "ObjectOwnership": "ObjectWriter"}, nil)
+	response := mustInvokeAs(t, p, id, "GetBucketOwnershipControls", map[string]any{"Bucket": regional}, nil)
+	rules := asSliceForTest(asMapForTest(response.Output["OwnershipControls"])["Rules"])
+	if len(rules) != 1 || asMapForTest(rules[0])["ObjectOwnership"] != "ObjectWriter" {
+		t.Fatalf("account-regional ownership = %#v", response.Output)
+	}
+	characterization["account-regional"] = "ObjectWriter"
+	golden.AssertJSON(t, characterization)
+}
+
 func TestCreateBucketAccountRegionalNamespace(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	east := ident()

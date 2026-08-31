@@ -717,6 +717,19 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
+	if op.Name == "GetBucketOwnershipControls" {
+		b.WriteString(`<OwnershipControls xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
+		controls, _ := resp.Output["OwnershipControls"].(map[string]any)
+		rules, _ := controls["Rules"].([]any)
+		for _, rule := range rules {
+			b.WriteString("<Rule>")
+			write(rule, &b)
+			b.WriteString("</Rule>")
+		}
+		b.WriteString("</OwnershipControls>")
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
 	if op.Name == "GetBucketReplication" {
 		configuration, _ := resp.Output["ReplicationConfiguration"].(map[string]any)
 		if configuration == nil {

@@ -34,6 +34,11 @@ func TestParseAndExpiry(t *testing.T) {
 	if id := Parse(v2, "", "", time.Unix(0, 0)); id.AccessKeyID != "AKIATEST" {
 		t.Fatalf("SigV2 access key = %q", id.AccessKeyID)
 	}
+	v2Header := httptest.NewRequest("GET", "/x", nil)
+	v2Header.Header.Set("Authorization", "AWS AKIATEST:signature")
+	if id := Parse(v2Header, "", "", time.Unix(0, 0)); id.AccessKeyID != "AKIATEST" {
+		t.Fatalf("SigV2 header access key = %q", id.AccessKeyID)
+	}
 	tooLong := httptest.NewRequest("GET", "/x?X-Amz-Date=20200101T000000Z&X-Amz-Expires=604801", nil)
 	if expires, ok := PresignedExpiry(tooLong); ok {
 		t.Fatalf("accepted excessive SigV4 expiry %v", expires)

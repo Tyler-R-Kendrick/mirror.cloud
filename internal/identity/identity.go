@@ -115,7 +115,11 @@ func PresignedAuthFault(r *http.Request) *spi.Fault {
 
 func parseCredential(h string) (akid, region string) {
 	// Authorization: AWS4-HMAC-SHA256 Credential=<AKID>/<date>/<region>/<service>/aws4_request, ...
-	// or raw query credential.
+	// Authorization: AWS <AKID>:<signature>, or raw query credential.
+	if credential, ok := strings.CutPrefix(h, "AWS "); ok {
+		akid, _, _ = strings.Cut(credential, ":")
+		return akid, ""
+	}
 	idx := strings.Index(h, "Credential=")
 	rest := h
 	if idx >= 0 {

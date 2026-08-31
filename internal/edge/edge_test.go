@@ -342,6 +342,27 @@ func TestS3PresignedSignatureFaultCharacterization(t *testing.T) {
 		t.Fatalf("authorization status=%d headers=%#v body=%s", authorizationRecorder.Code, authorizationRecorder.Header(), authorizationRecorder.Body.String())
 	}
 	results["authorization_v4"] = map[string]any{"code": authorizationFault.Code, "content_type": authorizationRecorder.Header().Get("Content-Type"), "message": authorizationFault.Message, "status": authorizationRecorder.Code}
+	authorization = httptest.NewRequest(http.MethodGet, "/bucket/key", nil)
+	authorization.Header.Set("Date", "Tue, 27 Mar 2007 19:36:42 +0000")
+	authorization.Header.Set("Authorization", "AWS test:AAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	authorizationRecorder = httptest.NewRecorder()
+	handler.ServeHTTP(authorizationRecorder, authorization)
+	if err := xml.Unmarshal(authorizationRecorder.Body.Bytes(), &authorizationFault); err != nil {
+		t.Fatal(err)
+	}
+	if authorizationRecorder.Code != http.StatusForbidden || authorizationFault.Code != "SignatureDoesNotMatch" || authorizationFault.Message == "" {
+		t.Fatalf("SigV2 authorization status=%d headers=%#v body=%s", authorizationRecorder.Code, authorizationRecorder.Header(), authorizationRecorder.Body.String())
+	}
+	results["authorization_v2"] = map[string]any{"code": authorizationFault.Code, "content_type": authorizationRecorder.Header().Get("Content-Type"), "message": authorizationFault.Message, "status": authorizationRecorder.Code}
+	validAuthorization := httptest.NewRequest(http.MethodGet, "/bucket/key", nil)
+	validAuthorization.Header.Set("Date", "Tue, 27 Mar 2007 19:36:42 +0000")
+	validAuthorization.Header.Set("Authorization", "AWS test:hPgJ2NVZ55L0/EW+hot62JihaFY=")
+	validAuthorizationRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(validAuthorizationRecorder, validAuthorization)
+	if validAuthorizationRecorder.Code != http.StatusNotFound || bytes.Contains(validAuthorizationRecorder.Body.Bytes(), []byte("SignatureDoesNotMatch")) {
+		t.Fatalf("valid SigV2 authorization rejected: %d %s", validAuthorizationRecorder.Code, validAuthorizationRecorder.Body.String())
+	}
+	results["authorization_v2_valid_status"] = validAuthorizationRecorder.Code
 	valid := httptest.NewRecorder()
 	handler.ServeHTTP(valid, httptest.NewRequest(http.MethodGet, "/bucket/key?AWSAccessKeyId=test&Expires=4070908800&Signature=B7s4qHMXncO2jDe59MhIDTHOODk%3D", nil))
 	if valid.Code != http.StatusNotFound || bytes.Contains(valid.Body.Bytes(), []byte("SignatureDoesNotMatch")) {

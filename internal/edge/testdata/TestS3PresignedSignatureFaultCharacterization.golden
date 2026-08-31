@@ -1,4 +1,11 @@
 {
+  "authorization_v2": {
+    "code": "SignatureDoesNotMatch",
+    "content_type": "application/xml",
+    "message": "The request signature we calculated does not match the signature you provided.",
+    "status": 403
+  },
+  "authorization_v2_valid_status": 404,
   "authorization_v4": {
     "code": "SignatureDoesNotMatch",
     "content_type": "application/xml",

@@ -177,6 +177,21 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
 			t.Fatalf("tampered authorization %d %s", response.StatusCode, body)
 		}
+		authorization, err = http.NewRequest(http.MethodGet, strictServer.URL+"/bucket/key", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		authorization.Header.Set("Date", "Tue, 27 Mar 2007 19:36:42 +0000")
+		authorization.Header.Set("Authorization", "AWS test:AAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+		response, err = http.DefaultClient.Do(authorization)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
+			t.Fatalf("tampered SigV2 authorization %d %s", response.StatusCode, body)
+		}
 		createStreaming, err := http.NewRequest(http.MethodPut, strictServer.URL+"/streaming", nil)
 		if err != nil {
 			t.Fatal(err)

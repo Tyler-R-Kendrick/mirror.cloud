@@ -15226,6 +15226,46 @@ var mutants = []mutant{
 		pkg:  "./internal/edge",
 		run:  "TestS3StreamingSignatureCharacterization",
 	},
+	{
+		name: "identity-skip-authorization-v2-signature",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  `return VerifyS3AuthorizationV2(r, secret)`,
+		new:  `return nil`,
+		pkg:  "./internal/edge",
+		run:  "TestS3PresignedSignatureFaultCharacterization",
+	},
+	{
+		name: "identity-accept-malformed-authorization-v2",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  `if !ok || accessKey == "" || signature == "" || strings.Contains(signature, ":") {`,
+		new:  `if false {`,
+		pkg:  "./internal/identity",
+		run:  "TestVerifyS3AuthorizationV2DateAndGrammar",
+	},
+	{
+		name: "identity-accept-authorization-v2-without-date",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  `} else if date == "" {`,
+		new:  `} else if false {`,
+		pkg:  "./internal/identity",
+		run:  "TestVerifyS3AuthorizationV2DateAndGrammar",
+	},
+	{
+		name: "identity-let-date-override-authorization-v2-amz-date",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  "if r.Header.Get(\"X-Amz-Date\") != \"\" {\n\t\tdate = \"\"",
+		new:  "if r.Header.Get(\"X-Amz-Date\") != \"\" {\n\t\tdate = r.Header.Get(\"Date\")",
+		pkg:  "./internal/identity",
+		run:  "TestVerifyS3AuthorizationV2DateAndGrammar",
+	},
+	{
+		name: "identity-ignore-authorization-v2-access-key",
+		file: filepath.Join("internal", "identity", "identity.go"),
+		old:  `if credential, ok := strings.CutPrefix(h, "AWS "); ok {`,
+		new:  `if false {`,
+		pkg:  "./internal/identity",
+		run:  "TestParseAndExpiry",
+	},
 }
 
 func TestMutantsAreKilled(t *testing.T) {

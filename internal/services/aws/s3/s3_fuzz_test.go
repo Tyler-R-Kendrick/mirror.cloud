@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -569,6 +570,47 @@ func FuzzBucketLifecycle(f *testing.F) {
 		put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": prefix + "key"}, body)
 		if got := put.Headers.Get("x-amz-expiration"); got == "" {
 			t.Fatalf("mode=%d prefix=%q size=%d missing expiration", mode%5, prefix, sizeSeed)
+		}
+	})
+}
+
+func FuzzBucketPolicy(f *testing.F) {
+	for _, policy := range []string{
+		`{"Statement":[]}`,
+		`{"Version":"2012-10-17"}`,
+		`{}`,
+		` {"Statement":[]}`,
+		`{`,
+		`[]`,
+		``,
+	} {
+		f.Add(policy)
+	}
+	f.Fuzz(func(t *testing.T, policy string) {
+		if !utf8.ValidString(policy) {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		bucket := map[string]any{"Bucket": "policy-fuzz"}
+		mustInvoke(t, p, "CreateBucket", bucket, nil)
+		baseline := `{"Statement":[{"Effect":"Deny"}]}`
+		mustInvoke(t, p, "PutBucketPolicy", map[string]any{"Bucket": bucket["Bucket"], "Policy": baseline}, nil)
+
+		var document map[string]any
+		valid := policy != "" && policy[0] == '{' && json.Unmarshal([]byte(policy), &document) == nil && len(document) != 0
+		_, err := invoke(t, p, "PutBucketPolicy", map[string]any{"Bucket": bucket["Bucket"], "Policy": policy}, nil)
+		if valid && err != nil {
+			t.Fatal(err)
+		}
+		if !valid && asFault(t, err).Code != "MalformedPolicy" {
+			t.Fatalf("policy=%q fault=%v", policy, err)
+		}
+		want := baseline
+		if valid {
+			want = policy
+		}
+		if got := mustInvoke(t, p, "GetBucketPolicy", bucket, nil).Output["Policy"]; got != want {
+			t.Fatalf("policy=%q stored=%q want=%q", policy, got, want)
 		}
 	})
 }

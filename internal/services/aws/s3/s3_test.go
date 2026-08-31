@@ -1007,6 +1007,53 @@ func TestBucketLifecycleConfiguration(t *testing.T) {
 	}
 }
 
+func TestBucketPolicyConfiguration(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	input := map[string]any{"Bucket": "policy"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	_, err := invoke(t, p, "GetBucketPolicy", input, nil)
+	if fault := asFault(t, err); fault.Code != "NoSuchBucketPolicy" || fault.HTTPStatus != http.StatusNotFound || fault.Fields["BucketName"] != "policy" {
+		t.Fatalf("default policy fault = %#v", fault)
+	}
+
+	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy/*"}]}`
+	put := mustInvoke(t, p, "PutBucketPolicy", map[string]any{"Bucket": "policy", "Policy": policy}, nil)
+	if put.Status != http.StatusOK || len(put.Output) != 0 {
+		t.Fatalf("put policy = %#v", put)
+	}
+	if got := mustInvoke(t, p, "GetBucketPolicy", input, nil).Output["Policy"]; got != policy {
+		t.Fatalf("policy = %q", got)
+	}
+
+	for _, test := range []struct {
+		name, policy, message string
+	}{
+		{"empty", "", "Policies must be valid JSON and the first byte must be '{'"},
+		{"leading whitespace", " " + policy, "Policies must be valid JSON and the first byte must be '{'"},
+		{"array", `[]`, "Policies must be valid JSON and the first byte must be '{'"},
+		{"invalid json", `{`, "Policies must be valid JSON and the first byte must be '{'"},
+		{"empty object", `{}`, "Missing required field Statement"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := invoke(t, p, "PutBucketPolicy", map[string]any{"Bucket": "policy", "Policy": test.policy}, nil)
+			fault := asFault(t, err)
+			if fault.Code != "MalformedPolicy" || fault.Message != test.message || fault.HTTPStatus != http.StatusBadRequest {
+				t.Fatalf("fault = %#v", fault)
+			}
+			if got := mustInvoke(t, p, "GetBucketPolicy", input, nil).Output["Policy"]; got != policy {
+				t.Fatalf("invalid put replaced policy = %q", got)
+			}
+		})
+	}
+	for range 2 {
+		mustInvoke(t, p, "DeleteBucketPolicy", input, nil)
+	}
+	_, err = invoke(t, p, "GetBucketPolicy", input, nil)
+	if fault := asFault(t, err); fault.Code != "NoSuchBucketPolicy" {
+		t.Fatalf("deleted policy fault = %#v", fault)
+	}
+}
+
 func TestBucketLifecycleExpirationHeaders(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	bucket := map[string]any{"Bucket": "lifecycle-expiration"}
@@ -1295,6 +1342,30 @@ func TestACLCharacterization(t *testing.T) {
 	object := mustInvoke(t, p, "GetObjectAcl", map[string]any{"Bucket": bucket["Bucket"], "Key": "object"}, nil).Output
 	_, invalidErr := invoke(t, p, "PutObjectAcl", map[string]any{"Bucket": bucket["Bucket"], "Key": "object", "GrantRead": `uri="invalid"`}, nil)
 	golden.AssertJSON(t, map[string]any{"bucketDefault": before, "bucketPublic": after, "invalid": asFault(t, invalidErr).Code, "object": object})
+}
+
+func TestBucketPolicyCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	input := map[string]any{"Bucket": "policy-characterization"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	_, missingErr := invoke(t, p, "GetBucketPolicy", input, nil)
+	policy := `{"Version":"2012-10-17", "Statement":[{"Effect":"Allow","Principal":"*"}]}`
+	put := mustInvoke(t, p, "PutBucketPolicy", map[string]any{"Bucket": input["Bucket"], "Policy": policy}, nil)
+	configured := mustInvoke(t, p, "GetBucketPolicy", input, nil)
+	_, invalidErr := invoke(t, p, "PutBucketPolicy", map[string]any{"Bucket": input["Bucket"], "Policy": `{}`}, nil)
+	preserved := mustInvoke(t, p, "GetBucketPolicy", input, nil)
+	deleted := mustInvoke(t, p, "DeleteBucketPolicy", input, nil)
+	_, finalErr := invoke(t, p, "GetBucketPolicy", input, nil)
+	missing, invalid, final := asFault(t, missingErr), asFault(t, invalidErr), asFault(t, finalErr)
+	golden.AssertJSON(t, map[string]any{
+		"configured": configured.Output,
+		"deleted":    deleted.Status,
+		"final":      map[string]any{"code": final.Code, "bucket": final.Fields["BucketName"]},
+		"invalid":    map[string]any{"code": invalid.Code, "message": invalid.Message},
+		"missing":    map[string]any{"code": missing.Code, "bucket": missing.Fields["BucketName"]},
+		"preserved":  preserved.Output,
+		"put":        put.Status,
+	})
 }
 
 func TestBucketLifecycleCharacterization(t *testing.T) {

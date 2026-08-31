@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1100,6 +1101,48 @@ func TestConcurrentNamedBucketConfigurationsRemainValid(t *testing.T) {
 		if configuration["Id"] != fmt.Sprintf("configuration-%02d", index) {
 			t.Fatalf("configuration order = %#v", configurations)
 		}
+	}
+}
+
+func TestConcurrentBucketPolicyWritesRemainValid(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "policy-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			policy := fmt.Sprintf(`{"Statement":[{"Sid":"policy-%02d"}]}`, n)
+			if n%2 != 0 {
+				policy = " " + policy
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutBucketPolicy", Input: map[string]any{"Bucket": "policy-chaos", "Policy": policy}})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	successes := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "MalformedPolicy" {
+			t.Fatalf("concurrent policy put: %v", err)
+		}
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBucketPolicy", Input: map[string]any{"Bucket": "policy-chaos"}})
+	policy, _ := response.Output["Policy"].(string)
+	var document map[string]any
+	if err != nil || successes != 16 || json.Unmarshal([]byte(policy), &document) != nil || !strings.Contains(policy, `"Sid":"policy-`) {
+		t.Fatalf("persisted concurrent policy = %q, successes=%d, err=%v", policy, successes, err)
 	}
 }
 

@@ -14290,6 +14290,46 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restxml",
 		run:  "TestACLXML",
 	},
+	{
+		name: "s3-bucket-policy-skip-validation",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  "if err := validateBucketPolicy(str(req.Input[\"Policy\"])); err != nil {",
+		new:  "if err := validateBucketPolicy(str(req.Input[\"Policy\"])); false && err != nil {",
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestBucketPolicyConfiguration",
+	},
+	{
+		name: "s3-bucket-policy-accept-leading-bytes",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `if policy == "" || policy[0] != '{' {`,
+		new:  `if policy == "" {`,
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestBucketPolicyConfiguration",
+	},
+	{
+		name: "s3-bucket-policy-accept-invalid-json",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `if json.Unmarshal([]byte(policy), &document) != nil {`,
+		new:  `if false {`,
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestBucketPolicyConfiguration",
+	},
+	{
+		name: "s3-bucket-policy-accept-empty-document",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `if len(document) == 0 {`,
+		new:  `if false {`,
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestBucketPolicyConfiguration",
+	},
+	{
+		name: "s3-restxml-drop-bucket-policy-payload",
+		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
+		old:  `if op.Name == "GetBucketPolicy" {`,
+		new:  `if false {`,
+		pkg:  "./internal/proto/aws/restxml",
+		run:  "TestBucketPolicyPayload",
+	},
 }
 
 func TestMutantsAreKilled(t *testing.T) {

@@ -889,6 +889,54 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a bucket policy When replacing it Then S3 validates and returns the exact JSON", func(t *testing.T) {
+		res := do(http.MethodPut, "/policy-bdd", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create policy bucket %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/policy-bdd?policy", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchBucketPolicy")) {
+			t.Fatalf("missing policy %d %s", res.StatusCode, body)
+		}
+		policy := []byte(`{"Version":"2012-10-17", "Statement":[{"Effect":"Allow","Principal":"*"}]}`)
+		res = do(http.MethodPut, "/policy-bdd?policy", policy, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("put policy %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/policy-bdd?policy", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "application/json" || !bytes.Equal(body, policy) {
+			t.Fatalf("get policy %d content-type=%q body=%s", res.StatusCode, res.Header.Get("Content-Type"), body)
+		}
+		res = do(http.MethodPut, "/policy-bdd?policy", append([]byte{' '}, policy...), "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("MalformedPolicy")) {
+			t.Fatalf("invalid policy %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/policy-bdd?policy", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Equal(body, policy) {
+			t.Fatalf("policy after invalid put %d %s", res.StatusCode, body)
+		}
+		for range 2 {
+			res = do(http.MethodDelete, "/policy-bdd?policy", nil, "")
+			io.Copy(io.Discard, res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusNoContent {
+				t.Fatalf("delete policy %d", res.StatusCode)
+			}
+		}
+	})
+
 	t.Run("Given bucket notifications When configuring and clearing them Then matching objects reach the queue", func(t *testing.T) {
 		res := do(http.MethodPut, "/notification-bdd", nil, "")
 		io.Copy(io.Discard, res.Body)

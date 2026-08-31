@@ -242,6 +242,10 @@ func TestAWSSDKPresignedSignatureValidation(t *testing.T) {
 	if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
 		t.Fatalf("unsigned x-amz header %d %s", response.StatusCode, body)
 	}
+	malformedCredential := strings.ReplaceAll(presigned.URL, "%2F", "%252F")
+	if response, body := do(malformedCredential); response.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>AuthorizationQueryParametersError</Code>")) || !bytes.Contains(body, []byte("Credential is mal-formed")) {
+		t.Fatalf("malformed credential %d %s", response.StatusCode, body)
+	}
 	tampered, err := url.Parse(presigned.URL)
 	if err != nil {
 		t.Fatal(err)

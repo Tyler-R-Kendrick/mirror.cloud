@@ -110,6 +110,9 @@ func PresignedAuthFault(r *http.Request) *spi.Fault {
 			return &spi.Fault{Code: group.code, Message: group.message, HTTPStatus: group.status, Fault: "client"}
 		}
 	}
+	if q.Get("X-Amz-Algorithm") == "AWS4-HMAC-SHA256" && len(strings.Split(q.Get("X-Amz-Credential"), "/")) != 5 {
+		return &spi.Fault{Code: "AuthorizationQueryParametersError", Message: `Error parsing the X-Amz-Credential parameter; the Credential is mal-formed; expecting "<YOUR-AKID>/YYYYMMDD/REGION/SERVICE/aws4_request".`, HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
 	if q.Get("X-Amz-Algorithm") == s3V4AAlgorithm && q.Get("X-Amz-Region-Set") == "" {
 		return &spi.Fault{Code: "AuthorizationQueryParametersError", Message: "Query-string authentication version 4A requires the X-Amz-Region-Set parameter.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}

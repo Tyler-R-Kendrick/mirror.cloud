@@ -13898,6 +13898,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestPresignedAuthFault",
 		},
 		{
+			name: "identity-accept-malformed-presigned-credential",
+			file: filepath.Join("internal", "identity", "identity.go"),
+			old:  `if q.Get("X-Amz-Algorithm") == "AWS4-HMAC-SHA256" && len(strings.Split(q.Get("X-Amz-Credential"), "/")) != 5 {`,
+			new:  `if false {`,
+			pkg:  "./internal/identity",
+			run:  "TestPresignedAuthFault",
+		},
+		{
 			name: "identity-accept-bad-presigned-v4-signature",
 			file: filepath.Join("internal", "identity", "s3_signature.go"),
 			old:  `return err == nil && len(got) == len(want) && subtle.ConstantTimeCompare(got, want) == 1`,

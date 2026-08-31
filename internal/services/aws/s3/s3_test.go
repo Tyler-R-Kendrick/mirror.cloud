@@ -5261,8 +5261,12 @@ func TestMultipartOperationsRejectMissingUpload(t *testing.T) {
 			if input["Bucket"] == "wrong" {
 				expected = "NoSuchBucket"
 			}
-			if fault := asFault(t, err); fault.Code != expected || fault.HTTPStatus != http.StatusNotFound {
+			fault := asFault(t, err)
+			if fault.Code != expected || fault.HTTPStatus != http.StatusNotFound {
 				t.Fatalf("%s fault = %#v", operation, fault)
+			}
+			if expected == "NoSuchUpload" && (fault.Message != "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed." || fault.Fields["UploadId"] != input["UploadId"]) {
+				t.Fatalf("%s modeled fault = %#v", operation, fault)
 			}
 		}
 	}

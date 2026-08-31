@@ -39,7 +39,7 @@ func VerifyS3V4A(r *http.Request, accessKey, secret, region string) *spi.Fault {
 	if query && payloadHash == "" {
 		payloadHash = "UNSIGNED-PAYLOAD"
 	}
-	streaming := payloadHash == "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD" || payloadHash == "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD-TRAILER"
+	streaming := payloadHash == "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD" || payloadHash == "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD-TRAILER" || payloadHash == "STREAMING-UNSIGNED-PAYLOAD-TRAILER"
 	if payloadHash == "" || strings.HasPrefix(payloadHash, "STREAMING-") && !streaming || !s3PayloadHashMatches(r, payloadHash) {
 		return signatureFault()
 	}
@@ -59,7 +59,8 @@ func VerifyS3V4A(r *http.Request, accessKey, secret, region string) *spi.Fault {
 func VerifyS3StreamingV4A(r *http.Request, accessKey, secret string, chunks [][]byte, signatures []string, trailers http.Header) *spi.Fault {
 	payloadHash := r.Header.Get("X-Amz-Content-Sha256")
 	signedTrailerMode := payloadHash == "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD-TRAILER"
-	if payloadHash != "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD" && !signedTrailerMode {
+	unsignedTrailerMode := payloadHash == "STREAMING-UNSIGNED-PAYLOAD-TRAILER"
+	if payloadHash != "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD" && !signedTrailerMode && !unsignedTrailerMode {
 		return nil
 	}
 	credential, signedHeaders, previous, date, _, query, ok := s3V4AFields(r)
@@ -67,15 +68,29 @@ func VerifyS3StreamingV4A(r *http.Request, accessKey, secret string, chunks [][]
 	if query || !ok || len(credential) != 4 || credential[0] != accessKey || credential[2] != "s3" || credential[3] != "aws4_request" || !strings.Contains(strings.ToLower(r.Header.Get("Content-Encoding")), "aws-chunked") || decodedLength < 0 || err != nil || len(chunks) == 0 || len(chunks) != len(signatures) || len(chunks[len(chunks)-1]) != 0 {
 		return signatureFault()
 	}
-	if signedTrailerMode && !containsString(strings.Split(signedHeaders, ";"), "x-amz-trailer") {
+	if (signedTrailerMode || unsignedTrailerMode) && !containsString(strings.Split(signedHeaders, ";"), "x-amz-trailer") {
 		return signatureFault()
 	}
 	var actualLength int64
 	for _, chunk := range chunks {
 		actualLength += int64(len(chunk))
 	}
+	if actualLength != decodedLength {
+		return signatureFault()
+	}
+	if unsignedTrailerMode {
+		for _, signature := range signatures {
+			if signature != "" {
+				return signatureFault()
+			}
+		}
+		if _, ok := canonicalS3StreamingTrailers(r, trailers, false); !ok {
+			return signatureFault()
+		}
+		return nil
+	}
 	key := s3V4AKey(accessKey, secret)
-	if actualLength != decodedLength || key == nil {
+	if key == nil {
 		return signatureFault()
 	}
 	scope := strings.Join(credential[1:], "/")

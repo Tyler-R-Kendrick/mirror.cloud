@@ -355,6 +355,47 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
 
+func TestAWSChunkedFramingContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.s3"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	request, _ := http.NewRequest(http.MethodPut, ts.URL+"/chunk-errors", nil)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	for name, tc := range map[string]struct {
+		decoded string
+		body    string
+	}{
+		"missing decoded length": {body: "5\r\nhello\r\n0\r\n\r\n"},
+		"non-integer length":     {decoded: "test", body: "5\r\nhello\r\n0\r\n\r\n"},
+		"truncated chunk":        {decoded: "5", body: "5\r\nhello"},
+	} {
+		request, _ := http.NewRequest(http.MethodPut, ts.URL+"/chunk-errors/object", strings.NewReader(tc.body))
+		request.Header.Set("Content-Encoding", "aws-chunked")
+		request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+		if tc.decoded != "" {
+			request.Header.Set("X-Amz-Decoded-Content-Length", tc.decoded)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
+			t.Fatalf("%s: %d %s", name, response.StatusCode, body)
+		}
+	}
+}
+
 func TestSigV4AStreamingContract(t *testing.T) {
 	t.Setenv("MIRROR_CLOCK", "controllable")
 	cfg := mcfg.Default()

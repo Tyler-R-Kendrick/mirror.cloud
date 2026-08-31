@@ -1,0 +1,5 @@
+{
+  "plain": "ok",
+  "unsigned_content_sha256": "ok",
+  "unsigned_user_agent": "SignatureDoesNotMatch"
+}

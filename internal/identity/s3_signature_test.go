@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 )
 
 func TestVerifyS3PresignedV4AWSExample(t *testing.T) {
@@ -19,6 +21,15 @@ func TestVerifyS3PresignedV4AWSExample(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, rawURL, nil)
 	if fault := VerifyS3PresignedV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault != nil {
 		t.Fatalf("official AWS example rejected: %#v", fault)
+	}
+	request.Header.Set("X-Amz-User-Agent", "test")
+	if fault := VerifyS3PresignedV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("unsigned x-amz header accepted: %#v", fault)
+	}
+	request.Header.Del("X-Amz-User-Agent")
+	request.Header.Set("X-Amz-Content-Sha256", "UNSIGNED-PAYLOAD")
+	if fault := VerifyS3PresignedV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault != nil {
+		t.Fatalf("unsigned payload hash rejected: %#v", fault)
 	}
 	query := request.URL.Query()
 	query.Set("X-Amz-Signature", "00eed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404")
@@ -28,11 +39,35 @@ func TestVerifyS3PresignedV4AWSExample(t *testing.T) {
 	}
 }
 
+func TestS3UnsignedAmzHeaderCharacterization(t *testing.T) {
+	const rawURL = "https://examplebucket.s3.amazonaws.com/test.txt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20130524T000000Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404"
+	verify := func(header, value string) string {
+		request := httptest.NewRequest(http.MethodGet, rawURL, nil)
+		if header != "" {
+			request.Header.Set(header, value)
+		}
+		if fault := VerifyS3PresignedV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault != nil {
+			return fault.Code
+		}
+		return "ok"
+	}
+	golden.AssertJSON(t, map[string]string{
+		"plain":                   verify("", ""),
+		"unsigned_content_sha256": verify("X-Amz-Content-Sha256", "UNSIGNED-PAYLOAD"),
+		"unsigned_user_agent":     verify("X-Amz-User-Agent", "test"),
+	})
+}
+
 func TestVerifyS3AuthorizationV4AWSExample(t *testing.T) {
 	request := awsAuthorizationExample()
 	if fault := VerifyS3AuthorizationV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault != nil {
 		t.Fatalf("official AWS example rejected: %#v", fault)
 	}
+	request.Header.Set("X-Amz-User-Agent", "test")
+	if fault := VerifyS3AuthorizationV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("unsigned x-amz header accepted: %#v", fault)
+	}
+	request.Header.Del("X-Amz-User-Agent")
 	request.Header.Set("Range", "bytes=1-9")
 	if fault := VerifyS3AuthorizationV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 		t.Fatalf("tampered signed header accepted: %#v", fault)
@@ -205,6 +240,11 @@ func TestVerifyS3V4A(t *testing.T) {
 	if fault := VerifyS3Signature(header, accessKey, secret, "us-west-2"); fault != nil {
 		t.Fatalf("valid SigV4A header rejected: %#v", fault)
 	}
+	header.Header.Set("X-Amz-User-Agent", "test")
+	if fault := VerifyS3V4A(header, accessKey, secret, "us-west-2"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("unsigned x-amz header accepted: %#v", fault)
+	}
+	header.Header.Del("X-Amz-User-Agent")
 	if fault := VerifyS3V4A(header, "wrong", secret, "us-west-2"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 		t.Fatalf("wrong access key accepted: %#v", fault)
 	}

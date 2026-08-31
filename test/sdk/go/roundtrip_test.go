@@ -230,6 +230,18 @@ func TestAWSSDKPresignedSignatureValidation(t *testing.T) {
 	if response, body := do(presigned.URL); response.StatusCode != http.StatusOK || string(body) != "verified" {
 		t.Fatalf("valid presign %d %s", response.StatusCode, body)
 	}
+	unsigned, _ := http.NewRequest(presigned.Method, presigned.URL, nil)
+	unsigned.Header = presigned.SignedHeader.Clone()
+	unsigned.Header.Set("X-Amz-User-Agent", "test")
+	response, err = http.DefaultClient.Do(unsigned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
+		t.Fatalf("unsigned x-amz header %d %s", response.StatusCode, body)
+	}
 	tampered, err := url.Parse(presigned.URL)
 	if err != nil {
 		t.Fatal(err)

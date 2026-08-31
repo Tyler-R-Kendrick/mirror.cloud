@@ -181,6 +181,38 @@ func TestBlobReadErrorsDoNotReturnOrCopyPartialData(t *testing.T) {
 	}
 }
 
+func TestExtraBodyReadErrorsDoNotCommitPartialData(t *testing.T) {
+	deps := spitest.Deps(t)
+	blobs := &failingReadBlobs{BlobStore: deps.Blobs}
+	deps.Blobs = blobs
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "reads"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "reads", "Key": "source"}, []byte("id,name\n1,Ada\n"))
+	blobs.fail = true
+	if _, err := invoke(t, p, "SelectObjectContent", map[string]any{"Bucket": "reads", "Key": "source", "Expression": "SELECT * FROM S3Object"}, nil); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("select error = %v", err)
+	}
+
+	failedWrite := func(operation string, input map[string]any) error {
+		_, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: operation, Input: input, Identity: ident(), Body: &failingReadCloser{}})
+		return err
+	}
+	if err := failedWrite("WriteGetObjectResponse", map[string]any{"RequestRoute": "route", "RequestToken": "token"}); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("write response error = %v", err)
+	}
+	ctx := context.Background()
+	scope := deps.Store.Scope(ident().Account, ident().Region)
+	if _, ok, err := scope.Collection("wgor").Get(ctx, "route/token"); err != nil || ok {
+		t.Fatalf("failed response write persisted: ok=%v err=%v", ok, err)
+	}
+	if err := failedWrite("CreateBucketMetadataConfiguration", map[string]any{"Bucket": "reads"}); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("metadata error = %v", err)
+	}
+	if _, ok, err := scope.Collection("bktcfg").Get(ctx, "reads/metadata"); err != nil || ok {
+		t.Fatalf("failed metadata write persisted: ok=%v err=%v", ok, err)
+	}
+}
+
 func TestCreateSessionRegistersTemporaryCredential(t *testing.T) {
 	deps := spitest.Deps(t)
 	response, err := invoke(t, s3.New(deps), "CreateSession", map[string]any{"Bucket": "directory-bucket"}, nil)

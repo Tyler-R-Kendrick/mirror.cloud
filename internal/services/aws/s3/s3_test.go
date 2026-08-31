@@ -13,6 +13,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -85,6 +86,131 @@ func mustInvoke(t *testing.T, p *s3.Pack, op string, in map[string]any, body []b
 		t.Fatalf("%s: %v", op, err)
 	}
 	return resp
+}
+
+var errInjectedRead = errors.New("injected read failure")
+
+type failingReadCloser struct {
+	sent bool
+}
+
+func (r *failingReadCloser) Read(p []byte) (int, error) {
+	if r.sent {
+		return 0, errInjectedRead
+	}
+	r.sent = true
+	return copy(p, "partial"), nil
+}
+
+func (*failingReadCloser) Close() error { return nil }
+
+type failingReadSeekCloser struct {
+	io.ReadSeekCloser
+	sent bool
+}
+
+func (r *failingReadSeekCloser) Read(p []byte) (int, error) {
+	if r.sent {
+		return 0, errInjectedRead
+	}
+	r.sent = true
+	return r.ReadSeekCloser.Read(p[:min(len(p), 3)])
+}
+
+type failingReadBlobs struct {
+	spi.BlobStore
+	fail bool
+}
+
+func (b *failingReadBlobs) Get(ctx context.Context, key string) (io.ReadSeekCloser, spi.BlobInfo, error) {
+	r, info, err := b.BlobStore.Get(ctx, key)
+	if err != nil || !b.fail {
+		return r, info, err
+	}
+	return &failingReadSeekCloser{ReadSeekCloser: r}, info, nil
+}
+
+func TestBodyReadErrorsDoNotCommitPartialWrites(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "reads"}, nil)
+	request := func(operation string, input map[string]any) error {
+		_, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: operation, Input: input, Identity: ident(), Body: &failingReadCloser{}})
+		return err
+	}
+	if err := request("PutObject", map[string]any{"Bucket": "reads", "Key": "object"}); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("put error = %v", err)
+	}
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "reads", "Key": "object"}, nil); err == nil {
+		t.Fatal("failed PutObject committed partial data")
+	}
+	upload := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "reads", "Key": "multipart"}, nil).Output["UploadId"]
+	partInput := map[string]any{"Bucket": "reads", "Key": "multipart", "UploadId": upload, "PartNumber": 1}
+	if err := request("UploadPart", partInput); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("part error = %v", err)
+	}
+	parts := mustInvoke(t, p, "ListParts", partInput, nil).Output["Parts"]
+	if listed, _ := parts.([]any); len(listed) != 0 {
+		t.Fatalf("failed UploadPart committed partial data: %#v", listed)
+	}
+}
+
+func TestBlobReadErrorsDoNotReturnOrCopyPartialData(t *testing.T) {
+	deps := spitest.Deps(t)
+	blobs := &failingReadBlobs{BlobStore: deps.Blobs}
+	deps.Blobs = blobs
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "reads"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "reads", "Key": "source"}, []byte("complete body"))
+	blobs.fail = true
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "reads", "Key": "source"}, nil); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("get error = %v", err)
+	}
+	if _, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "reads", "Key": "copy", "CopySource": "reads/source"}, nil); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("copy error = %v", err)
+	}
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "reads", "Key": "copy"}, nil); err == nil {
+		t.Fatal("failed CopyObject committed partial data")
+	}
+	upload := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "reads", "Key": "multipart-copy"}, nil).Output["UploadId"]
+	partInput := map[string]any{"Bucket": "reads", "Key": "multipart-copy", "UploadId": upload, "PartNumber": 1, "CopySource": "reads/source", "CopySourceRange": "bytes=0-2"}
+	if _, err := invoke(t, p, "UploadPartCopy", partInput, nil); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("part copy error = %v", err)
+	}
+	if listed, _ := mustInvoke(t, p, "ListParts", partInput, nil).Output["Parts"].([]any); len(listed) != 0 {
+		t.Fatalf("failed UploadPartCopy committed partial data: %#v", listed)
+	}
+}
+
+func TestExtraBodyReadErrorsDoNotCommitPartialData(t *testing.T) {
+	deps := spitest.Deps(t)
+	blobs := &failingReadBlobs{BlobStore: deps.Blobs}
+	deps.Blobs = blobs
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "reads"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "reads", "Key": "source"}, []byte("id,name\n1,Ada\n"))
+	blobs.fail = true
+	if _, err := invoke(t, p, "SelectObjectContent", map[string]any{"Bucket": "reads", "Key": "source", "Expression": "SELECT * FROM S3Object"}, nil); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("select error = %v", err)
+	}
+
+	failedWrite := func(operation string, input map[string]any) error {
+		_, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: operation, Input: input, Identity: ident(), Body: &failingReadCloser{}})
+		return err
+	}
+	if err := failedWrite("WriteGetObjectResponse", map[string]any{"RequestRoute": "route", "RequestToken": "token"}); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("write response error = %v", err)
+	}
+	ctx := context.Background()
+	scope := deps.Store.Scope(ident().Account, ident().Region)
+	if _, ok, err := scope.Collection("wgor").Get(ctx, "route/token"); err != nil || ok {
+		t.Fatalf("failed response write persisted: ok=%v err=%v", ok, err)
+	}
+	if err := failedWrite("CreateBucketMetadataConfiguration", map[string]any{"Bucket": "reads"}); !errors.Is(err, errInjectedRead) {
+		t.Fatalf("metadata error = %v", err)
+	}
+	if _, ok, err := scope.Collection("bktcfg").Get(ctx, "reads/metadata"); err != nil || ok {
+		t.Fatalf("failed metadata write persisted: ok=%v err=%v", ok, err)
+	}
 }
 
 func TestCreateSessionRegistersTemporaryCredential(t *testing.T) {

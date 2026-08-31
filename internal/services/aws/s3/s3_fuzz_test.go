@@ -1423,6 +1423,39 @@ func FuzzListObjectsPagination(f *testing.F) {
 	})
 }
 
+func FuzzListEncodingType(f *testing.F) {
+	for _, seed := range []struct {
+		operation uint8
+		encoding  string
+		provided  bool
+	}{{0, "url", true}, {1, "value", true}, {2, "", true}, {3, "URL", true}, {0, "", false}} {
+		f.Add(seed.operation, seed.encoding, seed.provided)
+	}
+	f.Fuzz(func(t *testing.T, operationSeed uint8, encoding string, provided bool) {
+		if !utf8.ValidString(encoding) || len(encoding) > 128 {
+			t.Skip()
+		}
+		operations := []string{"ListObjects", "ListObjectsV2", "ListObjectVersions", "ListMultipartUploads"}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-encoding-fuzz"}, nil)
+		input := map[string]any{"Bucket": "list-encoding-fuzz"}
+		if provided {
+			input["EncodingType"] = encoding
+		}
+		_, err := invoke(t, p, operations[int(operationSeed)%len(operations)], input, nil)
+		if !provided || encoding == "url" {
+			if err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		fault := asFault(t, err)
+		if fault.Code != "InvalidArgument" || fault.Message != "Invalid Encoding Method specified in Request" || fault.Fields["ArgumentName"] != "encoding-type" || fault.Fields["ArgumentValue"] != encoding {
+			t.Fatalf("encoding %q fault = %#v", encoding, fault)
+		}
+	})
+}
+
 func FuzzDeleteObjectVersionRestoration(f *testing.F) {
 	f.Add("first", "second", "third", uint8(2))
 	f.Add("", "same", "same", uint8(1))

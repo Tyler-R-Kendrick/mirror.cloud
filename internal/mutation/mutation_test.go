@@ -3128,8 +3128,16 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-cors-http-preserve-request-header-case",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `parts[i] = strings.ToLower(strings.TrimSpace(parts[i]))`,
-			new:  `parts[i] = strings.TrimSpace(parts[i])`,
+			old:  `if part = strings.ToLower(strings.TrimSpace(part)); part != "" {`,
+			new:  `if part = strings.TrimSpace(part); part != "" {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestBucketCorsHTTP",
+		},
+		{
+			name: "s3-cors-http-keep-empty-request-header",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if part = strings.ToLower(strings.TrimSpace(part)); part != "" {`,
+			new:  `if part = strings.ToLower(strings.TrimSpace(part)); true {`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestBucketCorsHTTP",
 		},

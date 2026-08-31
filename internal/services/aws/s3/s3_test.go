@@ -1020,6 +1020,12 @@ func TestBucketCorsHTTP(t *testing.T) {
 	if err != nil || response.Status != http.StatusOK || response.Headers.Get("Access-Control-Allow-Origin") != "https://app.example.test" || response.Headers.Get("Access-Control-Allow-Credentials") != "true" || response.Headers.Get("Access-Control-Allow-Headers") != "x-amz-request-payer, x-amz-meta-team" || response.Headers.Get("Access-Control-Expose-Headers") != "ETag" || response.Headers.Get("Access-Control-Max-Age") != "300" || response.Headers.Get("Vary") == "" {
 		t.Fatalf("matching preflight = %#v, %v", response, err)
 	}
+	request.Header.Set("Origin", "https://.example.test")
+	request.Header.Set("Access-Control-Request-Headers", " ")
+	response, err = p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: request})
+	if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != "https://.example.test" || response.Headers.Get("Access-Control-Allow-Headers") != "" {
+		t.Fatalf("empty requested header = %#v, %v", response, err)
+	}
 
 	for _, rejected := range []struct{ name, origin, method, headers string }{
 		{"method", "https://app.example.test", "DELETE", ""},

@@ -452,10 +452,13 @@ func splitCORSHeaders(value string) []string {
 		return nil
 	}
 	parts := strings.Split(value, ",")
-	for i := range parts {
-		parts[i] = strings.ToLower(strings.TrimSpace(parts[i]))
+	headers := parts[:0]
+	for _, part := range parts {
+		if part = strings.ToLower(strings.TrimSpace(part)); part != "" {
+			headers = append(headers, part)
+		}
 	}
-	return parts
+	return headers
 }
 
 func localstackCORSHeaders(request *http.Request, origin string) http.Header {

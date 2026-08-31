@@ -269,8 +269,10 @@ func TestBootedServerS3ExtraEngines(t *testing.T) {
 	if code, b, _ := do(http.MethodGet, "/bucket-x?annotation", "", nil); code != 200 {
 		t.Fatalf("list annot %d %s", code, b)
 	}
-	if code, b, _ := do(http.MethodGet, "/bucket-x/new?torrent", "", nil); code != 200 || !bytes.Contains(b, []byte("announce")) && !bytes.Contains(b, []byte("Torrent")) {
-		t.Fatalf("torrent %d %s", code, b)
+	for _, path := range []string{"/bucket-x?policyStatus", "/bucket-x/new?torrent"} {
+		if code, b, _ := do(http.MethodGet, path, "", nil); code != http.StatusNotImplemented || !bytes.Contains(b, []byte("MirrorNotImplemented")) {
+			t.Fatalf("unsupported %s: %d %s", path, code, b)
+		}
 	}
 	if code, b, fid := do(http.MethodGet, "/?Action=ListDirectoryBuckets", "", nil); code >= 300 || fid != "emulate" {
 		t.Fatalf("dir buckets %d %s fid %s", code, b, fid)

@@ -236,22 +236,6 @@ func recGet(rec map[string]string, col string) string {
 	return ""
 }
 
-func (p *Pack) objectTorrent(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
-	if err := p.requireBucket(ctx, req, b); err != nil {
-		return nil, err
-	}
-	raw, ok, _ := p.col(req, "objects").Get(ctx, b+"/"+key)
-	if !ok {
-		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
-	}
-	var meta map[string]any
-	_ = json.Unmarshal(raw, &meta)
-	md5 := str(meta["md5"])
-	torrent := "d8:announce12:mirror.local4:infod6:lengthi" + fmt.Sprint(meta["size"]) + "e4:name" + key + "e4:md5:" + md5 + "e"
-	return &spi.Response{Output: map[string]any{"Torrent": torrent}, Stream: io.NopCloser(bytes.NewReader([]byte(torrent)))}, nil
-}
-
 func (p *Pack) writeGetObjectResponse(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	route := str(req.Input["RequestRoute"])
 	tok := str(req.Input["RequestToken"])

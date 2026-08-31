@@ -40,7 +40,7 @@ aws --endpoint-url http://127.0.0.1:4566 s3 mb s3://demo
 aws --endpoint-url http://127.0.0.1:4566 s3 cp README.md s3://demo/README.md
 ```
 
-Dummy credentials `test`/`test` work. So does anything else — signatures are parsed, never verified. Default listen: `http://127.0.0.1:4566`.
+Dummy credentials `test`/`test` work. By default, so does anything else: signatures are parsed but not verified. Set `MIRROR_S3_VALIDATE_PRESIGNED_SIGNATURES=true` to verify S3 SigV4 presigned query signatures against `test`/`test` and deterministic IAM/STS credentials. SigV2 and Authorization-header signature verification are not yet supported. Default listen: `http://127.0.0.1:4566`.
 
 `bin/mirror up --profile aws-core` boots the emulate-tier AWS packs in docs/SUPPORT.md. Remaining ingested Smithy operations (if any) are mock-tier. This is not LocalStack-complete: no hypervisor, no real RDS/Redis/EKS, extra ops are named control-plane records. `bin/mirror up --all` serves mock-tier for everything else. `--strict` refuses mock. EC2 is VPC/subnet/SG/instance records on the ec2Query wire.
 

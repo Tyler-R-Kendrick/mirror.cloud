@@ -12,21 +12,22 @@ import (
 
 // Config is process configuration.
 type Config struct {
-	Bind           string
-	AdvertiseURL   string
-	Seed           string
-	PersistDir     string
-	Strict         bool
-	Services       []string
-	Tiers          map[string]model.Tier
-	DefaultRegion  string
-	DefaultAccount string
-	TLSCert        string
-	TLSKey         string
-	ProxyMode      string
-	ProxyEndpoint  string
-	CassetteDir    string
-	LockSHA        string
+	Bind                          string
+	AdvertiseURL                  string
+	Seed                          string
+	PersistDir                    string
+	Strict                        bool
+	Services                      []string
+	Tiers                         map[string]model.Tier
+	DefaultRegion                 string
+	DefaultAccount                string
+	S3ValidatePresignedSignatures bool
+	TLSCert                       string
+	TLSKey                        string
+	ProxyMode                     string
+	ProxyEndpoint                 string
+	CassetteDir                   string
+	LockSHA                       string
 }
 
 // Default returns the documented defaults.
@@ -65,6 +66,9 @@ func FromEnv(c Config) Config {
 	if v := os.Getenv("MIRROR_DEFAULT_ACCOUNT"); v != "" {
 		c.DefaultAccount = v
 	}
+	if v := os.Getenv("MIRROR_S3_VALIDATE_PRESIGNED_SIGNATURES"); v == "1" || strings.EqualFold(v, "true") {
+		c.S3ValidatePresignedSignatures = true
+	}
 	if v := os.Getenv("MIRROR_PROXY_MODE"); v != "" {
 		c.ProxyMode = v
 	}
@@ -88,15 +92,16 @@ func FromFile(c Config, path string) Config {
 		return c
 	}
 	var f struct {
-		Bind           string            `json:"bind"`
-		AdvertiseURL   string            `json:"advertise_url"`
-		Seed           string            `json:"seed"`
-		PersistDir     string            `json:"persist"`
-		Strict         bool              `json:"strict"`
-		DefaultRegion  string            `json:"region"`
-		DefaultAccount string            `json:"account"`
-		Services       []string          `json:"services"`
-		Tiers          map[string]string `json:"tiers"`
+		Bind                          string            `json:"bind"`
+		AdvertiseURL                  string            `json:"advertise_url"`
+		Seed                          string            `json:"seed"`
+		PersistDir                    string            `json:"persist"`
+		Strict                        bool              `json:"strict"`
+		DefaultRegion                 string            `json:"region"`
+		DefaultAccount                string            `json:"account"`
+		S3ValidatePresignedSignatures bool              `json:"s3_validate_presigned_signatures"`
+		Services                      []string          `json:"services"`
+		Tiers                         map[string]string `json:"tiers"`
 	}
 	if json.Unmarshal(b, &f) != nil {
 		return c
@@ -121,6 +126,9 @@ func FromFile(c Config, path string) Config {
 	}
 	if f.DefaultAccount != "" {
 		c.DefaultAccount = f.DefaultAccount
+	}
+	if f.S3ValidatePresignedSignatures {
+		c.S3ValidatePresignedSignatures = true
 	}
 	if len(f.Services) > 0 {
 		c.Services = f.Services

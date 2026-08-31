@@ -14978,6 +14978,38 @@ var mutants = []mutant{
 		pkg:  "./internal/identity",
 		run:  "TestPresignedAuthFault",
 	},
+	{
+		name: "s3-skip-presigned-signature-validation",
+		file: filepath.Join("internal", "edge", "edge.go"),
+		old:  `if svc != nil && svc.ID == "aws.s3" && s.cfg.S3ValidatePresignedSignatures {`,
+		new:  `if false {`,
+		pkg:  "./internal/edge",
+		run:  "TestS3PresignedSignatureFaultCharacterization",
+	},
+	{
+		name: "identity-accept-bad-presigned-v4-signature",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  `subtle.ConstantTimeCompare(got, want) != 1`,
+		new:  `false`,
+		pkg:  "./internal/identity",
+		run:  "TestVerifyS3PresignedV4AWSExample",
+	},
+	{
+		name: "identity-sign-presigned-v4-including-signature",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  `if key == "X-Amz-Signature" {`,
+		new:  `if false {`,
+		pkg:  "./internal/identity",
+		run:  "TestVerifyS3PresignedV4AWSExample",
+	},
+	{
+		name: "identity-sign-presigned-v4-empty-payload",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  `payloadHash = "UNSIGNED-PAYLOAD"`,
+		new:  `payloadHash = ""`,
+		pkg:  "./internal/identity",
+		run:  "TestVerifyS3PresignedV4AWSExample",
+	},
 }
 
 func TestMutantsAreKilled(t *testing.T) {

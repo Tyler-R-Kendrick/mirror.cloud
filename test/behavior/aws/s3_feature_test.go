@@ -132,6 +132,32 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given signature validation is enabled When a presigned signature is tampered Then S3 rejects it", func(t *testing.T) {
+		target := "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=" + strings.Repeat("0", 64)
+		response, err := http.Get(ts.URL + target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
+			t.Fatal("default server unexpectedly validated the signature")
+		}
+		strict := cfg
+		strict.S3ValidatePresignedSignatures = true
+		strictServer := httptest.NewServer(edge.New(strict, deps, reg, "test").Handler())
+		defer strictServer.Close()
+		response, err = http.Get(strictServer.URL + target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
+			t.Fatalf("tampered presign %d %s", response.StatusCode, body)
+		}
+	})
+
 	t.Run("Given explicit KMS keys When writing and reading Then S3 validates their regional state", func(t *testing.T) {
 		res := do(http.MethodPut, "/kms-validation-bdd", nil, "")
 		res.Body.Close()

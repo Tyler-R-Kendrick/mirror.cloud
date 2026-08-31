@@ -294,6 +294,30 @@ func TestS3PresignedAuthFaultCharacterization(t *testing.T) {
 	golden.AssertJSON(t, results)
 }
 
+func TestS3PresignedSignatureFaultCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	cfg.S3ValidatePresignedSignatures = true
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=" + strings.Repeat("0", 64)
+	recorder := httptest.NewRecorder()
+	edge.New(cfg, deps, reg, "test").Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
+	var fault struct {
+		Code, Message string
+	}
+	if err := xml.Unmarshal(recorder.Body.Bytes(), &fault); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusForbidden || fault.Code != "SignatureDoesNotMatch" || fault.Message == "" {
+		t.Fatalf("status=%d headers=%#v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
+	}
+	golden.AssertJSON(t, map[string]any{"code": fault.Code, "content_type": recorder.Header().Get("Content-Type"), "message": fault.Message, "status": recorder.Code})
+}
+
 func FuzzS3ResponseEnvelope(f *testing.F) {
 	deps := spitest.Deps(f)
 	cfg := config.Default()

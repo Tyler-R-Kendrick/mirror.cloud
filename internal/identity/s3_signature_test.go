@@ -20,6 +20,15 @@ func TestVerifyS3PresignedV4AWSExample(t *testing.T) {
 	if fault := VerifyS3PresignedV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault != nil {
 		t.Fatalf("official AWS example rejected: %#v", fault)
 	}
+	request.Header.Set("X-Amz-User-Agent", "test")
+	if fault := VerifyS3PresignedV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("unsigned x-amz header accepted: %#v", fault)
+	}
+	request.Header.Del("X-Amz-User-Agent")
+	request.Header.Set("X-Amz-Content-Sha256", "UNSIGNED-PAYLOAD")
+	if fault := VerifyS3PresignedV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault != nil {
+		t.Fatalf("unsigned payload hash rejected: %#v", fault)
+	}
 	query := request.URL.Query()
 	query.Set("X-Amz-Signature", "00eed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404")
 	request.URL.RawQuery = query.Encode()
@@ -33,6 +42,11 @@ func TestVerifyS3AuthorizationV4AWSExample(t *testing.T) {
 	if fault := VerifyS3AuthorizationV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault != nil {
 		t.Fatalf("official AWS example rejected: %#v", fault)
 	}
+	request.Header.Set("X-Amz-User-Agent", "test")
+	if fault := VerifyS3AuthorizationV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("unsigned x-amz header accepted: %#v", fault)
+	}
+	request.Header.Del("X-Amz-User-Agent")
 	request.Header.Set("Range", "bytes=1-9")
 	if fault := VerifyS3AuthorizationV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 		t.Fatalf("tampered signed header accepted: %#v", fault)
@@ -205,6 +219,11 @@ func TestVerifyS3V4A(t *testing.T) {
 	if fault := VerifyS3Signature(header, accessKey, secret, "us-west-2"); fault != nil {
 		t.Fatalf("valid SigV4A header rejected: %#v", fault)
 	}
+	header.Header.Set("X-Amz-User-Agent", "test")
+	if fault := VerifyS3V4A(header, accessKey, secret, "us-west-2"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("unsigned x-amz header accepted: %#v", fault)
+	}
+	header.Header.Del("X-Amz-User-Agent")
 	if fault := VerifyS3V4A(header, "wrong", secret, "us-west-2"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 		t.Fatalf("wrong access key accepted: %#v", fault)
 	}

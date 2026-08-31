@@ -4,6 +4,7 @@
     "stored_region": "eu-west-1"
   },
   "EU-header": "http://eu-alias.s3.amazonaws.com/",
+  "EU-region": "eu-west-1",
   "default": "",
   "invalid": {
     "code": "InvalidLocationConstraint",

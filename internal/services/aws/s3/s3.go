@@ -768,10 +768,17 @@ func (p *Pack) deleteBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 }
 
 func (p *Pack) headBucket(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	if err := p.requireBucket(ctx, req, str(req.Input["Bucket"])); err != nil {
+	if req.Identity.Region == "aws-global" {
+		return nil, &spi.Fault{Code: "AuthorizationHeaderMalformed", Message: "The authorization header is malformed; the region 'aws-global' is wrong; expecting 'us-east-1'", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"Region": "us-east-1"}}
+	}
+	bucket := str(req.Input["Bucket"])
+	if err := p.requireBucket(ctx, req, bucket); err != nil {
 		return nil, err
 	}
-	return &spi.Response{Status: 200}, nil
+	headers := http.Header{}
+	headers.Set("x-amz-bucket-region", req.Identity.Region)
+	headers.Set("x-amz-bucket-arn", "arn:aws:s3:::"+bucket)
+	return &spi.Response{Status: 200, Headers: headers}, nil
 }
 
 func (p *Pack) listBuckets(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -1765,7 +1772,9 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 		}
 		out["EncodingType"] = "url"
 	}
-	return &spi.Response{Output: out}, nil
+	headers := http.Header{}
+	headers.Set("x-amz-bucket-region", req.Identity.Region)
+	return &spi.Response{Headers: headers, Output: out}, nil
 }
 
 func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -4317,7 +4326,31 @@ func (p *Pack) requireBucketOwner(ctx context.Context, req *spi.Request, b, expe
 			}
 		}
 	}
-	_, ok, _ := p.col(req, "buckets").Get(ctx, b)
+	_, ok, err := p.col(req, "buckets").Get(ctx, b)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		raw, exists, err := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets").Get(ctx, b)
+		if err != nil {
+			return err
+		}
+		if exists {
+			var location struct {
+				Region string `json:"region"`
+			}
+			if err := json.Unmarshal(raw, &location); err != nil {
+				return err
+			}
+			if location.Region != "" {
+				req.Identity.Region = location.Region
+				_, ok, err = p.col(req, "buckets").Get(ctx, b)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
 	if !ok {
 		return &spi.Fault{Code: "NoSuchBucket", Message: "The specified bucket does not exist", HTTPStatus: 404, Fault: "client"}
 	}

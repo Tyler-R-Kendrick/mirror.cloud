@@ -1796,9 +1796,16 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 		w.Header().Set("x-mirror-not-implemented", svc.ID+"."+op.Name)
 		status = 501
 	}
+	if region := xmlString(f.Fields["Region"]); region != "" {
+		w.Header().Set("x-amz-bucket-region", region)
+	}
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(status)
-	_, err := fmt.Fprintf(w, `<Error><Code>%s</Code><Message>%s</Message><RequestId>%s</RequestId><HostId>mirror</HostId></Error>`, xmlEscape(f.Code), xmlEscape(f.Message), xmlEscape(requestID))
+	var body strings.Builder
+	fmt.Fprintf(&body, `<Error><Code>%s</Code><Message>%s</Message>`, xmlEscape(f.Code), xmlEscape(f.Message))
+	write(f.Fields, &body)
+	fmt.Fprintf(&body, `<RequestId>%s</RequestId><HostId>mirror</HostId></Error>`, xmlEscape(requestID))
+	_, err := io.WriteString(w, body.String())
 	return err
 }
 

@@ -76,7 +76,7 @@ func parseAWSChunked(r io.Reader) ([]byte, [][]byte, []string, http.Header, erro
 		}
 		rest = rest[2:]
 	}
-	return out.Bytes(), chunks, signatures, nil, nil
+	return nil, nil, nil, nil, fmt.Errorf("aws-chunked: missing final chunk")
 }
 
 func parseAWSChunkedTrailers(rest []byte) (http.Header, error) {

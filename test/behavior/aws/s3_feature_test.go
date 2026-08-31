@@ -134,6 +134,27 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given malformed aws-chunked framing When uploaded Then S3 rejects the request", func(t *testing.T) {
+		response := do(http.MethodPut, "/chunk-errors-bdd", nil, "")
+		response.Body.Close()
+		raw := "5\r\nhello\r\n0\r\n\r\n"
+		request, err := http.NewRequest(http.MethodPut, ts.URL+"/chunk-errors-bdd/object", strings.NewReader(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Encoding", "aws-chunked")
+		request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+		response, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
+			t.Fatalf("malformed stream: %d %s", response.StatusCode, body)
+		}
+	})
+
 	t.Run("Given signature validation is enabled When a signature is tampered Then S3 rejects it", func(t *testing.T) {
 		target := "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=" + strings.Repeat("0", 64)
 		response, err := http.Get(ts.URL + target)

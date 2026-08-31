@@ -555,6 +555,55 @@ func TestS3StreamingSignatureCharacterization(t *testing.T) {
 	golden.AssertJSON(t, results)
 }
 
+func TestS3MalformedAWSChunkedCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/chunk-errors", nil))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
+	}
+	valid := "5\r\nhello\r\n0\r\n\r\n"
+	results := map[string]any{}
+	for name, tc := range map[string]struct {
+		decoded string
+		body    string
+	}{
+		"missing decoded length": {body: valid},
+		"non-integer length":     {decoded: "test", body: valid},
+		"negative length":        {decoded: "-1", body: valid},
+		"mismatched length":      {decoded: "4", body: valid},
+		"truncated chunk":        {decoded: "5", body: "5\r\nhello"},
+		"missing terminal chunk": {decoded: "5", body: "5\r\nhello\r\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPut, "/chunk-errors/"+strings.ReplaceAll(name, " ", "-"), strings.NewReader(tc.body))
+			request.Header.Set("Content-Encoding", "aws-chunked")
+			request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+			if tc.decoded != "" {
+				request.Header.Set("X-Amz-Decoded-Content-Length", tc.decoded)
+			}
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			var fault struct{ Code string }
+			if err := xml.Unmarshal(recorder.Body.Bytes(), &fault); err != nil {
+				t.Fatal(err)
+			}
+			if recorder.Code != http.StatusForbidden || fault.Code != "SignatureDoesNotMatch" {
+				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+			results[name] = map[string]any{"code": fault.Code, "status": recorder.Code}
+		})
+	}
+	golden.AssertJSON(t, results)
+}
+
 func streamingUnsignedV4ARequest(checksum string, signedChunk bool) *http.Request {
 	extension := ""
 	if signedChunk {

@@ -13226,6 +13226,38 @@ var mutants = []mutant{
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestMultipartSSECustomerKey",
 	},
+	{
+		name: "s3-accept-copy-source-customer-encryption-mismatch",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `if str(meta["sseCustomerKeyMD5"]) != provided {`,
+		new:  `if false {`,
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestCopyObjectSSECustomerKeys|TestUploadPartCopySSECustomerKeys",
+	},
+	{
+		name: "s3-skip-copy-source-customer-encryption-validation",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  "validated, err := requestCopySourceSSECustomerKey(req)\n\tif err != nil {",
+		new:  "validated, err := requestCopySourceSSECustomerKey(req)\n\tif false && err != nil {",
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestCopyObjectSSECustomerKeys",
+	},
+	{
+		name: "s3-ignore-copy-source-customer-algorithm",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `requestCondition(req, "CopySourceSSECustomerAlgorithm", "x-amz-copy-source-server-side-encryption-customer-algorithm"),`,
+		new:  `requestCondition(req, "IgnoredCopySourceSSECustomerAlgorithm", "x-amz-copy-source-server-side-encryption-customer-algorithm"),`,
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestCopyObjectSSECustomerKeys",
+	},
+	{
+		name: "s3-skip-copy-source-customer-encryption-check",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `if err := validateCopySourceSSECustomerKey(req, meta); err != nil {`,
+		new:  `if false {`,
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestCopyObjectSSECustomerKeys|TestUploadPartCopySSECustomerKeys",
+	},
 }
 
 func TestMutantsAreKilled(t *testing.T) {

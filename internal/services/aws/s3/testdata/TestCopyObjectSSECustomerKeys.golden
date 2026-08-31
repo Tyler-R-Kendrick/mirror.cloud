@@ -1,0 +1,14 @@
+{
+  "customer": {
+    "algorithm": "AES256",
+    "keyMD5Matches": true
+  },
+  "get": {
+    "body": "secret",
+    "keyMD5Matches": true
+  },
+  "plain": {
+    "algorithm": "AES256",
+    "customerKey": false
+  }
+}

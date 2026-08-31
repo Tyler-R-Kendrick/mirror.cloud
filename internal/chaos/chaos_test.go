@@ -276,6 +276,42 @@ func TestCustomerEncryptionValidationFailurePreservesObject(t *testing.T) {
 	}
 }
 
+func TestCustomerEncryptedCopyValidationFailurePreservesDestination(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != nil {
+			stream = io.NopCloser(bytes.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "copy-sse-c"}, nil)
+	rawKey := []byte("0123456789abcdef0123456789abcdef")
+	digest := md5.Sum(rawKey)
+	key, keyMD5 := base64.StdEncoding.EncodeToString(rawKey), base64.StdEncoding.EncodeToString(digest[:])
+	if _, err := call("PutObject", map[string]any{"Bucket": "copy-sse-c", "Key": "source", "SSECustomerAlgorithm": "AES256", "SSECustomerKey": key, "SSECustomerKeyMD5": keyMD5}, []byte("source")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutObject", map[string]any{"Bucket": "copy-sse-c", "Key": "destination"}, []byte("original")); err != nil {
+		t.Fatal(err)
+	}
+	invalid := map[string]any{"Bucket": "copy-sse-c", "Key": "destination", "CopySource": "copy-sse-c/source", "CopySourceSSECustomerAlgorithm": "AES256", "CopySourceSSECustomerKey": key, "CopySourceSSECustomerKeyMD5": "AAAAAAAAAAAAAAAAAAAAAA=="}
+	if _, err := call("CopyObject", invalid, nil); err == nil {
+		t.Fatal("copy with invalid source key accepted")
+	}
+	got, err := call("GetObject", map[string]any{"Bucket": "copy-sse-c", "Key": "destination"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(got.Stream)
+	_ = got.Stream.Close()
+	if string(body) != "original" {
+		t.Fatalf("failed copy replaced destination with %q", body)
+	}
+}
+
 func TestConcurrentXXHashValidationPreservesObject(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

@@ -1073,3 +1073,61 @@ func FuzzMultipartSSECustomerKey(f *testing.F) {
 		}
 	})
 }
+
+func FuzzCopyObjectSSECustomerKeys(f *testing.F) {
+	f.Add(uint8(0), []byte("source"), []byte("destination"), "body")
+	f.Add(uint8(1), []byte("missing"), []byte("destination"), "reject")
+	f.Add(uint8(2), []byte("mismatch"), []byte("destination"), "reject")
+	f.Add(uint8(3), []byte("plain"), []byte("destination"), "plain")
+	f.Add(uint8(4), []byte("digest-only"), []byte("destination"), "md5")
+	f.Fuzz(func(t *testing.T, kind uint8, sourceSeed, destinationSeed []byte, body string) {
+		if len(sourceSeed) > 4096 || len(destinationSeed) > 4096 || len(body) > 4096 {
+			t.Skip()
+		}
+		sourceKey, destinationKey := sha256.Sum256(sourceSeed), sha256.Sum256(destinationSeed)
+		sourceDigest, destinationDigest := md5.Sum(sourceKey[:]), md5.Sum(destinationKey[:])
+		sourceKey64, sourceMD5 := base64.StdEncoding.EncodeToString(sourceKey[:]), base64.StdEncoding.EncodeToString(sourceDigest[:])
+		destinationKey64, destinationMD5 := base64.StdEncoding.EncodeToString(destinationKey[:]), base64.StdEncoding.EncodeToString(destinationDigest[:])
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "copy-sse-c-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "copy-sse-c-fuzz", "Key": "source", "SSECustomerAlgorithm": "AES256", "SSECustomerKey": sourceKey64, "SSECustomerKeyMD5": sourceMD5}, []byte(body))
+		input := map[string]any{"Bucket": "copy-sse-c-fuzz", "Key": "destination", "CopySource": "copy-sse-c-fuzz/source", "CopySourceSSECustomerAlgorithm": "AES256", "CopySourceSSECustomerKey": sourceKey64, "CopySourceSSECustomerKeyMD5": sourceMD5, "SSECustomerAlgorithm": "AES256", "SSECustomerKey": destinationKey64, "SSECustomerKeyMD5": destinationMD5}
+		mode := kind % 5
+		switch mode {
+		case 1:
+			delete(input, "CopySourceSSECustomerAlgorithm")
+			delete(input, "CopySourceSSECustomerKey")
+			delete(input, "CopySourceSSECustomerKeyMD5")
+		case 2:
+			sourceDigest[0] ^= 0xff
+			input["CopySourceSSECustomerKeyMD5"] = base64.StdEncoding.EncodeToString(sourceDigest[:])
+		case 3:
+			delete(input, "SSECustomerAlgorithm")
+			delete(input, "SSECustomerKey")
+			delete(input, "SSECustomerKeyMD5")
+		case 4:
+			delete(input, "CopySourceSSECustomerAlgorithm")
+			delete(input, "CopySourceSSECustomerKey")
+		}
+		copied, err := invoke(t, p, "CopyObject", input, nil)
+		if mode == 1 || mode == 2 {
+			if fault := asFault(t, err); fault.Code != "InvalidRequest" && fault.Code != "InvalidArgument" {
+				t.Fatalf("copy fault = %+v", fault)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		read := map[string]any{"Bucket": "copy-sse-c-fuzz", "Key": "destination"}
+		if mode != 3 {
+			read["SSECustomerAlgorithm"], read["SSECustomerKey"], read["SSECustomerKeyMD5"] = "AES256", destinationKey64, destinationMD5
+			if copied.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != destinationMD5 {
+				t.Fatalf("copy headers=%v", copied.Headers)
+			}
+		}
+		if got := mustInvoke(t, p, "GetObject", read, nil); string(readStream(t, got)) != body {
+			t.Fatal("copied customer body mismatch")
+		}
+	})
+}

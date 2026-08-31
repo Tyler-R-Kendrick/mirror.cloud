@@ -772,6 +772,94 @@ func TestMultipartSSECustomerKey(t *testing.T) {
 	})
 }
 
+func TestCopyObjectSSECustomerKeys(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "copy-sse-c"}, nil)
+	sourceRaw, destinationRaw := bytes.Repeat([]byte{1}, 32), bytes.Repeat([]byte{2}, 32)
+	sourceDigest, destinationDigest := md5.Sum(sourceRaw), md5.Sum(destinationRaw)
+	sourceKey, sourceMD5 := base64.StdEncoding.EncodeToString(sourceRaw), base64.StdEncoding.EncodeToString(sourceDigest[:])
+	destinationKey, destinationMD5 := base64.StdEncoding.EncodeToString(destinationRaw), base64.StdEncoding.EncodeToString(destinationDigest[:])
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "copy-sse-c", "Key": "source", "SSECustomerAlgorithm": "AES256", "SSECustomerKey": sourceKey, "SSECustomerKeyMD5": sourceMD5}, []byte("secret"))
+	if _, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "copy-sse-c", "Key": "missing-source-key", "CopySource": "copy-sse-c/source"}, nil); asFault(t, err).Code != "InvalidRequest" {
+		t.Fatalf("copy without source SSE-C = %v", err)
+	}
+	source := map[string]any{"CopySourceSSECustomerAlgorithm": "AES256", "CopySourceSSECustomerKey": sourceKey, "CopySourceSSECustomerKeyMD5": sourceMD5}
+	plainInput := maps.Clone(source)
+	plainInput["Bucket"], plainInput["Key"], plainInput["CopySource"] = "copy-sse-c", "plain", "copy-sse-c/source"
+	plain := mustInvoke(t, p, "CopyObject", plainInput, nil)
+	if plain.Headers.Get("x-amz-server-side-encryption") != "AES256" || plain.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != "" {
+		t.Fatalf("plain copy encryption = %v", plain.Headers)
+	}
+	customerInput := maps.Clone(plainInput)
+	customerInput["Key"] = "customer"
+	customerInput["SSECustomerAlgorithm"], customerInput["SSECustomerKey"], customerInput["SSECustomerKeyMD5"] = "AES256", destinationKey, destinationMD5
+	customer := mustInvoke(t, p, "CopyObject", customerInput, nil)
+	if customer.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != destinationMD5 {
+		t.Fatalf("customer copy encryption = %v", customer.Headers)
+	}
+	if _, err := invoke(t, p, "HeadObject", map[string]any{"Bucket": "copy-sse-c", "Key": "customer"}, nil); asFault(t, err).Code != "InvalidRequest" {
+		t.Fatal("customer copy readable without destination key")
+	}
+	get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "copy-sse-c", "Key": "customer", "SSECustomerAlgorithm": "AES256", "SSECustomerKey": destinationKey, "SSECustomerKeyMD5": destinationMD5}, nil)
+	body := string(readStream(t, get))
+	if body != "secret" {
+		t.Fatal("customer copy body mismatch")
+	}
+	invalidSource := maps.Clone(customerInput)
+	invalidSource["Key"], invalidSource["CopySourceSSECustomerKeyMD5"] = "invalid-source-key", "AAAAAAAAAAAAAAAAAAAAAA=="
+	if _, err := invoke(t, p, "CopyObject", invalidSource, nil); asFault(t, err).Code != "InvalidArgument" {
+		t.Fatalf("invalid copy source SSE-C = %v", err)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"plain":    map[string]any{"algorithm": plain.Headers.Get("x-amz-server-side-encryption"), "customerKey": plain.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != ""},
+		"customer": map[string]any{"algorithm": customer.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": customer.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == destinationMD5},
+		"get":      map[string]any{"body": body, "keyMD5Matches": get.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == destinationMD5},
+	})
+}
+
+func TestUploadPartCopySSECustomerKeys(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "part-copy-sse-c"}, nil)
+	sourceRaw, destinationRaw := bytes.Repeat([]byte{3}, 32), bytes.Repeat([]byte{4}, 32)
+	sourceDigest, destinationDigest := md5.Sum(sourceRaw), md5.Sum(destinationRaw)
+	sourceKey, sourceMD5 := base64.StdEncoding.EncodeToString(sourceRaw), base64.StdEncoding.EncodeToString(sourceDigest[:])
+	destinationKey, destinationMD5 := base64.StdEncoding.EncodeToString(destinationRaw), base64.StdEncoding.EncodeToString(destinationDigest[:])
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "part-copy-sse-c", "Key": "source", "SSECustomerAlgorithm": "AES256", "SSECustomerKey": sourceKey, "SSECustomerKeyMD5": sourceMD5}, []byte("copied part"))
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "part-copy-sse-c", "Key": "destination", "SSECustomerAlgorithm": "AES256", "SSECustomerKey": destinationKey, "SSECustomerKeyMD5": destinationMD5}, nil)
+	base := map[string]any{"Bucket": "part-copy-sse-c", "Key": "destination", "UploadId": created.Output["UploadId"], "PartNumber": 1, "CopySource": "part-copy-sse-c/source"}
+	destination := maps.Clone(base)
+	destination["SSECustomerAlgorithm"], destination["SSECustomerKey"], destination["SSECustomerKeyMD5"] = "AES256", destinationKey, destinationMD5
+	if _, err := invoke(t, p, "UploadPartCopy", destination, nil); asFault(t, err).Code != "InvalidRequest" {
+		t.Fatalf("part copy without source SSE-C = %v", err)
+	}
+	source := maps.Clone(base)
+	source["CopySourceSSECustomerAlgorithm"], source["CopySourceSSECustomerKey"], source["CopySourceSSECustomerKeyMD5"] = "AES256", sourceKey, sourceMD5
+	if _, err := invoke(t, p, "UploadPartCopy", source, nil); asFault(t, err).Code != "InvalidRequest" {
+		t.Fatalf("part copy without destination SSE-C = %v", err)
+	}
+	for key, value := range destination {
+		source[key] = value
+	}
+	part := mustInvoke(t, p, "UploadPartCopy", source, nil)
+	if part.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != destinationMD5 {
+		t.Fatalf("part copy encryption = %v", part.Headers)
+	}
+	completed := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(created.Output["UploadId"].(string), completedPart(1, part)), nil)
+	if completed.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != destinationMD5 {
+		t.Fatalf("part copy completion encryption = %v", completed.Headers)
+	}
+	get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "part-copy-sse-c", "Key": "destination", "SSECustomerAlgorithm": "AES256", "SSECustomerKey": destinationKey, "SSECustomerKeyMD5": destinationMD5}, nil)
+	body := string(readStream(t, get))
+	if body != "copied part" {
+		t.Fatal("part copy body mismatch")
+	}
+	golden.AssertJSON(t, map[string]any{
+		"part":     map[string]any{"algorithm": part.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": part.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == destinationMD5},
+		"complete": map[string]any{"algorithm": completed.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": completed.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == destinationMD5},
+		"get":      map[string]any{"body": body, "keyMD5Matches": get.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == destinationMD5},
+	})
+}
+
 func TestCopyObjectTaggingDirective(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

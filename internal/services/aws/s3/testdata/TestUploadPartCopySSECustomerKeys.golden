@@ -1,0 +1,14 @@
+{
+  "complete": {
+    "algorithm": "AES256",
+    "keyMD5Matches": true
+  },
+  "get": {
+    "body": "copied part",
+    "keyMD5Matches": true
+  },
+  "part": {
+    "algorithm": "AES256",
+    "keyMD5Matches": true
+  }
+}

@@ -4335,6 +4335,20 @@ func TestListEncodingTypeValidation(t *testing.T) {
 	}
 }
 
+func TestListEncodingTypeCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-encoding-golden"}, nil)
+	got := map[string]any{}
+	for _, operation := range []string{"ListObjects", "ListObjectsV2", "ListObjectVersions", "ListMultipartUploads"} {
+		for _, value := range []string{"value", ""} {
+			_, err := invoke(t, p, operation, map[string]any{"Bucket": "list-encoding-golden", "EncodingType": value}, nil)
+			fault := asFault(t, err)
+			got[operation+":"+value] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+		}
+	}
+	golden.AssertJSON(t, got)
+}
+
 func TestListObjectsPaginationIncludesCommonPrefixes(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-pagination"}, nil)

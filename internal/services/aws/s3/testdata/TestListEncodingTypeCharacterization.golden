@@ -1,0 +1,74 @@
+{
+  "ListMultipartUploads:": {
+    "code": "InvalidArgument",
+    "fields": {
+      "ArgumentName": "encoding-type",
+      "ArgumentValue": ""
+    },
+    "message": "Invalid Encoding Method specified in Request",
+    "status": 400
+  },
+  "ListMultipartUploads:value": {
+    "code": "InvalidArgument",
+    "fields": {
+      "ArgumentName": "encoding-type",
+      "ArgumentValue": "value"
+    },
+    "message": "Invalid Encoding Method specified in Request",
+    "status": 400
+  },
+  "ListObjectVersions:": {
+    "code": "InvalidArgument",
+    "fields": {
+      "ArgumentName": "encoding-type",
+      "ArgumentValue": ""
+    },
+    "message": "Invalid Encoding Method specified in Request",
+    "status": 400
+  },
+  "ListObjectVersions:value": {
+    "code": "InvalidArgument",
+    "fields": {
+      "ArgumentName": "encoding-type",
+      "ArgumentValue": "value"
+    },
+    "message": "Invalid Encoding Method specified in Request",
+    "status": 400
+  },
+  "ListObjects:": {
+    "code": "InvalidArgument",
+    "fields": {
+      "ArgumentName": "encoding-type",
+      "ArgumentValue": ""
+    },
+    "message": "Invalid Encoding Method specified in Request",
+    "status": 400
+  },
+  "ListObjects:value": {
+    "code": "InvalidArgument",
+    "fields": {
+      "ArgumentName": "encoding-type",
+      "ArgumentValue": "value"
+    },
+    "message": "Invalid Encoding Method specified in Request",
+    "status": 400
+  },
+  "ListObjectsV2:": {
+    "code": "InvalidArgument",
+    "fields": {
+      "ArgumentName": "encoding-type",
+      "ArgumentValue": ""
+    },
+    "message": "Invalid Encoding Method specified in Request",
+    "status": 400
+  },
+  "ListObjectsV2:value": {
+    "code": "InvalidArgument",
+    "fields": {
+      "ArgumentName": "encoding-type",
+      "ArgumentValue": "value"
+    },
+    "message": "Invalid Encoding Method specified in Request",
+    "status": 400
+  }
+}

@@ -664,16 +664,26 @@ func TestTwoAccountsNeverSeeEachOtherUnderLoad(t *testing.T) {
 	}
 }
 
-func TestBlobFailureSurfaces(t *testing.T) {
+func TestEncryptedBlobFailureLeavesNoObjectAndRecovers(t *testing.T) {
 	deps := spitest.Deps(t)
-	deps.Blobs = failBlobs{BlobStore: deps.Blobs, fail: true}
+	blobs := &failBlobs{BlobStore: deps.Blobs, fail: true}
+	deps.Blobs = blobs
 	p := s3.New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "bucket"}})
-	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "bucket", "Key": "k"}, Body: io.NopCloser(bytes.NewReader([]byte("x")))})
+	input := map[string]any{"Bucket": "bucket", "Key": "k", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": "arn:aws:kms:us-east-1:000000000000:key/chaos", "BucketKeyEnabled": true}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: input, Body: io.NopCloser(bytes.NewReader([]byte("x")))})
 	if err == nil {
 		t.Fatal("expected injected failure")
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "HeadObject", Input: map[string]any{"Bucket": "bucket", "Key": "k"}}); err == nil {
+		t.Fatal("failed encrypted write left object metadata")
+	}
+	blobs.fail = false
+	put, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: input, Body: io.NopCloser(bytes.NewReader([]byte("x")))})
+	if err != nil || put.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || put.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+		t.Fatalf("recovery put: %#v %v", put, err)
 	}
 }
 

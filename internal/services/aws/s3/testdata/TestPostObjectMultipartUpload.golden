@@ -5,6 +5,9 @@
     ],
     "Location": [
       "http://s3.test/post-object/uploads/hello%20world.txt"
+    ],
+    "X-Amz-Server-Side-Encryption": [
+      "AES256"
     ]
   },
   "output": {

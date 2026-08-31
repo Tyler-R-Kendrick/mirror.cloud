@@ -53,11 +53,11 @@ func TestBootedServerS3BucketConfigsRoundTrip(t *testing.T) {
 	if code, b := do(http.MethodGet, "/cfgb?encryption", ""); code != 404 || !bytes.Contains(b, []byte("ServerSideEncryptionConfigurationNotFoundError")) && !bytes.Contains(b, []byte("encryption")) {
 		t.Fatalf("missing encryption want 404, %d %s", code, b)
 	}
-	enc := `<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>`
+	enc := `<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>arn:aws:kms:us-east-1:000000000000:key/contract</KMSMasterKeyID></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`
 	if code, b := do(http.MethodPut, "/cfgb?encryption", enc); code >= 300 {
 		t.Fatalf("put enc %d %s", code, b)
 	}
-	if code, b := do(http.MethodGet, "/cfgb?encryption", ""); code != 200 || !bytes.Contains(b, []byte("AES256")) && !bytes.Contains(b, []byte("Document")) && !bytes.Contains(b, []byte("_body")) {
+	if code, b := do(http.MethodGet, "/cfgb?encryption", ""); code != 200 || !bytes.Contains(b, []byte("aws:kms")) && !bytes.Contains(b, []byte("Document")) && !bytes.Contains(b, []byte("_body")) {
 		t.Fatalf("get enc %d %s", code, b)
 	}
 	pol := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:*","Resource":"*"}]}`
@@ -85,6 +85,16 @@ func TestBootedServerS3BucketConfigsRoundTrip(t *testing.T) {
 	}
 	if code, b := do(http.MethodPut, "/cfgb/k", "body"); code >= 300 {
 		t.Fatalf("put obj %d %s", code, b)
+	}
+	head, _ := http.NewRequest(http.MethodHead, ts.URL+"/cfgb/k", nil)
+	head.Header.Set("Authorization", auth)
+	res, err := http.DefaultClient.Do(head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-server-side-encryption") != "aws:kms" || res.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != "arn:aws:kms:us-east-1:000000000000:key/contract" || res.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+		t.Fatalf("object encryption contract %d %v", res.StatusCode, res.Header)
 	}
 	if code, b := do(http.MethodGet, "/cfgb/k?attributes", ""); code != 200 || !bytes.Contains(b, []byte("ETag")) && !bytes.Contains(b, []byte("ObjectSize")) && !bytes.Contains(b, []byte("etag")) {
 		t.Fatalf("attrs %d %s", code, b)

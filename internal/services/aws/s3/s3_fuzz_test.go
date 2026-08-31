@@ -876,3 +876,44 @@ func FuzzPostObjectChecksums(f *testing.F) {
 		}
 	})
 }
+
+func FuzzObjectServerSideEncryption(f *testing.F) {
+	f.Add(uint8(0), false, "body")
+	f.Add(uint8(1), true, "kms")
+	f.Add(uint8(2), false, "dsse")
+	f.Add(uint8(3), true, "invalid")
+	f.Fuzz(func(t *testing.T, algorithmIndex uint8, bucketKey bool, body string) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		algorithms := []string{"AES256", "aws:kms", "aws:kms:dsse", "invalid"}
+		algorithm := algorithms[int(algorithmIndex)%len(algorithms)]
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "encryption-fuzz"}, nil)
+		input := map[string]any{"Bucket": "encryption-fuzz", "Key": "object", "ServerSideEncryption": algorithm, "BucketKeyEnabled": bucketKey}
+		keyID := "arn:aws:kms:us-east-1:123456789012:key/fuzz"
+		if algorithm == "aws:kms" {
+			input["SSEKMSKeyId"] = keyID
+		}
+		response, err := invoke(t, p, "PutObject", input, []byte(body))
+		if algorithm == "invalid" {
+			if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+				t.Fatalf("fault = %+v", fault)
+			}
+			if _, getErr := invoke(t, p, "GetObject", map[string]any{"Bucket": "encryption-fuzz", "Key": "object"}, nil); asFault(t, getErr).Code != "NoSuchKey" {
+				t.Fatal("invalid encryption stored object")
+			}
+			return
+		}
+		if err != nil || response.Headers.Get("x-amz-server-side-encryption") != algorithm {
+			t.Fatalf("put %v headers=%v", err, response.Headers)
+		}
+		get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "encryption-fuzz", "Key": "object"}, nil)
+		if get.Headers.Get("x-amz-server-side-encryption") != algorithm || string(readStream(t, get)) != body {
+			t.Fatalf("stored encryption headers=%v", get.Headers)
+		}
+		if algorithm == "aws:kms" && (get.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || bucketKey && get.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true") {
+			t.Fatalf("stored kms headers=%v", get.Headers)
+		}
+	})
+}

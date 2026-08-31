@@ -836,6 +836,10 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	}
 	objectMetadata := requestObjectMetadata(req)
 	websiteRedirectLocation := requestCondition(req, "WebsiteRedirectLocation", "x-amz-website-redirect-location")
+	serverSideEncryption, sseKMSKeyID, bucketKeyEnabled, err := p.objectEncryption(ctx, req, b)
+	if err != nil {
+		return nil, err
+	}
 	var body []byte
 	if req.Body != nil {
 		body, _ = io.ReadAll(req.Body)
@@ -869,7 +873,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		current, _ := p.objectMetadata(ctx, req, b, key, "")
 		versionOrder = append(p.objectVersionOrder(ctx, req, b, key, current), vid)
 		_, _ = p.deps.Blobs.Put(ctx, blobKey(req, b, key)+"@"+vid, bytes.NewReader(body))
-		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "versionOrder": versionOrder, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation}
+		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "versionOrder": versionOrder, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation, "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled}
 		if len(parts) > 0 {
 			versionMeta["parts"] = parts
 		}
@@ -880,7 +884,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		vm, _ := json.Marshal(versionMeta)
 		_ = p.col(req, "versions").Put(ctx, b+"/"+key+"/"+vid, vm)
 	}
-	metaDoc := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "versionId": vid, "deleteMarker": false, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation}
+	metaDoc := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "versionId": vid, "deleteMarker": false, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation, "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled}
 	if versioned {
 		metaDoc["versionOrder"] = versionOrder
 	}
@@ -920,6 +924,13 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	}
 	if len(provided) > 0 {
 		h.Set("x-amz-checksum-type", checksumType)
+	}
+	h.Set("x-amz-server-side-encryption", serverSideEncryption)
+	if serverSideEncryption == "aws:kms" {
+		h.Set("x-amz-server-side-encryption-aws-kms-key-id", sseKMSKeyID)
+		if bucketKeyEnabled {
+			h.Set("x-amz-server-side-encryption-bucket-key-enabled", "true")
+		}
 	}
 	if status := p.replicateObject(ctx, req, b, key, body, metaDoc, tags); status != "" {
 		metaDoc["replicationStatus"] = status
@@ -1011,6 +1022,17 @@ func (p *Pack) postObject(ctx context.Context, req *spi.Request) (*spi.Response,
 			return nil, &spi.Fault{Code: "InvalidRequest", Message: "Value for " + checksum.header + " header is invalid.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
 		input["ChecksumAlgorithm"], input[checksum.input] = algorithm, value
+	}
+	for form, member := range map[string]string{
+		"x-amz-server-side-encryption":                "ServerSideEncryption",
+		"x-amz-server-side-encryption-aws-kms-key-id": "SSEKMSKeyId",
+	} {
+		if value := fields[form]; value != "" {
+			input[member] = value
+		}
+	}
+	if value, ok := fields["x-amz-server-side-encryption-bucket-key-enabled"]; ok {
+		input["BucketKeyEnabled"] = truthy(value)
 	}
 	for form, member := range map[string]string{
 		"Cache-Control":                   "CacheControl",
@@ -1268,12 +1290,7 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if count := len(p.storedTags(ctx, req, b, key, wantVer)); count > 0 {
 		h.Set("x-amz-tagging-count", strconv.Itoa(count))
 	}
-	if encryption := str(meta["serverSideEncryption"]); encryption != "" {
-		h.Set("x-amz-server-side-encryption", encryption)
-	}
-	if keyID := str(meta["ssekmsKeyId"]); keyID != "" {
-		h.Set("x-amz-server-side-encryption-aws-kms-key-id", keyID)
-	}
+	setObjectEncryptionHeaders(h, meta)
 	if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
 		setChecksumHeaders(h, meta)
 	}
@@ -1347,6 +1364,7 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	h.Set("ETag", objectETag(meta, info.MD5))
 	h.Set("Accept-Ranges", "bytes")
 	setObjectMetadataHeaders(h, meta)
+	setObjectEncryptionHeaders(h, meta)
 	if restore, ok := p.restoreState(ctx, req, b, key, meta); ok {
 		h.Set("x-amz-restore", restore)
 	}
@@ -2708,6 +2726,62 @@ func requestObjectMetadata(req *spi.Request) map[string]any {
 	return metadata
 }
 
+func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket string) (string, string, bool, error) {
+	algorithm := requestCondition(req, "ServerSideEncryption", "x-amz-server-side-encryption")
+	keyID := requestCondition(req, "SSEKMSKeyId", "x-amz-server-side-encryption-aws-kms-key-id")
+	bucketKey := truthy(req.Input["BucketKeyEnabled"])
+	defaultAlgorithm, defaultKeyID := "", ""
+	defaultBucketKey := false
+	raw, ok, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/encryption")
+	if ok {
+		var document map[string]any
+		_ = json.Unmarshal(raw, &document)
+		configuration := asMap(document["ServerSideEncryptionConfiguration"])
+		if len(configuration) == 0 {
+			configuration = document
+		}
+		if rules := asSlice(configuration["Rules"]); len(rules) > 0 {
+			rule := asMap(rules[0])
+			defaults := asMap(rule["ApplyServerSideEncryptionByDefault"])
+			defaultAlgorithm = str(defaults["SSEAlgorithm"])
+			defaultKeyID = str(defaults["KMSMasterKeyID"])
+			defaultBucketKey = truthy(rule["BucketKeyEnabled"])
+		} else if encoded := str(document["Document"]); encoded != "" {
+			var parsed struct {
+				Rules []struct {
+					Defaults struct {
+						Algorithm string `xml:"SSEAlgorithm"`
+						KeyID     string `xml:"KMSMasterKeyID"`
+					} `xml:"ApplyServerSideEncryptionByDefault"`
+					BucketKey bool `xml:"BucketKeyEnabled"`
+				} `xml:"Rule"`
+			}
+			if xml.Unmarshal([]byte(encoded), &parsed) == nil && len(parsed.Rules) > 0 {
+				defaultAlgorithm = parsed.Rules[0].Defaults.Algorithm
+				defaultKeyID = parsed.Rules[0].Defaults.KeyID
+				defaultBucketKey = parsed.Rules[0].BucketKey
+			}
+		}
+	}
+	if algorithm == "" {
+		algorithm = defaultAlgorithm
+		if algorithm == "" {
+			algorithm = "AES256"
+		}
+	}
+	bucketKey = bucketKey || defaultBucketKey
+	if algorithm != "AES256" && algorithm != "aws:kms" && algorithm != "aws:kms:dsse" {
+		return "", "", false, &spi.Fault{Code: "InvalidArgument", Message: "The encryption method specified is not supported", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if algorithm == "aws:kms" && keyID == "" {
+		keyID = defaultKeyID
+		if keyID == "" {
+			keyID = fmt.Sprintf("arn:aws:kms:%s:%s:key/aws-managed-s3", req.Identity.Region, req.Identity.Account)
+		}
+	}
+	return algorithm, keyID, bucketKey, nil
+}
+
 func setObjectMetadataHeaders(headers http.Header, meta map[string]any) {
 	metadata := asMap(meta["objectMetadata"])
 	for _, field := range []struct{ key, header string }{
@@ -2727,6 +2801,23 @@ func setObjectMetadataHeaders(headers http.Header, meta map[string]any) {
 	}
 	if redirect := str(meta["websiteRedirectLocation"]); redirect != "" {
 		headers.Set("x-amz-website-redirect-location", redirect)
+	}
+}
+
+func setObjectEncryptionHeaders(headers http.Header, meta map[string]any) {
+	encryption := str(meta["serverSideEncryption"])
+	if encryption == "" {
+		return
+	}
+	headers.Set("x-amz-server-side-encryption", encryption)
+	if encryption != "aws:kms" {
+		return
+	}
+	if keyID := str(meta["ssekmsKeyId"]); keyID != "" {
+		headers.Set("x-amz-server-side-encryption-aws-kms-key-id", keyID)
+	}
+	if truthy(meta["bucketKeyEnabled"]) {
+		headers.Set("x-amz-server-side-encryption-bucket-key-enabled", "true")
 	}
 }
 

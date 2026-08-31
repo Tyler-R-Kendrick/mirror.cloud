@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -80,6 +81,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var awsTrailers http.Header
 	var awsDecodedLength int64
 	awsChunkedDecoded := false
+	awsChunkedInvalid := false
 	if r.Method == http.MethodOptions {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "*")
@@ -102,22 +104,36 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if enc := r.Header.Get("Content-Encoding"); strings.Contains(strings.ToLower(enc), "aws-chunked") || r.Header.Get("X-Amz-Decoded-Content-Length") != "" {
 		raw, err := io.ReadAll(r.Body)
 		_ = r.Body.Close()
-		if err == nil {
+		decodedLength, lengthErr := strconv.ParseInt(r.Header.Get("X-Amz-Decoded-Content-Length"), 10, 64)
+		if err == nil && lengthErr == nil && decodedLength >= 0 {
 			body := raw
 			if deframed, chunks, signatures, trailers, err2 := parseAWSChunked(bytes.NewReader(raw)); err2 == nil {
-				body = deframed
-				awsChunks = chunks
-				awsChunkSignatures = signatures
-				awsTrailers = trailers
-				awsDecodedLength = int64(len(body))
-				awsChunkedDecoded = true
+				if int64(len(deframed)) == decodedLength {
+					body = deframed
+					awsChunks = chunks
+					awsChunkSignatures = signatures
+					awsTrailers = trailers
+					awsDecodedLength = int64(len(body))
+					awsChunkedDecoded = true
+				} else {
+					awsChunkedInvalid = true
+				}
+			} else {
+				awsChunkedInvalid = true
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
+		} else {
+			awsChunkedInvalid = true
+			r.Body = io.NopCloser(bytes.NewReader(raw))
 		}
 	}
 
 	svc := s.demux(r)
 	w.Header().Set("x-mirror-request-id", rid)
+	if svc != nil && svc.ID == "aws.s3" && awsChunkedInvalid {
+		s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, &spi.Fault{Code: "SignatureDoesNotMatch", Message: "The request signature we calculated does not match the signature you provided.", HTTPStatus: http.StatusForbidden, Fault: "client"}, rid)
+		return
+	}
 	if svc != nil && svc.ID == "aws.s3" {
 		w.Header().Set("x-amz-request-id", rid)
 		w.Header().Set("x-amz-id-2", "mirror-"+rid)

@@ -28,8 +28,6 @@ func VerifyS3V4A(r *http.Request, accessKey, secret, region string) *spi.Fault {
 		if containsString(strings.Split(signedHeaders, ";"), "x-amz-region-set") {
 			return signatureFault()
 		}
-	} else if !containsString(strings.Split(signedHeaders, ";"), "x-amz-region-set") {
-		return signatureFault()
 	}
 	names := strings.Split(signedHeaders, ";")
 	canonicalHeaders, ok := signedHeaderValues(r, names)

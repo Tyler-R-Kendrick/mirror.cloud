@@ -1,0 +1,549 @@
+{
+  "schema": "trace/1",
+  "service": "aws.dms",
+  "source": "internal/services/aws/dms",
+  "note": "Creates work; start, stop and every delete address an ARN the pack never read.",
+  "steps": [
+    {
+      "operation": "DescribeReplicationInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationInstances": null
+      }
+    },
+    {
+      "operation": "CreateReplicationInstance",
+      "input": {
+        "AllocatedStorage": 50,
+        "MultiAZ": false,
+        "PubliclyAccessible": true,
+        "ReplicationInstanceClass": "dms.t3.micro",
+        "ReplicationInstanceIdentifier": "worker"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationInstance": {
+          "ReplicationInstanceArn": "arn:aws:dms:us-east-1:000000000000:rep:worker",
+          "ReplicationInstanceClass": "dms.t3.micro",
+          "ReplicationInstanceIdentifier": "worker",
+          "ReplicationInstanceStatus": "available"
+        }
+      }
+    },
+    {
+      "operation": "DescribeReplicationInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationInstances": [
+          {
+            "ReplicationInstanceArn": "arn:aws:dms:us-east-1:000000000000:rep:worker",
+            "ReplicationInstanceClass": "dms.t3.micro",
+            "ReplicationInstanceIdentifier": "worker",
+            "ReplicationInstanceStatus": "available"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateEndpoint",
+      "input": {
+        "DatabaseName": "app",
+        "EndpointIdentifier": "src",
+        "EndpointType": "source",
+        "EngineName": "mysql",
+        "Password": "hunter2hunter2",
+        "Port": 3306,
+        "ServerName": "db.internal",
+        "Username": "reader"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Endpoint": {
+          "EndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:src",
+          "EndpointIdentifier": "src",
+          "EngineName": "mysql",
+          "Status": "active"
+        }
+      }
+    },
+    {
+      "operation": "CreateEndpoint",
+      "input": {
+        "EndpointIdentifier": "dst",
+        "EndpointType": "target",
+        "EngineName": "postgres",
+        "Port": 5432,
+        "ServerName": "warehouse.internal"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Endpoint": {
+          "EndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:dst",
+          "EndpointIdentifier": "dst",
+          "EngineName": "postgres",
+          "Status": "active"
+        }
+      }
+    },
+    {
+      "operation": "DescribeEndpoints",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Endpoints": [
+          {
+            "EndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:dst",
+            "EndpointIdentifier": "dst",
+            "EngineName": "postgres",
+            "Status": "active"
+          },
+          {
+            "EndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:src",
+            "EndpointIdentifier": "src",
+            "EngineName": "mysql",
+            "Status": "active"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeEndpoints",
+      "input": {
+        "Filters": [
+          {
+            "Name": "endpoint-type",
+            "Values": [
+              "source"
+            ]
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Endpoints": [
+          {
+            "EndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:dst",
+            "EndpointIdentifier": "dst",
+            "EngineName": "postgres",
+            "Status": "active"
+          },
+          {
+            "EndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:src",
+            "EndpointIdentifier": "src",
+            "EngineName": "mysql",
+            "Status": "active"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateReplicationTask",
+      "input": {
+        "MigrationType": "full-load",
+        "ReplicationInstanceArn": {
+          "$fromPath": "ReplicationInstance.ReplicationInstanceArn",
+          "$fromStep": 1
+        },
+        "ReplicationTaskIdentifier": "migrate",
+        "SourceEndpointArn": {
+          "$fromPath": "Endpoint.EndpointArn",
+          "$fromStep": 3
+        },
+        "TableMappings": "{\"rules\":[]}",
+        "TargetEndpointArn": {
+          "$fromPath": "Endpoint.EndpointArn",
+          "$fromStep": 4
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationTask": {
+          "MigrationType": "full-load",
+          "ReplicationTaskArn": "arn:aws:dms:us-east-1:000000000000:task:migrate",
+          "ReplicationTaskIdentifier": "migrate",
+          "SourceEndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:src",
+          "Status": "ready",
+          "TargetEndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:dst"
+        }
+      }
+    },
+    {
+      "operation": "DescribeReplicationTasks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationTasks": [
+          {
+            "MigrationType": "full-load",
+            "ReplicationTaskArn": "arn:aws:dms:us-east-1:000000000000:task:migrate",
+            "ReplicationTaskIdentifier": "migrate",
+            "SourceEndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:src",
+            "Status": "ready",
+            "TargetEndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:dst"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StartReplicationTask",
+      "input": {
+        "ReplicationTaskArn": {
+          "$fromPath": "ReplicationTask.ReplicationTaskArn",
+          "$fromStep": 7
+        },
+        "StartReplicationTaskType": "start-replication"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationTask": {
+          "ReplicationTaskIdentifier": "",
+          "Status": "running"
+        }
+      }
+    },
+    {
+      "operation": "DescribeReplicationTasks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationTasks": [
+          {
+            "ReplicationTaskIdentifier": "",
+            "Status": "running"
+          },
+          {
+            "MigrationType": "full-load",
+            "ReplicationTaskArn": "arn:aws:dms:us-east-1:000000000000:task:migrate",
+            "ReplicationTaskIdentifier": "migrate",
+            "SourceEndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:src",
+            "Status": "ready",
+            "TargetEndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:dst"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StopReplicationTask",
+      "input": {
+        "ReplicationTaskArn": {
+          "$fromPath": "ReplicationTask.ReplicationTaskArn",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationTask": {
+          "ReplicationTaskIdentifier": "",
+          "Status": "stopped"
+        }
+      }
+    },
+    {
+      "operation": "DescribeReplicationTasks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationTasks": [
+          {
+            "ReplicationTaskIdentifier": "",
+            "Status": "stopped"
+          },
+          {
+            "MigrationType": "full-load",
+            "ReplicationTaskArn": "arn:aws:dms:us-east-1:000000000000:task:migrate",
+            "ReplicationTaskIdentifier": "migrate",
+            "SourceEndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:src",
+            "Status": "ready",
+            "TargetEndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:dst"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StartReplicationTask",
+      "input": {
+        "ReplicationTaskArn": "arn:aws:dms:us-east-1:000000000000:task:never-created",
+        "StartReplicationTaskType": "reload-target"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationTask": {
+          "ReplicationTaskIdentifier": "",
+          "Status": "running"
+        }
+      }
+    },
+    {
+      "operation": "DescribeReplicationTasks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationTasks": [
+          {
+            "ReplicationTaskIdentifier": "",
+            "Status": "running"
+          },
+          {
+            "MigrationType": "full-load",
+            "ReplicationTaskArn": "arn:aws:dms:us-east-1:000000000000:task:migrate",
+            "ReplicationTaskIdentifier": "migrate",
+            "SourceEndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:src",
+            "Status": "ready",
+            "TargetEndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:dst"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteReplicationTask",
+      "input": {
+        "ReplicationTaskArn": {
+          "$fromPath": "ReplicationTask.ReplicationTaskArn",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationTask": {
+          "ReplicationTaskIdentifier": "",
+          "Status": "deleting"
+        }
+      }
+    },
+    {
+      "operation": "DescribeReplicationTasks",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationTasks": [
+          {
+            "MigrationType": "full-load",
+            "ReplicationTaskArn": "arn:aws:dms:us-east-1:000000000000:task:migrate",
+            "ReplicationTaskIdentifier": "migrate",
+            "SourceEndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:src",
+            "Status": "ready",
+            "TargetEndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:dst"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteReplicationTask",
+      "input": {
+        "ReplicationTaskArn": {
+          "$fromPath": "ReplicationTask.ReplicationTaskArn",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationTask": {
+          "ReplicationTaskIdentifier": "",
+          "Status": "deleting"
+        }
+      }
+    },
+    {
+      "operation": "DeleteEndpoint",
+      "input": {
+        "EndpointArn": {
+          "$fromPath": "Endpoint.EndpointArn",
+          "$fromStep": 3
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Endpoint": {
+          "EndpointIdentifier": "",
+          "Status": "deleting"
+        }
+      }
+    },
+    {
+      "operation": "DescribeEndpoints",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Endpoints": [
+          {
+            "EndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:dst",
+            "EndpointIdentifier": "dst",
+            "EngineName": "postgres",
+            "Status": "active"
+          },
+          {
+            "EndpointArn": "arn:aws:dms:us-east-1:000000000000:endpoint:src",
+            "EndpointIdentifier": "src",
+            "EngineName": "mysql",
+            "Status": "active"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteReplicationInstance",
+      "input": {
+        "ReplicationInstanceArn": {
+          "$fromPath": "ReplicationInstance.ReplicationInstanceArn",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationInstance": {
+          "ReplicationInstanceIdentifier": "",
+          "ReplicationInstanceStatus": "deleting"
+        }
+      }
+    },
+    {
+      "operation": "DescribeReplicationInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ReplicationInstances": [
+          {
+            "ReplicationInstanceArn": "arn:aws:dms:us-east-1:000000000000:rep:worker",
+            "ReplicationInstanceClass": "dms.t3.micro",
+            "ReplicationInstanceIdentifier": "worker",
+            "ReplicationInstanceStatus": "available"
+          }
+        ]
+      }
+    }
+  ]
+}

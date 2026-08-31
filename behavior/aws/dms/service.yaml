@@ -1,0 +1,221 @@
+schema: bir/1
+service: aws.dms
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing migrates: no source is read, no target is written, and a
+# replication task that says running has moved no rows.
+provenance: authored
+
+resources:
+  instance:
+    collection: dmsri
+    arn: "arn:aws:dms:{region}:{account}:rep:{id}"
+    id:
+      input_members: [ReplicationInstanceIdentifier]
+    record:
+      ReplicationInstanceIdentifier: id
+      ReplicationInstanceArn: arn
+
+  # Named dmsendpoint rather than endpoint: `endpoint` is the base URL the
+  # caller reached, bound for every expression, and a resource may not shadow
+  # it.
+  dmsendpoint:
+    collection: dmsep
+    arn: "arn:aws:dms:{region}:{account}:endpoint:{id}"
+    id:
+      input_members: [EndpointIdentifier]
+    record:
+      EndpointIdentifier: id
+      EndpointArn: arn
+
+  # A task's ARN is built by its create rather than declared here, and it is
+  # the one resource that needs to be: start and stop write a task record
+  # partially, and a resource-level member is re-derived on every write, so an
+  # ARN declared here would be minted onto the empty-keyed record those two
+  # produce. The pack set the ARN only on create. `arn` is bound only inside a
+  # resource record, so the create spells the template out.
+  task:
+    collection: dmstk
+    id:
+      input_members: [ReplicationTaskIdentifier]
+    record:
+      ReplicationTaskIdentifier: id
+
+operations:
+  CreateReplicationInstance:
+    effects:
+      - create:
+          resource: instance
+          record:
+            ReplicationInstanceStatus: "'available'"
+            ReplicationInstanceClass: >
+              'ReplicationInstanceClass' in input
+                ? string(input.ReplicationInstanceClass) : ''
+    output:
+      ReplicationInstance: rec
+
+  DescribeReplicationInstances:
+    list: { resource: instance, member: ReplicationInstances, paginate: model }
+
+
+  # Answers a two-member instance built from the request rather than from the
+  # record it removed, so the answer is the same whether or not one existed.
+  DeleteReplicationInstance:
+    effects:
+      - delete: { resource: instance, missing: ignore }
+    output:
+      ReplicationInstance: >
+        {
+          'ReplicationInstanceIdentifier':
+            'ReplicationInstanceIdentifier' in input ? string(input.ReplicationInstanceIdentifier) : '',
+          'ReplicationInstanceStatus': 'deleting'
+        }
+
+  CreateEndpoint:
+    effects:
+      - create:
+          resource: dmsendpoint
+          record:
+            Status: "'active'"
+            EngineName: "'EngineName' in input ? string(input.EngineName) : ''"
+    output:
+      Endpoint: rec
+
+  DescribeEndpoints:
+    list: { resource: dmsendpoint, member: Endpoints, paginate: model }
+
+
+  DeleteEndpoint:
+    effects:
+      - delete: { resource: dmsendpoint, missing: ignore }
+    output:
+      Endpoint: >
+        {
+          'EndpointIdentifier': 'EndpointIdentifier' in input ? string(input.EndpointIdentifier) : '',
+          'Status': 'deleting'
+        }
+
+  CreateReplicationTask:
+    effects:
+      - create:
+          resource: task
+          record:
+            ReplicationTaskArn: >
+              'arn:aws:dms:' + identity.region + ':' + identity.account
+                + ':task:' + string(input.ReplicationTaskIdentifier)
+            Status: "'ready'"
+            MigrationType: >
+              'MigrationType' in input ? string(input.MigrationType) : ''
+            SourceEndpointArn: >
+              'SourceEndpointArn' in input ? string(input.SourceEndpointArn) : ''
+            TargetEndpointArn: >
+              'TargetEndpointArn' in input ? string(input.TargetEndpointArn) : ''
+    output:
+      ReplicationTask: rec
+
+  DescribeReplicationTasks:
+    list: { resource: task, member: ReplicationTasks, paginate: model }
+
+
+  # Start and stop write whether or not the task exists, creating a bare record
+  # when it does not, and answer the record they wrote.
+  StartReplicationTask:
+    effects:
+      - put:
+          resource: task
+          record:
+            Status: "'running'"
+    output:
+      ReplicationTask: rec
+
+  StopReplicationTask:
+    effects:
+      - put:
+          resource: task
+          record:
+            Status: "'stopped'"
+    output:
+      ReplicationTask: rec
+
+  DeleteReplicationTask:
+    effects:
+      - delete: { resource: task, missing: ignore }
+    output:
+      ReplicationTask: >
+        {
+          'ReplicationTaskIdentifier': 'ReplicationTaskIdentifier' in input ? string(input.ReplicationTaskIdentifier) : '',
+          'Status': 'deleting'
+        }
+
+quirks:
+  - operation: StartReplicationTask
+    note: >
+      This service cannot start, stop or delete anything.
+
+      StartReplicationTask, StopReplicationTask, DeleteReplicationTask,
+      DeleteEndpoint and DeleteReplicationInstance each address their subject
+      by ARN -- ReplicationTaskArn, EndpointArn, ReplicationInstanceArn -- and
+      those are the only members any of the five declares. The pack looked for
+      an identifier instead: ReplicationTaskIdentifier,
+      EndpointIdentifier, ReplicationInstanceIdentifier, none of which appears
+      in any of those five requests. So an SDK call to start a task resolves no
+      key at all, and the write lands on the empty one: a single phantom record
+      shared by every start and stop in the account and region, which
+      DescribeReplicationTasks then lists as a task with no identifier, no
+      endpoints and no migration type. The task the caller named keeps saying
+      ready. The three deletes remove that same phantom, so nothing a caller
+      created is ever deleted.
+
+      Every one of those calls succeeds, and each answers a body built from the
+      request rather than from the store, so the answer looks right: a start
+      reports running, a delete reports deleting. Only a describe afterwards
+      shows that nothing moved. That is the failure this transcription exists
+      to record -- a test that starts a task and asserts the call succeeded
+      passes, and one that asserts the task is running does not.
+
+      It is transcribed rather than corrected, because the recording is what
+      the pack did. Nothing else about a start would work either: no source is
+      read, no target is written, no CDC stream is opened, and the
+      ReplicationTaskStats that would report rows copied is declared and never
+      set, so even a start that found its task would migrate nothing.
+  - operation: DescribeReplicationTasks
+    note: >
+      None of the three describes takes an identifier: DescribeEndpoints,
+      DescribeReplicationInstances and DescribeReplicationTasks declare only
+      Filters, Marker and MaxRecords. The pack looked for an identifier on each
+      and always found none, so all three always listed everything -- the
+      bundle says that outright rather than carrying a narrowing expression
+      that can never fire.
+
+      The Filters those operations are built around -- by ARN, by endpoint
+      type, by engine -- are ignored, so a caller filtering for source
+      endpoints gets targets too, and none of the three paginates.
+  - operation: CreateReplicationTask
+    note: >
+      A task is ready immediately. Its SourceEndpointArn, TargetEndpointArn and
+      ReplicationInstanceArn are stored as given and none is resolved: they may
+      name endpoints and instances that were never created, and they survive
+      those being deleted -- though since nothing can be deleted, that is
+      academic. The TableMappings that decide what is migrated are dropped
+      entirely, along with ReplicationTaskSettings, CdcStartTime and TaskData,
+      so two tasks with different mappings are indistinguishable.
+
+      The creates are the three operations that do work, because each one does
+      declare the identifier the pack keys on. Creating over an existing
+      identifier replaces the record rather than faulting with
+      ResourceAlreadyExistsFault.
+  - operation: CreateEndpoint
+    note: >
+      An endpoint is active on creation and is never connected to: ServerName,
+      Port, Username, Password, DatabaseName and every engine-specific settings
+      block are dropped, so an endpoint describes no database. TestConnection
+      is not served, which is consistent -- there is nothing it could test --
+      but it means the one operation that would reveal an endpoint is empty is
+      also the one that is missing.
+
+      EngineName is stored without being validated against anything, so an
+      endpoint can declare an engine that does not exist, and EndpointType --
+      whether this is a source or a target -- is dropped, so an endpoint is
+      neither. The ARN is built from the identifier the caller chose, so it is
+      predictable rather than issued; that is what lets a task reference an
+      endpoint at all, since nothing resolves those references.

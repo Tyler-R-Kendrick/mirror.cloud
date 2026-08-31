@@ -812,6 +812,37 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.DeleteBucket(context.Background(), &s3.DeleteBucketInput{Bucket: aws.String("sdk-list-pagination")}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-version-list")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String("sdk-version-list"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusEnabled}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"folder/a/one", "folder/file1", "folder/file2"} {
+		if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-version-list"), Key: aws.String(key), Body: strings.NewReader("body")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	firstVersions, err := s3c.ListObjectVersions(context.Background(), &s3.ListObjectVersionsInput{Bucket: aws.String("sdk-version-list"), Prefix: aws.String("folder/"), Delimiter: aws.String("/"), MaxKeys: aws.Int32(1)})
+	if err != nil || len(firstVersions.CommonPrefixes) != 1 || aws.ToString(firstVersions.CommonPrefixes[0].Prefix) != "folder/a/" || aws.ToString(firstVersions.NextKeyMarker) != "folder/a/" || len(firstVersions.Versions) != 0 {
+		t.Fatalf("first version list page: %#v %v", firstVersions, err)
+	}
+	for range 5 {
+		if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-version-list"), Key: aws.String("versions/key"), Body: strings.NewReader("body")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	versionPage, err := s3c.ListObjectVersions(context.Background(), &s3.ListObjectVersionsInput{Bucket: aws.String("sdk-version-list"), Prefix: aws.String("versions/"), MaxKeys: aws.Int32(3)})
+	if err != nil || len(versionPage.Versions) != 3 || aws.ToString(versionPage.NextKeyMarker) != "versions/key" || aws.ToString(versionPage.NextVersionIdMarker) == "" || !aws.ToBool(versionPage.Versions[0].IsLatest) {
+		t.Fatalf("version list page: %#v %v", versionPage, err)
+	}
+	lastVersions, err := s3c.ListObjectVersions(context.Background(), &s3.ListObjectVersionsInput{Bucket: aws.String("sdk-version-list"), Prefix: aws.String("versions/"), MaxKeys: aws.Int32(5), KeyMarker: versionPage.NextKeyMarker, VersionIdMarker: versionPage.NextVersionIdMarker})
+	if err != nil || len(lastVersions.Versions) != 2 || aws.ToBool(lastVersions.IsTruncated) {
+		t.Fatalf("last version list page: %#v %v", lastVersions, err)
+	}
+	if _, err := s3c.ListObjectVersions(context.Background(), &s3.ListObjectVersionsInput{Bucket: aws.String("sdk-version-list"), VersionIdMarker: aws.String("orphan")}); err == nil || !strings.Contains(err.Error(), "InvalidArgument") {
+		t.Fatalf("orphan version marker: %v", err)
+	}
 	for _, name := range []string{"ab", "192.168.5.4", "reserved--table-s3"} {
 		if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String(name)}); err == nil || !strings.Contains(err.Error(), "InvalidBucketName") {
 			t.Fatalf("invalid bucket name %q: %v", name, err)
@@ -1323,7 +1354,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		t.Fatalf("invalid location constraint: %v", err)
 	}
 	unpaginatedBuckets, err := s3c.ListBuckets(context.Background(), &s3.ListBucketsInput{})
-	if err != nil || len(unpaginatedBuckets.Buckets) != 3 {
+	if err != nil || len(unpaginatedBuckets.Buckets) != 4 {
 		t.Fatalf("unpaginated buckets: %#v %v", unpaginatedBuckets, err)
 	}
 	for _, bucket := range unpaginatedBuckets.Buckets {
@@ -1345,7 +1376,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 			pagedNames = append(pagedNames, aws.ToString(bucket.Name))
 		}
 	}
-	if got := strings.Join(pagedNames, ","); got != "sdk,sdk-account-000000000000-us-east-1-an,sdk-west" {
+	if got := strings.Join(pagedNames, ","); got != "sdk,sdk-account-000000000000-us-east-1-an,sdk-version-list,sdk-west" {
 		t.Fatalf("paginated bucket names = %s", got)
 	}
 	regionalBuckets, err := west.ListBuckets(context.Background(), &s3.ListBucketsInput{BucketRegion: aws.String("us-west-2"), Prefix: aws.String("sdk")})

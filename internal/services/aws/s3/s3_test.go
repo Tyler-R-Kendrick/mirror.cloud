@@ -4439,6 +4439,83 @@ func TestListObjectsPaginationCharacterization(t *testing.T) {
 	})
 }
 
+func TestListObjectVersionsPagination(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-list"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "version-list", "Status": "Enabled"}, nil)
+	for _, key := range []string{"folder/a/one", "folder/a/two", "folder/file1", "folder/file2"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-list", "Key": key}, []byte(key))
+	}
+	for range 5 {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-list", "Key": "versions/key"}, []byte("version"))
+	}
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "version-list", "Key": "deleted"}, nil)
+
+	input := map[string]any{"Bucket": "version-list", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": 1}
+	first := mustInvoke(t, p, "ListObjectVersions", input, nil).Output
+	if got := asSliceForTest(first["CommonPrefixes"]); len(got) != 1 || asMapForTest(got[0])["Prefix"] != "folder/a/" || len(asSliceForTest(first["Versions"])) != 0 || first["NextKeyMarker"] != "folder/a/" || first["NextVersionIdMarker"] != nil || first["IsTruncated"] != true {
+		t.Fatalf("first prefix page = %#v", first)
+	}
+	nextInput := maps.Clone(input)
+	nextInput["KeyMarker"] = first["NextKeyMarker"]
+	next := mustInvoke(t, p, "ListObjectVersions", nextInput, nil).Output
+	if got := asSliceForTest(next["Versions"]); len(got) != 1 || asMapForTest(got[0])["Key"] != "folder/file1" || next["NextKeyMarker"] != "folder/file1" {
+		t.Fatalf("next prefix page = %#v", next)
+	}
+
+	versionInput := map[string]any{"Bucket": "version-list", "Prefix": "versions/", "MaxKeys": 3}
+	page := mustInvoke(t, p, "ListObjectVersions", versionInput, nil).Output
+	versions := asSliceForTest(page["Versions"])
+	if len(versions) != 3 || page["NextKeyMarker"] != "versions/key" || page["NextVersionIdMarker"] == nil || asMapForTest(versions[0])["IsLatest"] != true {
+		t.Fatalf("first version page = %#v", page)
+	}
+	for _, item := range versions {
+		row := asMapForTest(item)
+		if _, err := time.Parse("2006-01-02T15:04:05.000Z", row["LastModified"].(string)); err != nil || row["StorageClass"] != "STANDARD" || row["Owner"] == nil {
+			t.Fatalf("version row = %#v", row)
+		}
+	}
+	pageInput := maps.Clone(versionInput)
+	pageInput["KeyMarker"], pageInput["VersionIdMarker"] = page["NextKeyMarker"], page["NextVersionIdMarker"]
+	last := mustInvoke(t, p, "ListObjectVersions", pageInput, nil).Output
+	if got := asSliceForTest(last["Versions"]); len(got) != 2 || last["IsTruncated"] != false {
+		t.Fatalf("last version page = %#v", last)
+	}
+	keyOnly := maps.Clone(versionInput)
+	keyOnly["KeyMarker"], keyOnly["MaxKeys"] = "versions/key", 100
+	if got := asSliceForTest(mustInvoke(t, p, "ListObjectVersions", keyOnly, nil).Output["Versions"]); len(got) != 0 {
+		t.Fatalf("key-only marker retained versions = %#v", got)
+	}
+	_, err := invoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-list", "VersionIdMarker": "orphan"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Fields["ArgumentName"] != "version-id-marker" {
+		t.Fatalf("orphan version marker = %#v", fault)
+	}
+	encoded := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-list", "Prefix": "folder/", "EncodingType": "url"}, nil).Output
+	if encoded["Prefix"] != "folder%2F" || encoded["EncodingType"] != "url" {
+		t.Fatalf("encoded version list = %#v", encoded)
+	}
+	all := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-list"}, nil).Output
+	if len(asSliceForTest(all["DeleteMarkers"])) != 1 {
+		t.Fatalf("delete markers = %#v", all)
+	}
+}
+
+func TestListObjectVersionsCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-list-golden"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "version-list-golden", "Status": "Enabled"}, nil)
+	for range 3 {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-list-golden", "Key": "prefix/key"}, []byte("body"))
+	}
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-list-golden", "Key": "prefix/other"}, []byte("body"))
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "version-list-golden", "Key": "prefix/other"}, nil)
+	input := map[string]any{"Bucket": "version-list-golden", "Prefix": "prefix/", "MaxKeys": 2}
+	first := mustInvoke(t, p, "ListObjectVersions", input, nil).Output
+	nextInput := maps.Clone(input)
+	nextInput["KeyMarker"], nextInput["VersionIdMarker"] = first["NextKeyMarker"], first["NextVersionIdMarker"]
+	golden.AssertJSON(t, map[string]any{"first": first, "next": mustInvoke(t, p, "ListObjectVersions", nextInput, nil).Output})
+}
+
 func TestMultipartETagForm(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

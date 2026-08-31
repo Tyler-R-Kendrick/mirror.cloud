@@ -33,7 +33,7 @@ Dummy credentials `test`/`test` work. By default, so does anything else: signatu
 
 `bin/mirror up --profile aws-core` boots the emulate-tier AWS packs in docs/SUPPORT.md. Remaining ingested Smithy operations (if any) are mock-tier. This is not LocalStack-complete: no hypervisor, no real RDS/Redis/EKS, extra ops are named control-plane records. `bin/mirror up --all` serves mock-tier for everything else. `--strict` refuses mock. EC2 is VPC/subnet/SG/instance records on the ec2Query wire.
 
-S3 terraform refresh reads (`GetBucketAcl`, CORS, encryption, …) return the empty “not configured” document the AWS provider tolerates — they are not silent write stubs. IAM evaluates Deny then Allow (default deny when the role has policies). SSM `SecureString` is reversible local encoding, not encryption. CloudFormation accepts JSON or YAML TemplateBody and a fixed resource-type set.
+S3 terraform refresh reads (`GetBucketAcl`, CORS, encryption, …) return the empty “not configured” document the AWS provider tolerates — they are not silent write stubs. S3 wire responses preserve the exact `ETag` header name. IAM evaluates Deny then Allow (default deny when the role has policies). SSM `SecureString` is reversible local encoding, not encryption. CloudFormation accepts JSON or YAML TemplateBody and a fixed resource-type set.
 
 Hosted bind (`--bind 0.0.0.0:4566`) prints a banner: there is no authentication; do not expose the process to untrusted networks.
 

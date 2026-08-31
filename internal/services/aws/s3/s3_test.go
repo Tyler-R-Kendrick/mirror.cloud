@@ -5133,19 +5133,37 @@ func TestListMultipartUploadsPaginationAndDelimiter(t *testing.T) {
 	firstSame := create("same", "STANDARD_IA")
 	create("alpha", "STANDARD")
 	secondSame := create("same", "STANDARD")
-	create("space key", "STANDARD")
+	spaceUpload := create("space key", "STANDARD")
 
 	firstPage := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "bucket", "MaxUploads": 3}, nil)
 	first := firstPage.Output["Uploads"].([]any)
-	if len(first) != 3 || first[0].(map[string]any)["Key"] != "alpha" || first[1].(map[string]any)["Key"] != "photos/2026/b.jpg" || first[2].(map[string]any)["UploadId"] != firstSame || first[2].(map[string]any)["StorageClass"] != "STANDARD_IA" || first[2].(map[string]any)["Initiated"] == "" || firstPage.Output["IsTruncated"] != true || firstPage.Output["NextKeyMarker"] != "same" || firstPage.Output["NextUploadIdMarker"] != firstSame {
+	if len(first) != 3 || first[0].(map[string]any)["Key"] != "alpha" || first[1].(map[string]any)["Key"] != "photos/2026/b.jpg" || first[2].(map[string]any)["UploadId"] != firstSame || first[2].(map[string]any)["StorageClass"] != "STANDARD_IA" || firstPage.Output["IsTruncated"] != true || firstPage.Output["NextKeyMarker"] != "same" || firstPage.Output["NextUploadIdMarker"] != firstSame {
 		t.Fatalf("first multipart page = %v", firstPage.Output)
+	}
+	if _, err := time.Parse("2006-01-02T15:04:05.000Z", first[0].(map[string]any)["Initiated"].(string)); err != nil {
+		t.Fatalf("multipart initiation timestamp = %v", first[0])
 	}
 	secondPage := mustInvoke(t, p, "ListMultipartUploads", map[string]any{
 		"Bucket": "bucket", "KeyMarker": "same", "UploadIdMarker": firstSame, "MaxUploads": 3,
 	}, nil)
 	second := secondPage.Output["Uploads"].([]any)
-	if len(second) != 2 || second[0].(map[string]any)["UploadId"] != secondSame || second[1].(map[string]any)["Key"] != "space key" || secondPage.Output["IsTruncated"] != false {
+	if len(second) != 2 || second[0].(map[string]any)["UploadId"] != secondSame || second[1].(map[string]any)["Key"] != "space key" || secondPage.Output["IsTruncated"] != false || secondPage.Output["NextKeyMarker"] != "space key" || secondPage.Output["NextUploadIdMarker"] != spaceUpload {
 		t.Fatalf("second multipart page = %v", secondPage.Output)
+	}
+	uploadMarkerOnly := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "bucket", "UploadIdMarker": firstSame, "MaxUploads": 1}, nil).Output
+	if uploadMarkerOnly["UploadIdMarker"] != "" || asMapForTest(asSliceForTest(uploadMarkerOnly["Uploads"])[0])["Key"] != "alpha" {
+		t.Fatalf("upload marker without key = %#v", uploadMarkerOnly)
+	}
+	_, err := invoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "bucket", "KeyMarker": "alpha", "UploadIdMarker": firstSame}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Message != "Invalid uploadId marker" || fault.Fields["ArgumentName"] != "upload-id-marker" || fault.Fields["ArgumentValue"] != firstSame {
+		t.Fatalf("mismatched upload marker = %#v", fault)
+	}
+	for _, key := range []string{"folder/a/one", "folder/a/two", "folder/file1", "folder/file2"} {
+		create(key, "STANDARD")
+	}
+	prefixPage := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "bucket", "Prefix": "folder/", "Delimiter": "/", "MaxUploads": 1}, nil).Output
+	if prefixes := asSliceForTest(prefixPage["CommonPrefixes"]); len(prefixes) != 1 || asMapForTest(prefixes[0])["Prefix"] != "folder/a/" || prefixPage["IsTruncated"] != true || prefixPage["NextKeyMarker"] != "" || prefixPage["NextUploadIdMarker"] != "" {
+		t.Fatalf("multipart common prefix page = %#v", prefixPage)
 	}
 	grouped := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "bucket", "Prefix": "photos/", "Delimiter": "/"}, nil)
 	groups := grouped.Output["CommonPrefixes"].([]any)

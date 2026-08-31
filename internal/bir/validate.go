@@ -499,6 +499,15 @@ func validateEffect(s *Service, where string, eff Effect, compile, perItem func(
 		compile(where+"."+kind+".when", e.When)
 		compile(where+"."+kind+".state", e.State)
 		compileAny(where+"."+kind+".record", e.Record, compile)
+		// `input` is the only thing a write may spread, and saying so here is
+		// what keeps it that way: a bundle that spread a read binding would be
+		// copying a record the engine never checked against an input shape,
+		// which is the one property that makes the copy safe at all.
+		if e.Spread != "" && e.Spread != "input" {
+			*problems = append(*problems, fmt.Errorf(
+				"%s: %s.%s.spread: %q; a write may spread only `input`",
+				s.ServiceID, where, kind, e.Spread))
+		}
 		if d := e.Deadline; d != nil {
 			compile(where+"."+kind+".deadline.after", d.After)
 			compile(where+"."+kind+".deadline.when", d.When)

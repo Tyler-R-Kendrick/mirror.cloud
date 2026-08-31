@@ -549,6 +549,17 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 		}
 	}
 
+	// The request itself, when the write asks for it, underneath everything
+	// declared. Only members the request actually carried are copied, which is
+	// the half that cannot be written as expressions: a bundle enumerating the
+	// input shape would store a null for each member the caller omitted, and a
+	// later Get would answer those nulls.
+	if w.Spread == "input" {
+		for k, v := range ev.req.Input {
+			rec[k] = v
+		}
+	}
+
 	// Resource-level record members first, then effect-level overrides.
 	for _, k := range sortedKeysAny(res.Record) {
 		v, err := ev.recordValue(ctx, "resources."+w.Resource+".record."+k, res.Record[k])

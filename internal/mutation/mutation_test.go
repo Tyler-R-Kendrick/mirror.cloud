@@ -5518,6 +5518,35 @@ var mutants = []mutant{
 		run:  "TestDeleteWhereRemovesEveryMatch",
 	},
 	{
+		// A write that stops copying the request stores only what the bundle
+		// spells out. Nothing fails to load and nothing faults -- a later read
+		// just answers a smaller record, which is exactly how the pack idiom
+		// this replaced would have been lost silently.
+		name: "engine-write-drops-the-spread",
+		file: filepath.Join("internal", "engine", "eval.go"),
+		old:  `if w.Spread == "input" {`,
+		new:  `if w.Spread == "input" && false {`,
+		pkg:  "./internal/engine",
+		run:  "TestSpreadStoresWhatTheRequestCarried",
+	},
+	{
+		// Spreading after the declared members lets a request overwrite the
+		// members the bundle owns -- an id, a status, a state the caller must
+		// not be able to set.
+		name: "engine-spread-outranks-declared-members",
+		file: filepath.Join("internal", "engine", "eval.go"),
+		old: `	if w.Spread == "input" {
+		for k, v := range ev.req.Input {
+			rec[k] = v
+		}
+	}
+
+	// Resource-level record members first, then effect-level overrides.`,
+		new: `	// Resource-level record members first, then effect-level overrides.`,
+		pkg: "./internal/engine",
+		run: "TestDeclaredMembersWinOverTheSpread",
+	},
+	{
 		// Taking the last id any read resolved, rather than the one resolved
 		// for this effect's own resource, addresses a child by its parent's
 		// key: every user in a service lands under its server's id. The write

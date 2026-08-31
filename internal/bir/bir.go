@@ -358,6 +358,31 @@ type WriteEffect struct {
 	Key      string         `yaml:"key,omitempty"`
 	Record   map[string]any `yaml:"record,omitempty"`
 	When     string         `yaml:"when,omitempty"`
+	// Spread copies whole request members into the record before any declared
+	// member is computed. Its only accepted value is "input".
+	//
+	// Twenty-five of the hand-written packs store the request itself -- `for k,
+	// v := range req.Input { rec[k] = v }` -- and then force a few members back
+	// on top. CodeDeploy's CreateDeployment keeps every member the caller sent
+	// and re-fixes deploymentId and status; Amplify's CreateApp does the same
+	// with appId. Enumerating those members instead would not reproduce them:
+	// the pack stores only what the request carried, and a bundle spelling out
+	// `'x' in input ? input.x : null` stores a null for every member the
+	// request omitted, which a later Get then answers.
+	//
+	// So the copy is the behavior, and it is declared rather than expressed:
+	// an expression producing a whole record would have to be able to see the
+	// request as a value and merge it, which is the point at which a record
+	// stops being a reviewable list of members. What bounds it is model
+	// validation -- the request has already been checked against the generated
+	// input shape by the time an effect runs, so a spread cannot store a
+	// member no SDK could have sent.
+	//
+	// Declared members win over the spread, in both directions of the
+	// resource/effect order that already applies. That is what lets a bundle
+	// say "keep what the caller sent, but the id and the status are mine",
+	// which is what every one of those packs does.
+	Spread string `yaml:"spread,omitempty"`
 	// State is the lifecycle state a created record starts in, when that is
 	// not the chart's initial state. An SQS message sent with a delay is born
 	// invisible and becomes visible when its deadline passes.

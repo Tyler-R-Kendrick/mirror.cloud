@@ -655,6 +655,21 @@ func TestEmptyResponseHeadersCharacterization(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestETagHeaderCasingCharacterization(t *testing.T) {
+	w := httptest.NewRecorder()
+	response := &spi.Response{Headers: http.Header{"Etag": {`"etag"`}}, Stream: io.NopCloser(strings.NewReader("body"))}
+	if err := (Codec{}).Encode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "GetObject"}, w, response); err != nil {
+		t.Fatal(err)
+	}
+	_, exact := w.Header()["ETag"]
+	_, canonicalized := w.Header()["Etag"]
+	values := w.Header()["ETag"]
+	if !exact || canonicalized || len(values) != 1 || values[0] != `"etag"` {
+		t.Fatalf("headers = %#v", w.Header())
+	}
+	golden.AssertJSON(t, map[string]any{"exact_etag": exact, "go_canonicalized_etag": canonicalized, "value": values[0]})
+}
+
 func FuzzEmptyResponseHeaders(f *testing.F) {
 	f.Add(uint8(0))
 	f.Add(uint8(1))
@@ -680,7 +695,7 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	if err := codec.Encode(svc, &model.Operation{Name: "GetObject"}, w, &spi.Response{Status: http.StatusPartialContent, Headers: http.Header{"ETag": {"one"}}, Stream: io.NopCloser(strings.NewReader("object"))}); err != nil {
 		t.Fatal(err)
 	}
-	if w.Code != http.StatusPartialContent || w.Header().Get("ETag") != "one" || w.Body.String() != "object" {
+	if w.Code != http.StatusPartialContent || len(w.Header()["ETag"]) != 1 || w.Header()["ETag"][0] != "one" || w.Body.String() != "object" {
 		t.Fatalf("stream response %d %#v %q", w.Code, w.Header(), w.Body.String())
 	}
 	w = httptest.NewRecorder()

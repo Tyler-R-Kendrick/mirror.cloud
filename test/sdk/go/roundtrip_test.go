@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -355,6 +356,46 @@ func TestAWSSDKPresignedSignatureValidation(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
+
+func TestS3ETagWireCasingContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.s3"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	for _, target := range []struct {
+		path string
+		body io.Reader
+	}{{"/etag-casing", nil}, {"/etag-casing/object", strings.NewReader("body")}} {
+		request, _ := http.NewRequest(http.MethodPut, ts.URL+target.path, target.body)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatal(response.Status)
+		}
+	}
+	conn, err := net.Dial("tcp", ts.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := fmt.Fprintf(conn, "GET /etag-casing/object HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", ts.Listener.Addr()); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte("\r\nETag: \"")) || bytes.Contains(raw, []byte("\r\nEtag:")) {
+		t.Fatalf("raw response:\n%s", raw)
+	}
+}
 
 func TestAWSChunkedFramingContract(t *testing.T) {
 	cfg := mcfg.Default()

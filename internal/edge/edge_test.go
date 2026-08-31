@@ -646,8 +646,12 @@ func TestS3AWSChunkedUploadPartRetryCharacterization(t *testing.T) {
 	valid := put("a;chunk-signature=first\r\nHello Blob\r\n0;chunk-signature=last\r\n")
 	sum := md5.Sum([]byte("Hello Blob"))
 	wantETag := `"` + hex.EncodeToString(sum[:]) + `"`
-	if valid.Code != http.StatusOK || valid.Header().Get("ETag") != wantETag {
-		t.Fatalf("valid retry: %d etag=%q body=%s", valid.Code, valid.Header().Get("ETag"), valid.Body.String())
+	etag := ""
+	if values := valid.Header()["ETag"]; len(values) > 0 {
+		etag = values[0]
+	}
+	if valid.Code != http.StatusOK || etag != wantETag {
+		t.Fatalf("valid retry: %d etag=%q body=%s", valid.Code, etag, valid.Body.String())
 	}
 	listed := httptest.NewRecorder()
 	handler.ServeHTTP(listed, httptest.NewRequest(http.MethodGet, "/chunk-part/object?uploadId="+url.QueryEscape(upload.UploadID), nil))
@@ -657,7 +661,7 @@ func TestS3AWSChunkedUploadPartRetryCharacterization(t *testing.T) {
 	if listed.Code != http.StatusOK || xml.Unmarshal(listed.Body.Bytes(), &parts) != nil || len(parts.Parts) != 1 {
 		t.Fatalf("list parts: %d %s", listed.Code, listed.Body.String())
 	}
-	golden.AssertJSON(t, map[string]any{"invalid": map[string]any{"code": fault.Code, "status": invalid.Code}, "retry": map[string]any{"etag": valid.Header().Get("ETag"), "parts": len(parts.Parts), "status": valid.Code}})
+	golden.AssertJSON(t, map[string]any{"invalid": map[string]any{"code": fault.Code, "status": invalid.Code}, "retry": map[string]any{"etag": etag, "parts": len(parts.Parts), "status": valid.Code}})
 }
 
 func TestS3AWSChunkedContentEncodingCharacterization(t *testing.T) {

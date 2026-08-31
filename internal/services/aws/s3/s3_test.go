@@ -3023,6 +3023,73 @@ func TestPostObjectExpires(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestPostObjectChecksums(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "post-checksums"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "post-checksums", "Status": "Enabled"}, nil)
+	post := func(key, algorithm, checksum string) (*spi.Response, error) {
+		t.Helper()
+		var payload bytes.Buffer
+		writer := multipart.NewWriter(&payload)
+		_ = writer.WriteField("key", key)
+		_ = writer.WriteField("x-amz-checksum-algorithm", algorithm)
+		if checksum != "" {
+			_ = writer.WriteField("x-amz-checksum-"+strings.ToLower(algorithm), checksum)
+		}
+		file, _ := writer.CreateFormFile("file", "file.txt")
+		_, _ = file.Write([]byte("123456789"))
+		_ = writer.Close()
+		httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/post-checksums", &payload)
+		httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+		return p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": "post-checksums"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest})
+	}
+	body := []byte("123456789")
+	crc32sum, crc32csum := make([]byte, 4), make([]byte, 4)
+	binary.BigEndian.PutUint32(crc32sum, crc32.ChecksumIEEE(body))
+	binary.BigEndian.PutUint32(crc32csum, crc32.Checksum(body, crc32.MakeTable(crc32.Castagnoli)))
+	sha1sum, sha256sum := sha1.Sum(body), sha256.Sum256(body)
+	b64 := func(sum []byte) string { return base64.StdEncoding.EncodeToString(sum) }
+	want := map[string]string{
+		"CRC32": b64(crc32sum), "CRC32C": b64(crc32csum), "CRC64NVME": "rosUhgp5mIg=",
+		"SHA1": b64(sha1sum[:]), "SHA256": b64(sha256sum[:]),
+	}
+	characterization := map[string]any{}
+	for algorithm, checksum := range want {
+		response, err := post(strings.ToLower(algorithm), algorithm, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		header := "x-amz-checksum-" + strings.ToLower(algorithm)
+		if response.Headers.Get(header) != checksum || response.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" || response.Headers.Get("x-amz-version-id") == "" {
+			t.Fatalf("headers = %v", response.Headers)
+		}
+		head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "post-checksums", "Key": strings.ToLower(algorithm), "ChecksumMode": "ENABLED"}, nil)
+		if head.Headers.Get(header) != checksum {
+			t.Fatalf("stored checksum = %q", head.Headers.Get(header))
+		}
+		characterization[algorithm] = map[string]any{"checksum": checksum, "type": response.Headers.Get("x-amz-checksum-type"), "versioned": response.Headers.Get("x-amz-version-id") != ""}
+	}
+	if _, err := post("provided", "CRC32", want["CRC32"]); err != nil {
+		t.Fatal(err)
+	}
+	_, err := post("invalid", "CRC32", "AAAAAA==")
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("fault = %+v", fault)
+	} else {
+		characterization["invalid value"] = map[string]any{"code": fault.Code, "status": fault.HTTPStatus, "message": fault.Message}
+	}
+	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "post-checksums", "Key": "invalid"}, nil); asFault(t, err).Code != "NoSuchKey" {
+		t.Fatal("invalid checksum stored object")
+	}
+	_, err = post("unsupported", "SHA512", "")
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("unsupported fault = %+v", fault)
+	} else {
+		characterization["unsupported algorithm"] = map[string]any{"code": fault.Code, "status": fault.HTTPStatus}
+	}
+	golden.AssertJSON(t, characterization)
+}
+
 func TestObjectCreatedEventNames(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

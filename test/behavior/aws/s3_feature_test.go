@@ -3,6 +3,7 @@ package behavior
 import (
 	"bytes"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/xml"
 	"io"
@@ -100,6 +101,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		_ = writer.WriteField("success_action_status", "201")
 		_ = writer.WriteField("tagging", "<Tagging><TagSet><Tag><Key>source</Key><Value>browser</Value></Tag></TagSet></Tagging>")
 		_ = writer.WriteField("Expires", "Thu, 27 Aug 2026 12:00:00 GMT")
+		_ = writer.WriteField("x-amz-checksum-algorithm", "SHA256")
 		file, err := writer.CreateFormFile("file", "report.txt")
 		if err != nil {
 			t.Fatal(err)
@@ -120,7 +122,8 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		response, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusCreated || res.Header.Get("ETag") == "" || !bytes.Contains(response, []byte("<PostResponse>")) || !bytes.Contains(response, []byte("<Key>forms/report.txt</Key>")) {
+		checksum := sha256.Sum256([]byte("from browser"))
+		if res.StatusCode != http.StatusCreated || res.Header.Get("ETag") == "" || res.Header.Get("x-amz-checksum-sha256") != base64.StdEncoding.EncodeToString(checksum[:]) || res.Header.Get("x-amz-checksum-type") != "FULL_OBJECT" || !bytes.Contains(response, []byte("<PostResponse>")) || !bytes.Contains(response, []byte("<Key>forms/report.txt</Key>")) {
 			t.Fatalf("post form %d headers=%v body=%s", res.StatusCode, res.Header, response)
 		}
 		res = do(http.MethodGet, "/post-form/forms/report.txt", nil, "")

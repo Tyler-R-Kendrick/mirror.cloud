@@ -999,6 +999,19 @@ func (p *Pack) postObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		}
 		input["Expires"] = expires
 	}
+	if algorithm := strings.ToUpper(fields["x-amz-checksum-algorithm"]); algorithm != "" {
+		checksum, ok := checksumByAlgorithm(algorithm)
+		if !ok || algorithm == "MD5" || algorithm == "SHA512" || strings.HasPrefix(algorithm, "XXHASH") {
+			return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid checksum algorithm", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		value := fields[checksum.header]
+		if value == "" {
+			value = checksumValue(checksum.input, body)
+		} else if value != checksumValue(checksum.input, body) {
+			return nil, &spi.Fault{Code: "InvalidRequest", Message: "Value for " + checksum.header + " header is invalid.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		input["ChecksumAlgorithm"], input[checksum.input] = algorithm, value
+	}
 	for form, member := range map[string]string{
 		"Cache-Control":                   "CacheControl",
 		"Content-Disposition":             "ContentDisposition",

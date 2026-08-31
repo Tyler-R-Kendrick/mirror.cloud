@@ -691,6 +691,7 @@ func TestPostObjectBlobFailureLeavesNoObject(t *testing.T) {
 	_ = writer.WriteField("key", "object")
 	_ = writer.WriteField("tagging", "<Tagging><TagSet><Tag><Key>source</Key><Value>browser</Value></Tag></TagSet></Tagging>")
 	_ = writer.WriteField("Expires", "Thu, 27 Aug 2026 12:00:00 GMT")
+	_ = writer.WriteField("x-amz-checksum-algorithm", "CRC32")
 	file, _ := writer.CreateFormFile("file", "object.txt")
 	_, _ = file.Write([]byte("body"))
 	_ = writer.Close()

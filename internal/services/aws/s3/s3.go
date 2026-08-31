@@ -1989,59 +1989,95 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 		delim = str(req.Input["Delimiter"])
 	}
 	kvs, _, _ := p.col(req, "objects").List(ctx, b+"/"+prefix, "", 0)
-	var contents []any
+	type entry struct {
+		value   string
+		content any
+		prefix  bool
+	}
+	var entries []entry
 	common := map[string]bool{}
 	for _, kv := range kvs {
 		key := strings.TrimPrefix(kv.Key, b+"/")
 		if delim != "" {
 			rest := strings.TrimPrefix(key, prefix)
 			if i := strings.Index(rest, delim); i >= 0 {
-				common[prefix+rest[:i+len(delim)]] = true
+				pfx := prefix + rest[:i+len(delim)]
+				if !common[pfx] {
+					common[pfx] = true
+					entries = append(entries, entry{value: pfx, prefix: true})
+				}
 				continue
 			}
 		}
 		var meta map[string]any
 		_ = json.Unmarshal(kv.Value, &meta)
-		contents = append(contents, map[string]any{"Key": key, "Size": meta["size"], "ETag": meta["etag"], "LastModified": meta["mtime"], "StorageClass": meta["storageClass"]})
+		entries = append(entries, entry{value: key, content: map[string]any{"Key": key, "Size": meta["size"], "ETag": meta["etag"], "LastModified": meta["mtime"], "StorageClass": meta["storageClass"]}})
 	}
-	var prefixes []any
-	for pfx := range common {
-		prefixes = append(prefixes, map[string]any{"Prefix": pfx})
-	}
-	sort.Slice(contents, func(i, j int) bool {
-		return str(asMap(contents[i])["Key"]) < str(asMap(contents[j])["Key"])
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].value < entries[j].value
 	})
 	maxKeys := 1000
-	if n := asInt(req.Input["MaxKeys"]); n > 0 {
-		maxKeys = n
+	if value, ok := req.Input["MaxKeys"]; ok {
+		maxKeys = max(0, asInt(value))
+	} else if value, ok := req.Input["max-keys"]; ok {
+		maxKeys = max(0, asInt(value))
 	}
-	token := str(req.Input["ContinuationToken"])
-	if token == "" {
-		token = str(req.Input["StartAfter"])
+	marker := str(req.Input["Marker"])
+	continuation := str(req.Input["ContinuationToken"])
+	startAfter := str(req.Input["StartAfter"])
+	token := marker
+	if req.Operation == "ListObjectsV2" {
+		token = continuation
+		if token == "" {
+			token = startAfter
+		}
 	}
 	if token != "" {
-		var rest []any
-		for _, c := range contents {
-			if str(asMap(c)["Key"]) > token {
-				rest = append(rest, c)
+		var rest []entry
+		for _, item := range entries {
+			if item.value > token {
+				rest = append(rest, item)
 			}
 		}
-		contents = rest
+		entries = rest
 	}
 	truncated := false
 	next := ""
-	if len(contents) > maxKeys {
+	if len(entries) > maxKeys {
 		truncated = true
-		next = str(asMap(contents[maxKeys-1])["Key"])
-		contents = contents[:maxKeys]
+		if maxKeys > 0 {
+			next = entries[maxKeys-1].value
+		}
+		entries = entries[:maxKeys]
+	}
+	var contents, prefixes []any
+	for _, item := range entries {
+		if item.prefix {
+			prefixes = append(prefixes, map[string]any{"Prefix": item.value})
+		} else {
+			contents = append(contents, item.content)
+		}
 	}
 	out := map[string]any{
 		"Name": b, "Prefix": prefix, "Delimiter": delim,
 		"IsTruncated": truncated, "MaxKeys": maxKeys,
-		"Contents": contents, "CommonPrefixes": prefixes, "KeyCount": len(contents),
+		"Contents": contents, "CommonPrefixes": prefixes, "KeyCount": len(entries),
 	}
-	if next != "" {
-		out["NextContinuationToken"] = next
+	if req.Operation == "ListObjectsV2" {
+		if continuation != "" {
+			out["ContinuationToken"] = continuation
+		}
+		if startAfter != "" {
+			out["StartAfter"] = startAfter
+		}
+		if next != "" {
+			out["NextContinuationToken"] = next
+		}
+	} else {
+		out["Marker"] = marker
+		if next != "" && delim != "" {
+			out["NextMarker"] = next
+		}
 	}
 	if str(req.Input["EncodingType"]) == "url" || str(req.Input["encoding-type"]) == "url" {
 		for _, c := range contents {

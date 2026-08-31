@@ -4314,6 +4314,55 @@ func TestListObjectsV2Prefix(t *testing.T) {
 	}
 }
 
+func TestListObjectsPaginationIncludesCommonPrefixes(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-pagination"}, nil)
+	for _, key := range []string{"folder/aSubfolder/subFile1", "folder/aSubfolder/subFile2", "folder/file1", "folder/file2"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-pagination", "Key": key}, []byte("content"))
+	}
+	input := map[string]any{"Bucket": "list-pagination", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": 1}
+	first := mustInvoke(t, p, "ListObjects", input, nil).Output
+	firstPrefixes := asSliceForTest(first["CommonPrefixes"])
+	if len(firstPrefixes) != 1 || asMapForTest(firstPrefixes[0])["Prefix"] != "folder/aSubfolder/" || len(asSliceForTest(first["Contents"])) != 0 || first["NextMarker"] != "folder/aSubfolder/" || first["KeyCount"] != 1 || first["IsTruncated"] != true {
+		t.Fatalf("first V1 page = %#v", first)
+	}
+	secondInput := maps.Clone(input)
+	secondInput["Marker"] = first["NextMarker"]
+	second := mustInvoke(t, p, "ListObjects", secondInput, nil).Output
+	secondContents := asSliceForTest(second["Contents"])
+	if len(secondContents) != 1 || asMapForTest(secondContents[0])["Key"] != "folder/file1" || second["NextMarker"] != "folder/file1" || second["Marker"] != "folder/aSubfolder/" {
+		t.Fatalf("second V1 page = %#v", second)
+	}
+	lastInput := maps.Clone(input)
+	lastInput["Marker"] = second["NextMarker"]
+	last := mustInvoke(t, p, "ListObjects", lastInput, nil).Output
+	lastContents := asSliceForTest(last["Contents"])
+	if len(lastContents) != 1 || asMapForTest(lastContents[0])["Key"] != "folder/file2" || last["IsTruncated"] != false || last["NextMarker"] != nil {
+		t.Fatalf("last V1 page = %#v", last)
+	}
+	manualInput := maps.Clone(input)
+	manualInput["Marker"] = "folder/aSubfolder/subFile1"
+	manual := mustInvoke(t, p, "ListObjects", manualInput, nil).Output
+	if got := asSliceForTest(manual["Contents"]); len(got) != 1 || asMapForTest(got[0])["Key"] != "folder/file1" {
+		t.Fatalf("manual V1 marker = %#v", manual)
+	}
+	withoutDelimiter := mustInvoke(t, p, "ListObjects", map[string]any{"Bucket": "list-pagination", "MaxKeys": 1}, nil).Output
+	if withoutDelimiter["IsTruncated"] != true || withoutDelimiter["NextMarker"] != nil {
+		t.Fatalf("V1 page without delimiter = %#v", withoutDelimiter)
+	}
+	v2First := mustInvoke(t, p, "ListObjectsV2", input, nil).Output
+	v2Next := v2First["NextContinuationToken"]
+	if v2Next != "folder/aSubfolder/" || v2First["KeyCount"] != 1 {
+		t.Fatalf("first V2 page = %#v", v2First)
+	}
+	v2Input := maps.Clone(input)
+	v2Input["ContinuationToken"] = v2Next
+	v2Second := mustInvoke(t, p, "ListObjectsV2", v2Input, nil).Output
+	if got := asSliceForTest(v2Second["Contents"]); len(got) != 1 || asMapForTest(got[0])["Key"] != "folder/file1" || v2Second["ContinuationToken"] != v2Next || v2Second["NextContinuationToken"] != "folder/file1" {
+		t.Fatalf("second V2 page = %#v", v2Second)
+	}
+}
+
 func TestMultipartETagForm(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

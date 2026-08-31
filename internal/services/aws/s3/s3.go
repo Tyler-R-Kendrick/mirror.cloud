@@ -2008,7 +2008,11 @@ func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response,
 		h.Set(header, value)
 	}
 	setObjectEncryptionHeaders(h, encryption)
-	return &spi.Response{Headers: h, Output: map[string]any{"ETag": etag}}, nil
+	response := &spi.Response{Headers: h}
+	if req.Operation == "UploadPartCopy" {
+		response.Output = map[string]any{"ETag": etag}
+	}
+	return response, nil
 }
 
 func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response, error) {

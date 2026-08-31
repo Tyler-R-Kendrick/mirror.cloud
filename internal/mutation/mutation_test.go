@@ -14906,6 +14906,30 @@ var mutants = []mutant{
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestCrossRegionBucketResolutionAndHeadMetadata",
 	},
+	{
+		name: "restxml-keep-no-content-headers",
+		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
+		old:  `if status == http.StatusNoContent {`,
+		new:  `if false {`,
+		pkg:  "./internal/proto/aws/restxml",
+		run:  "TestEmptyResponseHeadersCharacterization",
+	},
+	{
+		name: "restxml-encode-upload-part-body",
+		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
+		old:  `if op.Name == "UploadPart" && resp.Output == nil {`,
+		new:  `if false {`,
+		pkg:  "./internal/proto/aws/restxml",
+		run:  "TestEmptyResponseHeadersCharacterization",
+	},
+	{
+		name: "s3-return-upload-part-xml-body",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `if req.Operation == "UploadPartCopy" {`,
+		new:  `if true {`,
+		pkg:  "./test/behavior/aws",
+		run:  "TestS3ObjectLifecycle/Given_KMS_multipart_encryption",
+	},
 }
 
 func TestMutantsAreKilled(t *testing.T) {

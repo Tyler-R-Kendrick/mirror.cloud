@@ -1,0 +1,12 @@
+{
+  "delete_object_tagging": {
+    "content_length": "",
+    "content_type": "",
+    "status": 204
+  },
+  "upload_part": {
+    "content_length": "0",
+    "content_type": "",
+    "status": 200
+  }
+}

@@ -1253,11 +1253,23 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 			w.Header().Add(k, v)
 		}
 	}
+	if status == http.StatusNoContent {
+		w.Header().Del("Content-Type")
+		w.Header().Del("Content-Length")
+		w.WriteHeader(status)
+		return nil
+	}
 	if resp.Stream != nil {
 		w.WriteHeader(status)
 		_, err := io.Copy(w, resp.Stream)
 		_ = resp.Stream.Close()
 		return err
+	}
+	if op.Name == "UploadPart" && resp.Output == nil {
+		w.Header().Del("Content-Type")
+		w.Header().Set("Content-Length", "0")
+		w.WriteHeader(status)
+		return nil
 	}
 	if op.Name == "HeadObject" || op.Name == "HeadBucket" {
 		w.WriteHeader(status)

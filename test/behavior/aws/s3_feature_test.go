@@ -445,7 +445,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		assertEncryption("create", created)
 		part, _ := request(http.MethodPut, "/multipart-encryption/object?partNumber=1&uploadId="+upload.ID, "body", nil)
-		if part.StatusCode != http.StatusOK || part.Header.Get("ETag") == "" {
+		if part.StatusCode != http.StatusOK || part.Header.Get("ETag") == "" || part.Header.Get("Content-Type") != "" || part.Header.Get("Content-Length") != "0" {
 			t.Fatalf("upload part %d %v", part.StatusCode, part.Header)
 		}
 		assertEncryption("part", part)

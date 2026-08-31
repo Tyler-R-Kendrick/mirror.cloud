@@ -277,6 +277,17 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
 			t.Fatalf("unsigned x-amz header %d %s", response.StatusCode, body)
 		}
+		malformedRequest, _ := http.NewRequest(http.MethodGet, strictServer.URL+strings.ReplaceAll(unsignedTarget, "%2F", "%252F"), nil)
+		malformedRequest.Host = "s3.localhost.localstack.cloud"
+		response, err = http.DefaultClient.Do(malformedRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>AuthorizationQueryParametersError</Code>")) || !bytes.Contains(body, []byte("Credential is mal-formed")) {
+			t.Fatalf("malformed credential %d %s", response.StatusCode, body)
+		}
 		for name, strictTarget := range map[string]string{
 			"sigv2":  "/bucket/key?AWSAccessKeyId=test&Expires=4070908800&Signature=AAAAAAAAAAAAAAAAAAAAAAAAAAA%3D",
 			"sigv4":  target,

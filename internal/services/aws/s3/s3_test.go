@@ -4500,6 +4500,22 @@ func TestListObjectVersionsPagination(t *testing.T) {
 	}
 }
 
+func TestListObjectVersionsCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-list-golden"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "version-list-golden", "Status": "Enabled"}, nil)
+	for range 3 {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-list-golden", "Key": "prefix/key"}, []byte("body"))
+	}
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-list-golden", "Key": "prefix/other"}, []byte("body"))
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "version-list-golden", "Key": "prefix/other"}, nil)
+	input := map[string]any{"Bucket": "version-list-golden", "Prefix": "prefix/", "MaxKeys": 2}
+	first := mustInvoke(t, p, "ListObjectVersions", input, nil).Output
+	nextInput := maps.Clone(input)
+	nextInput["KeyMarker"], nextInput["VersionIdMarker"] = first["NextKeyMarker"], first["NextVersionIdMarker"]
+	golden.AssertJSON(t, map[string]any{"first": first, "next": mustInvoke(t, p, "ListObjectVersions", nextInput, nil).Output})
+}
+
 func TestMultipartETagForm(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

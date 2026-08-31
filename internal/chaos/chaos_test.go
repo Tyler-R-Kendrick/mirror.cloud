@@ -32,6 +32,20 @@ type failBlobs struct {
 	failKey string
 }
 
+type failAfterReader struct {
+	io.Reader
+}
+
+func (r failAfterReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if err == io.EOF {
+		return 0, errors.New("injected read failure")
+	}
+	return n, err
+}
+
+func (failAfterReader) Close() error { return nil }
+
 func (f failBlobs) Put(ctx context.Context, key string, r io.Reader) (spi.BlobInfo, error) {
 	if f.fail || f.failKey != "" && strings.Contains(key, f.failKey) {
 		return spi.BlobInfo{}, errors.New("injected blob failure")
@@ -71,6 +85,54 @@ func TestReplicaVersionBlobFailureLeavesNoPartialCurrent(t *testing.T) {
 	}
 	if _, err := call("GetObject", map[string]any{"Bucket": "destination", "Key": "key"}, nil); err == nil {
 		t.Fatal("failed version replication left a partial current object")
+	}
+}
+
+func TestConcurrentBodyReadFailuresLeaveNoPartialObjects(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "read-failures"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("object-%d", i)
+			var body io.ReadCloser = io.NopCloser(strings.NewReader("complete"))
+			if i%2 != 0 {
+				body = failAfterReader{Reader: strings.NewReader("partial")}
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "read-failures", "Key": key}, Body: body})
+			if i%2 == 0 && err != nil || i%2 != 0 && err == nil {
+				errs <- fmt.Errorf("put %d: %v", i, err)
+				return
+			}
+			get, getErr := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{"Bucket": "read-failures", "Key": key}})
+			if i%2 != 0 {
+				if getErr == nil {
+					errs <- fmt.Errorf("failed put %d left object", i)
+				}
+				return
+			}
+			if getErr != nil {
+				errs <- fmt.Errorf("get %d: %v", i, getErr)
+				return
+			}
+			data, _ := io.ReadAll(get.Stream)
+			_ = get.Stream.Close()
+			if string(data) != "complete" {
+				errs <- fmt.Errorf("get %d body %q", i, data)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
 	}
 }
 

@@ -143,6 +143,61 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given KMS multipart encryption When completing the upload Then every stage preserves its headers", func(t *testing.T) {
+		res := do(http.MethodPut, "/multipart-encryption", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode >= 300 {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		keyID := "arn:aws:kms:us-east-1:000000000000:key/multipart-behavior"
+		request := func(method, path, body string, headers map[string]string) (*http.Response, []byte) {
+			t.Helper()
+			req, _ := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+			req.Header.Set("Authorization", auth)
+			for key, value := range headers {
+				req.Header.Set(key, value)
+			}
+			response, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response, data
+		}
+		assertEncryption := func(name string, response *http.Response) {
+			t.Helper()
+			if response.Header.Get("x-amz-server-side-encryption") != "aws:kms" || response.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || response.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+				t.Fatalf("%s encryption headers %v", name, response.Header)
+			}
+		}
+		created, createdBody := request(http.MethodPost, "/multipart-encryption/object?uploads", "", map[string]string{"x-amz-server-side-encryption": "aws:kms", "x-amz-server-side-encryption-aws-kms-key-id": keyID, "x-amz-server-side-encryption-bucket-key-enabled": "true"})
+		var upload struct {
+			ID string `xml:"UploadId"`
+		}
+		if created.StatusCode != http.StatusOK || xml.Unmarshal(createdBody, &upload) != nil || upload.ID == "" {
+			t.Fatalf("create upload %d %s", created.StatusCode, createdBody)
+		}
+		assertEncryption("create", created)
+		part, _ := request(http.MethodPut, "/multipart-encryption/object?partNumber=1&uploadId="+upload.ID, "body", nil)
+		if part.StatusCode != http.StatusOK || part.Header.Get("ETag") == "" {
+			t.Fatalf("upload part %d %v", part.StatusCode, part.Header)
+		}
+		assertEncryption("part", part)
+		manifest := "<CompleteMultipartUpload><Part><ETag>" + part.Header.Get("ETag") + "</ETag><PartNumber>1</PartNumber></Part></CompleteMultipartUpload>"
+		completed, _ := request(http.MethodPost, "/multipart-encryption/object?uploadId="+upload.ID, manifest, nil)
+		if completed.StatusCode != http.StatusOK {
+			t.Fatalf("complete upload %d", completed.StatusCode)
+		}
+		assertEncryption("complete", completed)
+		stored, body := request(http.MethodGet, "/multipart-encryption/object", "", nil)
+		if stored.StatusCode != http.StatusOK || string(body) != "body" {
+			t.Fatalf("stored object %d %q", stored.StatusCode, body)
+		}
+		assertEncryption("get", stored)
+	})
+
 	t.Run("Given an expired browser policy When POSTing a file Then S3 rejects it without storing the object", func(t *testing.T) {
 		res := do(http.MethodPut, "/post-policy", nil, "")
 		io.Copy(io.Discard, res.Body)

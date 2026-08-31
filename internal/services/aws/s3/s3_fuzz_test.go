@@ -917,3 +917,52 @@ func FuzzObjectServerSideEncryption(f *testing.F) {
 		}
 	})
 }
+
+func FuzzMultipartServerSideEncryption(f *testing.F) {
+	f.Add(uint8(0), false, "body")
+	f.Add(uint8(1), true, "kms")
+	f.Add(uint8(2), false, "dsse")
+	f.Add(uint8(3), true, "invalid")
+	f.Fuzz(func(t *testing.T, algorithmIndex uint8, bucketKey bool, body string) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		algorithms := []string{"AES256", "aws:kms", "aws:kms:dsse", "invalid"}
+		algorithm := algorithms[int(algorithmIndex)%len(algorithms)]
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-encryption-fuzz"}, nil)
+		input := map[string]any{"Bucket": "multipart-encryption-fuzz", "Key": "object", "ServerSideEncryption": algorithm, "BucketKeyEnabled": bucketKey}
+		keyID := "arn:aws:kms:us-east-1:123456789012:key/multipart-fuzz"
+		if algorithm == "aws:kms" {
+			input["SSEKMSKeyId"] = keyID
+		}
+		created, err := invoke(t, p, "CreateMultipartUpload", input, nil)
+		if algorithm == "invalid" {
+			if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+				t.Fatalf("fault = %+v", fault)
+			}
+			return
+		}
+		if err != nil || created.Headers.Get("x-amz-server-side-encryption") != algorithm {
+			t.Fatalf("create %v headers=%v", err, created.Headers)
+		}
+		uploadID := created.Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 1}, []byte(body))
+		if part.Headers.Get("x-amz-server-side-encryption") != algorithm {
+			t.Fatalf("part headers=%v", part.Headers)
+		}
+		aes := map[string]any{"Rules": []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256"}}}}
+		mustInvoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": "multipart-encryption-fuzz", "ServerSideEncryptionConfiguration": aes}, nil)
+		completed := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
+		if completed.Headers.Get("x-amz-server-side-encryption") != algorithm {
+			t.Fatalf("complete headers=%v", completed.Headers)
+		}
+		get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "multipart-encryption-fuzz", "Key": "object"}, nil)
+		if get.Headers.Get("x-amz-server-side-encryption") != algorithm || string(readStream(t, get)) != body {
+			t.Fatalf("stored multipart headers=%v", get.Headers)
+		}
+		if algorithm == "aws:kms" && (get.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || bucketKey && get.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true") {
+			t.Fatalf("stored kms headers=%v", get.Headers)
+		}
+	})
+}

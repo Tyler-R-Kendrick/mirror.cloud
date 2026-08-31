@@ -30,6 +30,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bus"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/logging"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
@@ -930,6 +931,99 @@ func TestBucketWebsite(t *testing.T) {
 	if fault := asFault(t, err); fault.Code != "NoSuchWebsiteConfiguration" {
 		t.Fatalf("deleted website fault = %#v", fault)
 	}
+}
+
+func TestStaticWebsiteHostingCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := logging.WithRequestID(context.Background(), "request-id")
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "website-hosting"}, nil)
+	put := func(key, body, redirect string) {
+		t.Helper()
+		input := map[string]any{"Bucket": "website-hosting", "Key": key, "ContentType": "text/html"}
+		if redirect != "" {
+			input["WebsiteRedirectLocation"] = redirect
+		}
+		mustInvoke(t, p, "PutObject", input, []byte(body))
+	}
+	put("index.html", "index", "")
+	put("docs/index.html", "docs", "")
+	put("error.html", "error", "")
+	put("redirected.html", "redirected", "")
+	put("object-redirect", "", "/redirected.html")
+	put("error-redirect", "", "/redirected.html")
+	put("prefixed-object", "prefixed", "/object-target.html")
+	put("both/existing", "existing", "")
+	configuration := map[string]any{
+		"IndexDocument": map[string]any{"Suffix": "index.html"},
+		"ErrorDocument": map[string]any{"Key": "error.html"},
+	}
+	mustInvoke(t, p, "PutBucketWebsite", map[string]any{"Bucket": "website-hosting", "WebsiteConfiguration": configuration}, nil)
+
+	request := func(method, path string, headers ...http.Header) map[string]any {
+		t.Helper()
+		httpRequest := httptest.NewRequest(method, "http://website-hosting.s3-website.localhost.localstack.cloud"+path, nil)
+		if len(headers) != 0 {
+			httpRequest.Header = headers[0]
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: ident(), Operation: "GetObject", Input: map[string]any{}, HTTP: httpRequest})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := ""
+		if response.Stream != nil {
+			body = string(readStream(t, response))
+		}
+		return map[string]any{
+			"status": response.Status,
+			"body":   body,
+			"type":   response.Headers.Get("Content-Type"),
+			"etag":   response.Headers.Get("ETag"),
+			"where":  response.Headers.Get("Location"),
+		}
+	}
+
+	characterization := map[string]any{
+		"root":          request(http.MethodGet, "/"),
+		"directory":     request(http.MethodGet, "/docs/"),
+		"directory-hop": request(http.MethodGet, "/docs"),
+		"missing":       request(http.MethodGet, "/missing"),
+		"object-hop":    request(http.MethodGet, "/object-redirect"),
+		"method":        request(http.MethodPost, "/"),
+	}
+	etag, _ := characterization["root"].(map[string]any)["etag"].(string)
+	characterization["not-modified"] = request(http.MethodGet, "/", http.Header{"If-None-Match": []string{etag}})
+	configuration["ErrorDocument"] = map[string]any{"Key": "missing-error.html"}
+	mustInvoke(t, p, "PutBucketWebsite", map[string]any{"Bucket": "website-hosting", "WebsiteConfiguration": configuration}, nil)
+	characterization["missing-error-document"] = request(http.MethodGet, "/missing")
+	configuration["ErrorDocument"] = map[string]any{"Key": "error-redirect"}
+	mustInvoke(t, p, "PutBucketWebsite", map[string]any{"Bucket": "website-hosting", "WebsiteConfiguration": configuration}, nil)
+	characterization["error-document-hop"] = request(http.MethodGet, "/missing")
+	configuration["ErrorDocument"] = map[string]any{"Key": "error.html"}
+
+	configuration["RoutingRules"] = []any{
+		map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "both/", "HttpErrorCodeReturnedEquals": "404"}, "Redirect": map[string]any{"ReplaceKeyWith": "redirected.html"}},
+		map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "host/"}, "Redirect": map[string]any{"HostName": "example.test"}},
+		map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "protocol/"}, "Redirect": map[string]any{"Protocol": "https"}},
+		map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "code/"}, "Redirect": map[string]any{"HttpRedirectCode": "307"}},
+		map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "prefixed"}, "Redirect": map[string]any{"ReplaceKeyWith": "redirected.html"}},
+		map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "old/"}, "Redirect": map[string]any{"ReplaceKeyPrefixWith": ""}},
+		map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "index"}, "Redirect": map[string]any{"ReplaceKeyWith": "redirected.html"}},
+		map[string]any{"Condition": map[string]any{"HttpErrorCodeReturnedEquals": "404"}, "Redirect": map[string]any{"ReplaceKeyWith": "redirected.html"}},
+	}
+	mustInvoke(t, p, "PutBucketWebsite", map[string]any{"Bucket": "website-hosting", "WebsiteConfiguration": configuration}, nil)
+	characterization["combined-rule"] = request(http.MethodGet, "/both/missing")
+	characterization["combined-existing"] = request(http.MethodGet, "/both/existing")
+	characterization["host-rule"] = request(http.MethodGet, "/host/key")
+	characterization["protocol-rule"] = request(http.MethodGet, "/protocol/key")
+	characterization["status-rule"] = request(http.MethodGet, "/code/key")
+	characterization["rule-before-object"] = request(http.MethodGet, "/prefixed-object")
+	characterization["prefix-rule"] = request(http.MethodGet, "/old/index.html")
+	characterization["error-rule"] = request(http.MethodGet, "/still-missing")
+	characterization["root-with-rules"] = request(http.MethodGet, "/")
+
+	mustInvoke(t, p, "PutBucketWebsite", map[string]any{"Bucket": "website-hosting", "WebsiteConfiguration": map[string]any{"RedirectAllRequestsTo": map[string]any{"HostName": "example.test", "Protocol": "https"}}}, nil)
+	characterization["redirect-all"] = request(http.MethodGet, "/path?q=1")
+	golden.AssertJSON(t, characterization)
 }
 
 func TestBucketLifecycleConfiguration(t *testing.T) {

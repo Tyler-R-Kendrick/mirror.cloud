@@ -59,6 +59,9 @@ func bucketKey(r *http.Request) (bucket, key string) {
 	if i := strings.IndexByte(host, ':'); i >= 0 {
 		host = host[:i]
 	}
+	if bucket, ok := websiteBucketHost(host); ok {
+		return bucket, path
+	}
 	if strings.Contains(host, ".s3.") {
 		return strings.Split(host, ".s3.")[0], path
 	}
@@ -72,9 +75,22 @@ func bucketKey(r *http.Request) (bucket, key string) {
 	return bucket, key
 }
 
+func websiteBucketHost(host string) (string, bool) {
+	lower := strings.ToLower(host)
+	for _, marker := range []string{".s3-website.", ".s3-website-"} {
+		if index := strings.Index(lower, marker); index > 0 {
+			return host[:index], true
+		}
+	}
+	return "", false
+}
+
 // RouteName maps an S3 REST request to the Smithy operation name.
 // Query flags are matched by key presence (`?tagging`, `?delete`), not Get() != "".
 func RouteName(r *http.Request) string {
+	if _, ok := websiteBucketHost(strings.Split(r.Host, ":")[0]); ok {
+		return "GetObject"
+	}
 	bucket, key := bucketKey(r)
 	m := r.Method
 	switch {

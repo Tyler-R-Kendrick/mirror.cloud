@@ -453,6 +453,14 @@ func TestRESTXMLServiceRoutes(t *testing.T) {
 	if got := RouteName(virtual); got != "GetObject" {
 		t.Fatalf("virtual-host route %q", got)
 	}
+	website := httptest.NewRequest(http.MethodPost, "http://bucket.s3-website.localhost.localstack.cloud/", nil)
+	if got := RouteName(website); got != "GetObject" {
+		t.Fatalf("website route %q", got)
+	}
+	decoded, err := codec.Decode(svc, &model.Operation{Name: "GetObject"}, website)
+	if err != nil || decoded.Input["Bucket"] != "bucket" {
+		t.Fatalf("website decode %#v %v", decoded, err)
+	}
 }
 
 func TestRESTXMLServiceDecodeContracts(t *testing.T) {

@@ -515,6 +515,22 @@ func FuzzBucketWebsite(f *testing.F) {
 		if valid && !reflect.DeepEqual(stored, input["WebsiteConfiguration"]) || !valid && !reflect.DeepEqual(stored, baseline) {
 			t.Fatalf("stored website = %#v", stored)
 		}
+		if !valid {
+			return
+		}
+		path, wantStatus := "/key", http.StatusMovedPermanently
+		if mode%9 == 0 {
+			path, wantStatus = "/", http.StatusOK
+			mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "website-fuzz", "Key": suffix}, []byte("index"))
+		}
+		httpRequest := httptest.NewRequest(http.MethodGet, "http://website-fuzz.s3-website.localhost.localstack.cloud"+path, nil)
+		response, err := p.Invoke(context.Background(), &spi.Request{Identity: ident(), Operation: "GetObject", Input: map[string]any{}, HTTP: httpRequest})
+		if err != nil || response.Status != wantStatus {
+			t.Fatalf("website mode=%d suffix=%q protocol=%q response=%#v err=%v", mode%9, suffix, protocol, response, err)
+		}
+		if response.Stream != nil {
+			_ = response.Stream.Close()
+		}
 	})
 }
 

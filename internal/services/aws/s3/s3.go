@@ -333,7 +333,10 @@ func (p *Pack) route(req *spi.Request) string {
 		host = host[:i]
 	}
 	bucket, key := "", ""
-	if strings.Contains(host, ".s3.") {
+	website := false
+	if bucket, website = websiteBucketHost(host); website {
+		key = path
+	} else if strings.Contains(host, ".s3.") {
 		bucket = strings.Split(host, ".s3.")[0]
 		key = path
 	} else {
@@ -349,8 +352,11 @@ func (p *Pack) route(req *spi.Request) string {
 		req.Input = map[string]any{}
 	}
 	req.Input["Bucket"] = bucket
-	if key != "" {
+	if key != "" || website {
 		req.Input["Key"] = key
+	}
+	if website {
+		return "GetObject"
 	}
 	q := r.URL.Query()
 	if a := q.Get("Action"); a != "" {
@@ -1336,6 +1342,9 @@ func verifyPostPolicyCondition(condition any, form map[string]string, bucket str
 }
 
 func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if websiteRequest(req) && !truthy(req.Input["_websiteRaw"]) {
+		return p.websiteObject(ctx, req)
+	}
 	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err

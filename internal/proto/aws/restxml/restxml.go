@@ -645,6 +645,94 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 			rules = append(rules, rule)
 		}
 		in["CORSConfiguration"] = map[string]any{"CORSRules": rules}
+	case "PutBucketWebsite":
+		type redirect struct {
+			HostName             *string `xml:"HostName"`
+			HTTPRedirectCode     string  `xml:"HttpRedirectCode"`
+			Protocol             string  `xml:"Protocol"`
+			ReplaceKeyPrefixWith *string `xml:"ReplaceKeyPrefixWith"`
+			ReplaceKeyWith       *string `xml:"ReplaceKeyWith"`
+		}
+		var configuration struct {
+			XMLName               xml.Name
+			RedirectAllRequestsTo *redirect `xml:"RedirectAllRequestsTo"`
+			IndexDocument         *struct {
+				Suffix *string `xml:"Suffix"`
+			} `xml:"IndexDocument"`
+			ErrorDocument *struct {
+				Key *string `xml:"Key"`
+			} `xml:"ErrorDocument"`
+			RoutingRules *struct {
+				Rules []struct {
+					Condition *struct {
+						HTTPErrorCodeReturnedEquals string `xml:"HttpErrorCodeReturnedEquals"`
+						KeyPrefixEquals             string `xml:"KeyPrefixEquals"`
+					} `xml:"Condition"`
+					Redirect *redirect `xml:"Redirect"`
+				} `xml:"RoutingRule"`
+			} `xml:"RoutingRules"`
+		}
+		if xml.Unmarshal(raw, &configuration) != nil || configuration.XMLName.Local != "WebsiteConfiguration" {
+			in["_body"] = string(raw)
+			return
+		}
+		document := map[string]any{}
+		convertRedirect := func(source *redirect) map[string]any {
+			result := map[string]any{}
+			if source.HostName != nil {
+				result["HostName"] = *source.HostName
+			}
+			for key, value := range map[string]string{"HttpRedirectCode": source.HTTPRedirectCode, "Protocol": source.Protocol} {
+				if value != "" {
+					result[key] = value
+				}
+			}
+			if source.ReplaceKeyPrefixWith != nil {
+				result["ReplaceKeyPrefixWith"] = *source.ReplaceKeyPrefixWith
+			}
+			if source.ReplaceKeyWith != nil {
+				result["ReplaceKeyWith"] = *source.ReplaceKeyWith
+			}
+			return result
+		}
+		if source := configuration.RedirectAllRequestsTo; source != nil {
+			document["RedirectAllRequestsTo"] = convertRedirect(source)
+		}
+		if source := configuration.IndexDocument; source != nil {
+			value := map[string]any{}
+			if source.Suffix != nil {
+				value["Suffix"] = *source.Suffix
+			}
+			document["IndexDocument"] = value
+		}
+		if source := configuration.ErrorDocument; source != nil {
+			value := map[string]any{}
+			if source.Key != nil {
+				value["Key"] = *source.Key
+			}
+			document["ErrorDocument"] = value
+		}
+		if source := configuration.RoutingRules; source != nil {
+			rules := make([]any, 0, len(source.Rules))
+			for _, source := range source.Rules {
+				rule := map[string]any{}
+				if source.Condition != nil {
+					condition := map[string]any{}
+					for key, value := range map[string]string{"HttpErrorCodeReturnedEquals": source.Condition.HTTPErrorCodeReturnedEquals, "KeyPrefixEquals": source.Condition.KeyPrefixEquals} {
+						if value != "" {
+							condition[key] = value
+						}
+					}
+					rule["Condition"] = condition
+				}
+				if source.Redirect != nil {
+					rule["Redirect"] = convertRedirect(source.Redirect)
+				}
+				rules = append(rules, rule)
+			}
+			document["RoutingRules"] = rules
+		}
+		in["WebsiteConfiguration"] = document
 	case "PutObjectLegalHold":
 		var hold struct {
 			Status string `xml:"Status"`
@@ -771,8 +859,7 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 		in["ReplicationConfiguration"] = map[string]any{"Role": configuration.Role, "Rules": rules}
 	case "PutBucketPolicy":
 		in["Policy"] = string(raw)
-	case "PutBucketWebsite",
-		"PutBucketLifecycleConfiguration",
+	case "PutBucketLifecycleConfiguration",
 		"PutBucketEncryption", "PutBucketAcl", "PutObjectAcl":
 		in["_body"] = string(raw)
 		in["Document"] = string(raw)
@@ -896,6 +983,35 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 			b.WriteString("</CORSRule>")
 		}
 		b.WriteString("</CORSConfiguration>")
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
+	if op.Name == "GetBucketWebsite" {
+		b.WriteString(`<WebsiteConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
+		for _, field := range []string{"RedirectAllRequestsTo", "IndexDocument", "ErrorDocument"} {
+			if value, ok := resp.Output[field]; ok {
+				fmt.Fprintf(&b, "<%s>", field)
+				write(value, &b)
+				fmt.Fprintf(&b, "</%s>", field)
+			}
+		}
+		if rules, ok := resp.Output["RoutingRules"].([]any); ok {
+			b.WriteString("<RoutingRules>")
+			for _, value := range rules {
+				rule, _ := value.(map[string]any)
+				b.WriteString("<RoutingRule>")
+				for _, field := range []string{"Condition", "Redirect"} {
+					if value, ok := rule[field]; ok {
+						fmt.Fprintf(&b, "<%s>", field)
+						write(value, &b)
+						fmt.Fprintf(&b, "</%s>", field)
+					}
+				}
+				b.WriteString("</RoutingRule>")
+			}
+			b.WriteString("</RoutingRules>")
+		}
+		b.WriteString("</WebsiteConfiguration>")
 		_, err := io.WriteString(w, b.String())
 		return err
 	}

@@ -1,0 +1,39 @@
+{
+  "default": {
+    "bucket": "website-characterization",
+    "code": "NoSuchWebsiteConfiguration",
+    "message": "The specified bucket does not have a website configuration",
+    "status": 404
+  },
+  "delete": null,
+  "deleted": {
+    "bucket": "website-characterization",
+    "code": "NoSuchWebsiteConfiguration",
+    "message": "The specified bucket does not have a website configuration",
+    "status": 404
+  },
+  "get": {
+    "ErrorDocument": {
+      "Key": "error.html"
+    },
+    "IndexDocument": {
+      "Suffix": "index.html"
+    }
+  },
+  "invalid": {
+    "argument": "IndexDocument",
+    "code": "InvalidArgument",
+    "message": "The IndexDocument Suffix is not well formed",
+    "status": 400,
+    "value": "dir/index.html"
+  },
+  "preserved": {
+    "ErrorDocument": {
+      "Key": "error.html"
+    },
+    "IndexDocument": {
+      "Suffix": "index.html"
+    }
+  },
+  "put": null
+}

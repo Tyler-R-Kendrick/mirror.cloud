@@ -972,6 +972,51 @@ func TestConcurrentBucketCorsRemainsValid(t *testing.T) {
 	}
 }
 
+func TestConcurrentBucketWebsiteRemainsValid(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "website-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			suffix := "dir/index.html"
+			if n%2 == 0 {
+				suffix = fmt.Sprintf("index-%d.html", n)
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutBucketWebsite", Input: map[string]any{"Bucket": "website-chaos", "WebsiteConfiguration": map[string]any{"IndexDocument": map[string]any{"Suffix": suffix}}}})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	successes := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "InvalidArgument" {
+			t.Fatalf("concurrent website put: %v", err)
+		}
+	}
+	if successes != 16 {
+		t.Fatalf("successful website puts = %d, want 16", successes)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBucketWebsite", Input: map[string]any{"Bucket": "website-chaos"}})
+	index, _ := response.Output["IndexDocument"].(map[string]any)
+	suffix, _ := index["Suffix"].(string)
+	if err != nil || !strings.HasPrefix(suffix, "index-") || strings.Contains(suffix, "/") {
+		t.Fatalf("persisted concurrent website = %#v, err=%v", response, err)
+	}
+}
+
 func TestConcurrentInvalidVersioningWritesDoNotChangeState(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

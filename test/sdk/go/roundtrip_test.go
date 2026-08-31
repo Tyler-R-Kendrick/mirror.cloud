@@ -760,6 +760,35 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		o.BaseEndpoint = aws.String(ts.URL)
 		o.UsePathStyle = true
 	})
+	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-list-pagination")}); err != nil {
+		t.Fatal(err)
+	}
+	listKeys := []string{"folder/aSubfolder/subFile1", "folder/aSubfolder/subFile2", "folder/file1", "folder/file2"}
+	for _, key := range listKeys {
+		if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-list-pagination"), Key: aws.String(key), Body: strings.NewReader("content")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	firstList, err := s3c.ListObjects(context.Background(), &s3.ListObjectsInput{Bucket: aws.String("sdk-list-pagination"), Prefix: aws.String("folder/"), Delimiter: aws.String("/"), MaxKeys: aws.Int32(1)})
+	if err != nil || len(firstList.CommonPrefixes) != 1 || aws.ToString(firstList.CommonPrefixes[0].Prefix) != "folder/aSubfolder/" || len(firstList.Contents) != 0 || aws.ToString(firstList.NextMarker) != "folder/aSubfolder/" || !aws.ToBool(firstList.IsTruncated) {
+		t.Fatalf("first list page: %#v %v", firstList, err)
+	}
+	secondList, err := s3c.ListObjects(context.Background(), &s3.ListObjectsInput{Bucket: aws.String("sdk-list-pagination"), Prefix: aws.String("folder/"), Delimiter: aws.String("/"), MaxKeys: aws.Int32(1), Marker: firstList.NextMarker})
+	if err != nil || len(secondList.Contents) != 1 || aws.ToString(secondList.Contents[0].Key) != "folder/file1" || aws.ToString(secondList.Marker) != "folder/aSubfolder/" || aws.ToString(secondList.NextMarker) != "folder/file1" {
+		t.Fatalf("second list page: %#v %v", secondList, err)
+	}
+	firstListV2, err := s3c.ListObjectsV2(context.Background(), &s3.ListObjectsV2Input{Bucket: aws.String("sdk-list-pagination"), Prefix: aws.String("folder/"), Delimiter: aws.String("/"), MaxKeys: aws.Int32(1)})
+	if err != nil || len(firstListV2.CommonPrefixes) != 1 || aws.ToInt32(firstListV2.KeyCount) != 1 || aws.ToString(firstListV2.NextContinuationToken) != "folder/aSubfolder/" {
+		t.Fatalf("first list V2 page: %#v %v", firstListV2, err)
+	}
+	for _, key := range listKeys {
+		if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk-list-pagination"), Key: aws.String(key)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s3c.DeleteBucket(context.Background(), &s3.DeleteBucketInput{Bucket: aws.String("sdk-list-pagination")}); err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range []string{"ab", "192.168.5.4", "reserved--table-s3"} {
 		if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String(name)}); err == nil || !strings.Contains(err.Error(), "InvalidBucketName") {
 			t.Fatalf("invalid bucket name %q: %v", name, err)

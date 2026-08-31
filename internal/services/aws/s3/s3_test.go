@@ -5130,6 +5130,34 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	}
 }
 
+func TestListPartsCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "parts-golden"}, nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "parts-golden", "Key": "object"}, nil).Output["UploadId"].(string)
+	input := map[string]any{"Bucket": "parts-golden", "Key": "object", "UploadId": uploadID}
+	empty := mustInvoke(t, p, "ListParts", maps.Clone(input), nil).Output
+	for _, part := range []struct {
+		number int
+		body   string
+	}{{1, "one"}, {3, "three"}} {
+		partInput := maps.Clone(input)
+		partInput["PartNumber"] = part.number
+		mustInvoke(t, p, "UploadPart", partInput, []byte(part.body))
+		_ = deps.Clock.Advance(time.Second)
+	}
+	firstInput := maps.Clone(input)
+	firstInput["MaxParts"] = 1
+	first := mustInvoke(t, p, "ListParts", firstInput, nil).Output
+	nextInput := maps.Clone(firstInput)
+	nextInput["PartNumberMarker"] = first["NextPartNumberMarker"]
+	next := mustInvoke(t, p, "ListParts", nextInput, nil).Output
+	beyondInput := maps.Clone(firstInput)
+	beyondInput["PartNumberMarker"] = 10
+	beyond := mustInvoke(t, p, "ListParts", beyondInput, nil).Output
+	golden.AssertJSON(t, map[string]any{"empty": empty, "first": first, "next": next, "beyond": beyond})
+}
+
 func TestListMultipartUploadsPaginationAndDelimiter(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

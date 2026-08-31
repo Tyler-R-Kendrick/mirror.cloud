@@ -1,0 +1,94 @@
+{
+  "beyond": {
+    "Bucket": "parts-golden",
+    "ChecksumAlgorithm": "CRC64NVME",
+    "ChecksumType": "FULL_OBJECT",
+    "Initiator": {
+      "ID": "123456789012"
+    },
+    "IsTruncated": false,
+    "Key": "object",
+    "MaxParts": 1,
+    "NextPartNumberMarker": 0,
+    "Owner": {
+      "ID": "123456789012"
+    },
+    "PartNumberMarker": 10,
+    "Parts": [],
+    "StorageClass": "STANDARD",
+    "UploadId": "7c5891299f6489f8"
+  },
+  "empty": {
+    "Bucket": "parts-golden",
+    "ChecksumAlgorithm": "CRC64NVME",
+    "ChecksumType": "FULL_OBJECT",
+    "Initiator": {
+      "ID": "123456789012"
+    },
+    "IsTruncated": false,
+    "Key": "object",
+    "MaxParts": 1000,
+    "NextPartNumberMarker": 0,
+    "Owner": {
+      "ID": "123456789012"
+    },
+    "PartNumberMarker": 0,
+    "Parts": [],
+    "StorageClass": "STANDARD",
+    "UploadId": "7c5891299f6489f8"
+  },
+  "first": {
+    "Bucket": "parts-golden",
+    "ChecksumAlgorithm": "CRC64NVME",
+    "ChecksumType": "FULL_OBJECT",
+    "Initiator": {
+      "ID": "123456789012"
+    },
+    "IsTruncated": true,
+    "Key": "object",
+    "MaxParts": 1,
+    "NextPartNumberMarker": 1,
+    "Owner": {
+      "ID": "123456789012"
+    },
+    "PartNumberMarker": 0,
+    "Parts": [
+      {
+        "ChecksumCRC64NVME": "sUmeCqrLO7M=",
+        "ETag": "\"f97c5d29941bfb1b2fdab0874906ab82\"",
+        "LastModified": "1970-01-01T00:00:00.000Z",
+        "PartNumber": 1,
+        "Size": 3
+      }
+    ],
+    "StorageClass": "STANDARD",
+    "UploadId": "7c5891299f6489f8"
+  },
+  "next": {
+    "Bucket": "parts-golden",
+    "ChecksumAlgorithm": "CRC64NVME",
+    "ChecksumType": "FULL_OBJECT",
+    "Initiator": {
+      "ID": "123456789012"
+    },
+    "IsTruncated": false,
+    "Key": "object",
+    "MaxParts": 1,
+    "NextPartNumberMarker": 3,
+    "Owner": {
+      "ID": "123456789012"
+    },
+    "PartNumberMarker": 1,
+    "Parts": [
+      {
+        "ChecksumCRC64NVME": "rjRGkQfpw8Y=",
+        "ETag": "\"35d6d33467aae9a2e3dccb4b6b027878\"",
+        "LastModified": "1970-01-01T00:00:01.000Z",
+        "PartNumber": 3,
+        "Size": 5
+      }
+    ],
+    "StorageClass": "STANDARD",
+    "UploadId": "7c5891299f6489f8"
+  }
+}

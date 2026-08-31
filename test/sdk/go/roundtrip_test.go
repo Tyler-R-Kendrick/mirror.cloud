@@ -182,6 +182,38 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.GetBucketWebsite(context.Background(), &s3.GetBucketWebsiteInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchWebsiteConfiguration") {
 		t.Fatalf("get deleted bucket website: %v", err)
 	}
+	if got, err := s3c.GetBucketNotificationConfiguration(context.Background(), &s3.GetBucketNotificationConfigurationInput{Bucket: aws.String("sdk")}); err != nil || len(got.QueueConfigurations) != 0 || len(got.TopicConfigurations) != 0 || len(got.LambdaFunctionConfigurations) != 0 || got.EventBridgeConfiguration != nil {
+		t.Fatalf("default bucket notifications: %#v %v", got, err)
+	}
+	notifications := &s3types.NotificationConfiguration{
+		QueueConfigurations: []s3types.QueueConfiguration{{
+			QueueArn: aws.String("arn:aws:sqs:us-east-1:111111111111:queue"), Events: []s3types.Event{s3types.Event("s3:ObjectCreated:*")},
+			Filter: &s3types.NotificationConfigurationFilter{Key: &s3types.S3KeyFilter{FilterRules: []s3types.FilterRule{{Name: s3types.FilterRuleName("prefix"), Value: aws.String("images/")}}}},
+		}},
+		TopicConfigurations:          []s3types.TopicConfiguration{{Id: aws.String("topic"), TopicArn: aws.String("arn:aws:sns:us-east-1:111111111111:topic"), Events: []s3types.Event{s3types.Event("s3:ObjectRemoved:*")}}},
+		LambdaFunctionConfigurations: []s3types.LambdaFunctionConfiguration{{LambdaFunctionArn: aws.String("arn:aws:lambda:us-east-1:111111111111:function:handler"), Events: []s3types.Event{s3types.Event("s3:ObjectCreated:Put")}}},
+		EventBridgeConfiguration:     &s3types.EventBridgeConfiguration{},
+	}
+	if _, err := s3c.PutBucketNotificationConfiguration(context.Background(), &s3.PutBucketNotificationConfigurationInput{Bucket: aws.String("sdk"), NotificationConfiguration: notifications, SkipDestinationValidation: aws.Bool(true)}); err != nil {
+		t.Fatalf("put bucket notifications: %v", err)
+	}
+	gotNotifications, err := s3c.GetBucketNotificationConfiguration(context.Background(), &s3.GetBucketNotificationConfigurationInput{Bucket: aws.String("sdk")})
+	if err != nil || len(gotNotifications.QueueConfigurations) != 1 || len(aws.ToString(gotNotifications.QueueConfigurations[0].Id)) != 8 || gotNotifications.QueueConfigurations[0].Filter == nil || gotNotifications.QueueConfigurations[0].Filter.Key == nil || gotNotifications.QueueConfigurations[0].Filter.Key.FilterRules[0].Name != s3types.FilterRuleName("Prefix") || len(gotNotifications.TopicConfigurations) != 1 || aws.ToString(gotNotifications.TopicConfigurations[0].Id) != "topic" || len(gotNotifications.LambdaFunctionConfigurations) != 1 || gotNotifications.EventBridgeConfiguration == nil {
+		t.Fatalf("bucket notifications round trip: %#v %v", gotNotifications, err)
+	}
+	invalidNotifications := &s3types.NotificationConfiguration{QueueConfigurations: []s3types.QueueConfiguration{{QueueArn: aws.String("arn:aws:sns:us-east-1:111111111111:queue"), Events: []s3types.Event{s3types.Event("s3:ObjectCreated:*")}}}}
+	if _, err := s3c.PutBucketNotificationConfiguration(context.Background(), &s3.PutBucketNotificationConfigurationInput{Bucket: aws.String("sdk"), NotificationConfiguration: invalidNotifications}); err == nil || !strings.Contains(err.Error(), "InvalidArgument") {
+		t.Fatalf("invalid bucket notifications: %v", err)
+	}
+	if gotNotifications, err = s3c.GetBucketNotificationConfiguration(context.Background(), &s3.GetBucketNotificationConfigurationInput{Bucket: aws.String("sdk")}); err != nil || len(gotNotifications.QueueConfigurations) != 1 || aws.ToString(gotNotifications.QueueConfigurations[0].QueueArn) != "arn:aws:sqs:us-east-1:111111111111:queue" {
+		t.Fatalf("invalid notifications replaced configuration: %#v %v", gotNotifications, err)
+	}
+	if _, err := s3c.PutBucketNotificationConfiguration(context.Background(), &s3.PutBucketNotificationConfigurationInput{Bucket: aws.String("sdk"), NotificationConfiguration: &s3types.NotificationConfiguration{}}); err != nil {
+		t.Fatalf("clear bucket notifications: %v", err)
+	}
+	if gotNotifications, err = s3c.GetBucketNotificationConfiguration(context.Background(), &s3.GetBucketNotificationConfigurationInput{Bucket: aws.String("sdk")}); err != nil || len(gotNotifications.QueueConfigurations) != 0 || gotNotifications.EventBridgeConfiguration != nil {
+		t.Fatalf("cleared bucket notifications: %#v %v", gotNotifications, err)
+	}
 	if payment, err := s3c.GetBucketRequestPayment(context.Background(), &s3.GetBucketRequestPaymentInput{Bucket: aws.String("sdk")}); err != nil || payment.Payer != s3types.PayerBucketOwner {
 		t.Fatalf("default request payer: %#v %v", payment, err)
 	}

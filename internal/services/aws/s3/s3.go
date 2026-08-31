@@ -30,6 +30,9 @@ import (
 	"github.com/cespare/xxhash/v2"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/zeebo/xxh3"
 )
@@ -1019,7 +1022,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	case "PostObject":
 		event = "ObjectCreated:Post"
 	}
-	p.notify(ctx, req, b, key, event)
+	p.notify(ctx, req, b, key, event, metaDoc)
 	return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"ETag": etag}}, nil
 }
 
@@ -1509,7 +1512,8 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		vid := p.deps.Rand.Hex(8)
 		mtime := p.deps.Clock.Now().UTC().Format(http.TimeFormat)
 		current, _ := p.objectMetadata(ctx, req, b, key, "")
-		meta, _ := json.Marshal(map[string]any{"deleteMarker": true, "versionId": vid, "versionOrder": append(p.objectVersionOrder(ctx, req, b, key, current), vid), "mtime": mtime, "key": key})
+		metaDoc := map[string]any{"deleteMarker": true, "versionId": vid, "versionOrder": append(p.objectVersionOrder(ctx, req, b, key, current), vid), "mtime": mtime, "key": key}
+		meta, _ := json.Marshal(metaDoc)
 		_ = p.col(req, "objects").Put(ctx, b+"/"+key, meta)
 		_ = p.col(req, "versions").Put(ctx, b+"/"+key+"/"+vid, meta)
 		h := http.Header{}
@@ -1519,6 +1523,7 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 			h.Set("x-amz-replication-status", status)
 		}
 		_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, ""))
+		p.notify(ctx, req, b, key, "ObjectRemoved:DeleteMarkerCreated", metaDoc)
 		return &spi.Response{Status: 204, Headers: h}, nil
 	}
 	if wantVer != "" {
@@ -1560,11 +1565,16 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		if truthy(meta["deleteMarker"]) {
 			h.Set("x-amz-delete-marker", "true")
 		}
+		p.notify(ctx, req, b, key, "ObjectRemoved:Delete", meta)
 		return &spi.Response{Status: 204, Headers: h}, nil
 	}
+	meta, existed := p.objectMetadata(ctx, req, b, key, "")
 	_ = p.deps.Blobs.Delete(ctx, blobKey(req, b, key))
 	_ = p.col(req, "objects").Delete(ctx, b+"/"+key)
 	_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, ""))
+	if existed {
+		p.notify(ctx, req, b, key, "ObjectRemoved:Delete", meta)
+	}
 	return &spi.Response{Status: 204}, nil
 }
 
@@ -2348,8 +2358,25 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	kind, miss := cfgKind(req.Operation)
 	key := b + "/" + kind
+	var objectMeta map[string]any
 	if keyObj := str(req.Input["Key"]); keyObj != "" {
-		key = b + "/" + keyObj + "/" + kind
+		if req.Operation == "GetObjectAcl" || req.Operation == "PutObjectAcl" {
+			var exists bool
+			objectMeta, exists = p.objectMetadata(ctx, req, b, keyObj, str(req.Input["VersionId"]))
+			if !exists {
+				return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client"}
+			}
+			if truthy(objectMeta["deleteMarker"]) {
+				return nil, deleteMarkerReadFault(objectMeta, str(req.Input["VersionId"]) != "")
+			}
+			version := str(objectMeta["versionId"])
+			if version == "null" {
+				version = ""
+			}
+			key = objectTagKey(b, keyObj, version) + "/" + kind
+		} else {
+			key = b + "/" + keyObj + "/" + kind
+		}
 	}
 	col := p.col(req, "bktcfg")
 	if strings.HasPrefix(req.Operation, "Put") {
@@ -2490,6 +2517,9 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 		}
 		raw, _ := json.Marshal(doc)
 		_ = col.Put(ctx, key, raw)
+		if req.Operation == "PutObjectAcl" {
+			p.notify(ctx, req, b, str(req.Input["Key"]), "ObjectAcl:Put", objectMeta)
+		}
 		return &spi.Response{Status: 200}, nil
 	}
 	if strings.HasPrefix(req.Operation, "Delete") {
@@ -2874,6 +2904,9 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 		if objectVersion != "" {
 			h.Set("x-amz-version-id", objectVersion)
 		}
+		if req.Operation == "DeleteObjectTagging" {
+			p.notify(ctx, req, b, key, "ObjectTagging:Delete")
+		}
 		return &spi.Response{Status: 204, Headers: h, Output: map[string]any{}}, nil
 	case "PutBucketTagging", "PutObjectTagging":
 		tagKey := b
@@ -2908,6 +2941,9 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 		if objectVersion != "" {
 			h.Set("x-amz-version-id", objectVersion)
 		}
+		if req.Operation == "PutObjectTagging" {
+			p.notify(ctx, req, b, key, "ObjectTagging:Put")
+		}
 		return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"TagSet": json.RawMessage(raw)}}, nil
 	case "GetBucketTagging", "GetObjectTagging":
 		tagKey := b
@@ -2936,9 +2972,13 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 		}
 		return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"TagSet": tags}}, nil
 	case "PutBucketNotificationConfiguration":
-		raw, _ := json.Marshal(req.Input)
+		configuration, err := p.prepareNotificationConfiguration(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		raw, _ := json.Marshal(configuration)
 		_ = p.col(req, "notify").Put(ctx, b, raw)
-		return &spi.Response{Status: 200, Output: map[string]any{}}, nil
+		return &spi.Response{Status: 200}, nil
 	case "GetBucketNotificationConfiguration":
 		raw, ok, _ := p.col(req, "notify").Get(ctx, b)
 		if !ok {
@@ -2950,6 +2990,157 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 	}
 	// Terraform refresh reads: empty document is the documented "not configured" response.
 	return &spi.Response{Status: 200, Output: map[string]any{}}, nil
+}
+
+func (p *Pack) prepareNotificationConfiguration(ctx context.Context, req *spi.Request) (map[string]any, error) {
+	skipDestinationValidation := false
+	if value, ok := req.Input["SkipDestinationValidation"].(bool); ok {
+		skipDestinationValidation = value
+	}
+	if req.HTTP != nil && strings.EqualFold(req.HTTP.Header.Get("x-amz-skip-destination-validation"), "true") {
+		skipDestinationValidation = true
+	}
+	configuration := map[string]any{}
+	if value, exists := req.Input["NotificationConfiguration"]; exists {
+		var ok bool
+		if configuration, ok = value.(map[string]any); !ok {
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+	} else {
+		if str(req.Input["_body"]) != "" {
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		for _, field := range []string{"QueueConfigurations", "TopicConfigurations", "LambdaFunctionConfigurations", "EventBridgeConfiguration"} {
+			if value, exists := req.Input[field]; exists {
+				configuration[field] = value
+			}
+		}
+	}
+	normalized := make(map[string]any, len(configuration))
+	var verified []struct{ service, arn string }
+	for field, value := range configuration {
+		if field == "EventBridgeConfiguration" {
+			if eventBridge, ok := value.(map[string]any); !ok || len(eventBridge) != 0 {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			normalized[field] = map[string]any{}
+			continue
+		}
+		arnField, service, argumentName := "", "", ""
+		switch field {
+		case "QueueConfigurations":
+			arnField, service, argumentName = "QueueArn", "sqs", "Queue"
+		case "TopicConfigurations":
+			arnField, service, argumentName = "TopicArn", "sns", "TopicArn"
+		case "LambdaFunctionConfigurations":
+			arnField, service, argumentName = "LambdaFunctionArn", "lambda", "LambdaFunctionArn"
+		default:
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		configurations, ok := value.([]any)
+		if !ok {
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		items := make([]any, 0, len(configurations))
+		for _, value := range configurations {
+			configuration, ok := value.(map[string]any)
+			if !ok || len(asSlice(configuration["Events"])) == 0 {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			arn := str(configuration[arnField])
+			parts := strings.SplitN(arn, ":", 4)
+			if len(parts) != 4 || parts[0] != "arn" || parts[2] != service {
+				return nil, &spi.Fault{Code: "InvalidArgument", Message: "The ARN could not be parsed", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": argumentName, "ArgumentValue": arn}}
+			}
+			if !skipDestinationValidation {
+				arnParts := strings.Split(arn, ":")
+				if len(arnParts) < 6 {
+					return nil, &spi.Fault{Code: "InvalidArgument", Message: "The ARN could not be parsed", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": argumentName, "ArgumentValue": arn}}
+				}
+				name, collection, missing := arnParts[len(arnParts)-1], "", ""
+				switch service {
+				case "sqs":
+					collection, missing = "queues", "The destination queue does not exist"
+				case "sns":
+					collection, missing = "topics", "The destination topic does not exist"
+				case "lambda":
+					collection, missing = "lambda", "The destination Lambda does not exist"
+					if _, resource, found := strings.Cut(arn, ":function:"); found {
+						name, _, _ = strings.Cut(resource, ":")
+					}
+				}
+				if _, exists, _ := p.deps.Store.Scope(arnParts[4], arnParts[3]).Collection(collection).Get(ctx, name); !exists {
+					return nil, &spi.Fault{Code: "InvalidArgument", Message: "Unable to validate the following destination configurations", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": arn, "ArgumentValue": missing}}
+				}
+				verified = append(verified, struct{ service, arn string }{service, arn})
+			}
+			for key := range configuration {
+				if key != "Id" && key != arnField && key != "Events" && key != "Filter" {
+					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+				}
+			}
+			item := map[string]any{arnField: arn, "Events": configuration["Events"], "Id": str(configuration["Id"])}
+			if item["Id"] == "" {
+				item["Id"] = p.deps.Rand.Hex(8)
+			}
+			if value, exists := configuration["Filter"]; exists {
+				filter := asMap(value)
+				key := asMap(filter["Key"])
+				rules, ok := key["FilterRules"].([]any)
+				if !ok {
+					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+				}
+				normalizedRules := make([]any, 0, len(rules))
+				for _, value := range rules {
+					rule, ok := value.(map[string]any)
+					name, hasName := rule["Name"].(string)
+					value, hasValue := rule["Value"].(string)
+					if !ok || !hasName || !hasValue {
+						return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+					}
+					switch strings.ToLower(name) {
+					case "prefix":
+						name = "Prefix"
+					case "suffix":
+						name = "Suffix"
+					default:
+						return nil, &spi.Fault{Code: "InvalidArgument", Message: "filter rule name must be either prefix or suffix", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "FilterRule.Name", "ArgumentValue": name}}
+					}
+					normalizedRules = append(normalizedRules, map[string]any{"Name": name, "Value": value})
+				}
+				item["Filter"] = map[string]any{"Key": map[string]any{"FilterRules": normalizedRules}}
+			}
+			items = append(items, item)
+		}
+		normalized[field] = items
+	}
+	for _, destination := range verified {
+		if err := p.verifyNotificationDestination(ctx, req, destination.service, destination.arn); err != nil {
+			return nil, err
+		}
+	}
+	return normalized, nil
+}
+
+func (p *Pack) verifyNotificationDestination(ctx context.Context, req *spi.Request, service, arn string) error {
+	identity := notificationTargetIdentity(req.Identity, arn)
+	name := arn[strings.LastIndex(arn, ":")+1:]
+	if service == "lambda" {
+		_, name, _ = strings.Cut(arn, ":function:")
+		name, _, _ = strings.Cut(name, ":")
+		_, err := lambda.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Invoke", Input: map[string]any{"FunctionName": name, "InvocationType": "DryRun"}})
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"Service": "Amazon S3", "Event": "s3:TestEvent", "Time": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		"Bucket": str(req.Input["Bucket"]), "RequestId": "mirror", "HostId": "eftixk72aD6Ap51TnqcoF8eFidJG9Z/2",
+	})
+	if service == "sqs" {
+		_, err := sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": string(payload)}})
+		return err
+	}
+	_, err := sns.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Publish", Input: map[string]any{"TopicArn": arn, "Message": string(payload)}})
+	return err
 }
 
 func validateTagSet(value any, limit int, kind string) error {
@@ -3410,6 +3601,10 @@ func (p *Pack) restoreObject(ctx context.Context, req *spi.Request) (*spi.Respon
 	expires := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, days+1)
 	restore := fmt.Sprintf(`ongoing-request="false", expiry-date="%s"`, expires.Format(http.TimeFormat))
 	_ = p.col(req, "objlock").Put(ctx, objectRestoreKey(b, key, meta), []byte(restore))
+	notificationMeta := cloneMap(meta)
+	notificationMeta["restoreExpiry"] = expires.UTC().Format("2006-01-02T15:04:05.000Z")
+	p.notify(ctx, req, b, key, "ObjectRestore:Post", notificationMeta)
+	p.notify(ctx, req, b, key, "ObjectRestore:Completed", notificationMeta)
 	status := http.StatusAccepted
 	if restored {
 		status = http.StatusOK
@@ -3497,13 +3692,14 @@ func (p *Pack) requireBucketOwner(ctx context.Context, req *spi.Request, b, expe
 	return nil
 }
 
-func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event string) {
-	payload, _ := json.Marshal(map[string]any{
-		"Records": []any{map[string]any{
-			"eventName": event,
-			"s3":        map[string]any{"bucket": map[string]any{"name": bucket}, "object": map[string]any{"key": key}},
-		}},
-	})
+func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event string, metadata ...map[string]any) {
+	meta := map[string]any{}
+	if len(metadata) > 0 {
+		meta = metadata[0]
+	} else {
+		meta, _ = p.objectMetadata(ctx, req, bucket, key, str(req.Input["VersionId"]))
+	}
+	payload := p.notificationPayload(req, bucket, key, event, "", meta)
 	_ = p.deps.Bus.Publish(ctx, "s3:"+bucket, payload)
 	raw, ok, _ := p.col(req, "notify").Get(ctx, bucket)
 	if !ok {
@@ -3513,6 +3709,9 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 	_ = json.Unmarshal(raw, &cfg)
 	for _, dest := range append(asSlice(cfg["QueueConfigurations"]), asSlice(cfg["TopicConfigurations"])...) {
 		m := asMap(dest)
+		if !notificationMatches(m, key, event) {
+			continue
+		}
 		arn := str(m["QueueArn"])
 		if arn == "" {
 			arn = str(m["TopicArn"])
@@ -3523,18 +3722,189 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 		if arn == "" {
 			continue
 		}
+		payload = p.notificationPayload(req, bucket, key, event, str(m["Id"]), meta)
 		name := arn
 		if i := strings.LastIndex(arn, ":"); i >= 0 {
 			name = arn[i+1:]
 		}
 		if str(m["QueueArn"]) != "" || str(m["Queue"]) != "" || strings.Contains(arn, ":sqs:") {
-			rh := p.deps.Rand.Hex(16)
-			msg, _ := json.Marshal(map[string]any{"id": rh, "body": string(payload), "handle": rh, "visibleAt": 0, "receiveCount": 0, "seq": 1})
-			_ = p.col(req, "msgs:"+name).Put(ctx, rh, msg)
+			_, _ = sqs.New(p.deps).Invoke(ctx, &spi.Request{
+				Identity: notificationTargetIdentity(req.Identity, arn), Operation: "SendMessage",
+				Input: map[string]any{"QueueName": name, "MessageBody": string(payload)},
+			})
 			continue
 		}
-		_ = p.deps.Bus.Publish(ctx, "sns:"+arn, payload)
+		_, _ = sns.New(p.deps).Invoke(ctx, &spi.Request{
+			Identity: notificationTargetIdentity(req.Identity, arn), Operation: "Publish",
+			Input: map[string]any{"TopicArn": arn, "Message": string(payload)},
+		})
 	}
+	for _, dest := range asSlice(cfg["LambdaFunctionConfigurations"]) {
+		configuration := asMap(dest)
+		if !notificationMatches(configuration, key, event) {
+			continue
+		}
+		arn := str(configuration["LambdaFunctionArn"])
+		payload = p.notificationPayload(req, bucket, key, event, str(configuration["Id"]), meta)
+		_, name, found := strings.Cut(arn, ":function:")
+		if !found {
+			continue
+		}
+		name, _, _ = strings.Cut(name, ":")
+		_, _ = lambda.New(p.deps).Invoke(ctx, &spi.Request{
+			Identity: notificationTargetIdentity(req.Identity, arn), Operation: "Invoke", Body: io.NopCloser(bytes.NewReader(payload)),
+			Input: map[string]any{"FunctionName": name, "InvocationType": "Event"},
+		})
+	}
+	if _, enabled := cfg["EventBridgeConfiguration"]; enabled {
+		entry := p.eventBridgeEntry(req, bucket, key, event, meta)
+		envelope, _ := json.Marshal(map[string]any{"identity": req.Identity, "entry": entry})
+		_ = p.deps.Bus.Publish(ctx, "events:s3", envelope)
+	}
+}
+
+func notificationTargetIdentity(identity spi.Identity, arn string) spi.Identity {
+	parts := strings.Split(arn, ":")
+	if len(parts) >= 6 {
+		identity.Region, identity.Account = parts[3], parts[4]
+	}
+	return identity
+}
+
+func (p *Pack) notificationPayload(req *spi.Request, bucket, key, event, configurationID string, meta map[string]any) []byte {
+	object := map[string]any{"key": notificationKey(key), "sequencer": "0055AED6DCD90281E5"}
+	if version := str(meta["versionId"]); version != "" && version != "null" {
+		object["versionId"] = version
+	}
+	if strings.Contains(event, "ObjectCreated") || strings.Contains(event, "ObjectRestore") {
+		object["eTag"] = strings.Trim(str(meta["etag"]), `"`)
+		object["size"] = asInt(meta["size"])
+	}
+	eventVersion := "2.1"
+	if strings.Contains(event, "ObjectTagging") || strings.Contains(event, "ObjectAcl") {
+		eventVersion = "2.3"
+		object["eTag"] = strings.Trim(str(meta["etag"]), `"`)
+		delete(object, "sequencer")
+	}
+	eventTime := p.deps.Clock.Now().UTC()
+	if strings.HasSuffix(event, "ObjectRestore:Completed") {
+		eventTime = eventTime.Add(500 * time.Millisecond)
+	}
+	record := map[string]any{
+		"eventVersion": eventVersion, "eventSource": "aws:s3", "awsRegion": req.Identity.Region,
+		"eventTime": eventTime.Format("2006-01-02T15:04:05.000Z"), "eventName": event,
+		"userIdentity":      map[string]any{"principalId": "AIDAJDPLRKLG7UEXAMPLE"},
+		"requestParameters": map[string]any{"sourceIPAddress": "127.0.0.1"},
+		"responseElements":  map[string]any{"x-amz-request-id": "mirror", "x-amz-id-2": "mirror"},
+		"s3": map[string]any{
+			"s3SchemaVersion": "1.0", "configurationId": configurationID,
+			"bucket": map[string]any{"name": bucket, "ownerIdentity": map[string]any{"principalId": req.Identity.Account}, "arn": "arn:aws:s3:::" + bucket},
+			"object": object,
+		},
+	}
+	if strings.HasSuffix(event, "ObjectRestore:Completed") {
+		record["glacierEventData"] = map[string]any{"restoreEventData": map[string]any{
+			"lifecycleRestorationExpiryTime": str(meta["restoreExpiry"]), "lifecycleRestoreStorageClass": str(meta["storageClass"]),
+		}}
+	}
+	payload, _ := json.Marshal(map[string]any{"Records": []any{record}})
+	return payload
+}
+
+func (p *Pack) eventBridgeEntry(req *spi.Request, bucket, key, event string, meta map[string]any) map[string]any {
+	object := map[string]any{
+		"key": notificationKey(key), "size": asInt(meta["size"]),
+		"etag": strings.Trim(str(meta["etag"]), `"`), "sequencer": "0062E99A88DC407460",
+	}
+	if version := str(meta["versionId"]); version != "" && version != "null" {
+		object["version-id"] = version
+	}
+	detail := map[string]any{
+		"version": "0", "bucket": map[string]any{"name": bucket}, "object": object,
+		"request-id": "mirror", "requester": req.Identity.Account, "source-ip-address": "127.0.0.1",
+	}
+	detailType := ""
+	switch {
+	case strings.Contains(event, "ObjectCreated"):
+		detailType = "Object Created"
+		action := event[strings.LastIndex(event, ":")+1:]
+		if action == "Put" || action == "Post" || action == "Copy" {
+			detail["reason"] = action + "Object"
+		} else {
+			detail["reason"] = "s3:" + event
+		}
+	case strings.Contains(event, "ObjectRemoved"):
+		detailType, detail["reason"] = "Object Deleted", "DeleteObject"
+		delete(object, "size")
+		if strings.Contains(event, "DeleteMarkerCreated") {
+			detail["deletion-type"] = "Delete Marker Created"
+			object["etag"] = "d41d8cd98f00b204e9800998ecf8427e"
+		} else {
+			detail["deletion-type"] = "Permanently Deleted"
+			delete(object, "etag")
+		}
+	case strings.Contains(event, "ObjectTagging"):
+		if strings.HasSuffix(event, ":Put") {
+			detailType = "Object Tags Added"
+		} else {
+			detailType = "Object Tags Deleted"
+		}
+	case strings.Contains(event, "ObjectAcl"):
+		detailType = "Object ACL Updated"
+		delete(object, "size")
+		delete(object, "sequencer")
+	case strings.Contains(event, "ObjectRestore"):
+		detailType = "Object Restore Initiated"
+		if strings.HasSuffix(event, ":Completed") {
+			detailType = "Object Restore Completed"
+			detail["restore-expiry-time"] = str(meta["restoreExpiry"])
+			delete(detail, "source-ip-address")
+		}
+		detail["source-storage-class"] = str(meta["storageClass"])
+		delete(object, "sequencer")
+	}
+	detailJSON, _ := json.Marshal(detail)
+	eventTime := p.deps.Clock.Now().UTC()
+	if strings.HasSuffix(event, "ObjectRestore:Completed") {
+		eventTime = eventTime.Add(time.Second)
+	}
+	return map[string]any{
+		"Source": "aws.s3", "Resources": []any{"arn:aws:s3:::" + bucket},
+		"Time": eventTime.Format(time.RFC3339Nano), "DetailType": detailType, "Detail": string(detailJSON),
+	}
+}
+
+func notificationKey(key string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(url.QueryEscape(key), "+", "%20"), "%2F", "/")
+}
+
+func notificationMatches(configuration map[string]any, key, event string) bool {
+	event = "s3:" + event
+	wildcard := event[:strings.LastIndex(event, ":")+1] + "*"
+	matched := false
+	for _, value := range asSlice(configuration["Events"]) {
+		if configured := str(value); configured == event || configured == wildcard {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return false
+	}
+	for _, value := range asSlice(asMap(asMap(configuration["Filter"])["Key"])["FilterRules"]) {
+		rule := asMap(value)
+		switch strings.ToLower(str(rule["Name"])) {
+		case "prefix":
+			if !strings.HasPrefix(key, str(rule["Value"])) {
+				return false
+			}
+		case "suffix":
+			if !strings.HasSuffix(key, str(rule["Value"])) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func blobKey(req *spi.Request, b, k string) string {

@@ -268,11 +268,16 @@ func TestBootedServerS3NotificationToSQS(t *testing.T) {
 	}
 	recv := sqsJSON("ReceiveMessage", `{"QueueName":"nq","WaitTimeSeconds":0,"MaxNumberOfMessages":10}`)
 	msgs := asSlice(recv["Messages"])
-	if len(msgs) == 0 {
-		t.Fatalf("no notification %v", recv)
+	if len(msgs) != 2 {
+		t.Fatalf("notifications %v", recv)
 	}
-	body := str(asM(msgs[0])["Body"])
-	if !strings.Contains(body, "ObjectCreated") || !strings.Contains(body, "obj") {
-		t.Fatalf("event %s", body)
+	testEvent, objectEvent := false, false
+	for _, message := range msgs {
+		body := str(asM(message)["Body"])
+		testEvent = testEvent || strings.Contains(body, `"Event":"s3:TestEvent"`)
+		objectEvent = objectEvent || strings.Contains(body, "ObjectCreated") && strings.Contains(body, "obj")
+	}
+	if !testEvent || !objectEvent {
+		t.Fatalf("events %v", msgs)
 	}
 }

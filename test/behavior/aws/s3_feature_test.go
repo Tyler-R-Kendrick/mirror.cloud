@@ -2,6 +2,7 @@ package behavior
 
 import (
 	"bytes"
+	"context"
 	"crypto/md5"
 	"crypto/sha256"
 	"encoding/base64"
@@ -736,6 +737,66 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchWebsiteConfiguration")) {
 			t.Fatalf("get deleted website %d %s", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given bucket notifications When configuring and clearing them Then matching objects reach the queue", func(t *testing.T) {
+		res := do(http.MethodPut, "/notification-bdd", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create notification bucket %d", res.StatusCode)
+		}
+		if err := deps.Store.Scope("000000000000", "us-east-1").Collection("queues").Put(context.Background(), "notification-queue", []byte("{}")); err != nil {
+			t.Fatal(err)
+		}
+		valid := []byte(`<NotificationConfiguration><QueueConfiguration><Id>images</Id><Queue>arn:aws:sqs:us-east-1:000000000000:notification-queue</Queue><Event>s3:ObjectCreated:*</Event><Filter><S3Key><FilterRule><Name>prefix</Name><Value>images/</Value></FilterRule><FilterRule><Name>suffix</Name><Value>.jpg</Value></FilterRule></S3Key></Filter></QueueConfiguration></NotificationConfiguration>`)
+		res = do(http.MethodPut, "/notification-bdd?notification", valid, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || len(body) != 0 {
+			t.Fatalf("put notifications %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/notification-bdd?notification", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<QueueConfiguration>")) || !bytes.Contains(body, []byte("<Name>Prefix</Name>")) || bytes.Contains(body, []byte("<member>")) || bytes.Contains(body, []byte("GetBucketNotificationConfigurationResult")) {
+			t.Fatalf("get notifications %d %s", res.StatusCode, body)
+		}
+		for _, key := range []string{"images/photo.jpg", "images/photo.png", "docs/photo.jpg"} {
+			res = do(http.MethodPut, "/notification-bdd/"+key, []byte(key), "")
+			io.Copy(io.Discard, res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("put notification object %s: %d", key, res.StatusCode)
+			}
+		}
+		messages, _, err := deps.Store.Scope("000000000000", "us-east-1").Collection("msgs:notification-queue").List(context.Background(), "", "", 0)
+		matched := false
+		for _, message := range messages {
+			matched = matched || bytes.Contains(message.Value, []byte("images/photo.jpg"))
+		}
+		if err != nil || len(messages) != 2 || !matched {
+			t.Fatalf("notification messages = %#v, err=%v", messages, err)
+		}
+		invalid := []byte(`<NotificationConfiguration><QueueConfiguration><Queue>arn:aws:sqs:us-east-1:000000000000:missing</Queue><Event>s3:ObjectCreated:*</Event></QueueConfiguration></NotificationConfiguration>`)
+		res = do(http.MethodPut, "/notification-bdd?notification", invalid, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidArgument")) {
+			t.Fatalf("invalid notifications %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodPut, "/notification-bdd?notification", []byte(`<NotificationConfiguration/>`), "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("clear notifications %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/notification-bdd?notification", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || bytes.Contains(body, []byte("QueueConfiguration")) {
+			t.Fatalf("cleared notifications %d %s", res.StatusCode, body)
 		}
 	})
 

@@ -516,6 +516,59 @@ func FuzzBucketWebsite(f *testing.F) {
 	})
 }
 
+func FuzzBucketNotifications(f *testing.F) {
+	for _, seed := range []struct {
+		mode uint8
+		name string
+	}{{0, "prefix"}, {0, "suffix"}, {0, "contains"}, {1, "prefix"}, {2, "prefix"}, {3, "prefix"}, {4, "prefix"}, {5, "prefix"}} {
+		f.Add(seed.mode, seed.name)
+	}
+	f.Fuzz(func(t *testing.T, mode uint8, name string) {
+		if !utf8.ValidString(name) {
+			t.Skip()
+		}
+		deps := spitest.Deps(t)
+		p := s3.New(deps)
+		input := map[string]any{"Bucket": "notification-fuzz"}
+		mustInvoke(t, p, "CreateBucket", input, nil)
+		if err := deps.Store.Scope("123456789012", "us-east-1").Collection("queues").Put(context.Background(), "queue", []byte("{}")); err != nil {
+			t.Fatal(err)
+		}
+		baseline := map[string]any{"QueueConfigurations": []any{map[string]any{"Id": "baseline", "QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue", "Events": []any{"s3:ObjectCreated:*"}}}}
+		mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": baseline}, nil)
+		valid, cleared, wantFault := false, false, "InvalidArgument"
+		configuration := map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue", "Events": []any{"s3:ObjectCreated:*"}, "Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{map[string]any{"Name": name, "Value": "images/"}}}}}}}
+		switch mode % 6 {
+		case 0:
+			valid = strings.EqualFold(name, "prefix") || strings.EqualFold(name, "suffix")
+		case 1:
+			configuration = map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:123456789012:missing", "Events": []any{"s3:ObjectCreated:*"}}}}
+		case 2:
+			configuration = map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sns:us-east-1:123456789012:queue", "Events": []any{"s3:ObjectCreated:*"}}}}
+		case 3:
+			configuration, wantFault = map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue"}}}, "MalformedXML"
+		case 4:
+			configuration, valid = map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:123456789012:missing", "Events": []any{"s3:ObjectCreated:*"}}}}, true
+			input["SkipDestinationValidation"] = true
+		case 5:
+			configuration, valid, cleared = map[string]any{}, true, true
+		}
+		input["NotificationConfiguration"] = configuration
+		_, err := invoke(t, p, "PutBucketNotificationConfiguration", input, nil)
+		if !valid {
+			if fault := asFault(t, err); fault.Code != wantFault {
+				t.Fatalf("mode=%d name=%q: %#v", mode%6, name, fault)
+			}
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		stored := mustInvoke(t, p, "GetBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"]}, nil).Output
+		if cleared && len(stored) != 0 || !valid && !reflect.DeepEqual(stored, baseline) {
+			t.Fatalf("stored notifications = %#v", stored)
+		}
+	})
+}
+
 func FuzzDeleteBucketEmptiness(f *testing.F) {
 	for _, seed := range []struct {
 		versioned bool

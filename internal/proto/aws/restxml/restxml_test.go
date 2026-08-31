@@ -339,9 +339,18 @@ func TestRESTXMLServiceDecodeContracts(t *testing.T) {
 			t.Errorf("%s decode %#v %v", test.operation, decoded, err)
 		}
 	}
-	notification := `<NotificationConfiguration><QueueConfiguration><Queue>arn:q</Queue><Event>s3:ObjectCreated:*</Event></QueueConfiguration><TopicConfiguration><Topic>arn:t</Topic><Event>s3:ObjectRemoved:*</Event></TopicConfiguration></NotificationConfiguration>`
+	notification := `<NotificationConfiguration><QueueConfiguration><Id>queue</Id><Queue>arn:aws:sqs:us-east-1:111111111111:q</Queue><Event>s3:ObjectCreated:*</Event><Filter><S3Key><FilterRule><Name>prefix</Name><Value>images/</Value></FilterRule></S3Key></Filter></QueueConfiguration><TopicConfiguration><Topic>arn:aws:sns:us-east-1:111111111111:t</Topic><Event>s3:ObjectRemoved:*</Event></TopicConfiguration><CloudFunctionConfiguration><CloudFunction>arn:aws:lambda:us-east-1:111111111111:function:f</CloudFunction><Event>s3:ObjectCreated:Put</Event></CloudFunctionConfiguration><EventBridgeConfiguration/></NotificationConfiguration>`
 	decoded, err = codec.Decode(s3, &model.Operation{Name: "PutBucketNotificationConfiguration"}, httptest.NewRequest(http.MethodPut, "/bucket?notification", strings.NewReader(notification)))
-	if err != nil || len(decoded.Input["QueueConfigurations"].([]any)) != 1 || len(decoded.Input["TopicConfigurations"].([]any)) != 1 {
+	notificationConfiguration, _ := decoded.Input["NotificationConfiguration"].(map[string]any)
+	queues, _ := notificationConfiguration["QueueConfigurations"].([]any)
+	queue, _ := queues[0].(map[string]any)
+	filter, _ := queue["Filter"].(map[string]any)
+	keyFilter, _ := filter["Key"].(map[string]any)
+	filterRules, _ := keyFilter["FilterRules"].([]any)
+	filterRule, _ := filterRules[0].(map[string]any)
+	topics, _ := notificationConfiguration["TopicConfigurations"].([]any)
+	lambdas, _ := notificationConfiguration["LambdaFunctionConfigurations"].([]any)
+	if err != nil || queue["Id"] != "queue" || filterRule["Value"] != "images/" || len(topics) != 1 || len(lambdas) != 1 || !reflect.DeepEqual(notificationConfiguration["EventBridgeConfiguration"], map[string]any{}) {
 		t.Fatalf("notification decode %#v %v", decoded, err)
 	}
 	ownership := `<OwnershipControls><Rule><ObjectOwnership>ObjectWriter</ObjectOwnership></Rule></OwnershipControls>`
@@ -531,6 +540,15 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	website := map[string]any{"IndexDocument": map[string]any{"Suffix": "index.html"}, "ErrorDocument": map[string]any{"Key": "error.html"}, "RoutingRules": []any{map[string]any{"Condition": map[string]any{"KeyPrefixEquals": "docs/"}, "Redirect": map[string]any{"Protocol": "https", "ReplaceKeyPrefixWith": "manual/"}}}}
 	if err := codec.Encode(svc, &model.Operation{Name: "GetBucketWebsite"}, w, &spi.Response{Output: website}); err != nil || !strings.Contains(w.Body.String(), `<WebsiteConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><IndexDocument><Suffix>index.html</Suffix></IndexDocument><ErrorDocument><Key>error.html</Key></ErrorDocument><RoutingRules><RoutingRule><Condition><KeyPrefixEquals>docs/</KeyPrefixEquals></Condition><Redirect><Protocol>https</Protocol><ReplaceKeyPrefixWith>manual/</ReplaceKeyPrefixWith></Redirect></RoutingRule></RoutingRules></WebsiteConfiguration>`) || strings.Contains(w.Body.String(), "<member>") {
 		t.Fatalf("website response %v %s", err, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	notifications := map[string]any{
+		"QueueConfigurations":          []any{map[string]any{"Id": "queue", "QueueArn": "arn:aws:sqs:us-east-1:111111111111:q", "Events": []any{"s3:ObjectCreated:*"}, "Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{map[string]any{"Name": "Prefix", "Value": "images/"}}}}}},
+		"LambdaFunctionConfigurations": []any{map[string]any{"Id": "lambda", "LambdaFunctionArn": "arn:aws:lambda:us-east-1:111111111111:function:f", "Events": []any{"s3:ObjectCreated:Put"}}},
+		"EventBridgeConfiguration":     map[string]any{},
+	}
+	if err := codec.Encode(svc, &model.Operation{Name: "GetBucketNotificationConfiguration"}, w, &spi.Response{Output: notifications}); err != nil || !strings.Contains(w.Body.String(), `<NotificationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><QueueConfiguration><Id>queue</Id><Queue>arn:aws:sqs:us-east-1:111111111111:q</Queue><Event>s3:ObjectCreated:*</Event><Filter><S3Key><FilterRule><Name>Prefix</Name><Value>images/</Value></FilterRule></S3Key></Filter></QueueConfiguration><CloudFunctionConfiguration><Id>lambda</Id><CloudFunction>arn:aws:lambda:us-east-1:111111111111:function:f</CloudFunction><Event>s3:ObjectCreated:Put</Event></CloudFunctionConfiguration><EventBridgeConfiguration></EventBridgeConfiguration></NotificationConfiguration>`) || strings.Contains(w.Body.String(), "<member>") || strings.Contains(w.Body.String(), "GetBucketNotificationConfigurationResult") {
+		t.Fatalf("notification response %v %s", err, w.Body.String())
 	}
 	w = httptest.NewRecorder()
 	if err := codec.EncodeFault(svc, &model.Operation{Name: "Missing"}, w, spi.NotImplemented(svc.ID, "Missing", "emulate"), "r<&"); err != nil {

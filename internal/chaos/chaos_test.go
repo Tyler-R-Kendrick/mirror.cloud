@@ -1017,6 +1017,60 @@ func TestConcurrentBucketWebsiteRemainsValid(t *testing.T) {
 	}
 }
 
+func TestConcurrentBucketNotificationsRemainValid(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "notification-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := deps.Store.Scope(id.Account, id.Region).Collection("queues").Put(ctx, "queue", []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			name := "missing"
+			if n%2 == 0 {
+				name = "queue"
+			}
+			configuration := map[string]any{"QueueConfigurations": []any{map[string]any{"Id": fmt.Sprintf("rule-%d", n), "QueueArn": "arn:aws:sqs:us-east-1:111111111111:" + name, "Events": []any{"s3:ObjectCreated:*"}}}}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutBucketNotificationConfiguration", Input: map[string]any{"Bucket": "notification-chaos", "NotificationConfiguration": configuration}})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	successes := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "InvalidArgument" {
+			t.Fatalf("concurrent notification put: %v", err)
+		}
+	}
+	if successes != 16 {
+		t.Fatalf("successful notification puts = %d, want 16", successes)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBucketNotificationConfiguration", Input: map[string]any{"Bucket": "notification-chaos"}})
+	configurations, _ := response.Output["QueueConfigurations"].([]any)
+	configuration := map[string]any{}
+	if len(configurations) == 1 {
+		configuration, _ = configurations[0].(map[string]any)
+	}
+	arn, _ := configuration["QueueArn"].(string)
+	if err != nil || len(configurations) != 1 || !strings.HasSuffix(arn, ":queue") {
+		t.Fatalf("persisted concurrent notifications = %#v, err=%v", response, err)
+	}
+}
+
 func TestConcurrentInvalidVersioningWritesDoNotChangeState(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

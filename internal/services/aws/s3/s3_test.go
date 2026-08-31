@@ -19,6 +19,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"os/exec"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -28,7 +30,11 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bus"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -218,6 +224,351 @@ func TestCreateBucketTags(t *testing.T) {
 		"tags": response.Output["TagSet"], "tagged recreation": recreate.Code,
 		"invalid tags": invalidTags.Code, "invalid bucket": invalidBucket.Code,
 	})
+}
+
+func TestBucketNotificationConfiguration(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	input := map[string]any{"Bucket": "notifications"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	for collection, name := range map[string]string{"queues": "queue", "topics": "topic", "lambda": "handler"} {
+		if err := deps.Store.Scope("111111111111", "us-east-1").Collection(collection).Put(context.Background(), name, []byte("{}")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(got) != 0 {
+		t.Fatalf("default notifications = %#v", got)
+	}
+	configuration := map[string]any{
+		"QueueConfigurations":          []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:queue", "Events": []any{"s3:ObjectCreated:*"}, "Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{map[string]any{"Name": "prefix", "Value": "images/"}}}}}},
+		"TopicConfigurations":          []any{map[string]any{"Id": "topic", "TopicArn": "arn:aws:sns:us-east-1:111111111111:topic", "Events": []any{"s3:ObjectRemoved:*"}}},
+		"LambdaFunctionConfigurations": []any{map[string]any{"LambdaFunctionArn": "arn:aws:lambda:us-east-1:111111111111:function:handler", "Events": []any{"s3:ObjectCreated:Put"}}},
+		"EventBridgeConfiguration":     map[string]any{},
+	}
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": configuration}, nil)
+	got := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output
+	queue := asMapForTest(asSliceForTest(got["QueueConfigurations"])[0])
+	id, _ := queue["Id"].(string)
+	if len(id) != 8 || asMapForTest(asSliceForTest(asMapForTest(asMapForTest(queue["Filter"])["Key"])["FilterRules"])[0])["Name"] != "Prefix" {
+		t.Fatalf("normalized queue = %#v", queue)
+	}
+	if !reflect.DeepEqual(got["EventBridgeConfiguration"], map[string]any{}) || asMapForTest(asSliceForTest(got["TopicConfigurations"])[0])["Id"] != "topic" {
+		t.Fatalf("notifications = %#v", got)
+	}
+	notificationWithFilter := func(rule map[string]any) map[string]any {
+		return map[string]any{
+			"QueueConfigurations": []any{
+				map[string]any{
+					"QueueArn": "arn:aws:sqs:us-east-1:111111111111:queue", "Events": []any{"s3:ObjectCreated:*"},
+					"Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{rule}}},
+				},
+			},
+		}
+	}
+	tests := []struct {
+		name, code string
+		config     any
+	}{
+		{"malformed document", "MalformedXML", nil},
+		{"missing events", "MalformedXML", map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:queue"}}}},
+		{"wrong arn service", "InvalidArgument", map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sns:us-east-1:111111111111:queue", "Events": []any{"s3:ObjectCreated:*"}}}}},
+		{"missing destination", "InvalidArgument", map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:missing", "Events": []any{"s3:ObjectCreated:*"}}}}},
+		{"missing filter value", "MalformedXML", notificationWithFilter(map[string]any{"Name": "prefix"})},
+		{"invalid filter name", "InvalidArgument", notificationWithFilter(map[string]any{"Name": "contains", "Value": "x"})},
+		{"unknown field", "MalformedXML", map[string]any{"UnknownConfigurations": []any{}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			request := map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": tc.config}
+			if tc.name == "malformed document" {
+				delete(request, "NotificationConfiguration")
+				request["_body"] = "<broken"
+			}
+			_, err := invoke(t, p, "PutBucketNotificationConfiguration", request, nil)
+			if fault := asFault(t, err); fault.Code != tc.code {
+				t.Fatalf("fault = %#v", fault)
+			}
+		})
+	}
+	if preserved := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; !reflect.DeepEqual(preserved, got) {
+		t.Fatalf("invalid replacement = %#v", preserved)
+	}
+	skipped := map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:missing", "Events": []any{"s3:ObjectCreated:*"}}}}
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": skipped, "SkipDestinationValidation": true}, nil)
+	if stored := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(asSliceForTest(stored["QueueConfigurations"])) != 1 {
+		t.Fatalf("skipped destination validation = %#v", stored)
+	}
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": map[string]any{}}, nil)
+	if cleared := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(cleared) != 0 {
+		t.Fatalf("cleared notifications = %#v", cleared)
+	}
+}
+
+func TestBucketNotificationDeliveryFilters(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	input := map[string]any{"Bucket": "notification-delivery"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	if err := deps.Store.Scope(ident().Account, ident().Region).Collection("queues").Put(context.Background(), "queue", []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	configuration := map[string]any{"QueueConfigurations": []any{
+		map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue", "Events": []any{"s3:ObjectCreated:*"}, "Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{map[string]any{"Name": "prefix", "Value": "images/"}, map[string]any{"Name": "suffix", "Value": ".jpg"}}}}},
+		map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue", "Events": []any{"s3:ObjectRemoved:*"}},
+	}}
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": configuration}, nil)
+	for _, key := range []string{"images/photo.jpg", "images/photo.png", "docs/photo.jpg"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": input["Bucket"], "Key": key}, []byte(key))
+	}
+	messages, _, err := deps.Store.Scope(ident().Account, ident().Region).Collection("msgs:queue").List(context.Background(), "", "", 0)
+	if err != nil || len(messages) != 3 {
+		t.Fatalf("filtered notifications = %#v, err=%v", messages, err)
+	}
+	found := false
+	for _, stored := range messages {
+		var message map[string]any
+		if err := json.Unmarshal(stored.Value, &message); err != nil {
+			t.Fatal(err)
+		}
+		body, _ := message["body"].(string)
+		found = found || strings.Contains(body, `"key":"images/photo.jpg"`)
+	}
+	if !found {
+		t.Fatalf("notification messages = %#v", messages)
+	}
+}
+
+func TestBucketNotificationRemovalAndTaggingEvents(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	bucket := "notification-events"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	if err := deps.Store.Scope(ident().Account, ident().Region).Collection("queues").Put(context.Background(), "queue", []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{
+		"Bucket": bucket,
+		"NotificationConfiguration": map[string]any{"QueueConfigurations": []any{map[string]any{
+			"QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue",
+			"Events":   []any{"s3:ObjectRemoved:*", "s3:ObjectTagging:*"},
+		}}},
+	}, nil)
+
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "plain"}, []byte("plain"))
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "plain"}, nil)
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "missing"}, nil)
+
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}, nil)
+	version := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "versioned"}, []byte("versioned")).Headers.Get("x-amz-version-id")
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "versioned"}, nil)
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "versioned", "VersionId": version}, nil)
+
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "tagged"}, []byte("tagged"))
+	mustInvoke(t, p, "PutObjectTagging", map[string]any{"Bucket": bucket, "Key": "tagged", "TagSet": []any{map[string]any{"Key": "kind", "Value": "test"}}}, nil)
+	mustInvoke(t, p, "DeleteObjectTagging", map[string]any{"Bucket": bucket, "Key": "tagged"}, nil)
+
+	messages, _, err := deps.Store.Scope(ident().Account, ident().Region).Collection("msgs:queue").List(context.Background(), "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := map[string]int{}
+	for _, stored := range messages {
+		var message map[string]any
+		if err := json.Unmarshal(stored.Value, &message); err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(message["body"].(string)), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["Records"] == nil {
+			continue
+		}
+		record := asMapForTest(asSliceForTest(payload["Records"])[0])
+		events[record["eventName"].(string)]++
+	}
+	want := map[string]int{"ObjectRemoved:Delete": 2, "ObjectRemoved:DeleteMarkerCreated": 1, "ObjectTagging:Put": 1, "ObjectTagging:Delete": 1}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("notification events = %#v, want %#v", events, want)
+	}
+}
+
+func TestBucketNotificationLambdaDelivery(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	deps := spitest.Deps(t)
+	ctx := context.Background()
+	id := ident()
+	path := t.TempDir() + "/event.json"
+	source := "import json\n\ndef lambda_handler(event, context):\n    open(" + strconv.Quote(path) + ", 'w').write(json.dumps(event))\n"
+	if _, err := lambda.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+		"FunctionName": "handler", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
+		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(source))},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	p := s3.New(deps)
+	bucket := "notification-lambda"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	arn := "arn:aws:lambda:us-east-1:123456789012:function:handler:live"
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{
+		"Bucket": bucket,
+		"NotificationConfiguration": map[string]any{"LambdaFunctionConfigurations": []any{map[string]any{
+			"LambdaFunctionArn": arn, "Events": []any{"s3:ObjectCreated:Put"},
+		}}},
+	}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "created"}, []byte("created"))
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	record := asMapForTest(asSliceForTest(payload["Records"])[0])
+	if record["eventName"] != "ObjectCreated:Put" || asMapForTest(asMapForTest(record["s3"])["object"])["key"] != "created" {
+		t.Fatalf("lambda notification = %#v", payload)
+	}
+}
+
+func TestBucketNotificationTopicDelivery(t *testing.T) {
+	deps := spitest.Deps(t)
+	topicPack, queuePack := sns.New(deps), sqs.New(deps)
+	ctx, id := context.Background(), ident()
+	invokePack := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := pack.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response
+	}
+	invokePack(queuePack, "CreateQueue", map[string]any{"QueueName": "subscriber"})
+	topicARN := invokePack(topicPack, "CreateTopic", map[string]any{"Name": "object-events"}).Output["TopicArn"].(string)
+	invokePack(topicPack, "Subscribe", map[string]any{
+		"TopicArn": topicARN, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:123456789012:subscriber", "RawMessageDelivery": "true",
+	})
+
+	p := s3.New(deps)
+	bucket := "notification-topic"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{
+		"Bucket": bucket,
+		"NotificationConfiguration": map[string]any{"TopicConfigurations": []any{map[string]any{
+			"TopicArn": topicARN, "Events": []any{"s3:ObjectCreated:Put"},
+		}}},
+	}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "created"}, []byte("created"))
+	messages := invokePack(queuePack, "ReceiveMessage", map[string]any{"QueueName": "subscriber", "MaxNumberOfMessages": 10}).Output["Messages"].([]any)
+	if len(messages) != 2 {
+		t.Fatalf("topic notification = %#v", messages)
+	}
+	found := false
+	for _, message := range messages {
+		found = found || strings.Contains(asMapForTest(message)["Body"].(string), `"eventName":"ObjectCreated:Put"`)
+	}
+	if !found {
+		t.Fatalf("topic notification = %#v", messages)
+	}
+}
+
+func TestBucketNotificationEventBridgeDelivery(t *testing.T) {
+	deps := spitest.Deps(t)
+	eventPack, queuePack := events.New(deps), sqs.New(deps)
+	defer eventPack.Close()
+	ctx, id := context.Background(), ident()
+	invokePack := func(pack spi.BehaviorPack, operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := pack.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response
+	}
+	invokePack(queuePack, "CreateQueue", map[string]any{"QueueName": "events"})
+	invokePack(eventPack, "PutRule", map[string]any{"Name": "s3", "EventPattern": `{"source":["aws.s3"],"detail-type":["Object Created"]}`})
+	invokePack(eventPack, "PutTargets", map[string]any{"Rule": "s3", "Targets": []any{map[string]any{
+		"Id": "queue", "Arn": "arn:aws:sqs:us-east-1:123456789012:events",
+	}}})
+
+	p := s3.New(deps)
+	bucket := "notification-eventbridge"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{
+		"Bucket": bucket, "NotificationConfiguration": map[string]any{"EventBridgeConfiguration": map[string]any{}},
+	}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "created"}, []byte("created"))
+
+	messages := invokePack(queuePack, "ReceiveMessage", map[string]any{"QueueName": "events", "MaxNumberOfMessages": 10}).Output["Messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("eventbridge messages = %#v", messages)
+	}
+	var event map[string]any
+	if err := json.Unmarshal([]byte(asMapForTest(messages[0])["Body"].(string)), &event); err != nil {
+		t.Fatal(err)
+	}
+	detail := asMapForTest(event["detail"])
+	if event["source"] != "aws.s3" || event["detail-type"] != "Object Created" || asMapForTest(detail["bucket"])["name"] != bucket || asMapForTest(detail["object"])["key"] != "created" {
+		t.Fatalf("eventbridge notification = %#v", event)
+	}
+}
+
+func TestBucketNotificationRestoreAndACLEvents(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	bucket := "notification-restore-acl"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	if err := deps.Store.Scope(ident().Account, ident().Region).Collection("queues").Put(context.Background(), "queue", []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{
+		"Bucket": bucket,
+		"NotificationConfiguration": map[string]any{"QueueConfigurations": []any{map[string]any{
+			"QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue", "Events": []any{"s3:ObjectRestore:*", "s3:ObjectAcl:*"},
+		}}},
+	}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "archived", "StorageClass": "GLACIER"}, []byte("archive"))
+	mustInvoke(t, p, "RestoreObject", map[string]any{"Bucket": bucket, "Key": "archived", "Days": 1}, nil)
+	if _, err := invoke(t, p, "PutObjectAcl", map[string]any{"Bucket": bucket, "Key": "missing", "ACL": "private"}, nil); asFault(t, err).Code != "NoSuchKey" {
+		t.Fatalf("missing object ACL = %v", err)
+	}
+	mustInvoke(t, p, "PutObjectAcl", map[string]any{"Bucket": bucket, "Key": "archived", "ACL": "private"}, nil)
+
+	messages, _, err := deps.Store.Scope(ident().Account, ident().Region).Collection("msgs:queue").List(context.Background(), "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := map[string]map[string]any{}
+	for _, stored := range messages {
+		var message map[string]any
+		if err := json.Unmarshal(stored.Value, &message); err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(message["body"].(string)), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["Records"] == nil {
+			continue
+		}
+		record := asMapForTest(asSliceForTest(payload["Records"])[0])
+		events[record["eventName"].(string)] = record
+	}
+	if len(events) != 3 || events["ObjectRestore:Post"] == nil || events["ObjectRestore:Completed"] == nil || events["ObjectAcl:Put"] == nil {
+		t.Fatalf("restore/ACL events = %#v", events)
+	}
+	restoreData := asMapForTest(asMapForTest(events["ObjectRestore:Completed"]["glacierEventData"])["restoreEventData"])
+	if restoreData["lifecycleRestoreStorageClass"] != "GLACIER" || restoreData["lifecycleRestorationExpiryTime"] == "" {
+		t.Fatalf("completed restore event = %#v", events["ObjectRestore:Completed"])
+	}
+	if events["ObjectAcl:Put"]["eventVersion"] != "2.3" {
+		t.Fatalf("ACL event = %#v", events["ObjectAcl:Put"])
+	}
+	if events["ObjectRestore:Post"]["eventTime"].(string) >= events["ObjectRestore:Completed"]["eventTime"].(string) {
+		t.Fatalf("restore event ordering = %#v", events)
+	}
 }
 
 func TestCreateBucketObjectOwnership(t *testing.T) {
@@ -620,6 +971,51 @@ func TestBucketWebsiteCharacterization(t *testing.T) {
 		"invalid":   map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus, "argument": invalid.Fields["ArgumentName"], "value": invalid.Fields["ArgumentValue"]},
 		"preserved": preserved.Output, "delete": deleted.Output,
 		"deleted": map[string]any{"code": final.Code, "message": final.Message, "status": final.HTTPStatus, "bucket": final.Fields["BucketName"]},
+	})
+}
+
+func TestBucketNotificationConfigurationCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	input := map[string]any{"Bucket": "notification-characterization"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	if err := deps.Store.Scope(ident().Account, ident().Region).Collection("queues").Put(context.Background(), "queue", []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	before := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil)
+	configuration := map[string]any{"QueueConfigurations": []any{map[string]any{"Id": "images", "QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue", "Events": []any{"s3:ObjectCreated:*"}, "Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{map[string]any{"Name": "prefix", "Value": "images/"}}}}}}}
+	put := mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": configuration}, nil)
+	after := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": input["Bucket"], "Key": "images/a+b c.jpg"}, []byte("photo"))
+	messages, _, err := deps.Store.Scope(ident().Account, ident().Region).Collection("msgs:queue").List(context.Background(), "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery := map[string]any{}
+	for _, stored := range messages {
+		var message map[string]any
+		if err := json.Unmarshal(stored.Value, &message); err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(message["body"].(string)), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["Event"] == "s3:TestEvent" {
+			delivery["test"] = payload
+		} else {
+			delivery["object"] = payload
+		}
+	}
+	_, invalidErr := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:123456789012:missing", "Events": []any{"s3:ObjectCreated:*"}}}}}, nil)
+	invalid := asFault(t, invalidErr)
+	preserved := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil)
+	cleared := mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": map[string]any{}}, nil)
+	final := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil)
+	golden.AssertJSON(t, map[string]any{
+		"default": before.Output, "put": put.Output, "get": after.Output, "delivery": delivery,
+		"invalid":   map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus, "argument": invalid.Fields["ArgumentName"], "value": invalid.Fields["ArgumentValue"]},
+		"preserved": preserved.Output, "clear": cleared.Output, "cleared": final.Output,
 	})
 }
 

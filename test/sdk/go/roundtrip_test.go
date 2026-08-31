@@ -3,6 +3,8 @@ package sdk_test
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http/httptest"
@@ -202,6 +204,22 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}
 	if aws.ToString(got.ContentType) != "text/plain" || aws.ToString(got.CacheControl) != "max-age=60" || got.Metadata["owner"] != "mirror" || aws.ToString(got.WebsiteRedirectLocation) != "/old" {
 		t.Fatalf("s3 metadata %#v", got)
+	}
+	customerKey := []byte("0123456789abcdef0123456789abcdef")
+	customerKeyDigest := md5.Sum(customerKey)
+	customerKey64, customerKeyMD5 := base64.StdEncoding.EncodeToString(customerKey), base64.StdEncoding.EncodeToString(customerKeyDigest[:])
+	customerPut, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("customer-encrypted"), Body: bytes.NewReader([]byte("sse-c-sdk")), SSECustomerAlgorithm: aws.String("AES256"), SSECustomerKey: aws.String(customerKey64), SSECustomerKeyMD5: aws.String(customerKeyMD5)})
+	if err != nil || aws.ToString(customerPut.SSECustomerAlgorithm) != "AES256" || aws.ToString(customerPut.SSECustomerKeyMD5) != customerKeyMD5 {
+		t.Fatalf("put customer encryption: %#v %v", customerPut, err)
+	}
+	customerGet, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("customer-encrypted"), SSECustomerAlgorithm: aws.String("AES256"), SSECustomerKey: aws.String(customerKey64), SSECustomerKeyMD5: aws.String(customerKeyMD5)})
+	if err != nil {
+		t.Fatalf("get customer encryption: %v", err)
+	}
+	customerBody, _ := io.ReadAll(customerGet.Body)
+	_ = customerGet.Body.Close()
+	if string(customerBody) != "sse-c-sdk" || aws.ToString(customerGet.SSECustomerAlgorithm) != "AES256" || aws.ToString(customerGet.SSECustomerKeyMD5) != customerKeyMD5 {
+		t.Fatalf("get customer encryption: body=%q output=%#v", customerBody, customerGet)
 	}
 	if _, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), ExpectedBucketOwner: aws.String("000000000000")}); err != nil {
 		t.Fatalf("matching expected owner: %v", err)

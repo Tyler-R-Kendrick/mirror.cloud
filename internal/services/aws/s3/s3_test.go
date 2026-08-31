@@ -634,6 +634,62 @@ func TestObjectServerSideEncryption(t *testing.T) {
 	})
 }
 
+func TestObjectSSECustomerKey(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "sse-c"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "sse-c", "Status": "Enabled"}, nil)
+	rawKey := []byte("0123456789abcdef0123456789abcdef")
+	key := base64.StdEncoding.EncodeToString(rawKey)
+	digest := md5.Sum(rawKey)
+	keyMD5 := base64.StdEncoding.EncodeToString(digest[:])
+	input := map[string]any{"Bucket": "sse-c", "Key": "object", "SSECustomerAlgorithm": "AES256", "SSECustomerKey": key, "SSECustomerKeyMD5": keyMD5}
+	put := mustInvoke(t, p, "PutObject", input, []byte("secret"))
+	if put.Headers.Get("x-amz-server-side-encryption-customer-algorithm") != "AES256" || put.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != keyMD5 || put.Headers.Get("x-amz-server-side-encryption") != "" {
+		t.Fatalf("put SSE-C headers = %v", put.Headers)
+	}
+	if _, err := invoke(t, p, "HeadObject", map[string]any{"Bucket": "sse-c", "Key": "object"}, nil); asFault(t, err).Code != "InvalidRequest" {
+		t.Fatal("SSE-C object read without key")
+	}
+	readInput := map[string]any{"Bucket": "sse-c", "Key": "object", "VersionId": put.Headers.Get("x-amz-version-id"), "SSECustomerAlgorithm": "AES256", "SSECustomerKey": key, "SSECustomerKeyMD5": keyMD5}
+	head := mustInvoke(t, p, "HeadObject", readInput, nil)
+	if head.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != keyMD5 {
+		t.Fatalf("head SSE-C headers = %v", head.Headers)
+	}
+	body := string(readStream(t, mustInvoke(t, p, "GetObject", readInput, nil)))
+	if body != "secret" {
+		t.Fatalf("SSE-C body = %q", body)
+	}
+	md5Only := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "sse-c", "Key": "object", "VersionId": put.Headers.Get("x-amz-version-id"), "SSECustomerKeyMD5": keyMD5}, nil)
+	shortDigest := md5.Sum([]byte("short"))
+	for name, test := range map[string]struct {
+		changes map[string]any
+		code    string
+	}{
+		"algorithm":         {map[string]any{"SSECustomerAlgorithm": "AES128"}, "InvalidEncryptionAlgorithmError"},
+		"short key":         {map[string]any{"SSECustomerKey": base64.StdEncoding.EncodeToString([]byte("short")), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(shortDigest[:])}, "InvalidArgument"},
+		"key encoding":      {map[string]any{"SSECustomerKey": "*"}, "InvalidArgument"},
+		"key digest":        {map[string]any{"SSECustomerKeyMD5": "AAAAAAAAAAAAAAAAAAAAAA=="}, "InvalidArgument"},
+		"mixed SSE":         {map[string]any{"ServerSideEncryption": "AES256"}, "InvalidArgument"},
+		"missing algorithm": {map[string]any{"SSECustomerAlgorithm": ""}, "InvalidArgument"},
+		"missing key":       {map[string]any{"SSECustomerKey": ""}, "InvalidArgument"},
+	} {
+		invalid := maps.Clone(input)
+		for key, value := range test.changes {
+			invalid[key] = value
+		}
+		if _, err := invoke(t, p, "PutObject", invalid, []byte("bad")); asFault(t, err).Code != test.code {
+			t.Fatalf("%s SSE-C fault = %v", name, err)
+		}
+	}
+	golden.AssertJSON(t, map[string]any{
+		"put":     map[string]any{"algorithm": put.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": put.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == keyMD5},
+		"head":    map[string]any{"algorithm": head.Headers.Get("x-amz-server-side-encryption-customer-algorithm"), "keyMD5Matches": head.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == keyMD5},
+		"md5Only": md5Only.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") == keyMD5,
+		"body":    body,
+		"version": put.Headers.Get("x-amz-version-id") != "",
+	})
+}
+
 func TestMultipartServerSideEncryption(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-encryption"}, nil)

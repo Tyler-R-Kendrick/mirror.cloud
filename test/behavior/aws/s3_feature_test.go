@@ -143,6 +143,54 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a customer encryption key When PUTting and GETting an object Then matching headers are required", func(t *testing.T) {
+		res := do(http.MethodPut, "/customer-encryption", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode >= 300 {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		rawKey := []byte("0123456789abcdef0123456789abcdef")
+		digest := md5.Sum(rawKey)
+		headers := map[string]string{
+			"x-amz-server-side-encryption-customer-algorithm": "AES256",
+			"x-amz-server-side-encryption-customer-key":       base64.StdEncoding.EncodeToString(rawKey),
+			"x-amz-server-side-encryption-customer-key-MD5":   base64.StdEncoding.EncodeToString(digest[:]),
+		}
+		request := func(method string, includeKey bool) (*http.Response, []byte) {
+			t.Helper()
+			payload := ""
+			if method == http.MethodPut {
+				payload = "secret"
+			}
+			req, _ := http.NewRequest(method, ts.URL+"/customer-encryption/object", strings.NewReader(payload))
+			req.Header.Set("Authorization", auth)
+			if includeKey {
+				for key, value := range headers {
+					req.Header.Set(key, value)
+				}
+			}
+			response, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response, body
+		}
+		res, _ = request(http.MethodPut, true)
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-server-side-encryption-customer-algorithm") != "AES256" || res.Header.Get("x-amz-server-side-encryption-customer-key-MD5") != headers["x-amz-server-side-encryption-customer-key-MD5"] || res.Header.Get("x-amz-server-side-encryption") != "" {
+			t.Fatalf("put customer encryption %d %v", res.StatusCode, res.Header)
+		}
+		if res, _ = request(http.MethodGet, false); res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("get without customer key %d", res.StatusCode)
+		}
+		res, body := request(http.MethodGet, true)
+		if res.StatusCode != http.StatusOK || string(body) != "secret" || res.Header.Get("x-amz-server-side-encryption-customer-key-MD5") != headers["x-amz-server-side-encryption-customer-key-MD5"] {
+			t.Fatalf("get customer encryption %d %q %v", res.StatusCode, body, res.Header)
+		}
+	})
+
 	t.Run("Given KMS multipart encryption When completing the upload Then every stage preserves its headers", func(t *testing.T) {
 		res := do(http.MethodPut, "/multipart-encryption", nil, "")
 		io.Copy(io.Discard, res.Body)

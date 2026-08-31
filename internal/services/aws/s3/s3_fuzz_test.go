@@ -3,6 +3,8 @@ package s3_test
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
 	"io"
@@ -914,6 +916,59 @@ func FuzzObjectServerSideEncryption(f *testing.F) {
 		}
 		if algorithm == "aws:kms" && (get.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || bucketKey && get.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true") {
 			t.Fatalf("stored kms headers=%v", get.Headers)
+		}
+	})
+}
+
+func FuzzObjectSSECustomerKey(f *testing.F) {
+	f.Add(uint8(0), []byte("0123456789abcdef0123456789abcdef"), "body")
+	f.Add(uint8(1), []byte("short"), "short")
+	f.Add(uint8(2), []byte("algorithm"), "invalid")
+	f.Add(uint8(3), []byte("digest"), "mismatch")
+	f.Add(uint8(4), []byte("mixed"), "incompatible")
+	f.Add(uint8(5), []byte("base64"), "malformed")
+	f.Fuzz(func(t *testing.T, kind uint8, key []byte, body string) {
+		if len(key) > 4096 || len(body) > 4096 {
+			t.Skip()
+		}
+		mode := kind % 6
+		rawKey := key
+		if mode != 1 {
+			normalized := sha256.Sum256(key)
+			rawKey = normalized[:]
+		}
+		digest := md5.Sum(rawKey)
+		input := map[string]any{"Bucket": "sse-c-fuzz", "Key": "object", "SSECustomerAlgorithm": "AES256", "SSECustomerKey": base64.StdEncoding.EncodeToString(rawKey), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(digest[:])}
+		valid := mode == 0 || mode == 1 && len(rawKey) == 32
+		switch mode {
+		case 2:
+			input["SSECustomerAlgorithm"] = "AES128"
+		case 3:
+			digest[0] ^= 0xff
+			input["SSECustomerKeyMD5"] = base64.StdEncoding.EncodeToString(digest[:])
+		case 4:
+			input["ServerSideEncryption"] = "AES256"
+		case 5:
+			input["SSECustomerKey"] = "*" + string(key)
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "sse-c-fuzz"}, nil)
+		response, err := invoke(t, p, "PutObject", input, []byte(body))
+		if !valid {
+			if fault := asFault(t, err); fault.HTTPStatus != http.StatusBadRequest {
+				t.Fatalf("fault = %+v", fault)
+			}
+			if _, getErr := invoke(t, p, "GetObject", map[string]any{"Bucket": "sse-c-fuzz", "Key": "object"}, nil); asFault(t, getErr).Code != "NoSuchKey" {
+				t.Fatal("invalid customer encryption stored object")
+			}
+			return
+		}
+		if err != nil || response.Headers.Get("x-amz-server-side-encryption-customer-key-MD5") != input["SSECustomerKeyMD5"] {
+			t.Fatalf("put %v headers=%v", err, response.Headers)
+		}
+		get := mustInvoke(t, p, "GetObject", input, nil)
+		if string(readStream(t, get)) != body || get.Headers.Get("x-amz-server-side-encryption-customer-algorithm") != "AES256" {
+			t.Fatalf("stored customer encryption headers=%v", get.Headers)
 		}
 	})
 }

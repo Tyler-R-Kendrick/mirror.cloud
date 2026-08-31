@@ -1,0 +1,13 @@
+{
+  "body": "secret",
+  "head": {
+    "algorithm": "AES256",
+    "keyMD5Matches": true
+  },
+  "md5Only": true,
+  "put": {
+    "algorithm": "AES256",
+    "keyMD5Matches": true
+  },
+  "version": true
+}

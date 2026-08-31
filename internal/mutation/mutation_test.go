@@ -14930,6 +14930,38 @@ var mutants = []mutant{
 		pkg:  "./test/behavior/aws",
 		run:  "TestS3ObjectLifecycle/Given_KMS_multipart_encryption",
 	},
+	{
+		name: "s3-ignore-presigned-expiry",
+		file: filepath.Join("internal", "edge", "edge.go"),
+		old:  `if identity.Expired(id) {`,
+		new:  `if false {`,
+		pkg:  "./internal/edge",
+		run:  "TestS3PresignedExpiryFaultCharacterization",
+	},
+	{
+		name: "s3-drop-presigned-expiry-field",
+		file: filepath.Join("internal", "edge", "edge.go"),
+		old:  `fields["X-Amz-Expires"] = value`,
+		new:  `fields["Ignored-X-Amz-Expires"] = value`,
+		pkg:  "./internal/edge",
+		run:  "TestS3PresignedExpiryFaultCharacterization",
+	},
+	{
+		name: "identity-ignore-sigv2-expiry",
+		file: filepath.Join("internal", "identity", "identity.go"),
+		old:  `if raw := q.Get("Expires"); raw != "" && q.Get("AWSAccessKeyId") != "" {`,
+		new:  `if false {`,
+		pkg:  "./internal/identity",
+		run:  "TestParseAndExpiry",
+	},
+	{
+		name: "identity-accept-excessive-sigv4-expiry",
+		file: filepath.Join("internal", "identity", "identity.go"),
+		old:  `secs <= 7*24*60*60`,
+		new:  `true`,
+		pkg:  "./internal/identity",
+		run:  "TestParseAndExpiry",
+	},
 }
 
 func TestMutantsAreKilled(t *testing.T) {

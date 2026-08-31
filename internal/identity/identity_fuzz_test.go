@@ -16,5 +16,9 @@ func FuzzParse(f *testing.F) {
 			r.Header.Set("Authorization", auth)
 		}
 		_ = Parse(r, "000000000000", "us-east-1", time.Unix(0, 0).UTC())
+		v4 := httptest.NewRequest("GET", "/x?X-Amz-Date=20200101T000000Z&X-Amz-Expires="+url.QueryEscape(cred), nil)
+		_, _ = PresignedExpiry(v4)
+		v2 := httptest.NewRequest("GET", "/x?AWSAccessKeyId=test&Expires="+url.QueryEscape(cred), nil)
+		_, _ = PresignedExpiry(v2)
 	})
 }

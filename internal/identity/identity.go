@@ -35,16 +35,10 @@ func Parse(r *http.Request, defaultAcct, defaultReg string, now time.Time) spi.I
 	cred := r.Header.Get("Authorization")
 	if cred == "" {
 		cred = r.URL.Query().Get("X-Amz-Credential")
-		if exp := r.URL.Query().Get("X-Amz-Expires"); exp != "" && r.URL.Query().Get("X-Amz-Date") != "" {
-			if secs, err := strconv.Atoi(exp); err == nil {
-				if t, err := time.Parse("20060102T150405Z", r.URL.Query().Get("X-Amz-Date")); err == nil {
-					if now.UTC().After(t.Add(time.Duration(secs) * time.Second)) {
-						// expiry is enforced; identity still returned so the
-						// edge can 403. Callers check Expired.
-						id.ARN += ":expired"
-					}
-				}
-			}
+		if expires, ok := PresignedExpiry(r); ok && !now.UTC().Before(expires) {
+			// expiry is enforced; identity still returned so the edge can
+			// return the service's modeled fault. Callers check Expired.
+			id.ARN += ":expired"
 		}
 	}
 	expired := strings.HasSuffix(id.ARN, ":expired")
@@ -71,6 +65,25 @@ func Parse(r *http.Request, defaultAcct, defaultReg string, now time.Time) spi.I
 		id.ARN = "arn:aws:sts::" + id.Account + ":assumed-role/" + v + "/mirror"
 	}
 	return id
+}
+
+// PresignedExpiry returns the expiry instant for SigV2 or SigV4 query authentication.
+func PresignedExpiry(r *http.Request) (time.Time, bool) {
+	q := r.URL.Query()
+	if raw := q.Get("X-Amz-Expires"); raw != "" {
+		secs, err := strconv.ParseInt(raw, 10, 64)
+		started, dateErr := time.Parse("20060102T150405Z", q.Get("X-Amz-Date"))
+		if err == nil && dateErr == nil && secs >= 0 && secs <= 7*24*60*60 {
+			return started.Add(time.Duration(secs) * time.Second), true
+		}
+	}
+	if raw := q.Get("Expires"); raw != "" && q.Get("AWSAccessKeyId") != "" {
+		seconds, err := strconv.ParseInt(raw, 10, 64)
+		if err == nil {
+			return time.Unix(seconds, 0).UTC(), true
+		}
+	}
+	return time.Time{}, false
 }
 
 func parseCredential(h string) (akid, region string) {

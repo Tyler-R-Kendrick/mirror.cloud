@@ -99,6 +99,22 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given an expired presigned URL When requested Then S3 returns a modeled access denial", func(t *testing.T) {
+		request, err := http.NewRequest(http.MethodGet, ts.URL+"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F19691231%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=19691231T235900Z&X-Amz-Expires=30&X-Amz-SignedHeaders=host&X-Amz-Signature=00", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden || response.Header.Get("Content-Type") != "application/xml" || response.Header.Get("x-amz-request-id") == "" || response.Header.Get("x-amz-id-2") == "" || !bytes.Contains(body, []byte("<Code>AccessDenied</Code>")) || !bytes.Contains(body, []byte("<Message>Request has expired</Message>")) || !bytes.Contains(body, []byte("<X-Amz-Expires>30</X-Amz-Expires>")) {
+			t.Fatalf("expired presign %d %#v %s", response.StatusCode, response.Header, body)
+		}
+	})
+
 	t.Run("Given explicit KMS keys When writing and reading Then S3 validates their regional state", func(t *testing.T) {
 		res := do(http.MethodPut, "/kms-validation-bdd", nil, "")
 		res.Body.Close()

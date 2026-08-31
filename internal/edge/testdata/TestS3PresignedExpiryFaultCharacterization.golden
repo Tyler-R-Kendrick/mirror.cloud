@@ -1,0 +1,20 @@
+{
+  "sigv2": {
+    "amz_expires": "",
+    "code": "AccessDenied",
+    "content_type": "application/xml",
+    "expires": "1969-12-31T23:59:59Z",
+    "message": "Request has expired",
+    "server_time": "1970-01-01T00:00:00Z",
+    "status": 403
+  },
+  "sigv4": {
+    "amz_expires": "30",
+    "code": "AccessDenied",
+    "content_type": "application/xml",
+    "expires": "1969-12-31T23:59:30Z",
+    "message": "Request has expired",
+    "server_time": "1970-01-01T00:00:00Z",
+    "status": 403
+  }
+}

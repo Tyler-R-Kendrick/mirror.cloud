@@ -20,7 +20,10 @@ import (
 )
 
 // VerifyS3Signature verifies supported S3 signatures when present.
-func VerifyS3Signature(r *http.Request, secret string) *spi.Fault {
+func VerifyS3Signature(r *http.Request, accessKey, secret, region string) *spi.Fault {
+	if strings.HasPrefix(r.Header.Get("Authorization"), s3V4AAlgorithm) || r.URL.Query().Get("X-Amz-Algorithm") == s3V4AAlgorithm {
+		return VerifyS3V4A(r, accessKey, secret, region)
+	}
 	if fault := VerifyS3Presigned(r, secret); fault != nil {
 		return fault
 	}
@@ -270,7 +273,7 @@ func S3AuthorizationTimeFault(r *http.Request, now time.Time) *spi.Fault {
 	var requestTime time.Time
 	var err error
 	switch {
-	case strings.HasPrefix(authorization, "AWS4-HMAC-SHA256 "):
+	case strings.HasPrefix(authorization, "AWS4-HMAC-SHA256 "), strings.HasPrefix(authorization, s3V4AAlgorithm+" "):
 		requestTime, err = time.Parse("20060102T150405Z", r.Header.Get("X-Amz-Date"))
 	case strings.HasPrefix(authorization, "AWS "):
 		date := r.Header.Get("X-Amz-Date")

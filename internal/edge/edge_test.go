@@ -273,8 +273,9 @@ func TestS3PresignedAuthFaultCharacterization(t *testing.T) {
 		status int
 		code   string
 	}{
-		"sigv2": {"/bucket/key?AWSAccessKeyId=test&Signature=00", http.StatusForbidden, "AccessDenied"},
-		"sigv4": {"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test&X-Amz-Signature=00&X-Amz-Expires=60&X-Amz-SignedHeaders=host", http.StatusBadRequest, "AuthorizationQueryParametersError"},
+		"sigv2":  {"/bucket/key?AWSAccessKeyId=test&Signature=00", http.StatusForbidden, "AccessDenied"},
+		"sigv4":  {"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test&X-Amz-Signature=00&X-Amz-Expires=60&X-Amz-SignedHeaders=host", http.StatusBadRequest, "AuthorizationQueryParametersError"},
+		"sigv4a": {"/bucket/key?X-Amz-Algorithm=AWS4-ECDSA-P256-SHA256&X-Amz-Credential=test%2F20990101%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=00", http.StatusBadRequest, "AuthorizationQueryParametersError"},
 	} {
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, tc.target, nil))
@@ -317,9 +318,10 @@ func TestS3PresignedSignatureFaultCharacterization(t *testing.T) {
 		status int
 		code   string
 	}{
-		"sigv2": {"/bucket/key?AWSAccessKeyId=test&Expires=4070908800&Signature=AAAAAAAAAAAAAAAAAAAAAAAAAAA%3D", http.StatusForbidden, "SignatureDoesNotMatch"},
-		"sigv4": {"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=" + strings.Repeat("0", 64), http.StatusForbidden, "SignatureDoesNotMatch"},
-		"token": {"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=temporary%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-Security-Token=wrong&X-Amz-SignedHeaders=host&X-Amz-Signature=" + strings.Repeat("0", 64), http.StatusBadRequest, "InvalidToken"},
+		"sigv2":  {"/bucket/key?AWSAccessKeyId=test&Expires=4070908800&Signature=AAAAAAAAAAAAAAAAAAAAAAAAAAA%3D", http.StatusForbidden, "SignatureDoesNotMatch"},
+		"sigv4":  {"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=" + strings.Repeat("0", 64), http.StatusForbidden, "SignatureDoesNotMatch"},
+		"sigv4a": {"/bucket/key?X-Amz-Algorithm=AWS4-ECDSA-P256-SHA256&X-Amz-Credential=test%2F20990101%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-Region-Set=us-east-1&X-Amz-SignedHeaders=host&X-Amz-Signature=00", http.StatusForbidden, "SignatureDoesNotMatch"},
+		"token":  {"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=temporary%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-Security-Token=wrong&X-Amz-SignedHeaders=host&X-Amz-Signature=" + strings.Repeat("0", 64), http.StatusBadRequest, "InvalidToken"},
 	} {
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, tc.target, nil))
@@ -346,6 +348,20 @@ func TestS3PresignedSignatureFaultCharacterization(t *testing.T) {
 		t.Fatalf("authorization status=%d headers=%#v body=%s", authorizationRecorder.Code, authorizationRecorder.Header(), authorizationRecorder.Body.String())
 	}
 	results["authorization_v4"] = map[string]any{"code": authorizationFault.Code, "content_type": authorizationRecorder.Header().Get("Content-Type"), "message": authorizationFault.Message, "status": authorizationRecorder.Code}
+	authorization = httptest.NewRequest(http.MethodGet, "/bucket/key", nil)
+	authorization.Header.Set("X-Amz-Content-Sha256", "UNSIGNED-PAYLOAD")
+	authorization.Header.Set("X-Amz-Date", "20990101T000000Z")
+	authorization.Header.Set("X-Amz-Region-Set", "us-east-1")
+	authorization.Header.Set("Authorization", "AWS4-ECDSA-P256-SHA256 Credential=test/20990101/s3/aws4_request,SignedHeaders=host;x-amz-content-sha256;x-amz-date;x-amz-region-set,Signature=00")
+	authorizationRecorder = httptest.NewRecorder()
+	handler.ServeHTTP(authorizationRecorder, authorization)
+	if err := xml.Unmarshal(authorizationRecorder.Body.Bytes(), &authorizationFault); err != nil {
+		t.Fatal(err)
+	}
+	if authorizationRecorder.Code != http.StatusForbidden || authorizationFault.Code != "SignatureDoesNotMatch" || authorizationFault.Message == "" {
+		t.Fatalf("SigV4A authorization status=%d headers=%#v body=%s", authorizationRecorder.Code, authorizationRecorder.Header(), authorizationRecorder.Body.String())
+	}
+	results["authorization_v4a"] = map[string]any{"code": authorizationFault.Code, "content_type": authorizationRecorder.Header().Get("Content-Type"), "message": authorizationFault.Message, "status": authorizationRecorder.Code}
 	authorization = httptest.NewRequest(http.MethodGet, "/bucket/key", nil)
 	authorization.Header.Set("Date", "Tue, 27 Mar 2007 19:36:42 +0000")
 	authorization.Header.Set("Authorization", "AWS test:AAAAAAAAAAAAAAAAAAAAAAAAAAA=")

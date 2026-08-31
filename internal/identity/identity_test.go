@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -39,6 +40,17 @@ func TestParseAndExpiry(t *testing.T) {
 	if id := Parse(v2Header, "", "", time.Unix(0, 0)); id.AccessKeyID != "AKIATEST" {
 		t.Fatalf("SigV2 header access key = %q", id.AccessKeyID)
 	}
+	for name, request := range map[string]*http.Request{
+		"header": httptest.NewRequest("GET", "/x", nil),
+		"query":  httptest.NewRequest("GET", "/x?X-Amz-Credential=AKIATEST/20200101/s3/aws4_request", nil),
+	} {
+		if name == "header" {
+			request.Header.Set("Authorization", "AWS4-ECDSA-P256-SHA256 Credential=AKIATEST/20200101/s3/aws4_request,SignedHeaders=host,Signature=00")
+		}
+		if id := Parse(request, "", "eu-west-1", time.Unix(0, 0)); id.AccessKeyID != "AKIATEST" || id.Region != "eu-west-1" {
+			t.Fatalf("SigV4A %s identity = %#v", name, id)
+		}
+	}
 	tooLong := httptest.NewRequest("GET", "/x?X-Amz-Date=20200101T000000Z&X-Amz-Expires=604801", nil)
 	if expires, ok := PresignedExpiry(tooLong); ok {
 		t.Fatalf("accepted excessive SigV4 expiry %v", expires)
@@ -52,6 +64,7 @@ func TestPresignedAuthFault(t *testing.T) {
 		"sigv2-full": "/x?AWSAccessKeyId=test&Signature=00&Expires=90",
 		"sigv4":      "/x?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test&X-Amz-Signature=00&X-Amz-Expires=60&X-Amz-SignedHeaders=host",
 		"sigv4-full": "/x?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test&X-Amz-Signature=00&X-Amz-Date=20200101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host",
+		"sigv4a":     "/x?X-Amz-Algorithm=AWS4-ECDSA-P256-SHA256&X-Amz-Credential=test&X-Amz-Signature=00&X-Amz-Date=20200101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host",
 	} {
 		fault := PresignedAuthFault(httptest.NewRequest("GET", target, nil))
 		switch name {
@@ -59,7 +72,7 @@ func TestPresignedAuthFault(t *testing.T) {
 			if fault == nil || fault.Code != "AccessDenied" || fault.HTTPStatus != 403 {
 				t.Fatalf("%s fault %#v", name, fault)
 			}
-		case "sigv4":
+		case "sigv4", "sigv4a":
 			if fault == nil || fault.Code != "AuthorizationQueryParametersError" || fault.HTTPStatus != 400 {
 				t.Fatalf("%s fault %#v", name, fault)
 			}

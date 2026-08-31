@@ -238,6 +238,39 @@ func TestAWSSDKPresignedSignatureValidation(t *testing.T) {
 	if response, body := do(tampered.String()); response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
 		t.Fatalf("tampered presign %d %s", response.StatusCode, body)
 	}
+	mrap, err := s3.NewPresignClient(s3.NewFromConfig(awscfg)).PresignGetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("arn:aws:s3::123456789012:accesspoint:" + strings.Repeat("a", 12) + ".mrap"), Key: aws.String("object")}, func(options *s3.PresignOptions) { options.Expires = time.Minute })
+	if err != nil {
+		t.Fatal(err)
+	}
+	mrapURL, err := url.Parse(mrap.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doMRAP := func() (*http.Response, []byte) {
+		t.Helper()
+		request, err := http.NewRequest(mrap.Method, ts.URL+mrapURL.RequestURI(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Host = mrapURL.Host
+		request.Header = mrap.SignedHeader.Clone()
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		return response, body
+	}
+	if response, body := doMRAP(); response.StatusCode != http.StatusNotFound || bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
+		t.Fatalf("valid SigV4A presign %d %s", response.StatusCode, body)
+	}
+	mrapQuery := mrapURL.Query()
+	mrapQuery.Set("X-Amz-Signature", "00")
+	mrapURL.RawQuery = mrapQuery.Encode()
+	if response, body := doMRAP(); response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
+		t.Fatalf("tampered SigV4A presign %d %s", response.StatusCode, body)
+	}
 	temporaryKey := "temporary"
 	temporarySecret := rt.Deps.Rand.Derive(temporaryKey).Hex(40)
 	temporaryToken := rt.Deps.Rand.Derive(temporaryKey + "tok").Hex(32)

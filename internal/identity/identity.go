@@ -110,6 +110,9 @@ func PresignedAuthFault(r *http.Request) *spi.Fault {
 			return &spi.Fault{Code: group.code, Message: group.message, HTTPStatus: group.status, Fault: "client"}
 		}
 	}
+	if q.Get("X-Amz-Algorithm") == s3V4AAlgorithm && q.Get("X-Amz-Region-Set") == "" {
+		return &spi.Fault{Code: "AuthorizationQueryParametersError", Message: "Query-string authentication version 4A requires the X-Amz-Region-Set parameter.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
 	return nil
 }
 
@@ -131,7 +134,7 @@ func parseCredential(h string) (akid, region string) {
 	if len(parts) >= 1 {
 		akid = parts[0]
 	}
-	if len(parts) >= 3 {
+	if len(parts) == 5 && parts[4] == "aws4_request" {
 		region = parts[2]
 	}
 	return akid, region

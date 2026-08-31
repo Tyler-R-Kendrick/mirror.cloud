@@ -268,6 +268,35 @@ func TestS3ObjectLifecycle(t *testing.T) {
 				t.Fatalf("%s: %d %s", name, response.StatusCode, body)
 			}
 		}
+		createV4A, _ := http.NewRequest(http.MethodPut, strictServer.URL+"/v4a", nil)
+		response, err = http.DefaultClient.Do(createV4A)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		for name, tc := range map[string]struct {
+			payload string
+			status  int
+		}{"valid SigV4A stream": {"hello", http.StatusOK}, "tampered SigV4A stream": {"jello", http.StatusForbidden}} {
+			raw := "5;chunk-signature=**304502201ba0be85f07d901a715f28fbcd6d4ee4d14ab70abe11f5cfaff93a3c1961e4ae022100f5693b9c34d100107df15bd06cbc5c1a608d467761f97f26e048c240b21cc256\r\n" + tc.payload + "\r\n0;chunk-signature=**304502202bed57aec7b9b53cfebdf5163fbc5c61009c0f0b1e1b50848ac50641c6d0d14a022100806a00edfb80226cf9f2761851cd38cb9f33ee3fdafb597c723086655aad5cb9\r\n\r\n"
+			stream, _ := http.NewRequest(http.MethodPut, strictServer.URL+"/v4a/object", strings.NewReader(raw))
+			stream.Host = "s3.localhost.localstack.cloud:4566"
+			stream.Header.Set("Content-Encoding", "aws-chunked")
+			stream.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD")
+			stream.Header.Set("X-Amz-Date", "20990101T000000Z")
+			stream.Header.Set("X-Amz-Decoded-Content-Length", "5")
+			stream.Header.Set("X-Amz-Region-Set", "us-east-1")
+			stream.Header.Set("Authorization", "AWS4-ECDSA-P256-SHA256 Credential=test/20990101/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-region-set,Signature=30450220292f2afead2f51323260a06fdfed3d88e0998b54f024a175f65e19bdbf970425022100e28adec0e230329184badd9bf335b18c8ad5373000bad0c47223b173ecd16d11")
+			response, err = http.DefaultClient.Do(stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ = io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != tc.status {
+				t.Fatalf("%s: %d %s", name, response.StatusCode, body)
+			}
+		}
 		createTrailers, err := http.NewRequest(http.MethodPut, strictServer.URL+"/trailers", nil)
 		if err != nil {
 			t.Fatal(err)

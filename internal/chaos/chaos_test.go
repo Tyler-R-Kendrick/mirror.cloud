@@ -1275,6 +1275,35 @@ func TestConcurrentObjectACLWritesRemainValid(t *testing.T) {
 	if err != nil || successes != 16 || len(grants) != 2 {
 		t.Fatalf("persisted concurrent ACL = %#v, successes=%d, err=%v", response, successes, err)
 	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutBucketVersioning", Input: map[string]any{"Bucket": "acl-chaos", "Status": "Enabled"}}); err != nil {
+		t.Fatal(err)
+	}
+	marker, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteObject", Input: map[string]any{"Bucket": "acl-chaos", "Key": "object"}})
+	if err != nil || marker.Headers.Get("x-amz-delete-marker") != "true" {
+		t.Fatalf("create ACL delete marker: %#v %v", marker, err)
+	}
+	errs = make(chan error, 32)
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			operation := "GetObjectAcl"
+			input := map[string]any{"Bucket": "acl-chaos", "Key": "object"}
+			if n%2 == 0 {
+				operation, input["ACL"] = "PutObjectAcl", "private"
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "MethodNotAllowed" && fault.Code != "NoSuchKey" {
+			t.Fatalf("concurrent delete-marker ACL: %v", err)
+		}
+	}
 }
 
 func TestConcurrentBucketNotificationsRemainValid(t *testing.T) {

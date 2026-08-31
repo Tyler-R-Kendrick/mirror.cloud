@@ -1,0 +1,78 @@
+{
+  "get current": {
+    "code": "NoSuchKey",
+    "fields": {
+      "Key": "versioned"
+    },
+    "headers": {
+      "X-Amz-Delete-Marker": [
+        "true"
+      ],
+      "X-Amz-Version-Id": [
+        "5f59f223"
+      ]
+    },
+    "message": "The specified key does not exist.",
+    "status": 404
+  },
+  "get explicit": {
+    "code": "MethodNotAllowed",
+    "fields": {
+      "Method": "GET",
+      "ResourceType": "DeleteMarker"
+    },
+    "headers": {
+      "Last-Modified": [
+        "Thu, 01 Jan 1970 00:00:00 GMT"
+      ],
+      "X-Amz-Delete-Marker": [
+        "true"
+      ],
+      "X-Amz-Version-Id": [
+        "5f59f223"
+      ]
+    },
+    "message": "The specified method is not allowed against this resource.",
+    "status": 405
+  },
+  "put current": {
+    "code": "MethodNotAllowed",
+    "fields": {
+      "Method": "PUT",
+      "ResourceType": "DeleteMarker"
+    },
+    "headers": {
+      "Last-Modified": [
+        "Thu, 01 Jan 1970 00:00:00 GMT"
+      ],
+      "X-Amz-Delete-Marker": [
+        "true"
+      ],
+      "X-Amz-Version-Id": [
+        "5f59f223"
+      ]
+    },
+    "message": "The specified method is not allowed against this resource.",
+    "status": 405
+  },
+  "put explicit": {
+    "code": "MethodNotAllowed",
+    "fields": {
+      "Method": "PUT",
+      "ResourceType": "DeleteMarker"
+    },
+    "headers": {
+      "Last-Modified": [
+        "Thu, 01 Jan 1970 00:00:00 GMT"
+      ],
+      "X-Amz-Delete-Marker": [
+        "true"
+      ],
+      "X-Amz-Version-Id": [
+        "5f59f223"
+      ]
+    },
+    "message": "The specified method is not allowed against this resource.",
+    "status": 405
+  }
+}

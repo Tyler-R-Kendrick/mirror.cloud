@@ -2657,7 +2657,16 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 				return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client"}
 			}
 			if truthy(objectMeta["deleteMarker"]) {
-				return nil, deleteMarkerReadFault(objectMeta, str(req.Input["VersionId"]) != "")
+				explicit := str(req.Input["VersionId"]) != ""
+				if req.Operation == "PutObjectAcl" || explicit {
+					fault := deleteMarkerReadFault(objectMeta, true)
+					fault.Message = "The specified method is not allowed against this resource."
+					fault.Fields = map[string]any{"Method": strings.ToUpper(strings.TrimSuffix(req.Operation, "ObjectAcl")), "ResourceType": "DeleteMarker"}
+					return nil, fault
+				}
+				fault := deleteMarkerReadFault(objectMeta, false)
+				fault.Fields = map[string]any{"Key": keyObj}
+				return nil, fault
 			}
 			version := str(objectMeta["versionId"])
 			if version == "null" {

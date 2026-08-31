@@ -369,7 +369,7 @@ func TestSigV4AStreamingContract(t *testing.T) {
 	}
 	ts := httptest.NewServer(rt.Handler())
 	defer ts.Close()
-	for _, bucket := range []string{"v4a", "v4a-trailers"} {
+	for _, bucket := range []string{"v4a", "v4a-trailers", "v4a-unsigned"} {
 		request, _ := http.NewRequest(http.MethodPut, ts.URL+"/"+bucket, nil)
 		response, err := http.DefaultClient.Do(request)
 		if err != nil {
@@ -401,6 +401,43 @@ func TestSigV4AStreamingContract(t *testing.T) {
 			t.Fatalf("%s: %d %s", name, response.StatusCode, body)
 		}
 	}
+	for name, tc := range map[string]struct {
+		checksum string
+		signed   bool
+		status   int
+	}{
+		"valid unsigned trailer":        {"mnG7TA==", false, http.StatusOK},
+		"bad unsigned checksum":         {"AAAAAA==", false, http.StatusBadRequest},
+		"signed unsigned payload chunk": {"mnG7TA==", true, http.StatusForbidden},
+	} {
+		response, err := http.DefaultClient.Do(sigV4AUnsignedStreamingFixture(ts.URL, tc.checksum, tc.signed))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != tc.status {
+			t.Fatalf("%s: %d %s", name, response.StatusCode, body)
+		}
+	}
+}
+
+func sigV4AUnsignedStreamingFixture(endpoint, checksum string, signedChunk bool) *http.Request {
+	extension := ""
+	if signedChunk {
+		extension = ";chunk-signature=unexpected"
+	}
+	raw := "5" + extension + "\r\nhello\r\n0\r\nx-amz-checksum-crc32c:" + checksum + "\r\n\r\n"
+	request, _ := http.NewRequest(http.MethodPut, endpoint+"/v4a-unsigned/object", strings.NewReader(raw))
+	request.Host = "s3.localhost.localstack.cloud:4566"
+	request.Header.Set("Content-Encoding", "aws-chunked")
+	request.Header.Set("X-Amz-Content-Sha256", "STREAMING-UNSIGNED-PAYLOAD-TRAILER")
+	request.Header.Set("X-Amz-Date", "20990101T000000Z")
+	request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+	request.Header.Set("X-Amz-Region-Set", "us-east-1")
+	request.Header.Set("X-Amz-Trailer", "x-amz-checksum-crc32c")
+	request.Header.Set("Authorization", "AWS4-ECDSA-P256-SHA256 Credential=test/20990101/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-region-set;x-amz-trailer,Signature=304402201f09d982734f868ab87f6e305473f7ef74a6882095dbf5d0f0b97bede169993402204a4c59017095e2ffaf861e04fc6c73b5d1c9b0d8c041b7fd2acb05d0a4c356f3")
+	return request
 }
 
 func sigV4AStreamingFixture(endpoint string, trailer bool, payload, checksum string) *http.Request {

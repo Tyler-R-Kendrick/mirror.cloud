@@ -10,6 +10,7 @@ import (
 	"io"
 	"maps"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -215,6 +216,28 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		response.Body.Close()
 		if response.StatusCode != http.StatusOK || string(body) != "hello" || response.Header.Get("Content-Encoding") != "gzip" {
 			t.Fatalf("stored encoding: %d %q %q", response.StatusCode, response.Header.Get("Content-Encoding"), body)
+		}
+	})
+
+	t.Run("Given an object When fetched Then S3 emits exact ETag header casing", func(t *testing.T) {
+		response := do(http.MethodPut, "/etag-casing-bdd", nil, "")
+		response.Body.Close()
+		response = do(http.MethodPut, "/etag-casing-bdd/object", []byte("body"), "")
+		response.Body.Close()
+		conn, err := net.Dial("tcp", ts.Listener.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		if _, err := io.WriteString(conn, "GET /etag-casing-bdd/object HTTP/1.1\r\nHost: "+ts.Listener.Addr().String()+"\r\nConnection: close\r\n\r\n"); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := io.ReadAll(conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(raw, []byte("\r\nETag: \"")) || bytes.Contains(raw, []byte("\r\nEtag:")) {
+			t.Fatalf("raw response:\n%s", raw)
 		}
 	})
 

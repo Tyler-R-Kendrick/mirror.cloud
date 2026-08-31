@@ -348,6 +348,56 @@ func FuzzBucketAccelerateConfiguration(f *testing.F) {
 	})
 }
 
+func FuzzBucketLogging(f *testing.F) {
+	for _, seed := range []struct {
+		mode   uint8
+		prefix string
+	}{{0, ""}, {1, "logs/"}, {2, ""}, {3, "missing/"}, {4, "<broken"}} {
+		f.Add(seed.mode, seed.prefix)
+	}
+	f.Fuzz(func(t *testing.T, mode uint8, prefix string) {
+		if !utf8.ValidString(prefix) {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		for _, bucket := range []string{"logging-fuzz-source", "logging-fuzz-target"} {
+			mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+		}
+		baseline := map[string]any{"TargetBucket": "logging-fuzz-target", "TargetPrefix": "baseline/"}
+		mustInvoke(t, p, "PutBucketLogging", map[string]any{"Bucket": "logging-fuzz-source", "BucketLoggingStatus": map[string]any{"LoggingEnabled": baseline}}, nil)
+		input := map[string]any{"Bucket": "logging-fuzz-source"}
+		valid, disabled, wantFault := true, false, ""
+		switch mode % 5 {
+		case 0:
+			input["BucketLoggingStatus"], disabled = map[string]any{}, true
+		case 1:
+			input["BucketLoggingStatus"] = map[string]any{"LoggingEnabled": map[string]any{"TargetBucket": "logging-fuzz-target", "TargetPrefix": prefix}}
+		case 2:
+			input["BucketLoggingStatus"], valid, wantFault = map[string]any{"LoggingEnabled": map[string]any{"TargetPrefix": "x" + prefix}}, false, "MalformedXML"
+		case 3:
+			input["BucketLoggingStatus"], valid, wantFault = map[string]any{"LoggingEnabled": map[string]any{"TargetBucket": "missing"}}, false, "InvalidTargetBucketForLogging"
+		case 4:
+			input["_body"], valid, wantFault = "<broken", false, "MalformedXML"
+		}
+		_, err := invoke(t, p, "PutBucketLogging", input, nil)
+		if !valid {
+			if fault := asFault(t, err); fault.Code != wantFault {
+				t.Fatalf("mode=%d prefix=%q: %#v", mode%5, prefix, fault)
+			}
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		output := mustInvoke(t, p, "GetBucketLogging", map[string]any{"Bucket": "logging-fuzz-source"}, nil).Output
+		if disabled && len(output) != 0 {
+			t.Fatalf("disabled logging = %#v", output)
+		}
+		stored := asMapForTest(output["LoggingEnabled"])
+		if valid && !disabled && (stored["TargetBucket"] != "logging-fuzz-target" || stored["TargetPrefix"] != prefix) || !valid && (stored["TargetBucket"] != baseline["TargetBucket"] || stored["TargetPrefix"] != baseline["TargetPrefix"]) {
+			t.Fatalf("stored logging = %#v", output)
+		}
+	})
+}
+
 func FuzzDeleteBucketEmptiness(f *testing.F) {
 	for _, seed := range []struct {
 		versioned bool

@@ -2353,6 +2353,40 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	col := p.col(req, "bktcfg")
 	if strings.HasPrefix(req.Operation, "Put") {
+		if req.Operation == "PutBucketLogging" {
+			if str(req.Input["_body"]) != "" {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			logging := asMap(asMap(req.Input["BucketLoggingStatus"])["LoggingEnabled"])
+			if len(logging) == 0 {
+				_ = col.Delete(ctx, key)
+				return &spi.Response{Status: 200}, nil
+			}
+			target := str(logging["TargetBucket"])
+			if target == "" {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			if _, exists, _ := p.col(req, "buckets").Get(ctx, target); !exists {
+				raw, found, _ := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets").Get(ctx, target)
+				var location struct {
+					Account string `json:"account"`
+					Region  string `json:"region"`
+				}
+				if found {
+					_ = json.Unmarshal(raw, &location)
+				}
+				if location.Account == req.Identity.Account && location.Region != "" && location.Region != req.Identity.Region {
+					fields := map[string]any{"TargetBucketLocation": location.Region}
+					if req.Identity.Region != "us-east-1" {
+						fields["SourceBucketLocation"] = req.Identity.Region
+					}
+					return nil, &spi.Fault{Code: "CrossLocationLoggingProhibitted", Message: "Cross S3 location logging not allowed. ", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: fields}
+				}
+				return nil, &spi.Fault{Code: "InvalidTargetBucketForLogging", Message: "The target bucket for logging does not exist", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"TargetBucket": target}}
+			}
+			logging["TargetPrefix"] = str(logging["TargetPrefix"])
+			req.Input["BucketLoggingStatus"] = map[string]any{"LoggingEnabled": logging}
+		}
 		if req.Operation == "PutBucketAccelerateConfiguration" {
 			if strings.Contains(b, ".") {
 				return nil, &spi.Fault{Code: "InvalidRequest", Message: "S3 Transfer Acceleration is not supported for buckets with periods (.) in their names", HTTPStatus: http.StatusBadRequest, Fault: "client"}
@@ -2446,6 +2480,9 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	if req.Operation == "GetBucketAccelerateConfiguration" {
 		return &spi.Response{Status: 200, Output: map[string]any{"Status": asMap(doc["AccelerateConfiguration"])["Status"]}}, nil
+	}
+	if req.Operation == "GetBucketLogging" {
+		return &spi.Response{Status: 200, Output: map[string]any{"LoggingEnabled": asMap(doc["BucketLoggingStatus"])["LoggingEnabled"]}}, nil
 	}
 	return &spi.Response{Status: 200, Output: doc}, nil
 }

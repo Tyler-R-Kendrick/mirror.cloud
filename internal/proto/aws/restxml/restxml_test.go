@@ -36,6 +36,7 @@ func TestRouteNameQueryOps(t *testing.T) {
 		{http.MethodDelete, "/b?cors", "", "DeleteBucketCors"},
 		{http.MethodDelete, "/b?website", "", "DeleteBucketWebsite"},
 		{http.MethodGet, "/b?logging", "", "GetBucketLogging"},
+		{http.MethodPut, "/b?logging", "", "PutBucketLogging"},
 		{http.MethodDelete, "/b?lifecycle", "", "DeleteBucketLifecycle"},
 		{http.MethodDelete, "/b?replication", "", "DeleteBucketReplication"},
 		{http.MethodPost, "/b?session", "", "CreateSession"},
@@ -369,6 +370,35 @@ func TestRESTXMLServiceDecodeContracts(t *testing.T) {
 	if err != nil || configuration["Status"] != "Enabled" {
 		t.Fatalf("accelerate decode %#v %v", decoded, err)
 	}
+	logging := `<BucketLoggingStatus xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><LoggingEnabled><TargetBucket>target</TargetBucket><TargetGrants><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser"><ID>id</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></TargetGrants><TargetObjectKeyFormat><PartitionedPrefix><PartitionDateSource>EventTime</PartitionDateSource></PartitionedPrefix></TargetObjectKeyFormat></LoggingEnabled></BucketLoggingStatus>`
+	decoded, err = codec.Decode(s3, &model.Operation{Name: "PutBucketLogging"}, httptest.NewRequest(http.MethodPut, "/bucket?logging", strings.NewReader(logging)))
+	configuration, _ = decoded.Input["BucketLoggingStatus"].(map[string]any)
+	wantLogging := map[string]any{"LoggingEnabled": map[string]any{
+		"TargetBucket": "target", "TargetPrefix": "",
+		"TargetGrants":          []any{map[string]any{"Grantee": map[string]any{"ID": "id", "Type": "CanonicalUser"}, "Permission": "FULL_CONTROL"}},
+		"TargetObjectKeyFormat": map[string]any{"PartitionedPrefix": map[string]any{"PartitionDateSource": "EventTime"}},
+	}}
+	if err != nil || !reflect.DeepEqual(configuration, wantLogging) {
+		t.Fatalf("logging decode %#v %v", decoded, err)
+	}
+	for _, test := range []struct {
+		body string
+		want map[string]any
+	}{
+		{`<BucketLoggingStatus/>`, map[string]any{}},
+		{`<BucketLoggingStatus><LoggingEnabled><TargetBucket>target</TargetBucket><TargetObjectKeyFormat><SimplePrefix/></TargetObjectKeyFormat></LoggingEnabled></BucketLoggingStatus>`, map[string]any{"LoggingEnabled": map[string]any{"TargetBucket": "target", "TargetPrefix": "", "TargetObjectKeyFormat": map[string]any{"SimplePrefix": map[string]any{}}}}},
+	} {
+		decoded, err = codec.Decode(s3, &model.Operation{Name: "PutBucketLogging"}, httptest.NewRequest(http.MethodPut, "/bucket?logging", strings.NewReader(test.body)))
+		if err != nil || !reflect.DeepEqual(decoded.Input["BucketLoggingStatus"], test.want) {
+			t.Errorf("logging decode %#v %v", decoded, err)
+		}
+	}
+	for _, body := range []string{`<broken`, `<LoggingEnabled/>`} {
+		decoded, err = codec.Decode(s3, &model.Operation{Name: "PutBucketLogging"}, httptest.NewRequest(http.MethodPut, "/bucket?logging", strings.NewReader(body)))
+		if err != nil || decoded.Input["_body"] != body {
+			t.Errorf("invalid logging decode %#v %v", decoded, err)
+		}
+	}
 }
 
 func TestPostObjectProtocolContract(t *testing.T) {
@@ -447,6 +477,10 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	w = httptest.NewRecorder()
 	if err := codec.Encode(svc, &model.Operation{Name: "GetBucketAccelerateConfiguration"}, w, &spi.Response{Output: map[string]any{"Status": "Enabled"}}); err != nil || !strings.Contains(w.Body.String(), `<AccelerateConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>Enabled</Status></AccelerateConfiguration>`) {
 		t.Fatalf("accelerate response %v %s", err, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(svc, &model.Operation{Name: "GetBucketLogging"}, w, &spi.Response{Output: map[string]any{"LoggingEnabled": map[string]any{"TargetBucket": "target", "TargetPrefix": "logs/"}}}); err != nil || !strings.Contains(w.Body.String(), `<BucketLoggingStatus xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><LoggingEnabled><TargetBucket>target</TargetBucket><TargetPrefix>logs/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>`) {
+		t.Fatalf("logging response %v %s", err, w.Body.String())
 	}
 	w = httptest.NewRecorder()
 	if err := codec.EncodeFault(svc, &model.Operation{Name: "Missing"}, w, spi.NotImplemented(svc.ID, "Missing", "emulate"), "r<&"); err != nil {

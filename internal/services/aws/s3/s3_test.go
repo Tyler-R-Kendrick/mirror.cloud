@@ -397,6 +397,79 @@ func TestBucketAccelerateConfiguration(t *testing.T) {
 	}
 }
 
+func TestBucketLogging(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	for _, bucket := range []string{"logging-source", "logging-target"} {
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	}
+	input := map[string]any{"Bucket": "logging-source"}
+	if output := mustInvoke(t, p, "GetBucketLogging", input, nil).Output; len(output) != 0 {
+		t.Fatalf("default logging = %#v", output)
+	}
+	configuration := map[string]any{"TargetBucket": "logging-target", "TargetGrants": []any{map[string]any{"Permission": "READ"}}}
+	mustInvoke(t, p, "PutBucketLogging", map[string]any{"Bucket": "logging-source", "BucketLoggingStatus": map[string]any{"LoggingEnabled": configuration}}, nil)
+	want := map[string]any{"TargetBucket": "logging-target", "TargetPrefix": "", "TargetGrants": []any{map[string]any{"Permission": "READ"}}}
+	if got := mustInvoke(t, p, "GetBucketLogging", input, nil).Output["LoggingEnabled"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("logging = %#v", got)
+	}
+	for _, tc := range []struct {
+		name   string
+		config map[string]any
+		code   string
+	}{
+		{"missing target name", map[string]any{"TargetPrefix": "logs/"}, "MalformedXML"},
+		{"missing target bucket", map[string]any{"TargetBucket": "missing"}, "InvalidTargetBucketForLogging"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := invoke(t, p, "PutBucketLogging", map[string]any{"Bucket": "logging-source", "BucketLoggingStatus": map[string]any{"LoggingEnabled": tc.config}}, nil)
+			if fault := asFault(t, err); fault.Code != tc.code || fault.HTTPStatus != http.StatusBadRequest {
+				t.Fatalf("fault = %#v", fault)
+			}
+		})
+	}
+	if got := mustInvoke(t, p, "GetBucketLogging", input, nil).Output["LoggingEnabled"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("invalid put replaced logging = %#v", got)
+	}
+	west := ident()
+	west.Region = "us-west-2"
+	for _, bucket := range []string{"logging-west-source", "logging-west-target"} {
+		mustInvokeAs(t, p, west, "CreateBucket", map[string]any{"Bucket": bucket, "CreateBucketConfiguration": map[string]any{"LocationConstraint": "us-west-2"}}, nil)
+	}
+	_, err := invoke(t, p, "PutBucketLogging", map[string]any{"Bucket": "logging-source", "BucketLoggingStatus": map[string]any{"LoggingEnabled": map[string]any{"TargetBucket": "logging-west-target"}}}, nil)
+	if fault := asFault(t, err); fault.Code != "CrossLocationLoggingProhibitted" || fault.Fields["TargetBucketLocation"] != "us-west-2" || fault.Fields["SourceBucketLocation"] != nil {
+		t.Fatalf("east cross-location fault = %#v", fault)
+	}
+	_, err = invokeAs(t, p, west, "PutBucketLogging", map[string]any{"Bucket": "logging-west-source", "BucketLoggingStatus": map[string]any{"LoggingEnabled": map[string]any{"TargetBucket": "logging-target"}}}, nil)
+	if fault := asFault(t, err); fault.Code != "CrossLocationLoggingProhibitted" || fault.Fields["SourceBucketLocation"] != "us-west-2" || fault.Fields["TargetBucketLocation"] != "us-east-1" {
+		t.Fatalf("west cross-location fault = %#v", fault)
+	}
+	mustInvoke(t, p, "PutBucketLogging", map[string]any{"Bucket": "logging-source", "BucketLoggingStatus": map[string]any{}}, nil)
+	if output := mustInvoke(t, p, "GetBucketLogging", input, nil).Output; len(output) != 0 {
+		t.Fatalf("disabled logging = %#v", output)
+	}
+}
+
+func TestBucketLoggingCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	for _, bucket := range []string{"logging-characterization-source", "logging-characterization-target"} {
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	}
+	input := map[string]any{"Bucket": "logging-characterization-source"}
+	before := mustInvoke(t, p, "GetBucketLogging", input, nil)
+	put := mustInvoke(t, p, "PutBucketLogging", map[string]any{"Bucket": input["Bucket"], "BucketLoggingStatus": map[string]any{"LoggingEnabled": map[string]any{"TargetBucket": "logging-characterization-target", "TargetPrefix": "logs/"}}}, nil)
+	after := mustInvoke(t, p, "GetBucketLogging", input, nil)
+	_, invalidErr := invoke(t, p, "PutBucketLogging", map[string]any{"Bucket": input["Bucket"], "BucketLoggingStatus": map[string]any{"LoggingEnabled": map[string]any{"TargetBucket": "missing"}}}, nil)
+	invalid := asFault(t, invalidErr)
+	preserved := mustInvoke(t, p, "GetBucketLogging", input, nil)
+	disabled := mustInvoke(t, p, "PutBucketLogging", map[string]any{"Bucket": input["Bucket"], "BucketLoggingStatus": map[string]any{}}, nil)
+	final := mustInvoke(t, p, "GetBucketLogging", input, nil)
+	golden.AssertJSON(t, map[string]any{
+		"default": before.Output, "put": put.Output, "get": after.Output,
+		"invalid":   map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus, "target": invalid.Fields["TargetBucket"]},
+		"preserved": preserved.Output, "disable": disabled.Output, "disabled": final.Output,
+	})
+}
+
 func TestBucketAccelerateConfigurationCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "accelerate-characterization"}, nil)

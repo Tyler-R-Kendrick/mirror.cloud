@@ -15010,6 +15010,38 @@ var mutants = []mutant{
 		pkg:  "./internal/identity",
 		run:  "TestVerifyS3PresignedV4AWSExample",
 	},
+	{
+		name: "identity-ignore-sigv2-access-key",
+		file: filepath.Join("internal", "identity", "identity.go"),
+		old:  `cred = r.URL.Query().Get("AWSAccessKeyId")`,
+		new:  `cred = ""`,
+		pkg:  "./internal/identity",
+		run:  "TestParseAndExpiry",
+	},
+	{
+		name: "identity-accept-bad-presigned-v2-signature",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  `if len(got) != len(want) || subtle.ConstantTimeCompare(got, want) != 1 {`,
+		new:  `if false {`,
+		pkg:  "./internal/identity",
+		run:  "TestVerifyS3PresignedV2AWSGrammar",
+	},
+	{
+		name: "identity-drop-presigned-v2-virtual-bucket",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  `if marker := strings.Index(host, ".s3."); marker > 0 {`,
+		new:  `if marker := strings.Index(host, ".s3."); marker < 0 {`,
+		pkg:  "./internal/identity",
+		run:  "TestVerifyS3PresignedV2AWSGrammar",
+	},
+	{
+		name: "identity-drop-presigned-v2-subresource",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  `path += "?" + strings.Join(query, "&")`,
+		new:  `path += ""`,
+		pkg:  "./internal/identity",
+		run:  "TestVerifyS3PresignedV2AWSGrammar",
+	},
 }
 
 func TestMutantsAreKilled(t *testing.T) {

@@ -555,7 +555,7 @@ func TestS3StreamingSignatureCharacterization(t *testing.T) {
 	golden.AssertJSON(t, results)
 }
 
-func TestS3MalformedAWSChunkedRejected(t *testing.T) {
+func TestS3MalformedAWSChunkedCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	cfg := config.Default()
 	cfg.Services = []string{"aws.s3"}
@@ -570,6 +570,7 @@ func TestS3MalformedAWSChunkedRejected(t *testing.T) {
 		t.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
 	}
 	valid := "5\r\nhello\r\n0\r\n\r\n"
+	results := map[string]any{}
 	for name, tc := range map[string]struct {
 		decoded string
 		body    string
@@ -597,8 +598,10 @@ func TestS3MalformedAWSChunkedRejected(t *testing.T) {
 			if recorder.Code != http.StatusForbidden || fault.Code != "SignatureDoesNotMatch" {
 				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 			}
+			results[name] = map[string]any{"code": fault.Code, "status": recorder.Code}
 		})
 	}
+	golden.AssertJSON(t, results)
 }
 
 func streamingUnsignedV4ARequest(checksum string, signedChunk bool) *http.Request {

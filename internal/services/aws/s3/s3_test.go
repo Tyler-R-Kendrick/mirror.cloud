@@ -4314,6 +4314,27 @@ func TestListObjectsV2Prefix(t *testing.T) {
 	}
 }
 
+func TestListEncodingTypeValidation(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-encoding"}, nil)
+	for _, operation := range []string{"ListObjects", "ListObjectsV2", "ListObjectVersions", "ListMultipartUploads"} {
+		t.Run(operation, func(t *testing.T) {
+			for _, value := range []string{"value", ""} {
+				_, err := invoke(t, p, operation, map[string]any{"Bucket": "list-encoding", "EncodingType": value}, nil)
+				fault := asFault(t, err)
+				if fault.Code != "InvalidArgument" || fault.Message != "Invalid Encoding Method specified in Request" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "encoding-type" || fault.Fields["ArgumentValue"] != value {
+					t.Fatalf("encoding %q fault = %#v", value, fault)
+				}
+			}
+			for _, input := range []map[string]any{{"Bucket": "list-encoding"}, {"Bucket": "list-encoding", "EncodingType": "url"}} {
+				if _, err := invoke(t, p, operation, input, nil); err != nil {
+					t.Fatalf("valid encoding %#v: %v", input, err)
+				}
+			}
+		})
+	}
+}
+
 func TestListObjectsPaginationIncludesCommonPrefixes(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-pagination"}, nil)

@@ -291,6 +291,71 @@ func TestConcurrentListEncodingValidationRemainsDeterministic(t *testing.T) {
 	}
 }
 
+func TestConcurrentListObjectVersionsRemainsPageable(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "version-list-chaos"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "version-list-chaos", "Status": "Enabled"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutObject", map[string]any{"Bucket": "version-list-chaos", "Key": "prefix/key"}, "initial"); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			switch i % 4 {
+			case 0:
+				_, err := call("PutObject", map[string]any{"Bucket": "version-list-chaos", "Key": "prefix/key"}, fmt.Sprintf("version-%d", i))
+				errs <- err
+			case 1, 3:
+				response, err := call("ListObjectVersions", map[string]any{"Bucket": "version-list-chaos", "Prefix": "prefix/", "MaxKeys": 3}, "")
+				versions := []any(nil)
+				if response != nil {
+					versions, _ = response.Output["Versions"].([]any)
+				}
+				if err != nil || len(versions) == 0 || len(versions) > 3 || versions[0].(map[string]any)["IsLatest"] != true || response.Output["IsTruncated"] == true && (response.Output["NextKeyMarker"] != "prefix/key" || response.Output["NextVersionIdMarker"] == nil) {
+					errs <- fmt.Errorf("version page = %#v, err=%v", response, err)
+					return
+				}
+				errs <- nil
+			case 2:
+				_, err := call("ListObjectVersions", map[string]any{"Bucket": "version-list-chaos", "VersionIdMarker": "orphan"}, "")
+				var fault *spi.Fault
+				if !errors.As(err, &fault) || fault.Code != "InvalidArgument" {
+					errs <- fmt.Errorf("orphan marker = %v", err)
+					return
+				}
+				errs <- nil
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	response, err := call("ListObjectVersions", map[string]any{"Bucket": "version-list-chaos", "Prefix": "prefix/"}, "")
+	if versions := response.Output["Versions"].([]any); err != nil || len(versions) != 17 {
+		t.Fatalf("final versions = %#v, err=%v", response, err)
+	}
+}
+
 func TestConcurrentBodyReadFailuresLeaveNoPartialObjects(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

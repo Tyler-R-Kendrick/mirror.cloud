@@ -170,6 +170,83 @@ func TestConcurrentCopySourcePreconditionsRemainDeterministic(t *testing.T) {
 	}
 }
 
+func TestConcurrentListObjectPaginationRemainsOrdered(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != nil {
+			stream = io.NopCloser(bytes.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "list-pagination"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"folder/a/one", "folder/base"} {
+		if _, err := call("PutObject", map[string]any{"Bucket": "list-pagination", "Key": key}, []byte("content")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if i%2 == 0 {
+				_, err := call("PutObject", map[string]any{"Bucket": "list-pagination", "Key": fmt.Sprintf("folder/item-%02d", i)}, []byte("content"))
+				errs <- err
+				return
+			}
+			operation := "ListObjects"
+			input := map[string]any{"Bucket": "list-pagination", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": 5, "Marker": "folder/a/"}
+			tokenField := "NextMarker"
+			if i%4 == 3 {
+				operation = "ListObjectsV2"
+				delete(input, "Marker")
+				input["ContinuationToken"] = "folder/a/"
+				tokenField = "NextContinuationToken"
+			}
+			response, err := call(operation, input, nil)
+			if err != nil {
+				errs <- err
+				return
+			}
+			var values []string
+			for _, value := range response.Output["CommonPrefixes"].([]any) {
+				values = append(values, value.(map[string]any)["Prefix"].(string))
+			}
+			for _, value := range response.Output["Contents"].([]any) {
+				values = append(values, value.(map[string]any)["Key"].(string))
+			}
+			if len(values) != response.Output["KeyCount"] || len(values) > 5 {
+				errs <- fmt.Errorf("%s count: %#v", operation, response.Output)
+				return
+			}
+			for index, value := range values {
+				if value <= "folder/a/" || index > 0 && value <= values[index-1] {
+					errs <- fmt.Errorf("%s order: %v", operation, values)
+					return
+				}
+			}
+			if response.Output["IsTruncated"] == true && len(values) > 0 && response.Output[tokenField] != values[len(values)-1] {
+				errs <- fmt.Errorf("%s token: %#v", operation, response.Output)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
 func TestConcurrentBodyReadFailuresLeaveNoPartialObjects(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

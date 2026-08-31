@@ -1645,6 +1645,44 @@ func FuzzObjectServerSideEncryption(f *testing.F) {
 	})
 }
 
+func FuzzGetObjectResponseOverrides(f *testing.F) {
+	for index, value := range []string{"max-age=74", `attachment; filename="foo.jpg"`, "identity", "de-DE", "image/jpeg", "Wed, 21 Oct 2015 07:28:00 GMT"} {
+		f.Add(uint8(index), value, index%2 == 0)
+	}
+	f.Fuzz(func(t *testing.T, fieldIndex uint8, value string, queryName bool) {
+		if value == "" || len(value) > 256 || !utf8.ValidString(value) || strings.ContainsAny(value, "\r\n") {
+			t.Skip()
+		}
+		fields := []struct{ input, query, header string }{
+			{"ResponseCacheControl", "response-cache-control", "Cache-Control"},
+			{"ResponseContentDisposition", "response-content-disposition", "Content-Disposition"},
+			{"ResponseContentEncoding", "response-content-encoding", "Content-Encoding"},
+			{"ResponseContentLanguage", "response-content-language", "Content-Language"},
+			{"ResponseContentType", "response-content-type", "Content-Type"},
+			{"ResponseExpires", "response-expires", "Expires"},
+		}
+		field := fields[int(fieldIndex)%len(fields)]
+		deps := spitest.Deps(t)
+		p := s3.New(deps)
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "override-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "override-fuzz", "Key": "object", "ContentType": "application/json"}, []byte("body"))
+		input := map[string]any{"Bucket": "override-fuzz", "Key": "object"}
+		if queryName {
+			input[field.query] = value
+		} else {
+			input[field.input] = value
+		}
+		response := mustInvoke(t, p, "GetObject", input, nil)
+		if response.Headers.Get(field.header) != value || string(readStream(t, response)) != "body" {
+			t.Fatalf("override %s = %q", field.header, response.Headers.Get(field.header))
+		}
+		stored := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "override-fuzz", "Key": "object"}, nil)
+		if stored.Headers.Get("Content-Type") != "application/json" {
+			t.Fatalf("stored content type = %q", stored.Headers.Get("Content-Type"))
+		}
+	})
+}
+
 func FuzzExplicitKMSKeyValidation(f *testing.F) {
 	f.Add(false, "Enabled", uint8(0))
 	f.Add(true, "Enabled", uint8(1))

@@ -1,0 +1,20 @@
+{
+  "overrides": {
+    "cacheControl": "max-age=74",
+    "contentDisposition": "attachment; filename=\"foo.jpg\"",
+    "contentEncoding": "identity",
+    "contentLanguage": "de-DE",
+    "contentType": "image/jpeg",
+    "expires": "Wed, 21 Oct 2015 07:28:00 GMT"
+  },
+  "range": {
+    "body": "bo",
+    "contentType": "text/csv",
+    "status": 206
+  },
+  "stored": {
+    "cacheControl": "stored",
+    "contentType": "application/json",
+    "expires": "Thu, 22 Oct 2026 07:28:00 GMT"
+  }
+}

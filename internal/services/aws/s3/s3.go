@@ -1371,6 +1371,22 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	h.Set("ETag", etag)
 	h.Set("Accept-Ranges", "bytes")
 	setObjectMetadataHeaders(h, meta)
+	for _, override := range []struct{ input, query, header string }{
+		{"ResponseCacheControl", "response-cache-control", "Cache-Control"},
+		{"ResponseContentDisposition", "response-content-disposition", "Content-Disposition"},
+		{"ResponseContentEncoding", "response-content-encoding", "Content-Encoding"},
+		{"ResponseContentLanguage", "response-content-language", "Content-Language"},
+		{"ResponseContentType", "response-content-type", "Content-Type"},
+		{"ResponseExpires", "response-expires", "Expires"},
+	} {
+		value := str(req.Input[override.input])
+		if value == "" {
+			value = str(req.Input[override.query])
+		}
+		if value != "" {
+			h.Set(override.header, value)
+		}
+	}
 	if restore, ok := p.restoreState(ctx, req, b, key, meta); ok {
 		h.Set("x-amz-restore", restore)
 	}

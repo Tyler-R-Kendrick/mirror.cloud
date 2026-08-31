@@ -1014,6 +1014,19 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.GetBucketCors(context.Background(), &s3.GetBucketCorsInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchCORSConfiguration") {
 		t.Fatalf("get deleted bucket CORS: %v", err)
 	}
+	defaultPreflight, _ := http.NewRequest(http.MethodOptions, ts.URL+"/object", nil)
+	defaultPreflight.Host = "sdk.s3.us-east-1.amazonaws.com"
+	defaultPreflight.Header.Set("Origin", "https://app.localstack.cloud")
+	defaultPreflight.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	defaultResponse, err := http.DefaultClient.Do(defaultPreflight)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, defaultResponse.Body)
+	defaultResponse.Body.Close()
+	if defaultResponse.StatusCode != http.StatusOK || defaultResponse.Header.Get("Access-Control-Allow-Origin") != "https://app.localstack.cloud" || defaultResponse.Header.Get("Access-Control-Allow-Methods") != "HEAD,GET,PUT,POST,DELETE,OPTIONS,PATCH" || defaultResponse.Header.Get("Vary") != "Origin" {
+		t.Fatalf("LocalStack default bucket CORS: %d %#v", defaultResponse.StatusCode, defaultResponse.Header)
+	}
 	if _, err := s3c.GetBucketWebsite(context.Background(), &s3.GetBucketWebsiteInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchWebsiteConfiguration") {
 		t.Fatalf("default bucket website: %v", err)
 	}

@@ -3666,6 +3666,41 @@ func TestCopyObjectConditions(t *testing.T) {
 	}
 }
 
+func TestCopySourcePreconditionsCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "copy-conditions"}, nil)
+	put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "copy-conditions", "Key": "source"}, []byte("source"))
+	_ = deps.Clock.Advance(2 * time.Second)
+	etag := put.Headers.Get("ETag")
+	past := time.Unix(-1, 0).UTC().Format(http.TimeFormat)
+	modified := time.Unix(0, 0).UTC().Format(http.TimeFormat)
+	future := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat)
+	cases := map[string]map[string]any{
+		"if-match":              {"CopySourceIfMatch": `"wrong"`},
+		"if-unmodified-since":   {"CopySourceIfUnmodifiedSince": past},
+		"if-none-match":         {"CopySourceIfNoneMatch": etag},
+		"if-modified-since":     {"CopySourceIfModifiedSince": modified},
+		"future-modified-since": {"CopySourceIfModifiedSince": future},
+		"all-positive": {"CopySourceIfMatch": etag, "CopySourceIfNoneMatch": `"wrong"`,
+			"CopySourceIfModifiedSince": past, "CopySourceIfUnmodifiedSince": modified},
+	}
+	outcomes := map[string]string{}
+	for name, conditions := range cases {
+		input := map[string]any{"Bucket": "copy-conditions", "Key": name, "CopySource": "copy-conditions/source"}
+		for key, value := range conditions {
+			input[key] = value
+		}
+		_, err := invoke(t, p, "CopyObject", input, nil)
+		if err == nil {
+			outcomes[name] = "success"
+		} else {
+			outcomes[name] = asFault(t, err).Code
+		}
+	}
+	golden.AssertJSON(t, outcomes)
+}
+
 func TestObjectReadConditions(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

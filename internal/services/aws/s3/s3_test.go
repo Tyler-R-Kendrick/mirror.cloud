@@ -4305,7 +4305,7 @@ func TestListObjectsV2Prefix(t *testing.T) {
 	for _, item := range contents {
 		m, _ := item.(map[string]any)
 		keys[m["Key"].(string)] = true
-		if m["LastModified"] == "" || m["StorageClass"] == "" || m["Key"] == "a/1" && m["StorageClass"] != "STANDARD_IA" {
+		if _, err := time.Parse(time.RFC3339, m["LastModified"].(string)); err != nil || m["StorageClass"] == "" || m["Key"] == "a/1" && m["StorageClass"] != "STANDARD_IA" {
 			t.Fatalf("object metadata: %#v", m)
 		}
 	}
@@ -4360,6 +4360,15 @@ func TestListObjectsPaginationIncludesCommonPrefixes(t *testing.T) {
 	v2Second := mustInvoke(t, p, "ListObjectsV2", v2Input, nil).Output
 	if got := asSliceForTest(v2Second["Contents"]); len(got) != 1 || asMapForTest(got[0])["Key"] != "folder/file1" || v2Second["ContinuationToken"] != v2Next || v2Second["NextContinuationToken"] != "folder/file1" {
 		t.Fatalf("second V2 page = %#v", v2Second)
+	}
+	for _, test := range []struct {
+		query, token string
+	}{{"", "NextMarker"}, {"?list-type=2", "NextContinuationToken"}} {
+		request := httptest.NewRequest(http.MethodGet, "https://list-pagination.s3.us-east-1.amazonaws.com/"+test.query, nil)
+		response, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "ListObjectsV2", Input: input, Identity: ident(), HTTP: request})
+		if err != nil || response.Output[test.token] != "folder/aSubfolder/" {
+			t.Fatalf("route %q = %#v, %v", test.query, response, err)
+		}
 	}
 }
 

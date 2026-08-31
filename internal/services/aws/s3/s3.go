@@ -936,7 +936,10 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	}
 	var body []byte
 	if req.Body != nil {
-		body, _ = io.ReadAll(req.Body)
+		body, err = io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if checksumType == "" {
 		checksumType = "FULL_OBJECT"
@@ -1459,8 +1462,11 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 		}
 		return &spi.Response{Status: http.StatusNotModified, Headers: h}, nil
 	}
-	data, _ := io.ReadAll(rc)
+	data, readErr := io.ReadAll(rc)
 	_ = rc.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
 	start, length, count, requested, err := objectPartRange(req, meta, int64(len(data)))
 	if err != nil {
 		return nil, err
@@ -1972,7 +1978,10 @@ func (p *Pack) uploadPartCopy(ctx context.Context, req *spi.Request) (*spi.Respo
 	}
 	req.Body = source.body
 	if rawRange := requestCondition(req, "CopySourceRange", "x-amz-copy-source-range"); rawRange != "" {
-		body, _ := io.ReadAll(source.body)
+		body, err := io.ReadAll(source.body)
+		if err != nil {
+			return nil, err
+		}
 		body, err = applyCopySourceRange(body, rawRange)
 		if err != nil {
 			return nil, err
@@ -1997,7 +2006,11 @@ func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response,
 	}
 	var body []byte
 	if req.Body != nil {
-		body, _ = io.ReadAll(req.Body)
+		var err error
+		body, err = io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
 	}
 	p.mu.Lock()
 	u := p.mpu[id]

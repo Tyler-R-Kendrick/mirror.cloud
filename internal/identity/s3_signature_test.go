@@ -350,11 +350,17 @@ func TestVerifyS3StreamingV4A(t *testing.T) {
 	sign := func(t *testing.T, stringToSign string, padded bool) string {
 		t.Helper()
 		digest := sha256.Sum256([]byte(stringToSign))
-		encoded, err := ecdsa.SignASN1(bytes.NewReader(bytes.Repeat([]byte{0x42}, 1024)), key, digest[:])
-		if err != nil {
-			t.Fatal(err)
+		var hexSignature string
+		for entropy := byte(0x42); ; entropy++ {
+			encoded, err := ecdsa.SignASN1(bytes.NewReader(bytes.Repeat([]byte{entropy}, 1024)), key, digest[:])
+			if err != nil {
+				t.Fatal(err)
+			}
+			hexSignature = hex.EncodeToString(encoded)
+			if !padded || len(hexSignature) < 144 || entropy == 0xff {
+				break
+			}
 		}
-		hexSignature := hex.EncodeToString(encoded)
 		if padded {
 			hexSignature = strings.Repeat("*", 144-len(hexSignature)) + hexSignature
 		}
@@ -414,16 +420,36 @@ func TestVerifyS3StreamingV4A(t *testing.T) {
 				t.Fatalf("valid SigV4A stream rejected: %#v", fault)
 			}
 			chunks[0][0] = 'j'
+			if fault := VerifyS3StreamingSignature(request, accessKey, secret, chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+				t.Fatalf("dispatcher accepted tampered SigV4A chunk: %#v", fault)
+			}
 			if fault := VerifyS3StreamingV4A(request, accessKey, secret, chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 				t.Fatalf("tampered SigV4A chunk accepted: %#v", fault)
 			}
 			chunks[0][0] = 'h'
 			if trailerMode {
+				authorization := request.Header.Get("Authorization")
+				request.Header.Set("Authorization", strings.Replace(authorization, ";x-amz-trailer", "", 1))
+				if fault := VerifyS3StreamingV4A(request, accessKey, secret, chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+					t.Fatalf("unsigned trailer declaration accepted: %#v", fault)
+				}
+				request.Header.Set("Authorization", authorization)
+				extra := trailers.Clone()
+				extra.Set("X-Amz-Extra", "value")
+				if fault := VerifyS3StreamingV4A(request, accessKey, secret, chunks, signatures, extra); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+					t.Fatalf("undeclared trailer accepted: %#v", fault)
+				}
 				trailers.Set("X-Amz-Checksum-Crc32c", "AAAAAA==")
 				if fault := VerifyS3StreamingV4A(request, accessKey, secret, chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 					t.Fatalf("tampered SigV4A trailer accepted: %#v", fault)
 				}
 				trailers.Set("X-Amz-Checksum-Crc32c", "mnG7TA==")
+				trailerSignature := trailers.Get("X-Amz-Trailer-Signature")
+				trailers.Set("X-Amz-Trailer-Signature", trailerSignature[1:])
+				if fault := VerifyS3StreamingV4A(request, accessKey, secret, chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+					t.Fatalf("unpadded SigV4A trailer accepted: %#v", fault)
+				}
+				trailers.Set("X-Amz-Trailer-Signature", trailerSignature)
 			}
 			signatures[0] = signatures[0][1:]
 			if fault := VerifyS3StreamingV4A(request, accessKey, secret, chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {

@@ -4363,6 +4363,27 @@ func TestListObjectsPaginationIncludesCommonPrefixes(t *testing.T) {
 	}
 }
 
+func TestListObjectsPaginationCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-characterization"}, nil)
+	for _, key := range []string{"folder/aSubfolder/subFile1", "folder/aSubfolder/subFile2", "folder/file1", "folder/file2"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-characterization", "Key": key}, []byte("content"))
+	}
+	input := map[string]any{"Bucket": "list-characterization", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": 1}
+	v1First := mustInvoke(t, p, "ListObjects", input, nil).Output
+	v1NextInput := maps.Clone(input)
+	v1NextInput["Marker"] = v1First["NextMarker"]
+	v2First := mustInvoke(t, p, "ListObjectsV2", input, nil).Output
+	v2NextInput := maps.Clone(input)
+	v2NextInput["ContinuationToken"] = v2First["NextContinuationToken"]
+	golden.AssertJSON(t, map[string]any{
+		"v1-first": v1First,
+		"v1-next":  mustInvoke(t, p, "ListObjects", v1NextInput, nil).Output,
+		"v2-first": v2First,
+		"v2-next":  mustInvoke(t, p, "ListObjectsV2", v2NextInput, nil).Output,
+	})
+}
+
 func TestMultipartETagForm(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

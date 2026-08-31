@@ -159,6 +159,47 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given object versions When listing pages Then markers include common prefixes", func(t *testing.T) {
+		res := do(http.MethodPut, "/version-list-bdd", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		res = do(http.MethodPut, "/version-list-bdd?versioning", []byte(`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`), "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("enable versioning %d", res.StatusCode)
+		}
+		for _, key := range []string{"folder/a/one", "folder/file1", "folder/file2"} {
+			res = do(http.MethodPut, "/version-list-bdd/"+key, []byte("body"), "")
+			io.Copy(io.Discard, res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("put %q: %d", key, res.StatusCode)
+			}
+		}
+		res = do(http.MethodGet, "/version-list-bdd?versions&prefix=folder%2F&delimiter=%2F&max-keys=1", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>folder/a/</Prefix></CommonPrefixes>")) || !bytes.Contains(body, []byte("<NextKeyMarker>folder/a/</NextKeyMarker>")) || bytes.Contains(body, []byte("<member>")) || bytes.Contains(body, []byte("<Version>")) {
+			t.Fatalf("first version page %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/version-list-bdd?versions&prefix=folder%2F&delimiter=%2F&max-keys=1&key-marker=folder%2Fa%2F", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Version>")) || !bytes.Contains(body, []byte("<Key>folder/file1</Key>")) || !bytes.Contains(body, []byte("<LastModified>")) {
+			t.Fatalf("next version page %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/version-list-bdd?versions&version-id-marker=orphan", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(body, []byte("<ArgumentName>version-id-marker</ArgumentName>")) {
+			t.Fatalf("orphan version marker %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given an expired presigned URL When requested Then S3 returns a modeled access denial", func(t *testing.T) {
 		request, err := http.NewRequest(http.MethodGet, ts.URL+"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F19691231%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=19691231T235900Z&X-Amz-Expires=30&X-Amz-SignedHeaders=host&X-Amz-Signature=00", nil)
 		if err != nil {

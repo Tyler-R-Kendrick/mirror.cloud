@@ -120,8 +120,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-skip-object-encryption-validation",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "serverSideEncryption, sseKMSKeyID, bucketKeyEnabled, err = p.objectEncryption(ctx, req, b)\n\t\tif err != nil {",
-			new:  "serverSideEncryption, sseKMSKeyID, bucketKeyEnabled, err = p.objectEncryption(ctx, req, b)\n\t\tif false && err != nil {",
+			old:  "serverSideEncryption, sseKMSKeyID, bucketKeyEnabled, err = p.objectEncryption(ctx, req, b)\n\t\tif err != nil {\n\t\t\treturn nil, err\n\t\t}\n\t}\n\tvar body []byte",
+			new:  "serverSideEncryption, sseKMSKeyID, bucketKeyEnabled, err = p.objectEncryption(ctx, req, b)\n\t\tif false && err != nil {\n\t\t\treturn nil, err\n\t\t}\n\t}\n\tvar body []byte",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestObjectServerSideEncryption",
 		},
@@ -136,8 +136,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-drop-version-customer-encryption",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `"sseCustomerKeyMD5": sseCustomerKeyMD5}`,
-			new:  `"sseCustomerKeyMD5": ""}`,
+			old:  `"versionOrder": versionOrder, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation, "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled, "sseCustomerKeyMD5": sseCustomerKeyMD5}`,
+			new:  `"versionOrder": versionOrder, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation, "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled, "sseCustomerKeyMD5": ""}`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestObjectSSECustomerKey",
 		},
@@ -272,8 +272,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-skip-stored-kms-validation",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if keyID := str(meta["ssekmsKeyId"]); keyID != "" {`,
-			new:  `if false {`,
+			old:  "if keyID := str(meta[\"ssekmsKeyId\"]); keyID != \"\" {\n\t\tif err := p.validateKMSKey(ctx, req, keyID); err != nil {",
+			new:  "if keyID := str(meta[\"ssekmsKeyId\"]); false {\n\t\tif err := p.validateKMSKey(ctx, req, keyID); err != nil {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestExplicitKMSKeyValidation",
 		},
@@ -568,8 +568,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-drop-completed-customer-encryption-state",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `"sseCustomerKeyMD5": u.sseCustomerKeyMD5, "bucketKeyEnabled": u.bucketKeyEnabled`,
-			new:  `"sseCustomerKeyMD5": "", "bucketKeyEnabled": u.bucketKeyEnabled`,
+			old:  `req.Input["_ObjectEncryption"] = map[string]any{"serverSideEncryption": u.serverSideEncryption, "ssekmsKeyId": u.sseKMSKeyID, "sseCustomerKeyMD5": u.sseCustomerKeyMD5, "bucketKeyEnabled": u.bucketKeyEnabled}`,
+			new:  `req.Input["_ObjectEncryption"] = map[string]any{"serverSideEncryption": u.serverSideEncryption, "ssekmsKeyId": u.sseKMSKeyID, "sseCustomerKeyMD5": "", "bucketKeyEnabled": u.bucketKeyEnabled}`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestMultipartSSECustomerKey",
 		},
@@ -736,8 +736,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-get-ignore-delete-marker",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "if truthy(meta[\"deleteMarker\"]) {\n\t\treturn nil, deleteMarkerReadFault(meta, wantVer != \"\")\n\t}",
-			new:  "if false {\n\t\treturn nil, deleteMarkerReadFault(meta, wantVer != \"\")\n\t}",
+			old:  "if truthy(meta[\"deleteMarker\"]) {\n\t\treturn nil, deleteMarkerReadFault(meta, wantVer != \"\")\n\t}\n\tif err := validateStoredSSECustomerKey(req, meta); err != nil {\n\t\treturn nil, err\n\t}\n\tif keyID := str(meta[\"ssekmsKeyId\"]); keyID != \"\" {",
+			new:  "if false {\n\t\treturn nil, deleteMarkerReadFault(meta, wantVer != \"\")\n\t}\n\tif err := validateStoredSSECustomerKey(req, meta); err != nil {\n\t\treturn nil, err\n\t}\n\tif keyID := str(meta[\"ssekmsKeyId\"]); keyID != \"\" {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCopyObjectSourceVersions",
 		},
@@ -768,8 +768,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-hide-delete-marker-version",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if version := str(meta["versionId"]); version != "" {`,
-			new:  `if version := str(meta["versionId"]); false {`,
+			old:  "headers.Set(\"x-amz-delete-marker\", \"true\")\n\tif version := str(meta[\"versionId\"]); version != \"\" {",
+			new:  "headers.Set(\"x-amz-delete-marker\", \"true\")\n\tif version := str(meta[\"versionId\"]); false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCopyObjectSourceVersions",
 		},
@@ -880,8 +880,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "restxml-drop-multi-delete-checksum-body",
 			file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-			old:  `if op.Name == "DeleteObjects" {`,
-			new:  `if false {`,
+			old:  "if op.Name == \"DeleteObjects\" {\n\t\t\t\tin[\"_body\"] = string(b)",
+			new:  "if false {\n\t\t\t\tin[\"_body\"] = string(b)",
 			pkg:  "./internal/proto/aws/restxml",
 			run:  "TestDecodeDeleteObjectsXML",
 		},
@@ -1656,8 +1656,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-list-parts-accept-large-limit",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `marker < 0 || maxParts < 0 || maxParts > 1000`,
-			new:  `marker < 0 || maxParts < 0`,
+			old:  `if marker < 0 || maxParts < 0 || maxParts > 1000 {`,
+			new:  `if marker < 0 || maxParts < 0 {`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestListPartsAndMultipartUploads",
 		},
@@ -1904,8 +1904,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-complete-accept-invalid-part-number",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if number < 1 || number > 10000 {`,
-			new:  `if false {`,
+			old:  "if number < 1 || number > 10000 {\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidPart\"",
+			new:  "if false {\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidPart\"",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestMultipartPartNumberBounds",
 		},
@@ -1928,8 +1928,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-hide-versioned-head-version-id",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if version := str(meta["versionId"]); version != "" {`,
-			new:  `if version := str(meta["versionId"]); false {`,
+			old:  "if version := str(meta[\"versionId\"]); version != \"\" {\n\t\th.Set(\"x-amz-version-id\", version)\n\t}\n\ttags := p.storedTags(ctx, req, b, key, wantVer)",
+			new:  "if version := str(meta[\"versionId\"]); false {\n\t\th.Set(\"x-amz-version-id\", version)\n\t}\n\ttags := p.storedTags(ctx, req, b, key, wantVer)",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCopyObjectSourceVersions",
 		},
@@ -2376,8 +2376,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-drop-version-website-redirect",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `"objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation`,
-			new:  `"objectMetadata": objectMetadata, "websiteRedirectLocation": ""`,
+			old:  `"versionOrder": versionOrder, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation`,
+			new:  `"versionOrder": versionOrder, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": ""`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestObjectMetadata",
 		},
@@ -2560,8 +2560,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-archive-restore-standard-object",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "storageClass := archiveStorageClass(meta)\n\tif storageClass == \"\" {",
-			new:  "storageClass := archiveStorageClass(meta)\n\tif false {",
+			old:  "storageClass := archiveStorageClass(meta)\n\tif storageClass == \"\" {\n\t\treturn nil, &spi.Fault{Code: \"InvalidObjectState\"",
+			new:  "storageClass := archiveStorageClass(meta)\n\tif false {\n\t\treturn nil, &spi.Fault{Code: \"InvalidObjectState\"",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestArchiveRestoreCharacterization",
 		},
@@ -2616,8 +2616,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-archive-hide-get-restore-header",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if restore, ok := p.restoreState(ctx, req, b, key, meta); ok {`,
-			new:  `if restore, ok := "", false; ok {`,
+			old:  "if restore, ok := p.restoreState(ctx, req, b, key, meta); ok {\n\t\th.Set(\"x-amz-restore\", restore)\n\t}\n\th.Set(\"Content-Length\", strconv.FormatInt(info.Size, 10))\n\tmtime := str(meta[\"mtime\"])",
+			new:  "if restore, ok := \"\", false; ok {\n\t\th.Set(\"x-amz-restore\", restore)\n\t}\n\th.Set(\"Content-Length\", strconv.FormatInt(info.Size, 10))\n\tmtime := str(meta[\"mtime\"])",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestArchiveRestoreCharacterization",
 		},
@@ -2640,8 +2640,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-storage-class-skip-put-validation",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "storageClass, err := requestStorageClass(req)\n\tif err != nil {",
-			new:  "storageClass, err := requestStorageClass(req)\n\tif false {",
+			old:  "acl, explicitACL, err := requestACL(req, false)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tstorageClass, err := requestStorageClass(req)\n\tif err != nil {",
+			new:  "acl, explicitACL, err := requestACL(req, false)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tstorageClass, err := requestStorageClass(req)\n\tif false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestStorageClassValidation",
 		},
@@ -2720,8 +2720,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-object-key-skip-put-validation",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if err := validateObjectKey(key); err != nil {`,
-			new:  `if err := validateObjectKey(key); false {`,
+			old:  "if err := validateObjectKey(key); err != nil {\n\t\treturn nil, err\n\t}\n\tif err := p.checkWritePreconditions(ctx, req, b, key); err != nil {",
+			new:  "if err := validateObjectKey(key); false {\n\t\treturn nil, err\n\t}\n\tif err := p.checkWritePreconditions(ctx, req, b, key); err != nil {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestObjectKeyLengthValidation",
 		},
@@ -2960,8 +2960,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-cors-drop-bucket-scoped-missing-error",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if req.Operation == "GetBucketCors" {`,
-			new:  `if false {`,
+			old:  "if req.Operation == \"GetBucketCors\" {\n\t\t\treturn nil, &spi.Fault{Code: \"NoSuchCORSConfiguration\"",
+			new:  "if false {\n\t\t\treturn nil, &spi.Fault{Code: \"NoSuchCORSConfiguration\"",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestBucketCors",
 		},
@@ -3016,8 +3016,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-website-accept-redirect-protocol",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if protocol := str(redirect["Protocol"]); protocol != "" && protocol != "http" && protocol != "https" {`,
-			new:  `if false {`,
+			old:  "if _, ok := redirect[\"HostName\"]; !ok {\n\t\t\treturn &spi.Fault{Code: \"MalformedXML\", HTTPStatus: http.StatusBadRequest, Fault: \"client\"}\n\t\t}\n\t\tif protocol := str(redirect[\"Protocol\"]); protocol != \"\" && protocol != \"http\" && protocol != \"https\" {",
+			new:  "if _, ok := redirect[\"HostName\"]; !ok {\n\t\t\treturn &spi.Fault{Code: \"MalformedXML\", HTTPStatus: http.StatusBadRequest, Fault: \"client\"}\n\t\t}\n\t\tif false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestBucketWebsite",
 		},
@@ -3088,8 +3088,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-website-drop-bucket-scoped-missing-error",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if req.Operation == "GetBucketWebsite" {`,
-			new:  `if false {`,
+			old:  "if req.Operation == \"GetBucketWebsite\" {\n\t\t\treturn nil, &spi.Fault{Code: \"NoSuchWebsiteConfiguration\"",
+			new:  "if false {\n\t\t\treturn nil, &spi.Fault{Code: \"NoSuchWebsiteConfiguration\"",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestBucketWebsite",
 		},
@@ -3296,8 +3296,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-bucket-encryption-accept-invalid-algorithm",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if algorithm != "AES256" && algorithm != "aws:fsx" && algorithm != "aws:backup" && algorithm != "aws:kms" && algorithm != "aws:kms:dsse" {`,
-			new:  `if false {`,
+			old:  "if algorithm != \"AES256\" && algorithm != \"aws:fsx\" && algorithm != \"aws:backup\" && algorithm != \"aws:kms\" && algorithm != \"aws:kms:dsse\" {\n\t\treturn nil, malformed()",
+			new:  "if false {\n\t\treturn nil, malformed()",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestBucketEncryptionConfiguration",
 		},
@@ -3440,8 +3440,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-lifecycle-round-days-down",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `AddDate(0, 0, days+1)`,
-			new:  `AddDate(0, 0, days)`,
+			old:  `time.Date(lastModified.Year(), lastModified.Month(), lastModified.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, days+1)`,
+			new:  `time.Date(lastModified.Year(), lastModified.Month(), lastModified.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, days)`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestBucketLifecycleExpirationHeaders",
 		},
@@ -3832,8 +3832,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-notifications-drop-acl-event",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `p.notify(ctx, req, b, str(req.Input["Key"]), "ObjectAcl:Put", objectMeta)`,
-			new:  ``,
+			old:  "p.notify(ctx, req, b, str(req.Input[\"Key\"]), \"ObjectAcl:Put\", objectMeta)\n\t\t\t}\n\t\t\treturn &spi.Response{Status: http.StatusOK}",
+			new:  "\n\t\t\t}\n\t\t\treturn &spi.Response{Status: http.StatusOK}",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestBucketNotificationRestoreAndACLEvents",
 		},
@@ -4552,8 +4552,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-bucket-location-header-ignore-tls",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if req.HTTP.TLS != nil {`,
-			new:  `if false {`,
+			old:  "scheme := \"http\"\n\t\t\tif req.HTTP.TLS != nil {",
+			new:  "scheme := \"http\"\n\t\t\tif false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCreateBucketLocationConstraints",
 		},
@@ -4792,18 +4792,22 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-bucket-name-drop-message",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `Code: "InvalidBucketName", Message: "The specified bucket is not valid."`,
-			new:  `Code: "InvalidBucketName"`,
-			pkg:  "./internal/services/aws/s3",
-			run:  "TestCreateBucketValidatesGlobalNames",
+			old: `if !accountRegional && !validBucketName(b) {
+		return nil, &spi.Fault{Code: "InvalidBucketName", Message: "The specified bucket is not valid."`,
+			new: `if !accountRegional && !validBucketName(b) {
+		return nil, &spi.Fault{Code: "InvalidBucketName"`,
+			pkg: "./internal/services/aws/s3",
+			run: "TestCreateBucketValidatesGlobalNames",
 		},
 		{
 			name: "s3-bucket-name-drop-field",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `Fields: map[string]any{"BucketName": b}`,
-			new:  `Fields: map[string]any{}`,
-			pkg:  "./internal/services/aws/s3",
-			run:  "TestCreateBucketValidatesGlobalNames",
+			old: `if !accountRegional && !validBucketName(b) {
+		return nil, &spi.Fault{Code: "InvalidBucketName", Message: "The specified bucket is not valid.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"BucketName": b}`,
+			new: `if !accountRegional && !validBucketName(b) {
+		return nil, &spi.Fault{Code: "InvalidBucketName", Message: "The specified bucket is not valid.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{}`,
+			pkg: "./internal/services/aws/s3",
+			run: "TestCreateBucketValidatesGlobalNames",
 		},
 		{
 			name: "restxml-skip-create-bucket-config",
@@ -5032,8 +5036,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-copy-current-delete-marker",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "if !exists {\n\t\treturn nil, &spi.Fault{Code: \"NoSuchKey\", HTTPStatus: 404, Fault: \"client\"}\n\t}\n\tif truthy(meta[\"deleteMarker\"]) {",
-			new:  "if !exists {\n\t\treturn nil, &spi.Fault{Code: \"NoSuchKey\", HTTPStatus: 404, Fault: \"client\"}\n\t}\n\tif false {",
+			old:  "meta, exists := p.objectMetadata(ctx, req, bucket, key, version)\n\tif !exists {\n\t\treturn nil, &spi.Fault{Code: \"NoSuchKey\", HTTPStatus: 404, Fault: \"client\"}\n\t}\n\tif truthy(meta[\"deleteMarker\"]) {",
+			new:  "meta, exists := p.objectMetadata(ctx, req, bucket, key, version)\n\tif !exists {\n\t\treturn nil, &spi.Fault{Code: \"NoSuchKey\", HTTPStatus: 404, Fault: \"client\"}\n\t}\n\tif false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCopyObjectSourceVersions",
 		},
@@ -5104,8 +5108,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-accept-empty-complete-manifest",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if len(parts) == 0 {`,
-			new:  `if false {`,
+			old:  "if len(parts) == 0 {\n\t\treturn nil, &spi.Fault{Code: \"InvalidPart\"",
+			new:  "if false {\n\t\treturn nil, &spi.Fault{Code: \"InvalidPart\"",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCompleteMultipartUploadManifest",
 		},
@@ -5184,8 +5188,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-copy-multipart-etag-from-body-md5",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta["mtime"]))`,
-			new:  "checkCopySourcePreconditions(req, `\"`+source.info.MD5+`\"`, str(source.meta[\"mtime\"]))",
+			old:  "if err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta[\"mtime\"])); err != nil {\n\t\treturn nil, err\n\t}\n\t_, bucketEncrypted",
+			new:  "if err := checkCopySourcePreconditions(req, `\"`+source.info.MD5+`\"`, str(source.meta[\"mtime\"])); err != nil {\n\t\treturn nil, err\n\t}\n\t_, bucketEncrypted",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestMultipartETagForm",
 		},
@@ -5360,8 +5364,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-read-wrong-multipart-part",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if asInt(part["number"]) == number {`,
-			new:  `if asInt(part["number"]) == number-1 {`,
+			old:  "if asInt(part[\"number\"]) == number {\n\t\t\treturn start, partSize, len(parts), true, nil",
+			new:  "if asInt(part[\"number\"]) == number-1 {\n\t\t\treturn start, partSize, len(parts), true, nil",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestMultipartPartReads",
 		},
@@ -5640,8 +5644,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-ignore-explicit-write-checksums",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if value := requestCondition(req, checksum.input, checksum.header); value != "" {`,
-			new:  `if value := requestCondition(req, checksum.input, checksum.header); false {`,
+			old:  "func validateChecksum(req *spi.Request, body []byte) error {\n\tfor _, checksum := range append([]struct{ algorithm, input, header string }{{\"MD5\", \"ContentMD5\", \"Content-MD5\"}}, checksums...) {\n\t\tif value := requestCondition(req, checksum.input, checksum.header); value != \"\" {",
+			new:  "func validateChecksum(req *spi.Request, body []byte) error {\n\tfor _, checksum := range append([]struct{ algorithm, input, header string }{{\"MD5\", \"ContentMD5\", \"Content-MD5\"}}, checksums...) {\n\t\tif value := requestCondition(req, checksum.input, checksum.header); false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestWriteChecksumValidation",
 		},
@@ -5760,16 +5764,16 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-hide-put-checksum-response",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `for header, value := range provided {`,
-			new:  `for header, value := range map[string]string{} {`,
+			old:  "if vid != \"\" {\n\t\th.Set(\"x-amz-version-id\", vid)\n\t}\n\tfor header, value := range provided {",
+			new:  "if vid != \"\" {\n\t\th.Set(\"x-amz-version-id\", vid)\n\t}\n\tfor header, value := range map[string]string{} {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestWriteChecksumValidation",
 		},
 		{
 			name: "s3-hide-get-checksum-mode",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {`,
-			new:  `if false {`,
+			old:  "setObjectEncryptionHeaders(h, meta)\n\tif requestCondition(req, \"ChecksumMode\", \"x-amz-checksum-mode\") == \"ENABLED\" {",
+			new:  "setObjectEncryptionHeaders(h, meta)\n\tif false {",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestWriteChecksumValidation",
 		},
@@ -6160,8 +6164,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-accept-invalid-test-state-retry-count",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if !valid || count < 0 || count != math.Trunc(count) {`,
-			new:  `if false {`,
+			old:  "if value, exists := inputValue(configuration, \"retrierRetryCount\", \"RetrierRetryCount\"); exists {\n\t\t\t\tcount, valid := exactNumber(value)\n\t\t\t\tif !valid || count < 0 || count != math.Trunc(count) {",
+			new:  "if value, exists := inputValue(configuration, \"retrierRetryCount\", \"RetrierRetryCount\"); exists {\n\t\t\t\tcount, valid := exactNumber(value)\n\t\t\t\tif false {",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
@@ -6288,8 +6292,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-test-state-error-source",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `"errorCausedByState", "ErrorCausedByState"`,
-			new:  `"missingErrorSource", "MissingErrorSource"`,
+			old:  `inputValue(configuration, "errorCausedByState", "ErrorCausedByState")`,
+			new:  `inputValue(configuration, "missingErrorSource", "MissingErrorSource")`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
@@ -6600,8 +6604,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "cloudformation-reject-api-gateway-resource",
 			file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-			old:  `case "AWS::ApiGateway::RestApi":`,
-			new:  `case "AWS::ApiGateway::RestApiMutated":`,
+			old:  "case \"AWS::ApiGateway::RestApi\":\n\t\tn := str(props[\"Name\"])",
+			new:  "case \"AWS::ApiGateway::RestApiMutated\":\n\t\tn := str(props[\"Name\"])",
 			pkg:  "./internal/services/aws/cloudformation",
 			run:  "TestCloudFormationProvisionedResourceLifecycle",
 		},
@@ -6680,8 +6684,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-accept-invalid-encryption",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if encryption != nil && !validEncryptionConfiguration(encryption) {`,
-			new:  `if false {`,
+			old:  "if tracing != nil && !validTracingConfiguration(tracing) {\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidTracingConfiguration\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tif encryption != nil && !validEncryptionConfiguration(encryption) {",
+			new:  "if tracing != nil && !validTracingConfiguration(tracing) {\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidTracingConfiguration\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tif false {",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesRequestValidation",
 		},
@@ -7376,8 +7380,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-assign-variable-limit",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if err != nil || len(encoded) > 256*1024 {`,
-			new:  `if err != nil || len(encoded) > math.MaxInt {`,
+			old:  "func commitAssignments(variables, assignments map[string]any) bool {\n\tencoded, err := json.Marshal(assignments)\n\tif err != nil || len(encoded) > 256*1024 {",
+			new:  "func commitAssignments(variables, assignments map[string]any) bool {\n\tencoded, err := json.Marshal(assignments)\n\tif err != nil || len(encoded) > math.MaxInt {",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestVariableAssignmentLimits",
 		},
@@ -7680,8 +7684,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-drop-flattened-array-source",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `flattened.sources = append(flattened.sources, nestedSource)`,
-			new:  `flattened.sources = append(flattened.sources, "")`,
+			old:  "for range values {\n\t\t\t\t\tflattened.sources = append(flattened.sources, nestedSource)",
+			new:  "for range values {\n\t\t\t\t\tflattened.sources = append(flattened.sources, \"\")",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestDistributedMapS3ItemReader",
 		},
@@ -7840,8 +7844,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-hide-map-reader-source",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `"Index": float64(index), "Value": item, "Source": itemSource}`,
-			new:  `"Index": float64(index), "Value": item, "Source": "STATE_DATA"}`,
+			old:  `itemDetails := map[string]any{"Index": float64(index), "Value": item, "Source": itemSource}`,
+			new:  `itemDetails := map[string]any{"Index": float64(index), "Value": item, "Source": "STATE_DATA"}`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestDistributedMapS3ItemReader",
 		},
@@ -7896,8 +7900,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-keep-extra-csv-map-field",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `for index, header := range headers {`,
-			new:  `for index, header := range record {`,
+			old:  "item := map[string]any{}\n\t\t\tfor index, header := range headers {",
+			new:  "item := map[string]any{}\n\t\t\tfor index, header := range record {",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestDistributedMapS3ItemReader",
 		},
@@ -7936,8 +7940,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-map-batch-limit-path",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `value = jsonPath(data, path, variables...)`,
-			new:  `value = 1.0`,
+			old:  "if hasValue == hasPath {\n\t\t\treturn 0, false\n\t\t}\n\t\tif hasPath {\n\t\t\tvalue = jsonPath(data, path, variables...)",
+			new:  "if hasValue == hasPath {\n\t\t\treturn 0, false\n\t\t}\n\t\tif hasPath {\n\t\t\tvalue = 1.0",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestDistributedMapItemBatcher",
 		},
@@ -8016,16 +8020,16 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-ignore-null-result-path",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if raw == nil {`,
-			new:  `if false {`,
+			old:  "if raw == nil {\n\t\treturn input, true",
+			new:  "if false {\n\t\treturn input, true",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
 		{
 			name: "states-reject-root-result-path",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if !exists || raw == "$" {`,
-			new:  `if !exists {`,
+			old:  "if !exists || raw == \"$\" {\n\t\treturn result, true",
+			new:  "if !exists {\n\t\treturn result, true",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
@@ -8040,8 +8044,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-shift-map-item-index",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `"Index": float64(index), "Value": item, "Source": itemSource}`,
-			new:  `"Index": float64(index + 1), "Value": item, "Source": itemSource}`,
+			old:  "selector := state[\"ItemSelector\"]\n\t\t\tif selector == nil {\n\t\t\t\tselector = state[\"Parameters\"]\n\t\t\t}\n\t\t\tfor index, item := range selected {\n\t\t\t\titemContext := map[string]any{\"Map\": map[string]any{\"Item\": map[string]any{\"Index\": float64(index), \"Value\": item, \"Source\": itemSource}}}",
+			new:  "selector := state[\"ItemSelector\"]\n\t\t\tif selector == nil {\n\t\t\t\tselector = state[\"Parameters\"]\n\t\t\t}\n\t\t\tfor index, item := range selected {\n\t\t\t\titemContext := map[string]any{\"Map\": map[string]any{\"Item\": map[string]any{\"Index\": float64(index + 1), \"Value\": item, \"Source\": itemSource}}}",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
@@ -8208,16 +8212,16 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-accept-invalid-wait-timestamp-path",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if !valid || !validJSONPath(reference, true) {`,
-			new:  `if false {`,
+			old:  "if value, exists := state[\"TimestampPath\"]; exists {\n\t\t\t\treference, valid := value.(string)\n\t\t\t\tif !valid || !validJSONPath(reference, true) {",
+			new:  "if value, exists := state[\"TimestampPath\"]; exists {\n\t\t\t\treference, valid := value.(string)\n\t\t\t\tif false {",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesWaitValidation",
 		},
 		{
 			name: "states-accept-non-string-fail-detail",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if _, valid := value.(string); !valid {`,
-			new:  `if false {`,
+			old:  "for _, field := range []string{\"Error\", \"Cause\"} {\n\t\t\t\tif value, exists := state[field]; exists {\n\t\t\t\t\tif _, valid := value.(string); !valid {",
+			new:  "for _, field := range []string{\"Error\", \"Cause\"} {\n\t\t\t\tif value, exists := state[field]; exists {\n\t\t\t\t\tif false {",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesFailValidation",
 		},
@@ -8232,8 +8236,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-accept-invalid-fail-reference-path",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `return validJSONPath(path, true)`,
-			new:  `return true`,
+			old:  "if strings.HasPrefix(path, \"$\") {\n\t\t\t\t\treturn validJSONPath(path, true)",
+			new:  "if strings.HasPrefix(path, \"$\") {\n\t\t\t\t\treturn true",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesReferencePathValidation",
 		},
@@ -8328,8 +8332,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-accept-invalid-parameters",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if _, valid := value.(map[string]any); !valid {`,
-			new:  `if false {`,
+			old:  "if value, exists := state[\"Parameters\"]; exists {\n\t\t\t\tif _, valid := value.(map[string]any); !valid {",
+			new:  "if value, exists := state[\"Parameters\"]; exists {\n\t\t\t\tif false {",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesDataFlowValidation",
 		},
@@ -8360,8 +8364,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-accept-non-string-machine-comment",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if _, valid := comment.(string); !valid {`,
-			new:  `if false {`,
+			old:  "if comment, exists := machine[\"Comment\"]; exists {\n\t\tif _, valid := comment.(string); !valid {",
+			new:  "if comment, exists := machine[\"Comment\"]; exists {\n\t\tif false {",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesStructuralMetadataValidation",
 		},
@@ -8416,8 +8420,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-skip-activity-retry",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if delay, retry := retryTask(st, failure.name, pend.Retries, p.deps.Rand); retry {`,
-			new:  `if false {`,
+			old:  "if failure.cause == \"\" {\n\t\t\tfailure.cause = failure.name\n\t\t}\n\t\tif pend.Retries == nil {\n\t\t\tpend.Retries = map[int]int{}\n\t\t}\n\t\tif delay, retry := retryTask(st, failure.name, pend.Retries, p.deps.Rand); retry {",
+			new:  "if failure.cause == \"\" {\n\t\t\tfailure.cause = failure.name\n\t\t}\n\t\tif pend.Retries == nil {\n\t\t\tpend.Retries = map[int]int{}\n\t\t}\n\t\tif delay, retry := retryTask(st, failure.name, pend.Retries, p.deps.Rand); false && retry {",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
@@ -8432,8 +8436,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-drop-activity-state-input",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `StateInput: rawInput, Retries: retries[cur]`,
-			new:  `StateInput: nil, Retries: retries[cur]`,
+			old:  `ActivityARN: res, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur]`,
+			new:  `ActivityARN: res, StateName: cur, Input: payload, StateInput: nil, Retries: retries[cur]`,
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesLifecycleAndWalkerUnits",
 		},
@@ -8840,8 +8844,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-accept-invalid-result-writer-option",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if !valid || !slices.Contains(allowed, configured) {`,
-			new:  `if (!valid || !slices.Contains(allowed, configured)) && false {`,
+			old:  "for option, allowed := range map[string][]string{\"Transformation\": {\"NONE\", \"COMPACT\", \"FLATTEN\"}, \"OutputType\": {\"JSON\", \"JSONL\"}} {\n\t\t\t\t\t\tif value, exists := writerConfig[option]; exists {\n\t\t\t\t\t\t\tconfigured, valid := value.(string)\n\t\t\t\t\t\t\tif !valid || !slices.Contains(allowed, configured) {",
+			new:  "for option, allowed := range map[string][]string{\"Transformation\": {\"NONE\", \"COMPACT\", \"FLATTEN\"}, \"OutputType\": {\"JSON\", \"JSONL\"}} {\n\t\t\t\t\t\tif value, exists := writerConfig[option]; exists {\n\t\t\t\t\t\t\tconfigured, valid := value.(string)\n\t\t\t\t\t\t\tif (!valid || !slices.Contains(allowed, configured)) && false {",
 			pkg:  "./internal/services/aws/states",
 			run:  "TestStatesMapValidation",
 		},
@@ -8880,10 +8884,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-allow-inline-map-label",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if mode != "DISTRIBUTED" {`,
-			new:  `if mode != "DISTRIBUTED" && false {`,
-			pkg:  "./internal/services/aws/states",
-			run:  "TestStatesMapValidation",
+			old: `if mode != "DISTRIBUTED" {
+						add("SCHEMA_VALIDATION_FAILED", "Label requires a Distributed Map.", "/States/"+name+"/Label")`,
+			new: `if mode != "DISTRIBUTED" && false {
+						add("SCHEMA_VALIDATION_FAILED", "Label requires a Distributed Map.", "/States/"+name+"/Label")`,
+			pkg: "./internal/services/aws/states",
+			run: "TestStatesMapValidation",
 		},
 		{
 			name: "states-allow-duplicate-map-label",
@@ -8984,10 +8990,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-shift-json-path-index",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `next = append(next, array[index])`,
-			new:  `next = append(next, array[max(0, index-1)])`,
-			pkg:  "./internal/services/aws/states",
-			run:  "TestStatesLifecycleAndWalkerUnits",
+			old: `index := token.start
+					if index < 0 {`,
+			new: `index := max(0, token.start-1)
+					if index < 0 {`,
+			pkg: "./internal/services/aws/states",
+			run: "TestStatesLifecycleAndWalkerUnits",
 		},
 		{
 			name: "states-reject-empty-json-path-result",
@@ -9008,10 +9016,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-reject-json-path-array-union",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if len(parts) > 0 {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/states",
-			run:  "TestStatesDataFlowValidation|TestStatesLifecycleAndWalkerUnits",
+			old: `if len(parts) > 0 {
+			parts = append(parts, member[start:])`,
+			new: `if false {
+			parts = append(parts, member[start:])`,
+			pkg: "./internal/services/aws/states",
+			run: "TestStatesDataFlowValidation|TestStatesLifecycleAndWalkerUnits",
 		},
 		{
 			name: "states-truncate-json-path-array-union",
@@ -9168,10 +9178,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-reject-json-path-filter-path-operand",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if rightPath, pathOperand := filterPath(rawRight); pathOperand {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/states",
-			run:  "TestStatesDataFlowValidation|TestStatesLifecycleAndWalkerUnits",
+			old: `if rightPath, pathOperand := filterPath(rawRight); pathOperand {
+		prefixes := []string{"String", "Numeric", "Timestamp"}`,
+			new: `if rightPath, pathOperand := filterPath(rawRight); pathOperand && false {
+		prefixes := []string{"String", "Numeric", "Timestamp"}`,
+			pkg: "./internal/services/aws/states",
+			run: "TestStatesDataFlowValidation|TestStatesLifecycleAndWalkerUnits",
 		},
 		{
 			name: "states-equalize-json-path-filter-path-comparison",
@@ -9472,18 +9484,26 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-keep-json-path-length-wrapper",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `value = nodes[0]`,
-			new:  `value = nodes`,
-			pkg:  "./internal/services/aws/states",
-			run:  "TestStatesLifecycleAndWalkerUnits",
+			old: `if token.kind == 'l' || token.kind == 'n' || token.kind == 'j' {
+			value := any(nodes)
+			if len(nodes) == 1 {
+				value = nodes[0]`,
+			new: `if token.kind == 'l' || token.kind == 'n' || token.kind == 'j' {
+			value := any(nodes)
+			if len(nodes) == 1 {
+				value = nodes`,
+			pkg: "./internal/services/aws/states",
+			run: "TestStatesLifecycleAndWalkerUnits",
 		},
 		{
 			name: "states-accept-json-path-length-non-array",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if length < 0 {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/states",
-			run:  "TestStatesLifecycleAndWalkerUnits",
+			old: `if length < 0 {
+					return nil, false`,
+			new: `if false {
+					return nil, false`,
+			pkg: "./internal/services/aws/states",
+			run: "TestStatesLifecycleAndWalkerUnits",
 		},
 		{
 			name: "states-increment-json-path-length",
@@ -9906,10 +9926,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-reject-negative-json-path-index",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if index < 0 {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/states",
-			run:  "TestStatesLifecycleAndWalkerUnits",
+			old: `index := token.start
+					if index < 0 {`,
+			new: `index := token.start
+					if false {`,
+			pkg: "./internal/services/aws/states",
+			run: "TestStatesLifecycleAndWalkerUnits",
 		},
 		{
 			name: "states-reject-negative-json-path-slice",
@@ -9946,10 +9968,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-preserve-null-path-input",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `return map[string]any{}, true`,
-			new:  `return input, true`,
-			pkg:  "./internal/services/aws/states",
-			run:  "TestStatesLifecycleAndWalkerUnits",
+			old: `if raw == nil {
+		return map[string]any{}, true`,
+			new: `if raw == nil {
+		return input, true`,
+			pkg: "./internal/services/aws/states",
+			run: "TestStatesLifecycleAndWalkerUnits",
 		},
 		{
 			name: "states-extract-task-payload-early",
@@ -10106,18 +10130,28 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-stop-express-execution",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if first(rec, "type") == "EXPRESS" {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/states",
-			run:  "TestStateListsAndHistoryPagination",
+			old: `if first(rec, "type") == "EXPRESS" {
+			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
+		}
+		if value, exists := inputValue(req.Input, "error", "Error"); exists {`,
+			new: `if false {
+			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
+		}
+		if value, exists := inputValue(req.Input, "error", "Error"); exists {`,
+			pkg: "./internal/services/aws/states",
+			run: "TestStateListsAndHistoryPagination",
 		},
 		{
 			name: "states-skip-stop-error-validation",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if !validErrorCause(req.Input) {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/states",
-			run:  "TestStartExecutionAdmission",
+			old: `case "StopExecution":
+		ex := first(req.Input, "executionArn", "ExecutionArn")
+		if !validErrorCause(req.Input) {`,
+			new: `case "StopExecution":
+		ex := first(req.Input, "executionArn", "ExecutionArn")
+		if false {`,
+			pkg: "./internal/services/aws/states",
+			run: "TestStartExecutionAdmission",
 		},
 		{
 			name: "states-accept-long-stop-error",
@@ -10298,10 +10332,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "states-describe-base-for-version",
 			file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-			old:  `if versionNumber(arn) > 0 {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/states",
-			run:  "TestStateMachineControlPlaneParity",
+			old: `collection, key := "sm", name
+		if versionNumber(arn) > 0 {`,
+			new: `collection, key := "sm", name
+		if false {`,
+			pkg: "./internal/services/aws/states",
+			run: "TestStateMachineControlPlaneParity",
 		},
 		{
 			name: "states-accept-invalid-execution-input",
@@ -10578,10 +10614,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-skip-gzip-default-extension",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `if recordExtension == "" {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseS3ObjectNameFormat",
+			old: `if recordExtension == "" {
+				recordExtension = ".gz"`,
+			new: `if false {
+				recordExtension = ".gz"`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseS3ObjectNameFormat",
 		},
 		{
 			name: "firehose-accept-unsupported-compression",
@@ -10794,10 +10832,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-hide-more-list-results",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `more = true`,
-			new:  `more = false`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseListDeliveryStreamsPagination",
+			old: `if len(names) == limit {
+				more = true`,
+			new: `if len(names) == limit {
+				more = false`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseListDeliveryStreamsPagination",
 		},
 		{
 			name: "firehose-accept-invalid-list-limit",
@@ -10818,10 +10858,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-replace-tags-instead-of-merge",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `tags := loadTags(b)`,
-			new:  `tags := map[string]string{}`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseTagsMergeRemoveAndPaginate",
+			old: `tags := loadTags(b)
+			maps.Copy(tags, updates)`,
+			new: `tags := map[string]string{}
+			maps.Copy(tags, updates)`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseTagsMergeRemoveAndPaginate",
 		},
 		{
 			name: "firehose-ignore-tag-limit",
@@ -10946,8 +10988,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-accept-unknown-create-stream-type",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  "default:\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidArgumentException\", HTTPStatus: 400, Fault: \"client\"}",
-			new:  "default:\n\t\t\tstreamType = \"DirectPut\"",
+			old:  "default:\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidArgumentException\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tif err := validateCreateDestination(req.Input); err != nil {",
+			new:  "default:\n\t\t\tstreamType = \"DirectPut\"\n\t\t}\n\t\tif err := validateCreateDestination(req.Input); err != nil {",
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseEncryptionState",
 		},
@@ -11106,10 +11148,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-drop-msk-source",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `if mskSource != nil {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseMSKSourceConfiguration",
+			old: `if mskSource != nil {
+			rec["MSKSourceConfiguration"] = maps.Clone(mskSource)`,
+			new: `if false {
+			rec["MSKSourceConfiguration"] = maps.Clone(mskSource)`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseMSKSourceConfiguration",
 		},
 		{
 			name: "firehose-omit-msk-source-description",
@@ -11384,10 +11428,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-skip-http-gzip",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `if encoding == "GZIP" {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseHTTPEndpointDestination",
+			old: `if encoding == "GZIP" {
+		var compressed bytes.Buffer`,
+			new: `if false {
+		var compressed bytes.Buffer`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseHTTPEndpointDestination",
 		},
 		{
 			name: "firehose-follow-http-redirect",
@@ -11489,10 +11535,14 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-ignore-http-buffer-size",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `if total >= sizeLimit {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseHTTPEndpointDestination",
+			old: `if total >= sizeLimit {
+			next = now
+			for _, item := range items {`,
+			new: `if false {
+			next = now
+			for _, item := range items {`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseHTTPEndpointDestination",
 		},
 		{
 			name: "firehose-reverse-http-buffer-order",
@@ -11587,10 +11637,16 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-drop-http-processing-failure-envelope",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)`,
-			new:  `p.logDeliveryError(ctx, req, destination, stream, failure.message, now)`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseHTTPEndpointDestination",
+			old: `p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)
+		}
+		for _, record := range records {
+			processedIDs = append(processedIDs, record.recID)`,
+			new: `p.logDeliveryError(ctx, req, destination, stream, failure.message, now)
+		}
+		for _, record := range records {
+			processedIDs = append(processedIDs, record.recID)`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseHTTPEndpointDestination",
 		},
 		{
 			name: "firehose-skip-endpoint-all-data-processing-failure-backup",
@@ -11653,10 +11709,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-stringify-splunk-failure-attempts",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `"attemptsMade": attempts,`,
-			new:  `"attemptsMade": strconv.Itoa(attempts),`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseSplunkFailureBackup",
+			old: `"attemptsMade": attempts, "arrivalTimestamp": arrival.UnixMilli(), "errorCode": code, "errorMessage": message,
+			"attemptEndingTimestamp": now.UnixMilli(), "rawData": base64.StdEncoding.EncodeToString(payload.BackupData[index]), "EventId": payload.BackupRecordIDs[index],`,
+			new: `"attemptsMade": strconv.Itoa(attempts), "arrivalTimestamp": arrival.UnixMilli(), "errorCode": code, "errorMessage": message,
+			"attemptEndingTimestamp": now.UnixMilli(), "rawData": base64.StdEncoding.EncodeToString(payload.BackupData[index]), "EventId": payload.BackupRecordIDs[index],`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseSplunkFailureBackup",
 		},
 		{
 			name: "firehose-discard-splunk-failure-arrival-time",
@@ -11718,10 +11776,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-skip-redshift-source-backup",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[index], data[index], now)`,
-			new:  `p.deliverS3Configuration(ctx, req, nil, stream, version, recIDs[index], data[index], now)`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseRedshiftDestination",
+			old: `if backupEnabled {
+			p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[index], data[index], now)`,
+			new: `if backupEnabled {
+			p.deliverS3Configuration(ctx, req, nil, stream, version, recIDs[index], data[index], now)`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseRedshiftDestination",
 		},
 		{
 			name: "firehose-skip-redshift-staging",
@@ -11953,9 +12013,13 @@ func TestMutantsAreKilled(t *testing.T) {
 			name: "firehose-skip-snowflake-all-data-backup",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 			old: `if first(destination, "S3BackupMode") == "AllData" {
-			p.deliverS3Configuration(ctx, req, s3, stream, version, recIDs[index], data[index], now)`,
+			p.deliverS3Configuration(ctx, req, s3, stream, version, recIDs[index], data[index], now)
+		}
+		processed, failures := p.processData(ctx, req, destination, stream, recIDs[index], data[index], now)`,
 			new: `if false {
-			p.deliverS3Configuration(ctx, req, s3, stream, version, recIDs[index], data[index], now)`,
+			p.deliverS3Configuration(ctx, req, s3, stream, version, recIDs[index], data[index], now)
+		}
+		processed, failures := p.processData(ctx, req, destination, stream, recIDs[index], data[index], now)`,
 			pkg: "./internal/services/aws/firehose",
 			run: "TestFirehoseSnowflakeDestination",
 		},
@@ -12184,18 +12248,46 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-accept-malformed-buffering-hints",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `if !ok || hasInterval != hasSize {`,
-			new:  `if hasInterval != hasSize {`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseBufferingHints",
+			old: `if !ok || hasInterval != hasSize {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if hasInterval {
+			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			if _, valid := inputInteger(hints["SizeInMBs"], 1, 128); !valid {`,
+			new: `if hasInterval != hasSize {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if hasInterval {
+			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			if _, valid := inputInteger(hints["SizeInMBs"], 1, 128); !valid {`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseBufferingHints",
 		},
 		{
 			name: "firehose-accept-unpaired-buffering-hints",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `if !ok || hasInterval != hasSize {`,
-			new:  `if !ok {`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseBufferingHints",
+			old: `if !ok || hasInterval != hasSize {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if hasInterval {
+			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			if _, valid := inputInteger(hints["SizeInMBs"], 1, 128); !valid {`,
+			new: `if !ok {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if hasInterval {
+			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			if _, valid := inputInteger(hints["SizeInMBs"], 1, 128); !valid {`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseBufferingHints",
 		},
 		{
 			name: "firehose-accept-invalid-buffer-interval",
@@ -12280,8 +12372,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-accept-long-destination-kms-arn",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `len(arn) > 512 ||`,
-			new:  `false ||`,
+			old:  `len(arn) > 512 || !firehoseDestinationKMSARN.MatchString(arn)`,
+			new:  `false || !firehoseDestinationKMSARN.MatchString(arn)`,
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseDestinationEncryption",
 		},
@@ -12328,10 +12420,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-drop-default-list-object-storage-class",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if storageClass == "" {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/s3",
-			run:  "TestListObjectsV2Prefix",
+			old: `if storageClass == "" {
+		return "STANDARD", nil`,
+			new: `if false {
+		return "STANDARD", nil`,
+			pkg: "./internal/services/aws/s3",
+			run: "TestListObjectsV2Prefix",
 		},
 		{
 			name: "s3-drop-list-object-modified-time",
@@ -12512,10 +12606,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-dont-update-destination-timestamp",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `rec["LastUpdateTimestamp"] = float64(p.deps.Clock.Now().UnixNano()) / float64(time.Second)`,
-			new:  `rec["LastUpdateTimestamp"] = rec["CreateTimestamp"]`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseLifecycleMetadataAndValidation",
+			old: `rec["VersionId"] = strconv.Itoa(version + 1)
+			rec["LastUpdateTimestamp"] = float64(p.deps.Clock.Now().UnixNano()) / float64(time.Second)`,
+			new: `rec["VersionId"] = strconv.Itoa(version + 1)
+			rec["LastUpdateTimestamp"] = rec["CreateTimestamp"]`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseLifecycleMetadataAndValidation",
 		},
 		{
 			name: "firehose-dont-update-encryption-timestamp",
@@ -12528,10 +12624,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-delete-missing-stream",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `if _, ok, _ := p.col(req, "fh").Get(ctx, name); !ok {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseLifecycleMetadataAndValidation",
+			old: `case "DeleteDeliveryStream":
+		if _, ok, _ := p.col(req, "fh").Get(ctx, name); !ok {`,
+			new: `case "DeleteDeliveryStream":
+		if false {`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseLifecycleMetadataAndValidation",
 		},
 		{
 			name: "firehose-ignore-describe-limit-validation",
@@ -12656,26 +12754,44 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-wrong-default-s3-backup-mode",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `configuration["S3BackupMode"] = "Disabled"`,
-			new:  `configuration["S3BackupMode"] = "Enabled"`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseDestinationDescriptionDefaults",
+			old: `if base == "ExtendedS3Destination" {
+				if first(configuration, "S3BackupMode") == "" {
+					configuration["S3BackupMode"] = "Disabled"`,
+			new: `if base == "ExtendedS3Destination" {
+				if first(configuration, "S3BackupMode") == "" {
+					configuration["S3BackupMode"] = "Enabled"`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseDestinationDescriptionDefaults",
 		},
 		{
 			name: "firehose-omit-s3-backup-description",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `configuration["S3BackupDescription"] = backup`,
-			new:  `configuration["S3BackupDescription"] = map[string]any{}`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseS3Backup",
+			old: `configuration["S3BackupDescription"] = backup
+					delete(configuration, "S3BackupConfiguration")
+				}
+			}
+			destination[base+"Description"] = configuration`,
+			new: `configuration["S3BackupDescription"] = map[string]any{}
+					delete(configuration, "S3BackupConfiguration")
+				}
+			}
+			destination[base+"Description"] = configuration`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseS3Backup",
 		},
 		{
 			name: "firehose-leak-s3-backup-configuration",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `delete(configuration, "S3BackupConfiguration")`,
-			new:  `delete(configuration, "mutated")`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseS3Backup",
+			old: `delete(configuration, "S3BackupConfiguration")
+				}
+			}
+			destination[base+"Description"] = configuration`,
+			new: `delete(configuration, "mutated")
+				}
+			}
+			destination[base+"Description"] = configuration`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseS3Backup",
 		},
 		{
 			name: "firehose-accept-invalid-s3-backup-mode",
@@ -12688,10 +12804,26 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-enable-s3-backup-without-configuration",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `if mode == "Enabled" && !backupExists {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseS3Backup",
+			old: `if mode == "Enabled" && !backupExists {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if backupExists {
+		backup, ok := backupRaw.(map[string]any)
+		if !ok {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		return validateS3Configuration(backup, region, false)`,
+			new: `if false {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if backupExists {
+		backup, ok := backupRaw.(map[string]any)
+		if !ok {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		return validateS3Configuration(backup, region, false)`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseS3Backup",
 		},
 		{
 			name: "firehose-skip-s3-backup-validation",
@@ -12808,8 +12940,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-allow-external-decompression-put",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `if requiresCloudWatchLogsSource(stream) && req.SourceService != "aws.logs" {`,
-			new:  `if false {`,
+			old:  "if requiresCloudWatchLogsSource(stream) && req.SourceService != \"aws.logs\" {\n\t\t\treturn nil, invalidSource(req, name)\n\t\t}\n\t\tdecoded, valid := recordData(req.Input[\"Record\"])",
+			new:  "if false {\n\t\t\treturn nil, invalidSource(req, name)\n\t\t}\n\t\tdecoded, valid := recordData(req.Input[\"Record\"])",
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseDecompressionProcessing",
 		},
@@ -12824,8 +12956,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-reject-cloudwatch-decompression-source",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `req.SourceService != "aws.logs"`,
-			new:  `req.SourceService == "aws.logs"`,
+			old:  "req.SourceService != \"aws.logs\" {\n\t\t\treturn nil, invalidSource(req, name)\n\t\t}\n\t\tdecoded, valid := recordData(req.Input[\"Record\"])",
+			new:  "req.SourceService == \"aws.logs\" {\n\t\t\treturn nil, invalidSource(req, name)\n\t\t}\n\t\tdecoded, valid := recordData(req.Input[\"Record\"])",
 			pkg:  "./internal/services/aws/firehose",
 			run:  "TestFirehoseDecompressionProcessing",
 		},
@@ -13232,10 +13364,14 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-use-wrong-decompression-error-code",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `code: "Decompression.Failed"`,
-			new:  `code: "mutated"`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseDecompressionProcessing",
+			old: `reader, err := gzip.NewReader(bytes.NewReader(record.data))
+				if err != nil {
+					failures = append(failures, &processingFailure{typeName: "decompression-failed", code: "Decompression.Failed"`,
+			new: `reader, err := gzip.NewReader(bytes.NewReader(record.data))
+				if err != nil {
+					failures = append(failures, &processingFailure{typeName: "decompression-failed", code: "mutated"`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseDecompressionProcessing",
 		},
 		{
 			name: "firehose-skip-s3-object-delivery",
@@ -13288,10 +13424,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-skip-cloudwatch-error-log",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `p.logDeliveryError(ctx, req, configuration, stream, failure.message, now)`,
-			new:  `p.logDeliveryError(ctx, req, map[string]any{}, stream, failure.message, now)`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseLambdaProcessing",
+			old: `for _, failure := range failures {
+		p.logDeliveryError(ctx, req, configuration, stream, failure.message, now)`,
+			new: `for _, failure := range failures {
+		p.logDeliveryError(ctx, req, map[string]any{}, stream, failure.message, now)`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseLambdaProcessing",
 		},
 		{
 			name: "firehose-use-wrong-cloudwatch-log-group",
@@ -13344,10 +13482,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "firehose-accept-invalid-dynamic-enabled",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-			old:  `enabled, ok = value.(bool)`,
-			new:  `enabled, ok = false, true`,
-			pkg:  "./internal/services/aws/firehose",
-			run:  "TestFirehoseLambdaDynamicPartitioning",
+			old: `enabled, ok = value.(bool)
+		if !ok {`,
+			new: `enabled, ok = false, true
+		if !ok {`,
+			pkg: "./internal/services/aws/firehose",
+			run: "TestFirehoseLambdaDynamicPartitioning",
 		},
 		{
 			name: "firehose-accept-negative-dynamic-retry",
@@ -13840,18 +13980,32 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "identity-ignore-authorization-v4-signed-headers",
 			file: filepath.Join("internal", "identity", "s3_signature.go"),
-			old:  `canonicalHeaders, ok := signedHeaderValues(r, strings.Split(signedHeaders, ";"))`,
-			new:  `canonicalHeaders, ok := "", true`,
-			pkg:  "./internal/identity",
-			run:  "TestVerifyS3AuthorizationV4AWSExample",
+			old: `canonicalHeaders, ok := signedHeaderValues(r, strings.Split(signedHeaders, ";"))
+	if !ok {
+		return signatureFault()
+	}
+	date := r.Header.Get("X-Amz-Date")`,
+			new: `canonicalHeaders, ok := "", true
+	if !ok {
+		return signatureFault()
+	}
+	date := r.Header.Get("X-Amz-Date")`,
+			pkg: "./internal/identity",
+			run: "TestVerifyS3AuthorizationV4AWSExample",
 		},
 		{
 			name: "identity-ignore-authorization-v4-payload",
 			file: filepath.Join("internal", "identity", "s3_signature.go"),
-			old:  `if !s3PayloadHashMatches(r, payloadHash) {`,
-			new:  `if false {`,
-			pkg:  "./internal/identity",
-			run:  "TestVerifyS3AuthorizationV4AWSExample",
+			old: `if date == "" || payloadHash == "" {
+		return signatureFault()
+	}
+	if !s3PayloadHashMatches(r, payloadHash) {`,
+			new: `if date == "" || payloadHash == "" {
+		return signatureFault()
+	}
+	if false {`,
+			pkg: "./internal/identity",
+			run: "TestVerifyS3AuthorizationV4AWSExample",
 		},
 		{
 			name: "identity-skip-signature-v4a-dispatch",
@@ -13864,8 +14018,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "identity-v4a-ignore-access-key",
 			file: filepath.Join("internal", "identity", "s3_signature_v4a.go"),
-			old:  `credential[0] != accessKey ||`,
-			new:  `false ||`,
+			old:  `credential[0] != accessKey || credential[1] != signedAt.Format("20060102")`,
+			new:  `false || credential[1] != signedAt.Format("20060102")`,
 			pkg:  "./internal/identity",
 			run:  "TestVerifyS3V4A",
 		},
@@ -13920,8 +14074,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "identity-v4a-stream-ignore-trailer-signature",
 			file: filepath.Join("internal", "identity", "s3_signature_v4a.go"),
-			old:  `!s3V4ASignatureMatches(signature, key, digest[:])`,
-			new:  `false`,
+			old:  `len(signature) != 144 || !s3V4ASignatureMatches(signature, key, digest[:])`,
+			new:  `len(signature) != 144 || false`,
 			pkg:  "./internal/identity",
 			run:  "TestVerifyS3StreamingV4A",
 		},
@@ -13976,8 +14130,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "identity-v4a-accept-bad-signature",
 			file: filepath.Join("internal", "identity", "s3_signature_v4a.go"),
-			old:  `!ecdsa.VerifyASN1(&key.PublicKey, digest[:], encoded)`,
-			new:  `false`,
+			old:  `err == nil && ecdsa.VerifyASN1(&key.PublicKey, digest, encoded)`,
+			new:  `true`,
 			pkg:  "./internal/identity",
 			run:  "TestVerifyS3V4A",
 		},
@@ -14496,8 +14650,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "store-reverse-scope-order",
 			file: filepath.Join("internal", "store", "store.go"),
-			old:  "sort.Strings(keys)",
-			new:  "sort.Sort(sort.Reverse(sort.StringSlice(keys)))",
+			old:  "sort.Strings(keys)\n\tout := make([]spi.Identity, 0, len(keys))",
+			new:  "sort.Sort(sort.Reverse(sort.StringSlice(keys)))\n\tout := make([]spi.Identity, 0, len(keys))",
 			pkg:  "./internal/store",
 			run:  "TestScopesAreEnumeratedDeterministically",
 		},
@@ -14696,8 +14850,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "pipes-acknowledge-failed-enrichment",
 			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
-			old:  "\t\tif err != nil {\n\t\t\treturn nil, true, false\n\t\t}",
-			new:  "\t\tif err != nil {\n\t\t\treturn nil, true, true\n\t\t}",
+			old:  "\t\tresponse, err := p.invokeLambdaPayload(ctx, identity, arn, payload)\n\t\tif err != nil {\n\t\t\treturn nil, true, false\n\t\t}",
+			new:  "\t\tresponse, err := p.invokeLambdaPayload(ctx, identity, arn, payload)\n\t\tif err != nil {\n\t\t\treturn nil, true, true\n\t\t}",
 			pkg:  "./internal/services/aws/pipes",
 			run:  "TestPipesLambdaEnrichment",
 		},
@@ -14794,10 +14948,12 @@ func TestMutantsAreKilled(t *testing.T) {
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 			old: `if err := validateVPCConfiguration(destination["VpcConfiguration"]); err != nil {
 		return err
-	}`,
+	}
+	if raw := destination["ProcessingConfiguration"]; raw != nil {`,
 			new: `if false {
 		return nil
-	}`,
+	}
+	if raw := destination["ProcessingConfiguration"]; raw != nil {`,
 			pkg: "./internal/services/aws/firehose",
 			run: "TestFirehoseAmazonOpenSearchServiceDestination",
 		},
@@ -14942,10 +15098,14 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "pipes-drop-stream-dead-letter",
 			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
-			old:  `if arn == "" {`,
-			new:  `if arn != "" {`,
-			pkg:  "./internal/services/aws/pipes",
-			run:  "TestPipesKinesisRetryAgeAndDeadLetterPolicy",
+			old: `config, _ := parameters["DeadLetterConfig"].(map[string]any)
+	arn := stringValue(config["Arn"])
+	if arn == "" {`,
+			new: `config, _ := parameters["DeadLetterConfig"].(map[string]any)
+	arn := stringValue(config["Arn"])
+	if arn != "" {`,
+			pkg: "./internal/services/aws/pipes",
+			run: "TestPipesKinesisRetryAgeAndDeadLetterPolicy",
 		},
 		{
 			name: "pipes-accept-excessive-stream-retries",
@@ -14982,10 +15142,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "pipes-ignore-dynamodb-stream-source",
 			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
-			old:  `case strings.Contains(source, ":dynamodb:") && strings.Contains(source, "/stream/"):`,
-			new:  `case false && strings.Contains(source, "/stream/"):`,
-			pkg:  "./internal/services/aws/pipes",
-			run:  "TestPipesDynamoDBStreamDeliveryAndCheckpoint",
+			old: `case strings.Contains(source, ":dynamodb:") && strings.Contains(source, "/stream/"):
+				more = p.drainDynamoDB(ctx, identity, pipe, source) || more`,
+			new: `case false && strings.Contains(source, "/stream/"):
+				more = p.drainDynamoDB(ctx, identity, pipe, source) || more`,
+			pkg: "./internal/services/aws/pipes",
+			run: "TestPipesDynamoDBStreamDeliveryAndCheckpoint",
 		},
 		{
 			name: "pipes-dynamodb-checkpoint-event-id",
@@ -15182,10 +15344,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "events-accept-non-object-connection-body",
 			file: filepath.Join("internal", "services", "aws", "eventhttp", "eventhttp.go"),
-			old:  `if json.Unmarshal(body, &object) != nil || object == nil {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/events",
-			run:  "TestInvokeAPIDestinationBasicAuth",
+			old: `if json.Unmarshal(body, &object) != nil || object == nil {
+		return nil, &spi.Fault{Code: "TargetInvocationFailed", Message: "Connection body parameters require a JSON object payload."`,
+			new: `if false {
+		return nil, &spi.Fault{Code: "TargetInvocationFailed", Message: "Connection body parameters require a JSON object payload."`,
+			pkg: "./internal/services/aws/events",
+			run: "TestInvokeAPIDestinationBasicAuth",
 		},
 		{
 			name: "events-allow-oversized-connection-body",
@@ -15430,10 +15594,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "events-retry-permanent-target",
 			file: filepath.Join("internal", "services", "aws", "events", "events.go"),
-			old:  `if !TargetErrorRetryable(deliveryErr) {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/events",
-			run:  "TestPutEventsRetriesAndDeadLettersTargets",
+			old: `if !TargetErrorRetryable(deliveryErr) {
+		p.deadLetter(ctx, identity, rec, target, payload, 0, "", deliveryErr)`,
+			new: `if false {
+		p.deadLetter(ctx, identity, rec, target, payload, 0, "", deliveryErr)`,
+			pkg: "./internal/services/aws/events",
+			run: "TestPutEventsRetriesAndDeadLettersTargets",
 		},
 		{
 			name: "events-skip-target-dead-letter",
@@ -15485,18 +15651,28 @@ func TestMutantsAreKilled(t *testing.T) {
 		},
 	}
 
+	files := map[string]string{}
+	for _, m := range mutants {
+		src := filepath.Join(root, m.file)
+		body, ok := files[src]
+		if !ok {
+			raw, err := os.ReadFile(src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body = string(raw)
+			files[src] = body
+		}
+		if count := strings.Count(body, m.old); count != 1 {
+			t.Fatalf("mutant %s needle occurs %d times in %s: %q", m.name, count, m.file, m.old)
+		}
+	}
+
 	for _, m := range mutants {
 		t.Run(m.name, func(t *testing.T) {
 			t.Parallel()
 			src := filepath.Join(root, m.file)
-			body, err := os.ReadFile(src)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(string(body), m.old) {
-				t.Fatalf("needle not found in %s: %q", m.file, m.old)
-			}
-			mutated := strings.Replace(string(body), m.old, m.new, 1)
+			mutated := strings.Replace(files[src], m.old, m.new, 1)
 			dir := t.TempDir()
 			dst := filepath.Join(dir, filepath.Base(m.file))
 			if err := os.WriteFile(dst, []byte(mutated), 0o644); err != nil {

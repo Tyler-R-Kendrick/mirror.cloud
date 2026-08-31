@@ -2275,18 +2275,6 @@ func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response,
 		return nil, err
 	}
 	id := mpuID(req)
-	pn := partNumber(req)
-	if pn < 1 || pn > 10000 {
-		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-	}
-	var body []byte
-	if req.Body != nil {
-		var err error
-		body, err = io.ReadAll(req.Body)
-		if err != nil {
-			return nil, err
-		}
-	}
 	p.mu.Lock()
 	u := p.mpu[id]
 	if !matchesMultipartUpload(u, req) {
@@ -2296,6 +2284,18 @@ func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response,
 	algorithm := u.checksumAlgorithm
 	encryption := map[string]any{"serverSideEncryption": u.serverSideEncryption, "ssekmsKeyId": u.sseKMSKeyID, "sseCustomerKeyMD5": u.sseCustomerKeyMD5, "bucketKeyEnabled": u.bucketKeyEnabled}
 	p.mu.Unlock()
+	pn := partNumber(req)
+	if pn < 1 || pn > 10000 {
+		return nil, &spi.Fault{Code: "InvalidArgument", Message: "Part number must be an integer between 1 and 10000, inclusive", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "partNumber", "ArgumentValue": pn}}
+	}
+	var body []byte
+	if req.Body != nil {
+		var err error
+		body, err = io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := validateStoredSSECustomerKey(req, encryption); err != nil {
 		return nil, err
 	}

@@ -82,7 +82,6 @@ func TestRouteNameQueryOps(t *testing.T) {
 		{http.MethodPut, "/b/k", "b/src", "CopyObject"},
 		{http.MethodPut, "/b", "", "CreateBucket"},
 		{http.MethodPut, "/b/k", "", "PutObject"},
-		{http.MethodOptions, "/b/k", "", "GetObject"},
 		{http.MethodGet, "/b/k", "", "GetObject"},
 		{http.MethodHead, "/b/k", "", "HeadObject"},
 		{http.MethodDelete, "/b/k", "", "DeleteObject"},
@@ -450,6 +449,10 @@ func TestRESTXMLServiceRoutes(t *testing.T) {
 	}
 	if _, err := codec.Route(&model.Service{ID: "aws.empty"}, httptest.NewRequest(http.MethodOptions, "/unknown", nil)); err == nil {
 		t.Fatal("routed empty unknown service")
+	}
+	preflight, err := codec.Route(&model.Service{ID: "aws.s3", Operations: []model.Operation{{Name: "GetObject"}}}, httptest.NewRequest(http.MethodOptions, "/bucket/key", nil))
+	if err != nil || preflight.Name != "GetObject" {
+		t.Fatalf("S3 preflight route %#v %v", preflight, err)
 	}
 	virtual := httptest.NewRequest(http.MethodGet, "https://bucket.s3.us-east-1.amazonaws.com/key", nil)
 	if got := RouteName(virtual); got != "GetObject" {

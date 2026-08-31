@@ -36,6 +36,9 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	if name == "" {
 		name = RouteName(r)
 	}
+	if name == "" && svc.ID == "aws.s3" && r.Method == http.MethodOptions && svc.OperationByName("GetObject") != nil {
+		name = "GetObject"
+	}
 	if name != "" {
 		if op := svc.OperationByName(name); op != nil {
 			return op, nil
@@ -228,8 +231,6 @@ func RouteName(r *http.Request) string {
 		return "AbortMultipartUpload"
 	case m == http.MethodPut && r.Header.Get("x-amz-copy-source") != "":
 		return "CopyObject"
-	case m == http.MethodOptions:
-		return "GetObject"
 	case m == http.MethodGet && bucket == "":
 		return "ListBuckets"
 	case m == http.MethodHead && key == "":

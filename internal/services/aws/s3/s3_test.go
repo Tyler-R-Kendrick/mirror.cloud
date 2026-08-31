@@ -267,6 +267,67 @@ func TestCreateBucketObjectOwnership(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestBucketOwnershipControls(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "ownership-controls"}, nil)
+	for _, ownership := range []string{"BucketOwnerPreferred", "ObjectWriter", "BucketOwnerEnforced"} {
+		controls := map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": ownership}}}
+		if response := mustInvoke(t, p, "PutBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls", "OwnershipControls": controls}, nil); len(response.Output) != 0 {
+			t.Fatalf("%s put output = %#v", ownership, response.Output)
+		}
+		response := mustInvoke(t, p, "GetBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls"}, nil)
+		if !reflect.DeepEqual(response.Output["OwnershipControls"], controls) {
+			t.Fatalf("%s controls = %#v", ownership, response.Output)
+		}
+	}
+
+	invalid := []any{
+		nil,
+		map[string]any{},
+		map[string]any{"Rules": []any{}},
+		map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": "ObjectWriter"}, map[string]any{"ObjectOwnership": "BucketOwnerPreferred"}}},
+		map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": ""}}},
+		map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": "invalid"}}},
+	}
+	for _, controls := range invalid {
+		_, err := invoke(t, p, "PutBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls", "OwnershipControls": controls}, nil)
+		if fault := asFault(t, err); fault.Code != "MalformedXML" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("controls %#v = %#v", controls, fault)
+		}
+	}
+
+	response := mustInvoke(t, p, "GetBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls"}, nil)
+	if got := asMapForTest(asSliceForTest(asMapForTest(response.Output["OwnershipControls"])["Rules"])[0])["ObjectOwnership"]; got != "BucketOwnerEnforced" {
+		t.Fatalf("invalid put replaced controls = %v", got)
+	}
+	mustInvoke(t, p, "DeleteBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls"}, nil)
+	mustInvoke(t, p, "DeleteBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls"}, nil)
+	if _, err := invoke(t, p, "GetBucketOwnershipControls", map[string]any{"Bucket": "ownership-controls"}, nil); asFault(t, err).Code != "OwnershipControlsNotFoundError" {
+		t.Fatalf("get deleted controls: %v", err)
+	}
+}
+
+func TestBucketOwnershipControlsCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "ownership-characterization"}, nil)
+	controls := map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": "ObjectWriter"}}}
+	put := mustInvoke(t, p, "PutBucketOwnershipControls", map[string]any{"Bucket": "ownership-characterization", "OwnershipControls": controls}, nil)
+	get := mustInvoke(t, p, "GetBucketOwnershipControls", map[string]any{"Bucket": "ownership-characterization"}, nil)
+	_, invalidErr := invoke(t, p, "PutBucketOwnershipControls", map[string]any{"Bucket": "ownership-characterization", "OwnershipControls": map[string]any{"Rules": []any{}}}, nil)
+	invalid := asFault(t, invalidErr)
+	firstDelete := mustInvoke(t, p, "DeleteBucketOwnershipControls", map[string]any{"Bucket": "ownership-characterization"}, nil)
+	secondDelete := mustInvoke(t, p, "DeleteBucketOwnershipControls", map[string]any{"Bucket": "ownership-characterization"}, nil)
+	_, missingErr := invoke(t, p, "GetBucketOwnershipControls", map[string]any{"Bucket": "ownership-characterization"}, nil)
+	missing := asFault(t, missingErr)
+	golden.AssertJSON(t, map[string]any{
+		"put":     map[string]any{"status": put.Status, "output": put.Output},
+		"get":     get.Output,
+		"invalid": map[string]any{"code": invalid.Code, "status": invalid.HTTPStatus},
+		"delete":  []any{firstDelete.Status, secondDelete.Status},
+		"missing": map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus},
+	})
+}
+
 func TestCreateBucketAccountRegionalNamespace(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	east := ident()

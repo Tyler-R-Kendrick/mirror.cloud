@@ -2318,7 +2318,7 @@ func (p *Pack) versioning(ctx context.Context, req *spi.Request) (*spi.Response,
 			return nil, &spi.Fault{Code: "InvalidBucketState", Message: "An Object Lock configuration is present on this bucket, so the versioning state cannot be changed.", HTTPStatus: http.StatusConflict, Fault: "client"}
 		}
 		_ = p.col(req, "versioning").Put(ctx, b, []byte(st))
-		return &spi.Response{Status: 200, Output: map[string]any{}}, nil
+		return &spi.Response{Status: 200}, nil
 	}
 	raw, ok, _ := p.col(req, "versioning").Get(ctx, b)
 	if !ok || len(raw) == 0 {
@@ -2353,6 +2353,11 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	col := p.col(req, "bktcfg")
 	if strings.HasPrefix(req.Operation, "Put") {
+		if req.Operation == "PutBucketOwnershipControls" {
+			if err := validateOwnershipControls(req.Input["OwnershipControls"]); err != nil {
+				return nil, err
+			}
+		}
 		if req.Operation == "PutBucketReplication" {
 			if !p.versioningEnabled(ctx, req, b) {
 				return nil, &spi.Fault{Code: "InvalidRequest", Message: "Versioning must be 'Enabled' on the bucket to apply a replication configuration", HTTPStatus: http.StatusBadRequest, Fault: "client"}
@@ -2379,7 +2384,7 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 		}
 		raw, _ := json.Marshal(doc)
 		_ = col.Put(ctx, key, raw)
-		return &spi.Response{Status: 200, Output: doc}, nil
+		return &spi.Response{Status: 200}, nil
 	}
 	if strings.HasPrefix(req.Operation, "Delete") {
 		_ = col.Delete(ctx, key)
@@ -2413,6 +2418,17 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	var doc map[string]any
 	_ = json.Unmarshal(raw, &doc)
 	return &spi.Response{Status: 200, Output: doc}, nil
+}
+
+func validateOwnershipControls(value any) error {
+	rules := asSlice(asMap(value)["Rules"])
+	if len(rules) == 1 {
+		switch str(asMap(rules[0])["ObjectOwnership"]) {
+		case "BucketOwnerPreferred", "ObjectWriter", "BucketOwnerEnforced":
+			return nil
+		}
+	}
+	return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 }
 
 func validateObjectLockConfiguration(value any) error {

@@ -494,6 +494,21 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 			tags = append(tags, map[string]any{"Key": tg.Key, "Value": tg.Value})
 		}
 		in["TagSet"] = tags
+	case "PutBucketOwnershipControls":
+		var controls struct {
+			Rules []struct {
+				ObjectOwnership string `xml:"ObjectOwnership"`
+			} `xml:"Rule"`
+		}
+		if xml.Unmarshal(raw, &controls) != nil {
+			in["_body"] = string(raw)
+			return
+		}
+		rules := make([]any, 0, len(controls.Rules))
+		for _, rule := range controls.Rules {
+			rules = append(rules, map[string]any{"ObjectOwnership": rule.ObjectOwnership})
+		}
+		in["OwnershipControls"] = map[string]any{"Rules": rules}
 	case "PutObjectLegalHold":
 		var hold struct {
 			Status string `xml:"Status"`

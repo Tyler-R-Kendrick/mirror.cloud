@@ -28,6 +28,7 @@ test-contract:
 
 test-snapshot:
 	$(GO) test ./internal/catalog ./internal/mock ./internal/runtime ./internal/specdiff -count=1
+	$(GO) test ./internal/services/aws/s3 -run 'Characterization$$' -count=1
 
 test-chaos:
 	$(GO) test ./internal/chaos -count=1
@@ -50,6 +51,7 @@ test-fuzz:
 	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCreateBucketCollisions$$' -fuzztime=10s -parallel=4
 	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCreateBucketTags$$' -fuzztime=10s -parallel=4
 	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCreateBucketObjectOwnership$$' -fuzztime=10s -parallel=4
+	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzBucketOwnershipControls$$' -fuzztime=10s -parallel=4
 	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzDeleteBucketEmptiness$$' -fuzztime=10s -parallel=4
 	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCreateBucketLocations$$' -fuzztime=10s -parallel=4
 	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzBucketVersioningState$$' -fuzztime=10s -parallel=4

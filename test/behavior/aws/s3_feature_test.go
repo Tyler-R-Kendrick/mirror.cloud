@@ -1301,6 +1301,18 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchCORSConfiguration")) {
 			t.Fatalf("get deleted CORS %d %s", res.StatusCode, body)
 		}
+		defaultPreflight, _ := http.NewRequest(http.MethodOptions, ts.URL+"/key", nil)
+		defaultPreflight.Host = "cors-bdd.s3.us-east-1.amazonaws.com"
+		defaultPreflight.Header.Set("Origin", "https://app.localstack.cloud")
+		res, err = http.DefaultClient.Do(defaultPreflight)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("Access-Control-Allow-Origin") != "https://app.localstack.cloud" || res.Header.Get("Vary") != "Origin" {
+			t.Fatalf("LocalStack default CORS %d %#v", res.StatusCode, res.Header)
+		}
 	})
 
 	t.Run("Given a bucket website When replacing and deleting it Then S3 validates and persists the routing", func(t *testing.T) {

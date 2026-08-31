@@ -508,6 +508,51 @@ func FuzzBucketCorsHTTP(f *testing.F) {
 	})
 }
 
+func FuzzLocalStackCORSOrigins(f *testing.F) {
+	for mode := uint8(0); mode < 8; mode++ {
+		f.Add(mode, uint16(4566), "https://wrong.test")
+	}
+	f.Fuzz(func(t *testing.T, mode uint8, portSeed uint16, arbitrary string) {
+		if !utf8.ValidString(arbitrary) || len(arbitrary) > 256 {
+			t.Skip()
+		}
+		port := strconv.Itoa(int(portSeed%65535) + 1)
+		origin := arbitrary
+		wantAllowed := true
+		switch mode % 8 {
+		case 0:
+			origin = "https://app.localstack.cloud"
+		case 1:
+			origin = "http://app.localstack.cloud"
+		case 2:
+			origin = "https://localhost"
+		case 3:
+			origin = "https://localhost.localstack.cloud"
+		case 4:
+			origin = "file://"
+		case 5:
+			origin = "http://localhost:" + port
+		case 6:
+			origin = "https://bucket.s3-website.localhost.localstack.cloud:" + port
+		case 7:
+			wantAllowed = false
+		}
+		p := s3.New(spitest.Deps(t))
+		request := httptest.NewRequest(http.MethodOptions, "https://missing.s3.us-east-1.amazonaws.com:"+port+"/key", nil)
+		request.Header.Set("Origin", origin)
+		response, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: request})
+		if wantAllowed {
+			if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != origin || response.Headers.Get("Access-Control-Allow-Headers") == "" {
+				t.Fatalf("allowed default origin %q = %#v, %v", origin, response, err)
+			}
+		} else if arbitrary == "https://wrong.test" && err == nil {
+			t.Fatalf("known forbidden origin accepted: %#v", response)
+		} else if err == nil && response.Headers.Get("Access-Control-Allow-Origin") != origin {
+			t.Fatalf("arbitrary origin response = %#v", response)
+		}
+	})
+}
+
 func FuzzBucketWebsite(f *testing.F) {
 	for _, seed := range []struct {
 		mode     uint8

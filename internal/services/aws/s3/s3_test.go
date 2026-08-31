@@ -1017,20 +1017,40 @@ func TestBucketCorsHTTP(t *testing.T) {
 	request.Header.Set("Access-Control-Request-Method", "GET")
 	request.Header.Set("Access-Control-Request-Headers", "x-amz-request-payer,x-amz-meta-team")
 	response, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: request})
-	if err != nil || response.Status != http.StatusOK || response.Headers.Get("Access-Control-Allow-Origin") != "https://app.example.test" || response.Headers.Get("Access-Control-Allow-Headers") != "x-amz-request-payer, x-amz-meta-team" || response.Headers.Get("Access-Control-Expose-Headers") != "ETag" || response.Headers.Get("Access-Control-Max-Age") != "300" {
+	if err != nil || response.Status != http.StatusOK || response.Headers.Get("Access-Control-Allow-Origin") != "https://app.example.test" || response.Headers.Get("Access-Control-Allow-Credentials") != "true" || response.Headers.Get("Access-Control-Allow-Headers") != "x-amz-request-payer, x-amz-meta-team" || response.Headers.Get("Access-Control-Expose-Headers") != "ETag" || response.Headers.Get("Access-Control-Max-Age") != "300" || response.Headers.Get("Vary") == "" {
 		t.Fatalf("matching preflight = %#v, %v", response, err)
 	}
 
-	request.Header.Set("Access-Control-Request-Method", "DELETE")
-	_, err = p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: request})
-	if fault := asFault(t, err); fault.Code != "AccessForbidden" || fault.HTTPStatus != http.StatusForbidden || fault.Fields["Method"] != "DELETE" || fault.Fields["ResourceType"] != "OBJECT" {
-		t.Fatalf("rejected preflight = %#v", fault)
+	for _, rejected := range []struct{ name, origin, method, headers string }{
+		{"method", "https://app.example.test", "DELETE", ""},
+		{"origin", "https://wrong.test", "GET", ""},
+		{"partial origin", "https://app.example.test/", "GET", ""},
+		{"header", "https://app.example.test", "GET", "content-type"},
+	} {
+		t.Run(rejected.name, func(t *testing.T) {
+			request.Header.Set("Origin", rejected.origin)
+			request.Header.Set("Access-Control-Request-Method", rejected.method)
+			request.Header.Set("Access-Control-Request-Headers", rejected.headers)
+			_, err = p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: request})
+			if fault := asFault(t, err); fault.Code != "AccessForbidden" || fault.HTTPStatus != http.StatusForbidden || fault.Fields["Method"] != rejected.method || fault.Fields["ResourceType"] != "OBJECT" {
+				t.Fatalf("rejected preflight = %#v", fault)
+			}
+		})
 	}
 
 	noOrigin := httptest.NewRequest(http.MethodOptions, "https://cors-http.s3.us-east-1.amazonaws.com/key", nil)
 	_, err = p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: noOrigin})
 	if fault := asFault(t, err); fault.Code != "BadRequest" || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("missing origin = %#v", fault)
+	}
+
+	unconfigured := s3.New(spitest.Deps(t))
+	mustInvoke(t, unconfigured, "CreateBucket", map[string]any{"Bucket": "cors-none"}, nil)
+	noConfig := httptest.NewRequest(http.MethodOptions, "https://cors-none.s3.us-east-1.amazonaws.com/key", nil)
+	noConfig.Header.Set("Origin", "https://app.example.test")
+	_, err = unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: noConfig})
+	if fault := asFault(t, err); fault.Code != "AccessForbidden" || fault.Message != "CORSResponse: CORS is not enabled for this bucket." || fault.Fields["Method"] != http.MethodOptions {
+		t.Fatalf("unconfigured preflight = %#v", fault)
 	}
 
 	get := httptest.NewRequest(http.MethodGet, "https://cors-http.s3.us-east-1.amazonaws.com/key", nil)

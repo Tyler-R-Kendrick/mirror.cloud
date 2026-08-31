@@ -247,6 +247,50 @@ func TestConcurrentListObjectPaginationRemainsOrdered(t *testing.T) {
 	}
 }
 
+func TestConcurrentListEncodingValidationRemainsDeterministic(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "list-encoding-chaos"}); err != nil {
+		t.Fatal(err)
+	}
+	operations := []string{"ListObjects", "ListObjectsV2", "ListObjectVersions", "ListMultipartUploads"}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			valid := i/len(operations)%2 == 0
+			encoding := "value"
+			if valid {
+				encoding = "url"
+			}
+			_, err := call(operations[i%len(operations)], map[string]any{"Bucket": "list-encoding-chaos", "EncodingType": encoding})
+			if valid {
+				errs <- err
+				return
+			}
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != "InvalidArgument" || fault.Message != "Invalid Encoding Method specified in Request" || fault.Fields["ArgumentValue"] != encoding {
+				errs <- fmt.Errorf("invalid %s encoding: %v", operations[i%len(operations)], err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
 func TestConcurrentBodyReadFailuresLeaveNoPartialObjects(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

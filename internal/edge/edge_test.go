@@ -739,6 +739,46 @@ func streamingSignatureRequest(payload string) *http.Request {
 	return request
 }
 
+func FuzzS3AWSChunkedContentEncoding(f *testing.F) {
+	deps := spitest.Deps(f)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		f.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/chunk-encoding-fuzz", nil))
+	if created.Code != http.StatusOK {
+		f.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
+	}
+	f.Add("aws-chunked")
+	f.Add("gzip, aws-chunked")
+	f.Add("AWS-CHUNKED, br")
+	f.Fuzz(func(t *testing.T, encoding string) {
+		if len(encoding) > 1024 || strings.ContainsAny(encoding, "\r\n") {
+			t.Skip()
+		}
+		request := httptest.NewRequest(http.MethodPut, "/chunk-encoding-fuzz/object", strings.NewReader("5\r\nhello\r\n0\r\n\r\n"))
+		request.Header.Set("Content-Encoding", encoding)
+		request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+		request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("put: %d %s", recorder.Code, recorder.Body.String())
+		}
+		read := httptest.NewRecorder()
+		handler.ServeHTTP(read, httptest.NewRequest(http.MethodGet, "/chunk-encoding-fuzz/object", nil))
+		for _, value := range strings.Split(read.Header().Get("Content-Encoding"), ",") {
+			if strings.EqualFold(strings.TrimSpace(value), "aws-chunked") {
+				t.Fatalf("transport encoding persisted: %q", read.Header().Get("Content-Encoding"))
+			}
+		}
+	})
+}
+
 func FuzzS3ResponseEnvelope(f *testing.F) {
 	deps := spitest.Deps(f)
 	cfg := config.Default()

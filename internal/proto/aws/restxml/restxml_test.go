@@ -289,6 +289,33 @@ func TestNamedConfigurationXML(t *testing.T) {
 	}
 }
 
+func TestACLXML(t *testing.T) {
+	body := `<AccessControlPolicy xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Owner><ID>000000000000</ID><DisplayName>mirror</DisplayName></Owner><AccessControlList><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="CanonicalUser"><ID>000000000000</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="Group"><URI>http://acs.amazonaws.com/groups/global/AllUsers</URI></Grantee><Permission>READ</Permission></Grant></AccessControlList></AccessControlPolicy>`
+	r := httptest.NewRequest(http.MethodPut, "http://127.0.0.1/b?acl", strings.NewReader(body))
+	req, err := Codec{}.Decode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "PutBucketAcl"}, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := req.Input["AccessControlPolicy"].(map[string]any)
+	grants := policy["Grants"].([]any)
+	if policy["Owner"].(map[string]any)["ID"] != "000000000000" || len(grants) != 2 || grants[0].(map[string]any)["Permission"] != "FULL_CONTROL" || grants[1].(map[string]any)["Grantee"].(map[string]any)["Type"] != "Group" {
+		t.Fatalf("decoded ACL = %#v", policy)
+	}
+	w := httptest.NewRecorder()
+	if err := (Codec{}).Encode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "GetObjectAcl"}, w, &spi.Response{Output: policy}); err != nil {
+		t.Fatal(err)
+	}
+	encoded := w.Body.String()
+	for _, want := range []string{`<AccessControlPolicy xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`, `xsi:type="CanonicalUser"`, `<URI>http://acs.amazonaws.com/groups/global/AllUsers</URI>`, `<Permission>READ</Permission>`} {
+		if !strings.Contains(encoded, want) {
+			t.Fatalf("encoded ACL %q missing %q", encoded, want)
+		}
+	}
+	if strings.Contains(encoded, "<member>") || strings.Contains(encoded, "GetObjectAclResult") {
+		t.Fatalf("encoded ACL = %q", encoded)
+	}
+}
+
 func TestDecodeCompleteMultipartUploadXML(t *testing.T) {
 	body := `<CompleteMultipartUpload><Part><ETag>"first"</ETag><PartNumber>1</PartNumber></Part><Part><ETag>"third"</ETag><PartNumber>3</PartNumber></Part></CompleteMultipartUpload>`
 	r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/b/k?uploadId=id", strings.NewReader(body))

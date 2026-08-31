@@ -635,6 +635,56 @@ func FuzzNamedBucketConfigurations(f *testing.F) {
 	})
 }
 
+func FuzzACLConfigurations(f *testing.F) {
+	for _, seed := range []struct {
+		mode  uint8
+		value string
+	}{{0, "private"}, {0, "public-read"}, {0, "invalid"}, {1, "http://acs.amazonaws.com/groups/global/AllUsers"}, {1, "invalid"}, {2, "123456789012"}, {2, "wrong-id"}, {3, "FULL_CONTROL"}, {3, "INVALID"}} {
+		f.Add(seed.mode, seed.value)
+	}
+	f.Fuzz(func(t *testing.T, mode uint8, value string) {
+		if !utf8.ValidString(value) {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		bucket, key := "acl-fuzz", "object"
+		account := ident().Account
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key, "ACL": "public-read"}, []byte("body"))
+		input := map[string]any{"Bucket": bucket, "Key": key}
+		valid, wantFault := false, "InvalidArgument"
+		switch mode % 4 {
+		case 0:
+			input["ACL"] = value
+			valid = value == "private" || value == "public-read" || value == "public-read-write" || value == "authenticated-read" || value == "bucket-owner-read" || value == "bucket-owner-full-control" || value == "aws-exec-read" || value == "log-delivery-write"
+			if value == "" {
+				wantFault = "MissingSecurityHeader"
+			}
+		case 1:
+			input["GrantRead"] = `uri="` + value + `"`
+			valid = value == "http://acs.amazonaws.com/groups/global/AllUsers" || value == "http://acs.amazonaws.com/groups/global/AuthenticatedUsers" || value == "http://acs.amazonaws.com/groups/s3/LogDelivery"
+		case 2:
+			input["GrantRead"] = `id="` + value + `"`
+			valid = value == account || len(value) == 64 && strings.IndexFunc(value, func(r rune) bool { return !strings.ContainsRune("0123456789abcdefABCDEF", r) }) < 0
+		case 3:
+			input["AccessControlPolicy"] = map[string]any{"Owner": map[string]any{"ID": account}, "Grants": []any{map[string]any{"Grantee": map[string]any{"Type": "CanonicalUser", "ID": account}, "Permission": value}}}
+			valid = value == "FULL_CONTROL" || value == "READ" || value == "WRITE" || value == "READ_ACP" || value == "WRITE_ACP"
+			wantFault = "MalformedACLError"
+		}
+		_, err := invoke(t, p, "PutObjectAcl", input, nil)
+		if valid && err != nil {
+			t.Fatal(err)
+		}
+		if !valid && asFault(t, err).Code != wantFault {
+			t.Fatalf("mode=%d value=%q fault=%v", mode%4, value, err)
+		}
+		grants := asSliceForTest(mustInvoke(t, p, "GetObjectAcl", map[string]any{"Bucket": bucket, "Key": key}, nil).Output["Grants"])
+		if valid && len(grants) == 0 || !valid && len(grants) != 2 {
+			t.Fatalf("stored ACL = %#v", grants)
+		}
+	})
+}
+
 func FuzzBucketNotifications(f *testing.F) {
 	for _, seed := range []struct {
 		mode uint8

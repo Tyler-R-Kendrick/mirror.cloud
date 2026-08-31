@@ -763,6 +763,17 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-list-pagination")}); err != nil {
 		t.Fatal(err)
 	}
+	invalidEncoding := s3types.EncodingType("value")
+	for operation, err := range map[string]error{
+		"ListObjects":          func() error { _, err := s3c.ListObjects(context.Background(), &s3.ListObjectsInput{Bucket: aws.String("sdk-list-pagination"), EncodingType: invalidEncoding}); return err }(),
+		"ListObjectsV2":        func() error { _, err := s3c.ListObjectsV2(context.Background(), &s3.ListObjectsV2Input{Bucket: aws.String("sdk-list-pagination"), EncodingType: invalidEncoding}); return err }(),
+		"ListObjectVersions":   func() error { _, err := s3c.ListObjectVersions(context.Background(), &s3.ListObjectVersionsInput{Bucket: aws.String("sdk-list-pagination"), EncodingType: invalidEncoding}); return err }(),
+		"ListMultipartUploads": func() error { _, err := s3c.ListMultipartUploads(context.Background(), &s3.ListMultipartUploadsInput{Bucket: aws.String("sdk-list-pagination"), EncodingType: invalidEncoding}); return err }(),
+	} {
+		if err == nil || !strings.Contains(err.Error(), "InvalidArgument") || !strings.Contains(err.Error(), "Invalid Encoding Method specified in Request") {
+			t.Fatalf("%s invalid encoding: %v", operation, err)
+		}
+	}
 	listKeys := []string{"folder/aSubfolder/subFile1", "folder/aSubfolder/subFile2", "folder/file1", "folder/file2"}
 	for _, key := range listKeys {
 		if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-list-pagination"), Key: aws.String(key), Body: strings.NewReader("content")}); err != nil {

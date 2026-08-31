@@ -14116,18 +14116,36 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "identity-ignore-authorization-v4-signed-headers",
 			file: filepath.Join("internal", "identity", "s3_signature.go"),
-			old: `canonicalHeaders, ok := signedHeaderValues(r, strings.Split(signedHeaders, ";"))
-	if !ok {
+			old: `names := strings.Split(signedHeaders, ";")
+	canonicalHeaders, ok := signedHeaderValues(r, names)
+	if !ok || !s3AmzHeadersSigned(r, names) {
 		return signatureFault()
 	}
 	date := r.Header.Get("X-Amz-Date")`,
-			new: `canonicalHeaders, ok := "", true
+			new: `names := strings.Split(signedHeaders, ";")
+	canonicalHeaders, ok := "", true
 	if !ok {
 		return signatureFault()
 	}
 	date := r.Header.Get("X-Amz-Date")`,
 			pkg: "./internal/identity",
 			run: "TestVerifyS3AuthorizationV4AWSExample",
+		},
+		{
+			name: "identity-accept-unsigned-amz-header",
+			file: filepath.Join("internal", "identity", "s3_signature.go"),
+			old:  `if strings.HasPrefix(name, "x-amz-") && name != "x-amz-content-sha256" && !containsString(names, name) {`,
+			new:  `if false {`,
+			pkg:  "./internal/identity",
+			run:  "TestVerifyS3PresignedV4AWSExample",
+		},
+		{
+			name: "identity-require-signed-content-sha256",
+			file: filepath.Join("internal", "identity", "s3_signature.go"),
+			old:  `name != "x-amz-content-sha256" && !containsString(names, name)`,
+			new:  `!containsString(names, name)`,
+			pkg:  "./internal/identity",
+			run:  "TestVerifyS3PresignedV4AWSExample",
 		},
 		{
 			name: "identity-ignore-authorization-v4-payload",

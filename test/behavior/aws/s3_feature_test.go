@@ -155,6 +155,34 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given aws-chunked transport encoding When stored Then S3 preserves only content encodings", func(t *testing.T) {
+		response := do(http.MethodPut, "/chunk-encoding-bdd", nil, "")
+		response.Body.Close()
+		request, err := http.NewRequest(http.MethodPut, ts.URL+"/chunk-encoding-bdd/object", strings.NewReader("5\r\nhello\r\n0\r\n\r\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Encoding", "gzip, aws-chunked")
+		request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+		request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+		response, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		request, _ = http.NewRequest(http.MethodGet, ts.URL+"/chunk-encoding-bdd/object", nil)
+		request.Header.Set("Accept-Encoding", "identity")
+		response, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK || string(body) != "hello" || response.Header.Get("Content-Encoding") != "gzip" {
+			t.Fatalf("stored encoding: %d %q %q", response.StatusCode, response.Header.Get("Content-Encoding"), body)
+		}
+	})
+
 	t.Run("Given signature validation is enabled When a signature is tampered Then S3 rejects it", func(t *testing.T) {
 		target := "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=" + strings.Repeat("0", 64)
 		response, err := http.Get(ts.URL + target)

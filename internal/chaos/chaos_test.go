@@ -224,6 +224,56 @@ func TestConcurrentMalformedAWSChunksDoNotCrossContaminate(t *testing.T) {
 	}
 }
 
+func TestConcurrentAWSChunkedContentEncodingsDoNotCrossContaminate(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/chunk-encodings", nil))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
+	}
+
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			encoding, want := "aws-chunked", ""
+			if i%2 != 0 {
+				encoding, want = "gzip, aws-chunked", "gzip"
+			}
+			path := fmt.Sprintf("/chunk-encodings/object-%d", i)
+			request := httptest.NewRequest(http.MethodPut, path, strings.NewReader("5\r\nhello\r\n0\r\n\r\n"))
+			request.Header.Set("Content-Encoding", encoding)
+			request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+			request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+			put := httptest.NewRecorder()
+			handler.ServeHTTP(put, request)
+			if put.Code != http.StatusOK {
+				errs <- fmt.Errorf("put %d: %d %s", i, put.Code, put.Body.String())
+				return
+			}
+			get := httptest.NewRecorder()
+			handler.ServeHTTP(get, httptest.NewRequest(http.MethodGet, path, nil))
+			if get.Code != http.StatusOK || get.Body.String() != "hello" || get.Header().Get("Content-Encoding") != want {
+				errs <- fmt.Errorf("get %d: %d encoding=%q body=%q", i, get.Code, get.Header().Get("Content-Encoding"), get.Body.String())
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentCrossRegionBucketResolution(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

@@ -188,6 +188,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if awsChunkedDecoded {
 		r.ContentLength = awsDecodedLength
+		var encodings []string
+		for _, encoding := range strings.Split(r.Header.Get("Content-Encoding"), ",") {
+			if encoding = strings.TrimSpace(encoding); encoding != "" && !strings.EqualFold(encoding, "aws-chunked") {
+				encodings = append(encodings, encoding)
+			}
+		}
+		if len(encodings) == 0 {
+			r.Header.Del("Content-Encoding")
+		} else {
+			r.Header.Set("Content-Encoding", strings.Join(encodings, ","))
+		}
 		for name, values := range awsTrailers {
 			if strings.EqualFold(name, "X-Amz-Trailer-Signature") {
 				continue

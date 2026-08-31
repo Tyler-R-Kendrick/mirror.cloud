@@ -604,6 +604,51 @@ func TestS3MalformedAWSChunkedCharacterization(t *testing.T) {
 	golden.AssertJSON(t, results)
 }
 
+func TestS3AWSChunkedContentEncodingCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/chunk-encoding", nil))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
+	}
+	results := map[string]any{}
+	for name, tc := range map[string]struct {
+		encoding string
+		want     string
+	}{
+		"chunked only":         {"aws-chunked", ""},
+		"content before chunk": {"gzip, aws-chunked", "gzip"},
+		"content after chunk":  {"AWS-CHUNKED, br", "br"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := "/chunk-encoding/" + strings.ReplaceAll(name, " ", "-")
+			request := httptest.NewRequest(http.MethodPut, path, strings.NewReader("5\r\nhello\r\n0\r\n\r\n"))
+			request.Header.Set("Content-Encoding", tc.encoding)
+			request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+			request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("put: %d %s", recorder.Code, recorder.Body.String())
+			}
+			read := httptest.NewRecorder()
+			handler.ServeHTTP(read, httptest.NewRequest(http.MethodGet, path, nil))
+			if read.Code != http.StatusOK || read.Body.String() != "hello" || read.Header().Get("Content-Encoding") != tc.want {
+				t.Fatalf("get: %d encoding=%q body=%q", read.Code, read.Header().Get("Content-Encoding"), read.Body.String())
+			}
+			results[name] = map[string]any{"body": read.Body.String(), "content_encoding": read.Header().Get("Content-Encoding"), "status": read.Code}
+		})
+	}
+	golden.AssertJSON(t, results)
+}
+
 func streamingUnsignedV4ARequest(checksum string, signedChunk bool) *http.Request {
 	extension := ""
 	if signedChunk {
@@ -692,6 +737,46 @@ func streamingSignatureRequest(payload string) *http.Request {
 	request.Header.Set("X-Amz-Decoded-Content-Length", "5")
 	request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20990101/us-east-1/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length,Signature=d32bab45d70b05d89ada2e57acc27c4117cf31f7ce3de470cf916b8f89558054")
 	return request
+}
+
+func FuzzS3AWSChunkedContentEncoding(f *testing.F) {
+	deps := spitest.Deps(f)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		f.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/chunk-encoding-fuzz", nil))
+	if created.Code != http.StatusOK {
+		f.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
+	}
+	f.Add("aws-chunked")
+	f.Add("gzip, aws-chunked")
+	f.Add("AWS-CHUNKED, br")
+	f.Fuzz(func(t *testing.T, encoding string) {
+		if len(encoding) > 1024 || strings.ContainsAny(encoding, "\r\n") {
+			t.Skip()
+		}
+		request := httptest.NewRequest(http.MethodPut, "/chunk-encoding-fuzz/object", strings.NewReader("5\r\nhello\r\n0\r\n\r\n"))
+		request.Header.Set("Content-Encoding", encoding)
+		request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+		request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("put: %d %s", recorder.Code, recorder.Body.String())
+		}
+		read := httptest.NewRecorder()
+		handler.ServeHTTP(read, httptest.NewRequest(http.MethodGet, "/chunk-encoding-fuzz/object", nil))
+		for _, value := range strings.Split(read.Header().Get("Content-Encoding"), ",") {
+			if strings.EqualFold(strings.TrimSpace(value), "aws-chunked") {
+				t.Fatalf("transport encoding persisted: %q", read.Header().Get("Content-Encoding"))
+			}
+		}
+	})
 }
 
 func FuzzS3ResponseEnvelope(f *testing.F) {

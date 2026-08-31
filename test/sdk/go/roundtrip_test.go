@@ -394,6 +394,32 @@ func TestAWSChunkedFramingContract(t *testing.T) {
 			t.Fatalf("%s: %d %s", name, response.StatusCode, body)
 		}
 	}
+	for name, tc := range map[string]struct {
+		encoding string
+		want     string
+	}{"chunked only": {"aws-chunked", ""}, "preserve gzip": {"gzip, aws-chunked", "gzip"}} {
+		path := "/chunk-errors/" + strings.ReplaceAll(name, " ", "-")
+		request, _ := http.NewRequest(http.MethodPut, ts.URL+path, strings.NewReader("5\r\nhello\r\n0\r\n\r\n"))
+		request.Header.Set("Content-Encoding", tc.encoding)
+		request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+		request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		request, _ = http.NewRequest(http.MethodGet, ts.URL+path, nil)
+		request.Header.Set("Accept-Encoding", "identity")
+		response, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK || string(body) != "hello" || response.Header.Get("Content-Encoding") != tc.want {
+			t.Fatalf("%s: %d encoding=%q body=%q", name, response.StatusCode, response.Header.Get("Content-Encoding"), body)
+		}
+	}
 }
 
 func TestSigV4AStreamingContract(t *testing.T) {

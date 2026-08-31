@@ -431,6 +431,12 @@ func TestVerifyS3StreamingV4A(t *testing.T) {
 				t.Fatalf("valid SigV4A stream rejected: %#v", fault)
 			}
 			if unsignedTrailerMode {
+				authorization := request.Header.Get("Authorization")
+				request.Header.Set("Authorization", strings.Replace(authorization, ";x-amz-trailer", "", 1))
+				if fault := VerifyS3StreamingSignature(request, accessKey, secret, chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+					t.Fatalf("unsigned SigV4A trailer declaration accepted: %#v", fault)
+				}
+				request.Header.Set("Authorization", authorization)
 				signatures[0] = "unexpected"
 				if fault := VerifyS3StreamingSignature(request, accessKey, secret, chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 					t.Fatalf("unsigned SigV4A stream with chunk signature accepted: %#v", fault)

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -39,6 +40,28 @@ func FuzzVerifyS3PresignedV4(f *testing.F) {
 		}
 		request.Host = host
 		_ = VerifyS3PresignedV4(request, secret)
+	})
+}
+
+func FuzzS3AmzHeaderSigning(f *testing.F) {
+	for _, suffix := range []string{"user-agent", "checksum-crc32", "content-sha256"} {
+		f.Add(suffix)
+	}
+	f.Fuzz(func(t *testing.T, suffix string) {
+		if suffix == "" || strings.ContainsFunc(suffix, func(r rune) bool {
+			return r != '-' && (r < 'a' || r > 'z') && (r < '0' || r > '9')
+		}) {
+			t.Skip()
+		}
+		name := "x-amz-" + suffix
+		request, _ := http.NewRequest(http.MethodGet, "https://example.test", nil)
+		request.Header.Set(name, "value")
+		if got := s3AmzHeadersSigned(request, []string{"host"}); got != (name == "x-amz-content-sha256") {
+			t.Fatalf("unsigned %s accepted=%t", name, got)
+		}
+		if !s3AmzHeadersSigned(request, []string{"host", name}) {
+			t.Fatalf("signed %s rejected", name)
+		}
 	})
 }
 

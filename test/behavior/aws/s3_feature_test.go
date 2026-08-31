@@ -167,6 +167,62 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given RFC 2047 user metadata When reading Then S3 returns mail-safe decoded values", func(t *testing.T) {
+		res := do(http.MethodPut, "/rfc2047-bdd", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		req, err := http.NewRequest(http.MethodPut, ts.URL+"/rfc2047-bdd/object", strings.NewReader("body"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", auth)
+		req.Header.Set("x-amz-meta-non-ascii", "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=")
+		req.Header.Set("x-amz-meta-fake-encoded", "=?UTF-8?Q?actually-ascii?=")
+		res, err = http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("put object %d", res.StatusCode)
+		}
+		res = do(http.MethodHead, "/rfc2047-bdd/object", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-meta-non-ascii") != "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=" || res.Header.Get("x-amz-meta-fake-encoded") != "actually-ascii" {
+			t.Fatalf("head metadata %d %v", res.StatusCode, res.Header)
+		}
+
+		var payload bytes.Buffer
+		writer := multipart.NewWriter(&payload)
+		_ = writer.WriteField("key", "post")
+		_ = writer.WriteField("x-amz-meta-non-ascii", "ÄMÄZÕÑ S3")
+		_ = writer.WriteField("x-amz-meta-q-encoded", "=?UTF-8?Q?actually-ascii?=")
+		file, _ := writer.CreateFormFile("file", "post.txt")
+		_, _ = file.Write([]byte("body"))
+		_ = writer.Close()
+		req, err = http.NewRequest(http.MethodPost, ts.URL+"/rfc2047-bdd", &payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", auth)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		res, err = http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusNoContent {
+			t.Fatalf("post object %d", res.StatusCode)
+		}
+		res = do(http.MethodHead, "/rfc2047-bdd/post", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-meta-non-ascii") != "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=" || res.Header.Get("x-amz-meta-q-encoded") != "=?UTF-8?Q?actually-ascii?=" {
+			t.Fatalf("post metadata %d %v", res.StatusCode, res.Header)
+		}
+	})
+
 	t.Run("Given no bucket When PUT object Then not found or created after bucket", func(t *testing.T) {
 		// Given a fresh emulator
 		// When the user creates a bucket

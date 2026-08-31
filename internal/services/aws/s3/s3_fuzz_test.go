@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -1409,10 +1410,10 @@ func FuzzReplicationDestinations(f *testing.F) {
 }
 
 func FuzzPostObjectMultipart(f *testing.F) {
-	f.Add("file.txt", "body", true)
-	f.Add("", "", false)
-	f.Fuzz(func(t *testing.T, filename, body string, created bool) {
-		if len(filename) > 512 || len(body) > 4096 || !utf8.ValidString(filename) || strings.IndexFunc(filename, func(r rune) bool { return r < ' ' || r == 0x7f }) >= 0 {
+	f.Add("file.txt", "body", true, "metadata")
+	f.Add("", "", false, "—_é")
+	f.Fuzz(func(t *testing.T, filename, body string, created bool, metadata string) {
+		if len(filename) > 512 || len(body) > 4096 || len(metadata) > 256 || !utf8.ValidString(filename) || !utf8.ValidString(metadata) || strings.IndexFunc(filename, func(r rune) bool { return r < ' ' || r == 0x7f }) >= 0 {
 			t.Skip()
 		}
 		p := s3.New(spitest.Deps(t))
@@ -1423,6 +1424,8 @@ func FuzzPostObjectMultipart(f *testing.F) {
 		if created {
 			_ = writer.WriteField("success_action_status", "201")
 		}
+		metadata = "Ä" + metadata
+		_ = writer.WriteField("x-amz-meta-value", metadata)
 		file, err := writer.CreateFormFile("file", filename)
 		if err != nil {
 			t.Skip()
@@ -1449,6 +1452,10 @@ func FuzzPostObjectMultipart(f *testing.F) {
 		got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "post-fuzz", "Key": "fuzz/" + effectiveFilename}, nil)
 		if stored := string(readStream(t, got)); stored != body {
 			t.Fatalf("body=%q want=%q", stored, body)
+		}
+		decoded, err := new(mime.WordDecoder).DecodeHeader(got.Headers.Get("x-amz-meta-value"))
+		if err != nil || decoded != metadata {
+			t.Fatalf("metadata=%q decoded=%q: %v", metadata, decoded, err)
 		}
 	})
 }
@@ -1679,6 +1686,30 @@ func FuzzGetObjectResponseOverrides(f *testing.F) {
 		stored := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "override-fuzz", "Key": "object"}, nil)
 		if stored.Headers.Get("Content-Type") != "application/json" {
 			t.Fatalf("stored content type = %q", stored.Headers.Get("Content-Type"))
+		}
+	})
+}
+
+func FuzzUserMetadataRFC2047(f *testing.F) {
+	for _, value := range []string{"S3", "—_é_2?.pdf", "\x00\x01\x02\x03", "�������"} {
+		f.Add(value)
+	}
+	f.Fuzz(func(t *testing.T, suffix string) {
+		if len(suffix) > 256 || !utf8.ValidString(suffix) {
+			t.Skip()
+		}
+		value := "Ä" + suffix
+		deps := spitest.Deps(t)
+		p := s3.New(deps)
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "rfc2047-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{
+			"Bucket": "rfc2047-fuzz", "Key": "object", "Metadata": map[string]any{"value": mime.BEncoding.Encode("UTF-8", value)},
+		}, []byte("body"))
+		response := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "rfc2047-fuzz", "Key": "object"}, nil)
+		wire := response.Headers.Get("x-amz-meta-value")
+		decoded, err := new(mime.WordDecoder).DecodeHeader(wire)
+		if err != nil || decoded != value {
+			t.Fatalf("metadata %q decoded to %q from %q: %v", value, decoded, wire, err)
 		}
 	})
 }

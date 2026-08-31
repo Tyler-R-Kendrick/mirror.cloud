@@ -1591,6 +1591,51 @@ func TestConcurrentGetObjectResponseOverrides(t *testing.T) {
 	}
 }
 
+func TestConcurrentUserMetadataRFC2047(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "rfc2047-chaos"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("key-%d", i)
+			value := fmt.Sprintf("Ä-%d", i)
+			if _, err := call("PutObject", map[string]any{"Bucket": "rfc2047-chaos", "Key": key, "Metadata": map[string]any{"value": value}}, "body"); err != nil {
+				errs <- err
+				return
+			}
+			response, err := call("HeadObject", map[string]any{"Bucket": "rfc2047-chaos", "Key": key}, "")
+			want := fmt.Sprintf("=?UTF-8?Q?=C3=84-%d?=", i)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if got := response.Headers.Get("x-amz-meta-value"); got != want {
+				errs <- fmt.Errorf("metadata %d: %q", i, got)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestEncryptedMultipartCompletionFailurePreservesUpload(t *testing.T) {
 	deps := spitest.Deps(t)
 	blobs := &failBlobs{BlobStore: deps.Blobs}

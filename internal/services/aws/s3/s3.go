@@ -17,6 +17,7 @@ import (
 	"hash/crc32"
 	"hash/crc64"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"sort"
@@ -3743,12 +3744,16 @@ func requestObjectMetadata(req *spi.Request) map[string]any {
 	}
 	user := map[string]any{}
 	for key, value := range asMap(req.Input["Metadata"]) {
-		user[strings.ToLower(key)] = str(value)
+		metadataValue := str(value)
+		if req.Operation != "PostObject" {
+			metadataValue = decodeRFC2047Header(metadataValue)
+		}
+		user[strings.ToLower(key)] = metadataValue
 	}
 	if req.HTTP != nil {
 		for key, values := range req.HTTP.Header {
 			if name, ok := strings.CutPrefix(strings.ToLower(key), "x-amz-meta-"); ok && len(values) > 0 {
-				user[name] = strings.Join(values, ",")
+				user[name] = decodeRFC2047Header(strings.Join(values, ","))
 			}
 		}
 	}
@@ -3954,11 +3959,93 @@ func setObjectMetadataHeaders(headers http.Header, meta map[string]any) {
 		}
 	}
 	for key, value := range asMap(metadata["user"]) {
-		headers.Set("x-amz-meta-"+key, str(value))
+		headers.Set("x-amz-meta-"+key, encodeRFC2047Header(str(value)))
 	}
 	if redirect := str(meta["websiteRedirectLocation"]); redirect != "" {
 		headers.Set("x-amz-website-redirect-location", redirect)
 	}
+}
+
+func decodeRFC2047Header(value string) string {
+	decoded, err := new(mime.WordDecoder).DecodeHeader(value)
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(lower, "=?utf-8?b?") && strings.HasSuffix(value, "?=") && len(value) > 13 && (err != nil || decoded == value) {
+		return strings.Repeat(string(utf8.RuneError), len(value)-13)
+	}
+	if strings.HasPrefix(lower, "=?utf-8?q?") && strings.HasSuffix(value, "?=") && decoded == value {
+		payload := value[len("=?UTF-8?Q?") : len(value)-2]
+		return decodeRFC2047Q(payload)
+	}
+	if err != nil {
+		return value
+	}
+	return decoded
+}
+
+func decodeRFC2047Q(value string) string {
+	var decoded strings.Builder
+	for i := 0; i < len(value); i++ {
+		if value[i] == '_' {
+			decoded.WriteByte(' ')
+			continue
+		}
+		if value[i] == '=' && i+2 < len(value) {
+			high, highOK := hexDigit(value[i+1])
+			low, lowOK := hexDigit(value[i+2])
+			if highOK && lowOK {
+				decoded.WriteByte(high<<4 | low)
+				i += 2
+				continue
+			}
+		}
+		decoded.WriteByte(value[i])
+	}
+	return decoded.String()
+}
+
+func hexDigit(value byte) (byte, bool) {
+	switch {
+	case value >= '0' && value <= '9':
+		return value - '0', true
+	case value >= 'A' && value <= 'F':
+		return value - 'A' + 10, true
+	case value >= 'a' && value <= 'f':
+		return value - 'a' + 10, true
+	default:
+		return 0, false
+	}
+}
+
+func encodeRFC2047Header(value string) string {
+	const safe = "!\"#$%&'()*+,-./0123456789:;<>@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^`abcdefghijklmnopqrstuvwxyz{|}~\t"
+	const unencoded = safe + " _=?"
+	if strings.IndexFunc(value, func(r rune) bool {
+		return r > unicode.MaxASCII || !strings.ContainsRune(unencoded, r)
+	}) < 0 {
+		return value
+	}
+	for _, r := range value {
+		if r == utf8.RuneError || unicode.In(r, unicode.Cc, unicode.Cf, unicode.Co, unicode.Cs) {
+			return "=?UTF-8?B?" + base64.StdEncoding.EncodeToString([]byte(value)) + "?="
+		}
+	}
+	var encoded strings.Builder
+	encoded.WriteString("=?UTF-8?Q?")
+	const hex = "0123456789ABCDEF"
+	for _, b := range []byte(value) {
+		switch {
+		case b == ' ':
+			encoded.WriteByte('_')
+		case strings.IndexByte(safe, b) >= 0:
+			encoded.WriteByte(b)
+		default:
+			encoded.WriteByte('=')
+			encoded.WriteByte(hex[b>>4])
+			encoded.WriteByte(hex[b&15])
+		}
+	}
+	encoded.WriteString("?=")
+	return encoded.String()
 }
 
 func setObjectEncryptionHeaders(headers http.Header, meta map[string]any) {

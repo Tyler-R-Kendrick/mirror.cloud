@@ -2049,6 +2049,65 @@ func TestObjectMetadata(t *testing.T) {
 	})
 }
 
+func TestUserMetadataRFC2047Characterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "metadata-bucket"}, nil)
+	safe := "! \"#$%&'()*+,-./0123456789:;<>'?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\t"
+	mustInvoke(t, p, "PutObject", map[string]any{
+		"Bucket": "metadata-bucket", "Key": "source",
+		"Metadata": map[string]any{
+			"Non-ASCII":    "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=",
+			"Binary":       "=?UTF-8?B?AAECAw==?=",
+			"Fake-Encoded": "=?UTF-8?Q?actually-ascii?=",
+			"ASCII-B64":    "=?UTF-8?B?YWJj?=",
+			"Bad-B64":      "=?UTF-8?B?=GGG?=",
+			"Bad-Q":        "=?UTF-8?Q?bad=4A=ZZ_value?=",
+			"Raw-Unicode":  "ÄMÄZÕÑ S3",
+			"Safe":         safe,
+		},
+	}, []byte("body"))
+
+	read := func(operation, key string) map[string]any {
+		t.Helper()
+		response := mustInvoke(t, p, operation, map[string]any{"Bucket": "metadata-bucket", "Key": key}, nil)
+		return map[string]any{
+			"nonASCII":    response.Headers.Get("x-amz-meta-non-ascii"),
+			"binary":      response.Headers.Get("x-amz-meta-binary"),
+			"fakeEncoded": response.Headers.Get("x-amz-meta-fake-encoded"),
+			"asciiB64":    response.Headers.Get("x-amz-meta-ascii-b64"),
+			"badB64":      response.Headers.Get("x-amz-meta-bad-b64"),
+			"badQ":        response.Headers.Get("x-amz-meta-bad-q"),
+			"rawUnicode":  response.Headers.Get("x-amz-meta-raw-unicode"),
+			"safe":        response.Headers.Get("x-amz-meta-safe"),
+		}
+	}
+	get := read("GetObject", "source")
+	head := read("HeadObject", "source")
+	for name, got := range map[string]map[string]any{"get": get, "head": head} {
+		if got["fakeEncoded"] != "actually-ascii" || got["asciiB64"] != "abc" || got["badB64"] != "=?UTF-8?B?77+977+977+9?=" || got["badQ"] != "badJ=ZZ value" || got["safe"] != safe {
+			t.Fatalf("%s decoded metadata = %#v", name, got)
+		}
+		if got["nonASCII"] != "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=" || got["rawUnicode"] != got["nonASCII"] || got["binary"] != "=?UTF-8?B?AAECAw==?=" {
+			t.Fatalf("%s encoded metadata = %#v", name, got)
+		}
+	}
+
+	mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "metadata-bucket", "Key": "copy", "CopySource": "metadata-bucket/source"}, nil)
+	copyMetadata := read("HeadObject", "copy")
+	if !reflect.DeepEqual(copyMetadata, head) {
+		t.Fatalf("copied metadata = %#v, want %#v", copyMetadata, head)
+	}
+	mustInvoke(t, p, "CopyObject", map[string]any{
+		"Bucket": "metadata-bucket", "Key": "replace", "CopySource": "metadata-bucket/source", "MetadataDirective": "REPLACE",
+		"Metadata": map[string]any{"Fake-Encoded": "=?UTF-8?Q?replacement?="},
+	}, nil)
+	replaced := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "metadata-bucket", "Key": "replace"}, nil)
+	if replaced.Headers.Get("x-amz-meta-fake-encoded") != "replacement" {
+		t.Fatalf("replacement metadata = %v", replaced.Headers)
+	}
+	golden.AssertJSON(t, map[string]any{"get": get, "head": head, "copy": copyMetadata, "replace": replaced.Headers.Get("x-amz-meta-fake-encoded")})
+}
+
 func TestGetObjectResponseHeaderOverrides(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "response-overrides"}, nil)
@@ -4679,6 +4738,10 @@ func TestPostObjectMultipartUpload(t *testing.T) {
 	_ = writer.WriteField("success_action_status", "201")
 	_ = writer.WriteField("Content-Type", "text/plain")
 	_ = writer.WriteField("x-amz-meta-owner", "mirror")
+	_ = writer.WriteField("x-amz-meta-non-ascii", "ÄMÄZÕÑ S3")
+	_ = writer.WriteField("x-amz-meta-q-encoded", "=?UTF-8?Q?actually-ascii?=")
+	_ = writer.WriteField("x-amz-meta-b-encoded", "=?UTF-8?B?YWJj?=")
+	_ = writer.WriteField("x-amz-meta-control", "\x00\x01\x02\x03")
 	file, err := writer.CreateFormFile("file", "hello world.txt")
 	if err != nil {
 		t.Fatal(err)
@@ -4701,7 +4764,7 @@ func TestPostObjectMultipartUpload(t *testing.T) {
 	}
 	golden.AssertJSON(t, map[string]any{"status": response.Status, "headers": response.Headers, "output": response.Output})
 	got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "post-object", "Key": "uploads/hello world.txt"}, nil)
-	if body := string(readStream(t, got)); body != "browser upload" || got.Headers.Get("Content-Type") != "text/plain" || got.Headers.Get("x-amz-meta-owner") != "mirror" {
+	if body := string(readStream(t, got)); body != "browser upload" || got.Headers.Get("Content-Type") != "text/plain" || got.Headers.Get("x-amz-meta-owner") != "mirror" || got.Headers.Get("x-amz-meta-non-ascii") != "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=" || got.Headers.Get("x-amz-meta-q-encoded") != "=?UTF-8?Q?actually-ascii?=" || got.Headers.Get("x-amz-meta-b-encoded") != "=?UTF-8?B?YWJj?=" || got.Headers.Get("x-amz-meta-control") != "=?UTF-8?B?AAECAw==?=" {
 		t.Fatalf("stored body=%q headers=%v", body, got.Headers)
 	}
 }

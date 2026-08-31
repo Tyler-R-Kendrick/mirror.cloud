@@ -5273,6 +5273,22 @@ func TestMultipartOperationsRejectMissingUpload(t *testing.T) {
 	mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "k", "UploadId": uploadID}, nil)
 }
 
+func TestNoSuchUploadCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-fault-golden"}, nil)
+	results := map[string]any{}
+	for _, operation := range []string{"UploadPart", "CompleteMultipartUpload", "ListParts", "AbortMultipartUpload"} {
+		input := map[string]any{"Bucket": "multipart-fault-golden", "Key": "key", "UploadId": "missing", "PartNumber": 1}
+		if operation == "CompleteMultipartUpload" {
+			input["MultipartUpload"] = map[string]any{"Parts": []any{}}
+		}
+		_, err := invoke(t, p, operation, input, []byte("part"))
+		fault := asFault(t, err)
+		results[operation] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+	}
+	golden.AssertJSON(t, results)
+}
+
 func TestMultipartPartNumberBounds(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

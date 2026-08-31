@@ -1,20 +1,36 @@
 {
   "deleteVersion": "9c8e2cb0",
   "listed": {
+    "CommonPrefixes": null,
     "DeleteMarkers": [
       {
-        "ETag": null,
+        "IsLatest": true,
         "Key": "logs/file",
-        "Size": null,
+        "LastModified": "1970-01-01T00:00:00.000Z",
+        "Owner": {
+          "ID": "123456789012"
+        },
         "VersionId": "9c8e2cb0"
       }
     ],
+    "Delimiter": "",
+    "IsTruncated": false,
+    "KeyMarker": "",
+    "MaxKeys": 1000,
     "Name": "destination",
+    "Prefix": "",
+    "VersionIdMarker": "",
     "Versions": [
       {
         "ETag": "\"08069c56938bbf6ddcc01ee2fd848af5\"",
+        "IsLatest": false,
         "Key": "logs/file",
+        "LastModified": "1970-01-01T00:00:00.000Z",
+        "Owner": {
+          "ID": "123456789012"
+        },
         "Size": 10,
+        "StorageClass": "STANDARD_IA",
         "VersionId": "5f59f223"
       }
     ]

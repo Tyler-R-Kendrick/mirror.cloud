@@ -5328,6 +5328,22 @@ func TestMultipartPartNumberBounds(t *testing.T) {
 	}
 }
 
+func TestMultipartPartNumberFaultCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "part-number-golden"}, nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "part-number-golden", "Key": "key"}, nil).Output["UploadId"].(string)
+	results := []any{}
+	for _, number := range []int{-1, 0, 10001} {
+		_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "part-number-golden", "Key": "key", "UploadId": uploadID, "PartNumber": number}, []byte("part"))
+		fault := asFault(t, err)
+		results = append(results, map[string]any{"code": fault.Code, "message": fault.Message, "fields": fault.Fields})
+	}
+	_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "part-number-golden", "Key": "key", "UploadId": "missing", "PartNumber": 0}, []byte("part"))
+	fault := asFault(t, err)
+	results = append(results, map[string]any{"code": fault.Code, "message": fault.Message, "fields": fault.Fields})
+	golden.AssertJSON(t, results)
+}
+
 func TestMissingBucket404(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": "nope", "Key": "k"}, []byte("x"))

@@ -1487,7 +1487,9 @@ func TestEncryptedBlobFailureLeavesNoObjectAndRecovers(t *testing.T) {
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "bucket"}})
-	input := map[string]any{"Bucket": "bucket", "Key": "k", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": "arn:aws:kms:us-east-1:000000000000:key/chaos", "BucketKeyEnabled": true}
+	keyID := "arn:aws:kms:us-east-1:000000000000:key/chaos"
+	spitest.SeedKMSKey(t, deps, id, keyID, "Enabled")
+	input := map[string]any{"Bucket": "bucket", "Key": "k", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true}
 	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: input, Body: io.NopCloser(bytes.NewReader([]byte("x")))})
 	if err == nil {
 		t.Fatal("expected injected failure")
@@ -1499,6 +1501,45 @@ func TestEncryptedBlobFailureLeavesNoObjectAndRecovers(t *testing.T) {
 	put, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: input, Body: io.NopCloser(bytes.NewReader([]byte("x")))})
 	if err != nil || put.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || put.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
 		t.Fatalf("recovery put: %#v %v", put, err)
+	}
+}
+
+func TestConcurrentKMSKeyValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	enabled := "arn:aws:kms:us-east-1:000000000000:key/concurrent"
+	missing := "arn:aws:kms:us-east-1:000000000000:key/missing"
+	spitest.SeedKMSKey(t, deps, id, enabled, "Enabled")
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "kms-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			keyID := enabled
+			if i%2 != 0 {
+				keyID = missing
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "kms-chaos", "Key": fmt.Sprintf("key-%d", i), "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID}, Body: io.NopCloser(strings.NewReader("body"))})
+			if i%2 == 0 && err != nil {
+				errs <- err
+			} else if i%2 != 0 {
+				fault, ok := err.(*spi.Fault)
+				if !ok || fault.Code != "KMS.NotFoundException" {
+					errs <- fmt.Errorf("missing key fault: %v", err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
 	}
 }
 
@@ -1518,6 +1559,7 @@ func TestEncryptedMultipartCompletionFailurePreservesUpload(t *testing.T) {
 	}
 	_, _ = call("CreateBucket", map[string]any{"Bucket": "multipart-encryption"}, nil)
 	keyID := "arn:aws:kms:us-east-1:000000000000:key/multipart-chaos"
+	spitest.SeedKMSKey(t, deps, id, keyID, "Enabled")
 	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-encryption", "Key": "object", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true}, nil)
 	if err != nil {
 		t.Fatal(err)

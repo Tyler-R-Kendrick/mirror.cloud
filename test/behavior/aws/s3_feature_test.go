@@ -19,6 +19,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
@@ -36,6 +37,10 @@ func TestS3ObjectLifecycle(t *testing.T) {
 	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
 	defer ts.Close()
 	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=00"
+	testIdentity := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	spitest.SeedKMSKey(t, deps, testIdentity, "arn:aws:kms:us-east-1:000000000000:key/multipart-behavior", "Enabled")
+	spitest.SeedKMSKey(t, deps, testIdentity, "arn:aws:kms:us-east-1:000000000000:key/kms-bdd", "Enabled")
+	spitest.SeedKMSKey(t, deps, testIdentity, "arn:aws:kms:us-east-1:000000000000:key/disabled-bdd", "Disabled")
 
 	do := func(method, path string, body []byte, storageClass string) *http.Response {
 		t.Helper()
@@ -91,6 +96,47 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-bucket-region") != "us-west-2" || !bytes.Contains(body, []byte("<Key>key</Key>")) {
 			t.Fatalf("cross-region list %d %#v %s", res.StatusCode, res.Header, body)
+		}
+	})
+
+	t.Run("Given explicit KMS keys When writing and reading Then S3 validates their regional state", func(t *testing.T) {
+		res := do(http.MethodPut, "/kms-validation-bdd", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		request := func(method, path, keyID string) (*http.Response, []byte) {
+			t.Helper()
+			req, err := http.NewRequest(method, ts.URL+path, strings.NewReader("body"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", auth)
+			if method == http.MethodPut {
+				req.Header.Set("x-amz-server-side-encryption", "aws:kms")
+				req.Header.Set("x-amz-server-side-encryption-aws-kms-key-id", keyID)
+			}
+			response, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response, body
+		}
+		enabledARN := "arn:aws:kms:us-east-1:000000000000:key/kms-bdd"
+		if response, body := request(http.MethodPut, "/kms-validation-bdd/enabled", enabledARN); response.StatusCode != http.StatusOK {
+			t.Fatalf("enabled key %d %s", response.StatusCode, body)
+		}
+		if response, body := request(http.MethodPut, "/kms-validation-bdd/missing", "arn:aws:kms:us-east-1:000000000000:key/missing"); response.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>KMS.NotFoundException</Code>")) {
+			t.Fatalf("missing key %d %s", response.StatusCode, body)
+		}
+		if response, body := request(http.MethodPut, "/kms-validation-bdd/disabled", "arn:aws:kms:us-east-1:000000000000:key/disabled-bdd"); response.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>KMS.DisabledException</Code>")) {
+			t.Fatalf("disabled key %d %s", response.StatusCode, body)
+		}
+		spitest.SeedKMSKey(t, deps, testIdentity, enabledARN, "Disabled")
+		if response, body := request(http.MethodGet, "/kms-validation-bdd/enabled", ""); response.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>KMS.DisabledException</Code>")) {
+			t.Fatalf("disabled read %d %s", response.StatusCode, body)
 		}
 	})
 
@@ -164,6 +210,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusCreated || res.Header.Get("ETag") == "" || res.Header.Get("x-amz-checksum-sha256") != base64.StdEncoding.EncodeToString(checksum[:]) || res.Header.Get("x-amz-checksum-type") != "FULL_OBJECT" || res.Header.Get("x-amz-server-side-encryption") != "aws:kms" || res.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != "arn:aws:kms:us-east-1:000000000000:key/browser" || res.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" || !bytes.Contains(response, []byte("<PostResponse>")) || !bytes.Contains(response, []byte("<Key>forms/report.txt</Key>")) {
 			t.Fatalf("post form %d headers=%v body=%s", res.StatusCode, res.Header, response)
 		}
+		spitest.SeedKMSKey(t, deps, testIdentity, "arn:aws:kms:us-east-1:000000000000:key/browser", "Enabled")
 		res = do(http.MethodGet, "/post-form/forms/report.txt", nil, "")
 		stored, _ := io.ReadAll(res.Body)
 		res.Body.Close()

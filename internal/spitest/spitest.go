@@ -4,6 +4,9 @@
 package spitest
 
 import (
+	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/blobs"
@@ -15,6 +18,16 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/store"
 )
+
+// SeedKMSKey adds a KMS record for cross-service tests that use an explicit key ARN.
+func SeedKMSKey(t testing.TB, deps spi.Deps, identity spi.Identity, keyARN, state string) {
+	t.Helper()
+	keyID := keyARN[strings.LastIndex(keyARN, "/")+1:]
+	record, _ := json.Marshal(map[string]any{"KeyId": keyID, "Arn": keyARN, "KeyState": state})
+	if err := deps.Store.Scope(identity.Account, identity.Region).Collection("kms").Put(context.Background(), keyID, record); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // Deps returns a ready spi.Deps for tests.
 func Deps(t *testing.T) spi.Deps {

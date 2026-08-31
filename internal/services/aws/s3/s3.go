@@ -1350,6 +1350,11 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if err := validateStoredSSECustomerKey(req, meta); err != nil {
 		return nil, err
 	}
+	if keyID := str(meta["ssekmsKeyId"]); keyID != "" {
+		if err := p.validateKMSKey(ctx, req, keyID); err != nil {
+			return nil, err
+		}
+	}
 	if err := p.requireRestored(ctx, req, b, key, meta); err != nil {
 		return nil, err
 	}
@@ -3743,6 +3748,11 @@ func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket st
 	}
 	algorithm := requestCondition(req, "ServerSideEncryption", "x-amz-server-side-encryption")
 	keyID := requestCondition(req, "SSEKMSKeyId", "x-amz-server-side-encryption-aws-kms-key-id")
+	if keyID != "" && req.Operation != "PostObject" {
+		if err := p.validateKMSKey(ctx, req, keyID); err != nil {
+			return "", "", false, err
+		}
+	}
 	bucketKey := truthy(req.Input["BucketKeyEnabled"])
 	if !bucketKey && req.HTTP != nil {
 		bucketKey = truthy(req.HTTP.Header.Get("x-amz-server-side-encryption-bucket-key-enabled"))
@@ -3797,6 +3807,46 @@ func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket st
 		}
 	}
 	return algorithm, keyID, bucketKey, nil
+}
+
+func (p *Pack) validateKMSKey(ctx context.Context, req *spi.Request, keyID string) error {
+	identity := req.Identity
+	if arn := strings.SplitN(keyID, ":", 6); len(arn) == 6 && arn[0] == "arn" && arn[2] == "kms" {
+		if arn[3] != identity.Region {
+			return &spi.Fault{Code: "KMS.NotFoundException", Message: "Invalid arn " + arn[3], HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		if arn[4] == identity.Account && arn[5] == "key/aws-managed-s3" {
+			return nil
+		}
+		identity.Account = arn[4]
+	}
+	scope := p.deps.Store.Scope(identity.Account, identity.Region)
+	if strings.HasPrefix(keyID, "alias/") || strings.Contains(keyID, ":alias/") {
+		name := keyID[strings.Index(keyID, "alias/"):]
+		if raw, ok, _ := scope.Collection("kmsalias").Get(ctx, name); ok {
+			var alias map[string]any
+			_ = json.Unmarshal(raw, &alias)
+			keyID = str(alias["TargetKeyId"])
+		}
+	}
+	if slash := strings.LastIndex(keyID, "/"); slash >= 0 {
+		keyID = keyID[slash+1:]
+	}
+	raw, ok, _ := scope.Collection("kms").Get(ctx, keyID)
+	if !ok {
+		return &spi.Fault{Code: "KMS.NotFoundException", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	var key map[string]any
+	_ = json.Unmarshal(raw, &key)
+	arn := str(key["Arn"])
+	switch str(key["KeyState"]) {
+	case "Enabled":
+		return nil
+	case "PendingDeletion":
+		return &spi.Fault{Code: "KMS.KMSInvalidStateException", Message: arn + " is pending deletion.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	default:
+		return &spi.Fault{Code: "KMS.DisabledException", Message: arn + " is disabled.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
 }
 
 func requestSSECustomerKey(req *spi.Request) (string, error) {

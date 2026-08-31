@@ -695,7 +695,7 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	if err := codec.Encode(svc, &model.Operation{Name: "GetObject"}, w, &spi.Response{Status: http.StatusPartialContent, Headers: http.Header{"ETag": {"one"}}, Stream: io.NopCloser(strings.NewReader("object"))}); err != nil {
 		t.Fatal(err)
 	}
-	if w.Code != http.StatusPartialContent || w.Header().Get("ETag") != "one" || w.Body.String() != "object" {
+	if w.Code != http.StatusPartialContent || len(w.Header()["ETag"]) != 1 || w.Header()["ETag"][0] != "one" || w.Body.String() != "object" {
 		t.Fatalf("stream response %d %#v %q", w.Code, w.Header(), w.Body.String())
 	}
 	w = httptest.NewRecorder()

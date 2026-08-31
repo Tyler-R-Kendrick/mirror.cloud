@@ -2659,6 +2659,8 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
+	p.versionMu.Lock()
+	defer p.versionMu.Unlock()
 	prefix, delimiter := str(req.Input["Prefix"]), str(req.Input["Delimiter"])
 	keyMarker, versionMarker := str(req.Input["KeyMarker"]), str(req.Input["VersionIdMarker"])
 	if versionMarker != "" && keyMarker == "" {

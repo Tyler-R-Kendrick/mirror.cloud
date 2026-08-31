@@ -101,6 +101,45 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given delimited objects When listing V1 and V2 Then prefixes consume pagination slots", func(t *testing.T) {
+		res := do(http.MethodPut, "/list-pagination-bdd", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		for _, key := range []string{"folder/aSubfolder/subFile1", "folder/aSubfolder/subFile2", "folder/file1", "folder/file2"} {
+			res = do(http.MethodPut, "/list-pagination-bdd/"+key, []byte("content"), "")
+			io.Copy(io.Discard, res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("put %q: %d", key, res.StatusCode)
+			}
+		}
+		list := func(query string) string {
+			t.Helper()
+			response := do(http.MethodGet, "/list-pagination-bdd?"+query, nil, "")
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("list %q: %d %s", query, response.StatusCode, body)
+			}
+			return string(body)
+		}
+		first := list("prefix=folder%2F&delimiter=%2F&max-keys=1")
+		if !strings.Contains(first, "<CommonPrefixes><Prefix>folder/aSubfolder/</Prefix></CommonPrefixes>") || !strings.Contains(first, "<NextMarker>folder/aSubfolder/</NextMarker>") || strings.Contains(first, "<Contents>") {
+			t.Fatalf("first V1 page %s", first)
+		}
+		next := list("prefix=folder%2F&delimiter=%2F&max-keys=1&marker=" + url.QueryEscape("folder/aSubfolder/"))
+		if !strings.Contains(next, "<Contents><ETag>") || !strings.Contains(next, "<Key>folder/file1</Key>") || !strings.Contains(next, "<Marker>folder/aSubfolder/</Marker>") {
+			t.Fatalf("next V1 page %s", next)
+		}
+		firstV2 := list("list-type=2&prefix=folder%2F&delimiter=%2F&max-keys=1")
+		if !strings.Contains(firstV2, "<CommonPrefixes><Prefix>folder/aSubfolder/</Prefix></CommonPrefixes>") || !strings.Contains(firstV2, "<NextContinuationToken>folder/aSubfolder/</NextContinuationToken>") || !strings.Contains(firstV2, "<KeyCount>1</KeyCount>") {
+			t.Fatalf("first V2 page %s", firstV2)
+		}
+	})
+
 	t.Run("Given an expired presigned URL When requested Then S3 returns a modeled access denial", func(t *testing.T) {
 		request, err := http.NewRequest(http.MethodGet, ts.URL+"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F19691231%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=19691231T235900Z&X-Amz-Expires=30&X-Amz-SignedHeaders=host&X-Amz-Signature=00", nil)
 		if err != nil {

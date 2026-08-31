@@ -30,6 +30,14 @@ func TestMutantsAreKilled(t *testing.T) {
 	}
 	mutants := []mutant{
 		{
+			name: "restxml-canonicalize-etag-header",
+			file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
+			old:  `if strings.EqualFold(k, "ETag") {`,
+			new:  `if false {`,
+			pkg:  "./internal/proto/aws/restxml",
+			run:  "TestETagHeaderCasingCharacterization",
+		},
+		{
 			name: "edge-reject-terminal-chunk-header-only",
 			file: filepath.Join("internal", "edge", "chunked.go"),
 			old:  "trailers := http.Header{}\n\tif len(rest) == 0 {",

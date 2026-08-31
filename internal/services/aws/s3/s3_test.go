@@ -3618,6 +3618,11 @@ func TestCopyObjectConditions(t *testing.T) {
 	if _, err := copyObject("future-modified", nil, map[string]string{"x-amz-copy-source-if-modified-since": farFuture}); err != nil {
 		t.Fatal(err)
 	}
+	_, err = copyObject("match-future-modified", nil, map[string]string{
+		"x-amz-copy-source-if-match":          etag,
+		"x-amz-copy-source-if-modified-since": farFuture,
+	})
+	wantPrecondition(err)
 	_, err = copyObject("none-mismatch-modified", nil, map[string]string{
 		"x-amz-copy-source-if-none-match":     `"wrong"`,
 		"x-amz-copy-source-if-modified-since": after,

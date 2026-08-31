@@ -1403,10 +1403,16 @@ func TestStatesWaitLoopUsesAbsoluteDeadline(t *testing.T) {
 		if delay != 10*time.Second {
 			t.Fatalf("Wait scheduled after %s, want 10s", delay)
 		}
-	case <-time.After(5 * time.Second):
+	// A give-up guard, not a timing assertion: the timing this test is about is
+	// asserted against the fake clock above, as `delay == 10s`. Five real
+	// seconds is enough on an idle machine and not always enough on a loaded
+	// CI runner, which is a way to fail for a reason the test is not about.
+	case <-time.After(30 * time.Second):
 		t.Fatal("Wait loop did not observe the absolute deadline")
 	}
-	deadline := time.After(5 * time.Second)
+	// The same give-up guard, for the same reason: what is asserted is that
+	// the execution reaches SUCCEEDED, not how many real seconds that takes.
+	deadline := time.After(30 * time.Second)
 	for {
 		execution := invoke("DescribeExecution", map[string]any{"executionArn": executionARN})
 		if execution["status"] == "SUCCEEDED" {

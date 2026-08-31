@@ -1068,6 +1068,124 @@ func TestBucketLifecycleExpirationHeaders(t *testing.T) {
 	}
 }
 
+func TestNamedBucketConfigurations(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	bucket := map[string]any{"Bucket": "named-configurations"}
+	mustInvoke(t, p, "CreateBucket", bucket, nil)
+	put := func(operation, field, id string, configuration map[string]any) (*spi.Response, error) {
+		return invoke(t, p, operation, map[string]any{"Bucket": bucket["Bucket"], "Id": id, field: configuration}, nil)
+	}
+	mustPut := func(operation, field, id string, configuration map[string]any) {
+		if _, err := put(operation, field, id, configuration); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stringValue := func(value any) string { result, _ := value.(string); return result }
+
+	if _, err := put("PutBucketAnalyticsConfiguration", "AnalyticsConfiguration", "request-id", map[string]any{"Id": "body-id"}); asFault(t, err).Code != "MalformedXML" {
+		t.Fatalf("analytics id mismatch = %v", err)
+	}
+	for _, id := range []string{"z-analysis", "a-analysis"} {
+		mustPut("PutBucketAnalyticsConfiguration", "AnalyticsConfiguration", id, map[string]any{"Id": id, "Filter": map[string]any{"Prefix": id}})
+	}
+	analytics := mustInvoke(t, p, "ListBucketAnalyticsConfigurations", bucket, nil)
+	analyticsList := asSliceForTest(analytics.Output["AnalyticsConfigurationList"])
+	if analytics.Output["IsTruncated"] != false || len(analyticsList) != 2 || asMapForTest(analyticsList[0])["Id"] != "a-analysis" || asMapForTest(analyticsList[1])["Id"] != "z-analysis" {
+		t.Fatalf("analytics list = %#v", analytics.Output)
+	}
+	gotAnalytics := asMapForTest(mustInvoke(t, p, "GetBucketAnalyticsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "a-analysis"}, nil).Output["AnalyticsConfiguration"])
+	if asMapForTest(gotAnalytics["Filter"])["Prefix"] != "a-analysis" {
+		t.Fatalf("analytics get = %#v", gotAnalytics)
+	}
+	if _, err := invoke(t, p, "DeleteBucketAnalyticsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "missing"}, nil); asFault(t, err).Code != "NoSuchConfiguration" {
+		t.Fatalf("missing analytics delete = %v", err)
+	}
+
+	if _, err := put("PutBucketIntelligentTieringConfiguration", "IntelligentTieringConfiguration", "request-id", map[string]any{"Id": "body-id"}); asFault(t, err).Code != "MalformedXML" {
+		t.Fatalf("intelligent tiering id mismatch = %v", err)
+	}
+	mustPut("PutBucketIntelligentTieringConfiguration", "IntelligentTieringConfiguration", "tiering", map[string]any{"Id": "tiering", "Status": "Enabled"})
+	if got := asSliceForTest(mustInvoke(t, p, "ListBucketIntelligentTieringConfigurations", bucket, nil).Output["IntelligentTieringConfigurationList"]); len(got) != 1 || asMapForTest(got[0])["Id"] != "tiering" {
+		t.Fatalf("intelligent tiering list = %#v", got)
+	}
+	if _, err := invoke(t, p, "GetBucketIntelligentTieringConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "tiering", "ExpectedBucketOwner": "999999999999"}, nil); err != nil {
+		t.Fatalf("intelligent tiering expected owner = %v", err)
+	}
+
+	inventory := func() map[string]any {
+		return map[string]any{
+			"Id": "inventory", "IsEnabled": true, "IncludedObjectVersions": "All",
+			"Destination":    map[string]any{"S3BucketDestination": map[string]any{"Bucket": "arn:aws:s3:::destination", "Format": "CSV"}},
+			"Schedule":       map[string]any{"Frequency": "Daily"},
+			"OptionalFields": []any{"Size", "ETag"},
+		}
+	}
+	mustPut("PutBucketInventoryConfiguration", "InventoryConfiguration", "inventory", inventory())
+	invalidInventory := []struct {
+		name string
+		code string
+		edit func(map[string]any)
+	}{
+		{"unknown root field", "MalformedXML", func(v map[string]any) { v["Unknown"] = true }},
+		{"id mismatch", "IdMismatch", func(v map[string]any) { v["Id"] = "other" }},
+		{"invalid destination", "InvalidS3DestinationBucket", func(v map[string]any) {
+			asMapForTest(asMapForTest(v["Destination"])["S3BucketDestination"])["Bucket"] = "destination"
+		}},
+		{"invalid format", "MalformedXML", func(v map[string]any) {
+			asMapForTest(asMapForTest(v["Destination"])["S3BucketDestination"])["Format"] = "JSON"
+		}},
+		{"invalid frequency", "MalformedXML", func(v map[string]any) { asMapForTest(v["Schedule"])["Frequency"] = "Hourly" }},
+		{"invalid versions", "MalformedXML", func(v map[string]any) { v["IncludedObjectVersions"] = "Previous" }},
+		{"invalid optional field", "MalformedXML", func(v map[string]any) { v["OptionalFields"] = []any{"Unknown"} }},
+	}
+	invalidInventoryCodes := map[string]any{}
+	for _, test := range invalidInventory {
+		t.Run(test.name, func(t *testing.T) {
+			configuration := inventory()
+			test.edit(configuration)
+			_, err := put("PutBucketInventoryConfiguration", "InventoryConfiguration", "inventory", configuration)
+			if fault := asFault(t, err); fault.Code != test.code {
+				t.Fatalf("fault = %#v", fault)
+			} else {
+				invalidInventoryCodes[test.name] = fault.Code
+			}
+		})
+	}
+	storedInventory := asMapForTest(mustInvoke(t, p, "GetBucketInventoryConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "inventory"}, nil).Output["InventoryConfiguration"])
+	if stringValue(asMapForTest(asMapForTest(storedInventory["Destination"])["S3BucketDestination"])["Format"]) != "CSV" {
+		t.Fatalf("invalid inventory replaced baseline = %#v", storedInventory)
+	}
+
+	for i := range 1000 {
+		id := fmt.Sprintf("%04d", i)
+		mustPut("PutBucketMetricsConfiguration", "MetricsConfiguration", id, map[string]any{"Id": id})
+	}
+	mustPut("PutBucketMetricsConfiguration", "MetricsConfiguration", "0000", map[string]any{"Id": "0000", "Filter": map[string]any{"Prefix": "updated"}})
+	if _, err := put("PutBucketMetricsConfiguration", "MetricsConfiguration", "1000", map[string]any{"Id": "1000"}); asFault(t, err).Code != "TooManyConfigurations" {
+		t.Fatalf("metrics limit = %v", err)
+	}
+	first := mustInvoke(t, p, "ListBucketMetricsConfigurations", bucket, nil)
+	firstPage := asSliceForTest(first.Output["MetricsConfigurationList"])
+	next := stringValue(first.Output["NextContinuationToken"])
+	if first.Output["IsTruncated"] != true || len(firstPage) != 100 || stringValue(asMapForTest(firstPage[0])["Id"]) != "0000" || next == "" {
+		t.Fatalf("metrics first page = %#v", first.Output)
+	}
+	second := mustInvoke(t, p, "ListBucketMetricsConfigurations", map[string]any{"Bucket": bucket["Bucket"], "ContinuationToken": next}, nil)
+	secondPage := asSliceForTest(second.Output["MetricsConfigurationList"])
+	if second.Output["ContinuationToken"] != next || len(secondPage) != 100 || stringValue(asMapForTest(secondPage[0])["Id"]) != "0100" {
+		t.Fatalf("metrics second page = %#v", second.Output)
+	}
+	if _, err := invoke(t, p, "ListBucketMetricsConfigurations", map[string]any{"Bucket": bucket["Bucket"], "ContinuationToken": "invalid"}, nil); asFault(t, err).Code != "InvalidToken" {
+		t.Fatalf("invalid metrics token = %v", err)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"analytics":          analytics.Output,
+		"inventory":          map[string]any{"configuration": storedInventory, "invalid": invalidInventoryCodes},
+		"intelligentTiering": mustInvoke(t, p, "ListBucketIntelligentTieringConfigurations", bucket, nil).Output,
+		"metrics":            map[string]any{"firstCount": len(firstPage), "firstId": asMapForTest(firstPage[0])["Id"], "secondCount": len(secondPage), "secondId": asMapForTest(secondPage[0])["Id"], "truncated": first.Output["IsTruncated"]},
+	})
+}
+
 func TestBucketLifecycleCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	input := map[string]any{"Bucket": "lifecycle-characterization"}
@@ -1559,7 +1677,7 @@ func TestDeleteBucketClearsBucketState(t *testing.T) {
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "recreated-bucket", "Status": "Enabled"}, nil)
 	mustInvoke(t, p, "PutBucketTagging", map[string]any{"Bucket": "recreated-bucket", "TagSet": []any{map[string]any{"Key": "old", "Value": "state"}}}, nil)
 	mustInvoke(t, p, "PutBucketCors", map[string]any{"Bucket": "recreated-bucket", "CORSRules": []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{"*"}}}}, nil)
-	mustInvoke(t, p, "PutBucketAnalyticsConfiguration", map[string]any{"Bucket": "recreated-bucket", "Id": "old"}, nil)
+	mustInvoke(t, p, "PutBucketAnalyticsConfiguration", map[string]any{"Bucket": "recreated-bucket", "Id": "old", "AnalyticsConfiguration": map[string]any{"Id": "old"}}, nil)
 	mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "recreated-bucket", "Key": "unfinished"}, nil)
 	mustInvoke(t, p, "DeleteBucket", input, nil)
 	if _, err := invoke(t, p, "HeadBucket", input, nil); asFault(t, err).Code != "NoSuchBucket" {
@@ -1576,7 +1694,7 @@ func TestDeleteBucketClearsBucketState(t *testing.T) {
 	if _, err := invoke(t, p, "GetBucketCors", input, nil); asFault(t, err).Code != "NoSuchCORSConfiguration" {
 		t.Fatalf("recreated bucket inherited CORS: %v", err)
 	}
-	if got := mustInvoke(t, p, "ListBucketAnalyticsConfigurations", input, nil); len(got.Output["List"].([]any)) != 0 {
+	if got := mustInvoke(t, p, "ListBucketAnalyticsConfigurations", input, nil); len(asSliceForTest(got.Output["AnalyticsConfigurationList"])) != 0 {
 		t.Fatalf("recreated bucket inherited named configuration: %#v", got.Output)
 	}
 	if got := mustInvoke(t, p, "ListMultipartUploads", input, nil); len(got.Output["Uploads"].([]any)) != 0 {

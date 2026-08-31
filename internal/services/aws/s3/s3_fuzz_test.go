@@ -573,6 +573,68 @@ func FuzzBucketLifecycle(f *testing.F) {
 	})
 }
 
+func FuzzNamedBucketConfigurations(f *testing.F) {
+	for _, seed := range []struct {
+		mode  uint8
+		value string
+	}{{0, "CSV"}, {0, "JSON"}, {1, "Daily"}, {1, "Hourly"}, {2, "Size"}, {2, "Unknown"}, {3, "inventory"}, {3, "other"}} {
+		f.Add(seed.mode, seed.value)
+	}
+	f.Fuzz(func(t *testing.T, mode uint8, value string) {
+		if !utf8.ValidString(value) {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		bucket := map[string]any{"Bucket": "named-configuration-fuzz"}
+		mustInvoke(t, p, "CreateBucket", bucket, nil)
+		baseline := map[string]any{
+			"Id": "inventory", "IsEnabled": true, "IncludedObjectVersions": "All",
+			"Destination":    map[string]any{"S3BucketDestination": map[string]any{"Bucket": "arn:aws:s3:::destination", "Format": "CSV"}},
+			"Schedule":       map[string]any{"Frequency": "Daily"},
+			"OptionalFields": []any{"Size"},
+		}
+		mustInvoke(t, p, "PutBucketInventoryConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "inventory", "InventoryConfiguration": baseline}, nil)
+		configuration := map[string]any{
+			"Id": "inventory", "IsEnabled": true, "IncludedObjectVersions": "All",
+			"Destination":    map[string]any{"S3BucketDestination": map[string]any{"Bucket": "arn:aws:s3:::destination", "Format": "CSV"}},
+			"Schedule":       map[string]any{"Frequency": "Daily"},
+			"OptionalFields": []any{"Size"},
+		}
+		valid, wantFault := false, "MalformedXML"
+		switch mode % 4 {
+		case 0:
+			configuration["Destination"].(map[string]any)["S3BucketDestination"].(map[string]any)["Format"] = value
+			valid = value == "CSV" || value == "ORC" || value == "Parquet"
+		case 1:
+			configuration["Schedule"].(map[string]any)["Frequency"] = value
+			valid = value == "Daily" || value == "Weekly"
+		case 2:
+			configuration["OptionalFields"] = []any{value}
+			valid = map[string]bool{
+				"Size": true, "LastModifiedDate": true, "StorageClass": true, "ETag": true,
+				"IsMultipartUploaded": true, "ReplicationStatus": true, "EncryptionStatus": true,
+				"ObjectLockRetainUntilDate": true, "ObjectLockMode": true, "ObjectLockLegalHoldStatus": true,
+				"IntelligentTieringAccessTier": true, "BucketKeyStatus": true, "ChecksumAlgorithm": true,
+			}[value]
+		case 3:
+			configuration["Id"] = value
+			valid = value == "inventory"
+			wantFault = "IdMismatch"
+		}
+		_, err := invoke(t, p, "PutBucketInventoryConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "inventory", "InventoryConfiguration": configuration}, nil)
+		if valid && err != nil {
+			t.Fatal(err)
+		}
+		if !valid && asFault(t, err).Code != wantFault {
+			t.Fatalf("mode=%d value=%q fault=%v", mode%4, value, err)
+		}
+		stored := mustInvoke(t, p, "GetBucketInventoryConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "inventory"}, nil).Output["InventoryConfiguration"]
+		if valid && !reflect.DeepEqual(stored, configuration) || !valid && !reflect.DeepEqual(stored, baseline) {
+			t.Fatalf("stored inventory = %#v", stored)
+		}
+	})
+}
+
 func FuzzBucketNotifications(f *testing.F) {
 	for _, seed := range []struct {
 		mode uint8

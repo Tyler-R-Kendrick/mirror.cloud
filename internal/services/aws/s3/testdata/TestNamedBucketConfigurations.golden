@@ -1,0 +1,64 @@
+{
+  "analytics": {
+    "AnalyticsConfigurationList": [
+      {
+        "Filter": {
+          "Prefix": "a-analysis"
+        },
+        "Id": "a-analysis"
+      },
+      {
+        "Filter": {
+          "Prefix": "z-analysis"
+        },
+        "Id": "z-analysis"
+      }
+    ],
+    "IsTruncated": false
+  },
+  "intelligentTiering": {
+    "IntelligentTieringConfigurationList": [
+      {
+        "Id": "tiering",
+        "Status": "Enabled"
+      }
+    ],
+    "IsTruncated": false
+  },
+  "inventory": {
+    "configuration": {
+      "Destination": {
+        "S3BucketDestination": {
+          "Bucket": "arn:aws:s3:::destination",
+          "Format": "CSV"
+        }
+      },
+      "Id": "inventory",
+      "IncludedObjectVersions": "All",
+      "IsEnabled": true,
+      "OptionalFields": [
+        "Size",
+        "ETag"
+      ],
+      "Schedule": {
+        "Frequency": "Daily"
+      }
+    },
+    "invalid": {
+      "id mismatch": "IdMismatch",
+      "invalid destination": "InvalidS3DestinationBucket",
+      "invalid format": "MalformedXML",
+      "invalid frequency": "MalformedXML",
+      "invalid optional field": "MalformedXML",
+      "invalid versions": "MalformedXML",
+      "unknown root field": "MalformedXML"
+    }
+  },
+  "metrics": {
+    "firstCount": 100,
+    "firstId": "0000",
+    "secondCount": 100,
+    "secondId": "0100",
+    "truncated": true
+  }
+}

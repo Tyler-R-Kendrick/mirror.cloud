@@ -126,7 +126,7 @@ func TestBootedServerS3BucketConfigsRoundTrip(t *testing.T) {
 	if code, b := do(http.MethodDelete, "/cfgb?analytics&id=a1", ""); code >= 300 && code != 204 {
 		t.Fatalf("del analytics %d %s", code, b)
 	}
-	if code, b := do(http.MethodPut, "/cfgb?inventory&id=i1", `<InventoryConfiguration><Id>i1</Id></InventoryConfiguration>`); code >= 300 {
+	if code, b := do(http.MethodPut, "/cfgb?inventory&id=i1", `<InventoryConfiguration><Destination><S3BucketDestination><Bucket>arn:aws:s3:::cfgb</Bucket><Format>CSV</Format></S3BucketDestination></Destination><Id>i1</Id><IncludedObjectVersions>All</IncludedObjectVersions><IsEnabled>true</IsEnabled><Schedule><Frequency>Daily</Frequency></Schedule></InventoryConfiguration>`); code >= 300 {
 		t.Fatalf("put inv %d %s", code, b)
 	}
 	if code, b := do(http.MethodGet, "/cfgb?inventory", ""); code != 200 {

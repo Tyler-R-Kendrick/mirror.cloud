@@ -3855,49 +3855,184 @@ func (p *Pack) restoreObject(ctx context.Context, req *spi.Request) (*spi.Respon
 
 func (p *Pack) namedCfg(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b := str(req.Input["Bucket"])
-	if err := p.requireBucket(ctx, req, b); err != nil {
-		return nil, err
+	spec := namedConfigurationSpecFor(req.Operation)
+	var err error
+	if spec.kind == "intelligent" {
+		err = p.requireBucketOwner(ctx, req, b, "")
+	} else {
+		err = p.requireBucket(ctx, req, b)
 	}
-	kind := "analytics"
-	switch {
-	case strings.Contains(req.Operation, "Inventory"):
-		kind = "inventory"
-	case strings.Contains(req.Operation, "Intelligent"):
-		kind = "intelligent"
-	case strings.Contains(req.Operation, "Metrics"):
-		kind = "metrics"
+	if err != nil {
+		return nil, err
 	}
 	id := str(req.Input["Id"])
 	if id == "" {
 		id = str(req.Input["id"])
 	}
+	collection := p.col(req, "namedcfg")
+	prefix := b + "/" + spec.kind + "/"
 	if strings.HasPrefix(req.Operation, "List") {
-		kvs, _, _ := p.col(req, "namedcfg").List(ctx, b+"/"+kind+"/", "", 0)
-		var items []any
+		kvs, _, _ := collection.List(ctx, prefix, "", 0)
+		items := make([]any, 0, len(kvs))
 		for _, kv := range kvs {
 			var doc map[string]any
 			_ = json.Unmarshal(kv.Value, &doc)
 			items = append(items, doc)
 		}
-		return &spi.Response{Output: map[string]any{"List": items}}, nil
+		sort.Slice(items, func(i, j int) bool { return str(asMap(items[i])["Id"]) < str(asMap(items[j])["Id"]) })
+		output := map[string]any{"IsTruncated": false, spec.list: items}
+		if spec.kind == "metrics" {
+			token := str(req.Input["ContinuationToken"])
+			if token == "" {
+				token = str(req.Input["continuation-token"])
+			}
+			start := 0
+			if token != "" {
+				decoded, err := base64.URLEncoding.DecodeString(token)
+				if err != nil {
+					return nil, &spi.Fault{Code: "InvalidToken", Message: "The continuation token provided is incorrect", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+				}
+				marker := string(decoded)
+				for start < len(items) && str(asMap(items[start])["Id"]) < marker {
+					start++
+				}
+				output["ContinuationToken"] = token
+			}
+			end := min(start+100, len(items))
+			if end < len(items) {
+				output["IsTruncated"] = true
+				output["NextContinuationToken"] = base64.URLEncoding.EncodeToString([]byte(str(asMap(items[end])["Id"])))
+			}
+			output[spec.list] = items[start:end]
+		}
+		return &spi.Response{Status: http.StatusOK, Output: output}, nil
 	}
-	ck := b + "/" + kind + "/" + id
+	if id == "" {
+		return nil, &spi.Fault{Code: "InvalidArgument", Message: "The configuration ID is required", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	ck := prefix + id
 	if strings.HasPrefix(req.Operation, "Put") {
-		raw, _ := json.Marshal(req.Input)
-		_ = p.col(req, "namedcfg").Put(ctx, ck, raw)
+		configuration, ok := req.Input[spec.configuration].(map[string]any)
+		if !ok {
+			return nil, malformedXML()
+		}
+		if err := validateNamedConfiguration(spec.kind, id, configuration); err != nil {
+			return nil, err
+		}
+		if spec.kind == "metrics" {
+			if _, exists, _ := collection.Get(ctx, ck); !exists {
+				kvs, _, _ := collection.List(ctx, prefix, "", 1001)
+				if len(kvs) >= 1000 {
+					return nil, &spi.Fault{Code: "TooManyConfigurations", Message: "Too many metrics configurations", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+				}
+			}
+		}
+		raw, _ := json.Marshal(configuration)
+		_ = collection.Put(ctx, ck, raw)
 		return &spi.Response{Status: 200, Output: map[string]any{}}, nil
 	}
 	if strings.HasPrefix(req.Operation, "Delete") {
-		_ = p.col(req, "namedcfg").Delete(ctx, ck)
+		if _, exists, _ := collection.Get(ctx, ck); !exists {
+			return nil, &spi.Fault{Code: "NoSuchConfiguration", Message: "The specified configuration does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client"}
+		}
+		_ = collection.Delete(ctx, ck)
 		return &spi.Response{Status: 204, Output: map[string]any{}}, nil
 	}
-	raw, ok, _ := p.col(req, "namedcfg").Get(ctx, ck)
+	raw, ok, _ := collection.Get(ctx, ck)
 	if !ok {
-		return nil, &spi.Fault{Code: "NoSuchConfiguration", HTTPStatus: 404, Fault: "client"}
+		return nil, &spi.Fault{Code: "NoSuchConfiguration", Message: "The specified configuration does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client"}
 	}
 	var doc map[string]any
 	_ = json.Unmarshal(raw, &doc)
-	return &spi.Response{Status: 200, Output: doc}, nil
+	return &spi.Response{Status: 200, Output: map[string]any{spec.configuration: doc}}, nil
+}
+
+type namedConfigurationSpec struct{ kind, configuration, list string }
+
+func namedConfigurationSpecFor(operation string) namedConfigurationSpec {
+	switch {
+	case strings.Contains(operation, "Inventory"):
+		return namedConfigurationSpec{"inventory", "InventoryConfiguration", "InventoryConfigurationList"}
+	case strings.Contains(operation, "Intelligent"):
+		return namedConfigurationSpec{"intelligent", "IntelligentTieringConfiguration", "IntelligentTieringConfigurationList"}
+	case strings.Contains(operation, "Metrics"):
+		return namedConfigurationSpec{"metrics", "MetricsConfiguration", "MetricsConfigurationList"}
+	default:
+		return namedConfigurationSpec{"analytics", "AnalyticsConfiguration", "AnalyticsConfigurationList"}
+	}
+}
+
+func validateNamedConfiguration(kind, id string, configuration map[string]any) error {
+	if kind == "inventory" {
+		return validateInventoryConfiguration(id, configuration)
+	}
+	if (kind == "analytics" || kind == "intelligent") && str(configuration["Id"]) != id {
+		return malformedXML()
+	}
+	return nil
+}
+
+func validateInventoryConfiguration(id string, configuration map[string]any) error {
+	if !hasOnlyFields(configuration,
+		[]string{"Destination", "Id", "IncludedObjectVersions", "IsEnabled", "Schedule"},
+		[]string{"Filter", "OptionalFields"}) {
+		return malformedXML()
+	}
+	destination := asMap(asMap(configuration["Destination"])["S3BucketDestination"])
+	if !hasOnlyFields(destination, []string{"Bucket", "Format"}, []string{"AccountId", "Encryption", "Prefix"}) {
+		return malformedXML()
+	}
+	if format := str(destination["Format"]); format != "CSV" && format != "ORC" && format != "Parquet" {
+		return malformedXML()
+	}
+	frequency := str(asMap(configuration["Schedule"])["Frequency"])
+	if frequency != "Daily" && frequency != "Weekly" {
+		return malformedXML()
+	}
+	versions := str(configuration["IncludedObjectVersions"])
+	if versions != "All" && versions != "Current" {
+		return malformedXML()
+	}
+	allowed := map[string]bool{
+		"Size": true, "LastModifiedDate": true, "StorageClass": true, "ETag": true,
+		"IsMultipartUploaded": true, "ReplicationStatus": true, "EncryptionStatus": true,
+		"ObjectLockRetainUntilDate": true, "ObjectLockMode": true, "ObjectLockLegalHoldStatus": true,
+		"IntelligentTieringAccessTier": true, "BucketKeyStatus": true, "ChecksumAlgorithm": true,
+	}
+	for _, value := range asSlice(configuration["OptionalFields"]) {
+		if !allowed[str(value)] {
+			return malformedXML()
+		}
+	}
+	if str(configuration["Id"]) != id {
+		return &spi.Fault{Code: "IdMismatch", Message: "Document ID does not match the specified configuration ID.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	parts := strings.SplitN(str(destination["Bucket"]), ":", 6)
+	if len(parts) != 6 || parts[0] != "arn" || parts[2] != "s3" || parts[5] == "" {
+		return &spi.Fault{Code: "InvalidS3DestinationBucket", Message: "Invalid bucket ARN.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	return nil
+}
+
+func hasOnlyFields(value map[string]any, required, optional []string) bool {
+	allowed := make(map[string]bool, len(required)+len(optional))
+	for _, field := range required {
+		allowed[field] = true
+	}
+	for _, field := range optional {
+		allowed[field] = true
+	}
+	for _, field := range required {
+		if _, exists := value[field]; !exists {
+			return false
+		}
+	}
+	for field := range value {
+		if !allowed[field] {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *Pack) requireBucket(ctx context.Context, req *spi.Request, b string) error {

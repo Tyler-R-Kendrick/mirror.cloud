@@ -1987,8 +1987,8 @@ var mutants = []mutant{
 	{
 		name: "s3-archive-expire-one-day-early",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `AddDate(0, 0, days+1)`,
-		new:  `AddDate(0, 0, days)`,
+		old:  "_, restored := p.restoreState(ctx, req, b, key, meta)\n\tnow := p.deps.Clock.Now().UTC()\n\texpires := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, days+1)",
+		new:  "_, restored := p.restoreState(ctx, req, b, key, meta)\n\tnow := p.deps.Clock.Now().UTC()\n\texpires := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, days)",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestArchiveRestoreCharacterization",
 	},
@@ -13120,7 +13120,7 @@ var mutants = []mutant{
 		old:  "sseCustomerKeyMD5, err := requestSSECustomerKey(req)\n\tif err != nil {",
 		new:  "sseCustomerKeyMD5, err := requestSSECustomerKey(req)\n\tif false && err != nil {",
 		pkg:  "./internal/services/aws/s3",
-		run:  "TestObjectSSECustomerKey",
+		run:  "TestMultipartSSECustomerKey",
 	},
 	{
 		name: "s3-drop-version-customer-encryption",
@@ -14986,8 +14986,8 @@ var mutants = []mutant{
 	{
 		name: "identity-accept-bad-presigned-v4-signature",
 		file: filepath.Join("internal", "identity", "s3_signature.go"),
-		old:  `subtle.ConstantTimeCompare(got, want) != 1`,
-		new:  `false`,
+		old:  "return err == nil && len(got) == len(want) && subtle.ConstantTimeCompare(got, want) == 1",
+		new:  "return err == nil && len(got) == len(want)",
 		pkg:  "./internal/identity",
 		run:  "TestVerifyS3PresignedV4AWSExample",
 	},
@@ -15228,8 +15228,8 @@ var mutants = []mutant{
 		file: filepath.Join("internal", "identity", "s3_signature.go"),
 		old:  `return VerifyS3AuthorizationV2(r, secret)`,
 		new:  `return nil`,
-		pkg:  "./internal/edge",
-		run:  "TestS3PresignedSignatureFaultCharacterization",
+		pkg:  "./internal/identity",
+		run:  "TestVerifyS3AuthorizationV2AWSExample",
 	},
 	{
 		name: "identity-accept-malformed-authorization-v2",

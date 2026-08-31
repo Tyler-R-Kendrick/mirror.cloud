@@ -82,6 +82,7 @@ func TestRouteNameQueryOps(t *testing.T) {
 		{http.MethodPut, "/b/k", "b/src", "CopyObject"},
 		{http.MethodPut, "/b", "", "CreateBucket"},
 		{http.MethodPut, "/b/k", "", "PutObject"},
+		{http.MethodOptions, "/b/k", "", "GetObject"},
 		{http.MethodGet, "/b/k", "", "GetObject"},
 		{http.MethodHead, "/b/k", "", "HeadObject"},
 		{http.MethodDelete, "/b/k", "", "DeleteObject"},

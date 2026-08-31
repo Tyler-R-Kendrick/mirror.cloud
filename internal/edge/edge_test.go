@@ -216,6 +216,54 @@ func TestS3PutGetAndForeignService501(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"create": createEnvelope, "get": getEnvelope, "head": headEnvelope, "missing": missingEnvelope, "put": putEnvelope})
 }
 
+func TestS3BucketCORSHTTP(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=00"
+	do := func(method, target, host string, body []byte, headers map[string]string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(method, target, bytes.NewReader(body))
+		request.Host = host
+		request.Header.Set("Authorization", auth)
+		for key, value := range headers {
+			request.Header.Set(key, value)
+		}
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	if got := do(http.MethodPut, "/cors-edge", "localhost", nil, nil); got.Code != http.StatusOK {
+		t.Fatalf("create bucket = %d %s", got.Code, got.Body.String())
+	}
+	configuration := []byte(`<CORSConfiguration><CORSRule><AllowedOrigin>https://*.example.test</AllowedOrigin><AllowedMethod>GET</AllowedMethod><AllowedHeader>x-amz-*</AllowedHeader><ExposeHeader>ETag</ExposeHeader><MaxAgeSeconds>300</MaxAgeSeconds></CORSRule></CORSConfiguration>`)
+	if got := do(http.MethodPut, "/cors-edge?cors", "localhost", configuration, nil); got.Code != http.StatusOK {
+		t.Fatalf("put CORS = %d %s", got.Code, got.Body.String())
+	}
+	if got := do(http.MethodPut, "/cors-edge/key", "localhost", []byte("body"), nil); got.Code != http.StatusOK {
+		t.Fatalf("put object = %d %s", got.Code, got.Body.String())
+	}
+	headers := map[string]string{"Origin": "https://app.example.test", "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "x-amz-request-payer"}
+	if got := do(http.MethodOptions, "/key", "cors-edge.s3.us-east-1.amazonaws.com", nil, headers); got.Code != http.StatusOK || got.Header().Get("Access-Control-Allow-Origin") != headers["Origin"] || got.Header().Get("Access-Control-Allow-Headers") != "x-amz-request-payer" {
+		t.Fatalf("preflight = %d %#v %s", got.Code, got.Header(), got.Body.String())
+	}
+	if got := do(http.MethodGet, "/key", "cors-edge.s3.us-east-1.amazonaws.com", nil, map[string]string{"Origin": headers["Origin"]}); got.Code != http.StatusOK || got.Body.String() != "body" || got.Header().Get("Access-Control-Expose-Headers") != "ETag" {
+		t.Fatalf("actual CORS = %d %#v %s", got.Code, got.Header(), got.Body.String())
+	}
+	if got := do(http.MethodOptions, "/key", "cors-edge.s3.us-east-1.amazonaws.com", nil, map[string]string{"Origin": "https://wrong.test", "Access-Control-Request-Method": "GET"}); got.Code != http.StatusForbidden || !strings.Contains(got.Body.String(), "AccessForbidden") {
+		t.Fatalf("rejected preflight = %d %s", got.Code, got.Body.String())
+	}
+	if got := do(http.MethodOptions, "/key", "cors-edge.s3.us-east-1.amazonaws.com", nil, nil); got.Code != http.StatusBadRequest || !strings.Contains(got.Body.String(), "Origin request header needed") {
+		t.Fatalf("missing origin = %d %s", got.Code, got.Body.String())
+	}
+}
+
 func TestS3PresignedExpiryFaultCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	cfg := config.Default()

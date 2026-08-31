@@ -228,6 +228,8 @@ func RouteName(r *http.Request) string {
 		return "AbortMultipartUpload"
 	case m == http.MethodPut && r.Header.Get("x-amz-copy-source") != "":
 		return "CopyObject"
+	case m == http.MethodOptions:
+		return "GetObject"
 	case m == http.MethodGet && bucket == "":
 		return "ListBuckets"
 	case m == http.MethodHead && key == "":

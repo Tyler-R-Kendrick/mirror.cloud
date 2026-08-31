@@ -231,6 +231,43 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given multipart parts When listing pages Then empty values use S3 defaults", func(t *testing.T) {
+		res := do(http.MethodPut, "/parts-list-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPost, "/parts-list-bdd/object?uploads", nil, "")
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		list := func(query string) string {
+			t.Helper()
+			response := do(http.MethodGet, "/parts-list-bdd/object?uploadId="+url.QueryEscape(created.UploadID)+"&"+query, nil, "")
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("list parts %q: %d %s", query, response.StatusCode, body)
+			}
+			return string(body)
+		}
+		empty := list("part-number-marker=&max-parts=")
+		if !strings.Contains(empty, "<PartNumberMarker>0</PartNumberMarker>") || !strings.Contains(empty, "<NextPartNumberMarker>0</NextPartNumberMarker>") || !strings.Contains(empty, "<MaxParts>1000</MaxParts>") || !strings.Contains(empty, "<Initiator><ID>000000000000</ID></Initiator>") || !strings.Contains(empty, "<Owner><ID>000000000000</ID></Owner>") {
+			t.Fatalf("empty parts page %s", empty)
+		}
+		res = do(http.MethodPut, "/parts-list-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("part"), "")
+		res.Body.Close()
+		page := list("max-parts=1")
+		if !strings.Contains(page, "<NextPartNumberMarker>1</NextPartNumberMarker>") || !strings.Contains(page, "<IsTruncated>false</IsTruncated>") || !strings.Contains(page, ".000Z</LastModified>") {
+			t.Fatalf("final parts page %s", page)
+		}
+		beyond := list("max-parts=1&part-number-marker=10")
+		if !strings.Contains(beyond, "<PartNumberMarker>10</PartNumberMarker>") || !strings.Contains(beyond, "<NextPartNumberMarker>0</NextPartNumberMarker>") {
+			t.Fatalf("beyond parts page %s", beyond)
+		}
+	})
+
 	t.Run("Given an expired presigned URL When requested Then S3 returns a modeled access denial", func(t *testing.T) {
 		request, err := http.NewRequest(http.MethodGet, ts.URL+"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F19691231%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=19691231T235900Z&X-Amz-Expires=30&X-Amz-SignedHeaders=host&X-Amz-Signature=00", nil)
 		if err != nil {

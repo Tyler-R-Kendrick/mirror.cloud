@@ -1538,6 +1538,55 @@ func FuzzListMultipartUploadsMarkers(f *testing.F) {
 	})
 }
 
+func FuzzListPartsPagination(f *testing.F) {
+	for _, seed := range []struct {
+		max, marker uint8
+		zero        bool
+	}{{1, 0, false}, {2, 1, false}, {3, 7, false}, {0, 9, true}} {
+		f.Add(seed.max, seed.marker, seed.zero)
+	}
+	f.Fuzz(func(t *testing.T, maxSeed, markerSeed uint8, zero bool) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "parts-list-fuzz"}, nil)
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "parts-list-fuzz", "Key": "key"}, nil).Output["UploadId"]
+		for _, number := range []int{1, 3, 7} {
+			mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "parts-list-fuzz", "Key": "key", "UploadId": uploadID, "PartNumber": number}, []byte("part"))
+		}
+		marker, maxParts := int(markerSeed%10), int(maxSeed%3)+1
+		if zero {
+			maxParts = 0
+		}
+		page := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "parts-list-fuzz", "Key": "key", "UploadId": uploadID, "PartNumberMarker": marker, "MaxParts": maxParts}, nil).Output
+		want := []int{}
+		for _, number := range []int{1, 3, 7} {
+			if number > marker {
+				want = append(want, number)
+			}
+		}
+		limit := maxParts
+		if limit == 0 {
+			limit = 1000
+		}
+		truncated := len(want) > limit
+		if truncated {
+			want = want[:limit]
+		}
+		got := asSliceForTest(page["Parts"])
+		next := 0
+		if len(want) > 0 {
+			next = want[len(want)-1]
+		}
+		if len(got) != len(want) || page["IsTruncated"] != truncated || page["NextPartNumberMarker"] != next || page["MaxParts"] != limit {
+			t.Fatalf("marker=%d max=%d page=%#v want=%v", marker, maxParts, page, want)
+		}
+		for index := range got {
+			if asMapForTest(got[index])["PartNumber"] != want[index] {
+				t.Fatalf("part %d = %#v want %d", index, got[index], want[index])
+			}
+		}
+	})
+}
+
 func FuzzDeleteObjectVersionRestoration(f *testing.F) {
 	f.Add("first", "second", "third", uint8(2))
 	f.Add("", "same", "same", uint8(1))

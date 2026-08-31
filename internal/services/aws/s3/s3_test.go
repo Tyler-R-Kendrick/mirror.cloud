@@ -5065,11 +5065,18 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "k"}, nil)
 	id, _ := created.Output["UploadId"].(string)
+	empty := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "k", "UploadId": id, "MaxParts": 0}, nil).Output
+	if len(empty["Parts"].([]any)) != 0 || empty["MaxParts"] != 1000 || empty["NextPartNumberMarker"] != 0 || asMapForTest(empty["Initiator"])["ID"] != "123456789012" || asMapForTest(empty["Owner"])["ID"] != "123456789012" {
+		t.Fatalf("empty ListParts %v", empty)
+	}
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "k", "UploadId": id, "PartNumber": 1}, []byte("AAA"))
 	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "k", "UploadId": id}, nil)
 	parts, _ := listed.Output["Parts"].([]any)
-	if len(parts) != 1 || listed.Output["ChecksumAlgorithm"] != "CRC64NVME" || listed.Output["ChecksumType"] != "FULL_OBJECT" {
+	if len(parts) != 1 || listed.Output["ChecksumAlgorithm"] != "CRC64NVME" || listed.Output["ChecksumType"] != "FULL_OBJECT" || listed.Output["NextPartNumberMarker"] != 1 {
 		t.Fatalf("ListParts %v", listed.Output)
+	}
+	if _, err := time.Parse("2006-01-02T15:04:05.000Z", asMapForTest(parts[0])["LastModified"].(string)); err != nil {
+		t.Fatalf("part timestamp = %#v", parts[0])
 	}
 	paged := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "paged", "StorageClass": "STANDARD_IA", "ChecksumAlgorithm": "CRC32"}, nil)
 	pagedID := paged.Output["UploadId"].(string)
@@ -5089,8 +5096,12 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	}
 	secondPage := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "paged", "UploadId": pagedID, "PartNumberMarker": 2, "MaxParts": 2}, nil)
 	last := secondPage.Output["Parts"].([]any)[0].(map[string]any)
-	if last["PartNumber"] != 3 || last["LastModified"] == "" || last["ChecksumCRC32"] == nil || secondPage.Output["IsTruncated"] != false || secondPage.Output["PartNumberMarker"] != 2 {
+	if last["PartNumber"] != 3 || last["LastModified"] == "" || last["ChecksumCRC32"] == nil || secondPage.Output["IsTruncated"] != false || secondPage.Output["PartNumberMarker"] != 2 || secondPage.Output["NextPartNumberMarker"] != 3 {
 		t.Fatalf("ListParts second page %v", secondPage.Output)
+	}
+	beyond := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "paged", "UploadId": pagedID, "PartNumberMarker": 10, "MaxParts": 1}, nil).Output
+	if len(beyond["Parts"].([]any)) != 0 || beyond["PartNumberMarker"] != 10 || beyond["NextPartNumberMarker"] != 0 || beyond["IsTruncated"] != false {
+		t.Fatalf("ListParts beyond final part %v", beyond)
 	}
 	for _, input := range []map[string]any{
 		{"Bucket": "bucket", "Key": "paged", "UploadId": "missing"},
@@ -5117,6 +5128,34 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	if len(uploads) != 0 {
 		t.Fatalf("completed upload still listed: %v", after.Output)
 	}
+}
+
+func TestListPartsCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "parts-golden"}, nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "parts-golden", "Key": "object"}, nil).Output["UploadId"].(string)
+	input := map[string]any{"Bucket": "parts-golden", "Key": "object", "UploadId": uploadID}
+	empty := mustInvoke(t, p, "ListParts", maps.Clone(input), nil).Output
+	for _, part := range []struct {
+		number int
+		body   string
+	}{{1, "one"}, {3, "three"}} {
+		partInput := maps.Clone(input)
+		partInput["PartNumber"] = part.number
+		mustInvoke(t, p, "UploadPart", partInput, []byte(part.body))
+		_ = deps.Clock.Advance(time.Second)
+	}
+	firstInput := maps.Clone(input)
+	firstInput["MaxParts"] = 1
+	first := mustInvoke(t, p, "ListParts", firstInput, nil).Output
+	nextInput := maps.Clone(firstInput)
+	nextInput["PartNumberMarker"] = first["NextPartNumberMarker"]
+	next := mustInvoke(t, p, "ListParts", nextInput, nil).Output
+	beyondInput := maps.Clone(firstInput)
+	beyondInput["PartNumberMarker"] = 10
+	beyond := mustInvoke(t, p, "ListParts", beyondInput, nil).Output
+	golden.AssertJSON(t, map[string]any{"empty": empty, "first": first, "next": next, "beyond": beyond})
 }
 
 func TestListMultipartUploadsPaginationAndDelimiter(t *testing.T) {

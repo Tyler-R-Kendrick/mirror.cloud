@@ -1899,6 +1899,10 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}); err == nil || !strings.Contains(err.Error(), "AccessDenied") {
 		t.Fatalf("multipart mismatched expected source owner: %v", err)
 	}
+	emptyParts, err := s3c.ListParts(context.Background(), &s3.ListPartsInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: otherUpload.UploadId})
+	if err != nil || len(emptyParts.Parts) != 0 || aws.ToString(emptyParts.PartNumberMarker) != "0" || aws.ToString(emptyParts.NextPartNumberMarker) != "0" || aws.ToInt32(emptyParts.MaxParts) != 1000 || emptyParts.Initiator == nil || aws.ToString(emptyParts.Initiator.ID) != "000000000000" || emptyParts.Owner == nil || aws.ToString(emptyParts.Owner.ID) != "000000000000" {
+		t.Fatalf("empty list parts: %#v %v", emptyParts, err)
+	}
 	part, err := s3c.UploadPartCopy(context.Background(), &s3.UploadPartCopyInput{
 		Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, PartNumber: aws.Int32(1),
 		CopySource: aws.String("sdk/large"), CopySourceIfMatch: largePut.ETag, CopySourceRange: aws.String("bytes=10-19"), ExpectedSourceBucketOwner: aws.String("000000000000"),
@@ -1909,7 +1913,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	listedParts, err := s3c.ListParts(context.Background(), &s3.ListPartsInput{
 		Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, MaxParts: aws.Int32(1),
 	})
-	if err != nil || len(listedParts.Parts) != 1 || aws.ToInt32(listedParts.Parts[0].PartNumber) != 1 || aws.ToString(listedParts.Parts[0].ETag) != aws.ToString(part.CopyPartResult.ETag) || aws.ToString(listedParts.UploadId) != aws.ToString(upload.UploadId) {
+	if err != nil || len(listedParts.Parts) != 1 || aws.ToInt32(listedParts.Parts[0].PartNumber) != 1 || aws.ToString(listedParts.Parts[0].ETag) != aws.ToString(part.CopyPartResult.ETag) || aws.ToString(listedParts.UploadId) != aws.ToString(upload.UploadId) || aws.ToString(listedParts.PartNumberMarker) != "0" || aws.ToString(listedParts.NextPartNumberMarker) != "1" || aws.ToBool(listedParts.IsTruncated) || listedParts.Parts[0].LastModified == nil || listedParts.Parts[0].LastModified.Nanosecond() != 0 {
 		t.Fatalf("list parts: %#v %v", listedParts, err)
 	}
 	completed, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{

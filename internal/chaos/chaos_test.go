@@ -179,6 +179,51 @@ func TestConcurrentSigV4AUnsignedTrailersDoNotCrossContaminate(t *testing.T) {
 	}
 }
 
+func TestConcurrentMalformedAWSChunksDoNotCrossContaminate(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/chunk-errors", nil))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
+	}
+
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			raw := "5\r\nhello\r\n0\r\n\r\n"
+			want := http.StatusOK
+			if i%2 != 0 {
+				raw = "5\r\nhello\r\n"
+				want = http.StatusForbidden
+			}
+			request := httptest.NewRequest(http.MethodPut, "/chunk-errors/object", strings.NewReader(raw))
+			request.Header.Set("Content-Encoding", "aws-chunked")
+			request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+			request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != want {
+				errs <- fmt.Errorf("request %d status %d, want %d", i, recorder.Code, want)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentCrossRegionBucketResolution(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

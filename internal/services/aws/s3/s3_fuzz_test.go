@@ -314,6 +314,40 @@ func FuzzBucketRequestPayment(f *testing.F) {
 	})
 }
 
+func FuzzBucketAccelerateConfiguration(f *testing.F) {
+	for _, seed := range []struct {
+		status string
+		dotted bool
+	}{{"Enabled", false}, {"Suspended", false}, {"", false}, {"Invalid", false}, {"Enabled", true}, {"Invalid", true}} {
+		f.Add(seed.status, seed.dotted)
+	}
+	f.Fuzz(func(t *testing.T, status string, dotted bool) {
+		p := s3.New(spitest.Deps(t))
+		bucket := "accelerate-fuzz"
+		if dotted {
+			bucket = "accelerate.fuzz"
+		}
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+		_, err := invoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": bucket, "AccelerateConfiguration": map[string]any{"Status": status}}, nil)
+		valid := !dotted && (status == "Enabled" || status == "Suspended")
+		if !valid {
+			want := "MalformedXML"
+			if dotted {
+				want = "InvalidRequest"
+			}
+			if fault := asFault(t, err); fault.Code != want {
+				t.Fatalf("status=%q dotted=%v: %#v", status, dotted, fault)
+			}
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		response := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": bucket}, nil)
+		if valid && response.Output["Status"] != status || !valid && len(response.Output) != 0 {
+			t.Fatalf("stored acceleration = %#v", response.Output)
+		}
+	})
+}
+
 func FuzzDeleteBucketEmptiness(f *testing.F) {
 	for _, seed := range []struct {
 		versioned bool

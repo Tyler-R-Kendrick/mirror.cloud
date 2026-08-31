@@ -615,6 +615,50 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given acceleration When changing its status Then S3 validates and persists it", func(t *testing.T) {
+		res := do(http.MethodPut, "/accelerate-bdd", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create accelerate bucket %d", res.StatusCode)
+		}
+		valid := []byte(`<AccelerateConfiguration><Status>Enabled</Status></AccelerateConfiguration>`)
+		res = do(http.MethodPut, "/accelerate-bdd?accelerate", valid, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || len(body) != 0 {
+			t.Fatalf("put acceleration %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/accelerate-bdd?accelerate", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Status>Enabled</Status>")) || bytes.Contains(body, []byte("GetBucketAccelerateConfigurationResult")) {
+			t.Fatalf("get acceleration %d %s", res.StatusCode, body)
+		}
+		invalid := []byte(`<AccelerateConfiguration><Status>Invalid</Status></AccelerateConfiguration>`)
+		res = do(http.MethodPut, "/accelerate-bdd?accelerate", invalid, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("MalformedXML")) {
+			t.Fatalf("invalid acceleration %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/accelerate-bdd?accelerate", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Status>Enabled</Status>")) {
+			t.Fatalf("acceleration after invalid put %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodPut, "/accelerate.with.period", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		res = do(http.MethodPut, "/accelerate.with.period?accelerate", valid, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidRequest")) {
+			t.Fatalf("period bucket acceleration %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given a globally owned bucket When another identity creates it Then ownership errors are returned", func(t *testing.T) {
 		create := func(account, region string) (int, []byte) {
 			t.Helper()

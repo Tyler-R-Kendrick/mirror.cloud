@@ -365,6 +365,53 @@ func TestBucketRequestPayment(t *testing.T) {
 	}
 }
 
+func TestBucketAccelerateConfiguration(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "accelerate"}, nil)
+	if output := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate"}, nil).Output; len(output) != 0 {
+		t.Fatalf("default configuration = %#v", output)
+	}
+	get := func() string {
+		status, _ := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate"}, nil).Output["Status"].(string)
+		return status
+	}
+	for _, status := range []string{"Enabled", "Suspended"} {
+		response := mustInvoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate", "AccelerateConfiguration": map[string]any{"Status": status}}, nil)
+		if len(response.Output) != 0 || get() != status {
+			t.Fatalf("status %q response=%#v got=%q", status, response, get())
+		}
+	}
+	for _, status := range []string{"", "Invalid"} {
+		_, err := invoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate", "AccelerateConfiguration": map[string]any{"Status": status}}, nil)
+		if fault := asFault(t, err); fault.Code != "MalformedXML" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("status %q fault=%#v", status, fault)
+		}
+	}
+	if got := get(); got != "Suspended" {
+		t.Fatalf("invalid put replaced status = %q", got)
+	}
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "accelerate.with.period"}, nil)
+	_, err := invoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate.with.period", "AccelerateConfiguration": map[string]any{"Status": "Enabled"}}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("period bucket fault=%#v", fault)
+	}
+}
+
+func TestBucketAccelerateConfigurationCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "accelerate-characterization"}, nil)
+	before := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization"}, nil)
+	put := mustInvoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization", "AccelerateConfiguration": map[string]any{"Status": "Enabled"}}, nil)
+	after := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization"}, nil)
+	_, invalidErr := invoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization", "AccelerateConfiguration": map[string]any{"Status": "Invalid"}}, nil)
+	invalid := asFault(t, invalidErr)
+	preserved := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization"}, nil)
+	golden.AssertJSON(t, map[string]any{
+		"default": before.Output, "put": put.Output, "get": after.Output,
+		"invalid": map[string]any{"code": invalid.Code, "status": invalid.HTTPStatus}, "preserved": preserved.Output,
+	})
+}
+
 func TestBucketRequestPaymentCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "request-payment-characterization"}, nil)

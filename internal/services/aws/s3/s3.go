@@ -2353,6 +2353,16 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	col := p.col(req, "bktcfg")
 	if strings.HasPrefix(req.Operation, "Put") {
+		if req.Operation == "PutBucketAccelerateConfiguration" {
+			if strings.Contains(b, ".") {
+				return nil, &spi.Fault{Code: "InvalidRequest", Message: "S3 Transfer Acceleration is not supported for buckets with periods (.) in their names", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			status := str(asMap(req.Input["AccelerateConfiguration"])["Status"])
+			if status != "Enabled" && status != "Suspended" {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			req.Input["AccelerateConfiguration"] = map[string]any{"Status": status}
+		}
 		if req.Operation == "PutBucketRequestPayment" {
 			payer := str(asMap(req.Input["RequestPaymentConfiguration"])["Payer"])
 			if payer != "Requester" && payer != "BucketOwner" {
@@ -2433,6 +2443,9 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	_ = json.Unmarshal(raw, &doc)
 	if req.Operation == "GetBucketRequestPayment" {
 		return &spi.Response{Status: 200, Output: map[string]any{"Payer": asMap(doc["RequestPaymentConfiguration"])["Payer"]}}, nil
+	}
+	if req.Operation == "GetBucketAccelerateConfiguration" {
+		return &spi.Response{Status: 200, Output: map[string]any{"Status": asMap(doc["AccelerateConfiguration"])["Status"]}}, nil
 	}
 	return &spi.Response{Status: 200, Output: doc}, nil
 }

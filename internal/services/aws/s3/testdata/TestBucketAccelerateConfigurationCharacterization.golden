@@ -1,0 +1,14 @@
+{
+  "default": {},
+  "get": {
+    "Status": "Enabled"
+  },
+  "invalid": {
+    "code": "MalformedXML",
+    "status": 400
+  },
+  "preserved": {
+    "Status": "Enabled"
+  },
+  "put": null
+}

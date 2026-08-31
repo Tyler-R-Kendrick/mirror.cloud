@@ -1491,6 +1491,53 @@ func FuzzListObjectVersionsPagination(f *testing.F) {
 	})
 }
 
+func FuzzListMultipartUploadsMarkers(f *testing.F) {
+	for _, seed := range []struct {
+		max, start uint8
+		invalid    bool
+	}{{1, 0, false}, {2, 1, false}, {5, 4, false}, {1, 2, true}} {
+		f.Add(seed.max, seed.start, seed.invalid)
+	}
+	f.Fuzz(func(t *testing.T, maxSeed, startSeed uint8, invalid bool) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-list-fuzz"}, nil)
+		for range 5 {
+			mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-list-fuzz", "Key": "prefix/key"}, nil)
+		}
+		all := asSliceForTest(mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "multipart-list-fuzz", "Prefix": "prefix/"}, nil).Output["Uploads"])
+		start, maxUploads := int(startSeed)%len(all), int(maxSeed%5)+1
+		input := map[string]any{"Bucket": "multipart-list-fuzz", "Prefix": "prefix/", "MaxUploads": maxUploads}
+		if start > 0 {
+			input["KeyMarker"] = "prefix/key"
+			input["UploadIdMarker"] = asMapForTest(all[start-1])["UploadId"]
+		}
+		if invalid {
+			input["KeyMarker"] = "wrong"
+			input["UploadIdMarker"] = asMapForTest(all[start])["UploadId"]
+			_, err := invoke(t, p, "ListMultipartUploads", input, nil)
+			fault := asFault(t, err)
+			if fault.Code != "InvalidArgument" || fault.Message != "Invalid uploadId marker" || fault.Fields["ArgumentName"] != "upload-id-marker" {
+				t.Fatalf("invalid marker fault = %#v", fault)
+			}
+			return
+		}
+		page := mustInvoke(t, p, "ListMultipartUploads", input, nil).Output
+		got := asSliceForTest(page["Uploads"])
+		end := min(start+maxUploads, len(all))
+		if len(got) != end-start || page["IsTruncated"] != (end < len(all)) {
+			t.Fatalf("start=%d max=%d page=%#v", start, maxUploads, page)
+		}
+		for index := range got {
+			if asMapForTest(got[index])["UploadId"] != asMapForTest(all[start+index])["UploadId"] {
+				t.Fatalf("upload %d = %#v want %#v", index, got[index], all[start+index])
+			}
+		}
+		if len(got) > 0 && (page["NextKeyMarker"] != "prefix/key" || page["NextUploadIdMarker"] != asMapForTest(got[len(got)-1])["UploadId"]) {
+			t.Fatalf("next markers = %#v", page)
+		}
+	})
+}
+
 func FuzzDeleteObjectVersionRestoration(f *testing.F) {
 	f.Add("first", "second", "third", uint8(2))
 	f.Add("", "same", "same", uint8(1))

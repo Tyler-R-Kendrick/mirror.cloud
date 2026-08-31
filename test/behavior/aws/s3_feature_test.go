@@ -200,6 +200,37 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given multipart uploads When listing pages Then markers match LocalStack", func(t *testing.T) {
+		res := do(http.MethodPut, "/multipart-list-bdd", nil, "")
+		res.Body.Close()
+		create := func(key string) string {
+			t.Helper()
+			response := do(http.MethodPost, "/multipart-list-bdd/"+key+"?uploads", nil, "")
+			defer response.Body.Close()
+			var output struct {
+				UploadID string `xml:"UploadId"`
+			}
+			if response.StatusCode != http.StatusOK || xml.NewDecoder(response.Body).Decode(&output) != nil || output.UploadID == "" {
+				t.Fatalf("create multipart upload %q: %s", key, response.Status)
+			}
+			return output.UploadID
+		}
+		firstID := create("folder/a/one")
+		create("folder/file1")
+		res = do(http.MethodGet, "/multipart-list-bdd?uploads&prefix=folder%2F&delimiter=%2F&max-uploads=1", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>folder/a/</Prefix></CommonPrefixes>")) || !bytes.Contains(body, []byte("<IsTruncated>true</IsTruncated>")) || !bytes.Contains(body, []byte("<NextKeyMarker></NextKeyMarker>")) || !bytes.Contains(body, []byte("<NextUploadIdMarker></NextUploadIdMarker>")) {
+			t.Fatalf("first multipart page %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/multipart-list-bdd?uploads&key-marker=wrong&upload-id-marker="+url.QueryEscape(firstID), nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(body, []byte("<Message>Invalid uploadId marker</Message>")) || !bytes.Contains(body, []byte("<ArgumentName>upload-id-marker</ArgumentName>")) {
+			t.Fatalf("mismatched multipart marker %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given an expired presigned URL When requested Then S3 returns a modeled access denial", func(t *testing.T) {
 		request, err := http.NewRequest(http.MethodGet, ts.URL+"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F19691231%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=19691231T235900Z&X-Amz-Expires=30&X-Amz-SignedHeaders=host&X-Amz-Signature=00", nil)
 		if err != nil {

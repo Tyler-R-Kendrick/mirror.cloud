@@ -356,6 +356,70 @@ func TestConcurrentListObjectVersionsRemainsPageable(t *testing.T) {
 	}
 }
 
+func TestConcurrentListMultipartUploadsRemainsPageable(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "multipart-list-chaos"}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-list-chaos", "Key": "prefix/key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := created.Output["UploadId"]
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			switch i % 4 {
+			case 0:
+				_, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-list-chaos", "Key": "prefix/key"})
+				errs <- err
+			case 1:
+				response, err := call("ListMultipartUploads", map[string]any{"Bucket": "multipart-list-chaos", "Prefix": "prefix/", "MaxUploads": 3})
+				if err != nil {
+					errs <- err
+					return
+				}
+				uploads := response.Output["Uploads"].([]any)
+				if len(uploads) == 0 || len(uploads) > 3 || response.Output["NextKeyMarker"] != "prefix/key" || response.Output["NextUploadIdMarker"] != uploads[len(uploads)-1].(map[string]any)["UploadId"] {
+					errs <- fmt.Errorf("multipart page = %#v", response.Output)
+					return
+				}
+				errs <- nil
+			case 2:
+				_, err := call("ListMultipartUploads", map[string]any{"Bucket": "multipart-list-chaos", "KeyMarker": "prefix/key", "UploadIdMarker": marker, "MaxUploads": 3})
+				errs <- err
+			case 3:
+				_, err := call("ListMultipartUploads", map[string]any{"Bucket": "multipart-list-chaos", "KeyMarker": "wrong", "UploadIdMarker": marker})
+				var fault *spi.Fault
+				if !errors.As(err, &fault) || fault.Code != "InvalidArgument" || fault.Message != "Invalid uploadId marker" {
+					errs <- fmt.Errorf("mismatched marker = %v", err)
+					return
+				}
+				errs <- nil
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	response, err := call("ListMultipartUploads", map[string]any{"Bucket": "multipart-list-chaos", "Prefix": "prefix/"})
+	if uploads := response.Output["Uploads"].([]any); err != nil || len(uploads) != 17 {
+		t.Fatalf("final multipart uploads = %#v, err=%v", response, err)
+	}
+}
+
 func TestConcurrentBodyReadFailuresLeaveNoPartialObjects(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

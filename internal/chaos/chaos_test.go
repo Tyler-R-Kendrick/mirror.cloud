@@ -1017,6 +1017,51 @@ func TestConcurrentBucketWebsiteRemainsValid(t *testing.T) {
 	}
 }
 
+func TestConcurrentBucketLifecycleRemainsValid(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "lifecycle-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			filter := map[string]any{"Prefix": fmt.Sprintf("objects/%d/", n)}
+			if n%2 != 0 {
+				filter["ObjectSizeGreaterThan"] = n
+			}
+			rules := []any{map[string]any{"ID": fmt.Sprintf("rule-%d", n), "Filter": filter, "Status": "Enabled", "Expiration": map[string]any{"Days": 1}}}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutBucketLifecycleConfiguration", Input: map[string]any{"Bucket": "lifecycle-chaos", "LifecycleConfiguration": map[string]any{"Rules": rules}}})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	successes := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "MalformedXML" {
+			t.Fatalf("concurrent lifecycle put: %v", err)
+		}
+	}
+	if successes != 16 {
+		t.Fatalf("successful lifecycle puts = %d, want 16", successes)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBucketLifecycleConfiguration", Input: map[string]any{"Bucket": "lifecycle-chaos"}})
+	rules, _ := response.Output["Rules"].([]any)
+	if err != nil || len(rules) != 1 || !strings.HasPrefix(rules[0].(map[string]any)["ID"].(string), "rule-") {
+		t.Fatalf("persisted concurrent lifecycle = %#v, err=%v", response, err)
+	}
+}
+
 func TestConcurrentBucketNotificationsRemainValid(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

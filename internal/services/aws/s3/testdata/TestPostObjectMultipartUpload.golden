@@ -6,6 +6,9 @@
     "Location": [
       "http://s3.test/post-object/uploads/hello%20world.txt"
     ],
+    "X-Amz-Expiration": [
+      "expiry-date=\"Sat, 03 Jan 1970 00:00:00 GMT\", rule-id=\"post\""
+    ],
     "X-Amz-Server-Side-Encryption": [
       "AES256"
     ]

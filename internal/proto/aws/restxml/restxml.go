@@ -395,6 +395,11 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 			parseXMLInput(op.Name, b, in)
 		}
 	}
+	if op.Name == "PutBucketLifecycleConfiguration" {
+		if value := r.Header.Get("x-amz-transition-default-minimum-object-size"); value != "" {
+			in["TransitionDefaultMinimumObjectSize"] = value
+		}
+	}
 	return req, nil
 }
 
@@ -859,8 +864,159 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 		in["ReplicationConfiguration"] = map[string]any{"Role": configuration.Role, "Rules": rules}
 	case "PutBucketPolicy":
 		in["Policy"] = string(raw)
-	case "PutBucketLifecycleConfiguration",
-		"PutBucketEncryption", "PutBucketAcl", "PutObjectAcl":
+	case "PutBucketLifecycleConfiguration":
+		type tag struct {
+			Key   string `xml:"Key"`
+			Value string `xml:"Value"`
+		}
+		type andFilter struct {
+			Prefix                *string `xml:"Prefix"`
+			Tags                  []tag   `xml:"Tag"`
+			ObjectSizeGreaterThan *int64  `xml:"ObjectSizeGreaterThan"`
+			ObjectSizeLessThan    *int64  `xml:"ObjectSizeLessThan"`
+		}
+		type filter struct {
+			Prefix                *string    `xml:"Prefix"`
+			Tag                   *tag       `xml:"Tag"`
+			And                   *andFilter `xml:"And"`
+			ObjectSizeGreaterThan *int64     `xml:"ObjectSizeGreaterThan"`
+			ObjectSizeLessThan    *int64     `xml:"ObjectSizeLessThan"`
+		}
+		type expiration struct {
+			Date                      *string `xml:"Date"`
+			Days                      *int    `xml:"Days"`
+			ExpiredObjectDeleteMarker *bool   `xml:"ExpiredObjectDeleteMarker"`
+		}
+		type transition struct {
+			Date         *string `xml:"Date"`
+			Days         *int    `xml:"Days"`
+			StorageClass string  `xml:"StorageClass"`
+		}
+		type noncurrentTransition struct {
+			NewerNoncurrentVersions *int   `xml:"NewerNoncurrentVersions"`
+			NoncurrentDays          *int   `xml:"NoncurrentDays"`
+			StorageClass            string `xml:"StorageClass"`
+		}
+		type noncurrentExpiration struct {
+			NewerNoncurrentVersions *int `xml:"NewerNoncurrentVersions"`
+			NoncurrentDays          *int `xml:"NoncurrentDays"`
+		}
+		var configuration struct {
+			XMLName xml.Name
+			Rules   []struct {
+				ID                           *string                `xml:"ID"`
+				Prefix                       *string                `xml:"Prefix"`
+				Filter                       *filter                `xml:"Filter"`
+				Status                       *string                `xml:"Status"`
+				Expiration                   *expiration            `xml:"Expiration"`
+				Transitions                  []transition           `xml:"Transition"`
+				NoncurrentVersionTransitions []noncurrentTransition `xml:"NoncurrentVersionTransition"`
+				NoncurrentVersionExpiration  *noncurrentExpiration  `xml:"NoncurrentVersionExpiration"`
+				AbortIncompleteMultipart     *struct {
+					DaysAfterInitiation *int `xml:"DaysAfterInitiation"`
+				} `xml:"AbortIncompleteMultipartUpload"`
+			} `xml:"Rule"`
+		}
+		if xml.Unmarshal(raw, &configuration) != nil || configuration.XMLName.Local != "LifecycleConfiguration" {
+			in["_body"] = string(raw)
+			return
+		}
+		addInt := func(target map[string]any, key string, value *int) {
+			if value != nil {
+				target[key] = *value
+			}
+		}
+		addInt64 := func(target map[string]any, key string, value *int64) {
+			if value != nil {
+				target[key] = *value
+			}
+		}
+		addString := func(target map[string]any, key string, value *string) {
+			if value != nil {
+				target[key] = *value
+			}
+		}
+		convertTags := func(source []tag) []any {
+			values := make([]any, 0, len(source))
+			for _, item := range source {
+				values = append(values, map[string]any{"Key": item.Key, "Value": item.Value})
+			}
+			return values
+		}
+		rules := make([]any, 0, len(configuration.Rules))
+		for _, source := range configuration.Rules {
+			rule := map[string]any{}
+			addString(rule, "ID", source.ID)
+			addString(rule, "Prefix", source.Prefix)
+			addString(rule, "Status", source.Status)
+			if source.Filter != nil {
+				value := map[string]any{}
+				addString(value, "Prefix", source.Filter.Prefix)
+				addInt64(value, "ObjectSizeGreaterThan", source.Filter.ObjectSizeGreaterThan)
+				addInt64(value, "ObjectSizeLessThan", source.Filter.ObjectSizeLessThan)
+				if source.Filter.Tag != nil {
+					value["Tag"] = map[string]any{"Key": source.Filter.Tag.Key, "Value": source.Filter.Tag.Value}
+				}
+				if source.Filter.And != nil {
+					and := map[string]any{}
+					addString(and, "Prefix", source.Filter.And.Prefix)
+					addInt64(and, "ObjectSizeGreaterThan", source.Filter.And.ObjectSizeGreaterThan)
+					addInt64(and, "ObjectSizeLessThan", source.Filter.And.ObjectSizeLessThan)
+					if len(source.Filter.And.Tags) != 0 {
+						and["Tags"] = convertTags(source.Filter.And.Tags)
+					}
+					value["And"] = and
+				}
+				rule["Filter"] = value
+			}
+			if source.Expiration != nil {
+				value := map[string]any{}
+				addString(value, "Date", source.Expiration.Date)
+				addInt(value, "Days", source.Expiration.Days)
+				if source.Expiration.ExpiredObjectDeleteMarker != nil {
+					value["ExpiredObjectDeleteMarker"] = *source.Expiration.ExpiredObjectDeleteMarker
+				}
+				rule["Expiration"] = value
+			}
+			for field, values := range map[string]any{
+				"Transitions": source.Transitions, "NoncurrentVersionTransitions": source.NoncurrentVersionTransitions,
+			} {
+				items := []any{}
+				switch typed := values.(type) {
+				case []transition:
+					for _, item := range typed {
+						value := map[string]any{"StorageClass": item.StorageClass}
+						addString(value, "Date", item.Date)
+						addInt(value, "Days", item.Days)
+						items = append(items, value)
+					}
+				case []noncurrentTransition:
+					for _, item := range typed {
+						value := map[string]any{"StorageClass": item.StorageClass}
+						addInt(value, "NewerNoncurrentVersions", item.NewerNoncurrentVersions)
+						addInt(value, "NoncurrentDays", item.NoncurrentDays)
+						items = append(items, value)
+					}
+				}
+				if len(items) != 0 {
+					rule[field] = items
+				}
+			}
+			if source.NoncurrentVersionExpiration != nil {
+				value := map[string]any{}
+				addInt(value, "NewerNoncurrentVersions", source.NoncurrentVersionExpiration.NewerNoncurrentVersions)
+				addInt(value, "NoncurrentDays", source.NoncurrentVersionExpiration.NoncurrentDays)
+				rule["NoncurrentVersionExpiration"] = value
+			}
+			if source.AbortIncompleteMultipart != nil {
+				value := map[string]any{}
+				addInt(value, "DaysAfterInitiation", source.AbortIncompleteMultipart.DaysAfterInitiation)
+				rule["AbortIncompleteMultipartUpload"] = value
+			}
+			rules = append(rules, rule)
+		}
+		in["LifecycleConfiguration"] = map[string]any{"Rules": rules}
+	case "PutBucketEncryption", "PutBucketAcl", "PutObjectAcl":
 		in["_body"] = string(raw)
 		in["Document"] = string(raw)
 	case "PutBucketVersioning":
@@ -1048,6 +1204,13 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 			b.WriteString("</RoutingRules>")
 		}
 		b.WriteString("</WebsiteConfiguration>")
+		_, err := io.WriteString(w, b.String())
+		return err
+	}
+	if op.Name == "GetBucketLifecycleConfiguration" {
+		b.WriteString(`<LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">`)
+		writeLifecycle(resp.Output, &b)
+		b.WriteString("</LifecycleConfiguration>")
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
@@ -1302,6 +1465,40 @@ func write(v any, b *strings.Builder) {
 	case nil:
 	default:
 		b.WriteString(xmlEscape(fmt.Sprint(t)))
+	}
+}
+
+func writeLifecycle(v any, b *strings.Builder) {
+	switch value := v.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(value))
+		for key := range value {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			tag := map[string]string{
+				"Rules": "Rule", "Tags": "Tag", "Transitions": "Transition",
+				"NoncurrentVersionTransitions": "NoncurrentVersionTransition",
+			}[key]
+			if tag == "" {
+				tag = key
+			}
+			if items, ok := value[key].([]any); ok {
+				for _, item := range items {
+					fmt.Fprintf(b, "<%s>", tag)
+					writeLifecycle(item, b)
+					fmt.Fprintf(b, "</%s>", tag)
+				}
+				continue
+			}
+			fmt.Fprintf(b, "<%s>", tag)
+			writeLifecycle(value[key], b)
+			fmt.Fprintf(b, "</%s>", tag)
+		}
+	case nil:
+	default:
+		b.WriteString(xmlEscape(fmt.Sprint(value)))
 	}
 }
 

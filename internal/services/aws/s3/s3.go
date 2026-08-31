@@ -258,12 +258,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.deleteObjects(ctx, req)
 	case "PutBucketVersioning", "GetBucketVersioning":
 		return p.versioning(ctx, req)
+	case "GetBucketLifecycleConfiguration", "PutBucketLifecycleConfiguration", "DeleteBucketLifecycle":
+		return p.bucketLifecycle(ctx, req)
 	case "GetBucketAcl", "PutBucketAcl", "GetObjectAcl", "PutObjectAcl",
 		"GetBucketPolicy", "PutBucketPolicy", "DeleteBucketPolicy",
 		"GetBucketCors", "PutBucketCors", "DeleteBucketCors",
 		"GetBucketWebsite", "PutBucketWebsite", "DeleteBucketWebsite",
 		"GetBucketLogging", "PutBucketLogging",
-		"GetBucketLifecycleConfiguration", "PutBucketLifecycleConfiguration", "DeleteBucketLifecycle",
 		"GetBucketReplication", "PutBucketReplication", "DeleteBucketReplication",
 		"GetBucketEncryption", "PutBucketEncryption", "DeleteBucketEncryption",
 		"GetBucketObjectLockConfiguration", "PutBucketObjectLockConfiguration",
@@ -1001,6 +1002,9 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		h.Set("x-amz-checksum-type", checksumType)
 	}
 	setObjectEncryptionHeaders(h, metaDoc)
+	if req.Operation == "PutObject" || req.Operation == "PostObject" {
+		p.setLifecycleExpirationHeader(ctx, req, b, key, info.Size, tags, mtime, h)
+	}
 	if status := p.replicateObject(ctx, req, b, key, body, metaDoc, tags); status != "" {
 		metaDoc["replicationStatus"] = status
 		meta, _ = json.Marshal(metaDoc)
@@ -1359,8 +1363,12 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if vid := str(meta["versionId"]); vid != "" {
 		h.Set("x-amz-version-id", vid)
 	}
-	if count := len(p.storedTags(ctx, req, b, key, wantVer)); count > 0 {
+	tags := p.storedTags(ctx, req, b, key, wantVer)
+	if count := len(tags); count > 0 {
 		h.Set("x-amz-tagging-count", strconv.Itoa(count))
+	}
+	if wantVer == "" || p.currentObjectVersion(ctx, req, b, key) == wantVer {
+		p.setLifecycleExpirationHeader(ctx, req, b, key, info.Size, tags, mtime, h)
 	}
 	setObjectEncryptionHeaders(h, meta)
 	if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
@@ -1448,8 +1456,12 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	if version := str(meta["versionId"]); version != "" {
 		h.Set("x-amz-version-id", version)
 	}
-	if count := len(p.storedTags(ctx, req, b, key, wantVer)); count > 0 {
+	tags := p.storedTags(ctx, req, b, key, wantVer)
+	if count := len(tags); count > 0 {
 		h.Set("x-amz-tagging-count", strconv.Itoa(count))
+	}
+	if wantVer == "" {
+		p.setLifecycleExpirationHeader(ctx, req, b, key, info.Size, tags, str(meta["mtime"]), h)
 	}
 	if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
 		setChecksumHeaders(h, meta)
@@ -2349,6 +2361,235 @@ func putGetDel(method, put, get, del string) string {
 	default:
 		return get
 	}
+}
+
+func (p *Pack) bucketLifecycle(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	bucket := str(req.Input["Bucket"])
+	if err := p.requireBucket(ctx, req, bucket); err != nil {
+		return nil, err
+	}
+	key := bucket + "/lifecycle"
+	collection := p.col(req, "bktcfg")
+	if req.Operation == "DeleteBucketLifecycle" {
+		_ = collection.Delete(ctx, key)
+		return &spi.Response{Status: http.StatusNoContent}, nil
+	}
+	if req.Operation == "PutBucketLifecycleConfiguration" {
+		configuration, err := validateLifecycleConfiguration(req.Input["LifecycleConfiguration"])
+		if err != nil {
+			return nil, err
+		}
+		minimumValue, specified := req.Input["TransitionDefaultMinimumObjectSize"]
+		minimum := str(minimumValue)
+		if !specified && req.HTTP != nil {
+			_, specified = req.HTTP.Header[http.CanonicalHeaderKey("x-amz-transition-default-minimum-object-size")]
+			minimum = req.HTTP.Header.Get("x-amz-transition-default-minimum-object-size")
+		}
+		if !specified {
+			minimum = "all_storage_classes_128K"
+		}
+		if minimum != "all_storage_classes_128K" && minimum != "varies_by_storage_class" {
+			return nil, &spi.Fault{Code: "InvalidRequest", Message: "Invalid TransitionDefaultMinimumObjectSize found: " + minimum, HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		document := map[string]any{"Rules": configuration["Rules"], "TransitionDefaultMinimumObjectSize": minimum}
+		raw, _ := json.Marshal(document)
+		_ = collection.Put(ctx, key, raw)
+		headers := http.Header{}
+		headers.Set("x-amz-transition-default-minimum-object-size", minimum)
+		return &spi.Response{Status: http.StatusOK, Headers: headers}, nil
+	}
+	raw, exists, _ := collection.Get(ctx, key)
+	if !exists {
+		return nil, &spi.Fault{Code: "NoSuchLifecycleConfiguration", Message: "The lifecycle configuration does not exist", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": bucket}}
+	}
+	var document map[string]any
+	_ = json.Unmarshal(raw, &document)
+	minimum := str(document["TransitionDefaultMinimumObjectSize"])
+	headers := http.Header{}
+	headers.Set("x-amz-transition-default-minimum-object-size", minimum)
+	return &spi.Response{Status: http.StatusOK, Headers: headers, Output: map[string]any{"Rules": asSlice(document["Rules"])}}, nil
+}
+
+func validateLifecycleConfiguration(value any) (map[string]any, error) {
+	configuration, ok := value.(map[string]any)
+	if !ok {
+		return nil, malformedXML()
+	}
+	rules, ok := configuration["Rules"].([]any)
+	if !ok || len(rules) == 0 {
+		return nil, malformedXML()
+	}
+	for _, value := range rules {
+		rule, ok := value.(map[string]any)
+		if !ok {
+			return nil, malformedXML()
+		}
+		for _, field := range []string{"ID", "Filter", "Status"} {
+			if _, exists := rule[field]; !exists {
+				return nil, malformedXML()
+			}
+		}
+		filter, ok := rule["Filter"].(map[string]any)
+		if !ok || len(filter) > 1 {
+			return nil, malformedXML()
+		}
+		if value, exists := rule["NoncurrentVersionExpiration"]; exists {
+			expiration, ok := value.(map[string]any)
+			if !ok {
+				return nil, malformedXML()
+			}
+			if _, newer := expiration["NewerNoncurrentVersions"]; !newer {
+				if _, days := expiration["NoncurrentDays"]; !days {
+					return nil, malformedXML()
+				}
+			}
+		}
+		if value, exists := rule["Expiration"]; exists {
+			expiration, ok := value.(map[string]any)
+			if !ok {
+				return nil, malformedXML()
+			}
+			if _, marker := expiration["ExpiredObjectDeleteMarker"]; marker && len(expiration) > 1 {
+				return nil, malformedXML()
+			}
+			if value, exists := expiration["Date"]; exists {
+				date, valid := lifecycleDate(value)
+				_, offset := date.Zone()
+				if !valid {
+					return nil, malformedXML()
+				}
+				if date.Hour() != 0 || date.Minute() != 0 || date.Second() != 0 || date.Nanosecond() != 0 || offset != 0 {
+					return nil, &spi.Fault{Code: "InvalidArgument", Message: "'Date' must be at midnight GMT", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "Date", "ArgumentValue": value}}
+				}
+			}
+		}
+		and := asMap(filter["And"])
+		seen := map[string]bool{}
+		for _, value := range asSlice(and["Tags"]) {
+			key := str(asMap(value)["Key"])
+			if seen[key] {
+				return nil, &spi.Fault{Code: "InvalidRequest", Message: "Duplicate Tag Keys are not allowed.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			seen[key] = true
+		}
+	}
+	return configuration, nil
+}
+
+func malformedXML() *spi.Fault {
+	return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+}
+
+func lifecycleDate(value any) (time.Time, bool) {
+	if date, ok := value.(time.Time); ok {
+		return date, true
+	}
+	date, err := time.Parse(time.RFC3339Nano, str(value))
+	return date, err == nil
+}
+
+func (p *Pack) setLifecycleExpirationHeader(ctx context.Context, req *spi.Request, bucket, key string, size int64, tags map[string]string, modified string, headers http.Header) {
+	raw, exists, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/lifecycle")
+	if !exists {
+		return
+	}
+	var configuration map[string]any
+	_ = json.Unmarshal(raw, &configuration)
+	for _, value := range asSlice(configuration["Rules"]) {
+		rule := asMap(value)
+		expiration, configured := rule["Expiration"].(map[string]any)
+		if _, deleteMarker := expiration["ExpiredObjectDeleteMarker"]; !configured || deleteMarker || !lifecycleFilterMatches(asMap(rule["Filter"]), key, size, tags) {
+			continue
+		}
+		var expires time.Time
+		if days := asInt(expiration["Days"]); days != 0 {
+			lastModified, err := http.ParseTime(modified)
+			if err != nil {
+				return
+			}
+			expires = time.Date(lastModified.Year(), lastModified.Month(), lastModified.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, days+1)
+		} else {
+			var ok bool
+			expires, ok = lifecycleDate(expiration["Date"])
+			if !ok {
+				return
+			}
+		}
+		headers.Set("x-amz-expiration", fmt.Sprintf(`expiry-date="%s", rule-id="%s"`, expires.UTC().Format(http.TimeFormat), str(rule["ID"])))
+		return
+	}
+}
+
+func lifecycleFilterMatches(filter map[string]any, key string, size int64, tags map[string]string) bool {
+	if len(filter) == 0 {
+		return true
+	}
+	if value, exists := filter["And"]; exists {
+		and := asMap(value)
+		if len(and) == 0 {
+			return false
+		}
+		for field, value := range and {
+			if !lifecyclePredicateMatches(field, value, key, size, tags) {
+				return false
+			}
+		}
+		return true
+	}
+	for field, value := range filter {
+		return lifecyclePredicateMatches(field, value, key, size, tags)
+	}
+	return false
+}
+
+func lifecyclePredicateMatches(field string, value any, key string, size int64, tags map[string]string) bool {
+	switch field {
+	case "Prefix":
+		return strings.HasPrefix(key, str(value))
+	case "Tag":
+		tag := asMap(value)
+		actual, exists := tags[str(tag["Key"])]
+		return exists && actual == str(tag["Value"])
+	case "ObjectSizeGreaterThan":
+		return size > lifecycleSize(value)
+	case "ObjectSizeLessThan":
+		return size < lifecycleSize(value)
+	case "Tags":
+		if len(tags) == 0 {
+			return false
+		}
+		for _, value := range asSlice(value) {
+			tag := asMap(value)
+			if tags[str(tag["Key"])] != str(tag["Value"]) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func lifecycleSize(value any) int64 {
+	switch size := value.(type) {
+	case int:
+		return int64(size)
+	case int64:
+		return size
+	case float64:
+		return int64(size)
+	case string:
+		parsed, _ := strconv.ParseInt(size, 10, 64)
+		return parsed
+	}
+	return 0
+}
+
+func (p *Pack) currentObjectVersion(ctx context.Context, req *spi.Request, bucket, key string) string {
+	current, exists := p.objectMetadata(ctx, req, bucket, key, "")
+	if !exists {
+		return ""
+	}
+	return str(current["versionId"])
 }
 
 func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, error) {

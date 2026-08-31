@@ -182,6 +182,54 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.GetBucketWebsite(context.Background(), &s3.GetBucketWebsiteInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchWebsiteConfiguration") {
 		t.Fatalf("get deleted bucket website: %v", err)
 	}
+	if _, err := s3c.GetBucketLifecycleConfiguration(context.Background(), &s3.GetBucketLifecycleConfigurationInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchLifecycleConfiguration") {
+		t.Fatalf("default bucket lifecycle: %v", err)
+	}
+	lifecycle := &s3types.BucketLifecycleConfiguration{Rules: []s3types.LifecycleRule{{
+		ID: aws.String("expire-images"), Status: s3types.ExpirationStatusEnabled,
+		Filter:      &s3types.LifecycleRuleFilter{And: &s3types.LifecycleRuleAndOperator{Prefix: aws.String("images/"), Tags: []s3types.Tag{{Key: aws.String("class"), Value: aws.String("temporary")}}}},
+		Expiration:  &s3types.LifecycleExpiration{Days: aws.Int32(7)},
+		Transitions: []s3types.Transition{{Days: aws.Int32(1), StorageClass: s3types.TransitionStorageClassGlacier}},
+	}}}
+	putLifecycle, err := s3c.PutBucketLifecycleConfiguration(context.Background(), &s3.PutBucketLifecycleConfigurationInput{
+		Bucket: aws.String("sdk"), LifecycleConfiguration: lifecycle,
+		TransitionDefaultMinimumObjectSize: s3types.TransitionDefaultMinimumObjectSizeVariesByStorageClass,
+	})
+	if err != nil || putLifecycle.TransitionDefaultMinimumObjectSize != s3types.TransitionDefaultMinimumObjectSizeVariesByStorageClass {
+		t.Fatalf("put bucket lifecycle: %#v %v", putLifecycle, err)
+	}
+	gotLifecycle, err := s3c.GetBucketLifecycleConfiguration(context.Background(), &s3.GetBucketLifecycleConfigurationInput{Bucket: aws.String("sdk")})
+	if err != nil || gotLifecycle.TransitionDefaultMinimumObjectSize != s3types.TransitionDefaultMinimumObjectSizeVariesByStorageClass || len(gotLifecycle.Rules) != 1 || aws.ToString(gotLifecycle.Rules[0].ID) != "expire-images" || gotLifecycle.Rules[0].Filter == nil || gotLifecycle.Rules[0].Filter.And == nil || aws.ToString(gotLifecycle.Rules[0].Filter.And.Prefix) != "images/" || len(gotLifecycle.Rules[0].Transitions) != 1 || gotLifecycle.Rules[0].Transitions[0].StorageClass != s3types.TransitionStorageClassGlacier {
+		t.Fatalf("bucket lifecycle round trip: %#v %v", gotLifecycle, err)
+	}
+	putExpiring, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("images/temporary.txt"), Body: strings.NewReader("photo"), Tagging: aws.String("class=temporary")})
+	if err != nil || !strings.Contains(aws.ToString(putExpiring.Expiration), `rule-id="expire-images"`) {
+		t.Fatalf("put lifecycle expiration: %#v %v", putExpiring, err)
+	}
+	getExpiring, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("images/temporary.txt")})
+	if err != nil || !strings.Contains(aws.ToString(getExpiring.Expiration), `rule-id="expire-images"`) {
+		t.Fatalf("get lifecycle expiration: %#v %v", getExpiring, err)
+	}
+	_ = getExpiring.Body.Close()
+	headExpiring, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String("images/temporary.txt")})
+	if err != nil || !strings.Contains(aws.ToString(headExpiring.Expiration), `rule-id="expire-images"`) {
+		t.Fatalf("head lifecycle expiration: %#v %v", headExpiring, err)
+	}
+	invalidLifecycle := &s3types.BucketLifecycleConfiguration{Rules: []s3types.LifecycleRule{{ID: aws.String("invalid"), Status: s3types.ExpirationStatusEnabled, Filter: &s3types.LifecycleRuleFilter{Prefix: aws.String("a"), Tag: &s3types.Tag{Key: aws.String("k"), Value: aws.String("v")}}}}}
+	if _, err := s3c.PutBucketLifecycleConfiguration(context.Background(), &s3.PutBucketLifecycleConfigurationInput{Bucket: aws.String("sdk"), LifecycleConfiguration: invalidLifecycle}); err == nil || !strings.Contains(err.Error(), "MalformedXML") {
+		t.Fatalf("invalid bucket lifecycle: %v", err)
+	}
+	if gotLifecycle, err = s3c.GetBucketLifecycleConfiguration(context.Background(), &s3.GetBucketLifecycleConfigurationInput{Bucket: aws.String("sdk")}); err != nil || aws.ToString(gotLifecycle.Rules[0].ID) != "expire-images" {
+		t.Fatalf("invalid lifecycle replaced configuration: %#v %v", gotLifecycle, err)
+	}
+	for range 2 {
+		if _, err := s3c.DeleteBucketLifecycle(context.Background(), &s3.DeleteBucketLifecycleInput{Bucket: aws.String("sdk")}); err != nil {
+			t.Fatalf("delete bucket lifecycle: %v", err)
+		}
+	}
+	if _, err := s3c.GetBucketLifecycleConfiguration(context.Background(), &s3.GetBucketLifecycleConfigurationInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchLifecycleConfiguration") {
+		t.Fatalf("get deleted bucket lifecycle: %v", err)
+	}
 	if got, err := s3c.GetBucketNotificationConfiguration(context.Background(), &s3.GetBucketNotificationConfigurationInput{Bucket: aws.String("sdk")}); err != nil || len(got.QueueConfigurations) != 0 || len(got.TopicConfigurations) != 0 || len(got.LambdaFunctionConfigurations) != 0 || got.EventBridgeConfiguration != nil {
 		t.Fatalf("default bucket notifications: %#v %v", got, err)
 	}

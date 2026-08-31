@@ -198,6 +198,31 @@ func TestEncodeObjectLockXML(t *testing.T) {
 	}
 }
 
+func TestLifecycleXML(t *testing.T) {
+	body := `<LifecycleConfiguration><Rule><ID>expire</ID><Filter><And><Prefix>images/</Prefix><Tag><Key>class</Key><Value>temporary</Value></Tag><ObjectSizeGreaterThan>10</ObjectSizeGreaterThan></And></Filter><Status>Enabled</Status><Expiration><Days>7</Days></Expiration><Transition><Days>1</Days><StorageClass>GLACIER</StorageClass></Transition><NoncurrentVersionExpiration><NoncurrentDays>30</NoncurrentDays></NoncurrentVersionExpiration><AbortIncompleteMultipartUpload><DaysAfterInitiation>2</DaysAfterInitiation></AbortIncompleteMultipartUpload></Rule></LifecycleConfiguration>`
+	r := httptest.NewRequest(http.MethodPut, "http://127.0.0.1/b?lifecycle", strings.NewReader(body))
+	r.Header.Set("x-amz-transition-default-minimum-object-size", "varies_by_storage_class")
+	req, err := Codec{}.Decode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "PutBucketLifecycleConfiguration"}, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuration := req.Input["LifecycleConfiguration"].(map[string]any)
+	rules := configuration["Rules"].([]any)
+	rule := rules[0].(map[string]any)
+	and := rule["Filter"].(map[string]any)["And"].(map[string]any)
+	if req.Input["TransitionDefaultMinimumObjectSize"] != "varies_by_storage_class" || rule["ID"] != "expire" || rule["Status"] != "Enabled" || and["Prefix"] != "images/" || and["ObjectSizeGreaterThan"] != int64(10) {
+		t.Fatalf("decoded lifecycle = %#v", req.Input)
+	}
+	w := httptest.NewRecorder()
+	response := &spi.Response{Headers: http.Header{"x-amz-transition-default-minimum-object-size": []string{"varies_by_storage_class"}}, Output: map[string]any{"Rules": rules}}
+	if err := (Codec{}).Encode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "GetBucketLifecycleConfiguration"}, w, response); err != nil {
+		t.Fatal(err)
+	}
+	if w.Header().Get("x-amz-transition-default-minimum-object-size") != "varies_by_storage_class" || !strings.Contains(w.Body.String(), "<LifecycleConfiguration") || strings.Contains(w.Body.String(), "<member>") || !strings.Contains(w.Body.String(), "<Rule>") || !strings.Contains(w.Body.String(), "<Transition>") || !strings.Contains(w.Body.String(), "<Tag>") {
+		t.Fatalf("encoded lifecycle = headers %#v body %q", w.Header(), w.Body.String())
+	}
+}
+
 func TestDecodeCompleteMultipartUploadXML(t *testing.T) {
 	body := `<CompleteMultipartUpload><Part><ETag>"first"</ETag><PartNumber>1</PartNumber></Part><Part><ETag>"third"</ETag><PartNumber>3</PartNumber></Part></CompleteMultipartUpload>`
 	r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/b/k?uploadId=id", strings.NewReader(body))

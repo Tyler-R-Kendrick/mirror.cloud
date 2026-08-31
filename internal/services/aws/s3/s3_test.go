@@ -3568,9 +3568,11 @@ func TestTagValidationAndBucketSemantics(t *testing.T) {
 }
 
 func TestCopyObjectConditions(t *testing.T) {
-	p := s3.New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
 	source := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "source"}, []byte("source"))
+	_ = deps.Clock.Advance(2 * time.Second)
 	etag := source.Headers.Get("ETag")
 	copyObject := func(key string, input map[string]any, headers map[string]string) (*spi.Response, error) {
 		t.Helper()
@@ -3601,6 +3603,7 @@ func TestCopyObjectConditions(t *testing.T) {
 
 	before := time.Unix(-1, 0).UTC().Format(http.TimeFormat)
 	after := time.Unix(1, 0).UTC().Format(http.TimeFormat)
+	farFuture := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat)
 	if _, err := copyObject("matched", nil, map[string]string{
 		"x-amz-copy-source-if-match":            etag,
 		"x-amz-copy-source-if-unmodified-since": before,
@@ -3612,6 +3615,22 @@ func TestCopyObjectConditions(t *testing.T) {
 		"x-amz-copy-source-if-modified-since": before,
 	})
 	wantPrecondition(err)
+	if _, err := copyObject("future-modified", nil, map[string]string{"x-amz-copy-source-if-modified-since": farFuture}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = copyObject("none-mismatch-modified", nil, map[string]string{
+		"x-amz-copy-source-if-none-match":     `"wrong"`,
+		"x-amz-copy-source-if-modified-since": after,
+	})
+	wantPrecondition(err)
+	if _, err := copyObject("match-unmodified", nil, map[string]string{
+		"x-amz-copy-source-if-match":            etag,
+		"x-amz-copy-source-if-none-match":       etag,
+		"x-amz-copy-source-if-modified-since":   before,
+		"x-amz-copy-source-if-unmodified-since": before,
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, test := range []struct {
 		name, header, value string

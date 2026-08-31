@@ -2067,7 +2067,7 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		return nil, err
 	}
 	defer source.body.Close()
-	if err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta["mtime"])); err != nil {
+	if err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta["mtime"]), p.deps.Clock.Now()); err != nil {
 		return nil, err
 	}
 	_, bucketEncrypted, _ := p.col(req, "bktcfg").Get(ctx, source.bucket+"/encryption")
@@ -2184,7 +2184,7 @@ func (p *Pack) uploadPartCopy(ctx context.Context, req *spi.Request) (*spi.Respo
 		return nil, err
 	}
 	defer source.body.Close()
-	if err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta["mtime"])); err != nil {
+	if err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta["mtime"]), p.deps.Clock.Now()); err != nil {
 		return nil, err
 	}
 	req.Body = source.body
@@ -5432,13 +5432,24 @@ func (p *Pack) checkWritePreconditions(ctx context.Context, req *spi.Request, bu
 	return nil
 }
 
-func checkCopySourcePreconditions(req *spi.Request, etag, modified string) error {
+func checkCopySourcePreconditions(req *spi.Request, etag, modified string, now time.Time) error {
 	match := requestCondition(req, "CopySourceIfMatch", "x-amz-copy-source-if-match")
 	if match != "" {
 		if !etagMatches(match, etag) {
 			return preconditionFailed()
 		}
-	} else if value := requestCondition(req, "CopySourceIfUnmodifiedSince", "x-amz-copy-source-if-unmodified-since"); value != "" {
+		if value := requestCondition(req, "CopySourceIfModifiedSince", "x-amz-copy-source-if-modified-since"); value != "" {
+			condition, conditionErr := http.ParseTime(value)
+			modifiedAt, modifiedErr := http.ParseTime(modified)
+			if conditionErr != nil || modifiedErr != nil || condition.After(modifiedAt) {
+				return preconditionFailed()
+			}
+		}
+		if requestCondition(req, "CopySourceIfUnmodifiedSince", "x-amz-copy-source-if-unmodified-since") != "" {
+			return nil
+		}
+	}
+	if value := requestCondition(req, "CopySourceIfUnmodifiedSince", "x-amz-copy-source-if-unmodified-since"); value != "" {
 		if condition, err := http.ParseTime(value); err != nil || sourceModifiedAfter(modified, condition) {
 			return preconditionFailed()
 		}
@@ -5448,8 +5459,9 @@ func checkCopySourcePreconditions(req *spi.Request, etag, modified string) error
 		if etagMatches(noneMatch, etag) {
 			return preconditionFailed()
 		}
-	} else if value := requestCondition(req, "CopySourceIfModifiedSince", "x-amz-copy-source-if-modified-since"); value != "" {
-		if condition, err := http.ParseTime(value); err != nil || !sourceModifiedAfter(modified, condition) {
+	}
+	if value := requestCondition(req, "CopySourceIfModifiedSince", "x-amz-copy-source-if-modified-since"); value != "" {
+		if condition, err := http.ParseTime(value); err != nil || !sourceModifiedAfter(modified, condition) && condition.Before(now) {
 			return preconditionFailed()
 		}
 	}

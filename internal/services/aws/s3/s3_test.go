@@ -5065,11 +5065,18 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "k"}, nil)
 	id, _ := created.Output["UploadId"].(string)
+	empty := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "k", "UploadId": id, "MaxParts": 0}, nil).Output
+	if len(empty["Parts"].([]any)) != 0 || empty["MaxParts"] != 1000 || empty["NextPartNumberMarker"] != 0 || asMapForTest(empty["Initiator"])["ID"] != "123456789012" || asMapForTest(empty["Owner"])["ID"] != "123456789012" {
+		t.Fatalf("empty ListParts %v", empty)
+	}
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "k", "UploadId": id, "PartNumber": 1}, []byte("AAA"))
 	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "k", "UploadId": id}, nil)
 	parts, _ := listed.Output["Parts"].([]any)
-	if len(parts) != 1 || listed.Output["ChecksumAlgorithm"] != "CRC64NVME" || listed.Output["ChecksumType"] != "FULL_OBJECT" {
+	if len(parts) != 1 || listed.Output["ChecksumAlgorithm"] != "CRC64NVME" || listed.Output["ChecksumType"] != "FULL_OBJECT" || listed.Output["NextPartNumberMarker"] != 1 {
 		t.Fatalf("ListParts %v", listed.Output)
+	}
+	if _, err := time.Parse("2006-01-02T15:04:05.000Z", asMapForTest(parts[0])["LastModified"].(string)); err != nil {
+		t.Fatalf("part timestamp = %#v", parts[0])
 	}
 	paged := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "paged", "StorageClass": "STANDARD_IA", "ChecksumAlgorithm": "CRC32"}, nil)
 	pagedID := paged.Output["UploadId"].(string)
@@ -5089,8 +5096,12 @@ func TestListPartsAndMultipartUploads(t *testing.T) {
 	}
 	secondPage := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "paged", "UploadId": pagedID, "PartNumberMarker": 2, "MaxParts": 2}, nil)
 	last := secondPage.Output["Parts"].([]any)[0].(map[string]any)
-	if last["PartNumber"] != 3 || last["LastModified"] == "" || last["ChecksumCRC32"] == nil || secondPage.Output["IsTruncated"] != false || secondPage.Output["PartNumberMarker"] != 2 {
+	if last["PartNumber"] != 3 || last["LastModified"] == "" || last["ChecksumCRC32"] == nil || secondPage.Output["IsTruncated"] != false || secondPage.Output["PartNumberMarker"] != 2 || secondPage.Output["NextPartNumberMarker"] != 3 {
 		t.Fatalf("ListParts second page %v", secondPage.Output)
+	}
+	beyond := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "paged", "UploadId": pagedID, "PartNumberMarker": 10, "MaxParts": 1}, nil).Output
+	if len(beyond["Parts"].([]any)) != 0 || beyond["PartNumberMarker"] != 10 || beyond["NextPartNumberMarker"] != 0 || beyond["IsTruncated"] != false {
+		t.Fatalf("ListParts beyond final part %v", beyond)
 	}
 	for _, input := range []map[string]any{
 		{"Bucket": "bucket", "Key": "paged", "UploadId": "missing"},

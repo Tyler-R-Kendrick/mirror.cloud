@@ -275,9 +275,10 @@ func TestS3PresignedAuthFaultCharacterization(t *testing.T) {
 		status int
 		code   string
 	}{
-		"sigv2":  {"/bucket/key?AWSAccessKeyId=test&Signature=00", http.StatusForbidden, "AccessDenied"},
-		"sigv4":  {"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test&X-Amz-Signature=00&X-Amz-Expires=60&X-Amz-SignedHeaders=host", http.StatusBadRequest, "AuthorizationQueryParametersError"},
-		"sigv4a": {"/bucket/key?X-Amz-Algorithm=AWS4-ECDSA-P256-SHA256&X-Amz-Credential=test%2F20990101%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=00", http.StatusBadRequest, "AuthorizationQueryParametersError"},
+		"malformed": {"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%252F20990101%252Fus-east-1%252Fs3%252Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=00", http.StatusBadRequest, "AuthorizationQueryParametersError"},
+		"sigv2":     {"/bucket/key?AWSAccessKeyId=test&Signature=00", http.StatusForbidden, "AccessDenied"},
+		"sigv4":     {"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test&X-Amz-Signature=00&X-Amz-Expires=60&X-Amz-SignedHeaders=host", http.StatusBadRequest, "AuthorizationQueryParametersError"},
+		"sigv4a":    {"/bucket/key?X-Amz-Algorithm=AWS4-ECDSA-P256-SHA256&X-Amz-Credential=test%2F20990101%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=00", http.StatusBadRequest, "AuthorizationQueryParametersError"},
 	} {
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, tc.target, nil))

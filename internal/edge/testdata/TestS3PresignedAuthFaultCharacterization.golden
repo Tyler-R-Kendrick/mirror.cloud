@@ -1,4 +1,10 @@
 {
+  "malformed": {
+    "code": "AuthorizationQueryParametersError",
+    "content_type": "application/xml",
+    "message": "Error parsing the X-Amz-Credential parameter; the Credential is mal-formed; expecting \"\u003cYOUR-AKID\u003e/YYYYMMDD/REGION/SERVICE/aws4_request\".",
+    "status": 400
+  },
   "sigv2": {
     "code": "AccessDenied",
     "content_type": "application/xml",

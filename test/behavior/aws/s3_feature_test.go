@@ -211,6 +211,45 @@ func TestS3ObjectLifecycle(t *testing.T) {
 				t.Fatalf("%s: %d %s", name, response.StatusCode, body)
 			}
 		}
+		createTrailers, err := http.NewRequest(http.MethodPut, strictServer.URL+"/trailers", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err = http.DefaultClient.Do(createTrailers)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		for name, tc := range map[string]struct {
+			checksum, signature string
+			status              int
+		}{
+			"valid trailer":    {"mnG7TA==", "67f7b779024ca973ddf6705b8ad24ecfc6f79f5242ff1d050fd8f830ae2071aa", http.StatusOK},
+			"tampered trailer": {"AAAAAA==", "67f7b779024ca973ddf6705b8ad24ecfc6f79f5242ff1d050fd8f830ae2071aa", http.StatusForbidden},
+			"bad checksum":     {"AAAAAA==", "0ef78e944cd5e61df18db7d6b99929d6871152b34d021274be44c9b5b113eeda", http.StatusBadRequest},
+		} {
+			raw := "5;chunk-signature=c83b0404927860c2dfacb114cd53dfe5505c5b4ad4dc605cc4e53806d4bb0d74\r\nhello\r\n0;chunk-signature=ffc89ae66d2e00900ad958aa09d8ea91ab7e1cb1938d6f4a5a30821f8fbe297f\r\nx-amz-checksum-crc32c:" + tc.checksum + "\r\nx-amz-trailer-signature:" + tc.signature + "\r\n\r\n"
+			stream, err := http.NewRequest(http.MethodPut, strictServer.URL+"/trailers/object", strings.NewReader(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream.Host = "s3.localhost.localstack.cloud:4566"
+			stream.Header.Set("Content-Encoding", "aws-chunked")
+			stream.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER")
+			stream.Header.Set("X-Amz-Date", "20990101T000000Z")
+			stream.Header.Set("X-Amz-Decoded-Content-Length", "5")
+			stream.Header.Set("X-Amz-Trailer", "x-amz-checksum-crc32c")
+			stream.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20990101/us-east-1/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-trailer,Signature=378380e9501dea596cd83a9661c42fc2603dbd37872ab598316173a4d9244821")
+			response, err = http.DefaultClient.Do(stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ = io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != tc.status {
+				t.Fatalf("%s: %d %s", name, response.StatusCode, body)
+			}
+		}
 		if err := deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), "temporary", []byte("000000000000")); err != nil {
 			t.Fatal(err)
 		}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 	"strings"
 )
@@ -11,14 +12,14 @@ import (
 // deframeAWSChunked unwraps Content-Encoding: aws-chunked bodies.
 // Format: <hex-size>[;chunk-signature=<sig>]\r\n<data>\r\n … trailing 0 chunk.
 func deframeAWSChunked(r io.Reader) ([]byte, error) {
-	body, _, _, err := parseAWSChunked(r)
+	body, _, _, _, err := parseAWSChunked(r)
 	return body, err
 }
 
-func parseAWSChunked(r io.Reader) ([]byte, [][]byte, []string, error) {
+func parseAWSChunked(r io.Reader) ([]byte, [][]byte, []string, http.Header, error) {
 	raw, err := io.ReadAll(r)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	var out bytes.Buffer
 	var chunks [][]byte
@@ -27,7 +28,7 @@ func parseAWSChunked(r io.Reader) ([]byte, [][]byte, []string, error) {
 	for len(rest) > 0 {
 		nl := bytes.Index(rest, []byte("\r\n"))
 		if nl < 0 {
-			return nil, nil, nil, fmt.Errorf("aws-chunked: missing chunk header")
+			return nil, nil, nil, nil, fmt.Errorf("aws-chunked: missing chunk header")
 		}
 		header := string(rest[:nl])
 		rest = rest[nl+2:]
@@ -39,7 +40,7 @@ func parseAWSChunked(r io.Reader) ([]byte, [][]byte, []string, error) {
 				name, value, ok := strings.Cut(extension, "=")
 				if ok && strings.EqualFold(strings.TrimSpace(name), "chunk-signature") {
 					if signature != "" {
-						return nil, nil, nil, fmt.Errorf("aws-chunked: duplicate chunk signature")
+						return nil, nil, nil, nil, fmt.Errorf("aws-chunked: duplicate chunk signature")
 					}
 					signature = strings.TrimSpace(value)
 				}
@@ -51,18 +52,19 @@ func parseAWSChunked(r io.Reader) ([]byte, [][]byte, []string, error) {
 		}
 		n, err := strconv.ParseInt(sizePart, 16, 64)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("aws-chunked: bad size %q: %w", sizePart, err)
+			return nil, nil, nil, nil, fmt.Errorf("aws-chunked: bad size %q: %w", sizePart, err)
 		}
 		if n < 0 {
-			return nil, nil, nil, fmt.Errorf("aws-chunked: bad size %q", sizePart)
+			return nil, nil, nil, nil, fmt.Errorf("aws-chunked: bad size %q", sizePart)
 		}
 		if n == 0 {
 			chunks = append(chunks, nil)
 			signatures = append(signatures, signature)
-			break
+			trailers, err := parseAWSChunkedTrailers(rest)
+			return out.Bytes(), chunks, signatures, trailers, err
 		}
 		if len(rest) < 2 || n > int64(len(rest)-2) {
-			return nil, nil, nil, fmt.Errorf("aws-chunked: truncated chunk")
+			return nil, nil, nil, nil, fmt.Errorf("aws-chunked: truncated chunk")
 		}
 		chunk := bytes.Clone(rest[:n])
 		out.Write(chunk)
@@ -70,9 +72,32 @@ func parseAWSChunked(r io.Reader) ([]byte, [][]byte, []string, error) {
 		signatures = append(signatures, signature)
 		rest = rest[n:]
 		if !bytes.HasPrefix(rest, []byte("\r\n")) {
-			return nil, nil, nil, fmt.Errorf("aws-chunked: missing chunk terminator")
+			return nil, nil, nil, nil, fmt.Errorf("aws-chunked: missing chunk terminator")
 		}
 		rest = rest[2:]
 	}
-	return out.Bytes(), chunks, signatures, nil
+	return out.Bytes(), chunks, signatures, nil, nil
+}
+
+func parseAWSChunkedTrailers(rest []byte) (http.Header, error) {
+	trailers := http.Header{}
+	for {
+		nl := bytes.Index(rest, []byte("\r\n"))
+		if nl < 0 {
+			return nil, fmt.Errorf("aws-chunked: missing trailer terminator")
+		}
+		line := string(rest[:nl])
+		rest = rest[nl+2:]
+		if line == "" {
+			if len(rest) != 0 {
+				return nil, fmt.Errorf("aws-chunked: data after trailers")
+			}
+			return trailers, nil
+		}
+		name, value, ok := strings.Cut(line, ":")
+		if !ok || strings.TrimSpace(name) == "" {
+			return nil, fmt.Errorf("aws-chunked: malformed trailer")
+		}
+		trailers.Add(strings.TrimSpace(name), strings.TrimSpace(value))
+	}
 }

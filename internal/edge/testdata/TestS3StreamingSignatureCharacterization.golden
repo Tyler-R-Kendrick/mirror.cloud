@@ -7,6 +7,21 @@
     "code": "SignatureDoesNotMatch",
     "status": 403
   },
+  "trailer_bad_checksum": {
+    "code": "BadDigest",
+    "status": 400
+  },
+  "trailer_stored": {
+    "body": "hello",
+    "status": 200
+  },
+  "trailer_tampered": {
+    "code": "SignatureDoesNotMatch",
+    "status": 403
+  },
+  "trailer_valid": {
+    "status": 200
+  },
   "valid": {
     "status": 200
   }

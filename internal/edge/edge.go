@@ -77,6 +77,7 @@ func New(cfg config.Config, deps spi.Deps, reg registry.Registry, version string
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var awsChunks [][]byte
 	var awsChunkSignatures []string
+	var awsTrailers http.Header
 	var awsDecodedLength int64
 	awsChunkedDecoded := false
 	if r.Method == http.MethodOptions {
@@ -103,10 +104,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = r.Body.Close()
 		if err == nil {
 			body := raw
-			if deframed, chunks, signatures, err2 := parseAWSChunked(bytes.NewReader(raw)); err2 == nil {
+			if deframed, chunks, signatures, trailers, err2 := parseAWSChunked(bytes.NewReader(raw)); err2 == nil {
 				body = deframed
 				awsChunks = chunks
 				awsChunkSignatures = signatures
+				awsTrailers = trailers
 				awsDecodedLength = int64(len(body))
 				awsChunkedDecoded = true
 			}
@@ -158,7 +160,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fault = identity.VerifyS3Signature(candidate, secret)
 		}
 		if fault == nil {
-			fault = identity.VerifyS3StreamingV4(r, secret, awsChunks, awsChunkSignatures)
+			fault = identity.VerifyS3StreamingV4(r, secret, awsChunks, awsChunkSignatures, awsTrailers)
 		}
 		if fault != nil {
 			s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, fault, rid)
@@ -167,6 +169,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if awsChunkedDecoded {
 		r.ContentLength = awsDecodedLength
+		for name, values := range awsTrailers {
+			if strings.EqualFold(name, "X-Amz-Trailer-Signature") {
+				continue
+			}
+			r.Header[name] = append([]string(nil), values...)
+		}
 	}
 
 	if svc == nil {

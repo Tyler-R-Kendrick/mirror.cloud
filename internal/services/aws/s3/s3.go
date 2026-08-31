@@ -763,10 +763,10 @@ func (p *Pack) route(req *spi.Request) string {
 	case m == http.MethodDelete && key != "":
 		return "DeleteObject"
 	case m == http.MethodGet && key == "":
-		if q.Get("list-type") == "1" {
-			return "ListObjects"
+		if q.Get("list-type") == "2" {
+			return "ListObjectsV2"
 		}
-		return "ListObjectsV2"
+		return "ListObjects"
 	}
 	return req.Operation
 }
@@ -2011,7 +2011,11 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 		}
 		var meta map[string]any
 		_ = json.Unmarshal(kv.Value, &meta)
-		entries = append(entries, entry{value: key, content: map[string]any{"Key": key, "Size": meta["size"], "ETag": meta["etag"], "LastModified": meta["mtime"], "StorageClass": meta["storageClass"]}})
+		modified := str(meta["mtime"])
+		if parsed, err := http.ParseTime(modified); err == nil {
+			modified = parsed.UTC().Format(time.RFC3339)
+		}
+		entries = append(entries, entry{value: key, content: map[string]any{"Key": key, "Size": meta["size"], "ETag": meta["etag"], "LastModified": modified, "StorageClass": meta["storageClass"]}})
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].value < entries[j].value
@@ -2022,9 +2026,18 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 	} else if value, ok := req.Input["max-keys"]; ok {
 		maxKeys = max(0, asInt(value))
 	}
-	marker := str(req.Input["Marker"])
-	continuation := str(req.Input["ContinuationToken"])
-	startAfter := str(req.Input["StartAfter"])
+	marker := str(req.Input["marker"])
+	if marker == "" {
+		marker = str(req.Input["Marker"])
+	}
+	continuation := str(req.Input["continuation-token"])
+	if continuation == "" {
+		continuation = str(req.Input["ContinuationToken"])
+	}
+	startAfter := str(req.Input["start-after"])
+	if startAfter == "" {
+		startAfter = str(req.Input["StartAfter"])
+	}
 	token := marker
 	if req.Operation == "ListObjectsV2" {
 		token = continuation

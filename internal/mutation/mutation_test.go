@@ -30,6 +30,30 @@ func TestMutantsAreKilled(t *testing.T) {
 	}
 	mutants := []mutant{
 		{
+			name: "s3-ignore-select-object-body-read-error",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3_extra.go"),
+			old:  "raw, err := io.ReadAll(rc)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\texpr := str(req.Input[\"Expression\"])",
+			new:  "raw, _ := io.ReadAll(rc)\n\texpr := str(req.Input[\"Expression\"])",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestExtraBodyReadErrorsDoNotCommitPartialData",
+		},
+		{
+			name: "s3-ignore-write-get-object-response-read-error",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3_extra.go"),
+			old:  "var err error\n\t\tbody, err = io.ReadAll(req.Body)\n\t\tif err != nil {\n\t\t\treturn nil, err\n\t\t}\n\t}\n\t_ = p.col(req, \"wgor\")",
+			new:  "body, _ = io.ReadAll(req.Body)\n\t}\n\t_ = p.col(req, \"wgor\")",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestExtraBodyReadErrorsDoNotCommitPartialData",
+		},
+		{
+			name: "s3-ignore-metadata-configuration-read-error",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3_extra.go"),
+			old:  "body, err := io.ReadAll(req.Body)\n\t\tif err != nil {\n\t\t\treturn nil, err\n\t\t}\n\t\tif len(body) > 0 {",
+			new:  "body, _ := io.ReadAll(req.Body)\n\t\tif len(body) > 0 {",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestExtraBodyReadErrorsDoNotCommitPartialData",
+		},
+		{
 			name: "s3-ignore-put-object-body-read-error",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  "body, err = io.ReadAll(req.Body)\n\t\tif err != nil {\n\t\t\treturn nil, err\n\t\t}\n\t}\n\tif checksumType == \"\" {",

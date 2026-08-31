@@ -23,6 +23,18 @@ func VerifyS3Presigned(r *http.Request, secret string) *spi.Fault {
 	return VerifyS3PresignedV2(r, secret)
 }
 
+// VerifyS3SessionToken verifies the temporary credential token on a presigned request.
+func VerifyS3SessionToken(r *http.Request, expected string) *spi.Fault {
+	token := r.URL.Query().Get("X-Amz-Security-Token")
+	if token == "" {
+		token = r.Header.Get("X-Amz-Security-Token")
+	}
+	if subtle.ConstantTimeCompare([]byte(token), []byte(expected)) != 1 {
+		return &spi.Fault{Code: "InvalidToken", Message: "The provided token is malformed or otherwise invalid.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	return nil
+}
+
 // VerifyS3PresignedV4 verifies SigV4 query authentication when present.
 func VerifyS3PresignedV4(r *http.Request, secret string) *spi.Fault {
 	q := r.URL.Query()

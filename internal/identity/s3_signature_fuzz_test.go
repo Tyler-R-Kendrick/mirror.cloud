@@ -36,3 +36,14 @@ func FuzzVerifyS3PresignedV2(f *testing.F) {
 		_ = VerifyS3PresignedV2(request, secret)
 	})
 }
+
+func FuzzVerifyS3SessionToken(f *testing.F) {
+	f.Add("session", "session")
+	f.Fuzz(func(t *testing.T, token, expected string) {
+		request, err := http.NewRequest(http.MethodGet, "https://example.test/key?X-Amz-Security-Token="+url.QueryEscape(token), nil)
+		if err != nil {
+			t.Skip()
+		}
+		_ = VerifyS3SessionToken(request, expected)
+	})
+}

@@ -85,6 +85,20 @@ func mustInvoke(t *testing.T, p *s3.Pack, op string, in map[string]any, body []b
 	return resp
 }
 
+func TestCreateSessionRegistersTemporaryCredential(t *testing.T) {
+	deps := spitest.Deps(t)
+	response, err := invoke(t, s3.New(deps), "CreateSession", map[string]any{"Bucket": "directory-bucket"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, _ := response.Output["Credentials"].(map[string]any)
+	ak, _ := credentials["AccessKeyId"].(string)
+	account, ok, err := deps.Store.Scope("_mirror", "global").Collection("stsk").Get(context.Background(), ak)
+	if err != nil || !ok || string(account) != ident().Account {
+		t.Fatalf("global session credential marker: account=%q ok=%v err=%v", account, ok, err)
+	}
+}
+
 func asFault(t *testing.T, err error) *spi.Fault {
 	t.Helper()
 	f, ok := err.(*spi.Fault)

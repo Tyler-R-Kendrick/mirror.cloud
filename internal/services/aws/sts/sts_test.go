@@ -69,7 +69,8 @@ func TestAssumeRoleARNShape(t *testing.T) {
 }
 
 func TestSessionAndFederationDeterministic(t *testing.T) {
-	p := New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := New(deps)
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	a, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "GetFederationToken", Input: map[string]any{"Name": "bob"}})
 	if err != nil {
@@ -86,7 +87,12 @@ func TestSessionAndFederationDeterministic(t *testing.T) {
 	if a.Output["Credentials"].(map[string]any)["Expiration"] == nil {
 		t.Fatal("fed expiration")
 	}
-	if b.Output["Credentials"].(map[string]any)["AccessKeyId"] == nil {
+	ak, _ := b.Output["Credentials"].(map[string]any)["AccessKeyId"].(string)
+	if ak == "" {
 		t.Fatal("session key")
+	}
+	account, ok, err := deps.Store.Scope("_mirror", "global").Collection("stsk").Get(context.Background(), ak)
+	if err != nil || !ok || string(account) != id.Account {
+		t.Fatalf("global session credential marker: account=%q ok=%v err=%v", account, ok, err)
 	}
 }

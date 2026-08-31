@@ -161,6 +161,19 @@ func TestS3ObjectLifecycle(t *testing.T) {
 				t.Fatalf("%s tampered presign %d %s", name, response.StatusCode, body)
 			}
 		}
+		if err := deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), "temporary", []byte("000000000000")); err != nil {
+			t.Fatal(err)
+		}
+		tokenTarget := "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=temporary%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-Security-Token=wrong&X-Amz-SignedHeaders=host&X-Amz-Signature=" + strings.Repeat("0", 64)
+		response, err = http.Get(strictServer.URL + tokenTarget)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidToken</Code>")) {
+			t.Fatalf("invalid session token %d %s", response.StatusCode, body)
+		}
 	})
 
 	t.Run("Given explicit KMS keys When writing and reading Then S3 validates their regional state", func(t *testing.T) {

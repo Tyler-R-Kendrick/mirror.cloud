@@ -106,13 +106,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	id := identity.Parse(r, s.cfg.DefaultAccount, s.cfg.DefaultRegion, s.deps.Clock.Now())
 	svc := s.demux(r)
 	w.Header().Set("x-mirror-request-id", rid)
 	if svc != nil && svc.ID == "aws.s3" {
 		w.Header().Set("x-amz-request-id", rid)
 		w.Header().Set("x-amz-id-2", "mirror-"+rid)
+		if fault := identity.PresignedAuthFault(r); fault != nil {
+			s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, fault, rid)
+			return
+		}
 	}
+	id := identity.Parse(r, s.cfg.DefaultAccount, s.cfg.DefaultRegion, s.deps.Clock.Now())
 	if identity.Expired(id) {
 		if svc != nil && svc.ID == "aws.s3" {
 			fields := map[string]any{"ServerTime": s.deps.Clock.Now().UTC().Format(time.RFC3339)}

@@ -14962,6 +14962,22 @@ var mutants = []mutant{
 		pkg:  "./internal/identity",
 		run:  "TestParseAndExpiry",
 	},
+	{
+		name: "s3-accept-incomplete-presigned-auth",
+		file: filepath.Join("internal", "edge", "edge.go"),
+		old:  `if fault := identity.PresignedAuthFault(r); fault != nil {`,
+		new:  `if fault := identity.PresignedAuthFault(r); false {`,
+		pkg:  "./internal/edge",
+		run:  "TestS3PresignedAuthFaultCharacterization",
+	},
+	{
+		name: "identity-accept-incomplete-presigned-auth",
+		file: filepath.Join("internal", "identity", "identity.go"),
+		old:  `if present && !complete {`,
+		new:  `if false {`,
+		pkg:  "./internal/identity",
+		run:  "TestPresignedAuthFault",
+	},
 }
 
 func TestMutantsAreKilled(t *testing.T) {

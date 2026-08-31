@@ -86,6 +86,30 @@ func PresignedExpiry(r *http.Request) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// PresignedAuthFault rejects incomplete SigV2 or SigV4 query authentication.
+func PresignedAuthFault(r *http.Request) *spi.Fault {
+	q := r.URL.Query()
+	groups := []struct {
+		names         []string
+		code, message string
+		status        int
+	}{
+		{[]string{"X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Signature", "X-Amz-Date", "X-Amz-SignedHeaders", "X-Amz-Expires"}, "AuthorizationQueryParametersError", "Query-string authentication version 4 requires the X-Amz-Algorithm, X-Amz-Credential, X-Amz-Signature, X-Amz-Date, X-Amz-SignedHeaders, and X-Amz-Expires parameters.", http.StatusBadRequest},
+		{[]string{"Signature", "Expires", "AWSAccessKeyId"}, "AccessDenied", "Query-string authentication requires the Signature, Expires and AWSAccessKeyId parameters", http.StatusForbidden},
+	}
+	for _, group := range groups {
+		present, complete := false, true
+		for _, name := range group.names {
+			present = present || q.Get(name) != ""
+			complete = complete && q.Get(name) != ""
+		}
+		if present && !complete {
+			return &spi.Fault{Code: group.code, Message: group.message, HTTPStatus: group.status, Fault: "client"}
+		}
+	}
+	return nil
+}
+
 func parseCredential(h string) (akid, region string) {
 	// Authorization: AWS4-HMAC-SHA256 Credential=<AKID>/<date>/<region>/<service>/aws4_request, ...
 	// or raw query credential.

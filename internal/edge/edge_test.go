@@ -257,6 +257,43 @@ func TestS3PresignedExpiryFaultCharacterization(t *testing.T) {
 	golden.AssertJSON(t, results)
 }
 
+func TestS3PresignedAuthFaultCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	results := map[string]any{}
+	for name, tc := range map[string]struct {
+		target string
+		status int
+		code   string
+	}{
+		"sigv2": {"/bucket/key?AWSAccessKeyId=test&Signature=00", http.StatusForbidden, "AccessDenied"},
+		"sigv4": {"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test&X-Amz-Signature=00&X-Amz-Expires=60&X-Amz-SignedHeaders=host", http.StatusBadRequest, "AuthorizationQueryParametersError"},
+	} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, tc.target, nil))
+		var fault struct {
+			Code      string `xml:"Code"`
+			Message   string `xml:"Message"`
+			RequestID string `xml:"RequestId"`
+			HostID    string `xml:"HostId"`
+		}
+		if err := xml.Unmarshal(recorder.Body.Bytes(), &fault); err != nil {
+			t.Fatalf("%s decode: %v: %s", name, err, recorder.Body.String())
+		}
+		if recorder.Code != tc.status || fault.Code != tc.code || fault.Message == "" || fault.RequestID == "" || fault.HostID == "" {
+			t.Fatalf("%s response: status=%d headers=%#v fault=%#v", name, recorder.Code, recorder.Header(), fault)
+		}
+		results[name] = map[string]any{"code": fault.Code, "content_type": recorder.Header().Get("Content-Type"), "message": fault.Message, "status": recorder.Code}
+	}
+	golden.AssertJSON(t, results)
+}
+
 func FuzzS3ResponseEnvelope(f *testing.F) {
 	deps := spitest.Deps(f)
 	cfg := config.Default()

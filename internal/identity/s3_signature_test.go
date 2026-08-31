@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -67,6 +68,33 @@ func TestVerifyS3AuthorizationV4RejectsMalformed(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer token")
 	if fault := VerifyS3AuthorizationV4(request, "unused"); fault != nil {
 		t.Fatalf("unrelated authorization rejected: %#v", fault)
+	}
+}
+
+func TestVerifyS3StreamingV4AWSExample(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPut, "https://s3.amazonaws.com/examplebucket/chunkObject.txt", nil)
+	request.ContentLength = 66824
+	request.Header.Set("Content-Encoding", "aws-chunked")
+	request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+	request.Header.Set("X-Amz-Date", "20130524T000000Z")
+	request.Header.Set("X-Amz-Decoded-Content-Length", "66560")
+	request.Header.Set("X-Amz-Storage-Class", "REDUCED_REDUNDANCY")
+	request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request,SignedHeaders=content-encoding;content-length;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-storage-class,Signature=4f232c4386841ef735655705268965c44a0e4690baa4adea153f7db9fa80a0a9")
+	secret := "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+	if fault := VerifyS3AuthorizationV4(request, secret); fault != nil {
+		t.Fatalf("official AWS seed signature rejected: %#v", fault)
+	}
+	chunks := [][]byte{bytes.Repeat([]byte{'a'}, 64*1024), bytes.Repeat([]byte{'a'}, 1024), nil}
+	signatures := []string{"ad80c730a21e5b8d04586a2213dd63b9a0e99e0e2307b0ade35a65485a288648", "0055627c9e194cb4542bae2aa5492e3c1575bbb81b612b7d234b86a503ef5497", "b6c6ea8a5354eaf15b3cb7646744f4275b71ea724fed81ceb9323e279d449df9"}
+	if fault := VerifyS3StreamingV4(request, secret, chunks, signatures); fault != nil {
+		t.Fatalf("official AWS chunk signatures rejected: %#v", fault)
+	}
+	if fault := VerifyS3StreamingV4(request, secret, chunks[:2], signatures[:2]); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("stream without final chunk accepted: %#v", fault)
+	}
+	chunks[1][0] = 'b'
+	if fault := VerifyS3StreamingV4(request, secret, chunks, signatures); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("tampered signed chunk accepted: %#v", fault)
 	}
 }
 

@@ -15146,6 +15146,46 @@ var mutants = []mutant{
 		pkg:  "./internal/identity",
 		run:  "TestVerifyS3AuthorizationV4AWSExample",
 	},
+	{
+		name: "identity-accept-bad-streaming-v4-signature",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  `if !s3V4SignatureMatches(signatures[i], want) {`,
+		new:  `if false {`,
+		pkg:  "./internal/identity",
+		run:  "TestVerifyS3StreamingV4AWSExample",
+	},
+	{
+		name: "identity-accept-streaming-v4-without-final-chunk",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  `|| len(chunks[len(chunks)-1]) != 0`,
+		new:  `|| false`,
+		pkg:  "./internal/identity",
+		run:  "TestVerifyS3StreamingV4AWSExample",
+	},
+	{
+		name: "edge-skip-streaming-v4-signatures",
+		file: filepath.Join("internal", "edge", "edge.go"),
+		old:  `fault = identity.VerifyS3StreamingV4(r, secret, awsChunks, awsChunkSignatures)`,
+		new:  `fault = nil`,
+		pkg:  "./internal/edge",
+		run:  "TestS3StreamingSignatureCharacterization",
+	},
+	{
+		name: "edge-drop-streaming-v4-chunk-signature",
+		file: filepath.Join("internal", "edge", "chunked.go"),
+		old:  "chunks = append(chunks, chunk)\n\t\tsignatures = append(signatures, signature)",
+		new:  "chunks = append(chunks, chunk)\n\t\tsignatures = append(signatures, \"\")",
+		pkg:  "./internal/edge",
+		run:  "TestS3StreamingSignatureCharacterization",
+	},
+	{
+		name: "edge-accept-streaming-chunk-without-terminator",
+		file: filepath.Join("internal", "edge", "chunked.go"),
+		old:  `if !bytes.HasPrefix(rest, []byte("\r\n")) {`,
+		new:  `if false {`,
+		pkg:  "./internal/edge",
+		run:  "TestParseAWSChunkedSignatures",
+	},
 }
 
 func TestMutantsAreKilled(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -35,31 +36,13 @@ func VerifyS3Presigned(r *http.Request, secret string) *spi.Fault {
 
 // VerifyS3AuthorizationV4 verifies SigV4 Authorization-header authentication when present.
 func VerifyS3AuthorizationV4(r *http.Request, secret string) *spi.Fault {
-	const algorithm = "AWS4-HMAC-SHA256"
-	authorization := r.Header.Get("Authorization")
-	if !strings.HasPrefix(authorization, algorithm) {
+	credential, signedHeaders, signature, present, ok := s3AuthorizationV4(r)
+	if !present {
 		return nil
 	}
-	rest, ok := strings.CutPrefix(authorization, algorithm+" ")
 	if !ok {
 		return signatureFault()
 	}
-	fields := map[string]string{}
-	for _, part := range strings.Split(rest, ",") {
-		name, value, ok := strings.Cut(strings.TrimSpace(part), "=")
-		if !ok || value == "" || fields[name] != "" {
-			return signatureFault()
-		}
-		fields[name] = value
-	}
-	if len(fields) != 3 || fields["Credential"] == "" || fields["SignedHeaders"] == "" || fields["Signature"] == "" {
-		return signatureFault()
-	}
-	credential := strings.Split(fields["Credential"], "/")
-	if len(credential) != 5 || credential[3] != "s3" || credential[4] != "aws4_request" {
-		return signatureFault()
-	}
-	signedHeaders := fields["SignedHeaders"]
 	canonicalHeaders, ok := signedHeaderValues(r, strings.Split(signedHeaders, ";"))
 	if !ok {
 		return signatureFault()
@@ -73,7 +56,70 @@ func VerifyS3AuthorizationV4(r *http.Request, secret string) *spi.Fault {
 		return signatureFault()
 	}
 	canonicalRequest := strings.Join([]string{r.Method, canonicalPath(r.URL), canonicalQuery(r.URL.Query()), canonicalHeaders, signedHeaders, payloadHash}, "\n")
-	return verifyS3V4Signature(credential, date, canonicalRequest, fields["Signature"], secret)
+	return verifyS3V4Signature(credential, date, canonicalRequest, signature, secret)
+}
+
+// VerifyS3StreamingV4 verifies the chained signatures of a signed aws-chunked payload.
+func VerifyS3StreamingV4(r *http.Request, secret string, chunks [][]byte, signatures []string) *spi.Fault {
+	if r.Header.Get("X-Amz-Content-Sha256") != "STREAMING-AWS4-HMAC-SHA256-PAYLOAD" {
+		return nil
+	}
+	credential, _, previous, present, ok := s3AuthorizationV4(r)
+	decodedLength, err := strconv.ParseInt(r.Header.Get("X-Amz-Decoded-Content-Length"), 10, 64)
+	if !present || !ok || !strings.Contains(strings.ToLower(r.Header.Get("Content-Encoding")), "aws-chunked") || decodedLength < 0 || err != nil || len(chunks) == 0 || len(chunks) != len(signatures) || len(chunks[len(chunks)-1]) != 0 {
+		return signatureFault()
+	}
+	var actualLength int64
+	for _, chunk := range chunks {
+		actualLength += int64(len(chunk))
+	}
+	if actualLength != decodedLength {
+		return signatureFault()
+	}
+	date := r.Header.Get("X-Amz-Date")
+	scope := strings.Join(credential[1:], "/")
+	signingKey := s3V4SigningKey(credential, secret)
+	emptyHash := sha256.Sum256(nil)
+	emptyHex := hex.EncodeToString(emptyHash[:])
+	for i, chunk := range chunks {
+		chunkHash := sha256.Sum256(chunk)
+		stringToSign := strings.Join([]string{"AWS4-HMAC-SHA256-PAYLOAD", date, scope, previous, emptyHex, hex.EncodeToString(chunkHash[:])}, "\n")
+		want := hmacSHA256(signingKey, stringToSign)
+		if !s3V4SignatureMatches(signatures[i], want) {
+			return signatureFault()
+		}
+		previous = signatures[i]
+	}
+	return nil
+}
+
+func s3AuthorizationV4(r *http.Request) (credential []string, signedHeaders, signature string, present, ok bool) {
+	const algorithm = "AWS4-HMAC-SHA256"
+	authorization := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authorization, algorithm) {
+		return nil, "", "", false, true
+	}
+	present = true
+	rest, valid := strings.CutPrefix(authorization, algorithm+" ")
+	if !valid {
+		return nil, "", "", true, false
+	}
+	fields := map[string]string{}
+	for _, part := range strings.Split(rest, ",") {
+		name, value, found := strings.Cut(strings.TrimSpace(part), "=")
+		if !found || value == "" || fields[name] != "" {
+			return nil, "", "", true, false
+		}
+		fields[name] = value
+	}
+	if len(fields) != 3 || fields["Credential"] == "" || fields["SignedHeaders"] == "" || fields["Signature"] == "" {
+		return nil, "", "", true, false
+	}
+	credential = strings.Split(fields["Credential"], "/")
+	if len(credential) != 5 || credential[3] != "s3" || credential[4] != "aws4_request" {
+		return nil, "", "", true, false
+	}
+	return credential, fields["SignedHeaders"], fields["Signature"], true, true
 }
 
 // VerifyS3SessionToken verifies the temporary credential token on a presigned request.
@@ -121,16 +167,24 @@ func verifyS3V4Signature(credential []string, date, canonicalRequest, signature,
 	scope := strings.Join(credential[1:], "/")
 	requestHash := sha256.Sum256([]byte(canonicalRequest))
 	stringToSign := strings.Join([]string{"AWS4-HMAC-SHA256", date, scope, hex.EncodeToString(requestHash[:])}, "\n")
-	dateKey := hmacSHA256([]byte("AWS4"+secret), credential[1])
-	regionKey := hmacSHA256(dateKey, credential[2])
-	serviceKey := hmacSHA256(regionKey, credential[3])
-	signingKey := hmacSHA256(serviceKey, "aws4_request")
+	signingKey := s3V4SigningKey(credential, secret)
 	want := hmacSHA256(signingKey, stringToSign)
-	got, err := hex.DecodeString(signature)
-	if err != nil || len(got) != len(want) || subtle.ConstantTimeCompare(got, want) != 1 {
+	if !s3V4SignatureMatches(signature, want) {
 		return signatureFault()
 	}
 	return nil
+}
+
+func s3V4SignatureMatches(signature string, want []byte) bool {
+	got, err := hex.DecodeString(signature)
+	return err == nil && len(got) == len(want) && subtle.ConstantTimeCompare(got, want) == 1
+}
+
+func s3V4SigningKey(credential []string, secret string) []byte {
+	dateKey := hmacSHA256([]byte("AWS4"+secret), credential[1])
+	regionKey := hmacSHA256(dateKey, credential[2])
+	serviceKey := hmacSHA256(regionKey, credential[3])
+	return hmacSHA256(serviceKey, "aws4_request")
 }
 
 // VerifyS3PresignedV2 verifies SigV2 query authentication when present.
@@ -222,6 +276,8 @@ func signedHeaderValues(r *http.Request, names []string) (string, bool) {
 		value := strings.Join(r.Header.Values(name), ",")
 		if name == "host" {
 			value = r.Host
+		} else if name == "content-length" && r.ContentLength >= 0 {
+			value = strconv.FormatInt(r.ContentLength, 10)
 		}
 		if value == "" {
 			return "", false

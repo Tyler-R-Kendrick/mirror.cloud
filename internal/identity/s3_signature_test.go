@@ -183,6 +183,34 @@ func TestVerifyS3StreamingTrailerV4AWSExample(t *testing.T) {
 	}
 }
 
+func TestVerifyS3StreamingUnsignedTrailerV4(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPut, "https://s3.localhost.localstack.cloud:4566/unsigned/object", nil)
+	request.Header.Set("Content-Encoding", "aws-chunked")
+	request.Header.Set("X-Amz-Content-Sha256", "STREAMING-UNSIGNED-PAYLOAD-TRAILER")
+	request.Header.Set("X-Amz-Date", "20990101T000000Z")
+	request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+	request.Header.Set("X-Amz-Trailer", "x-amz-checksum-crc32c")
+	request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20990101/us-east-1/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-trailer,Signature=fcefc9ae2b8230495738dd184bf82843d23e54dc536efdf1dcdd0acb7fe9277a")
+	if fault := VerifyS3AuthorizationV4(request, "test"); fault != nil {
+		t.Fatalf("unsigned trailer seed signature rejected: %#v", fault)
+	}
+	chunks := [][]byte{[]byte("hello"), nil}
+	signatures := []string{"", ""}
+	trailers := http.Header{"X-Amz-Checksum-Crc32c": {"mnG7TA=="}}
+	if fault := VerifyS3StreamingV4(request, "test", chunks, signatures, trailers); fault != nil {
+		t.Fatalf("unsigned trailer rejected: %#v", fault)
+	}
+	signatures[0] = "unexpected"
+	if fault := VerifyS3StreamingV4(request, "test", chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("unsigned stream with chunk signature accepted: %#v", fault)
+	}
+	signatures[0] = ""
+	trailers.Set("X-Amz-Extra", "value")
+	if fault := VerifyS3StreamingV4(request, "test", chunks, signatures, trailers); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("undeclared unsigned trailer accepted: %#v", fault)
+	}
+}
+
 func awsAuthorizationExample() *http.Request {
 	request := httptest.NewRequest(http.MethodGet, "https://examplebucket.s3.amazonaws.com/test.txt", nil)
 	request.Header.Set("Range", "bytes=0-9")

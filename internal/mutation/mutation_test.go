@@ -15266,6 +15266,30 @@ var mutants = []mutant{
 		pkg:  "./internal/identity",
 		run:  "TestParseAndExpiry",
 	},
+	{
+		name: "identity-skip-unsigned-streaming-v4-trailers",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  `if payloadHash != "STREAMING-AWS4-HMAC-SHA256-PAYLOAD" && !signedTrailerMode && !unsignedTrailerMode {`,
+		new:  `if payloadHash != "STREAMING-AWS4-HMAC-SHA256-PAYLOAD" && !signedTrailerMode {`,
+		pkg:  "./internal/identity",
+		run:  "TestVerifyS3StreamingUnsignedTrailerV4",
+	},
+	{
+		name: "identity-accept-signed-unsigned-streaming-v4-chunk",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  `if signature != "" {`,
+		new:  `if false {`,
+		pkg:  "./internal/identity",
+		run:  "TestVerifyS3StreamingUnsignedTrailerV4",
+	},
+	{
+		name: "identity-accept-undeclared-unsigned-streaming-v4-trailer",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  `if _, ok := canonicalS3StreamingTrailers(r, trailers, false); !ok {`,
+		new:  `if false {`,
+		pkg:  "./internal/identity",
+		run:  "TestVerifyS3StreamingUnsignedTrailerV4",
+	},
 }
 
 func TestMutantsAreKilled(t *testing.T) {

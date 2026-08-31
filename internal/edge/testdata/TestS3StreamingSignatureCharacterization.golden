@@ -22,6 +22,21 @@
   "trailer_valid": {
     "status": 200
   },
+  "unsigned_trailer_bad_checksum": {
+    "code": "BadDigest",
+    "status": 400
+  },
+  "unsigned_trailer_signed_chunk": {
+    "code": "SignatureDoesNotMatch",
+    "status": 403
+  },
+  "unsigned_trailer_stored": {
+    "body": "hello",
+    "status": 200
+  },
+  "unsigned_trailer_valid": {
+    "status": 200
+  },
   "valid": {
     "status": 200
   }

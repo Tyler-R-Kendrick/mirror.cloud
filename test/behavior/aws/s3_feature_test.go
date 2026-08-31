@@ -265,6 +265,41 @@ func TestS3ObjectLifecycle(t *testing.T) {
 				t.Fatalf("%s: %d %s", name, response.StatusCode, body)
 			}
 		}
+		createUnsigned, err := http.NewRequest(http.MethodPut, strictServer.URL+"/unsigned", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err = http.DefaultClient.Do(createUnsigned)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		for name, tc := range map[string]struct {
+			checksum string
+			status   int
+		}{"valid unsigned trailer": {"mnG7TA==", http.StatusOK}, "bad unsigned checksum": {"AAAAAA==", http.StatusBadRequest}} {
+			raw := "5\r\nhello\r\n0\r\nx-amz-checksum-crc32c:" + tc.checksum + "\r\n\r\n"
+			stream, err := http.NewRequest(http.MethodPut, strictServer.URL+"/unsigned/object", strings.NewReader(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream.Host = "s3.localhost.localstack.cloud:4566"
+			stream.Header.Set("Content-Encoding", "aws-chunked")
+			stream.Header.Set("X-Amz-Content-Sha256", "STREAMING-UNSIGNED-PAYLOAD-TRAILER")
+			stream.Header.Set("X-Amz-Date", "20990101T000000Z")
+			stream.Header.Set("X-Amz-Decoded-Content-Length", "5")
+			stream.Header.Set("X-Amz-Trailer", "x-amz-checksum-crc32c")
+			stream.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20990101/us-east-1/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-trailer,Signature=fcefc9ae2b8230495738dd184bf82843d23e54dc536efdf1dcdd0acb7fe9277a")
+			response, err = http.DefaultClient.Do(stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ = io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != tc.status {
+				t.Fatalf("%s: %d %s", name, response.StatusCode, body)
+			}
+		}
 		if err := deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), "temporary", []byte("000000000000")); err != nil {
 			t.Fatal(err)
 		}

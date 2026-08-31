@@ -604,6 +604,48 @@ func TestS3MalformedAWSChunkedCharacterization(t *testing.T) {
 	golden.AssertJSON(t, results)
 }
 
+func TestS3AWSChunkedContentEncoding(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/chunk-encoding", nil))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
+	}
+	for name, tc := range map[string]struct {
+		encoding string
+		want     string
+	}{
+		"chunked only":         {"aws-chunked", ""},
+		"content before chunk": {"gzip, aws-chunked", "gzip"},
+		"content after chunk":  {"AWS-CHUNKED, br", "br"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := "/chunk-encoding/" + strings.ReplaceAll(name, " ", "-")
+			request := httptest.NewRequest(http.MethodPut, path, strings.NewReader("5\r\nhello\r\n0\r\n\r\n"))
+			request.Header.Set("Content-Encoding", tc.encoding)
+			request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+			request.Header.Set("X-Amz-Decoded-Content-Length", "5")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("put: %d %s", recorder.Code, recorder.Body.String())
+			}
+			read := httptest.NewRecorder()
+			handler.ServeHTTP(read, httptest.NewRequest(http.MethodGet, path, nil))
+			if read.Code != http.StatusOK || read.Body.String() != "hello" || read.Header().Get("Content-Encoding") != tc.want {
+				t.Fatalf("get: %d encoding=%q body=%q", read.Code, read.Header().Get("Content-Encoding"), read.Body.String())
+			}
+		})
+	}
+}
+
 func streamingUnsignedV4ARequest(checksum string, signedChunk bool) *http.Request {
 	extension := ""
 	if signedChunk {

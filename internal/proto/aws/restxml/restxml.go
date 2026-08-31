@@ -1633,6 +1633,8 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		writeFlattened(resp.Output, &b, [][2]string{{"Parts", "Part"}})
 	case "ListMultipartUploads":
 		writeFlattened(resp.Output, &b, [][2]string{{"Uploads", "Upload"}, {"CommonPrefixes", "CommonPrefixes"}})
+	case "ListObjects", "ListObjectsV2":
+		writeFlattened(resp.Output, &b, [][2]string{{"Contents", "Contents"}, {"CommonPrefixes", "CommonPrefixes"}})
 	case "GetObjectAttributes":
 		top := make(map[string]any, len(resp.Output)-1)
 		for key, value := range resp.Output {

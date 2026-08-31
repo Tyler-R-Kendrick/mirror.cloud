@@ -1318,14 +1318,14 @@ func TestConcurrentBucketCorsRemainsValid(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			request := httptest.NewRequest(http.MethodOptions, "https://cors-chaos.s3.us-east-1.amazonaws.com/key", nil)
-			request.Header.Set("Origin", fmt.Sprintf("https://reader-%d.test", n))
+			request.Header.Set("Origin", "https://app.localstack.cloud")
 			request.Header.Set("Access-Control-Request-Method", []string{"GET", "HEAD"}[n%2])
 			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{}, HTTP: request})
 			if fault, ok := err.(*spi.Fault); ok && fault.Code == "AccessForbidden" {
 				preflightErrs <- nil
 				return
 			}
-			if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != "*" {
+			if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != "*" && response.Headers.Get("Access-Control-Allow-Origin") != "https://app.localstack.cloud" {
 				preflightErrs <- fmt.Errorf("concurrent preflight = %#v, %w", response, err)
 				return
 			}
@@ -1363,11 +1363,39 @@ func TestConcurrentBucketCorsRemainsValid(t *testing.T) {
 	if err != nil || len(rules) != 1 || len(methods) != 1 || methods[0] != "GET" && methods[0] != "HEAD" {
 		t.Fatalf("persisted concurrent CORS = %#v, err=%v", response, err)
 	}
+	transitionErrs := make(chan error, 32)
+	for i := 0; i < cap(transitionErrs); i++ {
+		wg.Add(1)
+		go func(deleteConfiguration bool) {
+			defer wg.Done()
+			if deleteConfiguration {
+				_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteBucketCors", Input: map[string]any{"Bucket": "cors-chaos"}})
+				transitionErrs <- err
+				return
+			}
+			request := httptest.NewRequest(http.MethodOptions, "https://cors-chaos.s3.us-east-1.amazonaws.com/key", nil)
+			request.Header.Set("Origin", "https://app.localstack.cloud")
+			request.Header.Set("Access-Control-Request-Method", methods[0].(string))
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{}, HTTP: request})
+			if err != nil || response.Headers.Get("Access-Control-Allow-Origin") == "" {
+				transitionErrs <- fmt.Errorf("CORS delete transition = %#v, %w", response, err)
+				return
+			}
+			transitionErrs <- nil
+		}(i%2 == 0)
+	}
+	wg.Wait()
+	close(transitionErrs)
+	for err := range transitionErrs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	request := httptest.NewRequest(http.MethodOptions, "https://cors-chaos.s3.us-east-1.amazonaws.com/key", nil)
-	request.Header.Set("Origin", "https://final.test")
+	request.Header.Set("Origin", "https://app.localstack.cloud")
 	request.Header.Set("Access-Control-Request-Method", methods[0].(string))
 	response, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetObject", Input: map[string]any{}, HTTP: request})
-	if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != "*" {
+	if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != "https://app.localstack.cloud" {
 		t.Fatalf("final preflight = %#v, err=%v", response, err)
 	}
 }

@@ -13267,18 +13267,15 @@ var mutants = []mutant{
 		run:  "TestCreateBucketTags",
 	},
 	{
+		// s3-create-tags-drop-global stood beside this one while createBucket
+		// persisted tags separately in each of its two branches. The branches
+		// now share one persistConfigurations closure, so both mutants named
+		// the same copy and only one of them could be killed; the other was
+		// retired rather than left pointing at a rollback no test reaches.
 		name: "s3-create-tags-drop-account-regional",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 		old:  "if len(tagDocument) > 0 {\n\t\t\tif err := bucketStore.Collection(\"tags\").Put(ctx, b, tagDocument); err != nil {",
 		new:  "if false {\n\t\t\tif err := bucketStore.Collection(\"tags\").Put(ctx, b, tagDocument); err != nil {",
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestCreateBucketTags",
-	},
-	{
-		name: "s3-create-tags-drop-global",
-		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "if err := persistConfigurations(); err != nil {\n\t\t\t_ = global.Delete(ctx, b)\n\t\t\t_ = buckets.Delete(ctx, b)",
-		new:  "if err := persistConfigurations(); err != nil {\n\t\t\t_ = buckets.Delete(ctx, b)",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestCreateBucketTags",
 	},

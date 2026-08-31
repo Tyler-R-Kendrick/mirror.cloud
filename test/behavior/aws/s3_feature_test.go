@@ -279,6 +279,31 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given an invalid multipart part number When uploaded Then S3 returns the modeled fault", func(t *testing.T) {
+		res := do(http.MethodPut, "/part-number-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPost, "/part-number-bdd/object?uploads", nil, "")
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodPut, "/part-number-bdd/object?partNumber=10001&uploadId="+url.QueryEscape(created.UploadID), []byte("part"), "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(body, []byte("<Message>Part number must be an integer between 1 and 10000, inclusive</Message>")) || !bytes.Contains(body, []byte("<ArgumentName>partNumber</ArgumentName>")) || !bytes.Contains(body, []byte("<ArgumentValue>10001</ArgumentValue>")) {
+			t.Fatalf("invalid multipart part number %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodPut, "/part-number-bdd/object?partNumber=0&uploadId=missing", []byte("part"), "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchUpload</Code>")) {
+			t.Fatalf("missing upload precedence %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given an expired presigned URL When requested Then S3 returns a modeled access denial", func(t *testing.T) {
 		request, err := http.NewRequest(http.MethodGet, ts.URL+"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F19691231%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=19691231T235900Z&X-Amz-Expires=30&X-Amz-SignedHeaders=host&X-Amz-Signature=00", nil)
 		if err != nil {

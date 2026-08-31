@@ -420,6 +420,66 @@ func TestConcurrentListMultipartUploadsRemainsPageable(t *testing.T) {
 	}
 }
 
+func TestConcurrentListPartsRemainsPageable(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "parts-list-chaos"}, "")
+	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "parts-list-chaos", "Key": "key"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID := created.Output["UploadId"]
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if i%2 == 0 {
+				_, err := call("UploadPart", map[string]any{"Bucket": "parts-list-chaos", "Key": "key", "UploadId": uploadID, "PartNumber": i/2 + 1}, "part")
+				errs <- err
+				return
+			}
+			response, err := call("ListParts", map[string]any{"Bucket": "parts-list-chaos", "Key": "key", "UploadId": uploadID, "MaxParts": 5}, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			parts := response.Output["Parts"].([]any)
+			for index, part := range parts {
+				if index > 0 && part.(map[string]any)["PartNumber"].(int) <= parts[index-1].(map[string]any)["PartNumber"].(int) {
+					errs <- fmt.Errorf("unordered parts: %#v", response.Output)
+					return
+				}
+			}
+			if len(parts) == 0 && response.Output["NextPartNumberMarker"] != 0 || len(parts) > 0 && response.Output["NextPartNumberMarker"] != parts[len(parts)-1].(map[string]any)["PartNumber"] {
+				errs <- fmt.Errorf("parts marker: %#v", response.Output)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	response, err := call("ListParts", map[string]any{"Bucket": "parts-list-chaos", "Key": "key", "UploadId": uploadID}, "")
+	if err != nil || len(response.Output["Parts"].([]any)) != 32 || response.Output["NextPartNumberMarker"] != 32 {
+		t.Fatalf("final parts = %#v, err=%v", response, err)
+	}
+}
+
 func TestConcurrentBodyReadFailuresLeaveNoPartialObjects(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

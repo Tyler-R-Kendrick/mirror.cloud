@@ -368,7 +368,7 @@ func FuzzS3ResponseEnvelope(f *testing.F) {
 	for _, seed := range []struct {
 		method uint8
 		path   string
-	}{{0, "object"}, {1, "space value"}, {2, "unicode-☃"}} {
+	}{{0, "object"}, {1, "space value"}, {2, "unicode-☃"}, {0, "eks"}} {
 		f.Add(seed.method, seed.path)
 	}
 	methods := []string{http.MethodGet, http.MethodHead, http.MethodDelete}
@@ -377,6 +377,7 @@ func FuzzS3ResponseEnvelope(f *testing.F) {
 		if err != nil {
 			t.Skip()
 		}
+		request.Host = "s3.localhost.localstack.cloud"
 		response, err := http.DefaultClient.Do(request)
 		if err != nil {
 			t.Fatal(err)

@@ -1377,13 +1377,14 @@ func TestStatesWaitLoopUsesAbsoluteDeadline(t *testing.T) {
 	advance := make(chan time.Duration, 1)
 	advance <- 10 * time.Second
 	baseClock := deps.Clock
-	deps.Clock = &observedClock{Clock: baseClock, after: make(chan time.Duration, 16), beforeUntil: func() {
+	clock := &observedClock{Clock: baseClock, after: make(chan time.Duration, 16), beforeUntil: func() {
 		select {
 		case duration := <-advance:
 			_ = baseClock.Advance(duration)
 		default:
 		}
 	}}
+	deps.Clock = clock
 	p := New(deps)
 	defer func() { _ = p.Close() }()
 	ctx := context.Background()
@@ -1397,7 +1398,15 @@ func TestStatesWaitLoopUsesAbsoluteDeadline(t *testing.T) {
 	}
 	machine := invoke("CreateStateMachine", map[string]any{"name": "absolute-wait", "definition": `{"StartAt":"Wait","States":{"Wait":{"Type":"Wait","Seconds":10,"End":true}}}`, "roleArn": testRoleARN})
 	executionARN := invoke("StartExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"]})["executionArn"].(string)
-	deadline := time.After(time.Second)
+	select {
+	case delay := <-clock.after:
+		if delay != 10*time.Second {
+			t.Fatalf("Wait scheduled after %s, want 10s", delay)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Wait loop did not observe the absolute deadline")
+	}
+	deadline := time.After(5 * time.Second)
 	for {
 		execution := invoke("DescribeExecution", map[string]any{"executionArn": executionARN})
 		if execution["status"] == "SUCCEEDED" {

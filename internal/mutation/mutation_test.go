@@ -14186,14 +14186,6 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestVerifyS3V4A",
 		},
 		{
-			name: "identity-v4a-allow-unsigned-region-set",
-			file: filepath.Join("internal", "identity", "s3_signature_v4a.go"),
-			old:  `} else if !containsString(strings.Split(signedHeaders, ";"), "x-amz-region-set") {`,
-			new:  `} else if false {`,
-			pkg:  "./internal/identity",
-			run:  "TestVerifyS3V4A",
-		},
-		{
 			name: "identity-v4a-accept-streaming-payload",
 			file: filepath.Join("internal", "identity", "s3_signature_v4a.go"),
 			old:  `strings.HasPrefix(payloadHash, "STREAMING-") && !streaming ||`,

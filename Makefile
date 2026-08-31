@@ -22,7 +22,7 @@ test-contract:
 	cd test/sdk/go && $(GO) test ./... -count=1
 
 test-snapshot:
-	$(GO) test ./internal/catalog ./internal/edge ./internal/mock ./internal/proto/aws/restxml ./internal/runtime ./internal/specdiff -count=1
+	$(GO) test ./internal/catalog ./internal/edge ./internal/identity ./internal/mock ./internal/proto/aws/restxml ./internal/runtime ./internal/specdiff -count=1
 	$(GO) test ./internal/services/aws/s3 -run 'Characterization$$|TestNamedBucketConfigurations$$' -count=1
 
 test-chaos:

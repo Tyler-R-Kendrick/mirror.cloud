@@ -589,6 +589,54 @@ func TestConcurrentInvalidBucketNamesDoNotReserveState(t *testing.T) {
 	}
 }
 
+func TestConcurrentCreateBucketTagsRemainAtomic(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	valid := []any{map[string]any{"Key": "team", "Value": "storage"}}
+	invalid := []any{map[string]any{"Key": "duplicate", "Value": "one"}, map[string]any{"Key": "duplicate", "Value": "two"}}
+	type result struct {
+		valid bool
+		err   error
+	}
+	results := make(chan result, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(results); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			tags := invalid
+			if n%2 == 0 {
+				tags = valid
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{
+				"Bucket": "atomic-create-tags", "CreateBucketConfiguration": map[string]any{"Tags": tags},
+			}})
+			results <- result{valid: n%2 == 0, err: err}
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+	successes := 0
+	for result := range results {
+		if result.err == nil {
+			successes++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(result.err, &fault) || result.valid && fault.Code != "BucketAlreadyOwnedByYou" || !result.valid && fault.Code != "InvalidTag" {
+			t.Fatalf("concurrent create valid=%t: %v", result.valid, result.err)
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("successful creates = %d, want 1", successes)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBucketTagging", Input: map[string]any{"Bucket": "atomic-create-tags"}})
+	if err != nil || !reflect.DeepEqual(response.Output["TagSet"], valid) {
+		t.Fatalf("persisted create tags = %#v %v", response, err)
+	}
+}
+
 func TestConcurrentInvalidVersioningWritesDoNotChangeState(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

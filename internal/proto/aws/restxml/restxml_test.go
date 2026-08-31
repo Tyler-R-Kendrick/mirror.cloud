@@ -121,6 +121,20 @@ func TestDecodeDeleteObjectsXML(t *testing.T) {
 	}
 }
 
+func TestDecodeCreateBucketXML(t *testing.T) {
+	body := `<CreateBucketConfiguration><LocationConstraint>us-west-2</LocationConstraint><Tags><Tag><Key>team</Key><Value>storage</Value></Tag><Tag><Key>env</Key><Value>test</Value></Tag></Tags></CreateBucketConfiguration>`
+	r := httptest.NewRequest(http.MethodPut, "http://127.0.0.1/tagged", strings.NewReader(body))
+	req, err := (Codec{}).Decode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "CreateBucket"}, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuration := req.Input["CreateBucketConfiguration"].(map[string]any)
+	tags := configuration["Tags"].([]any)
+	if req.Input["LocationConstraint"] != "us-west-2" || configuration["LocationConstraint"] != "us-west-2" || len(tags) != 2 || tags[0].(map[string]any)["Key"] != "team" || tags[1].(map[string]any)["Value"] != "test" {
+		t.Fatalf("configuration = %#v", configuration)
+	}
+}
+
 func TestEncodeDeleteObjectsXML(t *testing.T) {
 	w := httptest.NewRecorder()
 	err := (Codec{}).Encode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "DeleteObjects"}, w, &spi.Response{Output: map[string]any{

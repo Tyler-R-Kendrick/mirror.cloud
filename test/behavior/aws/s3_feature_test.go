@@ -416,6 +416,40 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given tags in CreateBucketConfiguration When creating a bucket Then the tags are persisted atomically", func(t *testing.T) {
+		configuration := []byte(`<CreateBucketConfiguration><Tags><Tag><Key>team</Key><Value>storage</Value></Tag><Tag><Key>env</Key><Value>test</Value></Tag></Tags></CreateBucketConfiguration>`)
+		res := do(http.MethodPut, "/create-tagged", configuration, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("tagged create %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/create-tagged?tagging", nil, "")
+		tags, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(tags, []byte("<Key>team</Key>")) || !bytes.Contains(tags, []byte("<Value>test</Value>")) {
+			t.Fatalf("created tags %d %s", res.StatusCode, tags)
+		}
+		res = do(http.MethodPut, "/create-tagged", configuration, "")
+		fault, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusConflict || !bytes.Contains(fault, []byte("BucketAlreadyOwnedByYou")) {
+			t.Fatalf("tagged recreation %d %s", res.StatusCode, fault)
+		}
+		invalid := []byte(`<CreateBucketConfiguration><Tags><Tag><Key>duplicate</Key><Value>one</Value></Tag><Tag><Key>duplicate</Key><Value>two</Value></Tag></Tags></CreateBucketConfiguration>`)
+		res = do(http.MethodPut, "/invalid-create-tags", invalid, "")
+		fault, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("InvalidTag")) {
+			t.Fatalf("invalid create tags %d %s", res.StatusCode, fault)
+		}
+		res = do(http.MethodHead, "/invalid-create-tags", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound {
+			t.Fatalf("invalid tags reserved bucket: %d", res.StatusCode)
+		}
+	})
+
 	t.Run("Given a globally owned bucket When another identity creates it Then ownership errors are returned", func(t *testing.T) {
 		create := func(account, region string) (int, []byte) {
 			t.Helper()

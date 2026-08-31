@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -57,8 +58,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 			t.Fatalf("invalid bucket name %q: %v", name, err)
 		}
 	}
-	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk")}); err != nil {
+	createTags := []s3types.Tag{{Key: aws.String("team"), Value: aws.String("storage")}, {Key: aws.String("env"), Value: aws.String("test")}}
+	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk"), CreateBucketConfiguration: &s3types.CreateBucketConfiguration{Tags: createTags}}); err != nil {
 		t.Fatalf("create bucket: %v", err)
+	}
+	if tagged, err := s3c.GetBucketTagging(context.Background(), &s3.GetBucketTaggingInput{Bucket: aws.String("sdk")}); err != nil || !reflect.DeepEqual(tagged.TagSet, createTags) {
+		t.Fatalf("create bucket tags: %#v %v", tagged, err)
 	}
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk")}); err != nil {
 		t.Fatalf("recreate us-east-1 bucket: %v", err)
@@ -134,7 +139,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || len(regionalBuckets.Buckets) != 1 || aws.ToString(regionalBuckets.Buckets[0].Name) != "sdk-west" || aws.ToString(regionalBuckets.Buckets[0].BucketRegion) != "us-west-2" {
 		t.Fatalf("regional buckets: %#v %v", regionalBuckets, err)
 	}
-	if _, err := s3c.GetBucketTagging(context.Background(), &s3.GetBucketTaggingInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchTagSet") {
+	if _, err := s3c.GetBucketTagging(context.Background(), &s3.GetBucketTaggingInput{Bucket: aws.String(accountRegional)}); err == nil || !strings.Contains(err.Error(), "NoSuchTagSet") {
 		t.Fatalf("untagged bucket: %v", err)
 	}
 	if versioning, err := s3c.GetBucketVersioning(context.Background(), &s3.GetBucketVersioningInput{Bucket: aws.String("sdk")}); err != nil || versioning.Status != "" || versioning.MFADelete != "" {

@@ -13258,6 +13258,46 @@ var mutants = []mutant{
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestCopyObjectSSECustomerKeys|TestUploadPartCopySSECustomerKeys",
 	},
+	{
+		name: "s3-create-tags-skip-validation",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `if _, ok := configuration["Tags"]; ok {`,
+		new:  `if false {`,
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestCreateBucketTags",
+	},
+	{
+		name: "s3-create-tags-drop-account-regional",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  "if len(tagDocument) > 0 {\n\t\t\tif err := bucketStore.Collection(\"tags\").Put(ctx, b, tagDocument); err != nil {\n\t\t\t\t_ = buckets.Delete(ctx, b)",
+		new:  "if false {\n\t\t\tif err := bucketStore.Collection(\"tags\").Put(ctx, b, tagDocument); err != nil {\n\t\t\t\t_ = buckets.Delete(ctx, b)",
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestCreateBucketTags",
+	},
+	{
+		name: "s3-create-tags-drop-global",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  "if len(tagDocument) > 0 {\n\t\t\tif err := bucketStore.Collection(\"tags\").Put(ctx, b, tagDocument); err != nil {\n\t\t\t\t_ = global.Delete(ctx, b)",
+		new:  "if false {\n\t\t\tif err := bucketStore.Collection(\"tags\").Put(ctx, b, tagDocument); err != nil {\n\t\t\t\t_ = global.Delete(ctx, b)",
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestCreateBucketTags",
+	},
+	{
+		name: "s3-create-tags-allow-tagged-recreation",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `if bucketRegion != "us-east-1" || location.Region != bucketRegion || len(tags) > 0 {`,
+		new:  `if bucketRegion != "us-east-1" || location.Region != bucketRegion {`,
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestCreateBucketTags",
+	},
+	{
+		name: "s3-restxml-drop-create-tags",
+		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
+		old:  `configuration["Tags"] = tags`,
+		new:  `_ = tags`,
+		pkg:  "./internal/proto/aws/restxml",
+		run:  "TestDecodeCreateBucketXML",
+	},
 }
 
 func TestMutantsAreKilled(t *testing.T) {

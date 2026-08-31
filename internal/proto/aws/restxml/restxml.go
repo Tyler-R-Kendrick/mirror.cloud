@@ -403,13 +403,27 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 	case "CreateBucket":
 		var cfg struct {
 			LocationConstraint string `xml:"LocationConstraint"`
+			Tags               *struct {
+				Tag []struct {
+					Key   string `xml:"Key"`
+					Value string `xml:"Value"`
+				} `xml:"Tag"`
+			} `xml:"Tags"`
 		}
 		if xml.Unmarshal(raw, &cfg) != nil {
 			in["_body"] = string(raw)
 			return
 		}
 		in["LocationConstraint"] = cfg.LocationConstraint
-		in["CreateBucketConfiguration"] = map[string]any{"LocationConstraint": cfg.LocationConstraint}
+		configuration := map[string]any{"LocationConstraint": cfg.LocationConstraint}
+		if cfg.Tags != nil {
+			tags := make([]any, 0, len(cfg.Tags.Tag))
+			for _, tag := range cfg.Tags.Tag {
+				tags = append(tags, map[string]any{"Key": tag.Key, "Value": tag.Value})
+			}
+			configuration["Tags"] = tags
+		}
+		in["CreateBucketConfiguration"] = configuration
 	case "DeleteObjects":
 		var d struct {
 			Object []struct {

@@ -7,11 +7,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -21,6 +23,22 @@ import (
 )
 
 type recordingAuthorizer struct{ checks []string }
+
+func s3Envelope(t testing.TB, response *http.Response) map[string]any {
+	t.Helper()
+	requestID := response.Header.Get("x-amz-request-id")
+	hostID := response.Header.Get("x-amz-id-2")
+	if requestID == "" || hostID == "" || requestID != response.Header.Get("x-mirror-request-id") || requestID == hostID {
+		t.Fatalf("invalid S3 response identifiers: %#v", response.Header)
+	}
+	return map[string]any{
+		"content_type":       response.Header.Get("Content-Type"),
+		"has_host_id":        hostID != "",
+		"has_request_id":     requestID != "",
+		"request_correlated": requestID == response.Header.Get("x-mirror-request-id"),
+		"status":             response.StatusCode,
+	}
+}
 
 func (a *recordingAuthorizer) Authorize(_ context.Context, _ spi.Identity, _, operation, resource string) error {
 	a.checks = append(a.checks, operation+" "+resource)
@@ -105,6 +123,19 @@ func TestS3PutGetAndForeignService501(t *testing.T) {
 	if bres.StatusCode >= 300 {
 		t.Fatalf("create bucket status %d", bres.StatusCode)
 	}
+	createEnvelope := s3Envelope(t, bres)
+
+	head, _ := http.NewRequest(http.MethodHead, ts.URL+"/mybucket", nil)
+	head.Header.Set("Authorization", auth)
+	hres, err := http.DefaultClient.Do(head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hres.Body.Close()
+	if hres.StatusCode != http.StatusOK || hres.Header.Get("Content-Type") != "application/xml" {
+		t.Fatalf("head bucket status %d headers %#v", hres.StatusCode, hres.Header)
+	}
+	headEnvelope := s3Envelope(t, hres)
 
 	put, err := http.NewRequest(http.MethodPut, ts.URL+"/mybucket/hello.txt", bytes.NewReader([]byte("hi")))
 	if err != nil {
@@ -120,6 +151,7 @@ func TestS3PutGetAndForeignService501(t *testing.T) {
 	if res.StatusCode >= 300 {
 		t.Fatalf("put status %d", res.StatusCode)
 	}
+	putEnvelope := s3Envelope(t, res)
 
 	get, _ := http.NewRequest(http.MethodGet, ts.URL+"/mybucket/hello.txt", nil)
 	get.Header.Set("Authorization", put.Header.Get("Authorization"))
@@ -135,6 +167,20 @@ func TestS3PutGetAndForeignService501(t *testing.T) {
 	if string(body) != "hi" {
 		t.Fatalf("got %q", body)
 	}
+	getEnvelope := s3Envelope(t, gres)
+
+	missing, _ := http.NewRequest(http.MethodGet, ts.URL+"/mybucket/missing", nil)
+	missing.Header.Set("Authorization", auth)
+	mres, err := http.DefaultClient.Do(missing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingBody, _ := io.ReadAll(mres.Body)
+	mres.Body.Close()
+	if mres.StatusCode != http.StatusNotFound || !bytes.Contains(missingBody, []byte("<Code>NoSuchKey</Code>")) {
+		t.Fatalf("missing object status %d body %s", mres.StatusCode, missingBody)
+	}
+	missingEnvelope := s3Envelope(t, mres)
 
 	ddb, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(`{}`))
 	ddb.Header.Set("X-Amz-Target", "DynamoDB_20120810.ListTables")
@@ -163,6 +209,38 @@ func TestS3PutGetAndForeignService501(t *testing.T) {
 	if ures.StatusCode != http.StatusNotImplemented || !strings.Contains(string(ubody), "unknown service") {
 		t.Fatalf("unknown service %d %s", ures.StatusCode, ubody)
 	}
+	golden.AssertJSON(t, map[string]any{"create": createEnvelope, "get": getEnvelope, "head": headEnvelope, "missing": missingEnvelope, "put": putEnvelope})
+}
+
+func FuzzS3ResponseEnvelope(f *testing.F) {
+	deps := spitest.Deps(f)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		f.Fatal(err)
+	}
+	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
+	f.Cleanup(ts.Close)
+	for _, seed := range []struct {
+		method uint8
+		path   string
+	}{{0, "object"}, {1, "space value"}, {2, "unicode-☃"}} {
+		f.Add(seed.method, seed.path)
+	}
+	methods := []string{http.MethodGet, http.MethodHead, http.MethodDelete}
+	f.Fuzz(func(t *testing.T, method uint8, path string) {
+		request, err := http.NewRequest(methods[int(method)%len(methods)], ts.URL+"/missing-fuzz-bucket/"+url.PathEscape(path), nil)
+		if err != nil {
+			t.Skip()
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		s3Envelope(t, response)
+	})
 }
 
 func TestHealth(t *testing.T) {

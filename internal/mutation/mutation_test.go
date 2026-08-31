@@ -14874,6 +14874,38 @@ var mutants = []mutant{
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestStaticWebsiteHostingCharacterization",
 	},
+	{
+		name: "s3-drop-amz-request-id",
+		file: filepath.Join("internal", "edge", "edge.go"),
+		old:  `w.Header().Set("x-amz-request-id", rid)`,
+		new:  `w.Header().Set("x-ignored-request-id", rid)`,
+		pkg:  "./internal/edge",
+		run:  "TestS3PutGetAndForeignService501",
+	},
+	{
+		name: "s3-drop-amz-host-id",
+		file: filepath.Join("internal", "edge", "edge.go"),
+		old:  `w.Header().Set("x-amz-id-2", "mirror-"+rid)`,
+		new:  `w.Header().Set("x-ignored-id-2", "mirror-"+rid)`,
+		pkg:  "./internal/edge",
+		run:  "TestS3PutGetAndForeignService501",
+	},
+	{
+		name: "s3-drop-head-bucket-content-type",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `headers.Set("Content-Type", "application/xml")`,
+		new:  `headers.Set("Ignored-Content-Type", "application/xml")`,
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestCrossRegionBucketResolutionAndHeadMetadata",
+	},
+	{
+		name: "s3-drop-head-bucket-alias-flag",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `headers.Set("x-amz-access-point-alias", "false")`,
+		new:  `headers.Set("x-ignored-access-point-alias", "false")`,
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestCrossRegionBucketResolutionAndHeadMetadata",
+	},
 }
 
 func TestMutantsAreKilled(t *testing.T) {

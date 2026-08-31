@@ -30,7 +30,7 @@ func SeedKMSKey(t testing.TB, deps spi.Deps, identity spi.Identity, keyARN, stat
 }
 
 // Deps returns a ready spi.Deps for tests.
-func Deps(t *testing.T) spi.Deps {
+func Deps(t testing.TB) spi.Deps {
 	t.Helper()
 	return spi.Deps{
 		Store:   store.NewMemory("test"),

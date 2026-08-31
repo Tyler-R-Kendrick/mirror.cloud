@@ -17,6 +17,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -67,6 +70,56 @@ func TestReplicaVersionBlobFailureLeavesNoPartialCurrent(t *testing.T) {
 	}
 	if _, err := call("GetObject", map[string]any{"Bucket": "destination", "Key": "key"}, nil); err == nil {
 		t.Fatal("failed version replication left a partial current object")
+	}
+}
+
+func TestConcurrentS3ResponseIDsRemainDistinct(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
+	defer ts.Close()
+
+	ids := make(chan string, 64)
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := http.Get(fmt.Sprintf("%s/missing-response-id-%d/key", ts.URL, i))
+			if err != nil {
+				errs <- err
+				return
+			}
+			response.Body.Close()
+			requestID := response.Header.Get("x-amz-request-id")
+			if response.StatusCode != http.StatusNotFound || requestID == "" || response.Header.Get("x-amz-id-2") == "" {
+				errs <- fmt.Errorf("response %d headers %#v", response.StatusCode, response.Header)
+				return
+			}
+			ids <- requestID
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	close(ids)
+	seen := map[string]bool{}
+	for id := range ids {
+		if seen[id] {
+			t.Fatalf("duplicate request ID %q", id)
+		}
+		seen[id] = true
+	}
+	if len(seen) != 64 {
+		t.Fatalf("unique request IDs = %d, want 64", len(seen))
 	}
 }
 

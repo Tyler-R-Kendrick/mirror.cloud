@@ -527,7 +527,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if location, err := west.GetBucketLocation(context.Background(), &s3.GetBucketLocationInput{Bucket: aws.String("sdk-west")}); err != nil || location.LocationConstraint != s3types.BucketLocationConstraintUsWest2 {
 		t.Fatalf("stored regional location: %#v %v", location, err)
 	}
-	if head, err := s3c.HeadBucket(context.Background(), &s3.HeadBucketInput{Bucket: aws.String("sdk-west")}); err != nil || aws.ToString(head.BucketRegion) != "us-west-2" || aws.ToString(head.BucketArn) != "arn:aws:s3:::sdk-west" {
+	if head, err := s3c.HeadBucket(context.Background(), &s3.HeadBucketInput{Bucket: aws.String("sdk-west")}); err != nil || head.AccessPointAlias == nil || aws.ToBool(head.AccessPointAlias) || aws.ToString(head.BucketRegion) != "us-west-2" || aws.ToString(head.BucketArn) != "arn:aws:s3:::sdk-west" {
 		t.Fatalf("cross-region head: %#v %v", head, err)
 	}
 	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-west"), Key: aws.String("cross-region"), Body: strings.NewReader("body")}); err != nil {

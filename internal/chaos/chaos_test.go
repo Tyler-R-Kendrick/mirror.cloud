@@ -136,14 +136,12 @@ func TestConcurrentSigV4AUnsignedTrailersDoNotCrossContaminate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
-	defer ts.Close()
-	create, _ := http.NewRequest(http.MethodPut, ts.URL+"/v4a-unsigned", nil)
-	response, err := http.DefaultClient.Do(create)
-	if err != nil {
-		t.Fatal(err)
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/v4a-unsigned", nil))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
 	}
-	response.Body.Close()
 
 	errs := make(chan error, 64)
 	var wg sync.WaitGroup
@@ -158,7 +156,7 @@ func TestConcurrentSigV4AUnsignedTrailersDoNotCrossContaminate(t *testing.T) {
 				want = http.StatusForbidden
 			}
 			raw := "5" + extension + "\r\nhello\r\n0\r\nx-amz-checksum-crc32c:mnG7TA==\r\n\r\n"
-			request, _ := http.NewRequest(http.MethodPut, ts.URL+"/v4a-unsigned/object", strings.NewReader(raw))
+			request := httptest.NewRequest(http.MethodPut, "/v4a-unsigned/object", strings.NewReader(raw))
 			request.Host = "s3.localhost.localstack.cloud:4566"
 			request.Header.Set("Content-Encoding", "aws-chunked")
 			request.Header.Set("X-Amz-Content-Sha256", "STREAMING-UNSIGNED-PAYLOAD-TRAILER")
@@ -167,14 +165,10 @@ func TestConcurrentSigV4AUnsignedTrailersDoNotCrossContaminate(t *testing.T) {
 			request.Header.Set("X-Amz-Region-Set", "us-east-1")
 			request.Header.Set("X-Amz-Trailer", "x-amz-checksum-crc32c")
 			request.Header.Set("Authorization", "AWS4-ECDSA-P256-SHA256 Credential=test/20990101/s3/aws4_request,SignedHeaders=content-encoding;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-region-set;x-amz-trailer,Signature=304402201f09d982734f868ab87f6e305473f7ef74a6882095dbf5d0f0b97bede169993402204a4c59017095e2ffaf861e04fc6c73b5d1c9b0d8c041b7fd2acb05d0a4c356f3")
-			response, err := http.DefaultClient.Do(request)
-			if err != nil {
-				errs <- err
-				return
-			}
-			response.Body.Close()
-			if response.StatusCode != want {
-				errs <- fmt.Errorf("request %d status %d, want %d", i, response.StatusCode, want)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != want {
+				errs <- fmt.Errorf("request %d status %d, want %d", i, recorder.Code, want)
 			}
 		}()
 	}

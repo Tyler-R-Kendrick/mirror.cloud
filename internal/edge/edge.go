@@ -131,7 +131,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	svc := s.demux(r)
 	w.Header().Set("x-mirror-request-id", rid)
 	if svc != nil && svc.ID == "aws.s3" && awsChunkedInvalid {
-		s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, &spi.Fault{Code: "SignatureDoesNotMatch", Message: "The request signature we calculated does not match the signature you provided.", HTTPStatus: http.StatusForbidden, Fault: "client"}, rid)
+		operation := "unknown"
+		fault := &spi.Fault{Code: "SignatureDoesNotMatch", Message: "The request signature we calculated does not match the signature you provided.", HTTPStatus: http.StatusForbidden, Fault: "client"}
+		if r.Method == http.MethodPut && r.URL.Query().Get("partNumber") != "" && r.URL.Query().Get("uploadId") != "" {
+			operation = "UploadPart"
+			fault = &spi.Fault{Code: "InternalError", Message: "We encountered an internal error. Please try again.", HTTPStatus: http.StatusInternalServerError, Fault: "server"}
+		}
+		s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: operation}, fault, rid)
 		return
 	}
 	if svc != nil && svc.ID == "aws.s3" {

@@ -3,6 +3,8 @@ package edge_test
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"io"
@@ -602,6 +604,60 @@ func TestS3MalformedAWSChunkedCharacterization(t *testing.T) {
 		})
 	}
 	golden.AssertJSON(t, results)
+}
+
+func TestS3AWSChunkedUploadPartRetryCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := edge.New(cfg, deps, reg, "test").Handler()
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/chunk-part", nil))
+	if created.Code != http.StatusOK {
+		t.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
+	}
+	started := httptest.NewRecorder()
+	handler.ServeHTTP(started, httptest.NewRequest(http.MethodPost, "/chunk-part/object?uploads", nil))
+	var upload struct {
+		UploadID string `xml:"UploadId"`
+	}
+	if started.Code != http.StatusOK || xml.Unmarshal(started.Body.Bytes(), &upload) != nil || upload.UploadID == "" {
+		t.Fatalf("create upload: %d %s", started.Code, started.Body.String())
+	}
+	path := "/chunk-part/object?partNumber=1&uploadId=" + url.QueryEscape(upload.UploadID)
+	put := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
+		request.Header.Set("Content-Encoding", "aws-chunked")
+		request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER")
+		request.Header.Set("X-Amz-Decoded-Content-Length", "10")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		return recorder
+	}
+	invalid := put("\r\nHello Blob\r\n0;chunk-signature=invalid\r\n")
+	var fault struct{ Code string }
+	if xml.Unmarshal(invalid.Body.Bytes(), &fault) != nil || invalid.Code != http.StatusInternalServerError || fault.Code != "InternalError" {
+		t.Fatalf("invalid part: %d %s", invalid.Code, invalid.Body.String())
+	}
+	valid := put("a;chunk-signature=first\r\nHello Blob\r\n0;chunk-signature=last\r\n")
+	sum := md5.Sum([]byte("Hello Blob"))
+	wantETag := `"` + hex.EncodeToString(sum[:]) + `"`
+	if valid.Code != http.StatusOK || valid.Header().Get("ETag") != wantETag {
+		t.Fatalf("valid retry: %d etag=%q body=%s", valid.Code, valid.Header().Get("ETag"), valid.Body.String())
+	}
+	listed := httptest.NewRecorder()
+	handler.ServeHTTP(listed, httptest.NewRequest(http.MethodGet, "/chunk-part/object?uploadId="+url.QueryEscape(upload.UploadID), nil))
+	var parts struct {
+		Parts []struct{} `xml:"Part"`
+	}
+	if listed.Code != http.StatusOK || xml.Unmarshal(listed.Body.Bytes(), &parts) != nil || len(parts.Parts) != 1 {
+		t.Fatalf("list parts: %d %s", listed.Code, listed.Body.String())
+	}
+	golden.AssertJSON(t, map[string]any{"invalid": map[string]any{"code": fault.Code, "status": invalid.Code}, "retry": map[string]any{"etag": valid.Header().Get("ETag"), "parts": len(parts.Parts), "status": valid.Code}})
 }
 
 func TestS3AWSChunkedContentEncodingCharacterization(t *testing.T) {

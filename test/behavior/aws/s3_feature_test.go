@@ -155,6 +155,41 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a cancelled chunked part When retried Then S3 stores only the valid part", func(t *testing.T) {
+		response := do(http.MethodPut, "/chunk-part-bdd", nil, "")
+		response.Body.Close()
+		response = do(http.MethodPost, "/chunk-part-bdd/object?uploads", nil, "")
+		var upload struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(response.Body).Decode(&upload); err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		path := "/chunk-part-bdd/object?partNumber=1&uploadId=" + url.QueryEscape(upload.UploadID)
+		put := func(raw string) *http.Response {
+			request, _ := http.NewRequest(http.MethodPut, ts.URL+path, strings.NewReader(raw))
+			request.Header.Set("Content-Encoding", "aws-chunked")
+			request.Header.Set("X-Amz-Content-Sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER")
+			request.Header.Set("X-Amz-Decoded-Content-Length", "10")
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return response
+		}
+		response = put("\r\nHello Blob\r\n0;chunk-signature=invalid\r\n")
+		response.Body.Close()
+		if response.StatusCode != http.StatusInternalServerError {
+			t.Fatalf("cancelled part: %s", response.Status)
+		}
+		response = put("a;chunk-signature=first\r\nHello Blob\r\n0;chunk-signature=last\r\n")
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("valid retry: %s", response.Status)
+		}
+	})
+
 	t.Run("Given aws-chunked transport encoding When stored Then S3 preserves only content encodings", func(t *testing.T) {
 		response := do(http.MethodPut, "/chunk-encoding-bdd", nil, "")
 		response.Body.Close()

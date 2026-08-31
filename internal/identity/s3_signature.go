@@ -1,12 +1,14 @@
 package identity
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -15,12 +17,63 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
+// VerifyS3Signature verifies supported S3 signatures when present.
+func VerifyS3Signature(r *http.Request, secret string) *spi.Fault {
+	if fault := VerifyS3Presigned(r, secret); fault != nil {
+		return fault
+	}
+	return VerifyS3AuthorizationV4(r, secret)
+}
+
 // VerifyS3Presigned verifies supported query-signature versions when present.
 func VerifyS3Presigned(r *http.Request, secret string) *spi.Fault {
 	if fault := VerifyS3PresignedV4(r, secret); fault != nil {
 		return fault
 	}
 	return VerifyS3PresignedV2(r, secret)
+}
+
+// VerifyS3AuthorizationV4 verifies SigV4 Authorization-header authentication when present.
+func VerifyS3AuthorizationV4(r *http.Request, secret string) *spi.Fault {
+	const algorithm = "AWS4-HMAC-SHA256"
+	authorization := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authorization, algorithm) {
+		return nil
+	}
+	rest, ok := strings.CutPrefix(authorization, algorithm+" ")
+	if !ok {
+		return signatureFault()
+	}
+	fields := map[string]string{}
+	for _, part := range strings.Split(rest, ",") {
+		name, value, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok || value == "" || fields[name] != "" {
+			return signatureFault()
+		}
+		fields[name] = value
+	}
+	if len(fields) != 3 || fields["Credential"] == "" || fields["SignedHeaders"] == "" || fields["Signature"] == "" {
+		return signatureFault()
+	}
+	credential := strings.Split(fields["Credential"], "/")
+	if len(credential) != 5 || credential[3] != "s3" || credential[4] != "aws4_request" {
+		return signatureFault()
+	}
+	signedHeaders := fields["SignedHeaders"]
+	canonicalHeaders, ok := signedHeaderValues(r, strings.Split(signedHeaders, ";"))
+	if !ok {
+		return signatureFault()
+	}
+	date := r.Header.Get("X-Amz-Date")
+	payloadHash := r.Header.Get("X-Amz-Content-Sha256")
+	if date == "" || payloadHash == "" {
+		return signatureFault()
+	}
+	if !s3PayloadHashMatches(r, payloadHash) {
+		return signatureFault()
+	}
+	canonicalRequest := strings.Join([]string{r.Method, canonicalPath(r.URL), canonicalQuery(r.URL.Query()), canonicalHeaders, signedHeaders, payloadHash}, "\n")
+	return verifyS3V4Signature(credential, date, canonicalRequest, fields["Signature"], secret)
 }
 
 // VerifyS3SessionToken verifies the temporary credential token on a presigned request.
@@ -42,7 +95,7 @@ func VerifyS3PresignedV4(r *http.Request, secret string) *spi.Fault {
 		return nil
 	}
 	credential := strings.Split(q.Get("X-Amz-Credential"), "/")
-	if len(credential) != 5 || credential[4] != "aws4_request" || q.Get("X-Amz-Algorithm") != "AWS4-HMAC-SHA256" {
+	if len(credential) != 5 || credential[3] != "s3" || credential[4] != "aws4_request" || q.Get("X-Amz-Algorithm") != "AWS4-HMAC-SHA256" {
 		return signatureFault()
 	}
 	signedHeaders := q.Get("X-Amz-SignedHeaders")
@@ -57,16 +110,23 @@ func VerifyS3PresignedV4(r *http.Request, secret string) *spi.Fault {
 	if payloadHash == "" {
 		payloadHash = "UNSIGNED-PAYLOAD"
 	}
+	if !s3PayloadHashMatches(r, payloadHash) {
+		return signatureFault()
+	}
 	canonicalRequest := strings.Join([]string{r.Method, canonicalPath(r.URL), canonicalQuery(q), canonicalHeaders, signedHeaders, payloadHash}, "\n")
+	return verifyS3V4Signature(credential, q.Get("X-Amz-Date"), canonicalRequest, q.Get("X-Amz-Signature"), secret)
+}
+
+func verifyS3V4Signature(credential []string, date, canonicalRequest, signature, secret string) *spi.Fault {
 	scope := strings.Join(credential[1:], "/")
 	requestHash := sha256.Sum256([]byte(canonicalRequest))
-	stringToSign := strings.Join([]string{"AWS4-HMAC-SHA256", q.Get("X-Amz-Date"), scope, hex.EncodeToString(requestHash[:])}, "\n")
+	stringToSign := strings.Join([]string{"AWS4-HMAC-SHA256", date, scope, hex.EncodeToString(requestHash[:])}, "\n")
 	dateKey := hmacSHA256([]byte("AWS4"+secret), credential[1])
 	regionKey := hmacSHA256(dateKey, credential[2])
 	serviceKey := hmacSHA256(regionKey, credential[3])
 	signingKey := hmacSHA256(serviceKey, "aws4_request")
 	want := hmacSHA256(signingKey, stringToSign)
-	got, err := hex.DecodeString(q.Get("X-Amz-Signature"))
+	got, err := hex.DecodeString(signature)
 	if err != nil || len(got) != len(want) || subtle.ConstantTimeCompare(got, want) != 1 {
 		return signatureFault()
 	}
@@ -197,6 +257,23 @@ func canonicalQuery(q url.Values) string {
 
 func awsEscape(value string) string {
 	return strings.ReplaceAll(url.QueryEscape(value), "+", "%20")
+}
+
+func s3PayloadHashMatches(r *http.Request, payloadHash string) bool {
+	if payloadHash == "UNSIGNED-PAYLOAD" || strings.HasPrefix(payloadHash, "STREAMING-") {
+		return true
+	}
+	want, err := hex.DecodeString(payloadHash)
+	if err != nil || len(want) != sha256.Size {
+		return false
+	}
+	var body []byte
+	if r.Body != nil {
+		body, err = io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(body))
+	}
+	got := sha256.Sum256(body)
+	return err == nil && subtle.ConstantTimeCompare(got[:], want) == 1
 }
 
 func hmacSHA256(key []byte, value string) []byte {

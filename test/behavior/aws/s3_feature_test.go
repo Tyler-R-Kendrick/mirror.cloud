@@ -132,7 +132,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
-	t.Run("Given signature validation is enabled When a presigned signature is tampered Then S3 rejects it", func(t *testing.T) {
+	t.Run("Given signature validation is enabled When a signature is tampered Then S3 rejects it", func(t *testing.T) {
 		target := "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-SignedHeaders=host&X-Amz-Signature=" + strings.Repeat("0", 64)
 		response, err := http.Get(ts.URL + target)
 		if err != nil {
@@ -160,6 +160,22 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
 				t.Fatalf("%s tampered presign %d %s", name, response.StatusCode, body)
 			}
+		}
+		authorization, err := http.NewRequest(http.MethodGet, strictServer.URL+"/bucket/key", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		authorization.Header.Set("X-Amz-Content-Sha256", "UNSIGNED-PAYLOAD")
+		authorization.Header.Set("X-Amz-Date", "20990101T000000Z")
+		authorization.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20990101/us-east-1/s3/aws4_request,SignedHeaders=host;x-amz-content-sha256;x-amz-date,Signature="+strings.Repeat("0", 64))
+		response, err = http.DefaultClient.Do(authorization)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>SignatureDoesNotMatch</Code>")) {
+			t.Fatalf("tampered authorization %d %s", response.StatusCode, body)
 		}
 		if err := deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), "temporary", []byte("000000000000")); err != nil {
 			t.Fatal(err)

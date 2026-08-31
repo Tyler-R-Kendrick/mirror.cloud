@@ -328,6 +328,20 @@ func TestS3PresignedSignatureFaultCharacterization(t *testing.T) {
 		}
 		results[name] = map[string]any{"code": fault.Code, "content_type": recorder.Header().Get("Content-Type"), "message": fault.Message, "status": recorder.Code}
 	}
+	authorization := httptest.NewRequest(http.MethodGet, "/bucket/key", nil)
+	authorization.Header.Set("X-Amz-Content-Sha256", "UNSIGNED-PAYLOAD")
+	authorization.Header.Set("X-Amz-Date", "20990101T000000Z")
+	authorization.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20990101/us-east-1/s3/aws4_request,SignedHeaders=host;x-amz-content-sha256;x-amz-date,Signature="+strings.Repeat("0", 64))
+	authorizationRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(authorizationRecorder, authorization)
+	var authorizationFault struct{ Code, Message string }
+	if err := xml.Unmarshal(authorizationRecorder.Body.Bytes(), &authorizationFault); err != nil {
+		t.Fatal(err)
+	}
+	if authorizationRecorder.Code != http.StatusForbidden || authorizationFault.Code != "SignatureDoesNotMatch" || authorizationFault.Message == "" {
+		t.Fatalf("authorization status=%d headers=%#v body=%s", authorizationRecorder.Code, authorizationRecorder.Header(), authorizationRecorder.Body.String())
+	}
+	results["authorization_v4"] = map[string]any{"code": authorizationFault.Code, "content_type": authorizationRecorder.Header().Get("Content-Type"), "message": authorizationFault.Message, "status": authorizationRecorder.Code}
 	valid := httptest.NewRecorder()
 	handler.ServeHTTP(valid, httptest.NewRequest(http.MethodGet, "/bucket/key?AWSAccessKeyId=test&Expires=4070908800&Signature=B7s4qHMXncO2jDe59MhIDTHOODk%3D", nil))
 	if valid.Code != http.StatusNotFound || bytes.Contains(valid.Body.Bytes(), []byte("SignatureDoesNotMatch")) {

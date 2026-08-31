@@ -22,6 +22,24 @@ func FuzzVerifyS3PresignedV4(f *testing.F) {
 	})
 }
 
+func FuzzVerifyS3AuthorizationV4(f *testing.F) {
+	f.Add("GET", "/test.txt", "host;x-amz-content-sha256;x-amz-date", "f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41", "examplebucket.s3.amazonaws.com", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+	f.Fuzz(func(t *testing.T, method, path, signedHeaders, signature, host, secret string) {
+		if method == "" || path == "" || path[0] != '/' {
+			t.Skip()
+		}
+		request, err := http.NewRequest(method, "https://example.test"+path, nil)
+		if err != nil {
+			t.Skip()
+		}
+		request.Host = host
+		request.Header.Set("X-Amz-Content-Sha256", "UNSIGNED-PAYLOAD")
+		request.Header.Set("X-Amz-Date", "20130524T000000Z")
+		request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20130524/us-east-1/s3/aws4_request,SignedHeaders="+signedHeaders+",Signature="+signature)
+		_ = VerifyS3AuthorizationV4(request, secret)
+	})
+}
+
 func FuzzVerifyS3PresignedV2(f *testing.F) {
 	f.Add("GET", "/bucket/key", "signature", "localhost", "test")
 	f.Fuzz(func(t *testing.T, method, path, signature, host, secret string) {

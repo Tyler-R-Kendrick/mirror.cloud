@@ -144,11 +144,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		fault := identity.VerifyS3Presigned(r, secret)
+		fault := identity.VerifyS3Signature(r, secret)
 		if host := signedGatewayHost(r.Host, s.cfg.Bind); fault != nil && host != "" {
 			candidate := r.Clone(ctx)
 			candidate.Host = host
-			fault = identity.VerifyS3Presigned(candidate, secret)
+			fault = identity.VerifyS3Signature(candidate, secret)
 		}
 		if fault != nil {
 			s.fault(w, s.codecs[svc.Protocol], svc, &model.Operation{Name: "unknown"}, fault, rid)

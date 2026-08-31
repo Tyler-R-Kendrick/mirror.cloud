@@ -1,4 +1,10 @@
 {
+  "authorization_skew": {
+    "code": "RequestTimeTooSkewed",
+    "request_time": "2099-01-01T00:00:00Z",
+    "server_time": "2099-01-01T00:15:30Z",
+    "status": 403
+  },
   "authorization_v2": {
     "code": "SignatureDoesNotMatch",
     "content_type": "application/xml",

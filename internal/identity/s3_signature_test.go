@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestVerifyS3PresignedV4AWSExample(t *testing.T) {
@@ -84,6 +85,9 @@ func TestVerifyS3AuthorizationV2AWSExample(t *testing.T) {
 	if fault := VerifyS3AuthorizationV2(request, secret); fault == nil || fault.Code != "SignatureDoesNotMatch" {
 		t.Fatalf("tampered date accepted: %#v", fault)
 	}
+	if fault := VerifyS3Signature(request, secret); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("dispatcher accepted tampered SigV2 authorization: %#v", fault)
+	}
 }
 
 func TestVerifyS3AuthorizationV2DateAndGrammar(t *testing.T) {
@@ -115,6 +119,48 @@ func TestVerifyS3AuthorizationV2DateAndGrammar(t *testing.T) {
 	}
 	request.Header.Set("Authorization", "Bearer token")
 	if fault := VerifyS3AuthorizationV2(request, "test"); fault != nil {
+		t.Fatalf("unrelated authorization rejected: %#v", fault)
+	}
+}
+
+func TestS3AuthorizationTimeFault(t *testing.T) {
+	now := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)
+	request := httptest.NewRequest(http.MethodGet, "https://example.test", nil)
+	request.Header.Set("Authorization", "AWS4-HMAC-SHA256 signed")
+	for name, at := range map[string]time.Time{
+		"past boundary":   now.Add(-15 * time.Minute),
+		"future boundary": now.Add(15 * time.Minute),
+	} {
+		request.Header.Set("X-Amz-Date", at.Format("20060102T150405Z"))
+		if fault := S3AuthorizationTimeFault(request, now); fault != nil {
+			t.Fatalf("%s rejected: %#v", name, fault)
+		}
+	}
+	request.Header.Set("X-Amz-Date", now.Add(-15*time.Minute-time.Second).Format("20060102T150405Z"))
+	if fault := S3AuthorizationTimeFault(request, now); fault == nil || fault.Code != "RequestTimeTooSkewed" || fault.HTTPStatus != http.StatusForbidden || fault.Fields["RequestTime"] == nil || fault.Fields["ServerTime"] == nil {
+		t.Fatalf("past skew fault = %#v", fault)
+	}
+	request.Header.Set("X-Amz-Date", now.Add(15*time.Minute+time.Second).Format("20060102T150405Z"))
+	if fault := S3AuthorizationTimeFault(request, now); fault == nil || fault.Code != "RequestTimeTooSkewed" {
+		t.Fatalf("future skew fault = %#v", fault)
+	}
+	request.Header.Set("X-Amz-Date", "invalid")
+	if fault := S3AuthorizationTimeFault(request, now); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("invalid timestamp fault = %#v", fault)
+	}
+	request.Header.Set("Authorization", "AWS test:signature")
+	request.Header.Set("X-Amz-Date", now.Format(http.TimeFormat))
+	if fault := S3AuthorizationTimeFault(request, now); fault != nil {
+		t.Fatalf("SigV2 x-amz-date rejected: %#v", fault)
+	}
+	request.Header.Del("X-Amz-Date")
+	request.Header.Set("Date", now.Format(http.TimeFormat))
+	if fault := S3AuthorizationTimeFault(request, now); fault != nil {
+		t.Fatalf("SigV2 Date rejected: %#v", fault)
+	}
+	request.Header.Set("Authorization", "Bearer token")
+	request.Header.Set("X-Amz-Date", "invalid")
+	if fault := S3AuthorizationTimeFault(request, now); fault != nil {
 		t.Fatalf("unrelated authorization rejected: %#v", fault)
 	}
 }

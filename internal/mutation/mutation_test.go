@@ -15290,6 +15290,46 @@ var mutants = []mutant{
 		pkg:  "./internal/identity",
 		run:  "TestVerifyS3StreamingUnsignedTrailerV4",
 	},
+	{
+		name: "edge-skip-s3-authorization-time-skew",
+		file: filepath.Join("internal", "edge", "edge.go"),
+		old:  `fault = identity.S3AuthorizationTimeFault(r, s.deps.Clock.Now())`,
+		new:  `fault = nil`,
+		pkg:  "./internal/edge",
+		run:  "TestS3PresignedSignatureFaultCharacterization",
+	},
+	{
+		name: "identity-accept-malformed-s3-authorization-time",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  "if err != nil {\n\t\treturn signatureFault()\n\t}\n\tnow = now.UTC()",
+		new:  "if false {\n\t\treturn signatureFault()\n\t}\n\tnow = now.UTC()",
+		pkg:  "./internal/identity",
+		run:  "TestS3AuthorizationTimeFault",
+	},
+	{
+		name: "identity-ignore-sigv2-authorization-date-header",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  "date := r.Header.Get(\"X-Amz-Date\")\n\t\tif date == \"\" {",
+		new:  "date := r.Header.Get(\"X-Amz-Date\")\n\t\tif false {",
+		pkg:  "./internal/identity",
+		run:  "TestS3AuthorizationTimeFault",
+	},
+	{
+		name: "identity-accept-old-s3-authorization-time",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  `!requestTime.Before(now.Add(-15*time.Minute))`,
+		new:  `true`,
+		pkg:  "./internal/identity",
+		run:  "TestS3AuthorizationTimeFault",
+	},
+	{
+		name: "identity-accept-future-s3-authorization-time",
+		file: filepath.Join("internal", "identity", "s3_signature.go"),
+		old:  `!requestTime.After(now.Add(15*time.Minute))`,
+		new:  `true`,
+		pkg:  "./internal/identity",
+		run:  "TestS3AuthorizationTimeFault",
+	},
 }
 
 func TestMutantsAreKilled(t *testing.T) {

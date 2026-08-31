@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
@@ -296,6 +297,9 @@ func TestS3PresignedAuthFaultCharacterization(t *testing.T) {
 
 func TestS3PresignedSignatureFaultCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
+	if err := deps.Clock.Advance(time.Date(2098, 12, 31, 23, 59, 30, 0, time.UTC).Sub(deps.Clock.Now())); err != nil {
+		t.Fatal(err)
+	}
 	cfg := config.Default()
 	cfg.Services = []string{"aws.s3"}
 	cfg.S3ValidatePresignedSignatures = true
@@ -355,8 +359,8 @@ func TestS3PresignedSignatureFaultCharacterization(t *testing.T) {
 	}
 	results["authorization_v2"] = map[string]any{"code": authorizationFault.Code, "content_type": authorizationRecorder.Header().Get("Content-Type"), "message": authorizationFault.Message, "status": authorizationRecorder.Code}
 	validAuthorization := httptest.NewRequest(http.MethodGet, "/bucket/key", nil)
-	validAuthorization.Header.Set("Date", "Tue, 27 Mar 2007 19:36:42 +0000")
-	validAuthorization.Header.Set("Authorization", "AWS test:hPgJ2NVZ55L0/EW+hot62JihaFY=")
+	validAuthorization.Header.Set("Date", "Thu, 01 Jan 2099 00:00:00 GMT")
+	validAuthorization.Header.Set("Authorization", "AWS test:RviC9EQBbB5VsLwWSI+WK0lMbaQ=")
 	validAuthorizationRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(validAuthorizationRecorder, validAuthorization)
 	if validAuthorizationRecorder.Code != http.StatusNotFound || bytes.Contains(validAuthorizationRecorder.Body.Bytes(), []byte("SignatureDoesNotMatch")) {
@@ -387,11 +391,27 @@ func TestS3PresignedSignatureFaultCharacterization(t *testing.T) {
 		}
 		results[name] = recorder.Code
 	}
+	if err := deps.Clock.Advance(16 * time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	skewedAuthorizationRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(skewedAuthorizationRecorder, validAuthorization)
+	var skewedAuthorizationFault struct{ Code, Message, RequestTime, ServerTime string }
+	if err := xml.Unmarshal(skewedAuthorizationRecorder.Body.Bytes(), &skewedAuthorizationFault); err != nil {
+		t.Fatal(err)
+	}
+	if skewedAuthorizationRecorder.Code != http.StatusForbidden || skewedAuthorizationFault.Code != "RequestTimeTooSkewed" || skewedAuthorizationFault.Message == "" || skewedAuthorizationFault.RequestTime == "" || skewedAuthorizationFault.ServerTime == "" {
+		t.Fatalf("skewed SigV2 authorization status=%d body=%s", skewedAuthorizationRecorder.Code, skewedAuthorizationRecorder.Body.String())
+	}
+	results["authorization_skew"] = map[string]any{"code": skewedAuthorizationFault.Code, "request_time": skewedAuthorizationFault.RequestTime, "server_time": skewedAuthorizationFault.ServerTime, "status": skewedAuthorizationRecorder.Code}
 	golden.AssertJSON(t, results)
 }
 
 func TestS3StreamingSignatureCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
+	if err := deps.Clock.Advance(time.Date(2098, 12, 31, 23, 59, 30, 0, time.UTC).Sub(deps.Clock.Now())); err != nil {
+		t.Fatal(err)
+	}
 	cfg := config.Default()
 	cfg.Services = []string{"aws.s3"}
 	cfg.S3ValidatePresignedSignatures = true

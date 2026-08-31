@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
@@ -145,7 +146,15 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		strict := cfg
 		strict.S3ValidatePresignedSignatures = true
-		strictServer := httptest.NewServer(edge.New(strict, deps, reg, "test").Handler())
+		strictDeps := spitest.Deps(t)
+		if err := strictDeps.Clock.Advance(time.Date(2098, 12, 31, 23, 59, 30, 0, time.UTC).Sub(strictDeps.Clock.Now())); err != nil {
+			t.Fatal(err)
+		}
+		strictReg, err := registry.New(strictDeps, strict.Services, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		strictServer := httptest.NewServer(edge.New(strict, strictDeps, strictReg, "test").Handler())
 		defer strictServer.Close()
 		for name, strictTarget := range map[string]string{
 			"sigv2": "/bucket/key?AWSAccessKeyId=test&Expires=4070908800&Signature=AAAAAAAAAAAAAAAAAAAAAAAAAAA%3D",
@@ -300,7 +309,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 				t.Fatalf("%s: %d %s", name, response.StatusCode, body)
 			}
 		}
-		if err := deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), "temporary", []byte("000000000000")); err != nil {
+		if err := strictDeps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), "temporary", []byte("000000000000")); err != nil {
 			t.Fatal(err)
 		}
 		tokenTarget := "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=temporary%2F20990101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20990101T000000Z&X-Amz-Expires=60&X-Amz-Security-Token=wrong&X-Amz-SignedHeaders=host&X-Amz-Signature=" + strings.Repeat("0", 64)

@@ -1249,6 +1249,10 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		status = 200
 	}
 	for k, vs := range resp.Headers {
+		if strings.EqualFold(k, "ETag") {
+			w.Header()["ETag"] = append(w.Header()["ETag"], vs...)
+			continue
+		}
 		for _, v := range vs {
 			w.Header().Add(k, v)
 		}

@@ -1980,6 +1980,9 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
+	if err := validateListEncodingType(req); err != nil {
+		return nil, err
+	}
 	prefix := str(req.Input["prefix"])
 	if prefix == "" {
 		prefix = str(req.Input["Prefix"])
@@ -2501,6 +2504,9 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 	if err := p.requireBucket(ctx, req, bucket); err != nil {
 		return nil, err
 	}
+	if err := validateListEncodingType(req); err != nil {
+		return nil, err
+	}
 	parameter := func(input, query string) string {
 		if value := str(req.Input[input]); value != "" {
 			return value
@@ -2635,6 +2641,9 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 
 func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b := str(req.Input["Bucket"])
+	if err := validateListEncodingType(req); err != nil {
+		return nil, err
+	}
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
@@ -2666,6 +2675,26 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 		return resp, nil
 	}
 	return &spi.Response{Output: map[string]any{"Name": b, "Versions": versions, "DeleteMarkers": markers}}, nil
+}
+
+func validateListEncodingType(req *spi.Request) error {
+	value, provided := req.Input["EncodingType"]
+	if !provided {
+		value, provided = req.Input["encoding-type"]
+	}
+	if !provided && req.HTTP != nil {
+		values := req.HTTP.URL.Query()
+		_, provided = values["encoding-type"]
+		value = values.Get("encoding-type")
+	}
+	if !provided || str(value) == "url" {
+		return nil
+	}
+	return &spi.Fault{
+		Code: "InvalidArgument", Message: "Invalid Encoding Method specified in Request",
+		HTTPStatus: http.StatusBadRequest, Fault: "client",
+		Fields: map[string]any{"ArgumentName": "encoding-type", "ArgumentValue": str(value)},
+	}
 }
 
 func (p *Pack) abortMPU(ctx context.Context, req *spi.Request) (*spi.Response, error) {

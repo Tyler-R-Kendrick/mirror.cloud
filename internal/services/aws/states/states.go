@@ -5040,6 +5040,9 @@ var integrationMemberNames = map[string]map[string]string{
 		"JobQueue":      "jobQueue",
 		"JobDefinition": "jobDefinition",
 	},
+	"arn:aws:states:::codebuild:startBuild": {
+		"ProjectName": "projectName",
+	},
 }
 
 func taskIntegration(resource string) (service, operation, prefix string, sdk, ok bool) {

@@ -1,0 +1,198 @@
+schema: bir/1
+service: aws.codebuild
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing builds: no container is started, no source is fetched and no
+# buildspec is read, so a build is SUCCEEDED before the call that started it
+# returns.
+provenance: authored
+
+resources:
+  project:
+    collection: cbproj
+    arn: "arn:aws:codebuild:{region}:{account}:project/{id}"
+    id:
+      input_members: [name]
+    record:
+      name: id
+      arn: arn
+
+  # A build is keyed by the id its start minted, which is the project name and
+  # eight hex bytes joined by a colon. The record's id is that key echoed back.
+  build:
+    collection: cbbuild
+    id:
+      input_members: [id]
+    record:
+      id: id
+
+operations:
+  # Create and update are one path in the pack and one here: both rebuild the
+  # record from the request, so an update that omits `source` does not clear
+  # it -- it stores a null over it. `create` rather than `put` because the
+  # pack replaced the record rather than merging onto it.
+  CreateProject:
+    effects:
+      - create:
+          resource: project
+          record:
+            source: "'source' in input ? input.source : null"
+            environment: "'environment' in input ? input.environment : null"
+    output:
+      project: rec
+
+  UpdateProject:
+    effects:
+      - create:
+          resource: project
+          record:
+            source: "'source' in input ? input.source : null"
+            environment: "'environment' in input ? input.environment : null"
+    output:
+      project: rec
+
+  BatchGetProjects:
+    list:
+      resource: project
+      member: projects
+      paginate: model
+      filter: "item.name in input.names"
+
+  ListProjects:
+    list: { resource: project, member: projects, paginate: model }
+    output:
+      projects: "items.map(p, string(p.name))"
+
+  DeleteProject:
+    effects:
+      - delete: { resource: project, missing: ignore }
+
+  StartBuild:
+    effects:
+      - generate: { bind: bid, kind: hex, bytes: 8 }
+      - create:
+          resource: build
+          key: "string(input.projectName) + ':' + fx.bid"
+          record:
+            projectName: "string(input.projectName)"
+            buildStatus: "'SUCCEEDED'"
+    output:
+      build: rec
+
+  BatchGetBuilds:
+    list:
+      resource: build
+      member: builds
+      paginate: model
+      filter: "item.id in input.ids"
+
+  ListBuilds:
+    list: { resource: build, member: ids, paginate: model }
+    output:
+      ids: "items.map(b, string(b.id))"
+
+  # A stop writes only when there is a build to stop, and answers nothing when
+  # there is not -- where StopBuildOutput declares a build.
+  StopBuild:
+    reads:
+      build: { resource: build }
+    effects:
+      - patch:
+          resource: build
+          when: build_found
+          record:
+            buildStatus: "'STOPPED'"
+    output:
+      build: "build_found ? merge(build, {'buildStatus': 'STOPPED'}) : null"
+
+quirks:
+  - operation: CreateProject
+    note: >
+      A project is four members: its name, its ARN, and whatever the request
+      sent as `source` and `environment`, stored without being looked at. Of
+      the twenty-two members CreateProjectInput declares, two of the four
+      required ones -- `artifacts` and `serviceRole` -- are dropped along with
+      `cache`, `logsConfig`, `vpcConfig`, `timeoutInMinutes`, `description`,
+      `tags` and the rest. So a project has no artifact destination and no
+      service role, and nothing would notice if it did.
+
+      The Project the response carries is the record, which means it is missing
+      every member the SDK declares on it and never set: `created`,
+      `lastModified`, `webhook`, `badge`, `projectVisibility`. Creating over an
+      existing name replaces the project rather than faulting with
+      ResourceAlreadyExistsException.
+
+      The pack also looked for the name under `Name`, `projectName` and
+      `ProjectName`, and inside a `project` member, before falling back to
+      `name`. None of those exists on either input shape -- CreateProjectInput
+      and UpdateProjectInput both declare `name` and nothing like it -- so the
+      four fallbacks and the empty-name fault behind them were unreachable
+      under model validation and the bundle does not carry them.
+  - operation: UpdateProject
+    note: >
+      An update is a create. It rebuilds the record from the request rather
+      than applying the members the request carried, so updating a project to
+      change its `environment` stores a null over its `source`, and an update
+      that sends only the name empties both. The nineteen other members
+      UpdateProjectInput declares are dropped as they are on create, so there
+      is nothing else an update could change.
+
+      The project is not checked to exist: updating one that was never created
+      creates it, where the real service faults with
+      ResourceNotFoundException.
+  - operation: StartBuild
+    note: >
+      A build is SUCCEEDED before the call returns, so nothing observes
+      QUEUED, PROVISIONING or IN_PROGRESS, and nothing ever reaches FAILED.
+      No container runs, no source is fetched and no buildspec is parsed, so a
+      build has no phases, no logs and no artifacts: `phases`, `logs`,
+      `artifacts`, `startTime`, `endTime`, `currentPhase` and
+      `buildNumber` are all declared on Build and never set.
+
+      The project the build names is not checked to exist, so a build can be
+      started against a project that was never created -- and since the id is
+      the project name with eight hex bytes appended, that build is listed and
+      fetched like any other. Every one of the thirty-four override members
+      StartBuildInput carries is dropped, `idempotencyToken` included, so two
+      identical starts produce two builds.
+  - operation: BatchGetProjects
+    note: >
+      Both batch operations answer the records they find and say nothing about
+      the ones they do not: `projectsNotFound` and `buildsNotFound` are
+      declared on the two responses and never set. A caller asking for five
+      projects and getting three has no way to learn which two were missing.
+
+      The pack answered them in request order; a filtered list answers them in
+      store order, which for these keys is lexical. No SDK contract orders a
+      batch-get response, and the recording marks the step where the two
+      differ rather than quietly matching it.
+  - operation: ListProjects
+    note: >
+      Both lists answer every record in the account and region. `sortBy` and
+      `sortOrder` are ignored, so a caller asking for projects newest-first
+      gets them lexically, and neither list paginates: `nextToken` is accepted,
+      ignored, and never returned, so a caller looping until it is empty stops
+      after one page whatever the store holds.
+
+      ListBuilds answers ids across every project -- there is no
+      ListBuildsForProject here -- and since a build id begins with its
+      project name, the only way to find one project's builds is to filter the
+      strings client-side.
+  - operation: StopBuild
+    note: >
+      Stopping a build that exists rewrites its status to STOPPED and answers
+      it. Stopping one that does not answers an empty body, where
+      StopBuildOutput declares a `build` -- so an SDK reading the response
+      gets a zero-valued Build rather than an error, and the call succeeds
+      either way. The real service faults with ResourceNotFoundException.
+
+      A build that has already SUCCEEDED can be stopped, since nothing checks
+      the status it is in, and a stopped build cannot be restarted: there is
+      no RetryBuild here.
+  - operation: DeleteProject
+    note: >
+      Deleting a project answers an empty body and succeeds whether or not it
+      existed. Its builds are left behind in their own collection, still
+      naming it, and are still listed and fetched afterwards -- the real
+      service refuses to delete a project with builds unless they are deleted
+      first, and there is no BatchDeleteBuilds here to do it with.

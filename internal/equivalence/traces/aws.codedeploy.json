@@ -1,0 +1,513 @@
+{
+  "schema": "trace/1",
+  "service": "aws.codedeploy",
+  "source": "internal/services/aws/codedeploy",
+  "note": "Applications, groups and deployments; the deployment that stores the request.",
+  "steps": [
+    {
+      "operation": "ListApplications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "applications": null
+      }
+    },
+    {
+      "operation": "CreateApplication",
+      "input": {
+        "applicationName": "app",
+        "computePlatform": "Server"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "applicationId": "7c589129"
+      }
+    },
+    {
+      "operation": "CreateApplication",
+      "input": {
+        "applicationName": "other"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "applicationId": "5f59f223"
+      }
+    },
+    {
+      "operation": "GetApplication",
+      "input": {
+        "applicationName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "application": {
+          "applicationId": "7c589129",
+          "applicationName": "app",
+          "computePlatform": "Server"
+        }
+      }
+    },
+    {
+      "operation": "GetApplication",
+      "input": {
+        "applicationName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ApplicationDoesNotExistException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetApplication",
+      "input": {
+        "applicationName": "other"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "application": {
+          "applicationId": "5f59f223",
+          "applicationName": "other",
+          "computePlatform": ""
+        }
+      }
+    },
+    {
+      "operation": "ListApplications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "applications": [
+          "app",
+          "other"
+        ]
+      }
+    },
+    {
+      "operation": "CreateDeploymentGroup",
+      "input": {
+        "applicationName": "app",
+        "deploymentConfigName": "CodeDeployDefault.OneAtATime",
+        "deploymentGroupName": "grp",
+        "serviceRoleArn": "arn:aws:iam::000000000000:role/cd"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deploymentGroupId": "9c8e2cb0"
+      }
+    },
+    {
+      "operation": "CreateDeploymentGroup",
+      "input": {
+        "applicationName": "other",
+        "deploymentGroupName": "grp",
+        "serviceRoleArn": "arn:aws:iam::000000000000:role/cd"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deploymentGroupId": "33f6fc5d"
+      }
+    },
+    {
+      "operation": "GetDeploymentGroup",
+      "input": {
+        "applicationName": "app",
+        "deploymentGroupName": "grp"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deploymentGroupInfo": {
+          "applicationName": "app",
+          "deploymentGroupId": "9c8e2cb0",
+          "deploymentGroupName": "grp"
+        }
+      }
+    },
+    {
+      "operation": "GetDeploymentGroup",
+      "input": {
+        "applicationName": "app",
+        "deploymentGroupName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "DeploymentGroupDoesNotExistException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListDeploymentGroups",
+      "input": {
+        "applicationName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deploymentGroups": [
+          "grp"
+        ]
+      }
+    },
+    {
+      "operation": "ListDeploymentGroups",
+      "input": {
+        "applicationName": "other"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deploymentGroups": [
+          "grp"
+        ]
+      }
+    },
+    {
+      "operation": "CreateDeployment",
+      "input": {
+        "applicationName": "app",
+        "deploymentGroupName": "grp",
+        "description": "kept",
+        "ignoreApplicationStopFailures": true,
+        "revision": {
+          "revisionType": "S3",
+          "s3Location": {
+            "bucket": "b",
+            "bundleType": "zip",
+            "key": "k"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deploymentId": "83d4958a"
+      }
+    },
+    {
+      "operation": "CreateDeployment",
+      "input": {
+        "applicationName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deploymentId": "100aa4e6"
+      }
+    },
+    {
+      "operation": "GetDeployment",
+      "input": {
+        "deploymentId": {
+          "$fromPath": "deploymentId",
+          "$fromStep": 13
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deploymentInfo": {
+          "applicationName": "app",
+          "deploymentGroupName": "grp",
+          "deploymentId": "83d4958a",
+          "description": "kept",
+          "ignoreApplicationStopFailures": true,
+          "revision": {
+            "revisionType": "S3",
+            "s3Location": {
+              "bucket": "b",
+              "bundleType": "zip",
+              "key": "k"
+            }
+          },
+          "status": "Succeeded"
+        }
+      }
+    },
+    {
+      "operation": "GetDeployment",
+      "input": {
+        "deploymentId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "DeploymentDoesNotExistException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ListDeployments",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deployments": [
+          "100aa4e6",
+          "83d4958a"
+        ]
+      }
+    },
+    {
+      "operation": "StopDeployment",
+      "input": {
+        "deploymentId": {
+          "$fromPath": "deploymentId",
+          "$fromStep": 13
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "status": "Stopped"
+      }
+    },
+    {
+      "operation": "GetDeployment",
+      "input": {
+        "deploymentId": {
+          "$fromPath": "deploymentId",
+          "$fromStep": 13
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deploymentInfo": {
+          "applicationName": "app",
+          "deploymentGroupName": "grp",
+          "deploymentId": "83d4958a",
+          "description": "kept",
+          "ignoreApplicationStopFailures": true,
+          "revision": {
+            "revisionType": "S3",
+            "s3Location": {
+              "bucket": "b",
+              "bundleType": "zip",
+              "key": "k"
+            }
+          },
+          "status": "Stopped"
+        }
+      }
+    },
+    {
+      "operation": "StopDeployment",
+      "input": {
+        "deploymentId": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "status": "Stopped"
+      }
+    },
+    {
+      "operation": "DeleteDeploymentGroup",
+      "input": {
+        "applicationName": "app",
+        "deploymentGroupName": "grp"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListDeploymentGroups",
+      "input": {
+        "applicationName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deploymentGroups": null
+      }
+    },
+    {
+      "operation": "DeleteApplication",
+      "input": {
+        "applicationName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteApplication",
+      "input": {
+        "applicationName": "app"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListApplications",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "applications": [
+          "other"
+        ]
+      }
+    },
+    {
+      "operation": "ListDeployments",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "deployments": [
+          "100aa4e6",
+          "83d4958a"
+        ]
+      }
+    }
+  ]
+}

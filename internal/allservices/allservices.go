@@ -18,7 +18,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/acm"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/amplify"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apigateway"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apigatewayv2"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/appsync"
@@ -27,8 +26,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cloudcontrol"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cloudformation"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cloudfront"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/codebuild"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/codedeploy"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cognitoidp"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/comprehend"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/configservice"

@@ -479,3 +479,27 @@ Five of eleven operations, and all five succeed. Each answers a body built from 
 Two services is a class. Both packs were written against member names that read plausibly — `WorkspaceId`, `ReplicationTaskIdentifier` — and neither exists on the operation in question, and in both the wrong lookup produces an empty key rather than an error, so nothing anywhere fails. Nothing in the old arrangement could have caught it: a hand-written pack has no declaration of what it is allowed to read, and its tests were written from the same wrong assumption as the code.
 
 What would catch it is cheap and does not exist yet: the model already says which members each operation declares, and a bundle's `id.input_members` and `id.derive` name the members it reads, so a loader-time check could refuse a bundle that addresses a resource by a member some operation using it does not declare. That is a gate rather than a fix — the behavior stays transcribed either way — but it would turn the next instance into a load failure instead of a discovery. Recorded rather than built: it wants its own change and a pass over every bundle already written, several of which read members deliberately (`aws.transfer` resolves `ServerId` on operations that declare it, but `workspaces` deliberately resolves nothing), so the check needs a way to say "this one is meant".
+
+### The idiom the schema had no word for
+
+Extracting `codedeploy` and `amplify` ran into the first genuine schema gap since SQS: both store the request itself. `CreateDeployment` copies every member the caller sent into the record and forces `deploymentId` and `status` back on top; `CreateApp` does the same and forces `appId`. Twenty-five of the remaining packs contain that loop, and it was not expressible.
+
+The tempting workaround is to enumerate. Model validation bounds what a request can carry, so a bundle could spell out `'x' in input ? input.x : null` for each declared member and copy the same set. It does not reproduce the behavior: the pack stores only what the request *carried*, and an enumeration stores a null for every member the caller omitted. `GetDeployment` then answers twelve members where the pack answered three, and a caller cannot tell a member that was never sent from one sent as null. The difference is not cosmetic — it is the whole content of "the record is the request".
+
+So `spread: input` was added to the write effects. Three things about it are deliberate:
+
+- **Only `input`.** The request has been checked against the generated input shape by the time an effect runs, so a spread of it cannot store a member no SDK could send. Nothing else a write could name has that property, so the loader refuses anything else rather than the engine ignoring it at request time.
+- **Declared members win.** The spread lands beneath the resource-level and effect-level record, which is what lets a bundle say *keep what the caller sent, but the id and the status are mine* — precisely what all twenty-five packs do. No shipped bundle exercises the collision, so it has its own test built on a synthetic bundle rather than being left as an untested claim in a comment.
+- **It is one field, not an expression.** A CEL expression producing a whole record would have to see the request as a value and merge it, at which point a record stops being a reviewable list of members and the loader can no longer say what a write stores.
+
+The gap is worth recording separately from the fix, because of what it says about the ceiling. Wave 0 proved the schema against SQS's hardest semantics — statecharts, dedup, FIFO groups, long-poll — and froze it. What it did not prove was the schema against the *dullest* pack idiom, which turns out to be the one a quarter of the remaining services need. Sophistication and coverage are different axes, and the ceiling exercise measured only the first.
+
+### What `aws.codebuild`, `aws.codedeploy` and `aws.amplify` turned out to be
+
+No new instance of the addressing-member class: all three read members their operations declare. What they have instead is the update that is a create.
+
+`UpdateProject`, `UpdateApp` and CodeBuild's second create path all rebuild the record from the request rather than applying the members it carried. Updating a CodeBuild project to change its environment stores a null over its source. Updating an Amplify app to change its platform erases its name, its repository and its description — the name becoming the empty string rather than disappearing, because the pack seeded it before copying the request over the top. In all three the resource is not checked to exist, so an update to something that was never created creates it.
+
+This is a quieter failure than the phantom record and a more likely one to be hit: an update is the operation a caller reaches for *after* a create, with a partial request, which is exactly the shape that loses data here. Every one of them succeeds and answers the emptied record, so the response is the evidence and the caller has to read it to notice.
+
+One more worth naming: Amplify stores jobs per app rather than per branch. `ListJobs` answers every job under the app whatever branch it asks about, and `GetJob` resolves any job id under the app — so asking for a job "on branch main" finds one that ran on dev. The branch is in the request, in the record, and in neither the collection nor the lookup.

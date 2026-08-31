@@ -1,0 +1,236 @@
+schema: bir/1
+service: aws.amplify
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is hosted: no repository is cloned, no build runs and the
+# defaultDomain an app is given ends in .localhost, so nothing resolves and
+# nothing is served.
+provenance: authored
+
+resources:
+  app:
+    collection: ampapp
+    id:
+      input_members: [appId]
+    record:
+      appId: id
+      defaultDomain: "id + '.amplifyapp.localhost'"
+
+  # Branches and jobs are scoped to their app, so two apps may each have a
+  # branch called main and they are different records. Every operation on one
+  # reads its app first -- not to check it exists, which this service never
+  # does, but because the collection is named for it.
+  branch:
+    collection: "ampbr:{app.id}"
+    parent: app
+    id:
+      input_members: [branchName]
+    record:
+      branchName: id
+
+  # Jobs are scoped to the app, not to the branch -- see the quirk.
+  job:
+    collection: "ampjob:{app.id}"
+    parent: app
+    id:
+      input_members: [jobId]
+    record:
+      jobId: id
+
+errors:
+  NotFound:
+    code: NotFoundException
+    http: 400
+    fault: client
+
+operations:
+  # Create and update are one path in the pack and one here: both rebuild the
+  # app from the request, keeping whatever it carried and nothing else.
+  CreateApp:
+    effects:
+      - generate: { bind: aid, kind: hex, bytes: 8 }
+      - create:
+          resource: app
+          key: "fx.aid"
+          spread: input
+          record:
+            name: "'name' in input ? string(input.name) : ''"
+    output:
+      app: rec
+
+  UpdateApp:
+    effects:
+      - create:
+          resource: app
+          spread: input
+          record:
+            name: "'name' in input ? string(input.name) : ''"
+    output:
+      app: rec
+
+  GetApp:
+    reads:
+      app: { resource: app }
+    require:
+      - { cond: app_found, error: NotFound }
+    output:
+      app: app
+
+  ListApps:
+    list: { resource: app, member: apps, paginate: model }
+
+  DeleteApp:
+    effects:
+      - delete: { resource: app, missing: ignore }
+
+  CreateBranch:
+    reads:
+      app: { resource: app }
+    effects:
+      - create:
+          resource: branch
+          record:
+            appId: "string(input.appId)"
+            activeJobId: "''"
+    output:
+      branch: rec
+
+  GetBranch:
+    reads:
+      app: { resource: app }
+      branch: { resource: branch }
+    require:
+      - { cond: branch_found, error: NotFound }
+    output:
+      branch: branch
+
+  ListBranches:
+    reads:
+      app: { resource: app }
+    list: { resource: branch, member: branches, paginate: model }
+
+  DeleteBranch:
+    reads:
+      app: { resource: app }
+    effects:
+      - delete: { resource: branch, missing: ignore }
+
+  StartJob:
+    reads:
+      app: { resource: app }
+    effects:
+      - generate: { bind: jid, kind: hex, bytes: 8 }
+      - create:
+          resource: job
+          key: "fx.jid"
+          record:
+            appId: "string(input.appId)"
+            branchName: "string(input.branchName)"
+            status: "'SUCCEED'"
+    output:
+      jobSummary: rec
+
+  GetJob:
+    reads:
+      app: { resource: app }
+      job: { resource: job }
+    require:
+      - { cond: job_found, error: NotFound }
+    output:
+      job: job
+
+  ListJobs:
+    reads:
+      app: { resource: app }
+    list: { resource: job, member: jobSummaries, paginate: model }
+
+quirks:
+  - operation: UpdateApp
+    note: >
+      An update is a create. It rebuilds the app from the request rather than
+      applying the members the request carried, so updating one to change its
+      platform erases its name, its repository, its description and everything
+      else it was created with -- the name becomes the empty string rather
+      than disappearing, because the pack seeded it before copying the request
+      over the top. Every subsequent GetApp answers the emptied app.
+
+      The app is not checked to exist, so updating one that was never created
+      creates it, keyed by whatever appId the request named -- which is how an
+      app can come to have an appId that is not eight hex bytes. The real
+      service faults with NotFoundException.
+
+      What survives an update is what an app is: the appId and a defaultDomain
+      derived from it. Both are recomputed on every write, so neither can be
+      overwritten by a request that names them.
+  - operation: CreateApp
+    note: >
+      An app is its generated appId, its name, a defaultDomain ending in
+      .localhost, and whatever else the request carried, stored without being
+      looked at. No repository is cloned -- `repository`, `accessToken` and
+      `oauthToken` are stored and never used, which means an access token the
+      caller sent is kept in the store and answered by every later GetApp and
+      ListApps. `buildSpec`, `customRules`, `environmentVariables`,
+      `enableBranchAutoBuild` and the rest are stored and equally ignored.
+
+      Of what App declares, `appArn`, `createTime`, `updateTime`,
+      `defaultDomain`'s certificate, `productionBranch` and `repositoryCloneMethod`
+      are never set -- so an app has no ARN, which is unusual here: it is the
+      one resource in this bundle that could have had one and does not.
+
+      The pack looked for the appId under `AppId` as well as `appId`. Neither
+      CreateApp nor any other input shape declares the capitalised spelling,
+      so that fallback was unreachable under model validation and the bundle
+      does not carry it.
+  - operation: CreateBranch
+    note: >
+      A branch is three members -- its name, its app's id, and an activeJobId
+      that is the empty string and stays it, since starting a job never
+      updates the branch that job names. Everything CreateBranchInput carries
+      to describe a branch is dropped: `stage`, `framework`, `buildSpec`,
+      `environmentVariables`, `enableAutoBuild`, `ttl`, `backend`. So a
+      branch is a name under an app.
+
+      Unlike the app, a branch keeps nothing of the request -- the two writes
+      differ, and the difference is not a decision anyone recorded. The app is
+      not checked to exist, so a branch can be created under one that was
+      never created, and it is listed and fetched normally afterwards.
+      Deleting an app leaves its branches and its jobs behind in their own
+      collections, still reachable by appId.
+  - operation: StartJob
+    note: >
+      A job is SUCCEED before the call returns -- the pack's spelling, and
+      the SDK's -- so nothing observes PENDING, PROVISIONING or RUNNING and
+      nothing ever fails. No build runs, so `steps`, `startTime`, `endTime`,
+      `commitId` and `commitMessage` are declared on JobSummary and never
+      set, and the `jobId` the request may supply is ignored in favour of a
+      generated one.
+
+      The branch the job names is not checked to exist: step for step, a job
+      started against a branch that was never created is indistinguishable
+      from one started against a real branch.
+  - operation: ListJobs
+    note: >
+      Jobs are stored per app rather than per branch, so ListJobs answers
+      every job under the app whatever branch it asks about -- a caller
+      listing jobs for main gets the jobs of every other branch too, each
+      carrying its own branchName in a response the caller has to filter
+      itself. GetJob has the same shape: it resolves any job id under the app,
+      so asking for a job "on branch main" finds one that ran on dev.
+
+      None of the three lists paginates: `maxResults` and `nextToken` are
+      accepted, ignored, and never returned.
+  - operation: GetJob
+    note: >
+      GetJob answers the JobSummary where GetJobResult declares a `job` of
+      type Job -- a structure whose own members are `summary` and `steps`. So
+      an SDK reading `job.summary.status` reads nothing, and the status is
+      one level higher than anywhere it could look for it. Every other read
+      here answers the shape it declares; this is the one that does not.
+  - operation: DeleteApp
+    note: >
+      All three deletes answer an empty body and succeed whether or not their
+      subject existed. DeleteAppResult and DeleteBranchResult each declare
+      their record as required, so an SDK reading the response gets a
+      zero-valued App or Branch rather than the thing that was removed --
+      and a caller cannot tell a delete that removed something from one that
+      found nothing.

@@ -1812,13 +1812,21 @@ func TestBucketCorsCharacterization(t *testing.T) {
 	deleted := mustInvoke(t, p, "DeleteBucketCors", input, nil)
 	_, finalErr := invoke(t, p, "GetBucketCors", input, nil)
 	final := asFault(t, finalErr)
+	defaultRequest := httptest.NewRequest(http.MethodOptions, "https://cors-characterization.s3.us-east-1.amazonaws.com/key", nil)
+	defaultRequest.Header.Set("Origin", "https://app.localstack.cloud")
+	defaultRequest.Header.Set("Access-Control-Request-Method", "GET")
+	localstackDefault, defaultErr := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: defaultRequest})
+	if defaultErr != nil {
+		t.Fatal(defaultErr)
+	}
 	golden.AssertJSON(t, map[string]any{
 		"default": map[string]any{"code": before.Code, "status": before.HTTPStatus, "bucket": before.Fields["BucketName"]},
 		"put":     put.Output, "get": after.Output,
-		"preflight": map[string]any{"status": preflight.Status, "headers": preflight.Headers},
-		"rejected":  map[string]any{"code": rejected.Code, "message": rejected.Message, "method": rejected.Fields["Method"], "resourceType": rejected.Fields["ResourceType"], "status": rejected.HTTPStatus},
-		"invalid":   map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus},
-		"preserved": preserved.Output, "delete": deleted.Output,
+		"preflight":         map[string]any{"status": preflight.Status, "headers": preflight.Headers},
+		"rejected":          map[string]any{"code": rejected.Code, "message": rejected.Message, "method": rejected.Fields["Method"], "resourceType": rejected.Fields["ResourceType"], "status": rejected.HTTPStatus},
+		"localstackDefault": map[string]any{"status": localstackDefault.Status, "headers": localstackDefault.Headers},
+		"invalid":           map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus},
+		"preserved":         preserved.Output, "delete": deleted.Output,
 		"deleted": map[string]any{"code": final.Code, "status": final.HTTPStatus, "bucket": final.Fields["BucketName"]},
 	})
 }

@@ -36,6 +36,29 @@
     "message": "Found unsupported HTTP method in CORS config. Unsupported method is OPTIONS",
     "status": 400
   },
+  "localstackDefault": {
+    "headers": {
+      "Access-Control-Allow-Credentials": [
+        "true"
+      ],
+      "Access-Control-Allow-Headers": [
+        "authorization,cache-control,content-length,content-md5,content-type,etag,location,x-amz-acl,x-amz-content-sha256,x-amz-date,x-amz-request-id,x-amz-security-token,x-amz-tagging,x-amz-target,x-amz-user-agent,x-amz-version-id,x-amzn-requestid,x-localstack-target,amz-sdk-invocation-id,amz-sdk-request,x-amz-log-type"
+      ],
+      "Access-Control-Allow-Methods": [
+        "HEAD,GET,PUT,POST,DELETE,OPTIONS,PATCH"
+      ],
+      "Access-Control-Allow-Origin": [
+        "https://app.localstack.cloud"
+      ],
+      "Access-Control-Expose-Headers": [
+        "etag,x-amz-version-id,x-amz-log-result,x-amz-executed-version,x-amz-function-error"
+      ],
+      "Vary": [
+        "Origin"
+      ]
+    },
+    "status": 200
+  },
   "preflight": {
     "headers": {
       "Access-Control-Allow-Credentials": [

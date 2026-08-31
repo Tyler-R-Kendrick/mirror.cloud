@@ -521,6 +521,56 @@ func TestConcurrentMissingMultipartUploadsRemainModeled(t *testing.T) {
 	}
 }
 
+func TestConcurrentMultipartPartNumberFaultsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(input map[string]any) error {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "UploadPart", Input: input, Body: io.NopCloser(strings.NewReader("part"))})
+		return err
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "part-number-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateMultipartUpload", Input: map[string]any{"Bucket": "part-number-chaos", "Key": "key"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID := created.Output["UploadId"].(string)
+	numbers := []int{-1, 0, 10001}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			number := numbers[i%len(numbers)]
+			id := uploadID
+			missing := i%2 == 0
+			if missing {
+				id = fmt.Sprintf("missing-%d", i)
+			}
+			var fault *spi.Fault
+			if err := call(map[string]any{"Bucket": "part-number-chaos", "Key": "key", "UploadId": id, "PartNumber": number}); !errors.As(err, &fault) {
+				errs <- fmt.Errorf("part number %d fault = %v", number, err)
+			} else if missing && (fault.Code != "NoSuchUpload" || fault.Fields["UploadId"] != id) {
+				errs <- fmt.Errorf("missing upload fault = %#v", fault)
+			} else if !missing && (fault.Code != "InvalidArgument" || fault.Message != "Part number must be an integer between 1 and 10000, inclusive" || fault.Fields["ArgumentName"] != "partNumber" || fault.Fields["ArgumentValue"] != number) {
+				errs <- fmt.Errorf("part number %d fault = %#v", number, fault)
+			} else {
+				errs <- nil
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
 func TestConcurrentBodyReadFailuresLeaveNoPartialObjects(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

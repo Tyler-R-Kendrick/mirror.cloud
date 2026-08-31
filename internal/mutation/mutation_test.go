@@ -30,6 +30,38 @@ func TestMutantsAreKilled(t *testing.T) {
 	}
 	mutants := []mutant{
 		{
+			name: "s3-ignore-put-object-body-read-error",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  "body, err = io.ReadAll(req.Body)\n\t\tif err != nil {\n\t\t\treturn nil, err\n\t\t}\n\t}\n\tif checksumType == \"\" {",
+			new:  "body, _ = io.ReadAll(req.Body)\n\t}\n\tif checksumType == \"\" {",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestBodyReadErrorsDoNotCommitPartialWrites",
+		},
+		{
+			name: "s3-ignore-get-object-blob-read-error",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  "data, readErr := io.ReadAll(rc)\n\t_ = rc.Close()\n\tif readErr != nil {\n\t\treturn nil, readErr\n\t}",
+			new:  "data, _ := io.ReadAll(rc)\n\t_ = rc.Close()",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestBlobReadErrorsDoNotReturnOrCopyPartialData",
+		},
+		{
+			name: "s3-ignore-ranged-part-copy-read-error",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  "body, err := io.ReadAll(source.body)\n\t\tif err != nil {\n\t\t\treturn nil, err\n\t\t}\n\t\tbody, err = applyCopySourceRange(body, rawRange)",
+			new:  "body, _ := io.ReadAll(source.body)\n\t\tbody, err = applyCopySourceRange(body, rawRange)",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestBlobReadErrorsDoNotReturnOrCopyPartialData",
+		},
+		{
+			name: "s3-ignore-upload-part-body-read-error",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  "var err error\n\t\tbody, err = io.ReadAll(req.Body)\n\t\tif err != nil {\n\t\t\treturn nil, err\n\t\t}",
+			new:  "body, _ = io.ReadAll(req.Body)",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestBodyReadErrorsDoNotCommitPartialWrites",
+		},
+		{
 			name: "restxml-keep-no-content-headers",
 			file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
 			old:  `if status == http.StatusNoContent {`,

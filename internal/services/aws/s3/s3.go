@@ -383,7 +383,7 @@ func (p *Pack) applyCORS(ctx context.Context, req *spi.Request, headers http.Hea
 func (p *Pack) corsHeaders(ctx context.Context, req *spi.Request, origin, method, requested string) (http.Header, bool) {
 	configuration, ok := p.corsConfiguration(ctx, req)
 	if !ok {
-		return nil, false
+		return localstackCORSHeaders(req.HTTP, origin), false
 	}
 	requestedHeaders := splitCORSHeaders(requested)
 	for _, value := range asSlice(configuration["CORSRules"]) {
@@ -453,9 +453,48 @@ func splitCORSHeaders(value string) []string {
 	}
 	parts := strings.Split(value, ",")
 	for i := range parts {
-		parts[i] = strings.TrimSpace(parts[i])
+		parts[i] = strings.ToLower(strings.TrimSpace(parts[i]))
 	}
 	return parts
+}
+
+func localstackCORSHeaders(request *http.Request, origin string) http.Header {
+	if !localstackCORSOriginAllowed(request, origin) {
+		return nil
+	}
+	headers := http.Header{}
+	headers.Set("Access-Control-Allow-Origin", origin)
+	headers.Set("Access-Control-Allow-Credentials", "true")
+	headers.Set("Access-Control-Allow-Methods", "HEAD,GET,PUT,POST,DELETE,OPTIONS,PATCH")
+	headers.Set("Access-Control-Allow-Headers", "authorization,cache-control,content-length,content-md5,content-type,etag,location,x-amz-acl,x-amz-content-sha256,x-amz-date,x-amz-request-id,x-amz-security-token,x-amz-tagging,x-amz-target,x-amz-user-agent,x-amz-version-id,x-amzn-requestid,x-localstack-target,amz-sdk-invocation-id,amz-sdk-request,x-amz-log-type")
+	headers.Set("Access-Control-Expose-Headers", "etag,x-amz-version-id,x-amz-log-result,x-amz-executed-version,x-amz-function-error")
+	headers.Set("Vary", "Origin")
+	if request != nil && request.Header.Get("Access-Control-Request-Private-Network") == "true" {
+		headers.Set("Access-Control-Allow-Private-Network", "true")
+	}
+	return headers
+}
+
+func localstackCORSOriginAllowed(request *http.Request, origin string) bool {
+	switch origin {
+	case "https://app.localstack.cloud", "http://app.localstack.cloud", "https://localhost", "https://localhost.localstack.cloud", "file://":
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || request == nil || parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return false
+	}
+	endpoint, err := url.Parse("//" + request.Host)
+	if err != nil {
+		return false
+	}
+	portAllowed := parsed.Port() == "" || parsed.Port() == endpoint.Port()
+	for _, marker := range []string{".s3-website.", ".cloudfront."} {
+		if _, domain, ok := strings.Cut(parsed.Hostname(), marker); ok && portAllowed && (domain == "localhost" || domain == "localhost.localstack.cloud") {
+			return true
+		}
+	}
+	return parsed.Port() != "" && parsed.Port() == endpoint.Port() && (parsed.Hostname() == "localhost" || parsed.Hostname() == "localhost.localstack.cloud")
 }
 
 func corsHeadersAllowed(allowed []any, requested []string) bool {

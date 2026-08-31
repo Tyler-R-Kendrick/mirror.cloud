@@ -1015,7 +1015,7 @@ func TestBucketCorsHTTP(t *testing.T) {
 	request := httptest.NewRequest(http.MethodOptions, "https://cors-http.s3.us-east-1.amazonaws.com/key", nil)
 	request.Header.Set("Origin", "https://app.example.test")
 	request.Header.Set("Access-Control-Request-Method", "GET")
-	request.Header.Set("Access-Control-Request-Headers", "x-amz-request-payer,x-amz-meta-team")
+	request.Header.Set("Access-Control-Request-Headers", "x-amz-request-payer,x-AMZ-meta-team")
 	response, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: request})
 	if err != nil || response.Status != http.StatusOK || response.Headers.Get("Access-Control-Allow-Origin") != "https://app.example.test" || response.Headers.Get("Access-Control-Allow-Credentials") != "true" || response.Headers.Get("Access-Control-Allow-Headers") != "x-amz-request-payer, x-amz-meta-team" || response.Headers.Get("Access-Control-Expose-Headers") != "ETag" || response.Headers.Get("Access-Control-Max-Age") != "300" || response.Headers.Get("Vary") == "" {
 		t.Fatalf("matching preflight = %#v, %v", response, err)
@@ -1051,6 +1051,26 @@ func TestBucketCorsHTTP(t *testing.T) {
 	_, err = unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: noConfig})
 	if fault := asFault(t, err); fault.Code != "AccessForbidden" || fault.Message != "CORSResponse: CORS is not enabled for this bucket." || fault.Fields["Method"] != http.MethodOptions {
 		t.Fatalf("unconfigured preflight = %#v", fault)
+	}
+	noConfig.Header.Set("Origin", "https://app.localstack.cloud")
+	noConfig.Header.Set("Access-Control-Request-Private-Network", "true")
+	response, err = unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: noConfig})
+	if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != "https://app.localstack.cloud" || response.Headers.Get("Access-Control-Allow-Methods") != "HEAD,GET,PUT,POST,DELETE,OPTIONS,PATCH" || response.Headers.Get("Access-Control-Allow-Private-Network") != "true" || response.Headers.Get("Vary") != "Origin" {
+		t.Fatalf("LocalStack default preflight = %#v, %v", response, err)
+	}
+	for _, origin := range []string{"http://app.localstack.cloud", "https://localhost", "https://localhost.localstack.cloud", "file://", "http://localhost:4566", "https://localhost.localstack.cloud:4566", "http://bucket.s3-website.localhost.localstack.cloud:4566", "http://distribution.cloudfront.localhost:4566"} {
+		request := httptest.NewRequest(http.MethodOptions, "https://cors-none.s3.us-east-1.amazonaws.com:4566/key", nil)
+		request.Header.Set("Origin", origin)
+		response, err := unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: request})
+		if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != origin {
+			t.Errorf("LocalStack default origin %q = %#v, %v", origin, response, err)
+		}
+	}
+	wrongPort := httptest.NewRequest(http.MethodOptions, "https://cors-none.s3.us-east-1.amazonaws.com:4566/key", nil)
+	wrongPort.Header.Set("Origin", "http://localhost:9999")
+	_, err = unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: wrongPort})
+	if fault := asFault(t, err); fault.Code != "AccessForbidden" {
+		t.Fatalf("wrong-port origin = %#v", fault)
 	}
 
 	get := httptest.NewRequest(http.MethodGet, "https://cors-http.s3.us-east-1.amazonaws.com/key", nil)

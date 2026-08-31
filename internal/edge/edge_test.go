@@ -262,6 +262,9 @@ func TestS3BucketCORSHTTP(t *testing.T) {
 	if got := do(http.MethodOptions, "/key", "cors-edge.s3.us-east-1.amazonaws.com", nil, nil); got.Code != http.StatusBadRequest || !strings.Contains(got.Body.String(), "Origin request header needed") {
 		t.Fatalf("missing origin = %d %s", got.Code, got.Body.String())
 	}
+	if got := do(http.MethodOptions, "/key", "missing.s3.us-east-1.amazonaws.com", nil, map[string]string{"Origin": "https://app.localstack.cloud"}); got.Code != http.StatusOK || got.Header().Get("Access-Control-Allow-Origin") != "https://app.localstack.cloud" {
+		t.Fatalf("LocalStack default preflight = %d %#v %s", got.Code, got.Header(), got.Body.String())
+	}
 }
 
 func TestS3PresignedExpiryFaultCharacterization(t *testing.T) {

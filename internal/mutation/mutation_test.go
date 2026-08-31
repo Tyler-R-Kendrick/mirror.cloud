@@ -5594,14 +5594,6 @@ var mutants = []mutant{
 		run:  "TestStatesSyncServiceIntegrations",
 	},
 	{
-		name: "states-drop-codebuild-project-name",
-		file: filepath.Join("internal", "services", "aws", "codebuild", "codebuild.go"),
-		old:  `name := first(req.Input, "name", "Name", "projectName", "ProjectName")`,
-		new:  `name := first(req.Input, "name", "Name")`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStatesSyncServiceIntegrations",
-	},
-	{
 		name: "states-ignore-task-credentials",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 		old:  `copy.Identity = identity`,

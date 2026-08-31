@@ -1364,6 +1364,65 @@ func FuzzListBucketsPagination(f *testing.F) {
 	})
 }
 
+func FuzzListObjectsPagination(f *testing.F) {
+	for _, seed := range []struct {
+		v2     bool
+		max    uint8
+		marker string
+	}{{false, 1, ""}, {false, 1, "folder/a/"}, {true, 2, "folder/a/"}, {true, 3, "folder/b"}} {
+		f.Add(seed.v2, seed.max, seed.marker)
+	}
+	f.Fuzz(func(t *testing.T, v2 bool, maxSeed uint8, marker string) {
+		if !utf8.ValidString(marker) || len(marker) > 128 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-fuzz"}, nil)
+		for _, key := range []string{"folder/a/one", "folder/a/two", "folder/b", "folder/c"} {
+			mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-fuzz", "Key": key}, []byte("content"))
+		}
+		maxKeys := int(maxSeed%3) + 1
+		operation := "ListObjects"
+		input := map[string]any{"Bucket": "list-fuzz", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": maxKeys, "Marker": marker}
+		if v2 {
+			operation = "ListObjectsV2"
+			delete(input, "Marker")
+			input["ContinuationToken"] = marker
+		}
+		page := mustInvoke(t, p, operation, input, nil).Output
+		all := []string{"folder/a/", "folder/b", "folder/c"}
+		var want []string
+		for _, value := range all {
+			if value > marker {
+				want = append(want, value)
+			}
+		}
+		truncated := len(want) > maxKeys
+		if truncated {
+			want = want[:maxKeys]
+		}
+		var got []string
+		for _, value := range asSliceForTest(page["CommonPrefixes"]) {
+			got = append(got, asMapForTest(value)["Prefix"].(string))
+		}
+		for _, value := range asSliceForTest(page["Contents"]) {
+			got = append(got, asMapForTest(value)["Key"].(string))
+		}
+		if strings.Join(got, "\x00") != strings.Join(want, "\x00") || page["IsTruncated"] != truncated || page["KeyCount"] != len(want) {
+			t.Fatalf("%s marker=%q max=%d page=%#v want=%v", operation, marker, maxKeys, page, want)
+		}
+		if truncated {
+			field := "NextMarker"
+			if v2 {
+				field = "NextContinuationToken"
+			}
+			if page[field] != want[len(want)-1] {
+				t.Fatalf("%s = %q want %q", field, page[field], want[len(want)-1])
+			}
+		}
+	})
+}
+
 func FuzzDeleteObjectVersionRestoration(f *testing.F) {
 	f.Add("first", "second", "third", uint8(2))
 	f.Add("", "same", "same", uint8(1))

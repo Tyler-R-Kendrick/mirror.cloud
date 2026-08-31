@@ -730,6 +730,16 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	if body := w.Body.String(); err != nil || !strings.Contains(body, "<Buckets><Bucket><BucketRegion>us-west-2</BucketRegion><CreationDate>date</CreationDate><Name>one</Name></Bucket></Buckets>") || strings.Contains(body, "<member>") {
 		t.Fatalf("bucket list response %v %s", err, body)
 	}
+	for _, operation := range []string{"ListObjects", "ListObjectsV2"} {
+		w = httptest.NewRecorder()
+		err := codec.Encode(svc, &model.Operation{Name: operation}, w, &spi.Response{Output: map[string]any{
+			"Contents": []any{map[string]any{"Key": "folder/file"}}, "CommonPrefixes": []any{map[string]any{"Prefix": "folder/subfolder/"}},
+		}})
+		body := w.Body.String()
+		if err != nil || !strings.Contains(body, "<Contents><Key>folder/file</Key></Contents>") || !strings.Contains(body, "<CommonPrefixes><Prefix>folder/subfolder/</Prefix></CommonPrefixes>") || strings.Contains(body, "<member>") {
+			t.Fatalf("%s flattened response %v %s", operation, err, body)
+		}
+	}
 	w = httptest.NewRecorder()
 	if err := codec.Encode(svc, &model.Operation{Name: "GetBucketLocation"}, w, &spi.Response{Output: map[string]any{"LocationConstraint": "EU"}}); err != nil || !strings.Contains(w.Body.String(), `<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">EU</LocationConstraint>`) {
 		t.Fatalf("bucket location response %v %s", err, w.Body.String())

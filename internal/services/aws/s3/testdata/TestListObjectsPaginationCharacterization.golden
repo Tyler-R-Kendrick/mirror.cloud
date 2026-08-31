@@ -1,0 +1,73 @@
+{
+  "v1-first": {
+    "CommonPrefixes": [
+      {
+        "Prefix": "folder/aSubfolder/"
+      }
+    ],
+    "Contents": null,
+    "Delimiter": "/",
+    "IsTruncated": true,
+    "KeyCount": 1,
+    "Marker": "",
+    "MaxKeys": 1,
+    "Name": "list-characterization",
+    "NextMarker": "folder/aSubfolder/",
+    "Prefix": "folder/"
+  },
+  "v1-next": {
+    "CommonPrefixes": null,
+    "Contents": [
+      {
+        "ETag": "\"9a0364b9e99bb480dd25e1f0284c8555\"",
+        "Key": "folder/file1",
+        "LastModified": "1970-01-01T00:00:00Z",
+        "Size": 7,
+        "StorageClass": "STANDARD"
+      }
+    ],
+    "Delimiter": "/",
+    "IsTruncated": true,
+    "KeyCount": 1,
+    "Marker": "folder/aSubfolder/",
+    "MaxKeys": 1,
+    "Name": "list-characterization",
+    "NextMarker": "folder/file1",
+    "Prefix": "folder/"
+  },
+  "v2-first": {
+    "CommonPrefixes": [
+      {
+        "Prefix": "folder/aSubfolder/"
+      }
+    ],
+    "Contents": null,
+    "Delimiter": "/",
+    "IsTruncated": true,
+    "KeyCount": 1,
+    "MaxKeys": 1,
+    "Name": "list-characterization",
+    "NextContinuationToken": "folder/aSubfolder/",
+    "Prefix": "folder/"
+  },
+  "v2-next": {
+    "CommonPrefixes": null,
+    "Contents": [
+      {
+        "ETag": "\"9a0364b9e99bb480dd25e1f0284c8555\"",
+        "Key": "folder/file1",
+        "LastModified": "1970-01-01T00:00:00Z",
+        "Size": 7,
+        "StorageClass": "STANDARD"
+      }
+    ],
+    "ContinuationToken": "folder/aSubfolder/",
+    "Delimiter": "/",
+    "IsTruncated": true,
+    "KeyCount": 1,
+    "MaxKeys": 1,
+    "Name": "list-characterization",
+    "NextContinuationToken": "folder/file1",
+    "Prefix": "folder/"
+  }
+}

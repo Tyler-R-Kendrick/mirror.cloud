@@ -1617,6 +1617,35 @@ func FuzzNoSuchUploadFaults(f *testing.F) {
 	})
 }
 
+func FuzzMultipartPartNumberFaults(f *testing.F) {
+	f.Add(0, false)
+	f.Add(1, false)
+	f.Add(10000, false)
+	f.Add(10001, true)
+	f.Fuzz(func(t *testing.T, number int, missing bool) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "part-number-fuzz"}, nil)
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "part-number-fuzz", "Key": "key"}, nil).Output["UploadId"].(string)
+		if missing {
+			uploadID = "missing"
+		}
+		_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "part-number-fuzz", "Key": "key", "UploadId": uploadID, "PartNumber": number}, []byte("part"))
+		if missing {
+			if fault := asFault(t, err); fault.Code != "NoSuchUpload" || fault.Fields["UploadId"] != uploadID {
+				t.Fatalf("missing upload fault = %#v", fault)
+			}
+			return
+		}
+		if number < 1 || number > 10000 {
+			if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Message != "Part number must be an integer between 1 and 10000, inclusive" || fault.Fields["ArgumentName"] != "partNumber" || fault.Fields["ArgumentValue"] != number {
+				t.Fatalf("part number %d fault = %#v", number, fault)
+			}
+		} else if err != nil {
+			t.Fatalf("valid part number %d: %v", number, err)
+		}
+	})
+}
+
 func FuzzDeleteObjectVersionRestoration(f *testing.F) {
 	f.Add("first", "second", "third", uint8(2))
 	f.Add("", "same", "same", uint8(1))

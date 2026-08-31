@@ -2353,6 +2353,46 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	col := p.col(req, "bktcfg")
 	if strings.HasPrefix(req.Operation, "Put") {
+		if req.Operation == "PutBucketCors" {
+			if str(req.Input["_body"]) != "" {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			configuration := asMap(req.Input["CORSConfiguration"])
+			rules := asSlice(configuration["CORSRules"])
+			if len(rules) == 0 {
+				rules = asSlice(req.Input["CORSRules"])
+			}
+			if len(rules) == 0 || len(rules) > 100 {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			for _, value := range rules {
+				rule, ok := value.(map[string]any)
+				if !ok {
+					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+				}
+				if _, ok := rule["AllowedMethods"]; !ok {
+					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+				}
+				if _, ok := rule["AllowedOrigins"]; !ok {
+					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+				}
+				for field := range rule {
+					switch field {
+					case "AllowedMethods", "AllowedOrigins", "AllowedHeaders", "ExposeHeaders", "MaxAgeSeconds", "ID":
+					default:
+						return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+					}
+				}
+				for _, value := range asSlice(rule["AllowedMethods"]) {
+					method := str(value)
+					if method != "GET" && method != "PUT" && method != "HEAD" && method != "POST" && method != "DELETE" {
+						return nil, &spi.Fault{Code: "InvalidRequest", Message: "Found unsupported HTTP method in CORS config. Unsupported method is " + method, HTTPStatus: http.StatusBadRequest, Fault: "client"}
+					}
+				}
+			}
+			delete(req.Input, "CORSRules")
+			req.Input["CORSConfiguration"] = map[string]any{"CORSRules": rules}
+		}
 		if req.Operation == "PutBucketLogging" {
 			if str(req.Input["_body"]) != "" {
 				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
@@ -2468,6 +2508,9 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 		if req.Operation == "GetBucketAccelerateConfiguration" {
 			return &spi.Response{Output: map[string]any{}}, nil
 		}
+		if req.Operation == "GetBucketCors" {
+			return nil, &spi.Fault{Code: "NoSuchCORSConfiguration", Message: "The CORS configuration does not exist", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": b}}
+		}
 		if miss != nil {
 			return nil, miss
 		}
@@ -2483,6 +2526,9 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	if req.Operation == "GetBucketLogging" {
 		return &spi.Response{Status: 200, Output: map[string]any{"LoggingEnabled": asMap(doc["BucketLoggingStatus"])["LoggingEnabled"]}}, nil
+	}
+	if req.Operation == "GetBucketCors" {
+		return &spi.Response{Status: 200, Output: map[string]any{"CORSRules": asMap(doc["CORSConfiguration"])["CORSRules"]}}, nil
 	}
 	return &spi.Response{Status: 200, Output: doc}, nil
 }

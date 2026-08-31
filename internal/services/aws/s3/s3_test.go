@@ -449,6 +449,83 @@ func TestBucketLogging(t *testing.T) {
 	}
 }
 
+func TestBucketCors(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	input := map[string]any{"Bucket": "cors"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	_, err := invoke(t, p, "GetBucketCors", input, nil)
+	if fault := asFault(t, err); fault.Code != "NoSuchCORSConfiguration" || fault.HTTPStatus != http.StatusNotFound || fault.Fields["BucketName"] != "cors" {
+		t.Fatalf("default CORS fault = %#v", fault)
+	}
+	rules := []any{
+		map[string]any{"AllowedMethods": []any{"GET", "HEAD"}, "AllowedOrigins": []any{"https://example.test"}, "AllowedHeaders": []any{"*"}, "ExposeHeaders": []any{"ETag"}, "MaxAgeSeconds": float64(300), "ID": "read"},
+		map[string]any{"AllowedMethods": []any{"PUT", "POST", "DELETE"}, "AllowedOrigins": []any{"*"}},
+	}
+	mustInvoke(t, p, "PutBucketCors", map[string]any{"Bucket": "cors", "CORSConfiguration": map[string]any{"CORSRules": rules}}, nil)
+	if got := mustInvoke(t, p, "GetBucketCors", input, nil).Output["CORSRules"]; !reflect.DeepEqual(got, rules) {
+		t.Fatalf("CORS rules = %#v", got)
+	}
+	tooMany := make([]any, 101)
+	for i := range tooMany {
+		tooMany[i] = rules[0]
+	}
+	for _, tc := range []struct {
+		name  string
+		input map[string]any
+		code  string
+	}{
+		{"malformed body", map[string]any{"_body": "<broken"}, "MalformedXML"},
+		{"no rules", map[string]any{"CORSConfiguration": map[string]any{}}, "MalformedXML"},
+		{"too many rules", map[string]any{"CORSConfiguration": map[string]any{"CORSRules": tooMany}}, "MalformedXML"},
+		{"missing methods", map[string]any{"CORSRules": []any{map[string]any{"AllowedOrigins": []any{"*"}}}}, "MalformedXML"},
+		{"missing origins", map[string]any{"CORSRules": []any{map[string]any{"AllowedMethods": []any{"GET"}}}}, "MalformedXML"},
+		{"unknown field", map[string]any{"CORSRules": []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{"*"}, "Unknown": true}}}, "MalformedXML"},
+		{"unsupported method", map[string]any{"CORSRules": []any{map[string]any{"AllowedMethods": []any{"OPTIONS"}, "AllowedOrigins": []any{"*"}}}}, "InvalidRequest"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.input["Bucket"] = "cors"
+			_, err := invoke(t, p, "PutBucketCors", tc.input, nil)
+			if fault := asFault(t, err); fault.Code != tc.code || fault.HTTPStatus != http.StatusBadRequest {
+				t.Fatalf("fault = %#v", fault)
+			}
+		})
+	}
+	if got := mustInvoke(t, p, "GetBucketCors", input, nil).Output["CORSRules"]; !reflect.DeepEqual(got, rules) {
+		t.Fatalf("invalid put replaced CORS = %#v", got)
+	}
+	for range 2 {
+		mustInvoke(t, p, "DeleteBucketCors", input, nil)
+	}
+	_, err = invoke(t, p, "GetBucketCors", input, nil)
+	if fault := asFault(t, err); fault.Code != "NoSuchCORSConfiguration" {
+		t.Fatalf("deleted CORS fault = %#v", fault)
+	}
+}
+
+func TestBucketCorsCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	input := map[string]any{"Bucket": "cors-characterization"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	_, beforeErr := invoke(t, p, "GetBucketCors", input, nil)
+	before := asFault(t, beforeErr)
+	rules := []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{"*"}, "ID": "read"}}
+	put := mustInvoke(t, p, "PutBucketCors", map[string]any{"Bucket": input["Bucket"], "CORSConfiguration": map[string]any{"CORSRules": rules}}, nil)
+	after := mustInvoke(t, p, "GetBucketCors", input, nil)
+	_, invalidErr := invoke(t, p, "PutBucketCors", map[string]any{"Bucket": input["Bucket"], "CORSRules": []any{map[string]any{"AllowedMethods": []any{"OPTIONS"}, "AllowedOrigins": []any{"*"}}}}, nil)
+	invalid := asFault(t, invalidErr)
+	preserved := mustInvoke(t, p, "GetBucketCors", input, nil)
+	deleted := mustInvoke(t, p, "DeleteBucketCors", input, nil)
+	_, finalErr := invoke(t, p, "GetBucketCors", input, nil)
+	final := asFault(t, finalErr)
+	golden.AssertJSON(t, map[string]any{
+		"default": map[string]any{"code": before.Code, "status": before.HTTPStatus, "bucket": before.Fields["BucketName"]},
+		"put":     put.Output, "get": after.Output,
+		"invalid":   map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus},
+		"preserved": preserved.Output, "delete": deleted.Output,
+		"deleted": map[string]any{"code": final.Code, "status": final.HTTPStatus, "bucket": final.Fields["BucketName"]},
+	})
+}
+
 func TestBucketLoggingCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	for _, bucket := range []string{"logging-characterization-source", "logging-characterization-target"} {

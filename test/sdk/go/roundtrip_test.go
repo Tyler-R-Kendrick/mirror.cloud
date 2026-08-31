@@ -127,6 +127,28 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if logging, err := s3c.GetBucketLogging(context.Background(), &s3.GetBucketLoggingInput{Bucket: aws.String("sdk")}); err != nil || logging.LoggingEnabled != nil {
 		t.Fatalf("disabled bucket logging: %#v %v", logging, err)
 	}
+	if _, err := s3c.GetBucketCors(context.Background(), &s3.GetBucketCorsInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchCORSConfiguration") {
+		t.Fatalf("default bucket CORS: %v", err)
+	}
+	cors := &s3types.CORSConfiguration{CORSRules: []s3types.CORSRule{{AllowedMethods: []string{"GET", "HEAD"}, AllowedOrigins: []string{"https://example.test"}, ExposeHeaders: []string{"ETag"}, MaxAgeSeconds: aws.Int32(300)}}}
+	if _, err := s3c.PutBucketCors(context.Background(), &s3.PutBucketCorsInput{Bucket: aws.String("sdk"), CORSConfiguration: cors}); err != nil {
+		t.Fatalf("put bucket CORS: %v", err)
+	}
+	if got, err := s3c.GetBucketCors(context.Background(), &s3.GetBucketCorsInput{Bucket: aws.String("sdk")}); err != nil || len(got.CORSRules) != 1 || !reflect.DeepEqual(got.CORSRules[0].AllowedMethods, []string{"GET", "HEAD"}) || !reflect.DeepEqual(got.CORSRules[0].AllowedOrigins, []string{"https://example.test"}) || aws.ToInt32(got.CORSRules[0].MaxAgeSeconds) != 300 {
+		t.Fatalf("bucket CORS round trip: %#v %v", got, err)
+	}
+	invalidCors := &s3types.CORSConfiguration{CORSRules: []s3types.CORSRule{{AllowedMethods: []string{"OPTIONS"}, AllowedOrigins: []string{"*"}}}}
+	if _, err := s3c.PutBucketCors(context.Background(), &s3.PutBucketCorsInput{Bucket: aws.String("sdk"), CORSConfiguration: invalidCors}); err == nil || !strings.Contains(err.Error(), "InvalidRequest") {
+		t.Fatalf("invalid bucket CORS: %v", err)
+	}
+	for range 2 {
+		if _, err := s3c.DeleteBucketCors(context.Background(), &s3.DeleteBucketCorsInput{Bucket: aws.String("sdk")}); err != nil {
+			t.Fatalf("delete bucket CORS: %v", err)
+		}
+	}
+	if _, err := s3c.GetBucketCors(context.Background(), &s3.GetBucketCorsInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchCORSConfiguration") {
+		t.Fatalf("get deleted bucket CORS: %v", err)
+	}
 	if payment, err := s3c.GetBucketRequestPayment(context.Background(), &s3.GetBucketRequestPaymentInput{Bucket: aws.String("sdk")}); err != nil || payment.Payer != s3types.PayerBucketOwner {
 		t.Fatalf("default request payer: %#v %v", payment, err)
 	}

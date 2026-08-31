@@ -329,7 +329,6 @@ func TestRESTXMLServiceDecodeContracts(t *testing.T) {
 	for _, test := range []struct{ operation, body, key, want string }{
 		{"CreateBucket", `<CreateBucketConfiguration><LocationConstraint>us-west-2</LocationConstraint></CreateBucketConfiguration>`, "LocationConstraint", "us-west-2"},
 		{"PutBucketPolicy", `{"allow":true}`, "Policy", `{"allow":true}`},
-		{"PutBucketCors", `<Cors/>`, "Document", `<Cors/>`},
 		{"PutBucketVersioning", `<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`, "Status", "Enabled"},
 		{"PutBucketVersioning", `<broken`, "_body", `<broken`},
 		{"Unknown", `<Other/>`, "_body", `<Other/>`},
@@ -397,6 +396,18 @@ func TestRESTXMLServiceDecodeContracts(t *testing.T) {
 		decoded, err = codec.Decode(s3, &model.Operation{Name: "PutBucketLogging"}, httptest.NewRequest(http.MethodPut, "/bucket?logging", strings.NewReader(body)))
 		if err != nil || decoded.Input["_body"] != body {
 			t.Errorf("invalid logging decode %#v %v", decoded, err)
+		}
+	}
+	cors := `<CORSConfiguration><CORSRule><ID>read</ID><AllowedHeader>*</AllowedHeader><AllowedMethod>GET</AllowedMethod><AllowedMethod>HEAD</AllowedMethod><AllowedOrigin>https://example.test</AllowedOrigin><ExposeHeader>ETag</ExposeHeader><MaxAgeSeconds>300</MaxAgeSeconds></CORSRule></CORSConfiguration>`
+	decoded, err = codec.Decode(s3, &model.Operation{Name: "PutBucketCors"}, httptest.NewRequest(http.MethodPut, "/bucket?cors", strings.NewReader(cors)))
+	wantCors := map[string]any{"CORSRules": []any{map[string]any{"ID": "read", "AllowedHeaders": []any{"*"}, "AllowedMethods": []any{"GET", "HEAD"}, "AllowedOrigins": []any{"https://example.test"}, "ExposeHeaders": []any{"ETag"}, "MaxAgeSeconds": 300}}}
+	if err != nil || !reflect.DeepEqual(decoded.Input["CORSConfiguration"], wantCors) {
+		t.Fatalf("CORS decode %#v %v", decoded, err)
+	}
+	for _, body := range []string{`<broken`, `<CORSRule/>`} {
+		decoded, err = codec.Decode(s3, &model.Operation{Name: "PutBucketCors"}, httptest.NewRequest(http.MethodPut, "/bucket?cors", strings.NewReader(body)))
+		if err != nil || decoded.Input["_body"] != body {
+			t.Errorf("invalid CORS decode %#v %v", decoded, err)
 		}
 	}
 }
@@ -481,6 +492,11 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	w = httptest.NewRecorder()
 	if err := codec.Encode(svc, &model.Operation{Name: "GetBucketLogging"}, w, &spi.Response{Output: map[string]any{"LoggingEnabled": map[string]any{"TargetBucket": "target", "TargetPrefix": "logs/"}}}); err != nil || !strings.Contains(w.Body.String(), `<BucketLoggingStatus xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><LoggingEnabled><TargetBucket>target</TargetBucket><TargetPrefix>logs/</TargetPrefix></LoggingEnabled></BucketLoggingStatus>`) {
 		t.Fatalf("logging response %v %s", err, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	cors := map[string]any{"CORSRules": []any{map[string]any{"ID": "read", "AllowedHeaders": []any{"*"}, "AllowedMethods": []any{"GET", "HEAD"}, "AllowedOrigins": []any{"https://example.test"}, "ExposeHeaders": []any{"ETag"}, "MaxAgeSeconds": 300}}}
+	if err := codec.Encode(svc, &model.Operation{Name: "GetBucketCors"}, w, &spi.Response{Output: cors}); err != nil || !strings.Contains(w.Body.String(), `<CORSConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><CORSRule><ID>read</ID><AllowedHeader>*</AllowedHeader><AllowedMethod>GET</AllowedMethod><AllowedMethod>HEAD</AllowedMethod><AllowedOrigin>https://example.test</AllowedOrigin><ExposeHeader>ETag</ExposeHeader><MaxAgeSeconds>300</MaxAgeSeconds></CORSRule></CORSConfiguration>`) || strings.Contains(w.Body.String(), "<member>") {
+		t.Fatalf("CORS response %v %s", err, w.Body.String())
 	}
 	w = httptest.NewRecorder()
 	if err := codec.EncodeFault(svc, &model.Operation{Name: "Missing"}, w, spi.NotImplemented(svc.ID, "Missing", "emulate"), "r<&"); err != nil {

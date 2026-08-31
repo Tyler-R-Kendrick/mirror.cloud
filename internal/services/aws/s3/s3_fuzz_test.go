@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -394,6 +395,64 @@ func FuzzBucketLogging(f *testing.F) {
 		stored := asMapForTest(output["LoggingEnabled"])
 		if valid && !disabled && (stored["TargetBucket"] != "logging-fuzz-target" || stored["TargetPrefix"] != prefix) || !valid && (stored["TargetBucket"] != baseline["TargetBucket"] || stored["TargetPrefix"] != baseline["TargetPrefix"]) {
 			t.Fatalf("stored logging = %#v", output)
+		}
+	})
+}
+
+func FuzzBucketCors(f *testing.F) {
+	for _, seed := range []struct {
+		mode   uint8
+		method string
+		origin string
+	}{{0, "GET", "*"}, {0, "DELETE", "https://example.test"}, {0, "OPTIONS", "*"}, {1, "GET", "*"}, {2, "GET", "*"}, {3, "GET", "*"}, {4, "GET", "*"}, {5, "GET", "*"}, {6, "GET", "*"}} {
+		f.Add(seed.mode, seed.method, seed.origin)
+	}
+	f.Fuzz(func(t *testing.T, mode uint8, method, origin string) {
+		if !utf8.ValidString(method) || !utf8.ValidString(origin) {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		input := map[string]any{"Bucket": "cors-fuzz"}
+		mustInvoke(t, p, "CreateBucket", input, nil)
+		baseline := []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{"*"}}}
+		mustInvoke(t, p, "PutBucketCors", map[string]any{"Bucket": input["Bucket"], "CORSConfiguration": map[string]any{"CORSRules": baseline}}, nil)
+		valid, wantFault := false, "MalformedXML"
+		switch mode % 7 {
+		case 0:
+			input["CORSRules"] = []any{map[string]any{"AllowedMethods": []any{method}, "AllowedOrigins": []any{origin}}}
+			valid = method == "GET" || method == "PUT" || method == "HEAD" || method == "POST" || method == "DELETE"
+			if !valid {
+				wantFault = "InvalidRequest"
+			}
+		case 1:
+			input["CORSConfiguration"] = map[string]any{}
+		case 2:
+			input["CORSRules"] = []any{map[string]any{"AllowedOrigins": []any{origin}}}
+		case 3:
+			input["CORSRules"] = []any{map[string]any{"AllowedMethods": []any{method}}}
+		case 4:
+			input["CORSRules"] = []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{origin}, "Unknown": true}}
+		case 5:
+			rules := make([]any, 101)
+			for i := range rules {
+				rules[i] = baseline[0]
+			}
+			input["CORSRules"] = rules
+		case 6:
+			input["_body"] = "<broken"
+		}
+		_, err := invoke(t, p, "PutBucketCors", input, nil)
+		if !valid {
+			if fault := asFault(t, err); fault.Code != wantFault {
+				t.Fatalf("mode=%d method=%q origin=%q: %#v", mode%7, method, origin, fault)
+			}
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		stored := asSliceForTest(mustInvoke(t, p, "GetBucketCors", map[string]any{"Bucket": "cors-fuzz"}, nil).Output["CORSRules"])
+		rule := asMapForTest(stored[0])
+		if valid && (asSliceForTest(rule["AllowedMethods"])[0] != method || asSliceForTest(rule["AllowedOrigins"])[0] != origin) || !valid && !reflect.DeepEqual(stored, baseline) {
+			t.Fatalf("stored CORS = %#v", stored)
 		}
 	})
 }

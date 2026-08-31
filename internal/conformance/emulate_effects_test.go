@@ -75,7 +75,7 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv("PutObjectAcl", map[string]any{"Bucket": "bucket", "Key": "k"}, nil, "")
 		inv("PutBucketPolicy", map[string]any{"Bucket": "bucket", "Policy": `{"Version":"2012-10-17"}`}, nil, "")
 		inv("DeleteBucketPolicy", map[string]any{"Bucket": "bucket"}, nil, "")
-		inv("PutBucketCors", map[string]any{"Bucket": "bucket"}, nil, "")
+		inv("PutBucketCors", map[string]any{"Bucket": "bucket", "CORSConfiguration": map[string]any{"CORSRules": []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{"*"}}}}}, nil, "")
 		inv("DeleteBucketCors", map[string]any{"Bucket": "bucket"}, nil, "")
 		inv("PutBucketWebsite", map[string]any{"Bucket": "bucket"}, nil, "")
 		inv("DeleteBucketWebsite", map[string]any{"Bucket": "bucket"}, nil, "")

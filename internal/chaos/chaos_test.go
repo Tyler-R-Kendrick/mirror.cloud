@@ -923,6 +923,55 @@ func TestConcurrentBucketLoggingRemainsValid(t *testing.T) {
 	}
 }
 
+func TestConcurrentBucketCorsRemainsValid(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "cors-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := 0; i < cap(errs); i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			method := "OPTIONS"
+			if n%2 == 0 {
+				method = []string{"GET", "HEAD"}[(n/2)%2]
+			}
+			rules := []any{map[string]any{"AllowedMethods": []any{method}, "AllowedOrigins": []any{"*"}, "ID": fmt.Sprintf("rule-%d", n)}}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutBucketCors", Input: map[string]any{"Bucket": "cors-chaos", "CORSConfiguration": map[string]any{"CORSRules": rules}}})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	successes := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.Code != "InvalidRequest" {
+			t.Fatalf("concurrent CORS put: %v", err)
+		}
+	}
+	if successes != 16 {
+		t.Fatalf("successful CORS puts = %d, want 16", successes)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBucketCors", Input: map[string]any{"Bucket": "cors-chaos"}})
+	rules, _ := response.Output["CORSRules"].([]any)
+	var methods []any
+	if len(rules) == 1 {
+		methods, _ = rules[0].(map[string]any)["AllowedMethods"].([]any)
+	}
+	if err != nil || len(rules) != 1 || len(methods) != 1 || methods[0] != "GET" && methods[0] != "HEAD" {
+		t.Fatalf("persisted concurrent CORS = %#v, err=%v", response, err)
+	}
+}
+
 func TestConcurrentInvalidVersioningWritesDoNotChangeState(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

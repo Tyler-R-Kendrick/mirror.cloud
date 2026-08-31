@@ -2566,6 +2566,15 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 		}
 		return uploads[i].id < uploads[j].id
 	})
+	if keyMarker != "" && uploadMarker != "" {
+		valid := false
+		for _, upload := range uploads {
+			valid = valid || upload.key == keyMarker && upload.id == uploadMarker
+		}
+		if !valid {
+			return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid uploadId marker", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "upload-id-marker", "ArgumentValue": uploadMarker}}
+		}
+	}
 
 	type entry struct {
 		key, uploadID string
@@ -2600,8 +2609,12 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 			}
 		}
 		identity := map[string]any{"ID": req.Identity.Account}
+		initiated := upload.initiated
+		if parsed, err := time.Parse(time.RFC3339Nano, initiated); err == nil {
+			initiated = parsed.UTC().Format("2006-01-02T15:04:05.000Z")
+		}
 		entries = append(entries, entry{key: upload.key, uploadID: upload.id, row: map[string]any{
-			"Key": upload.key, "UploadId": upload.id, "Initiated": upload.initiated,
+			"Key": upload.key, "UploadId": upload.id, "Initiated": initiated,
 			"StorageClass": upload.storageClass, "Initiator": identity, "Owner": identity,
 		}})
 	}
@@ -2618,18 +2631,19 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 		}
 	}
 	out := map[string]any{
-		"Bucket": bucket, "Prefix": prefix, "KeyMarker": keyMarker, "UploadIdMarker": uploadMarker,
+		"Bucket": bucket, "Prefix": prefix, "KeyMarker": keyMarker, "UploadIdMarker": "",
 		"MaxUploads": maxUploads, "IsTruncated": truncated, "Uploads": listed, "CommonPrefixes": prefixes,
+		"NextKeyMarker": "", "NextUploadIdMarker": "",
+	}
+	if keyMarker != "" {
+		out["UploadIdMarker"] = uploadMarker
 	}
 	if delimiter != "" {
 		out["Delimiter"] = delimiter
 	}
-	if truncated {
-		last := entries[len(entries)-1]
-		out["NextKeyMarker"] = last.key
-		if last.uploadID != "" {
-			out["NextUploadIdMarker"] = last.uploadID
-		}
+	if len(listed) > 0 {
+		last := asMap(listed[len(listed)-1])
+		out["NextKeyMarker"], out["NextUploadIdMarker"] = last["Key"], last["UploadId"]
 	}
 	if encoding == "url" {
 		encode := func(value string) string { return strings.ReplaceAll(url.QueryEscape(value), "+", "%20") }

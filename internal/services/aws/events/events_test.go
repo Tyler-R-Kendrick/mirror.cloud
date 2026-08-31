@@ -254,11 +254,25 @@ func TestScheduledRulesPersistAndRespectState(t *testing.T) {
 
 type eventObservedClock struct {
 	spi.Clock
-	after chan time.Duration
+	after       chan time.Duration
+	beforeUntil func()
 }
 
 func (c *eventObservedClock) After(delay time.Duration) <-chan time.Time {
+	if c.beforeUntil != nil {
+		c.beforeUntil()
+	}
 	ch := c.Clock.After(delay)
+	c.after <- delay
+	return ch
+}
+
+func (c *eventObservedClock) AfterTime(at time.Time) <-chan time.Time {
+	delay := max(time.Duration(0), at.Sub(c.Clock.Now()))
+	if c.beforeUntil != nil {
+		c.beforeUntil()
+	}
+	ch := c.Clock.AfterTime(at)
 	c.after <- delay
 	return ch
 }
@@ -400,6 +414,58 @@ func TestPutEventsRetriesAndDeadLettersTargets(t *testing.T) {
 	if calls.Load() != beforeAge+1 {
 		t.Fatalf("expired event retried: calls before=%d after=%d", beforeAge, calls.Load())
 	}
+}
+
+func TestSchedulerUsesAbsoluteDeadline(t *testing.T) {
+	deps := spitest.Deps(t)
+	setup := New(deps)
+	queue := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	call := func(pack spi.BehaviorPack, operation string, input map[string]any) {
+		if _, err := pack.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input}); err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+	}
+	call(queue, "CreateQueue", map[string]any{"QueueName": "absolute-schedule"})
+	call(setup, "PutRule", map[string]any{"Name": "absolute-schedule", "ScheduleExpression": "rate(1 minute)", "State": "DISABLED"})
+	call(setup, "PutTargets", map[string]any{"Rule": "absolute-schedule", "Targets": []any{map[string]any{
+		"Id": "queue", "Arn": "arn:aws:sqs:us-east-1:1:absolute-schedule",
+	}}})
+	if err := setup.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rules := deps.Store.Scope(id.Account, id.Region).Collection("rules")
+	ruleKey := eventKey("default", "absolute-schedule")
+	raw, found, err := rules.Get(ctx, ruleKey)
+	if err != nil || !found {
+		t.Fatalf("stored rule found=%v err=%v", found, err)
+	}
+	var rule map[string]any
+	if err := json.Unmarshal(raw, &rule); err != nil {
+		t.Fatal(err)
+	}
+	rule["State"] = "ENABLED"
+	raw, _ = json.Marshal(rule)
+	if err := rules.Put(ctx, ruleKey, raw); err != nil {
+		t.Fatal(err)
+	}
+	advance := make(chan time.Duration, 1)
+	advance <- time.Minute
+	baseClock := deps.Clock
+	deps.Clock = &eventObservedClock{Clock: baseClock, after: make(chan time.Duration, 16), beforeUntil: func() {
+		select {
+		case duration := <-advance:
+			_ = baseClock.Advance(duration)
+		default:
+		}
+	}}
+	p := New(deps)
+	defer func() { _ = p.Close() }()
+	eventuallyEvent(t, func() bool {
+		messages, _, err := deps.Store.Scope(id.Account, id.Region).Collection("msgs:absolute-schedule").List(ctx, "", "", 0)
+		return err == nil && len(messages) == 1
+	})
 }
 
 func TestPutTargetsValidatesReliability(t *testing.T) {

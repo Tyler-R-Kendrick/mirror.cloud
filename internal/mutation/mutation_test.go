@@ -13546,6 +13546,22 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restxml",
 		run:  "TestRESTXMLEncodeAndFaultContracts",
 	},
+	{
+		name: "states-schedule-relative-wait-deadline",
+		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+		old:  `case <-p.deps.Clock.AfterTime(next):`,
+		new:  `case <-p.deps.Clock.After(next.Sub(p.deps.Clock.Now())):`,
+		pkg:  "./internal/services/aws/states",
+		run:  "TestStatesWaitLoopUsesAbsoluteDeadline",
+	},
+	{
+		name: "events-schedule-relative-rule-deadline",
+		file: filepath.Join("internal", "services", "aws", "events", "events.go"),
+		old:  `case <-p.deps.Clock.AfterTime(next):`,
+		new:  `case <-p.deps.Clock.After(next.Sub(p.deps.Clock.Now())):`,
+		pkg:  "./internal/services/aws/events",
+		run:  "TestSchedulerUsesAbsoluteDeadline",
+	},
 }
 
 func TestMutantsAreKilled(t *testing.T) {

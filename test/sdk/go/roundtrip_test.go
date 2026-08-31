@@ -1509,6 +1509,22 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("conditional copy: %v", err)
 	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{
+		Bucket: aws.String("sdk"), Key: aws.String("future-copy"), CopySource: aws.String("sdk/k"), CopySourceIfModifiedSince: aws.Time(time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)),
+	}); err != nil {
+		t.Fatalf("future modified-since copy: %v", err)
+	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{
+		Bucket: aws.String("sdk"), Key: aws.String("ordered-rejection"), CopySource: aws.String("sdk/k"), CopySourceIfNoneMatch: aws.String(`"wrong"`), CopySourceIfModifiedSince: got.LastModified,
+	}); err == nil || !strings.Contains(err.Error(), "PreconditionFailed") {
+		t.Fatalf("ordered copy preconditions: %v", err)
+	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{
+		Bucket: aws.String("sdk"), Key: aws.String("short-circuit-copy"), CopySource: aws.String("sdk/k"), CopySourceIfMatch: got.ETag, CopySourceIfNoneMatch: got.ETag,
+		CopySourceIfModifiedSince: aws.Time(got.LastModified.Add(-time.Hour)), CopySourceIfUnmodifiedSince: aws.Time(got.LastModified.Add(-time.Hour)),
+	}); err != nil {
+		t.Fatalf("matching copy short circuit: %v", err)
+	}
 	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("copied"), CopySource: aws.String("sdk/copied")}); err == nil || !strings.Contains(err.Error(), "InvalidRequest") {
 		t.Fatalf("unchanged self-copy: %v", err)
 	}

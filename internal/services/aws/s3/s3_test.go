@@ -1066,11 +1066,13 @@ func TestBucketCorsHTTP(t *testing.T) {
 			t.Errorf("LocalStack default origin %q = %#v, %v", origin, response, err)
 		}
 	}
-	wrongPort := httptest.NewRequest(http.MethodOptions, "https://cors-none.s3.us-east-1.amazonaws.com:4566/key", nil)
-	wrongPort.Header.Set("Origin", "http://localhost:9999")
-	_, err = unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: wrongPort})
-	if fault := asFault(t, err); fault.Code != "AccessForbidden" {
-		t.Fatalf("wrong-port origin = %#v", fault)
+	for _, origin := range []string{"http://localhost:9999", "http://bucket.s3-website.evil.test:4566", "http://distribution.cloudfront.evil.test:4566"} {
+		forbidden := httptest.NewRequest(http.MethodOptions, "https://cors-none.s3.us-east-1.amazonaws.com:4566/key", nil)
+		forbidden.Header.Set("Origin", origin)
+		_, err = unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: forbidden})
+		if fault := asFault(t, err); fault.Code != "AccessForbidden" {
+			t.Errorf("forbidden default origin %q = %#v", origin, fault)
+		}
 	}
 
 	get := httptest.NewRequest(http.MethodGet, "https://cors-http.s3.us-east-1.amazonaws.com/key", nil)

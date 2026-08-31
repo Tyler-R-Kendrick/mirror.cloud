@@ -604,7 +604,7 @@ func TestS3MalformedAWSChunkedCharacterization(t *testing.T) {
 	golden.AssertJSON(t, results)
 }
 
-func TestS3AWSChunkedContentEncoding(t *testing.T) {
+func TestS3AWSChunkedContentEncodingCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	cfg := config.Default()
 	cfg.Services = []string{"aws.s3"}
@@ -618,6 +618,7 @@ func TestS3AWSChunkedContentEncoding(t *testing.T) {
 	if created.Code != http.StatusOK {
 		t.Fatalf("create bucket: %d %s", created.Code, created.Body.String())
 	}
+	results := map[string]any{}
 	for name, tc := range map[string]struct {
 		encoding string
 		want     string
@@ -642,8 +643,10 @@ func TestS3AWSChunkedContentEncoding(t *testing.T) {
 			if read.Code != http.StatusOK || read.Body.String() != "hello" || read.Header().Get("Content-Encoding") != tc.want {
 				t.Fatalf("get: %d encoding=%q body=%q", read.Code, read.Header().Get("Content-Encoding"), read.Body.String())
 			}
+			results[name] = map[string]any{"body": read.Body.String(), "content_encoding": read.Header().Get("Content-Encoding"), "status": read.Code}
 		})
 	}
+	golden.AssertJSON(t, results)
 }
 
 func streamingUnsignedV4ARequest(checksum string, signedChunk bool) *http.Request {

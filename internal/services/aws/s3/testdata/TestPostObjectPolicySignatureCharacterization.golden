@@ -1,0 +1,13 @@
+{
+  "accepted": [
+    "temporary",
+    "v2",
+    "v4",
+    "validation-disabled"
+  ],
+  "rejected": {
+    "SigV2": "SignatureDoesNotMatch",
+    "SigV4": "SignatureDoesNotMatch",
+    "temporary token": "InvalidToken"
+  }
+}

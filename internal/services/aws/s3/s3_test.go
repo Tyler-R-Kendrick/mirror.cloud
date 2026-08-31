@@ -3,6 +3,7 @@ package s3_test
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -10,6 +11,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"hash/crc32"
@@ -5086,6 +5088,93 @@ func TestPostObjectPolicyValidation(t *testing.T) {
 		})
 	}
 	golden.AssertJSON(t, characterization)
+}
+
+func TestPostObjectPolicySignatureCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "post-signature"}, nil)
+	policy := base64.StdEncoding.EncodeToString([]byte(`{"expiration":"2099-01-01T00:00:00Z","conditions":[{"bucket":"post-signature"}]}`))
+	hmac256 := func(key []byte, value string) []byte {
+		mac := hmac.New(sha256.New, key)
+		_, _ = mac.Write([]byte(value))
+		return mac.Sum(nil)
+	}
+	signV4 := func(fields map[string]string, secret string) {
+		credential := strings.Split(fields["x-amz-credential"], "/")
+		dateKey := hmac256([]byte("AWS4"+secret), credential[1])
+		regionKey := hmac256(dateKey, credential[2])
+		serviceKey := hmac256(regionKey, credential[3])
+		fields["x-amz-signature"] = hex.EncodeToString(hmac256(hmac256(serviceKey, "aws4_request"), fields["policy"]))
+	}
+	post := func(key string, fields map[string]string, validate bool) error {
+		t.Helper()
+		var payload bytes.Buffer
+		writer := multipart.NewWriter(&payload)
+		_ = writer.WriteField("key", key)
+		for field, value := range fields {
+			_ = writer.WriteField(field, value)
+		}
+		file, _ := writer.CreateFormFile("file", "file.txt")
+		_, _ = file.Write([]byte("body"))
+		_ = writer.Close()
+		httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/post-signature", &payload)
+		httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+		_, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": "post-signature"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest, S3ValidateSignatures: validate})
+		return err
+	}
+	v4 := map[string]string{
+		"policy":           policy,
+		"x-amz-algorithm":  "AWS4-HMAC-SHA256",
+		"x-amz-credential": "test/20990101/us-east-1/s3/aws4_request",
+		"x-amz-date":       "20990101T000000Z",
+	}
+	signV4(v4, "test")
+	if err := post("v4", v4, true); err != nil {
+		t.Fatal(err)
+	}
+	tamperedV4 := maps.Clone(v4)
+	tamperedV4["x-amz-signature"] = "00"
+	if fault := asFault(t, post("rejected-v4", tamperedV4, true)); fault.Code != "SignatureDoesNotMatch" || fault.HTTPStatus != http.StatusForbidden {
+		t.Fatalf("tampered SigV4 fault = %+v", fault)
+	}
+	if err := post("validation-disabled", tamperedV4, false); err != nil {
+		t.Fatalf("default-off signature validation rejected request: %v", err)
+	}
+	v2 := map[string]string{"policy": policy, "AWSAccessKeyId": "test"}
+	mac := hmac.New(sha1.New, []byte("test"))
+	_, _ = mac.Write([]byte(policy))
+	v2["signature"] = base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	if err := post("v2", v2, true); err != nil {
+		t.Fatal(err)
+	}
+	tamperedV2 := maps.Clone(v2)
+	tamperedV2["signature"] = "tampered"
+	if fault := asFault(t, post("rejected-v2", tamperedV2, true)); fault.Code != "SignatureDoesNotMatch" {
+		t.Fatalf("tampered SigV2 fault = %+v", fault)
+	}
+	temporary := "temporary"
+	if err := deps.Store.Scope("_mirror", "global").Collection("stsk").Put(context.Background(), temporary, []byte(ident().Account)); err != nil {
+		t.Fatal(err)
+	}
+	temporaryV4 := maps.Clone(v4)
+	temporaryV4["x-amz-credential"] = temporary + "/20990101/us-east-1/s3/aws4_request"
+	temporaryV4["x-amz-security-token"] = deps.Rand.Derive(temporary + "tok").Hex(32)
+	signV4(temporaryV4, deps.Rand.Derive(temporary).Hex(40))
+	if err := post("temporary", temporaryV4, true); err != nil {
+		t.Fatal(err)
+	}
+	missingToken := maps.Clone(temporaryV4)
+	delete(missingToken, "x-amz-security-token")
+	if fault := asFault(t, post("rejected-token", missingToken, true)); fault.Code != "InvalidToken" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("missing token fault = %+v", fault)
+	}
+	for _, key := range []string{"rejected-v4", "rejected-v2", "rejected-token"} {
+		if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "post-signature", "Key": key}, nil); asFault(t, err).Code != "NoSuchKey" {
+			t.Fatalf("rejected upload %q stored object", key)
+		}
+	}
+	golden.AssertJSON(t, map[string]any{"accepted": []string{"temporary", "v2", "v4", "validation-disabled"}, "rejected": map[string]string{"SigV2": "SignatureDoesNotMatch", "SigV4": "SignatureDoesNotMatch", "temporary token": "InvalidToken"}})
 }
 
 func TestPostObjectTagging(t *testing.T) {

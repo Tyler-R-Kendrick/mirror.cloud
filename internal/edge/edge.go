@@ -212,6 +212,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Identity = id
 	req.HTTP = r
+	req.S3ValidateSignatures = svc.ID == "aws.s3" && s.cfg.S3ValidatePresignedSignatures
 
 	if !s.serviceEnabled(svc.ID) {
 		s.fault(w, codec, svc, op, spi.NotImplemented(svc.ID, op.Name, "emulate"), rid)

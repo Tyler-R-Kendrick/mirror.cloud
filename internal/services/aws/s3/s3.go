@@ -29,6 +29,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/cespare/xxhash/v2"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/identity"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
@@ -1095,6 +1096,24 @@ func (p *Pack) postObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	if err := validatePostPolicy(fields, bucket, len(body), p.deps.Clock.Now()); err != nil {
 		return nil, err
 	}
+	if req.S3ValidateSignatures {
+		accessKey := postObjectField(fields, "awsaccesskeyid")
+		if credential := postObjectField(fields, "x-amz-credential"); credential != "" {
+			accessKey, _, _ = strings.Cut(credential, "/")
+		}
+		secret := "test"
+		if accessKey != "test" {
+			secret = p.deps.Rand.Derive(accessKey).Hex(40)
+		}
+		if _, temporary, _ := p.deps.Store.Scope("_mirror", "global").Collection("stsk").Get(ctx, accessKey); temporary {
+			if fault := identity.VerifyS3SessionTokenValue(postObjectField(fields, "x-amz-security-token"), p.deps.Rand.Derive(accessKey+"tok").Hex(32)); fault != nil {
+				return nil, fault
+			}
+		}
+		if fault := identity.VerifyS3PostPolicy(fields, secret); fault != nil {
+			return nil, fault
+		}
+	}
 	input := map[string]any{"Bucket": bucket, "Key": key, "ContentType": "binary/octet-stream"}
 	if tagging, err := postObjectTagging(fields["tagging"]); err != nil {
 		return nil, err
@@ -1190,6 +1209,15 @@ func (p *Pack) postObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		return &spi.Response{Status: status, Headers: headers, Output: map[string]any{"Location": location, "Bucket": bucket, "Key": key, "ETag": response.Output["ETag"]}}, nil
 	}
 	return &spi.Response{Status: status, Headers: headers}, nil
+}
+
+func postObjectField(fields map[string]string, name string) string {
+	for key, value := range fields {
+		if strings.EqualFold(key, name) {
+			return value
+		}
+	}
+	return ""
 }
 
 func postObjectTagging(value string) (string, error) {

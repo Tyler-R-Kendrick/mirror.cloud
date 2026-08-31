@@ -37,7 +37,8 @@ type Request struct {
 	// HTTP is the raw request, for the narrow cases that need it
 	// (S3 addressing, presigned URLs, conditional headers). Behavior packs
 	// must prefer Input and treat this as an escape hatch.
-	HTTP *http.Request
+	HTTP                 *http.Request
+	S3ValidateSignatures bool
 }
 
 // Response is one operation result. Exactly one of Output or Stream is set

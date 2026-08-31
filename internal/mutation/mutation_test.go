@@ -13186,6 +13186,46 @@ var mutants = []mutant{
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestObjectSSECustomerKey",
 	},
+	{
+		name: "s3-skip-multipart-customer-encryption-validation",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  "sseCustomerKeyMD5, err := requestSSECustomerKey(req)\n\tif err != nil {",
+		new:  "sseCustomerKeyMD5, err := requestSSECustomerKey(req)\n\tif false && err != nil {",
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestMultipartSSECustomerKey",
+	},
+	{
+		name: "s3-drop-multipart-customer-encryption-state",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `sseCustomerKeyMD5: sseCustomerKeyMD5, bucketKeyEnabled: bucketKeyEnabled`,
+		new:  `sseCustomerKeyMD5: "", bucketKeyEnabled: bucketKeyEnabled`,
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestMultipartSSECustomerKey",
+	},
+	{
+		name: "s3-skip-upload-part-customer-encryption-validation",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `if err := validateStoredSSECustomerKey(req, encryption); err != nil {`,
+		new:  `if false {`,
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestMultipartSSECustomerKey",
+	},
+	{
+		name: "s3-drop-completed-customer-encryption-state",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `"sseCustomerKeyMD5": u.sseCustomerKeyMD5, "bucketKeyEnabled": u.bucketKeyEnabled`,
+		new:  `"sseCustomerKeyMD5": "", "bucketKeyEnabled": u.bucketKeyEnabled`,
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestMultipartSSECustomerKey",
+	},
+	{
+		name: "s3-ignore-resolved-customer-encryption-state",
+		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+		old:  `sseCustomerKeyMD5 := str(asMap(req.Input["_ObjectEncryption"])["sseCustomerKeyMD5"])`,
+		new:  `sseCustomerKeyMD5 := ""`,
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestMultipartSSECustomerKey",
+	},
 }
 
 func TestMutantsAreKilled(t *testing.T) {

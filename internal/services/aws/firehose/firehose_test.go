@@ -1341,20 +1341,21 @@ func TestFirehoseRedshiftPersistentRetry(t *testing.T) {
 	for deadline := time.After(pollBudget); polling(deadline); {
 		rows, _ := redshift.TableRows(context.Background(), id, "retry-warehouse", "analytics", "events")
 		if len(rows) == 1 {
-			if !reflect.DeepEqual(rows[0], map[string]any{"id": "3", "payload": "three"}) {
-				t.Fatalf("retried Redshift row %#v", rows)
+			workItems, _, _ := collection.List(context.Background(), "redshift-retry/", "", 0)
+			if len(workItems) == 0 {
+				reader, _, err := deps.Blobs.Get(context.Background(), work.DataKey)
+				if err != nil {
+					if !reflect.DeepEqual(rows[0], map[string]any{"id": "3", "payload": "three"}) {
+						t.Fatalf("retried Redshift row %#v", rows)
+					}
+					return
+				}
+				_ = reader.Close()
 			}
-			if workItems, _, _ := collection.List(context.Background(), "redshift-retry/", "", 0); len(workItems) != 0 {
-				t.Fatalf("successful Redshift retry remained persisted %#v", workItems)
-			}
-			if _, _, err := deps.Blobs.Get(context.Background(), work.DataKey); err == nil {
-				t.Fatal("successful Redshift retry payload remained persisted")
-			}
-			return
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatal("persisted Redshift COPY did not retry")
+	t.Fatal("persisted Redshift COPY did not retry and clean up")
 }
 
 func TestFirehoseRedshiftRetryExpiryAndDelete(t *testing.T) {

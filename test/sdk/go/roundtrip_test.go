@@ -221,6 +221,27 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if string(customerBody) != "sse-c-sdk" || aws.ToString(customerGet.SSECustomerAlgorithm) != "AES256" || aws.ToString(customerGet.SSECustomerKeyMD5) != customerKeyMD5 {
 		t.Fatalf("get customer encryption: body=%q output=%#v", customerBody, customerGet)
 	}
+	multipartCustomer, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("multipart-customer-encrypted"), SSECustomerAlgorithm: aws.String("AES256"), SSECustomerKey: aws.String(customerKey64), SSECustomerKeyMD5: aws.String(customerKeyMD5)})
+	if err != nil || aws.ToString(multipartCustomer.SSECustomerKeyMD5) != customerKeyMD5 {
+		t.Fatalf("create multipart customer encryption: %#v %v", multipartCustomer, err)
+	}
+	multipartPart, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String("multipart-customer-encrypted"), UploadId: multipartCustomer.UploadId, PartNumber: aws.Int32(1), Body: bytes.NewReader([]byte("multipart-sse-c-sdk")), SSECustomerAlgorithm: aws.String("AES256"), SSECustomerKey: aws.String(customerKey64), SSECustomerKeyMD5: aws.String(customerKeyMD5)})
+	if err != nil || aws.ToString(multipartPart.SSECustomerKeyMD5) != customerKeyMD5 {
+		t.Fatalf("upload multipart customer encryption: %#v %v", multipartPart, err)
+	}
+	multipartCompleted, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("multipart-customer-encrypted"), UploadId: multipartCustomer.UploadId, MultipartUpload: &s3types.CompletedMultipartUpload{Parts: []s3types.CompletedPart{{ETag: multipartPart.ETag, PartNumber: aws.Int32(1)}}}})
+	if err != nil {
+		t.Fatalf("complete multipart customer encryption: %#v %v", multipartCompleted, err)
+	}
+	multipartCustomerGet, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("multipart-customer-encrypted"), SSECustomerAlgorithm: aws.String("AES256"), SSECustomerKey: aws.String(customerKey64), SSECustomerKeyMD5: aws.String(customerKeyMD5)})
+	if err != nil {
+		t.Fatalf("get multipart customer encryption: %v", err)
+	}
+	multipartCustomerBody, _ := io.ReadAll(multipartCustomerGet.Body)
+	_ = multipartCustomerGet.Body.Close()
+	if string(multipartCustomerBody) != "multipart-sse-c-sdk" || aws.ToString(multipartCustomerGet.SSECustomerKeyMD5) != customerKeyMD5 {
+		t.Fatalf("get multipart customer encryption: body=%q output=%#v", multipartCustomerBody, multipartCustomerGet)
+	}
 	if _, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), ExpectedBucketOwner: aws.String("000000000000")}); err != nil {
 		t.Fatalf("matching expected owner: %v", err)
 	}

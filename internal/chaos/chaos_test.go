@@ -89,6 +89,87 @@ func TestReplicaVersionBlobFailureLeavesNoPartialCurrent(t *testing.T) {
 	}
 }
 
+func TestConcurrentCopySourcePreconditionsRemainDeterministic(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != nil {
+			stream = io.NopCloser(bytes.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "copy-conditions"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	put, err := call("PutObject", map[string]any{"Bucket": "copy-conditions", "Key": "source"}, []byte("source"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = deps.Clock.Advance(2 * time.Second)
+	etag := put.Headers.Get("ETag")
+	past := time.Unix(-1, 0).UTC().Format(http.TimeFormat)
+	modified := time.Unix(0, 0).UTC().Format(http.TimeFormat)
+	future := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat)
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			input := map[string]any{"Bucket": "copy-conditions", "Key": fmt.Sprintf("destination-%d", i), "CopySource": "copy-conditions/source"}
+			wantSuccess := i%4 < 2
+			switch i % 4 {
+			case 0:
+				input["CopySourceIfModifiedSince"] = future
+			case 1:
+				input["CopySourceIfMatch"], input["CopySourceIfNoneMatch"] = etag, etag
+				input["CopySourceIfModifiedSince"], input["CopySourceIfUnmodifiedSince"] = past, past
+			case 2:
+				input["CopySourceIfMatch"] = `"wrong"`
+			case 3:
+				input["CopySourceIfNoneMatch"] = `"wrong"`
+				input["CopySourceIfModifiedSince"] = modified
+			}
+			response, err := call("CopyObject", input, nil)
+			if wantSuccess {
+				if err != nil || response.Headers.Get("ETag") != etag {
+					errs <- fmt.Errorf("copy %d = %#v, %v", i, response, err)
+				}
+				return
+			}
+			fault, _ := err.(*spi.Fault)
+			if fault == nil || fault.Code != "PreconditionFailed" {
+				errs <- fmt.Errorf("rejected copy %d = %v", i, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	for i := range 32 {
+		response, err := call("GetObject", map[string]any{"Bucket": "copy-conditions", "Key": fmt.Sprintf("destination-%d", i)}, nil)
+		if i%4 < 2 {
+			if err != nil {
+				t.Fatalf("get copied %d: %v", i, err)
+			}
+			body, _ := io.ReadAll(response.Stream)
+			_ = response.Stream.Close()
+			if string(body) != "source" {
+				t.Fatalf("copied %d body %q", i, body)
+			}
+		} else if err == nil {
+			t.Fatalf("rejected copy %d persisted", i)
+		}
+	}
+}
+
 func TestConcurrentBodyReadFailuresLeaveNoPartialObjects(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

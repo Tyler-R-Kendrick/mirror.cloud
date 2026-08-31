@@ -13,13 +13,21 @@
   "get": {
     "CORSRules": [
       {
+        "AllowedHeaders": [
+          "x-amz-*"
+        ],
         "AllowedMethods": [
-          "GET"
+          "GET",
+          "PUT"
         ],
         "AllowedOrigins": [
-          "*"
+          "https://*.example.test"
         ],
-        "ID": "read"
+        "ExposeHeaders": [
+          "ETag"
+        ],
+        "ID": "read",
+        "MaxAgeSeconds": 300
       }
     ]
   },
@@ -28,18 +36,59 @@
     "message": "Found unsupported HTTP method in CORS config. Unsupported method is OPTIONS",
     "status": 400
   },
+  "preflight": {
+    "headers": {
+      "Access-Control-Allow-Credentials": [
+        "true"
+      ],
+      "Access-Control-Allow-Headers": [
+        "x-amz-request-payer, x-amz-meta-team"
+      ],
+      "Access-Control-Allow-Methods": [
+        "GET, PUT"
+      ],
+      "Access-Control-Allow-Origin": [
+        "https://app.example.test"
+      ],
+      "Access-Control-Expose-Headers": [
+        "ETag"
+      ],
+      "Access-Control-Max-Age": [
+        "300"
+      ],
+      "Vary": [
+        "Origin, Access-Control-Request-Headers, Access-Control-Request-Method"
+      ]
+    },
+    "status": 200
+  },
   "preserved": {
     "CORSRules": [
       {
+        "AllowedHeaders": [
+          "x-amz-*"
+        ],
         "AllowedMethods": [
-          "GET"
+          "GET",
+          "PUT"
         ],
         "AllowedOrigins": [
-          "*"
+          "https://*.example.test"
         ],
-        "ID": "read"
+        "ExposeHeaders": [
+          "ETag"
+        ],
+        "ID": "read",
+        "MaxAgeSeconds": 300
       }
     ]
   },
-  "put": null
+  "put": null,
+  "rejected": {
+    "code": "AccessForbidden",
+    "message": "CORSResponse: This CORS request is not allowed. This is usually because the evalution of Origin, request method / Access-Control-Request-Method or Access-Control-Request-Headers are not whitelisted by the resource's CORS spec.",
+    "method": "GET",
+    "resourceType": "OBJECT",
+    "status": 403
+  }
 }

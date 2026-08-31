@@ -989,6 +989,19 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if got, err := s3c.GetBucketCors(context.Background(), &s3.GetBucketCorsInput{Bucket: aws.String("sdk")}); err != nil || len(got.CORSRules) != 1 || !reflect.DeepEqual(got.CORSRules[0].AllowedMethods, []string{"GET", "HEAD"}) || !reflect.DeepEqual(got.CORSRules[0].AllowedOrigins, []string{"https://example.test"}) || aws.ToInt32(got.CORSRules[0].MaxAgeSeconds) != 300 {
 		t.Fatalf("bucket CORS round trip: %#v %v", got, err)
 	}
+	preflight, _ := http.NewRequest(http.MethodOptions, ts.URL+"/object", nil)
+	preflight.Host = "sdk.s3.us-east-1.amazonaws.com"
+	preflight.Header.Set("Origin", "https://example.test")
+	preflight.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	preflightResponse, err := http.DefaultClient.Do(preflight)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, preflightResponse.Body)
+	preflightResponse.Body.Close()
+	if preflightResponse.StatusCode != http.StatusOK || preflightResponse.Header.Get("Access-Control-Allow-Origin") != "https://example.test" || preflightResponse.Header.Get("Access-Control-Allow-Methods") != "GET, HEAD" || preflightResponse.Header.Get("Access-Control-Expose-Headers") != "ETag" || preflightResponse.Header.Get("Access-Control-Max-Age") != "300" {
+		t.Fatalf("bucket CORS preflight: %d %#v", preflightResponse.StatusCode, preflightResponse.Header)
+	}
 	invalidCors := &s3types.CORSConfiguration{CORSRules: []s3types.CORSRule{{AllowedMethods: []string{"OPTIONS"}, AllowedOrigins: []string{"*"}}}}
 	if _, err := s3c.PutBucketCors(context.Background(), &s3.PutBucketCorsInput{Bucket: aws.String("sdk"), CORSConfiguration: invalidCors}); err == nil || !strings.Contains(err.Error(), "InvalidRequest") {
 		t.Fatalf("invalid bucket CORS: %v", err)

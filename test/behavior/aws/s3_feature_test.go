@@ -1255,6 +1255,19 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK {
 			t.Fatalf("put CORS %d", res.StatusCode)
 		}
+		preflight, _ := http.NewRequest(http.MethodOptions, ts.URL+"/key", nil)
+		preflight.Host = "cors-bdd.s3.us-east-1.amazonaws.com"
+		preflight.Header.Set("Origin", "https://example.test")
+		preflight.Header.Set("Access-Control-Request-Method", http.MethodGet)
+		res, err = http.DefaultClient.Do(preflight)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("Access-Control-Allow-Origin") != "https://example.test" || res.Header.Get("Access-Control-Allow-Methods") != "GET, HEAD" || res.Header.Get("Access-Control-Max-Age") != "300" {
+			t.Fatalf("CORS preflight %d %#v", res.StatusCode, res.Header)
+		}
 		res = do(http.MethodGet, "/cors-bdd?cors", nil, "")
 		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()

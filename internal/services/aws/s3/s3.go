@@ -584,6 +584,18 @@ func (p *Pack) route(req *spi.Request) string {
 	if has("prefix") {
 		req.Input["Prefix"] = q.Get("prefix")
 	}
+	if has("delimiter") {
+		req.Input["Delimiter"] = q.Get("delimiter")
+	}
+	if has("marker") {
+		req.Input["Marker"] = q.Get("marker")
+	}
+	if has("key-marker") {
+		req.Input["KeyMarker"] = q.Get("key-marker")
+	}
+	if has("version-id-marker") {
+		req.Input["VersionIdMarker"] = q.Get("version-id-marker")
+	}
 	if v := q.Get("versionId"); v != "" {
 		req.Input["VersionId"] = v
 	}
@@ -2647,8 +2659,18 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
+	prefix, delimiter := str(req.Input["Prefix"]), str(req.Input["Delimiter"])
+	keyMarker, versionMarker := str(req.Input["KeyMarker"]), str(req.Input["VersionIdMarker"])
+	if versionMarker != "" && keyMarker == "" {
+		return nil, &spi.Fault{Code: "InvalidArgument", Message: "A version-id marker cannot be specified without a key marker.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "version-id-marker", "ArgumentValue": versionMarker}}
+	}
+	maxKeys := 1000
+	if value, ok := req.Input["MaxKeys"]; ok {
+		maxKeys = max(0, asInt(value))
+	}
+
+	records := map[string][]map[string]any{}
 	kvs, _, _ := p.col(req, "versions").List(ctx, b+"/", "", 0)
-	var versions, markers []any
 	for _, kv := range kvs {
 		var meta map[string]any
 		_ = json.Unmarshal(kv.Value, &meta)
@@ -2659,22 +2681,144 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 				key = strings.Join(parts[:len(parts)-1], "/")
 			}
 		}
-		row := map[string]any{"Key": key, "VersionId": meta["versionId"], "ETag": meta["etag"], "Size": meta["size"]}
-		if truthy(meta["deleteMarker"]) {
-			markers = append(markers, row)
+		if strings.HasPrefix(key, prefix) {
+			records[key] = append(records[key], meta)
+		}
+	}
+	objects, _, _ := p.col(req, "objects").List(ctx, b+"/"+prefix, "", 0)
+	for _, kv := range objects {
+		key := strings.TrimPrefix(kv.Key, b+"/")
+		if _, versioned := records[key]; versioned {
 			continue
 		}
-		versions = append(versions, row)
-	}
-	if len(versions) == 0 && len(markers) == 0 {
-		resp, err := p.listObjects(ctx, req)
-		if err != nil {
-			return nil, err
+		var meta map[string]any
+		_ = json.Unmarshal(kv.Value, &meta)
+		if !truthy(meta["deleteMarker"]) {
+			meta["key"], meta["versionId"] = key, "null"
+			records[key] = []map[string]any{meta}
 		}
-		resp.Output["Versions"] = resp.Output["Contents"]
-		return resp, nil
 	}
-	return &spi.Response{Output: map[string]any{"Name": b, "Versions": versions, "DeleteMarkers": markers}}, nil
+
+	type entry struct {
+		key, version string
+		row          map[string]any
+		marker       bool
+		prefix       bool
+	}
+	keys := make([]string, 0, len(records))
+	for key := range records {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var entries []entry
+	common := map[string]bool{}
+	for _, key := range keys {
+		if delimiter != "" {
+			rest := strings.TrimPrefix(key, prefix)
+			if i := strings.Index(rest, delimiter); i >= 0 {
+				value := prefix + rest[:i+len(delimiter)]
+				if !common[value] {
+					common[value] = true
+					entries = append(entries, entry{key: value, row: map[string]any{"Prefix": value}, prefix: true})
+				}
+				continue
+			}
+		}
+		current, _ := p.objectMetadata(ctx, req, b, key, "")
+		order := map[string]int{}
+		for index, value := range asSlice(current["versionOrder"]) {
+			order[str(value)] = index
+		}
+		sort.Slice(records[key], func(i, j int) bool {
+			left, right := str(records[key][i]["versionId"]), str(records[key][j]["versionId"])
+			return order[left] > order[right]
+		})
+		for _, meta := range records[key] {
+			version := str(meta["versionId"])
+			modified := str(meta["mtime"])
+			if parsed, err := http.ParseTime(modified); err == nil {
+				modified = parsed.UTC().Format("2006-01-02T15:04:05.000Z")
+			}
+			row := map[string]any{
+				"Key": key, "VersionId": version, "IsLatest": version == "null" || str(current["versionId"]) == version,
+				"LastModified": modified, "Owner": map[string]any{"ID": req.Identity.Account},
+			}
+			deleteMarker := truthy(meta["deleteMarker"])
+			if !deleteMarker {
+				storageClass := str(meta["storageClass"])
+				if storageClass == "" {
+					storageClass = "STANDARD"
+				}
+				row["ETag"], row["Size"], row["StorageClass"] = meta["etag"], meta["size"], storageClass
+			}
+			entries = append(entries, entry{key: key, version: version, row: row, marker: deleteMarker})
+		}
+	}
+	if keyMarker != "" {
+		filtered := entries[:0]
+		versionSeen := versionMarker == ""
+		for _, item := range entries {
+			switch {
+			case item.key < keyMarker:
+				continue
+			case item.key > keyMarker:
+				filtered = append(filtered, item)
+			case versionMarker == "":
+				continue
+			case versionSeen:
+				filtered = append(filtered, item)
+			case item.version == versionMarker:
+				versionSeen = true
+			}
+		}
+		entries = filtered
+	}
+	truncated := len(entries) > maxKeys
+	if truncated {
+		entries = entries[:maxKeys]
+	}
+	var versions, markers, prefixes []any
+	for _, item := range entries {
+		switch {
+		case item.prefix:
+			prefixes = append(prefixes, item.row)
+		case item.marker:
+			markers = append(markers, item.row)
+		default:
+			versions = append(versions, item.row)
+		}
+	}
+	out := map[string]any{
+		"Name": b, "Prefix": prefix, "Delimiter": delimiter, "KeyMarker": keyMarker, "VersionIdMarker": versionMarker,
+		"MaxKeys": maxKeys, "IsTruncated": truncated, "Versions": versions, "DeleteMarkers": markers, "CommonPrefixes": prefixes,
+	}
+	if truncated && len(entries) > 0 {
+		last := entries[len(entries)-1]
+		out["NextKeyMarker"] = last.key
+		if last.version != "" {
+			out["NextVersionIdMarker"] = last.version
+		}
+	}
+	if str(req.Input["EncodingType"]) == "url" {
+		encode := func(value string) string { return strings.ReplaceAll(url.QueryEscape(value), "+", "%20") }
+		for _, collection := range [][]any{versions, markers, prefixes} {
+			for _, value := range collection {
+				row := asMap(value)
+				for _, field := range []string{"Key", "Prefix"} {
+					if raw := str(row[field]); raw != "" {
+						row[field] = encode(raw)
+					}
+				}
+			}
+		}
+		for _, field := range []string{"Prefix", "Delimiter", "KeyMarker", "NextKeyMarker"} {
+			if raw := str(out[field]); raw != "" {
+				out[field] = encode(raw)
+			}
+		}
+		out["EncodingType"] = "url"
+	}
+	return &spi.Response{Output: out}, nil
 }
 
 func validateListEncodingType(req *spi.Request) error {

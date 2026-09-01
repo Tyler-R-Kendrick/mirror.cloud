@@ -4520,6 +4520,25 @@ func TestListObjectsBucketRegionCharacterization(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestListObjectChecksumMetadata(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-checksums"}, nil)
+	body := []byte("checksummed")
+	sum := sha256.Sum256(body)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-checksums", "Key": "checksummed", "ChecksumSHA256": base64.StdEncoding.EncodeToString(sum[:])}, body)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-checksums", "Key": "plain"}, body)
+	for _, operation := range []string{"ListObjects", "ListObjectsV2"} {
+		contents := mustInvoke(t, p, operation, map[string]any{"Bucket": "list-checksums"}, nil).Output["Contents"].([]any)
+		checksummed, plain := asMapForTest(contents[0]), asMapForTest(contents[1])
+		if !reflect.DeepEqual(checksummed["ChecksumAlgorithm"], []any{"SHA256"}) || checksummed["ChecksumType"] != "FULL_OBJECT" {
+			t.Fatalf("%s checksummed object = %#v", operation, checksummed)
+		}
+		if plain["ChecksumAlgorithm"] != nil || plain["ChecksumType"] != nil {
+			t.Fatalf("%s plain object = %#v", operation, plain)
+		}
+	}
+}
+
 func TestListEncodingTypeValidation(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-encoding"}, nil)

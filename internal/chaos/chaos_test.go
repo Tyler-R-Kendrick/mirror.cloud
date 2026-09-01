@@ -90,7 +90,7 @@ func TestConcurrentStateStartsDoNotDropHalfCommittedWaits(t *testing.T) {
 	for err := range errs {
 		t.Error(err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.After(2 * time.Second)
 	for arn := range arns {
 		for {
 			described, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeExecution", Input: map[string]any{"executionArn": arn}})
@@ -100,8 +100,10 @@ func TestConcurrentStateStartsDoNotDropHalfCommittedWaits(t *testing.T) {
 			if described.Output["status"] == "SUCCEEDED" {
 				break
 			}
-			if time.Now().After(deadline) {
+			select {
+			case <-deadline:
 				t.Fatalf("execution %s remained %#v", arn, described.Output)
+			default:
 			}
 			time.Sleep(time.Millisecond)
 		}

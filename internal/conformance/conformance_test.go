@@ -196,7 +196,7 @@ func TestStatesWaitExecutionContract(t *testing.T) {
 	if err := deps.Clock.Advance(time.Second); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(time.Second)
+	deadline := time.After(time.Second)
 	for {
 		described, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeExecution", Input: map[string]any{"executionArn": started.Output["executionArn"]}})
 		if err != nil {
@@ -205,8 +205,10 @@ func TestStatesWaitExecutionContract(t *testing.T) {
 		if described.Output["status"] == "SUCCEEDED" {
 			return
 		}
-		if time.Now().After(deadline) {
+		select {
+		case <-deadline:
 			t.Fatalf("Wait execution remained %#v", described.Output)
+		default:
 		}
 		time.Sleep(time.Millisecond)
 	}

@@ -54,14 +54,16 @@ func TestStatesWaitFeature(t *testing.T) {
 		definition, _ := json.Marshal(`{"StartAt":"Wait","States":{"Wait":{"Type":"Wait","Seconds":0,"End":true}}}`)
 		created := call("CreateStateMachine", `{"name":"wait-feature","definition":`+string(definition)+`,"roleArn":"arn:aws:iam::000000000000:role/states"}`)
 		started := call("StartExecution", `{"stateMachineArn":"`+created["stateMachineArn"].(string)+`","name":"run"}`)
-		deadline := time.Now().Add(time.Second)
+		deadline := time.After(time.Second)
 		for {
 			described := call("DescribeExecution", `{"executionArn":"`+started["executionArn"].(string)+`"}`)
 			if described["status"] == "SUCCEEDED" {
 				return
 			}
-			if time.Now().After(deadline) {
+			select {
+			case <-deadline:
 				t.Fatalf("Wait execution remained %#v", described)
+			default:
 			}
 			time.Sleep(time.Millisecond)
 		}

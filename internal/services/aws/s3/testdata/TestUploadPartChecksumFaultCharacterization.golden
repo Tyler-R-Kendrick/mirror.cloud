@@ -1,0 +1,22 @@
+{
+  "declared-algorithm": {
+    "code": "InvalidRequest",
+    "message": "Checksum Type mismatch occurred, expected checksum Type: crc32, actual checksum Type: sha256",
+    "status": 400
+  },
+  "header-algorithm": {
+    "code": "InvalidRequest",
+    "message": "Checksum Type mismatch occurred, expected checksum Type: crc32, actual checksum Type: sha256",
+    "status": 400
+  },
+  "malformed": {
+    "code": "InvalidRequest",
+    "message": "Value for x-amz-checksum-crc32 header is invalid.",
+    "status": 400
+  },
+  "mismatch": {
+    "code": "BadDigest",
+    "message": "The CRC32 you specified did not match the calculated checksum.",
+    "status": 400
+  }
+}

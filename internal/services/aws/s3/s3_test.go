@@ -4888,6 +4888,25 @@ func TestUploadPartChecksumFaults(t *testing.T) {
 	mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "upload-part-checksum", "Key": "key", "UploadId": uploadID, "PartNumber": 1, "ChecksumCRC32": base64.StdEncoding.EncodeToString(sum)}, body)
 }
 
+func TestUploadPartChecksumFaultCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "upload-part-checksum-golden"}, nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "upload-part-checksum-golden", "Key": "key", "ChecksumAlgorithm": "CRC32"}, nil).Output["UploadId"].(string)
+	results := map[string]any{}
+	for name, input := range map[string]map[string]any{
+		"malformed":          {"ChecksumCRC32": "!"},
+		"mismatch":           {"ChecksumCRC32": "AAAAAA=="},
+		"header-algorithm":   {"ChecksumSHA256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
+		"declared-algorithm": {"ChecksumAlgorithm": "SHA256"},
+	} {
+		input["Bucket"], input["Key"], input["UploadId"], input["PartNumber"] = "upload-part-checksum-golden", "key", uploadID, 1
+		_, err := invoke(t, p, "UploadPart", input, []byte("checksum"))
+		fault := asFault(t, err)
+		results[name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus}
+	}
+	golden.AssertJSON(t, results)
+}
+
 func TestMultipartChecksumContract(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

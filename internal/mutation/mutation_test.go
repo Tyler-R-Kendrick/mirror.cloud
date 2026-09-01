@@ -918,6 +918,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestCopyObjectChecksums",
 		},
 		{
+			name: "s3-copy-drop-last-modified",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if req.Operation == "CopyObject" {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestCopyObjectLastModifiedCharacterization",
+		},
+		{
+			name: "s3-copy-return-http-date",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `out["LastModified"] = modified.UTC().Format(time.RFC3339)`,
+			new:  `out["LastModified"] = mtime`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestCopyObjectLastModifiedCharacterization",
+		},
+		{
 			name: "s3-ignore-copy-source-version",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  "if version != \"\" {\n\t\tcollection, metaKey = \"versions\", metaKey+\"/\"+version",

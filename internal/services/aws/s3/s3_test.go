@@ -5284,12 +5284,18 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 		t.Fatalf("small part fault = %#v", fault)
 	}
 
+	zeroIgnored := create("zero-ignored")
+	zeroIgnoredPart := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": zeroIgnored, "PartNumber": 1}, []byte("body"))
+	zeroIgnoredInput := completeInput(zeroIgnored, completedPart(1, zeroIgnoredPart))
+	zeroIgnoredInput["MpuObjectSize"] = "0"
+	mustInvoke(t, p, "CompleteMultipartUpload", zeroIgnoredInput, nil)
+
 	sized := create("sized")
 	sizedPart := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": sized, "PartNumber": 1}, []byte("sized"))
 	sizedInput := completeInput(sized, completedPart(1, sizedPart))
 	sizedInput["MpuObjectSize"] = "4"
 	_, err := invoke(t, p, "CompleteMultipartUpload", sizedInput, nil)
-	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "The provided 'x-amz-mp-object-size' header value 4 does not match what was computed: 5" || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("object size fault = %#v", fault)
 	}
 	sizedInput["MpuObjectSize"] = "invalid"

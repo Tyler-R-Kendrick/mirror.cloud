@@ -1424,6 +1424,44 @@ func TestStatesWaitLoopUsesAbsoluteDeadline(t *testing.T) {
 	}
 }
 
+func TestResumeWaitKeepsPendingUntilExecutionCommit(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	req := &spi.Request{Identity: spi.Identity{Account: "1", Region: "us-east-1"}}
+	token, executionARN := "pending", "arn:aws:states:us-east-1:1:execution:machine:run"
+	wait := pending{Token: token, ExecARN: executionARN}
+	body, _ := json.Marshal(wait)
+	if err := p.col(req, "pending").Put(ctx, token, body); err != nil {
+		t.Fatal(err)
+	}
+	assertPending := func(want bool) {
+		t.Helper()
+		_, found, err := p.col(req, "pending").Get(ctx, token)
+		if err != nil || found != want {
+			t.Fatalf("pending found=%v err=%v, want %v", found, err, want)
+		}
+	}
+
+	p.resumeWait(ctx, req, token, wait)
+	assertPending(true)
+
+	if err := p.col(req, "ex").Put(ctx, executionARN, []byte(`{"status":"RUNNING","pendingToken":"other"}`)); err != nil {
+		t.Fatal(err)
+	}
+	p.resumeWait(ctx, req, token, wait)
+	assertPending(true)
+
+	if err := p.col(req, "ex").Put(ctx, executionARN, []byte(`{"status":"SUCCEEDED","pendingToken":"pending"}`)); err != nil {
+		t.Fatal(err)
+	}
+	p.resumeWait(ctx, req, token, wait)
+	assertPending(false)
+}
+
 func TestStatesRetryScheduling(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

@@ -5131,6 +5131,31 @@ func TestMultipartChecksumCharacterization(t *testing.T) {
 	})
 }
 
+func TestMultipartWithoutChecksum(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "plain"}, nil)
+	if created.Output["ChecksumAlgorithm"] != nil || created.Output["ChecksumType"] != nil {
+		t.Fatalf("create checksum = %#v", created.Output)
+	}
+	uploadID := created.Output["UploadId"].(string)
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "plain", "UploadId": uploadID, "PartNumber": 1}, []byte("plain"))
+	if part.Headers.Get("x-amz-checksum-crc64nvme") != "" || part.Headers.Get("x-amz-checksum-type") != "" {
+		t.Fatalf("part checksum headers = %v", part.Headers)
+	}
+	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "plain", "UploadId": uploadID}, nil)
+	if listed.Output["ChecksumAlgorithm"] != nil || listed.Output["ChecksumType"] != nil {
+		t.Fatalf("list checksum = %#v", listed.Output)
+	}
+	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
+	if done.Output["ChecksumCRC64NVME"] != nil || done.Output["ChecksumType"] != nil {
+		t.Fatalf("complete checksum = %#v", done.Output)
+	}
+	if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "plain", "ChecksumMode": "ENABLED"}, nil))); body != "plain" {
+		t.Fatalf("body = %q", body)
+	}
+}
+
 func TestMultipartCreationAttributes(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

@@ -5136,16 +5136,21 @@ func TestMultipartCreationAttributes(t *testing.T) {
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{
 		"Bucket": "bucket", "Key": "attributes", "StorageClass": "STANDARD_IA", "Tagging": "team=storage&env=test",
+		"CacheControl": "max-age=60", "ContentDisposition": `attachment; filename="multipart.txt"`, "ContentEncoding": "gzip", "ContentLanguage": "en-US", "ContentType": "text/plain", "Expires": "Wed, 21 Oct 2026 07:28:00 GMT",
+		"Metadata": map[string]any{"Team": "storage"}, "WebsiteRedirectLocation": "/multipart",
 	}, nil)
 	id := created.Output["UploadId"].(string)
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "attributes", "UploadId": id, "PartNumber": 1}, []byte("body"))
 	complete := completeInput(id, completedPart(1, part))
-	complete["StorageClass"], complete["Tagging"] = "STANDARD", "ignored=true"
+	complete["StorageClass"], complete["Tagging"], complete["ContentType"], complete["Metadata"], complete["WebsiteRedirectLocation"] = "STANDARD", "ignored=true", "application/json", map[string]any{"Team": "ignored"}, "/ignored"
 	mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
 
 	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "attributes"}, nil)
 	if head.Headers.Get("x-amz-storage-class") != "STANDARD_IA" {
 		t.Fatalf("multipart storage class = %v", head.Headers)
+	}
+	if head.Headers.Get("Cache-Control") != "max-age=60" || head.Headers.Get("Content-Disposition") != `attachment; filename="multipart.txt"` || head.Headers.Get("Content-Encoding") != "gzip" || head.Headers.Get("Content-Language") != "en-US" || head.Headers.Get("Content-Type") != "text/plain" || head.Headers.Get("Expires") != "Wed, 21 Oct 2026 07:28:00 GMT" || head.Headers.Get("x-amz-meta-team") != "storage" || head.Headers.Get("x-amz-website-redirect-location") != "/multipart" {
+		t.Fatalf("multipart metadata = %v", head.Headers)
 	}
 	get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "attributes"}, nil)
 	if get.Headers.Get("x-amz-storage-class") != "STANDARD_IA" {

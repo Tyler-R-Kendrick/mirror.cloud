@@ -5648,10 +5648,9 @@ func objectETag(meta map[string]any, md5sum string) string {
 }
 
 var (
-	crc32C               = crc32.MakeTable(crc32.Castagnoli)
-	crc64NVME            = crc64.MakeTable(0x9a6c9329ac4bc9b5)
-	continuationEncoding = base64.NewEncoding("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._")
-	checksums            = []struct{ algorithm, input, header string }{
+	crc32C    = crc32.MakeTable(crc32.Castagnoli)
+	crc64NVME = crc64.MakeTable(0x9a6c9329ac4bc9b5)
+	checksums = []struct{ algorithm, input, header string }{
 		{"MD5", "ChecksumMD5", "x-amz-checksum-md5"},
 		{"CRC32", "ChecksumCRC32", "x-amz-checksum-crc32"},
 		{"CRC32C", "ChecksumCRC32C", "x-amz-checksum-crc32c"},
@@ -5664,6 +5663,8 @@ var (
 		{"XXHASH128", "ChecksumXXHASH128", "x-amz-checksum-xxhash128"},
 	}
 )
+
+var continuationEncoding = base64.NewEncoding("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._")
 
 func checksumByAlgorithm(algorithm string) (struct{ algorithm, input, header string }, bool) {
 	for _, checksum := range checksums {

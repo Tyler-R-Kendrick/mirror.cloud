@@ -13716,6 +13716,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestListObjectVersionsPagination",
 		},
 		{
+			name: "s3-list-versions-keep-zero-max-keys",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  "if value, ok := req.Input[\"MaxKeys\"]; ok {\n\t\tif value := asInt(value); value != 0 {\n\t\t\tmaxKeys = max(0, value)\n\t\t}\n\t}\n\n\trecords := map[string][]map[string]any{}",
+			new:  "if value, ok := req.Input[\"MaxKeys\"]; ok {\n\t\tif value := asInt(value); value == 0 {\n\t\t\tmaxKeys = max(0, value)\n\t\t}\n\t}\n\n\trecords := map[string][]map[string]any{}",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestListZeroMaxKeysUsesDefault",
+		},
+		{
 			name: "s3-list-versions-keep-raw-url-key",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `row[field] = s3URLEncode(raw)`,
@@ -13834,6 +13842,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  "if false {\n\t\ttruncated = true\n\t\tif req.Operation == \"ListObjectsV2\" {\n\t\t\tnext = entries[maxKeys].value\n\t\t} else if maxKeys > 0 {\n\t\t\tnext = entries[maxKeys-1].value\n\t\t}\n\t\tentries = entries[:maxKeys]\n\t}",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestListObjectsPaginationIncludesCommonPrefixes",
+		},
+		{
+			name: "s3-list-objects-keep-zero-max-keys",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  "if value, ok := req.Input[\"MaxKeys\"]; ok {\n\t\tif value := asInt(value); value != 0 {\n\t\t\tmaxKeys = max(0, value)\n\t\t}\n\t} else if value, ok := req.Input[\"max-keys\"]; ok {",
+			new:  "if value, ok := req.Input[\"MaxKeys\"]; ok {\n\t\tif value := asInt(value); value == 0 {\n\t\t\tmaxKeys = max(0, value)\n\t\t}\n\t} else if value, ok := req.Input[\"max-keys\"]; ok {",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestListZeroMaxKeysUsesDefault",
 		},
 		{
 			name: "s3-list-objects-accept-invalid-continuation",

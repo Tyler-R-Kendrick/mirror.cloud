@@ -2053,9 +2053,13 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 	})
 	maxKeys := 1000
 	if value, ok := req.Input["MaxKeys"]; ok {
-		maxKeys = max(0, asInt(value))
+		if value := asInt(value); value != 0 {
+			maxKeys = max(0, value)
+		}
 	} else if value, ok := req.Input["max-keys"]; ok {
-		maxKeys = max(0, asInt(value))
+		if value := asInt(value); value != 0 {
+			maxKeys = max(0, value)
+		}
 	}
 	marker := str(req.Input["marker"])
 	if marker == "" {
@@ -2843,7 +2847,9 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 	}
 	maxKeys := 1000
 	if value, ok := req.Input["MaxKeys"]; ok {
-		maxKeys = max(0, asInt(value))
+		if value := asInt(value); value != 0 {
+			maxKeys = max(0, value)
+		}
 	}
 
 	records := map[string][]map[string]any{}

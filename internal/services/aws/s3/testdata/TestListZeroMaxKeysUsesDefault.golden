@@ -1,0 +1,67 @@
+{
+  "ListObjectVersions": {
+    "CommonPrefixes": null,
+    "DeleteMarkers": null,
+    "Delimiter": "",
+    "IsTruncated": false,
+    "KeyMarker": "",
+    "MaxKeys": 1000,
+    "Name": "list-zero-max",
+    "Prefix": "",
+    "VersionIdMarker": "",
+    "Versions": [
+      {
+        "ETag": "\"841a2d689ad86bd1611447453c22c6fc\"",
+        "IsLatest": true,
+        "Key": "key",
+        "LastModified": "1970-01-01T00:00:00.000Z",
+        "Owner": {
+          "ID": "123456789012"
+        },
+        "Size": 4,
+        "StorageClass": "STANDARD",
+        "VersionId": "7c589129"
+      }
+    ]
+  },
+  "ListObjects": {
+    "CommonPrefixes": null,
+    "Contents": [
+      {
+        "ETag": "\"841a2d689ad86bd1611447453c22c6fc\"",
+        "Key": "key",
+        "LastModified": "1970-01-01T00:00:00Z",
+        "Owner": {
+          "ID": "123456789012"
+        },
+        "Size": 4,
+        "StorageClass": "STANDARD"
+      }
+    ],
+    "Delimiter": "",
+    "IsTruncated": false,
+    "KeyCount": 1,
+    "Marker": "",
+    "MaxKeys": 1000,
+    "Name": "list-zero-max",
+    "Prefix": ""
+  },
+  "ListObjectsV2": {
+    "CommonPrefixes": null,
+    "Contents": [
+      {
+        "ETag": "\"841a2d689ad86bd1611447453c22c6fc\"",
+        "Key": "key",
+        "LastModified": "1970-01-01T00:00:00Z",
+        "Size": 4,
+        "StorageClass": "STANDARD"
+      }
+    ],
+    "Delimiter": "",
+    "IsTruncated": false,
+    "KeyCount": 1,
+    "MaxKeys": 1000,
+    "Name": "list-zero-max",
+    "Prefix": ""
+  }
+}

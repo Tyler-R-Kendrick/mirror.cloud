@@ -303,6 +303,45 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given multipart object sizes When completed Then zero is ignored and mismatches are described", func(t *testing.T) {
+		res := do(http.MethodPut, "/multipart-size-bdd", nil, "")
+		res.Body.Close()
+		createPart := func(key string) (string, string) {
+			response := do(http.MethodPost, "/multipart-size-bdd/"+key+"?uploads", nil, "")
+			var created struct {
+				UploadID string `xml:"UploadId"`
+			}
+			if err := xml.NewDecoder(response.Body).Decode(&created); err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			response = do(http.MethodPut, "/multipart-size-bdd/"+key+"?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("sized"), "")
+			defer response.Body.Close()
+			return created.UploadID, response.Header.Get("ETag")
+		}
+		complete := func(key, uploadID, etag, size string) (int, []byte) {
+			manifest := `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`
+			request, _ := http.NewRequest(http.MethodPost, ts.URL+"/multipart-size-bdd/"+key+"?uploadId="+url.QueryEscape(uploadID), strings.NewReader(manifest))
+			request.Header.Set("Authorization", auth)
+			request.Header.Set("x-amz-mp-object-size", size)
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response.StatusCode, payload
+		}
+		zeroID, zeroETag := createPart("zero")
+		if status, body := complete("zero", zeroID, zeroETag, "0"); status != http.StatusOK {
+			t.Fatalf("zero object size: %d %s", status, body)
+		}
+		mismatchID, mismatchETag := createPart("mismatch")
+		if status, body := complete("mismatch", mismatchID, mismatchETag, "4"); status != http.StatusBadRequest || !bytes.Contains(body, []byte("header value 4 does not match what was computed: 5")) {
+			t.Fatalf("mismatched object size: %d %s", status, body)
+		}
+	})
+
 	t.Run("Given multipart parts When listing pages Then empty values use S3 defaults", func(t *testing.T) {
 		res := do(http.MethodPut, "/parts-list-bdd", nil, "")
 		res.Body.Close()

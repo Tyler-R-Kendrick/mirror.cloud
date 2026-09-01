@@ -5052,6 +5052,12 @@ func TestMultipartChecksumContract(t *testing.T) {
 	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "The upload was created using a crc32 checksum. The complete request must include the checksum for each part. It was missing for part 1 in the request." || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("missing part checksum fault = %#v", fault)
 	}
+	alternate := completedPart(1, missingPart).(map[string]any)
+	alternate["ChecksumSHA256"] = "AA=="
+	_, err = invoke(t, p, "CompleteMultipartUpload", completeInput(missing, alternate), nil)
+	if fault := asFault(t, err); fault.Code != "BadDigest" || fault.Message != "The sha256 you specified for part 1 did not match what we received." || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("alternate part checksum fault = %#v", fault)
+	}
 
 	composite := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "gap", "ChecksumAlgorithm": "SHA256"}, nil)
 	compositeID := composite.Output["UploadId"].(string)

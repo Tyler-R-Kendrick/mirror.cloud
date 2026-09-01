@@ -19,6 +19,11 @@
     "message": "The upload was created using the COMPOSITE checksum mode. The complete request must use the same checksum mode.",
     "status": 400
   },
+  "missing": {
+    "code": "InvalidRequest",
+    "message": "The upload was created using a sha256 checksum. The complete request must include the checksum for each part. It was missing for part 1 in the request.",
+    "status": 400
+  },
   "object": {
     "cacheControl": "max-age=120",
     "contentType": "application/json",

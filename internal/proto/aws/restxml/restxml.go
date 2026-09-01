@@ -524,8 +524,17 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 	case "CompleteMultipartUpload":
 		var completed struct {
 			Part []struct {
-				ETag       string `xml:"ETag"`
-				PartNumber int    `xml:"PartNumber"`
+				ETag              string `xml:"ETag"`
+				PartNumber        int    `xml:"PartNumber"`
+				ChecksumCRC32     string `xml:"ChecksumCRC32"`
+				ChecksumCRC32C    string `xml:"ChecksumCRC32C"`
+				ChecksumCRC64NVME string `xml:"ChecksumCRC64NVME"`
+				ChecksumMD5       string `xml:"ChecksumMD5"`
+				ChecksumSHA1      string `xml:"ChecksumSHA1"`
+				ChecksumSHA256    string `xml:"ChecksumSHA256"`
+				ChecksumXXHASH64  string `xml:"ChecksumXXHASH64"`
+				ChecksumXXHASH3   string `xml:"ChecksumXXHASH3"`
+				ChecksumXXHASH128 string `xml:"ChecksumXXHASH128"`
 			} `xml:"Part"`
 		}
 		if xml.Unmarshal(raw, &completed) != nil {
@@ -534,7 +543,13 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 		}
 		parts := make([]any, 0, len(completed.Part))
 		for _, part := range completed.Part {
-			parts = append(parts, map[string]any{"ETag": part.ETag, "PartNumber": part.PartNumber})
+			item := map[string]any{"ETag": part.ETag, "PartNumber": part.PartNumber}
+			for name, value := range map[string]string{"ChecksumCRC32": part.ChecksumCRC32, "ChecksumCRC32C": part.ChecksumCRC32C, "ChecksumCRC64NVME": part.ChecksumCRC64NVME, "ChecksumMD5": part.ChecksumMD5, "ChecksumSHA1": part.ChecksumSHA1, "ChecksumSHA256": part.ChecksumSHA256, "ChecksumXXHASH64": part.ChecksumXXHASH64, "ChecksumXXHASH3": part.ChecksumXXHASH3, "ChecksumXXHASH128": part.ChecksumXXHASH128} {
+				if value != "" {
+					item[name] = value
+				}
+			}
+			parts = append(parts, item)
 		}
 		in["MultipartUpload"] = map[string]any{"Parts": parts}
 	case "RestoreObject":

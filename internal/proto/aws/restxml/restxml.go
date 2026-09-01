@@ -1791,6 +1791,12 @@ func write(v any, b *strings.Builder) {
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
+			if values, ok := t[k].([]any); ok && k == "ChecksumAlgorithm" {
+				for _, value := range values {
+					fmt.Fprintf(b, "<ChecksumAlgorithm>%s</ChecksumAlgorithm>", xmlEscape(fmt.Sprint(value)))
+				}
+				continue
+			}
 			fmt.Fprintf(b, "<%s>", k)
 			write(t[k], b)
 			fmt.Fprintf(b, "</%s>", k)

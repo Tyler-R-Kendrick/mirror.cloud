@@ -38,6 +38,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestETagHeaderCasingCharacterization",
 		},
 		{
+			name: "restxml-drop-completed-part-checksums",
+			file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
+			old:  "\"ChecksumXXHASH128\": part.ChecksumXXHASH128} {\n\t\t\t\tif value != \"\" {",
+			new:  "\"ChecksumXXHASH128\": part.ChecksumXXHASH128} {\n\t\t\t\tif false {",
+			pkg:  "./internal/proto/aws/restxml",
+			run:  "TestDecodeCompleteMultipartUploadXML",
+		},
+		{
 			name: "edge-reject-terminal-chunk-header-only",
 			file: filepath.Join("internal", "edge", "chunked.go"),
 			old:  "trailers := http.Header{}\n\tif len(rest) == 0 {",

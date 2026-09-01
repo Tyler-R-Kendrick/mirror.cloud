@@ -4811,6 +4811,7 @@ func TestUploadPartContentMD5(t *testing.T) {
 		fields               map[string]any
 	}{
 		{"!", "InvalidDigest", "The Content-MD5 you specified was invalid.", map[string]any{"Content_MD5": "!"}},
+		{"AA==", "InvalidDigest", "The Content-MD5 you specified was invalid.", map[string]any{"Content_MD5": "AA=="}},
 		{"AAAAAAAAAAAAAAAAAAAAAA==", "BadDigest", "The Content-MD5 you specified did not match what we received.", map[string]any{"ExpectedDigest": "AAAAAAAAAAAAAAAAAAAAAA=="}},
 	} {
 		_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "upload-part-md5", "Key": "key", "UploadId": uploadID, "PartNumber": 1, "ContentMD5": test.value}, body)

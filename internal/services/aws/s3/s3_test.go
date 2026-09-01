@@ -5032,6 +5032,12 @@ func TestMultipartChecksumContract(t *testing.T) {
 	binary.BigEndian.PutUint32(sum, crc32.ChecksumIEEE(body))
 	want := base64.StdEncoding.EncodeToString(sum)
 	complete["ChecksumCRC32"] = want
+	delete(complete, "ChecksumType")
+	_, err = invoke(t, p, "CompleteMultipartUpload", complete, nil)
+	if fault := asFault(t, err); fault.Code != "BadDigest" || fault.Message != "The crc32 you specified did not match the calculated checksum." || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("implicit full-object checksum type fault = %#v", fault)
+	}
+	complete["ChecksumType"] = "FULL_OBJECT"
 	done := mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
 	if done.Output["ChecksumCRC32"] != want || done.Output["ChecksumType"] != "FULL_OBJECT" {
 		t.Fatalf("complete checksum = %#v", done.Output)

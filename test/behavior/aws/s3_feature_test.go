@@ -304,6 +304,44 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given an invalid upload part Content-MD5 When uploaded Then S3 returns modeled faults", func(t *testing.T) {
+		res := do(http.MethodPut, "/upload-part-md5-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPost, "/upload-part-md5-bdd/object?uploads", nil, "")
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		upload := func(digest string) (int, []byte) {
+			t.Helper()
+			request, err := http.NewRequest(http.MethodPut, ts.URL+"/upload-part-md5-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), strings.NewReader("part"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Content-MD5", digest)
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response.StatusCode, body
+		}
+		status, body := upload("!")
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidDigest</Code>")) || !bytes.Contains(body, []byte("<Message>The Content-MD5 you specified was invalid.</Message>")) || !bytes.Contains(body, []byte("<Content_MD5>!</Content_MD5>")) {
+			t.Fatalf("malformed upload part Content-MD5 %d %s", status, body)
+		}
+		status, body = upload("AAAAAAAAAAAAAAAAAAAAAA==")
+		sum := md5.Sum([]byte("part"))
+		calculated := base64.StdEncoding.EncodeToString(sum[:])
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>BadDigest</Code>")) || !bytes.Contains(body, []byte("<Message>The Content-MD5 you specified did not match what we received.</Message>")) || !bytes.Contains(body, []byte("<ExpectedDigest>AAAAAAAAAAAAAAAAAAAAAA==</ExpectedDigest>")) || !bytes.Contains(body, []byte("<CalculatedDigest>"+calculated+"</CalculatedDigest>")) {
+			t.Fatalf("mismatched upload part Content-MD5 %d %s", status, body)
+		}
+	})
+
 	t.Run("Given an invalid multipart completion When submitted Then S3 returns modeled faults", func(t *testing.T) {
 		res := do(http.MethodPut, "/completion-fault-bdd", nil, "")
 		res.Body.Close()

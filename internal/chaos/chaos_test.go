@@ -724,6 +724,78 @@ func TestConcurrentUploadPartChecksumFaultsRemainModeled(t *testing.T) {
 	}
 }
 
+func TestConcurrentUploadPartSSECustomerKeyFaultsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: io.NopCloser(strings.NewReader("part"))})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "upload-part-sse-c-chaos"}); err != nil {
+		t.Fatal(err)
+	}
+	key := bytes.Repeat([]byte{'a'}, 32)
+	digest := md5.Sum(key)
+	encryption := map[string]any{"SSECustomerAlgorithm": "AES256", "SSECustomerKey": base64.StdEncoding.EncodeToString(key), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(digest[:])}
+	create := map[string]any{"Bucket": "upload-part-sse-c-chaos", "Key": "encrypted"}
+	for name, value := range encryption {
+		create[name] = value
+	}
+	encrypted, err := call("CreateMultipartUpload", create)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := call("CreateMultipartUpload", map[string]any{"Bucket": "upload-part-sse-c-chaos", "Key": "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherKey := bytes.Repeat([]byte{'b'}, 32)
+	otherDigest := md5.Sum(otherKey)
+	wrongEncryption := map[string]any{"SSECustomerAlgorithm": "AES256", "SSECustomerKey": base64.StdEncoding.EncodeToString(otherKey), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(otherDigest[:])}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key, uploadID := "encrypted", encrypted.Output["UploadId"]
+			input := map[string]any{"Bucket": "upload-part-sse-c-chaos", "Key": key, "UploadId": uploadID, "PartNumber": i + 1}
+			want := "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters."
+			if i%3 == 1 {
+				input["Key"], input["UploadId"] = "plain", plain.Output["UploadId"]
+				for name, value := range encryption {
+					input[name] = value
+				}
+			} else if i%3 == 2 {
+				for name, value := range wrongEncryption {
+					input[name] = value
+				}
+				want = "The provided encryption parameters did not match the ones used originally."
+			}
+			_, err := call("UploadPart", input)
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != "InvalidRequest" || fault.Message != want {
+				errs <- fmt.Errorf("SSE-C fault %d = %#v", i, fault)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	for key, uploadID := range map[string]any{"encrypted": encrypted.Output["UploadId"], "plain": plain.Output["UploadId"]} {
+		listed, err := call("ListParts", map[string]any{"Bucket": "upload-part-sse-c-chaos", "Key": key, "UploadId": uploadID})
+		if err != nil || len(listed.Output["Parts"].([]any)) != 0 {
+			t.Fatalf("rejected SSE-C requests stored parts = %#v, err=%v", listed, err)
+		}
+	}
+}
+
 func TestConcurrentBodyReadFailuresLeaveNoPartialObjects(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

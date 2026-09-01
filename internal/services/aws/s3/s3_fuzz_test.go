@@ -1412,7 +1412,10 @@ func FuzzListObjectsPagination(f *testing.F) {
 		if v2 {
 			operation = "ListObjectsV2"
 			delete(input, "Marker")
-			input["ContinuationToken"], input["FetchOwner"] = marker, fetchOwner
+			if marker != "" {
+				input["ContinuationToken"] = base64.NewEncoding("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._").EncodeToString([]byte(marker))
+			}
+			input["FetchOwner"] = fetchOwner
 		}
 		page := mustInvoke(t, p, operation, input, nil).Output
 		if page["BucketRegion"] != "us-west-2" {
@@ -1421,12 +1424,18 @@ func FuzzListObjectsPagination(f *testing.F) {
 		all := []string{"folder/a/", "folder/b", "folder/c"}
 		var want []string
 		for _, value := range all {
-			if value > marker {
+			if value > marker || v2 && value == marker {
 				want = append(want, value)
 			}
 		}
 		truncated := len(want) > maxKeys
+		next := ""
 		if truncated {
+			if v2 {
+				next = want[maxKeys]
+			} else {
+				next = want[maxKeys-1]
+			}
 			want = want[:maxKeys]
 		}
 		var got []string
@@ -1452,8 +1461,12 @@ func FuzzListObjectsPagination(f *testing.F) {
 			if v2 {
 				field = "NextContinuationToken"
 			}
-			if page[field] != want[len(want)-1] {
-				t.Fatalf("%s = %q want %q", field, page[field], want[len(want)-1])
+			wantToken := next
+			if v2 {
+				wantToken = base64.NewEncoding("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._").EncodeToString([]byte(next))
+			}
+			if page[field] != wantToken {
+				t.Fatalf("%s = %q want %q", field, page[field], wantToken)
 			}
 		}
 	})

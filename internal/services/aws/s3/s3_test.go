@@ -4646,6 +4646,7 @@ func TestListObjectVersionsURLMarkerRoundTrip(t *testing.T) {
 	if len(secondRows) != 1 || asMapForTest(secondRows[0])["Key"] != "folder/a%21key" || second["KeyMarker"] != "folder/a%20key" {
 		t.Fatalf("second encoded page = %#v", second)
 	}
+	golden.AssertJSON(t, map[string]any{"first": first, "second": second})
 }
 
 func TestListObjectsPaginationIncludesCommonPrefixes(t *testing.T) {

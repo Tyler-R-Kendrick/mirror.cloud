@@ -984,10 +984,18 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-list-mislabel-checksum-type",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `content["ChecksumType"] = str(meta["checksumType"])`,
-			new:  `content["ChecksumType"] = "COMPOSITE"`,
+			old:  `row["ChecksumType"] = str(meta["checksumType"])`,
+			new:  `row["ChecksumType"] = "COMPOSITE"`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestListObjectChecksumMetadata",
+		},
+		{
+			name: "s3-list-version-drop-checksum-metadata",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `setListChecksumMetadata(row, meta)`,
+			new:  `setListChecksumMetadata(map[string]any{}, meta)`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestListObjectVersionChecksumMetadata",
 		},
 		{
 			name: "restxml-wrap-list-checksum-algorithms",

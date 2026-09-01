@@ -531,7 +531,9 @@ func TestConcurrentListObjectVersionsRemainsPageable(t *testing.T) {
 	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "version-list-chaos", "Status": "Enabled"}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := call("PutObject", map[string]any{"Bucket": "version-list-chaos", "Key": "prefix/key"}, "initial"); err != nil {
+	initialSum := crc32.ChecksumIEEE([]byte("initial"))
+	initialChecksum := base64.StdEncoding.EncodeToString([]byte{byte(initialSum >> 24), byte(initialSum >> 16), byte(initialSum >> 8), byte(initialSum)})
+	if _, err := call("PutObject", map[string]any{"Bucket": "version-list-chaos", "Key": "prefix/key", "ChecksumCRC32": initialChecksum}, "initial"); err != nil {
 		t.Fatal(err)
 	}
 	errs := make(chan error, 64)
@@ -574,7 +576,15 @@ func TestConcurrentListObjectVersionsRemainsPageable(t *testing.T) {
 		}
 	}
 	response, err := call("ListObjectVersions", map[string]any{"Bucket": "version-list-chaos", "Prefix": "prefix/"}, "")
-	if versions := response.Output["Versions"].([]any); err != nil || len(versions) != 17 {
+	versions := response.Output["Versions"].([]any)
+	checksummed := 0
+	for _, value := range versions {
+		row := value.(map[string]any)
+		if reflect.DeepEqual(row["ChecksumAlgorithm"], []any{"CRC32"}) && row["ChecksumType"] == "FULL_OBJECT" {
+			checksummed++
+		}
+	}
+	if err != nil || len(versions) != 17 || checksummed != 1 {
 		t.Fatalf("final versions = %#v, err=%v", response, err)
 	}
 }

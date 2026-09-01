@@ -1017,6 +1017,13 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String("sdk-version-list"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusEnabled}}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-version-list"), Key: aws.String("checksummed"), Body: strings.NewReader("body"), ChecksumAlgorithm: s3types.ChecksumAlgorithmSha256}); err != nil {
+		t.Fatal(err)
+	}
+	checksummedVersions, err := s3c.ListObjectVersions(context.Background(), &s3.ListObjectVersionsInput{Bucket: aws.String("sdk-version-list"), Prefix: aws.String("checksummed")})
+	if err != nil || len(checksummedVersions.Versions) != 1 || len(checksummedVersions.Versions[0].ChecksumAlgorithm) != 1 || checksummedVersions.Versions[0].ChecksumAlgorithm[0] != s3types.ChecksumAlgorithmSha256 || checksummedVersions.Versions[0].ChecksumType != s3types.ChecksumTypeFullObject {
+		t.Fatalf("checksummed versions: %#v %v", checksummedVersions, err)
+	}
 	for _, key := range []string{"folder/a/one", "folder/file1", "folder/file2"} {
 		if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-version-list"), Key: aws.String(key), Body: strings.NewReader("body")}); err != nil {
 			t.Fatal(err)

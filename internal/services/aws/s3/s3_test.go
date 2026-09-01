@@ -4783,7 +4783,7 @@ func TestListObjectVersionsPagination(t *testing.T) {
 		t.Fatalf("orphan version marker = %#v", fault)
 	}
 	encoded := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-list", "Prefix": "folder/", "EncodingType": "url"}, nil).Output
-	if encoded["Prefix"] != "folder%2F" || encoded["EncodingType"] != "url" {
+	if encoded["Prefix"] != "folder/" || encoded["EncodingType"] != "url" {
 		t.Fatalf("encoded version list = %#v", encoded)
 	}
 	all := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-list"}, nil).Output

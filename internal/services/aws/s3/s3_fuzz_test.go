@@ -15,6 +15,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -1399,16 +1400,16 @@ func FuzzListObjectsPagination(f *testing.F) {
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-fuzz", "LocationConstraint": "us-west-2"}, nil)
 		body := []byte("content")
 		sum := sha256.Sum256(body)
-		for _, key := range []string{"folder/a/one", "folder/a/two", "folder/b", "folder/c"} {
+		for _, key := range []string{"folder/a/one", "folder/a/two", "folder/b value+", "folder/c"} {
 			input := map[string]any{"Bucket": "list-fuzz", "Key": key}
-			if key == "folder/b" {
+			if key == "folder/b value+" {
 				input["ChecksumSHA256"] = base64.StdEncoding.EncodeToString(sum[:])
 			}
 			mustInvoke(t, p, "PutObject", input, body)
 		}
 		maxKeys := int(maxSeed%3) + 1
 		operation := "ListObjects"
-		input := map[string]any{"Bucket": "list-fuzz", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": maxKeys, "Marker": marker}
+		input := map[string]any{"Bucket": "list-fuzz", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": maxKeys, "Marker": marker, "EncodingType": "url"}
 		if v2 {
 			operation = "ListObjectsV2"
 			delete(input, "Marker")
@@ -1421,7 +1422,7 @@ func FuzzListObjectsPagination(f *testing.F) {
 		if page["BucketRegion"] != "us-west-2" {
 			t.Fatalf("%s BucketRegion = %#v", operation, page["BucketRegion"])
 		}
-		all := []string{"folder/a/", "folder/b", "folder/c"}
+		all := []string{"folder/a/", "folder/b value+", "folder/c"}
 		var want []string
 		for _, value := range all {
 			if value > marker || v2 && value == marker {
@@ -1445,7 +1446,7 @@ func FuzzListObjectsPagination(f *testing.F) {
 		for _, value := range asSliceForTest(page["Contents"]) {
 			row := asMapForTest(value)
 			got = append(got, row["Key"].(string))
-			if checksummed := row["Key"] == "folder/b"; checksummed != reflect.DeepEqual(row["ChecksumAlgorithm"], []any{"SHA256"}) || checksummed != (row["ChecksumType"] == "FULL_OBJECT") {
+			if checksummed := row["Key"] == "folder/b%20value%2B"; checksummed != reflect.DeepEqual(row["ChecksumAlgorithm"], []any{"SHA256"}) || checksummed != (row["ChecksumType"] == "FULL_OBJECT") {
 				t.Fatalf("%s checksum metadata = %#v", operation, row)
 			}
 			owner := asMapForTest(row["Owner"])
@@ -1453,7 +1454,14 @@ func FuzzListObjectsPagination(f *testing.F) {
 				t.Fatalf("%s fetchOwner=%v owner=%#v", operation, fetchOwner, owner)
 			}
 		}
-		if strings.Join(got, "\x00") != strings.Join(want, "\x00") || page["IsTruncated"] != truncated || page["KeyCount"] != len(want) {
+		encode := func(value string) string {
+			return strings.ReplaceAll(strings.ReplaceAll(url.QueryEscape(value), "+", "%20"), "%2F", "/")
+		}
+		wantEncoded := make([]string, len(want))
+		for i, value := range want {
+			wantEncoded[i] = encode(value)
+		}
+		if strings.Join(got, "\x00") != strings.Join(wantEncoded, "\x00") || page["IsTruncated"] != truncated || page["KeyCount"] != len(want) {
 			t.Fatalf("%s marker=%q max=%d page=%#v want=%v", operation, marker, maxKeys, page, want)
 		}
 		if truncated {
@@ -1464,6 +1472,8 @@ func FuzzListObjectsPagination(f *testing.F) {
 			wantToken := next
 			if v2 {
 				wantToken = base64.NewEncoding("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._").EncodeToString([]byte(next))
+			} else {
+				wantToken = encode(next)
 			}
 			if page[field] != wantToken {
 				t.Fatalf("%s = %q want %q", field, page[field], wantToken)

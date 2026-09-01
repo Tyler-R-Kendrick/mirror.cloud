@@ -377,7 +377,7 @@ func TestConcurrentListObjectPaginationRemainsOrdered(t *testing.T) {
 	body := []byte("content")
 	sum := crc32.ChecksumIEEE(body)
 	checksum := base64.StdEncoding.EncodeToString([]byte{byte(sum >> 24), byte(sum >> 16), byte(sum >> 8), byte(sum)})
-	for _, key := range []string{"folder/a/one", "folder/base"} {
+	for _, key := range []string{"folder/a/one", "folder/b ase+", "folder/base"} {
 		input := map[string]any{"Bucket": "list-pagination", "Key": key}
 		if key == "folder/base" {
 			input["ChecksumCRC32"] = checksum
@@ -398,13 +398,13 @@ func TestConcurrentListObjectPaginationRemainsOrdered(t *testing.T) {
 				return
 			}
 			operation := "ListObjects"
-			input := map[string]any{"Bucket": "list-pagination", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": 5, "Marker": "folder/a/"}
+			input := map[string]any{"Bucket": "list-pagination", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": 5, "Marker": "folder/a/", "EncodingType": "url"}
 			tokenField := "NextMarker"
 			v2 := false
 			if i%4 == 3 {
 				operation = "ListObjectsV2"
 				delete(input, "Marker")
-				input["ContinuationToken"] = "Zm9sZGVyL2Jhc2U="
+				input["ContinuationToken"] = base64.NewEncoding("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._").EncodeToString([]byte("folder/b ase+"))
 				tokenField = "NextContinuationToken"
 				v2 = true
 			}
@@ -421,13 +421,19 @@ func TestConcurrentListObjectPaginationRemainsOrdered(t *testing.T) {
 			for _, value := range response.Output["CommonPrefixes"].([]any) {
 				values = append(values, value.(map[string]any)["Prefix"].(string))
 			}
+			encodedSpecial := false
 			for _, value := range response.Output["Contents"].([]any) {
 				content := value.(map[string]any)
 				values = append(values, content["Key"].(string))
+				encodedSpecial = encodedSpecial || content["Key"] == "folder/b%20ase%2B"
 				if content["Key"] == "folder/base" && (!reflect.DeepEqual(content["ChecksumAlgorithm"], []any{"CRC32"}) || content["ChecksumType"] != "FULL_OBJECT") {
 					errs <- fmt.Errorf("%s checksum: %#v", operation, content)
 					return
 				}
+			}
+			if !encodedSpecial {
+				errs <- fmt.Errorf("%s URL encoding: %#v", operation, response.Output)
+				return
 			}
 			if len(values) != response.Output["KeyCount"] || len(values) > 5 {
 				errs <- fmt.Errorf("%s count: %#v", operation, response.Output)

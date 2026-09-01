@@ -2136,20 +2136,17 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 		}
 	}
 	if str(req.Input["EncodingType"]) == "url" || str(req.Input["encoding-type"]) == "url" {
-		encode := func(value any) string {
-			return strings.ReplaceAll(strings.ReplaceAll(url.QueryEscape(str(value)), "+", "%20"), "%2F", "/")
-		}
 		for _, c := range contents {
 			m := asMap(c)
-			m["Key"] = encode(m["Key"])
+			m["Key"] = s3URLEncode(m["Key"])
 		}
 		for _, p := range prefixes {
 			m := asMap(p)
-			m["Prefix"] = encode(m["Prefix"])
+			m["Prefix"] = s3URLEncode(m["Prefix"])
 		}
 		for _, field := range []string{"Prefix", "Delimiter", "StartAfter", "NextMarker"} {
 			if value, ok := out[field]; ok {
-				out[field] = encode(value)
+				out[field] = s3URLEncode(value)
 			}
 		}
 		out["EncodingType"] = "url"
@@ -2976,25 +2973,28 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 		}
 	}
 	if str(req.Input["EncodingType"]) == "url" {
-		encode := func(value string) string { return strings.ReplaceAll(url.QueryEscape(value), "+", "%20") }
 		for _, collection := range [][]any{versions, markers, prefixes} {
 			for _, value := range collection {
 				row := asMap(value)
 				for _, field := range []string{"Key", "Prefix"} {
 					if raw := str(row[field]); raw != "" {
-						row[field] = encode(raw)
+						row[field] = s3URLEncode(raw)
 					}
 				}
 			}
 		}
 		for _, field := range []string{"Prefix", "Delimiter", "KeyMarker", "NextKeyMarker"} {
 			if raw := str(out[field]); raw != "" {
-				out[field] = encode(raw)
+				out[field] = s3URLEncode(raw)
 			}
 		}
 		out["EncodingType"] = "url"
 	}
 	return &spi.Response{Output: out}, nil
+}
+
+func s3URLEncode(value any) string {
+	return strings.ReplaceAll(strings.ReplaceAll(url.QueryEscape(str(value)), "+", "%20"), "%2F", "/")
 }
 
 func validateListEncodingType(req *spi.Request) error {

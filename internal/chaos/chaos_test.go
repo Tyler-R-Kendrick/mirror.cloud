@@ -374,8 +374,15 @@ func TestConcurrentListObjectPaginationRemainsOrdered(t *testing.T) {
 	if _, err := call("CreateBucket", map[string]any{"Bucket": "list-pagination", "LocationConstraint": "us-west-2"}, nil); err != nil {
 		t.Fatal(err)
 	}
+	body := []byte("content")
+	sum := crc32.ChecksumIEEE(body)
+	checksum := base64.StdEncoding.EncodeToString([]byte{byte(sum >> 24), byte(sum >> 16), byte(sum >> 8), byte(sum)})
 	for _, key := range []string{"folder/a/one", "folder/base"} {
-		if _, err := call("PutObject", map[string]any{"Bucket": "list-pagination", "Key": key}, []byte("content")); err != nil {
+		input := map[string]any{"Bucket": "list-pagination", "Key": key}
+		if key == "folder/base" {
+			input["ChecksumCRC32"] = checksum
+		}
+		if _, err := call("PutObject", input, body); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -413,7 +420,12 @@ func TestConcurrentListObjectPaginationRemainsOrdered(t *testing.T) {
 				values = append(values, value.(map[string]any)["Prefix"].(string))
 			}
 			for _, value := range response.Output["Contents"].([]any) {
-				values = append(values, value.(map[string]any)["Key"].(string))
+				content := value.(map[string]any)
+				values = append(values, content["Key"].(string))
+				if content["Key"] == "folder/base" && (!reflect.DeepEqual(content["ChecksumAlgorithm"], []any{"CRC32"}) || content["ChecksumType"] != "FULL_OBJECT") {
+					errs <- fmt.Errorf("%s checksum: %#v", operation, content)
+					return
+				}
 			}
 			if len(values) != response.Output["KeyCount"] || len(values) > 5 {
 				errs <- fmt.Errorf("%s count: %#v", operation, response.Output)

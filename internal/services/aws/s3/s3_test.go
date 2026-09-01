@@ -4626,6 +4626,7 @@ func TestListObjectVersionsURLResponseEncoding(t *testing.T) {
 	if len(rows) != 1 || asMapForTest(rows[0])["Key"] != "folder/a%20b/file%2Bone" || versions["Prefix"] != "folder/a%20b/" || versions["EncodingType"] != "url" {
 		t.Fatalf("encoded versions = %#v", versions)
 	}
+	golden.AssertJSON(t, map[string]any{"first": first, "versions": versions})
 }
 
 func TestListObjectsPaginationIncludesCommonPrefixes(t *testing.T) {

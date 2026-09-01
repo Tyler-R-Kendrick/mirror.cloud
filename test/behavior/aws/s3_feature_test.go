@@ -268,6 +268,39 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given multipart metadata When completing the upload Then S3 preserves initiation headers", func(t *testing.T) {
+		res := do(http.MethodPut, "/multipart-metadata-bdd", nil, "")
+		res.Body.Close()
+		request, _ := http.NewRequest(http.MethodPost, ts.URL+"/multipart-metadata-bdd/object?uploads", nil)
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("Cache-Control", "max-age=60")
+		request.Header.Set("Content-Type", "text/plain")
+		request.Header.Set("x-amz-meta-team", "storage")
+		request.Header.Set("x-amz-website-redirect-location", "/multipart")
+		res, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodPut, "/multipart-metadata-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("part"), "")
+		etag := res.Header.Get("ETag")
+		res.Body.Close()
+		manifest := []byte(`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`)
+		res = do(http.MethodPost, "/multipart-metadata-bdd/object?uploadId="+url.QueryEscape(created.UploadID), manifest, "")
+		res.Body.Close()
+		res = do(http.MethodHead, "/multipart-metadata-bdd/object", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("Cache-Control") != "max-age=60" || res.Header.Get("Content-Type") != "text/plain" || res.Header.Get("x-amz-meta-team") != "storage" || res.Header.Get("x-amz-website-redirect-location") != "/multipart" {
+			t.Fatalf("multipart metadata %d headers=%v", res.StatusCode, res.Header)
+		}
+	})
+
 	t.Run("Given a missing multipart upload When accessed Then S3 returns the modeled fault", func(t *testing.T) {
 		res := do(http.MethodPut, "/multipart-fault-bdd", nil, "")
 		res.Body.Close()

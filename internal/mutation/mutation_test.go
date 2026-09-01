@@ -13686,7 +13686,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-list-url-keep-raw-object-key",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `m["Key"] = encode(m["Key"])`,
+			old:  `m["Key"] = s3URLEncode(m["Key"])`,
 			new:  `m["Key"] = str(m["Key"])`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestListURLResponseEncoding",
@@ -13694,7 +13694,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-list-url-keep-raw-common-prefix",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `m["Prefix"] = encode(m["Prefix"])`,
+			old:  `m["Prefix"] = s3URLEncode(m["Prefix"])`,
 			new:  `m["Prefix"] = str(m["Prefix"])`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestListURLResponseEncoding",
@@ -13714,6 +13714,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestListObjectVersionsPagination",
+		},
+		{
+			name: "s3-list-versions-keep-raw-url-key",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `row[field] = s3URLEncode(raw)`,
+			new:  `row[field] = raw`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestListObjectVersionsURLResponseEncoding",
 		},
 		{
 			name: "s3-list-versions-drop-common-prefix",

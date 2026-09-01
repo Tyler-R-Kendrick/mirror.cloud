@@ -207,6 +207,14 @@ func TestS3ObjectLifecycle(t *testing.T) {
 				t.Fatalf("list %q: %d %s", query, res.StatusCode, body)
 			}
 		}
+		res = do(http.MethodPut, "/list-url-bdd?versioning", []byte(`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`), "")
+		res.Body.Close()
+		res = do(http.MethodGet, "/list-url-bdd?versions&prefix=folder%2F&delimiter=%2F&encoding-type=url", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>folder/a%20b/</Prefix></CommonPrefixes>")) || !bytes.Contains(body, []byte("<Key>folder/root%20%3F</Key>")) {
+			t.Fatalf("version URL list: %d %s", res.StatusCode, body)
+		}
 	})
 
 	t.Run("Given a checksummed version When listing versions Then checksum metadata is returned", func(t *testing.T) {

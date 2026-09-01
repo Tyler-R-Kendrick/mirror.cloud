@@ -1532,6 +1532,7 @@ func FuzzListObjectVersionsPagination(f *testing.F) {
 			}
 			mustInvoke(t, p, "PutObject", input, body)
 		}
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-list-fuzz", "Key": "url/k ey+"}, body)
 		all := asSliceForTest(mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-list-fuzz", "Prefix": "prefix/"}, nil).Output["Versions"])
 		start, maxKeys := int(startSeed)%len(all), int(maxSeed%5)+1
 		input := map[string]any{"Bucket": "version-list-fuzz", "Prefix": "prefix/", "MaxKeys": maxKeys}
@@ -1553,6 +1554,10 @@ func FuzzListObjectVersionsPagination(f *testing.F) {
 		}
 		if end < len(all) && (page["NextKeyMarker"] != "prefix/key" || page["NextVersionIdMarker"] != asMapForTest(all[end-1])["VersionId"]) {
 			t.Fatalf("next markers = %#v", page)
+		}
+		encoded := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-list-fuzz", "Prefix": "url/", "EncodingType": "url"}, nil).Output["Versions"].([]any)
+		if len(encoded) != 1 || asMapForTest(encoded[0])["Key"] != "url/k%20ey%2B" {
+			t.Fatalf("encoded versions = %#v", encoded)
 		}
 	})
 }

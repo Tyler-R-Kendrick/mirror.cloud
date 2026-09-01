@@ -1,0 +1,46 @@
+{
+  "first": {
+    "CommonPrefixes": [
+      {
+        "Prefix": "folder/a%20b/"
+      }
+    ],
+    "DeleteMarkers": null,
+    "Delimiter": "/",
+    "EncodingType": "url",
+    "IsTruncated": true,
+    "KeyMarker": "",
+    "MaxKeys": 1,
+    "Name": "version-url",
+    "NextKeyMarker": "folder/a%20b/",
+    "Prefix": "folder/",
+    "VersionIdMarker": "",
+    "Versions": null
+  },
+  "versions": {
+    "CommonPrefixes": null,
+    "DeleteMarkers": null,
+    "Delimiter": "",
+    "EncodingType": "url",
+    "IsTruncated": false,
+    "KeyMarker": "",
+    "MaxKeys": 1000,
+    "Name": "version-url",
+    "Prefix": "folder/a%20b/",
+    "VersionIdMarker": "",
+    "Versions": [
+      {
+        "ETag": "\"a60e6975452533f9eb60fc0b521c4f3d\"",
+        "IsLatest": true,
+        "Key": "folder/a%20b/file%2Bone",
+        "LastModified": "1970-01-01T00:00:00.000Z",
+        "Owner": {
+          "ID": "123456789012"
+        },
+        "Size": 19,
+        "StorageClass": "STANDARD",
+        "VersionId": "7c589129"
+      }
+    ]
+  }
+}

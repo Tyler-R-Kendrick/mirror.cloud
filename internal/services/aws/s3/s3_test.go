@@ -4610,6 +4610,24 @@ func TestListURLResponseEncoding(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"v1": first, "v2": v2})
 }
 
+func TestListObjectVersionsURLResponseEncoding(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-url"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "version-url", "Status": "Enabled"}, nil)
+	for _, key := range []string{"folder/a b/file+one", "folder/root ?"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-url", "Key": key}, []byte(key))
+	}
+	first := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-url", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": 1, "EncodingType": "url"}, nil).Output
+	if prefixes := asSliceForTest(first["CommonPrefixes"]); len(prefixes) != 1 || asMapForTest(prefixes[0])["Prefix"] != "folder/a%20b/" || first["NextKeyMarker"] != "folder/a%20b/" {
+		t.Fatalf("encoded version prefix page = %#v", first)
+	}
+	versions := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-url", "Prefix": "folder/a b/", "EncodingType": "url"}, nil).Output
+	rows := asSliceForTest(versions["Versions"])
+	if len(rows) != 1 || asMapForTest(rows[0])["Key"] != "folder/a%20b/file%2Bone" || versions["Prefix"] != "folder/a%20b/" || versions["EncodingType"] != "url" {
+		t.Fatalf("encoded versions = %#v", versions)
+	}
+}
+
 func TestListObjectsPaginationIncludesCommonPrefixes(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-pagination"}, nil)

@@ -900,6 +900,22 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || inheritedEncryption.ServerSideEncryption != s3types.ServerSideEncryptionAwsKms || aws.ToString(inheritedEncryption.SSEKMSKeyId) != bucketEncryptionKey || !aws.ToBool(inheritedEncryption.BucketKeyEnabled) {
 		t.Fatalf("inherited bucket encryption: %#v %v", inheritedEncryption, err)
 	}
+	kmsUpload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-kms-multipart")})
+	if err != nil {
+		t.Fatalf("create KMS multipart upload: %v", err)
+	}
+	kmsPart, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-kms-multipart"), UploadId: kmsUpload.UploadId, PartNumber: aws.Int32(1), Body: strings.NewReader("part")})
+	if err != nil {
+		t.Fatalf("upload KMS multipart part: %v", err)
+	}
+	kmsCompleted, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-kms-multipart"), UploadId: kmsUpload.UploadId, MultipartUpload: &s3types.CompletedMultipartUpload{Parts: []s3types.CompletedPart{{PartNumber: aws.Int32(1), ETag: kmsPart.ETag}}}})
+	if err != nil || kmsCompleted.ChecksumCRC64NVME != nil || kmsCompleted.ChecksumType != "" {
+		t.Fatalf("KMS completion checksum response: %#v %v", kmsCompleted, err)
+	}
+	kmsHead, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-kms-multipart"), ChecksumMode: s3types.ChecksumModeEnabled})
+	if err != nil || kmsHead.ChecksumCRC64NVME == nil || kmsHead.ChecksumType != s3types.ChecksumTypeFullObject {
+		t.Fatalf("persisted KMS multipart checksum: %#v %v", kmsHead, err)
+	}
 	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-explicit-kms"), Body: strings.NewReader("encrypted"), ServerSideEncryption: s3types.ServerSideEncryptionAwsKms, SSEKMSKeyId: aws.String(bucketEncryptionKey)}); err != nil {
 		t.Fatalf("explicit kms put: %v", err)
 	}

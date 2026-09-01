@@ -2824,7 +2824,7 @@ func TestMultipartServerSideEncryption(t *testing.T) {
 		t.Fatalf("invalid encryption fault = %+v", fault)
 	}
 	snapshot := func(response *spi.Response) map[string]any {
-		return map[string]any{"algorithm": response.Headers.Get("x-amz-server-side-encryption"), "key": response.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id"), "bucketKey": response.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled")}
+		return map[string]any{"algorithm": response.Headers.Get("x-amz-server-side-encryption"), "key": response.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id"), "bucketKey": response.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled"), "checksum": response.Headers.Get("x-amz-checksum-crc64nvme"), "checksumType": response.Headers.Get("x-amz-checksum-type")}
 	}
 	golden.AssertJSON(t, map[string]any{"create": snapshot(created), "part": snapshot(part), "complete": snapshot(completed), "head": snapshot(head), "invalid": map[string]any{"code": fault.Code, "status": fault.HTTPStatus}})
 }

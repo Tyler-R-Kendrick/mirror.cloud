@@ -2565,7 +2565,7 @@ func FuzzMultipartServerSideEncryption(f *testing.F) {
 		p := s3.New(deps)
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-encryption-fuzz"}, nil)
 		metadataValue := base64.RawStdEncoding.EncodeToString([]byte(metadata))
-		input := map[string]any{"Bucket": "multipart-encryption-fuzz", "Key": "object", "ServerSideEncryption": algorithm, "BucketKeyEnabled": bucketKey, "ContentType": "application/octet-stream", "Metadata": map[string]any{"Case": metadataValue}, "WebsiteRedirectLocation": "/multipart"}
+		input := map[string]any{"Bucket": "multipart-encryption-fuzz", "Key": "object", "ChecksumAlgorithm": "CRC64NVME", "ServerSideEncryption": algorithm, "BucketKeyEnabled": bucketKey, "ContentType": "application/octet-stream", "Metadata": map[string]any{"Case": metadataValue}, "WebsiteRedirectLocation": "/multipart"}
 		keyID := "arn:aws:kms:us-east-1:123456789012:key/multipart-fuzz"
 		if algorithm == "aws:kms" {
 			spitest.SeedKMSKey(t, deps, ident(), keyID, "Enabled")
@@ -2602,6 +2602,42 @@ func FuzzMultipartServerSideEncryption(f *testing.F) {
 		}
 		if algorithm == "aws:kms" && (get.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || bucketKey && get.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true") {
 			t.Fatalf("stored kms headers=%v", get.Headers)
+		}
+	})
+}
+
+func FuzzMultipartWithoutChecksum(f *testing.F) {
+	f.Add("plain", false)
+	f.Add("checked part", true)
+	f.Fuzz(func(t *testing.T, body string, checksumPart bool) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-no-checksum-fuzz"}, nil)
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-no-checksum-fuzz", "Key": "object"}, nil)
+		if created.Output["ChecksumAlgorithm"] != nil || created.Output["ChecksumType"] != nil {
+			t.Fatalf("create = %#v", created.Output)
+		}
+		uploadID := created.Output["UploadId"].(string)
+		partInput := map[string]any{"Bucket": "multipart-no-checksum-fuzz", "Key": "object", "UploadId": uploadID, "PartNumber": 1}
+		if checksumPart {
+			sum := make([]byte, 4)
+			binary.BigEndian.PutUint32(sum, crc32.ChecksumIEEE([]byte(body)))
+			partInput["ChecksumAlgorithm"], partInput["ChecksumCRC32"] = "CRC32", base64.StdEncoding.EncodeToString(sum)
+		}
+		part := mustInvoke(t, p, "UploadPart", partInput, []byte(body))
+		listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "multipart-no-checksum-fuzz", "Key": "object", "UploadId": uploadID}, nil)
+		if listed.Output["ChecksumAlgorithm"] != nil || listed.Output["ChecksumType"] != nil || listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumCRC32"] != nil {
+			t.Fatalf("list = %#v", listed.Output)
+		}
+		completed := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
+		if completed.Output["ChecksumCRC64NVME"] != nil || completed.Output["ChecksumType"] != nil {
+			t.Fatalf("complete = %#v", completed.Output)
+		}
+		got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "multipart-no-checksum-fuzz", "Key": "object", "ChecksumMode": "ENABLED"}, nil)
+		if got.Headers.Get("x-amz-checksum-crc32") != "" || got.Headers.Get("x-amz-checksum-crc64nvme") != "" || string(readStream(t, got)) != body {
+			t.Fatalf("get headers=%v", got.Headers)
 		}
 	})
 }

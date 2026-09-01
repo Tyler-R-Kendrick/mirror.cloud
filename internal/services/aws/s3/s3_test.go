@@ -5243,13 +5243,15 @@ func TestCompleteMultipartUploadPreconditionFaults(t *testing.T) {
 	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "complete-preconditions", "Key": "key"}, nil).Output["UploadId"].(string)
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "complete-preconditions", "Key": "key", "UploadId": uploadID, "PartNumber": 1}, []byte("part"))
 	tests := []struct {
+		name               string
 		conditions         map[string]any
 		header, additional string
 	}{
-		{map[string]any{"IfMatch": `"etag"`, "IfNoneMatch": "*"}, "If-Match,If-None-Match", "Multiple conditional request headers present in the request"},
-		{map[string]any{"IfNoneMatch": `"etag"`}, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
-		{map[string]any{"IfMatch": "*"}, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+		{"combined", map[string]any{"IfMatch": `"etag"`, "IfNoneMatch": "*"}, "If-Match,If-None-Match", "Multiple conditional request headers present in the request"},
+		{"if-none-match", map[string]any{"IfNoneMatch": `"etag"`}, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+		{"if-match-star", map[string]any{"IfMatch": "*"}, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
 	}
+	characterization := map[string]any{}
 	for index, test := range tests {
 		input := completeInput(uploadID, completedPart(1, part))
 		for name, value := range test.conditions {
@@ -5260,11 +5262,13 @@ func TestCompleteMultipartUploadPreconditionFaults(t *testing.T) {
 		if fault.Code != "NotImplemented" || fault.Message != "A header you provided implies functionality that is not implemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fault != "server" || fault.Fields["Header"] != test.header || fault.Fields["additionalMessage"] != test.additional {
 			t.Fatalf("case %d fault = %#v", index, fault)
 		}
+		characterization[test.name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
 	}
 	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "complete-preconditions", "Key": "key", "UploadId": uploadID}, nil)
 	if len(listed.Output["Parts"].([]any)) != 1 {
 		t.Fatalf("rejected completions changed upload = %#v", listed.Output)
 	}
+	golden.AssertJSON(t, characterization)
 }
 
 func TestMultipartCompletionFaultCharacterization(t *testing.T) {

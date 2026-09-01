@@ -1,0 +1,29 @@
+{
+  "combined": {
+    "code": "NotImplemented",
+    "fields": {
+      "Header": "If-Match,If-None-Match",
+      "additionalMessage": "Multiple conditional request headers present in the request"
+    },
+    "message": "A header you provided implies functionality that is not implemented",
+    "status": 501
+  },
+  "if-match-star": {
+    "code": "NotImplemented",
+    "fields": {
+      "Header": "If-None-Match",
+      "additionalMessage": "We don't accept the provided value of If-None-Match header for this API"
+    },
+    "message": "A header you provided implies functionality that is not implemented",
+    "status": 501
+  },
+  "if-none-match": {
+    "code": "NotImplemented",
+    "fields": {
+      "Header": "If-None-Match",
+      "additionalMessage": "We don't accept the provided value of If-None-Match header for this API"
+    },
+    "message": "A header you provided implies functionality that is not implemented",
+    "status": 501
+  }
+}

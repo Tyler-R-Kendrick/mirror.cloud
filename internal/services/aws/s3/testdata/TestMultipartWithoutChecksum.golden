@@ -1,0 +1,18 @@
+{
+  "complete": {
+    "crc64nvme": null,
+    "type": null
+  },
+  "create": {
+    "algorithm": null,
+    "type": null
+  },
+  "list": {
+    "algorithm": null,
+    "partCRC32": null,
+    "type": null
+  },
+  "part": {
+    "crc32": "GSBizw=="
+  }
+}

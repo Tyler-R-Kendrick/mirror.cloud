@@ -5158,6 +5158,12 @@ func TestMultipartWithoutChecksum(t *testing.T) {
 	if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "plain", "ChecksumMode": "ENABLED"}, nil))); body != "plain" {
 		t.Fatalf("body = %q", body)
 	}
+	golden.AssertJSON(t, map[string]any{
+		"create":   map[string]any{"algorithm": created.Output["ChecksumAlgorithm"], "type": created.Output["ChecksumType"]},
+		"part":     map[string]any{"crc32": part.Headers.Get("x-amz-checksum-crc32")},
+		"list":     map[string]any{"algorithm": listed.Output["ChecksumAlgorithm"], "type": listed.Output["ChecksumType"], "partCRC32": listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumCRC32"]},
+		"complete": map[string]any{"crc64nvme": done.Output["ChecksumCRC64NVME"], "type": done.Output["ChecksumType"]},
+	})
 }
 
 func TestMultipartCreationAttributes(t *testing.T) {

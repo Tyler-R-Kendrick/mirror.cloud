@@ -25,6 +25,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -54,6 +55,57 @@ func (f failBlobs) Put(ctx context.Context, key string, r io.Reader) (spi.BlobIn
 		return spi.BlobInfo{}, errors.New("injected blob failure")
 	}
 	return f.BlobStore.Put(ctx, key, r)
+}
+
+func TestConcurrentStateStartsDoNotDropHalfCommittedWaits(t *testing.T) {
+	p := states.New(spitest.Deps(t))
+	defer func() { _ = p.Close() }()
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStateMachine", Input: map[string]any{
+		"name": "concurrent-waits", "definition": `{"StartAt":"Wait","States":{"Wait":{"Type":"Wait","Seconds":0,"End":true}}}`, "roleArn": "arn:aws:iam::000000000000:role/states",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	machineARN := created.Output["stateMachineArn"]
+	arns := make(chan string, 32)
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			started, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartExecution", Input: map[string]any{"stateMachineArn": machineARN, "name": fmt.Sprintf("run-%d", i)}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			arns <- started.Output["executionArn"].(string)
+		}()
+	}
+	wg.Wait()
+	close(arns)
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for arn := range arns {
+		for {
+			described, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeExecution", Input: map[string]any{"executionArn": arn}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if described.Output["status"] == "SUCCEEDED" {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("execution %s remained %#v", arn, described.Output)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
 }
 
 func TestReplicaVersionBlobFailureLeavesNoPartialCurrent(t *testing.T) {

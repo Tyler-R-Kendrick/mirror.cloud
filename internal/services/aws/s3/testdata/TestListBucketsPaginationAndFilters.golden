@@ -23,7 +23,6 @@
       }
     ],
     "Owner": {
-      "DisplayName": "mirror",
       "ID": "123456789012"
     }
   },
@@ -37,7 +36,6 @@
       }
     ],
     "Owner": {
-      "DisplayName": "mirror",
       "ID": "123456789012"
     },
     "Prefix": "team-"
@@ -59,7 +57,6 @@
     ],
     "ContinuationToken": "dGVhbS1iZXRh",
     "Owner": {
-      "DisplayName": "mirror",
       "ID": "123456789012"
     },
     "Prefix": "team-"
@@ -80,7 +77,6 @@
       }
     ],
     "Owner": {
-      "DisplayName": "mirror",
       "ID": "123456789012"
     },
     "Prefix": "team-"

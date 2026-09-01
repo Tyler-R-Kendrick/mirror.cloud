@@ -2550,12 +2550,12 @@ func FuzzObjectSSECustomerKey(f *testing.F) {
 }
 
 func FuzzMultipartServerSideEncryption(f *testing.F) {
-	f.Add(uint8(0), false, "body")
-	f.Add(uint8(1), true, "kms")
-	f.Add(uint8(2), false, "dsse")
-	f.Add(uint8(3), true, "invalid")
-	f.Fuzz(func(t *testing.T, algorithmIndex uint8, bucketKey bool, body string) {
-		if len(body) > 4096 {
+	f.Add(uint8(0), false, "body", "plain")
+	f.Add(uint8(1), true, "kms", "metadata")
+	f.Add(uint8(2), false, "dsse", "\x00\xff")
+	f.Add(uint8(3), true, "invalid", "ignored")
+	f.Fuzz(func(t *testing.T, algorithmIndex uint8, bucketKey bool, body, metadata string) {
+		if len(body) > 4096 || len(metadata) > 512 {
 			t.Skip()
 		}
 		algorithms := []string{"AES256", "aws:kms", "aws:kms:dsse", "invalid"}
@@ -2563,7 +2563,8 @@ func FuzzMultipartServerSideEncryption(f *testing.F) {
 		deps := spitest.Deps(t)
 		p := s3.New(deps)
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-encryption-fuzz"}, nil)
-		input := map[string]any{"Bucket": "multipart-encryption-fuzz", "Key": "object", "ServerSideEncryption": algorithm, "BucketKeyEnabled": bucketKey}
+		metadataValue := base64.RawStdEncoding.EncodeToString([]byte(metadata))
+		input := map[string]any{"Bucket": "multipart-encryption-fuzz", "Key": "object", "ServerSideEncryption": algorithm, "BucketKeyEnabled": bucketKey, "ContentType": "application/octet-stream", "Metadata": map[string]any{"Case": metadataValue}, "WebsiteRedirectLocation": "/multipart"}
 		keyID := "arn:aws:kms:us-east-1:123456789012:key/multipart-fuzz"
 		if algorithm == "aws:kms" {
 			spitest.SeedKMSKey(t, deps, ident(), keyID, "Enabled")
@@ -2595,7 +2596,7 @@ func FuzzMultipartServerSideEncryption(f *testing.F) {
 			t.Fatalf("KMS completion checksum response headers=%v output=%#v", completed.Headers, completed.Output)
 		}
 		get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "multipart-encryption-fuzz", "Key": "object", "ChecksumMode": "ENABLED"}, nil)
-		if get.Headers.Get("x-amz-server-side-encryption") != algorithm || get.Headers.Get("x-amz-checksum-crc64nvme") == "" || get.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" || string(readStream(t, get)) != body {
+		if get.Headers.Get("x-amz-server-side-encryption") != algorithm || get.Headers.Get("x-amz-checksum-crc64nvme") == "" || get.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" || get.Headers.Get("Content-Type") != "application/octet-stream" || get.Headers.Get("x-amz-meta-case") != metadataValue || get.Headers.Get("x-amz-website-redirect-location") != "/multipart" || string(readStream(t, get)) != body {
 			t.Fatalf("stored multipart headers=%v", get.Headers)
 		}
 		if algorithm == "aws:kms" && (get.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || bucketKey && get.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true") {

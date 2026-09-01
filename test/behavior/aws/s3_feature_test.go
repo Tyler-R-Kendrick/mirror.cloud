@@ -261,6 +261,23 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given zero max keys When listing objects and versions Then the default limit is used", func(t *testing.T) {
+		res := do(http.MethodPut, "/zero-max-list-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/zero-max-list-bdd?versioning", []byte(`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`), "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/zero-max-list-bdd/key", []byte("body"), "")
+		res.Body.Close()
+		for _, query := range []string{"max-keys=0", "list-type=2&max-keys=0", "versions&max-keys=0"} {
+			res = do(http.MethodGet, "/zero-max-list-bdd?"+query, nil, "")
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<MaxKeys>1000</MaxKeys>")) || !bytes.Contains(body, []byte("<Key>key</Key>")) {
+				t.Fatalf("zero max list %q: %d %s", query, res.StatusCode, body)
+			}
+		}
+	})
+
 	t.Run("Given invalid list encoding When listing Then S3 rejects every list operation", func(t *testing.T) {
 		res := do(http.MethodPut, "/list-encoding-bdd", nil, "")
 		io.Copy(io.Discard, res.Body)

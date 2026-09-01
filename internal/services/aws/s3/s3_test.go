@@ -5110,7 +5110,7 @@ func TestXXHashChecksumCharacterization(t *testing.T) {
 func TestMultipartChecksumCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
-	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "snapshot", "ChecksumAlgorithm": "SHA256", "StorageClass": "STANDARD_IA", "Tagging": "env=snapshot"}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "snapshot", "ChecksumAlgorithm": "SHA256", "StorageClass": "STANDARD_IA", "Tagging": "env=snapshot", "CacheControl": "max-age=120", "ContentType": "application/json", "Metadata": map[string]any{"Env": "snapshot"}, "WebsiteRedirectLocation": "/snapshot"}, nil)
 	id := created.Output["UploadId"].(string)
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "snapshot", "UploadId": id, "PartNumber": 1}, []byte("snapshot"))
 	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "snapshot", "UploadId": id}, nil)
@@ -5127,7 +5127,7 @@ func TestMultipartChecksumCharacterization(t *testing.T) {
 		"list":     map[string]any{"algorithm": listed.Output["ChecksumAlgorithm"], "type": listed.Output["ChecksumType"], "part": listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumSHA256"]},
 		"mismatch": map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus},
 		"complete": map[string]any{"checksum": done.Output["ChecksumSHA256"], "type": done.Output["ChecksumType"]},
-		"object":   map[string]any{"storageClass": head.Headers.Get("x-amz-storage-class"), "tags": tags},
+		"object":   map[string]any{"cacheControl": head.Headers.Get("Cache-Control"), "contentType": head.Headers.Get("Content-Type"), "metadata": head.Headers.Get("x-amz-meta-env"), "redirect": head.Headers.Get("x-amz-website-redirect-location"), "storageClass": head.Headers.Get("x-amz-storage-class"), "tags": tags},
 	})
 }
 

@@ -20,6 +20,10 @@
     "status": 400
   },
   "object": {
+    "cacheControl": "max-age=120",
+    "contentType": "application/json",
+    "metadata": "snapshot",
+    "redirect": "/snapshot",
     "storageClass": "STANDARD_IA",
     "tags": [
       {

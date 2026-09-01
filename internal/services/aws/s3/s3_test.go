@@ -4996,12 +4996,14 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 		t.Helper()
 		return mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": key}, nil).Output["UploadId"].(string)
 	}
-	wantFault := func(uploadID, code string, parts ...any) {
+	wantFault := func(uploadID, code string, parts ...any) *spi.Fault {
 		t.Helper()
 		_, err := invoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, parts...), nil)
-		if fault := asFault(t, err); fault.Code != code || fault.HTTPStatus != http.StatusBadRequest {
+		fault := asFault(t, err)
+		if fault.Code != code || fault.HTTPStatus != http.StatusBadRequest {
 			t.Fatalf("complete fault = %#v want %s", fault, code)
 		}
+		return fault
 	}
 
 	noncontiguous := create("noncontiguous")
@@ -5017,20 +5019,28 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 
 	wrongETag := create("wrong-etag")
 	mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": wrongETag, "PartNumber": 1}, []byte("one"))
-	wantFault(wrongETag, "InvalidPart", map[string]any{"PartNumber": 1, "ETag": `"wrong"`})
+	if fault := wantFault(wrongETag, "InvalidPart", map[string]any{"PartNumber": 1, "ETag": `"wrong"`}); fault.Message != "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag." || fault.Fields["ETag"] != "wrong" || fault.Fields["PartNumber"] != "1" || fault.Fields["UploadId"] != wrongETag {
+		t.Fatalf("wrong ETag fault = %#v", fault)
+	}
 	missing := create("missing")
-	wantFault(missing, "InvalidPart", map[string]any{"PartNumber": 9, "ETag": `"missing"`})
+	if fault := wantFault(missing, "InvalidPart", map[string]any{"PartNumber": 9, "ETag": `"missing"`}); fault.Message != "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag." || fault.Fields["ETag"] != "missing" || fault.Fields["PartNumber"] != "9" || fault.Fields["UploadId"] != missing {
+		t.Fatalf("missing part fault = %#v", fault)
+	}
 
 	badOrder := create("order")
 	large := bytes.Repeat([]byte("A"), 5<<20)
 	second := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": badOrder, "PartNumber": 2}, large)
 	first := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": badOrder, "PartNumber": 1}, []byte("last"))
-	wantFault(badOrder, "InvalidPartOrder", completedPart(2, second), completedPart(1, first))
+	if fault := wantFault(badOrder, "InvalidPartOrder", completedPart(2, second), completedPart(1, first)); fault.Message != "The list of parts was not in ascending order. Parts must be ordered by part number." || fault.Fields["UploadId"] != badOrder {
+		t.Fatalf("part order fault = %#v", fault)
+	}
 
 	tooSmall := create("small")
 	smallFirst := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": tooSmall, "PartNumber": 1}, []byte("small"))
 	smallLast := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": tooSmall, "PartNumber": 2}, []byte("last"))
-	wantFault(tooSmall, "EntityTooSmall", completedPart(1, smallFirst), completedPart(2, smallLast))
+	if fault := wantFault(tooSmall, "EntityTooSmall", completedPart(1, smallFirst), completedPart(2, smallLast)); fault.Message != "Your proposed upload is smaller than the minimum allowed size" || fault.Fields["ETag"] != strings.Trim(smallFirst.Headers.Get("ETag"), `"`) || fault.Fields["PartNumber"] != "1" || fault.Fields["MinSizeAllowed"] != 5<<20 || fault.Fields["ProposedSize"] != 5 {
+		t.Fatalf("small part fault = %#v", fault)
+	}
 
 	sized := create("sized")
 	sizedPart := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": sized, "PartNumber": 1}, []byte("sized"))
@@ -5057,7 +5067,9 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 	}
 	zeroInput["MpuObjectSize"] = "0"
 	mustInvoke(t, p, "CompleteMultipartUpload", zeroInput, nil)
-	wantFault(create("empty"), "InvalidRequest")
+	if fault := wantFault(create("empty"), "InvalidRequest"); fault.Message != "You must specify at least one part" {
+		t.Fatalf("empty manifest fault = %#v", fault)
+	}
 }
 
 func TestListPartsAndMultipartUploads(t *testing.T) {

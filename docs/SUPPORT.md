@@ -220,6 +220,7 @@ UploadPart, CompleteMultipartUpload, ListParts, and AbortMultipartUpload return 
 UploadPart validates upload identity before the part number and returns LocalStack-compatible InvalidArgument status, message, ArgumentName, and ArgumentValue details for numbers outside 1 through 10,000.
 CompleteMultipartUpload returns LocalStack-compatible InvalidRequest, InvalidPartOrder, InvalidPart, and EntityTooSmall messages and fault details for empty, unordered, missing, mismatched, and undersized part manifests.
 CompleteMultipartUpload returns LocalStack-compatible InvalidRequest details when the requested checksum type differs from the mode selected at upload creation.
+CompleteMultipartUpload returns LocalStack-compatible NotImplemented details for combined conditional headers, non-wildcard If-None-Match, and wildcard If-Match values.
 UploadPart validates Content-MD5 before storing a part, returning LocalStack-compatible InvalidDigest details for malformed values and BadDigest expected/calculated details for body mismatches; rejected digests leave the upload unchanged.
 UploadPart distinguishes checksum algorithm mismatches, malformed checksum header values, and valid-length body mismatches with LocalStack-compatible InvalidRequest and BadDigest messages.
 UploadPart distinguishes missing or unexpected SSE-C parameters from valid but mismatched customer keys using LocalStack-compatible InvalidRequest messages.

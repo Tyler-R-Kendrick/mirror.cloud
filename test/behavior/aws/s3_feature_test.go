@@ -96,8 +96,14 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodGet, "/cross-region-bdd?list-type=2", nil, "")
 		body, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-bucket-region") != "us-west-2" || !bytes.Contains(body, []byte("<Key>key</Key>")) {
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-bucket-region") != "us-west-2" || !bytes.Contains(body, []byte("<Key>key</Key>")) || !bytes.Contains(body, []byte("<BucketRegion>us-west-2</BucketRegion>")) {
 			t.Fatalf("cross-region list %d %#v %s", res.StatusCode, res.Header, body)
+		}
+		res = do(http.MethodGet, "/cross-region-bdd", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<BucketRegion>us-west-2</BucketRegion>")) {
+			t.Fatalf("cross-region list V1 %d %s", res.StatusCode, body)
 		}
 	})
 

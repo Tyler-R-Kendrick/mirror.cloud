@@ -1672,6 +1672,33 @@ func TestBucketAndObjectACLConfigurations(t *testing.T) {
 	}
 }
 
+func TestOwnerDisplayNamesMatchCurrentLocalStack(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	bucket := map[string]any{"Bucket": "owner-display-name"}
+	mustInvoke(t, p, "CreateBucket", bucket, nil)
+
+	listedOwner := asMapForTest(mustInvoke(t, p, "ListBuckets", nil, nil).Output["Owner"])
+	defaultACL := mustInvoke(t, p, "GetBucketAcl", bucket, nil).Output
+	defaultOwner := asMapForTest(defaultACL["Owner"])
+	defaultGrantee := asMapForTest(asMapForTest(asSliceForTest(defaultACL["Grants"])[0])["Grantee"])
+	if listedOwner["DisplayName"] != nil || defaultOwner["DisplayName"] != nil || defaultGrantee["DisplayName"] != nil {
+		t.Fatalf("deprecated owner display names: list=%#v owner=%#v grantee=%#v", listedOwner, defaultOwner, defaultGrantee)
+	}
+
+	id := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	mustInvoke(t, p, "PutBucketAcl", map[string]any{"Bucket": bucket["Bucket"], "GrantRead": `id="` + id + `"`}, nil)
+	grant := asMapForTest(asMapForTest(asSliceForTest(mustInvoke(t, p, "GetBucketAcl", bucket, nil).Output["Grants"])[0])["Grantee"])
+	if grant["ID"] != id || grant["DisplayName"] != nil {
+		t.Fatalf("canonical grant = %#v", grant)
+	}
+
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": bucket["Bucket"], "Key": "multipart"}, nil)
+	parts := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": bucket["Bucket"], "Key": "multipart", "UploadId": created.Output["UploadId"]}, nil).Output
+	if asMapForTest(parts["Initiator"])["DisplayName"] != "webfile" || asMapForTest(parts["Owner"])["DisplayName"] != nil {
+		t.Fatalf("multipart identities = %#v", parts)
+	}
+}
+
 func TestACLCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	bucket := map[string]any{"Bucket": "acl-characterization"}

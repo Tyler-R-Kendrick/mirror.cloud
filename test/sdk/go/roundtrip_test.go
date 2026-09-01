@@ -968,12 +968,20 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		t.Fatalf("first list page: %#v %v", firstList, err)
 	}
 	secondList, err := s3c.ListObjects(context.Background(), &s3.ListObjectsInput{Bucket: aws.String("sdk-list-pagination"), Prefix: aws.String("folder/"), Delimiter: aws.String("/"), MaxKeys: aws.Int32(1), Marker: firstList.NextMarker})
-	if err != nil || len(secondList.Contents) != 1 || aws.ToString(secondList.Contents[0].Key) != "folder/file1" || aws.ToString(secondList.Marker) != "folder/aSubfolder/" || aws.ToString(secondList.NextMarker) != "folder/file1" {
+	if err != nil || len(secondList.Contents) != 1 || aws.ToString(secondList.Contents[0].Key) != "folder/file1" || secondList.Contents[0].Owner == nil || aws.ToString(secondList.Contents[0].Owner.ID) != "000000000000" || secondList.Contents[0].Owner.DisplayName != nil || aws.ToString(secondList.Marker) != "folder/aSubfolder/" || aws.ToString(secondList.NextMarker) != "folder/file1" {
 		t.Fatalf("second list page: %#v %v", secondList, err)
 	}
 	firstListV2, err := s3c.ListObjectsV2(context.Background(), &s3.ListObjectsV2Input{Bucket: aws.String("sdk-list-pagination"), Prefix: aws.String("folder/"), Delimiter: aws.String("/"), MaxKeys: aws.Int32(1)})
 	if err != nil || len(firstListV2.CommonPrefixes) != 1 || aws.ToInt32(firstListV2.KeyCount) != 1 || aws.ToString(firstListV2.NextContinuationToken) != "folder/aSubfolder/" {
 		t.Fatalf("first list V2 page: %#v %v", firstListV2, err)
+	}
+	defaultOwnerV2, err := s3c.ListObjectsV2(context.Background(), &s3.ListObjectsV2Input{Bucket: aws.String("sdk-list-pagination"), Prefix: aws.String("folder/file"), MaxKeys: aws.Int32(1)})
+	if err != nil || len(defaultOwnerV2.Contents) != 1 || defaultOwnerV2.Contents[0].Owner != nil {
+		t.Fatalf("default V2 owner: %#v %v", defaultOwnerV2, err)
+	}
+	fetchedOwnerV2, err := s3c.ListObjectsV2(context.Background(), &s3.ListObjectsV2Input{Bucket: aws.String("sdk-list-pagination"), Prefix: aws.String("folder/file"), MaxKeys: aws.Int32(1), FetchOwner: aws.Bool(true)})
+	if err != nil || len(fetchedOwnerV2.Contents) != 1 || fetchedOwnerV2.Contents[0].Owner == nil || aws.ToString(fetchedOwnerV2.Contents[0].Owner.ID) != "000000000000" || fetchedOwnerV2.Contents[0].Owner.DisplayName != nil {
+		t.Fatalf("fetched V2 owner: %#v %v", fetchedOwnerV2, err)
 	}
 	for _, key := range listKeys {
 		if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk-list-pagination"), Key: aws.String(key)}); err != nil {

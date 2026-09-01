@@ -1535,7 +1535,8 @@ func FuzzListMultipartUploadsMarkers(f *testing.F) {
 			t.Fatalf("start=%d max=%d page=%#v", start, maxUploads, page)
 		}
 		for index := range got {
-			if asMapForTest(got[index])["UploadId"] != asMapForTest(all[start+index])["UploadId"] {
+			row := asMapForTest(got[index])
+			if row["UploadId"] != asMapForTest(all[start+index])["UploadId"] || row["ChecksumAlgorithm"] != "CRC64NVME" || row["ChecksumType"] != "FULL_OBJECT" || asMapForTest(row["Initiator"])["DisplayName"] != "webfile" {
 				t.Fatalf("upload %d = %#v want %#v", index, got[index], all[start+index])
 			}
 		}
@@ -1583,7 +1584,7 @@ func FuzzListPartsPagination(f *testing.F) {
 		if len(want) > 0 {
 			next = want[len(want)-1]
 		}
-		if len(got) != len(want) || page["IsTruncated"] != truncated || page["NextPartNumberMarker"] != next || page["MaxParts"] != limit {
+		if len(got) != len(want) || page["IsTruncated"] != truncated || page["NextPartNumberMarker"] != next || page["MaxParts"] != limit || asMapForTest(page["Initiator"])["DisplayName"] != "webfile" {
 			t.Fatalf("marker=%d max=%d page=%#v want=%v", marker, maxParts, page, want)
 		}
 		for index := range got {

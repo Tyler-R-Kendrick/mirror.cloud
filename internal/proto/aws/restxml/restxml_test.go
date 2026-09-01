@@ -737,10 +737,10 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	for _, operation := range []string{"ListObjects", "ListObjectsV2"} {
 		w = httptest.NewRecorder()
 		err := codec.Encode(svc, &model.Operation{Name: operation}, w, &spi.Response{Output: map[string]any{
-			"Contents": []any{map[string]any{"Key": "folder/file"}}, "CommonPrefixes": []any{map[string]any{"Prefix": "folder/subfolder/"}},
+			"Contents": []any{map[string]any{"Key": "folder/file"}}, "CommonPrefixes": []any{map[string]any{"Prefix": "folder/subfolder/"}}, "BucketRegion": "us-west-2",
 		}})
 		body := w.Body.String()
-		if err != nil || !strings.Contains(body, "<Contents><Key>folder/file</Key></Contents>") || !strings.Contains(body, "<CommonPrefixes><Prefix>folder/subfolder/</Prefix></CommonPrefixes>") || strings.Contains(body, "<member>") {
+		if err != nil || !strings.Contains(body, "<Contents><Key>folder/file</Key></Contents>") || !strings.Contains(body, "<CommonPrefixes><Prefix>folder/subfolder/</Prefix></CommonPrefixes>") || !strings.Contains(body, "<BucketRegion>us-west-2</BucketRegion>") || strings.Contains(body, "<member>") {
 			t.Fatalf("%s flattened response %v %s", operation, err, body)
 		}
 	}

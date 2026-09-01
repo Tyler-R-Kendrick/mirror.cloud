@@ -2463,7 +2463,8 @@ func TestConcurrentMultipartCompletionsPreserveLifecycleExpiration(t *testing.T)
 			if i%2 == 0 {
 				key = fmt.Sprintf("expire/%d", i)
 			}
-			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "complete-expiration-chaos", "Key": key}, "")
+			metadata, redirect := fmt.Sprintf("team-%d", i), fmt.Sprintf("/%d", i)
+			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "complete-expiration-chaos", "Key": key, "ContentType": "text/plain", "Metadata": map[string]any{"Team": metadata}, "WebsiteRedirectLocation": redirect}, "")
 			if err != nil {
 				errCh <- err
 				return
@@ -2477,6 +2478,14 @@ func TestConcurrentMultipartCompletionsPreserveLifecycleExpiration(t *testing.T)
 			completed, err := call("CompleteMultipartUpload", map[string]any{"Bucket": "complete-expiration-chaos", "Key": key, "UploadId": uploadID, "MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}}, "")
 			if err == nil && (completed.Headers.Get("x-amz-expiration") != "") != (i%2 == 0) {
 				err = fmt.Errorf("key %q expiration = %q", key, completed.Headers.Get("x-amz-expiration"))
+			}
+			if err == nil {
+				head, headErr := call("HeadObject", map[string]any{"Bucket": "complete-expiration-chaos", "Key": key}, "")
+				if headErr != nil {
+					err = headErr
+				} else if head.Headers.Get("Content-Type") != "text/plain" || head.Headers.Get("x-amz-meta-team") != metadata || head.Headers.Get("x-amz-website-redirect-location") != redirect {
+					err = fmt.Errorf("key %q metadata = %v", key, head.Headers)
+				}
 			}
 			errCh <- err
 		}()

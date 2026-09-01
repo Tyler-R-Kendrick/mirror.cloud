@@ -5110,7 +5110,7 @@ func TestXXHashChecksumCharacterization(t *testing.T) {
 func TestMultipartChecksumCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
-	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "snapshot", "ChecksumAlgorithm": "SHA256", "StorageClass": "STANDARD_IA", "Tagging": "env=snapshot"}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "snapshot", "ChecksumAlgorithm": "SHA256", "StorageClass": "STANDARD_IA", "Tagging": "env=snapshot", "CacheControl": "max-age=120", "ContentType": "application/json", "Metadata": map[string]any{"Env": "snapshot"}, "WebsiteRedirectLocation": "/snapshot"}, nil)
 	id := created.Output["UploadId"].(string)
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "snapshot", "UploadId": id, "PartNumber": 1}, []byte("snapshot"))
 	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "snapshot", "UploadId": id}, nil)
@@ -5127,7 +5127,7 @@ func TestMultipartChecksumCharacterization(t *testing.T) {
 		"list":     map[string]any{"algorithm": listed.Output["ChecksumAlgorithm"], "type": listed.Output["ChecksumType"], "part": listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumSHA256"]},
 		"mismatch": map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus},
 		"complete": map[string]any{"checksum": done.Output["ChecksumSHA256"], "type": done.Output["ChecksumType"]},
-		"object":   map[string]any{"storageClass": head.Headers.Get("x-amz-storage-class"), "tags": tags},
+		"object":   map[string]any{"cacheControl": head.Headers.Get("Cache-Control"), "contentType": head.Headers.Get("Content-Type"), "metadata": head.Headers.Get("x-amz-meta-env"), "redirect": head.Headers.Get("x-amz-website-redirect-location"), "storageClass": head.Headers.Get("x-amz-storage-class"), "tags": tags},
 	})
 }
 
@@ -5136,16 +5136,21 @@ func TestMultipartCreationAttributes(t *testing.T) {
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{
 		"Bucket": "bucket", "Key": "attributes", "StorageClass": "STANDARD_IA", "Tagging": "team=storage&env=test",
+		"CacheControl": "max-age=60", "ContentDisposition": `attachment; filename="multipart.txt"`, "ContentEncoding": "gzip", "ContentLanguage": "en-US", "ContentType": "text/plain", "Expires": "Wed, 21 Oct 2026 07:28:00 GMT",
+		"Metadata": map[string]any{"Team": "storage"}, "WebsiteRedirectLocation": "/multipart",
 	}, nil)
 	id := created.Output["UploadId"].(string)
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "attributes", "UploadId": id, "PartNumber": 1}, []byte("body"))
 	complete := completeInput(id, completedPart(1, part))
-	complete["StorageClass"], complete["Tagging"] = "STANDARD", "ignored=true"
+	complete["StorageClass"], complete["Tagging"], complete["ContentType"], complete["Metadata"], complete["WebsiteRedirectLocation"] = "STANDARD", "ignored=true", "application/json", map[string]any{"Team": "ignored"}, "/ignored"
 	mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
 
 	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "attributes"}, nil)
 	if head.Headers.Get("x-amz-storage-class") != "STANDARD_IA" {
 		t.Fatalf("multipart storage class = %v", head.Headers)
+	}
+	if head.Headers.Get("Cache-Control") != "max-age=60" || head.Headers.Get("Content-Disposition") != `attachment; filename="multipart.txt"` || head.Headers.Get("Content-Encoding") != "gzip" || head.Headers.Get("Content-Language") != "en-US" || head.Headers.Get("Content-Type") != "text/plain" || head.Headers.Get("Expires") != "Wed, 21 Oct 2026 07:28:00 GMT" || head.Headers.Get("x-amz-meta-team") != "storage" || head.Headers.Get("x-amz-website-redirect-location") != "/multipart" {
+		t.Fatalf("multipart metadata = %v", head.Headers)
 	}
 	get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "attributes"}, nil)
 	if get.Headers.Get("x-amz-storage-class") != "STANDARD_IA" {

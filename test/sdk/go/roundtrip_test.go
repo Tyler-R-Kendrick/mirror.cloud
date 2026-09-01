@@ -1002,7 +1002,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.DeleteBucket(context.Background(), &s3.DeleteBucketInput{Bucket: aws.String("sdk-acl-marker")}); err != nil {
 		t.Fatalf("delete acl marker bucket: %v", err)
 	}
-	multipartACL, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-multipart-acl"), ACL: s3types.ObjectCannedACLPublicReadWrite})
+	multipartACL, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-multipart-acl"), ACL: s3types.ObjectCannedACLPublicReadWrite, CacheControl: aws.String("max-age=60"), ContentType: aws.String("text/plain"), Metadata: map[string]string{"team": "storage"}, WebsiteRedirectLocation: aws.String("/multipart")})
 	if err != nil {
 		t.Fatalf("create multipart ACL: %v", err)
 	}
@@ -1015,6 +1015,9 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}
 	if objectACL, err := s3c.GetObjectAcl(context.Background(), &s3.GetObjectAclInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-multipart-acl")}); err != nil || len(objectACL.Grants) != 3 {
 		t.Fatalf("multipart object ACL: %#v %v", objectACL, err)
+	}
+	if head, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-multipart-acl")}); err != nil || aws.ToString(head.CacheControl) != "max-age=60" || aws.ToString(head.ContentType) != "text/plain" || head.Metadata["team"] != "storage" || aws.ToString(head.WebsiteRedirectLocation) != "/multipart" {
+		t.Fatalf("multipart object metadata: %#v %v", head, err)
 	}
 	ownership, err := s3c.GetBucketOwnershipControls(context.Background(), &s3.GetBucketOwnershipControlsInput{Bucket: aws.String("sdk")})
 	if err != nil || ownership.OwnershipControls == nil {

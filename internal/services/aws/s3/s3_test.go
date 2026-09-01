@@ -3114,6 +3114,27 @@ func TestCopyObjectChecksums(t *testing.T) {
 	})
 }
 
+func TestCopyObjectLastModified(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "source"}, []byte("body"))
+	if err := deps.Clock.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	copied := mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "bucket", "Key": "copy", "CopySource": "bucket/source"}, nil)
+	modifiedValue, ok := copied.Output["LastModified"].(string)
+	modified, err := time.Parse(time.RFC3339, modifiedValue)
+	if !ok || err != nil {
+		t.Fatalf("copy LastModified = %#v: %v", copied.Output["LastModified"], err)
+	}
+	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "copy"}, nil)
+	stored, err := http.ParseTime(head.Headers.Get("Last-Modified"))
+	if err != nil || !modified.Equal(stored) {
+		t.Fatalf("copy LastModified %s, stored %q: %v", modified, head.Headers.Get("Last-Modified"), err)
+	}
+}
+
 func TestCopyObjectDirectiveValidation(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

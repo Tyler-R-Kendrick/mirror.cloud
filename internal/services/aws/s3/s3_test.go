@@ -1403,6 +1403,12 @@ func TestBucketLifecycleExpirationHeaders(t *testing.T) {
 	if got := put.Headers.Get("x-amz-expiration"); got != expected {
 		t.Fatalf("put expiration = %q", got)
 	}
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": bucket["Bucket"], "Key": "images/multipart.jpg", "Tagging": "class=temporary"}, nil).Output["UploadId"].(string)
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": bucket["Bucket"], "Key": "images/multipart.jpg", "UploadId": uploadID, "PartNumber": 1}, []byte("photo"))
+	completed := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
+	if got := completed.Headers.Get("x-amz-expiration"); got != expected {
+		t.Fatalf("complete expiration = %q", got)
+	}
 	copy := mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "images/copied.jpg", "CopySource": "lifecycle-expiration/images/a.jpg"}, nil)
 	if got := copy.Headers.Get("x-amz-expiration"); got != "" {
 		t.Fatalf("LocalStack copy expiration = %q", got)

@@ -4786,8 +4786,10 @@ func TestListObjectVersionChecksumMetadata(t *testing.T) {
 		t.Fatalf("versions = %#v", versions)
 	}
 	withChecksum := 0
+	characterization := []any{}
 	for _, value := range versions {
 		row := asMapForTest(value)
+		characterization = append(characterization, map[string]any{"latest": row["IsLatest"], "algorithm": row["ChecksumAlgorithm"], "type": row["ChecksumType"]})
 		if row["ChecksumAlgorithm"] == nil {
 			if row["ChecksumType"] != nil {
 				t.Fatalf("plain version = %#v", row)
@@ -4802,6 +4804,7 @@ func TestListObjectVersionChecksumMetadata(t *testing.T) {
 	if withChecksum != 1 {
 		t.Fatalf("checksummed versions = %d: %#v", withChecksum, versions)
 	}
+	golden.AssertJSON(t, characterization)
 }
 
 func TestListObjectVersionsCharacterization(t *testing.T) {

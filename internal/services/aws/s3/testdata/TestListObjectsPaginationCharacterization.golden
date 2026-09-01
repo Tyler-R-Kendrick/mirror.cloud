@@ -50,7 +50,7 @@
     "KeyCount": 1,
     "MaxKeys": 1,
     "Name": "list-characterization",
-    "NextContinuationToken": "folder/aSubfolder/",
+    "NextContinuationToken": "Zm9sZGVyL2ZpbGUx",
     "Prefix": "folder/"
   },
   "v2-next": {
@@ -64,13 +64,13 @@
         "StorageClass": "STANDARD"
       }
     ],
-    "ContinuationToken": "folder/aSubfolder/",
+    "ContinuationToken": "Zm9sZGVyL2ZpbGUx",
     "Delimiter": "/",
     "IsTruncated": true,
     "KeyCount": 1,
     "MaxKeys": 1,
     "Name": "list-characterization",
-    "NextContinuationToken": "folder/file1",
+    "NextContinuationToken": "Zm9sZGVyL2ZpbGUy",
     "Prefix": "folder/"
   }
 }

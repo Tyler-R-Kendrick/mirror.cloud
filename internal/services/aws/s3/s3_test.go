@@ -5320,6 +5320,25 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 	}
 }
 
+func TestMultipartObjectSizeCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-size-golden"}, nil)
+	create := func(key string) (string, *spi.Response) {
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-size-golden", "Key": key}, nil).Output["UploadId"].(string)
+		return uploadID, mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 1}, []byte("sized"))
+	}
+	zeroID, zeroPart := create("zero")
+	zero := completeInput(zeroID, completedPart(1, zeroPart))
+	zero["MpuObjectSize"] = "0"
+	accepted := mustInvoke(t, p, "CompleteMultipartUpload", zero, nil)
+	mismatchID, mismatchPart := create("mismatch")
+	mismatch := completeInput(mismatchID, completedPart(1, mismatchPart))
+	mismatch["MpuObjectSize"] = "4"
+	_, err := invoke(t, p, "CompleteMultipartUpload", mismatch, nil)
+	fault := asFault(t, err)
+	golden.AssertJSON(t, map[string]any{"zero": accepted.Output["ETag"], "mismatch": map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus}})
+}
+
 func TestCompleteMultipartUploadPreconditionFaults(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "complete-preconditions"}, nil)

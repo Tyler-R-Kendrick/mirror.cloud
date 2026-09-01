@@ -1,0 +1,8 @@
+{
+  "mismatch": {
+    "code": "InvalidRequest",
+    "message": "The provided 'x-amz-mp-object-size' header value 4 does not match what was computed: 5",
+    "status": 400
+  },
+  "zero": "\"bf9fa6c818cd9fe9e390c93e8387e7bb-1\""
+}

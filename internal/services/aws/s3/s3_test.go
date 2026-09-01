@@ -5237,6 +5237,36 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 	}
 }
 
+func TestCompleteMultipartUploadPreconditionFaults(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "complete-preconditions"}, nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "complete-preconditions", "Key": "key"}, nil).Output["UploadId"].(string)
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "complete-preconditions", "Key": "key", "UploadId": uploadID, "PartNumber": 1}, []byte("part"))
+	tests := []struct {
+		conditions         map[string]any
+		header, additional string
+	}{
+		{map[string]any{"IfMatch": `"etag"`, "IfNoneMatch": "*"}, "If-Match,If-None-Match", "Multiple conditional request headers present in the request"},
+		{map[string]any{"IfNoneMatch": `"etag"`}, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+		{map[string]any{"IfMatch": "*"}, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+	}
+	for index, test := range tests {
+		input := completeInput(uploadID, completedPart(1, part))
+		for name, value := range test.conditions {
+			input[name] = value
+		}
+		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		fault := asFault(t, err)
+		if fault.Code != "NotImplemented" || fault.Message != "A header you provided implies functionality that is not implemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fault != "server" || fault.Fields["Header"] != test.header || fault.Fields["additionalMessage"] != test.additional {
+			t.Fatalf("case %d fault = %#v", index, fault)
+		}
+	}
+	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "complete-preconditions", "Key": "key", "UploadId": uploadID}, nil)
+	if len(listed.Output["Parts"].([]any)) != 1 {
+		t.Fatalf("rejected completions changed upload = %#v", listed.Output)
+	}
+}
+
 func TestMultipartCompletionFaultCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "completion-fault-golden"}, nil)

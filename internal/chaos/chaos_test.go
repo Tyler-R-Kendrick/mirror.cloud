@@ -617,6 +617,56 @@ func TestConcurrentMultipartCompletionFaultsRemainModeled(t *testing.T) {
 	}
 }
 
+func TestConcurrentCompleteMultipartChecksumTypeFaultsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "complete-checksum-type-chaos"}, "")
+	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "complete-checksum-type-chaos", "Key": "key", "ChecksumAlgorithm": "CRC32", "ChecksumType": "FULL_OBJECT"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID := created.Output["UploadId"].(string)
+	part, err := call("UploadPart", map[string]any{"Bucket": "complete-checksum-type-chaos", "Key": "key", "UploadId": uploadID, "PartNumber": 1}, "part")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := call("CompleteMultipartUpload", map[string]any{"Bucket": "complete-checksum-type-chaos", "Key": "key", "UploadId": uploadID, "ChecksumType": "COMPOSITE", "MultipartUpload": manifest}, "")
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != "InvalidRequest" || fault.Message != "The upload was created using the FULL_OBJECT checksum mode. The complete request must use the same checksum mode." {
+				errs <- fmt.Errorf("checksum type fault = %#v", fault)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	listed, err := call("ListParts", map[string]any{"Bucket": "complete-checksum-type-chaos", "Key": "key", "UploadId": uploadID}, "")
+	if err != nil || len(listed.Output["Parts"].([]any)) != 1 {
+		t.Fatalf("rejected completions changed upload = %#v, err=%v", listed, err)
+	}
+}
+
 func TestConcurrentUploadPartContentMD5FaultsRemainModeled(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

@@ -14,6 +14,11 @@
     "part": "FqDusHkbbJJFH9KE3Z9Zngp9vn9uvqbi0tBsf3SuwRI=",
     "type": "COMPOSITE"
   },
+  "mismatch": {
+    "code": "InvalidRequest",
+    "message": "The upload was created using the COMPOSITE checksum mode. The complete request must use the same checksum mode.",
+    "status": 400
+  },
   "object": {
     "storageClass": "STANDARD_IA",
     "tags": [

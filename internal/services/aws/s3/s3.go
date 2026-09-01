@@ -2364,7 +2364,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	previous := 0
 	checksum, _ := checksumByAlgorithm(u.checksumAlgorithm)
 	if requestedType := strings.ToUpper(requestCondition(req, "ChecksumType", "x-amz-checksum-type")); requestedType != "" && requestedType != u.checksumType {
-		return nil, &spi.Fault{Code: "BadDigest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		return nil, &spi.Fault{Code: "InvalidRequest", Message: fmt.Sprintf("The upload was created using the %s checksum mode. The complete request must use the same checksum mode.", u.checksumType), HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
 	for index, completed := range parts {
 		item := asMap(completed)

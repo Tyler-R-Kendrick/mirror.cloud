@@ -1944,6 +1944,51 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 			t.Fatalf("%s multipart precondition fault: %v", name, err)
 		}
 	}
+	conditionalUpload := func(key string) (string, *s3types.CompletedMultipartUpload) {
+		t.Helper()
+		created, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String(key)})
+		if err != nil {
+			t.Fatalf("create %s conditional upload: %v", key, err)
+		}
+		part, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String(key), UploadId: created.UploadId, PartNumber: aws.Int32(1), Body: strings.NewReader("part")})
+		if err != nil {
+			t.Fatalf("upload %s conditional part: %v", key, err)
+		}
+		return aws.ToString(created.UploadId), &s3types.CompletedMultipartUpload{Parts: []s3types.CompletedPart{{PartNumber: aws.Int32(1), ETag: part.ETag}}}
+	}
+	completeConditional := func(key, uploadID string, manifest *s3types.CompletedMultipartUpload, match, noneMatch *string) error {
+		t.Helper()
+		_, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String(key), UploadId: aws.String(uploadID), MultipartUpload: manifest, IfMatch: match, IfNoneMatch: noneMatch})
+		return err
+	}
+	uploadID, manifest := conditionalUpload("complete-if-match-missing")
+	if err := completeConditional("complete-if-match-missing", uploadID, manifest, aws.String(`"missing"`), nil); err == nil || !strings.Contains(err.Error(), "StatusCode: 404") || !strings.Contains(err.Error(), "NoSuchKey") || !strings.Contains(err.Error(), "The specified key does not exist") {
+		t.Fatalf("missing complete If-Match: %v", err)
+	}
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("complete-if-match-mismatch"), Body: strings.NewReader("old")}); err != nil {
+		t.Fatal(err)
+	}
+	uploadID, manifest = conditionalUpload("complete-if-match-mismatch")
+	if err := completeConditional("complete-if-match-mismatch", uploadID, manifest, aws.String(`"wrong"`), nil); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") || !strings.Contains(err.Error(), "PreconditionFailed") || !strings.Contains(err.Error(), "At least one of the pre-conditions you specified did not hold") {
+		t.Fatalf("mismatched complete If-Match: %v", err)
+	}
+	uploadID, manifest = conditionalUpload("complete-if-none-created")
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("complete-if-none-created"), Body: strings.NewReader("object")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := completeConditional("complete-if-none-created", uploadID, manifest, nil, aws.String("*")); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") || !strings.Contains(err.Error(), "PreconditionFailed") {
+		t.Fatalf("created complete If-None-Match: %v", err)
+	}
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("complete-if-none-deleted"), Body: strings.NewReader("object")}); err != nil {
+		t.Fatal(err)
+	}
+	uploadID, manifest = conditionalUpload("complete-if-none-deleted")
+	if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk"), Key: aws.String("complete-if-none-deleted")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := completeConditional("complete-if-none-deleted", uploadID, manifest, nil, aws.String("*")); err == nil || !strings.Contains(err.Error(), "StatusCode: 409") || !strings.Contains(err.Error(), "ConditionalRequestConflict") || !strings.Contains(err.Error(), "The conditional request cannot succeed due to a conflicting operation against this resource") {
+		t.Fatalf("deleted complete If-None-Match: %v", err)
+	}
 	otherUpload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy")})
 	if err != nil {
 		t.Fatalf("create second multipart copy: %v", err)

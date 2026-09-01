@@ -1691,6 +1691,13 @@ func TestOwnerDisplayNamesMatchCurrentLocalStack(t *testing.T) {
 	if grant["ID"] != id || grant["DisplayName"] != nil {
 		t.Fatalf("canonical grant = %#v", grant)
 	}
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "private"}, []byte("body"))
+	privateACL := mustInvoke(t, p, "GetObjectAcl", map[string]any{"Bucket": bucket["Bucket"], "Key": "private"}, nil).Output
+	privateOwner := asMapForTest(privateACL["Owner"])
+	privateGrantee := asMapForTest(asMapForTest(asSliceForTest(privateACL["Grants"])[0])["Grantee"])
+	if privateOwner["DisplayName"] != nil || privateGrantee["DisplayName"] != nil {
+		t.Fatalf("private object display names: owner=%#v grantee=%#v", privateOwner, privateGrantee)
+	}
 
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": bucket["Bucket"], "Key": "multipart"}, nil)
 	parts := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": bucket["Bucket"], "Key": "multipart", "UploadId": created.Output["UploadId"]}, nil).Output

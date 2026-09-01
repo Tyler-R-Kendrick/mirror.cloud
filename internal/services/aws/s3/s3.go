@@ -2071,25 +2071,35 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 	if marker == "" {
 		marker = str(req.Input["Marker"])
 	}
-	continuation := str(req.Input["continuation-token"])
-	if continuation == "" {
-		continuation = str(req.Input["ContinuationToken"])
+	continuationValue, continuationProvided := req.Input["continuation-token"]
+	if !continuationProvided {
+		continuationValue, continuationProvided = req.Input["ContinuationToken"]
+	}
+	continuation := str(continuationValue)
+	decodedContinuation := ""
+	if req.Operation == "ListObjectsV2" && continuationProvided {
+		decoded, err := continuationEncoding.DecodeString(continuation)
+		if err != nil || continuation == "" {
+			return nil, &spi.Fault{Code: "InvalidArgument", Message: "The continuation token provided is incorrect", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "continuation-token"}}
+		}
+		decodedContinuation = string(decoded)
 	}
 	startAfter := str(req.Input["start-after"])
 	if startAfter == "" {
 		startAfter = str(req.Input["StartAfter"])
 	}
 	token := marker
+	inclusive := false
 	if req.Operation == "ListObjectsV2" {
-		token = continuation
-		if token == "" {
-			token = startAfter
+		token = startAfter
+		if continuation != "" {
+			token, inclusive = decodedContinuation, true
 		}
 	}
 	if token != "" {
 		var rest []entry
 		for _, item := range entries {
-			if item.value > token {
+			if item.value > token || inclusive && item.value == token {
 				rest = append(rest, item)
 			}
 		}
@@ -2099,7 +2109,9 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 	next := ""
 	if len(entries) > maxKeys {
 		truncated = true
-		if maxKeys > 0 {
+		if req.Operation == "ListObjectsV2" {
+			next = entries[maxKeys].value
+		} else if maxKeys > 0 {
 			next = entries[maxKeys-1].value
 		}
 		entries = entries[:maxKeys]
@@ -2125,7 +2137,7 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 			out["StartAfter"] = startAfter
 		}
 		if next != "" {
-			out["NextContinuationToken"] = next
+			out["NextContinuationToken"] = continuationEncoding.EncodeToString([]byte(next))
 		}
 	} else {
 		out["Marker"] = marker
@@ -5636,9 +5648,10 @@ func objectETag(meta map[string]any, md5sum string) string {
 }
 
 var (
-	crc32C    = crc32.MakeTable(crc32.Castagnoli)
-	crc64NVME = crc64.MakeTable(0x9a6c9329ac4bc9b5)
-	checksums = []struct{ algorithm, input, header string }{
+	crc32C               = crc32.MakeTable(crc32.Castagnoli)
+	crc64NVME            = crc64.MakeTable(0x9a6c9329ac4bc9b5)
+	continuationEncoding = base64.NewEncoding("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._")
+	checksums            = []struct{ algorithm, input, header string }{
 		{"MD5", "ChecksumMD5", "x-amz-checksum-md5"},
 		{"CRC32", "ChecksumCRC32", "x-amz-checksum-crc32"},
 		{"CRC32C", "ChecksumCRC32C", "x-amz-checksum-crc32c"},

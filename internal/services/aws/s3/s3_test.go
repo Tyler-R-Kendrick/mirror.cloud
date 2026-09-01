@@ -4670,6 +4670,29 @@ func TestListObjectsPaginationCharacterization(t *testing.T) {
 	})
 }
 
+func TestListObjectsV2OpaqueContinuationTokens(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "opaque-tokens"}, nil)
+	for _, key := range []string{"a", "b", "c"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "opaque-tokens", "Key": key}, []byte(key))
+	}
+	first := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "opaque-tokens", "MaxKeys": 1}, nil).Output
+	if contents := asSliceForTest(first["Contents"]); len(contents) != 1 || asMapForTest(contents[0])["Key"] != "a" || first["NextContinuationToken"] != "Yg==" {
+		t.Fatalf("first page = %#v", first)
+	}
+	second := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "opaque-tokens", "MaxKeys": 1, "ContinuationToken": first["NextContinuationToken"]}, nil).Output
+	if contents := asSliceForTest(second["Contents"]); len(contents) != 1 || asMapForTest(contents[0])["Key"] != "b" || second["ContinuationToken"] != "Yg==" || second["NextContinuationToken"] != "Yw==" {
+		t.Fatalf("second page = %#v", second)
+	}
+	for _, token := range []string{"", "not-base64"} {
+		_, err := invoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "opaque-tokens", "ContinuationToken": token}, nil)
+		fault := asFault(t, err)
+		if fault.Code != "InvalidArgument" || fault.Message != "The continuation token provided is incorrect" || fault.Fields["ArgumentName"] != "continuation-token" {
+			t.Fatalf("token %q fault = %#v", token, fault)
+		}
+	}
+}
+
 func TestListObjectVersionsPagination(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-list"}, nil)

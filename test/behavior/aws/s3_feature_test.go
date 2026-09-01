@@ -1963,6 +1963,24 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || !strings.Contains(res.Header.Get("x-amz-expiration"), `rule-id="expire"`) {
 			t.Fatalf("head lifecycle object %d headers=%v", res.StatusCode, res.Header)
 		}
+		res = do(http.MethodPost, "/lifecycle-bdd/multipart?uploads", nil, "")
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodPut, "/lifecycle-bdd/multipart?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("body"), "")
+		etag := res.Header.Get("ETag")
+		res.Body.Close()
+		manifest := []byte(`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`)
+		res = do(http.MethodPost, "/lifecycle-bdd/multipart?uploadId="+url.QueryEscape(created.UploadID), manifest, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !strings.Contains(res.Header.Get("x-amz-expiration"), `rule-id="expire"`) {
+			t.Fatalf("complete lifecycle object %d %s headers=%v", res.StatusCode, body, res.Header)
+		}
 		invalid := []byte(`<LifecycleConfiguration><Rule><ID>invalid</ID><Filter><Prefix>a</Prefix><ObjectSizeGreaterThan>1</ObjectSizeGreaterThan></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>`)
 		res = do(http.MethodPut, "/lifecycle-bdd?lifecycle", invalid, "")
 		body, _ = io.ReadAll(res.Body)

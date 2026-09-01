@@ -2437,6 +2437,59 @@ func TestConcurrentBucketLifecycleRemainsValid(t *testing.T) {
 	}
 }
 
+func TestConcurrentMultipartCompletionsPreserveLifecycleExpiration(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "complete-expiration-chaos"}, "")
+	rules := []any{map[string]any{"ID": "expire", "Filter": map[string]any{"Prefix": "expire/"}, "Status": "Enabled", "Expiration": map[string]any{"Days": 1}}}
+	if _, err := call("PutBucketLifecycleConfiguration", map[string]any{"Bucket": "complete-expiration-chaos", "LifecycleConfiguration": map[string]any{"Rules": rules}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	errCh := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errCh) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("keep/%d", i)
+			if i%2 == 0 {
+				key = fmt.Sprintf("expire/%d", i)
+			}
+			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "complete-expiration-chaos", "Key": key}, "")
+			if err != nil {
+				errCh <- err
+				return
+			}
+			uploadID := created.Output["UploadId"].(string)
+			part, err := call("UploadPart", map[string]any{"Bucket": "complete-expiration-chaos", "Key": key, "UploadId": uploadID, "PartNumber": 1}, "part")
+			if err != nil {
+				errCh <- err
+				return
+			}
+			completed, err := call("CompleteMultipartUpload", map[string]any{"Bucket": "complete-expiration-chaos", "Key": key, "UploadId": uploadID, "MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}}, "")
+			if err == nil && (completed.Headers.Get("x-amz-expiration") != "") != (i%2 == 0) {
+				err = fmt.Errorf("key %q expiration = %q", key, completed.Headers.Get("x-amz-expiration"))
+			}
+			errCh <- err
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
 func TestConcurrentNamedBucketConfigurationsRemainValid(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

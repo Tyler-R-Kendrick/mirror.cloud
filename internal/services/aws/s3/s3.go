@@ -1254,7 +1254,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 		h.Set("x-amz-checksum-type", checksumType)
 	}
 	setObjectEncryptionHeaders(h, metaDoc)
-	if req.Operation == "PutObject" || req.Operation == "PostObject" {
+	if req.Operation == "PutObject" || req.Operation == "PostObject" || req.Operation == "CompleteMultipartUpload" {
 		p.setLifecycleExpirationHeader(ctx, req, b, key, info.Size, tags, mtime, h)
 	}
 	if status := p.replicateObject(ctx, req, b, key, body, metaDoc, tags); status != "" {

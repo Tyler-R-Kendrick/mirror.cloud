@@ -687,6 +687,12 @@ func FuzzBucketLifecycle(f *testing.F) {
 		if got := put.Headers.Get("x-amz-expiration"); got == "" {
 			t.Fatalf("mode=%d prefix=%q size=%d missing expiration", mode%5, prefix, sizeSeed)
 		}
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": bucket["Bucket"], "Key": prefix + "m"}, nil).Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": bucket["Bucket"], "Key": prefix + "m", "UploadId": uploadID, "PartNumber": 1}, body)
+		completed := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
+		if got := completed.Headers.Get("x-amz-expiration"); got == "" {
+			t.Fatalf("mode=%d prefix=%q size=%d missing completion expiration", mode%5, prefix, sizeSeed)
+		}
 	})
 }
 

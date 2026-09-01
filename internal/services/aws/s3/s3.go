@@ -2213,9 +2213,7 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	algorithm := strings.ToUpper(requestCondition(req, "ChecksumAlgorithm", "x-amz-checksum-algorithm"))
 	checksumType := strings.ToUpper(requestCondition(req, "ChecksumType", "x-amz-checksum-type"))
-	if algorithm == "" {
-		algorithm, checksumType = "CRC64NVME", "FULL_OBJECT"
-	} else if checksumType == "" {
+	if algorithm != "" && checksumType == "" {
 		checksumType = "COMPOSITE"
 	}
 	if err := validateMultipartChecksumContract(req, algorithm, checksumType); err != nil {
@@ -2241,10 +2239,14 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), tagging: requestCondition(req, "Tagging", "x-amz-tagging"), checksumAlgorithm: algorithm, checksumType: checksumType, serverSideEncryption: serverSideEncryption, sseKMSKeyID: sseKMSKeyID, sseCustomerKeyMD5: sseCustomerKeyMD5, bucketKeyEnabled: bucketKeyEnabled, precondition: precondition, objectMetadata: requestObjectMetadata(req), websiteRedirectLocation: requestCondition(req, "WebsiteRedirectLocation", "x-amz-website-redirect-location"), initiator: map[string]any{"ID": req.Identity.Account, "DisplayName": "webfile"}, acl: acl, lockDocs: lockDocs, parts: map[int]multipartPart{}}
 	p.mu.Unlock()
 	h := http.Header{}
-	h.Set("x-amz-checksum-algorithm", algorithm)
-	h.Set("x-amz-checksum-type", checksumType)
+	out := map[string]any{"Bucket": b, "Key": key, "UploadId": id}
+	if algorithm != "" {
+		h.Set("x-amz-checksum-algorithm", algorithm)
+		h.Set("x-amz-checksum-type", checksumType)
+		out["ChecksumAlgorithm"], out["ChecksumType"] = algorithm, checksumType
+	}
 	setObjectEncryptionHeaders(h, map[string]any{"serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "sseCustomerKeyMD5": sseCustomerKeyMD5, "bucketKeyEnabled": bucketKeyEnabled})
-	return &spi.Response{Headers: h, Output: map[string]any{"Bucket": b, "Key": key, "UploadId": id, "ChecksumAlgorithm": algorithm, "ChecksumType": checksumType}}, nil
+	return &spi.Response{Headers: h, Output: out}, nil
 }
 
 func (p *Pack) uploadPartCopy(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -2310,15 +2312,19 @@ func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response,
 	if err := validateStoredSSECustomerKey(req, encryption); err != nil {
 		return nil, err
 	}
-	if requested := strings.ToUpper(requestCondition(req, "ChecksumAlgorithm", "x-amz-sdk-checksum-algorithm")); requested != "" && requested != algorithm {
+	if requested := strings.ToUpper(requestCondition(req, "ChecksumAlgorithm", "x-amz-sdk-checksum-algorithm")); algorithm == "" {
+		algorithm = requested
+	} else if requested != "" && requested != algorithm {
 		return nil, &spi.Fault{Code: "InvalidRequest", Message: fmt.Sprintf("Checksum Type mismatch occurred, expected checksum Type: %s, actual checksum Type: %s", strings.ToLower(algorithm), strings.ToLower(requested)), HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
-	checksum, _ := checksumByAlgorithm(algorithm)
+	checksum, hasChecksum := checksumByAlgorithm(algorithm)
 	if err := validateMultipartPartChecksum(req, checksum, body); err != nil {
 		return nil, err
 	}
-	value := checksumValue(checksum.input, body)
-	provided := map[string]string{checksum.header: value}
+	provided := map[string]string{}
+	if hasChecksum {
+		provided[checksum.header] = checksumValue(checksum.input, body)
+	}
 	p.mu.Lock()
 	u = p.mpu[id]
 	if !matchesMultipartUpload(u, req) {
@@ -2397,7 +2403,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	var partChecksums []byte
 	var completedParts []any
 	previous := 0
-	checksum, _ := checksumByAlgorithm(u.checksumAlgorithm)
+	checksum, hasChecksum := checksumByAlgorithm(u.checksumAlgorithm)
 	if requestedType := strings.ToUpper(requestCondition(req, "ChecksumType", "x-amz-checksum-type")); requestedType != "" && requestedType != u.checksumType {
 		return nil, &spi.Fault{Code: "InvalidRequest", Message: fmt.Sprintf("The upload was created using the %s checksum mode. The complete request must use the same checksum mode.", u.checksumType), HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
@@ -2422,12 +2428,20 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 		if u.checksumType == "COMPOSITE" && number != index+1 {
 			return nil, &spi.Fault{Code: "InternalError", HTTPStatus: http.StatusInternalServerError, Fault: "server"}
 		}
-		partChecksum := part.checksums[checksum.header]
-		if supplied := str(item[checksum.input]); supplied != "" && supplied != partChecksum {
-			return nil, &spi.Fault{Code: "InvalidPart", Message: "One or more of the specified parts could not be found. The part may not have been uploaded, or the specified entity tag may not match the part's entity tag.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ETag": etag, "PartNumber": strconv.Itoa(number), "UploadId": id}}
+		if hasChecksum {
+			partChecksum := part.checksums[checksum.header]
+			if supplied := str(item[checksum.input]); supplied != "" && supplied != partChecksum {
+				return nil, invalidMultipartPart(id, etag, number)
+			}
+			decoded, _ := base64.StdEncoding.DecodeString(partChecksum)
+			partChecksums = append(partChecksums, decoded...)
+		} else {
+			for _, candidate := range checksums {
+				if str(item[candidate.input]) != "" {
+					return nil, invalidMultipartPart(id, etag, number)
+				}
+			}
 		}
-		decoded, _ := base64.StdEncoding.DecodeString(partChecksum)
-		partChecksums = append(partChecksums, decoded...)
 		completedParts = append(completedParts, map[string]any{"number": number, "size": len(part.body), "checksums": part.checksums})
 		buf.Write(part.body)
 		md5s = append(md5s, s[:]...)
@@ -2441,19 +2455,22 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	}
 	sum := md5.Sum(md5s)
 	etag := fmt.Sprintf(`"%s-%d"`, hex.EncodeToString(sum[:]), len(parts))
-	objectChecksum := checksumValue(checksum.input, buf.Bytes())
-	if u.checksumType == "COMPOSITE" {
-		objectChecksum = checksumValue(checksum.input, partChecksums) + fmt.Sprintf("-%d", len(parts))
-	}
-	if supplied := requestCondition(req, checksum.input, checksum.header); supplied != "" && supplied != objectChecksum {
-		return nil, &spi.Fault{Code: "BadDigest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-	}
-	for _, other := range checksums {
-		if other.algorithm != checksum.algorithm && requestCondition(req, other.input, other.header) != "" {
-			return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	objectChecksum := ""
+	if hasChecksum {
+		objectChecksum = checksumValue(checksum.input, buf.Bytes())
+		if u.checksumType == "COMPOSITE" {
+			objectChecksum = checksumValue(checksum.input, partChecksums) + fmt.Sprintf("-%d", len(parts))
 		}
+		if supplied := requestCondition(req, checksum.input, checksum.header); supplied != "" && supplied != objectChecksum {
+			return nil, &spi.Fault{Code: "BadDigest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		for _, other := range checksums {
+			if other.algorithm != checksum.algorithm && requestCondition(req, other.input, other.header) != "" {
+				return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+		}
+		req.Input[checksum.input], req.Input["ChecksumType"] = objectChecksum, u.checksumType
 	}
-	req.Input[checksum.input], req.Input["ChecksumType"] = objectChecksum, u.checksumType
 	req.Input["Bucket"], req.Input["Key"], req.Input["StorageClass"], req.Input["Tagging"] = bucket, key, u.storageClass, u.tagging
 	req.Input["_ObjectMetadata"], req.Input["WebsiteRedirectLocation"] = u.objectMetadata, u.websiteRedirectLocation
 	if u.acl != nil {
@@ -2470,10 +2487,10 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	}
 	resp.Headers.Set("ETag", etag)
 	resp.Output = map[string]any{"Bucket": bucket, "Key": key, "ETag": etag}
-	if strings.HasPrefix(u.serverSideEncryption, "aws:kms") {
+	if strings.HasPrefix(u.serverSideEncryption, "aws:kms") && hasChecksum {
 		resp.Headers.Del(checksum.header)
 		resp.Headers.Del("x-amz-checksum-type")
-	} else {
+	} else if hasChecksum {
 		resp.Output[checksum.input] = objectChecksum
 		resp.Output["ChecksumType"] = u.checksumType
 	}
@@ -2543,9 +2560,11 @@ func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, 
 			modified = parsed.UTC().Format("2006-01-02T15:04:05.000Z")
 		}
 		row := map[string]any{"PartNumber": number, "ETag": `"` + hex.EncodeToString(sum[:]) + `"`, "Size": len(part.body), "LastModified": modified}
-		for _, checksum := range checksums {
-			if value := part.checksums[checksum.header]; value != "" {
-				row[checksum.input] = value
+		if u.checksumAlgorithm != "" {
+			for _, checksum := range checksums {
+				if value := part.checksums[checksum.header]; value != "" {
+					row[checksum.input] = value
+				}
 			}
 		}
 		parts = append(parts, row)
@@ -2554,8 +2573,10 @@ func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, 
 	out := map[string]any{
 		"Bucket": b, "Key": key, "UploadId": id, "PartNumberMarker": marker,
 		"MaxParts": maxParts, "IsTruncated": truncated, "Parts": parts, "StorageClass": u.storageClass,
-		"ChecksumAlgorithm": u.checksumAlgorithm, "ChecksumType": u.checksumType,
 		"Initiator": cloneMap(u.initiator), "Owner": identity, "NextPartNumberMarker": 0,
+	}
+	if u.checksumAlgorithm != "" {
+		out["ChecksumAlgorithm"], out["ChecksumType"] = u.checksumAlgorithm, u.checksumType
 	}
 	if len(numbers) > 0 {
 		out["NextPartNumberMarker"] = numbers[len(numbers)-1]
@@ -5576,6 +5597,12 @@ func checksumByAlgorithm(algorithm string) (struct{ algorithm, input, header str
 }
 
 func validateMultipartChecksumContract(req *spi.Request, algorithm, checksumType string) error {
+	if algorithm == "" {
+		if checksumType != "" {
+			return &spi.Fault{Code: "InvalidRequest", Message: "The x-amz-checksum-type header can only be used with the x-amz-checksum-algorithm header.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		return nil
+	}
 	if _, ok := checksumByAlgorithm(algorithm); !ok || (checksumType != "COMPOSITE" && checksumType != "FULL_OBJECT") {
 		return &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}

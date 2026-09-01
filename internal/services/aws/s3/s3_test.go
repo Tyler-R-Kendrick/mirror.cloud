@@ -4649,6 +4649,21 @@ func TestListObjectVersionsURLMarkerRoundTrip(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"first": first, "second": second})
 }
 
+func TestListZeroMaxKeysUsesDefault(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-zero-max"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "list-zero-max", "Status": "Enabled"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-zero-max", "Key": "key"}, []byte("body"))
+	for _, tc := range []struct{ operation, collection string }{{"ListObjects", "Contents"}, {"ListObjectsV2", "Contents"}, {"ListObjectVersions", "Versions"}} {
+		t.Run(tc.operation, func(t *testing.T) {
+			out := mustInvoke(t, p, tc.operation, map[string]any{"Bucket": "list-zero-max", "MaxKeys": 0}, nil).Output
+			if out["MaxKeys"] != 1000 || len(asSliceForTest(out[tc.collection])) != 1 || out["IsTruncated"] != false {
+				t.Fatalf("zero max keys = %#v", out)
+			}
+		})
+	}
+}
+
 func TestListObjectsPaginationIncludesCommonPrefixes(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-pagination"}, nil)

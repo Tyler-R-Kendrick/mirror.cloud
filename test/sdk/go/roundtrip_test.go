@@ -1805,6 +1805,22 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || aws.ToString(xxhashComplete.ChecksumXXHASH3) != xxhashComposite {
 		t.Fatalf("complete xxhash multipart: %#v %v", xxhashComplete, err)
 	}
+	copyChecksumBody := []byte("copy-checksum-sdk")
+	copyChecksumSum := sha256.Sum256(copyChecksumBody)
+	copyChecksumValue := base64.StdEncoding.EncodeToString(copyChecksumSum[:])
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{
+		Bucket: aws.String("sdk"), Key: aws.String("copy-checksum-source"), Body: bytes.NewReader(copyChecksumBody), ChecksumSHA256: aws.String(copyChecksumValue),
+	}); err != nil {
+		t.Fatalf("put copy checksum source: %v", err)
+	}
+	copyChecksum, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("copy-checksum"), CopySource: aws.String("sdk/copy-checksum-source")})
+	if err != nil || copyChecksum.CopyObjectResult == nil || aws.ToString(copyChecksum.CopyObjectResult.ChecksumSHA256) != copyChecksumValue || copyChecksum.CopyObjectResult.ChecksumType != s3types.ChecksumTypeFullObject {
+		t.Fatalf("copy checksum result: %#v %v", copyChecksum, err)
+	}
+	copyChecksumHead, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String("copy-checksum"), ChecksumMode: s3types.ChecksumModeEnabled})
+	if err != nil || aws.ToString(copyChecksumHead.ChecksumSHA256) != copyChecksumValue || copyChecksumHead.ChecksumType != s3types.ChecksumTypeFullObject {
+		t.Fatalf("copy checksum head: %#v %v", copyChecksumHead, err)
+	}
 	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{
 		Bucket: aws.String("sdk"), Key: aws.String("copied"), CopySource: aws.String("sdk/k"), CopySourceIfMatch: got.ETag, ExpectedSourceBucketOwner: aws.String("000000000000"),
 	}); err != nil {

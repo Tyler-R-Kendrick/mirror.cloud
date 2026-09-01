@@ -1814,11 +1814,11 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		t.Fatalf("put copy checksum source: %v", err)
 	}
 	copyChecksum, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("copy-checksum"), CopySource: aws.String("sdk/copy-checksum-source")})
-	if err != nil || copyChecksum.CopyObjectResult == nil || aws.ToString(copyChecksum.CopyObjectResult.ChecksumSHA256) != copyChecksumValue || copyChecksum.CopyObjectResult.ChecksumType != s3types.ChecksumTypeFullObject {
+	if err != nil || copyChecksum.CopyObjectResult == nil || copyChecksum.CopyObjectResult.LastModified == nil || aws.ToString(copyChecksum.CopyObjectResult.ChecksumSHA256) != copyChecksumValue || copyChecksum.CopyObjectResult.ChecksumType != s3types.ChecksumTypeFullObject {
 		t.Fatalf("copy checksum result: %#v %v", copyChecksum, err)
 	}
 	copyChecksumHead, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String("copy-checksum"), ChecksumMode: s3types.ChecksumModeEnabled})
-	if err != nil || aws.ToString(copyChecksumHead.ChecksumSHA256) != copyChecksumValue || copyChecksumHead.ChecksumType != s3types.ChecksumTypeFullObject {
+	if err != nil || copyChecksumHead.LastModified == nil || !copyChecksum.CopyObjectResult.LastModified.Equal(*copyChecksumHead.LastModified) || aws.ToString(copyChecksumHead.ChecksumSHA256) != copyChecksumValue || copyChecksumHead.ChecksumType != s3types.ChecksumTypeFullObject {
 		t.Fatalf("copy checksum head: %#v %v", copyChecksumHead, err)
 	}
 	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{

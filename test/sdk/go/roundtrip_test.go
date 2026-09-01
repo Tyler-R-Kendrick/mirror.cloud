@@ -413,7 +413,7 @@ func TestS3ETagWireCasingContract(t *testing.T) {
 	}
 }
 
-func TestS3MultipartWithoutChecksumContract(t *testing.T) {
+func TestS3MultipartContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.s3"}
 	rt, err := runtime.Boot(cfg)
@@ -480,6 +480,34 @@ func TestS3MultipartWithoutChecksumContract(t *testing.T) {
 	response.Body.Close()
 	if response.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("<Code>InvalidRequest</Code>")) || !bytes.Contains(fault, []byte("missing for part 1")) {
 		t.Fatalf("missing composite checksum: %d %s", response.StatusCode, fault)
+	}
+	createPart := func(key string) (string, string) {
+		_, initiated := do(http.MethodPost, "/multipart-contract/"+key+"?uploads", "")
+		if err := xml.Unmarshal(initiated, &upload); err != nil {
+			t.Fatal(err)
+		}
+		part, _ := do(http.MethodPut, "/multipart-contract/"+key+"?partNumber=1&uploadId="+url.QueryEscape(upload.UploadID), "sized")
+		return upload.UploadID, part.Header.Get("ETag")
+	}
+	completeSize := func(key, uploadID, etag, size string) (int, []byte) {
+		manifest := "<CompleteMultipartUpload><Part><ETag>" + etag + "</ETag><PartNumber>1</PartNumber></Part></CompleteMultipartUpload>"
+		request, _ := http.NewRequest(http.MethodPost, ts.URL+"/multipart-contract/"+key+"?uploadId="+url.QueryEscape(uploadID), strings.NewReader(manifest))
+		request.Header.Set("x-amz-mp-object-size", size)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		return response.StatusCode, payload
+	}
+	zeroID, zeroETag := createPart("zero-size")
+	if status, payload := completeSize("zero-size", zeroID, zeroETag, "0"); status != http.StatusOK {
+		t.Fatalf("zero object size: %d %s", status, payload)
+	}
+	mismatchID, mismatchETag := createPart("mismatched-size")
+	if status, payload := completeSize("mismatched-size", mismatchID, mismatchETag, "4"); status != http.StatusBadRequest || !bytes.Contains(payload, []byte("header value 4 does not match what was computed: 5")) {
+		t.Fatalf("mismatched object size: %d %s", status, payload)
 	}
 }
 

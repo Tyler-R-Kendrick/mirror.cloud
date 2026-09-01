@@ -5284,12 +5284,18 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 		t.Fatalf("small part fault = %#v", fault)
 	}
 
+	zeroIgnored := create("zero-ignored")
+	zeroIgnoredPart := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": zeroIgnored, "PartNumber": 1}, []byte("body"))
+	zeroIgnoredInput := completeInput(zeroIgnored, completedPart(1, zeroIgnoredPart))
+	zeroIgnoredInput["MpuObjectSize"] = "0"
+	mustInvoke(t, p, "CompleteMultipartUpload", zeroIgnoredInput, nil)
+
 	sized := create("sized")
 	sizedPart := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": sized, "PartNumber": 1}, []byte("sized"))
 	sizedInput := completeInput(sized, completedPart(1, sizedPart))
 	sizedInput["MpuObjectSize"] = "4"
 	_, err := invoke(t, p, "CompleteMultipartUpload", sizedInput, nil)
-	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "The provided 'x-amz-mp-object-size' header value 4 does not match what was computed: 5" || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("object size fault = %#v", fault)
 	}
 	sizedInput["MpuObjectSize"] = "invalid"
@@ -5312,6 +5318,25 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 	if fault := wantFault(create("empty"), "InvalidRequest"); fault.Message != "You must specify at least one part" {
 		t.Fatalf("empty manifest fault = %#v", fault)
 	}
+}
+
+func TestMultipartObjectSizeCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-size-golden"}, nil)
+	create := func(key string) (string, *spi.Response) {
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-size-golden", "Key": key}, nil).Output["UploadId"].(string)
+		return uploadID, mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 1}, []byte("sized"))
+	}
+	zeroID, zeroPart := create("zero")
+	zero := completeInput(zeroID, completedPart(1, zeroPart))
+	zero["MpuObjectSize"] = "0"
+	accepted := mustInvoke(t, p, "CompleteMultipartUpload", zero, nil)
+	mismatchID, mismatchPart := create("mismatch")
+	mismatch := completeInput(mismatchID, completedPart(1, mismatchPart))
+	mismatch["MpuObjectSize"] = "4"
+	_, err := invoke(t, p, "CompleteMultipartUpload", mismatch, nil)
+	fault := asFault(t, err)
+	golden.AssertJSON(t, map[string]any{"zero": accepted.Output["ETag"], "mismatch": map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus}})
 }
 
 func TestCompleteMultipartUploadPreconditionFaults(t *testing.T) {

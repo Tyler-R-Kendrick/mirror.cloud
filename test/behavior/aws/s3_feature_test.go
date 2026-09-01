@@ -482,6 +482,77 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given conflicting multipart completion conditions When completed Then S3 returns LocalStack faults", func(t *testing.T) {
+		res := do(http.MethodPut, "/completion-conditional-bdd", nil, "")
+		res.Body.Close()
+		start := func(key string) (string, string) {
+			t.Helper()
+			response := do(http.MethodPost, "/completion-conditional-bdd/"+key+"?uploads", nil, "")
+			var created struct {
+				UploadID string `xml:"UploadId"`
+			}
+			if err := xml.NewDecoder(response.Body).Decode(&created); err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			response = do(http.MethodPut, "/completion-conditional-bdd/"+key+"?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("part"), "application/octet-stream")
+			etag := response.Header.Get("ETag")
+			response.Body.Close()
+			return created.UploadID, `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`
+		}
+		complete := func(key, uploadID, manifest, match, noneMatch string) (int, []byte) {
+			t.Helper()
+			request, err := http.NewRequest(http.MethodPost, ts.URL+"/completion-conditional-bdd/"+key+"?uploadId="+url.QueryEscape(uploadID), strings.NewReader(manifest))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", auth)
+			request.Header.Set("Content-Type", "application/xml")
+			if match != "" {
+				request.Header.Set("If-Match", match)
+			}
+			if noneMatch != "" {
+				request.Header.Set("If-None-Match", noneMatch)
+			}
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response.StatusCode, body
+		}
+
+		uploadID, manifest := start("missing")
+		status, body := complete("missing", uploadID, manifest, `"missing"`, "")
+		if status != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchKey</Code>")) || !bytes.Contains(body, []byte("<Message>The specified key does not exist.</Message>")) || !bytes.Contains(body, []byte("<Key>missing</Key>")) {
+			t.Fatalf("missing complete If-Match %d %s", status, body)
+		}
+		res = do(http.MethodPut, "/completion-conditional-bdd/mismatch", []byte("old"), "")
+		res.Body.Close()
+		uploadID, manifest = start("mismatch")
+		status, body = complete("mismatch", uploadID, manifest, `"wrong"`, "")
+		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Message>At least one of the pre-conditions you specified did not hold</Message>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
+			t.Fatalf("mismatched complete If-Match %d %s", status, body)
+		}
+		uploadID, manifest = start("created")
+		res = do(http.MethodPut, "/completion-conditional-bdd/created", []byte("object"), "")
+		res.Body.Close()
+		status, body = complete("created", uploadID, manifest, "", "*")
+		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-None-Match</Condition>")) {
+			t.Fatalf("created complete If-None-Match %d %s", status, body)
+		}
+		res = do(http.MethodPut, "/completion-conditional-bdd/deleted", []byte("object"), "")
+		res.Body.Close()
+		uploadID, manifest = start("deleted")
+		res = do(http.MethodDelete, "/completion-conditional-bdd/deleted", nil, "")
+		res.Body.Close()
+		status, body = complete("deleted", uploadID, manifest, "", "*")
+		if status != http.StatusConflict || !bytes.Contains(body, []byte("<Code>ConditionalRequestConflict</Code>")) || !bytes.Contains(body, []byte("<Message>The conditional request cannot succeed due to a conflicting operation against this resource.</Message>")) || !bytes.Contains(body, []byte("<Condition>If-None-Match</Condition>")) || !bytes.Contains(body, []byte("<Key>deleted</Key>")) {
+			t.Fatalf("deleted complete If-None-Match %d %s", status, body)
+		}
+	})
+
 	t.Run("Given an expired presigned URL When requested Then S3 returns a modeled access denial", func(t *testing.T) {
 		request, err := http.NewRequest(http.MethodGet, ts.URL+"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F19691231%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=19691231T235900Z&X-Amz-Expires=30&X-Amz-SignedHeaders=host&X-Amz-Signature=00", nil)
 		if err != nil {

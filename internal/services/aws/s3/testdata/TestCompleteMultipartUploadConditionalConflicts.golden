@@ -1,0 +1,44 @@
+{
+  "changed-after-initiation": {
+    "code": "ConditionalRequestConflict",
+    "fields": {
+      "Condition": "If-Match",
+      "Key": "changed-after-initiation"
+    },
+    "message": "The conditional request cannot succeed due to a conflicting operation against this resource.",
+    "status": 409
+  },
+  "created-after-initiation": {
+    "code": "PreconditionFailed",
+    "fields": {
+      "Condition": "If-None-Match"
+    },
+    "message": "At least one of the pre-conditions you specified did not hold",
+    "status": 412
+  },
+  "deleted-after-initiation": {
+    "code": "ConditionalRequestConflict",
+    "fields": {
+      "Condition": "If-None-Match",
+      "Key": "deleted-after-initiation"
+    },
+    "message": "The conditional request cannot succeed due to a conflicting operation against this resource.",
+    "status": 409
+  },
+  "mismatched-if-match": {
+    "code": "PreconditionFailed",
+    "fields": {
+      "Condition": "If-Match"
+    },
+    "message": "At least one of the pre-conditions you specified did not hold",
+    "status": 412
+  },
+  "missing-if-match": {
+    "code": "NoSuchKey",
+    "fields": {
+      "Key": "missing"
+    },
+    "message": "The specified key does not exist.",
+    "status": 404
+  }
+}

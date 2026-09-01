@@ -305,8 +305,8 @@ func TestBootedServerS3QuerySemantics(t *testing.T) {
 		t.Fatalf("complete mpu %d %s", code, b)
 	} else if !bytes.Contains(b, []byte("-2")) && !strings.Contains(h.Get("ETag"), "-2") {
 		t.Fatalf("multipart etag %s %v", b, h)
-	} else if !bytes.Contains(b, []byte(checksum)) {
-		t.Fatalf("multipart checksum output %s", b)
+	} else if bytes.Contains(b, []byte(checksum)) || bytes.Contains(b, []byte("ChecksumType")) || h.Get("x-amz-checksum-crc32") != "" || h.Get("x-amz-checksum-type") != "" {
+		t.Fatalf("KMS multipart exposed checksum output %s %v", b, h)
 	} else {
 		assertMultipartEncryption("complete", h)
 	}

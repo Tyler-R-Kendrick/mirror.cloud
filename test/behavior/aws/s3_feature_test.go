@@ -1308,8 +1308,16 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		assertEncryption("create", created)
 		partPath := "/multipart-customer-encryption/object?partNumber=1&uploadId=" + upload.ID
-		if part, _ := request(http.MethodPut, partPath, "body", nil); part.StatusCode != http.StatusBadRequest {
-			t.Fatalf("part without customer key %d", part.StatusCode)
+		if part, faultBody := request(http.MethodPut, partPath, "body", nil); part.StatusCode != http.StatusBadRequest || !bytes.Contains(faultBody, []byte("The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters.")) {
+			t.Fatalf("part without customer key %d %s", part.StatusCode, faultBody)
+		}
+		otherKey := bytes.Repeat([]byte{'b'}, 32)
+		otherDigest := md5.Sum(otherKey)
+		wrongHeaders := maps.Clone(headers)
+		wrongHeaders["x-amz-server-side-encryption-customer-key"] = base64.StdEncoding.EncodeToString(otherKey)
+		wrongHeaders["x-amz-server-side-encryption-customer-key-MD5"] = base64.StdEncoding.EncodeToString(otherDigest[:])
+		if part, faultBody := request(http.MethodPut, partPath, "body", wrongHeaders); part.StatusCode != http.StatusBadRequest || !bytes.Contains(faultBody, []byte("The provided encryption parameters did not match the ones used originally.")) {
+			t.Fatalf("part with mismatched customer key %d %s", part.StatusCode, faultBody)
 		}
 		part, _ := request(http.MethodPut, partPath, "body", headers)
 		if part.StatusCode != http.StatusOK || part.Header.Get("ETag") == "" {

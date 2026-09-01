@@ -190,6 +190,7 @@ S3 multipart uploads resolve and persist server-side encryption when the upload 
 S3 multipart uploads preserve initiation-time cache-control, content-disposition, content-encoding, content-language, content-type, expires, user metadata, and website redirects through completion.
 S3 multipart uploads may omit a checksum algorithm; LocalStack-compatible create, list, completion, and ChecksumMode reads then omit checksum metadata even when an individual part supplied a checksum. Explicit CRC64NVME defaults to FULL_OBJECT and other explicit algorithms default to COMPOSITE.
 S3 ListParts and ListMultipartUploads return LocalStack's webfile initiator identity; multipart upload listings also expose each upload's checksum algorithm and type.
+S3 owner and canonical-grantee identities omit the deprecated DisplayName field; multipart initiators retain LocalStack's webfile DisplayName exception.
 S3 PutObject validates AES256 customer-provided encryption keys, persists only the key MD5 per object version, requires matching parameters on GetObject and HeadObject, and returns SSE-C response headers. Customer keys are not persisted, and stored blob bytes are not cryptographically encrypted.
 S3 multipart uploads with customer-provided encryption validate AES256 credentials at initiation and for every uploaded part, retain only the key MD5 through completion, and enforce it on final object reads.
 S3 CopyObject and UploadPartCopy validate SSE-C copy-source credentials independently from destination credentials, including re-encryption with a different customer key.

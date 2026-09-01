@@ -2740,13 +2740,14 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		} {
 			res := request(http.MethodPut, "/"+bucket.name, bucket.region, bucket.body)
 			res.Body.Close()
-			if res.StatusCode != http.StatusOK {
+			if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-bucket-arn") != "arn:aws:s3:::"+bucket.name {
 				t.Fatalf("create %s: %d", bucket.name, res.StatusCode)
 			}
 		}
 		type page struct {
 			Buckets []struct {
 				Name         string `xml:"Name"`
+				BucketArn    string `xml:"BucketArn"`
 				BucketRegion string `xml:"BucketRegion"`
 			} `xml:"Buckets>Bucket"`
 			Prefix            string `xml:"Prefix"`
@@ -2763,11 +2764,11 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			return got
 		}
 		first := list("/?max-buckets=1&prefix=list-behavior")
-		if len(first.Buckets) != 1 || first.Buckets[0].Name != "list-behavior-east" || first.Buckets[0].BucketRegion != "us-east-1" || first.Prefix != "list-behavior" || first.ContinuationToken == "" {
+		if len(first.Buckets) != 1 || first.Buckets[0].Name != "list-behavior-east" || first.Buckets[0].BucketArn != "arn:aws:s3:::list-behavior-east" || first.Buckets[0].BucketRegion != "us-east-1" || first.Prefix != "list-behavior" || first.ContinuationToken == "" {
 			t.Fatalf("first page: %#v", first)
 		}
 		second := list("/?max-buckets=1&prefix=list-behavior&continuation-token=" + url.QueryEscape(first.ContinuationToken))
-		if len(second.Buckets) != 1 || second.Buckets[0].Name != "list-behavior-west" || second.Buckets[0].BucketRegion != "us-west-2" || second.ContinuationToken != "" {
+		if len(second.Buckets) != 1 || second.Buckets[0].Name != "list-behavior-west" || second.Buckets[0].BucketArn != "arn:aws:s3:::list-behavior-west" || second.Buckets[0].BucketRegion != "us-west-2" || second.ContinuationToken != "" {
 			t.Fatalf("second page: %#v", second)
 		}
 	})

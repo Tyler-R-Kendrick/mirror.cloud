@@ -2019,7 +2019,7 @@ func TestCreateBucketAccountRegionalNamespace(t *testing.T) {
 	characterization := map[string]any{}
 	name := "team-" + east.Account + "-" + east.Region + "-an"
 	input := map[string]any{"Bucket": name, "BucketNamespace": "account-regional"}
-	if got, err := invokeAs(t, p, east, "CreateBucket", input, nil); err != nil || got.Headers.Get("Location") != "/"+name {
+	if got, err := invokeAs(t, p, east, "CreateBucket", input, nil); err != nil || got.Headers.Get("Location") != "/"+name || got.Output["BucketArn"] != "arn:aws:s3:::"+name {
 		t.Fatalf("create = %#v %v", got, err)
 	} else {
 		characterization["east-location"] = got.Headers.Get("Location")
@@ -2065,7 +2065,7 @@ func TestCreateBucketAccountRegionalNamespace(t *testing.T) {
 	west := spi.Identity{Account: east.Account, Region: "us-west-2"}
 	westName := "team-" + west.Account + "-" + west.Region + "-an"
 	westInput := map[string]any{"Bucket": westName, "BucketNamespace": "account-regional", "LocationConstraint": west.Region}
-	if got, err := invokeAs(t, p, west, "CreateBucket", westInput, nil); err != nil || got.Headers.Get("Location") != "/"+westName {
+	if got, err := invokeAs(t, p, west, "CreateBucket", westInput, nil); err != nil || got.Headers.Get("Location") != "/"+westName || got.Output["BucketArn"] != "arn:aws:s3:::"+westName {
 		t.Fatalf("west create = %#v %v", got, err)
 	} else {
 		characterization["west-location"] = got.Headers.Get("Location")
@@ -2090,7 +2090,10 @@ func TestListBucketsPaginationAndFilters(t *testing.T) {
 		if id.Region != "us-east-1" {
 			input["LocationConstraint"] = id.Region
 		}
-		mustInvokeAs(t, p, id, "CreateBucket", input, nil)
+		created := mustInvokeAs(t, p, id, "CreateBucket", input, nil)
+		if created.Output["BucketArn"] != "arn:aws:s3:::"+name {
+			t.Fatalf("create bucket ARN = %#v", created.Output)
+		}
 		if err := deps.Clock.Advance(time.Second); err != nil {
 			t.Fatal(err)
 		}
@@ -2115,7 +2118,7 @@ func TestListBucketsPaginationAndFilters(t *testing.T) {
 		t.Fatalf("all buckets = %s", got)
 	}
 	firstCreated := stringValue(asMapForTest(all.Output["Buckets"].([]any)[0])["CreationDate"])
-	if firstCreated == "" || asMapForTest(all.Output["Buckets"].([]any)[0])["BucketRegion"] != nil {
+	if firstCreated == "" || asMapForTest(all.Output["Buckets"].([]any)[0])["BucketRegion"] != nil || asMapForTest(all.Output["Buckets"].([]any)[0])["BucketArn"] != "arn:aws:s3:::alpha-bucket" {
 		t.Fatalf("unpaginated bucket = %#v", all.Output["Buckets"].([]any)[0])
 	}
 	if err := deps.Clock.Advance(time.Hour); err != nil {

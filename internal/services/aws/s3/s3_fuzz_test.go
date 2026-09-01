@@ -1397,8 +1397,14 @@ func FuzzListObjectsPagination(f *testing.F) {
 		}
 		p := s3.New(spitest.Deps(t))
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-fuzz", "LocationConstraint": "us-west-2"}, nil)
+		body := []byte("content")
+		sum := sha256.Sum256(body)
 		for _, key := range []string{"folder/a/one", "folder/a/two", "folder/b", "folder/c"} {
-			mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-fuzz", "Key": key}, []byte("content"))
+			input := map[string]any{"Bucket": "list-fuzz", "Key": key}
+			if key == "folder/b" {
+				input["ChecksumSHA256"] = base64.StdEncoding.EncodeToString(sum[:])
+			}
+			mustInvoke(t, p, "PutObject", input, body)
 		}
 		maxKeys := int(maxSeed%3) + 1
 		operation := "ListObjects"
@@ -1430,6 +1436,9 @@ func FuzzListObjectsPagination(f *testing.F) {
 		for _, value := range asSliceForTest(page["Contents"]) {
 			row := asMapForTest(value)
 			got = append(got, row["Key"].(string))
+			if checksummed := row["Key"] == "folder/b"; checksummed != reflect.DeepEqual(row["ChecksumAlgorithm"], []any{"SHA256"}) || checksummed != (row["ChecksumType"] == "FULL_OBJECT") {
+				t.Fatalf("%s checksum metadata = %#v", operation, row)
+			}
 			owner := asMapForTest(row["Owner"])
 			if wantOwner := !v2 || fetchOwner; (owner["ID"] == "123456789012") != wantOwner || owner["DisplayName"] != nil {
 				t.Fatalf("%s fetchOwner=%v owner=%#v", operation, fetchOwner, owner)

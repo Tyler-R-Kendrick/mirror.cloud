@@ -983,6 +983,14 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || len(fetchedOwnerV2.Contents) != 1 || fetchedOwnerV2.Contents[0].Owner == nil || aws.ToString(fetchedOwnerV2.Contents[0].Owner.ID) != "000000000000" || fetchedOwnerV2.Contents[0].Owner.DisplayName != nil {
 		t.Fatalf("fetched V2 owner: %#v %v", fetchedOwnerV2, err)
 	}
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-list-pagination"), Key: aws.String("checksum"), Body: strings.NewReader("content"), ChecksumAlgorithm: s3types.ChecksumAlgorithmSha256}); err != nil {
+		t.Fatal(err)
+	}
+	checksummed, err := s3c.ListObjectsV2(context.Background(), &s3.ListObjectsV2Input{Bucket: aws.String("sdk-list-pagination"), Prefix: aws.String("checksum")})
+	if err != nil || len(checksummed.Contents) != 1 || len(checksummed.Contents[0].ChecksumAlgorithm) != 1 || checksummed.Contents[0].ChecksumAlgorithm[0] != s3types.ChecksumAlgorithmSha256 || checksummed.Contents[0].ChecksumType != s3types.ChecksumTypeFullObject {
+		t.Fatalf("listed checksum: %#v %v", checksummed, err)
+	}
+	listKeys = append(listKeys, "checksum")
 	for _, key := range listKeys {
 		if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk-list-pagination"), Key: aws.String(key)}); err != nil {
 			t.Fatal(err)

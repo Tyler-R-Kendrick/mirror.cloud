@@ -2042,6 +2042,17 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 			modified = parsed.UTC().Format(time.RFC3339)
 		}
 		content := map[string]any{"Key": key, "Size": meta["size"], "ETag": meta["etag"], "LastModified": modified, "StorageClass": meta["storageClass"]}
+		storedChecksums := asMap(meta["checksums"])
+		var algorithms []any
+		for _, checksum := range checksums {
+			if str(storedChecksums[checksum.header]) != "" {
+				algorithms = append(algorithms, checksum.algorithm)
+			}
+		}
+		if len(algorithms) > 0 {
+			content["ChecksumAlgorithm"] = algorithms
+			content["ChecksumType"] = str(meta["checksumType"])
+		}
 		if req.Operation == "ListObjects" || truthy(req.Input["FetchOwner"]) || truthy(req.Input["fetch-owner"]) {
 			content["Owner"] = map[string]any{"ID": req.Identity.Account}
 		}

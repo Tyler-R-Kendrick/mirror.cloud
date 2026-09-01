@@ -2887,14 +2887,15 @@ func TestUploadPartSSECustomerKeyFaults(t *testing.T) {
 	otherDigest := md5.Sum(otherKey)
 	wrongEncryption := map[string]any{"SSECustomerAlgorithm": "AES256", "SSECustomerKey": base64.StdEncoding.EncodeToString(otherKey), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(otherDigest[:])}
 	tests := []struct {
-		key, uploadID string
-		encryption    map[string]any
-		message       string
+		name, key, uploadID string
+		encryption          map[string]any
+		message             string
 	}{
-		{"encrypted", encryptedID, nil, "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters."},
-		{"plain", plainID, encryption, "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters."},
-		{"encrypted", encryptedID, wrongEncryption, "The provided encryption parameters did not match the ones used originally."},
+		{"missing", "encrypted", encryptedID, nil, "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters."},
+		{"unexpected", "plain", plainID, encryption, "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters."},
+		{"mismatch", "encrypted", encryptedID, wrongEncryption, "The provided encryption parameters did not match the ones used originally."},
 	}
+	characterization := map[string]any{}
 	for index, test := range tests {
 		input := maps.Clone(test.encryption)
 		if input == nil {
@@ -2904,6 +2905,8 @@ func TestUploadPartSSECustomerKeyFaults(t *testing.T) {
 		_, err := invoke(t, p, "UploadPart", input, []byte("part"))
 		if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != test.message || fault.HTTPStatus != http.StatusBadRequest {
 			t.Fatalf("case %d fault = %#v", index, fault)
+		} else {
+			characterization[test.name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus}
 		}
 	}
 	for _, upload := range []struct{ key, id string }{{"encrypted", encryptedID}, {"plain", plainID}} {
@@ -2912,6 +2915,7 @@ func TestUploadPartSSECustomerKeyFaults(t *testing.T) {
 			t.Fatalf("rejected SSE-C request stored parts = %#v", listed.Output)
 		}
 	}
+	golden.AssertJSON(t, characterization)
 }
 
 func TestCopyObjectSSECustomerKeys(t *testing.T) {

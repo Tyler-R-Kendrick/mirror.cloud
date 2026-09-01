@@ -5058,6 +5058,14 @@ func TestMultipartChecksumContract(t *testing.T) {
 	if fault := asFault(t, err); fault.Code != "BadDigest" || fault.Message != "The sha256 you specified for part 1 did not match what we received." || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("alternate part checksum fault = %#v", fault)
 	}
+	ignored := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "ignored-composite", "ChecksumAlgorithm": "CRC32"}, nil).Output["UploadId"].(string)
+	ignoredPart := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "ignored-composite", "UploadId": ignored, "PartNumber": 1}, body)
+	ignoredInput := completeInput(ignored, completedPartWithChecksum(1, ignoredPart, "ChecksumCRC32", "x-amz-checksum-crc32"))
+	ignoredInput["ChecksumCRC32"] = "AA=="
+	ignoredDone := mustInvoke(t, p, "CompleteMultipartUpload", ignoredInput, nil)
+	if ignoredDone.Output["ChecksumCRC32"] == "AA==" || ignoredDone.Output["ChecksumType"] != "COMPOSITE" {
+		t.Fatalf("ignored composite checksum = %#v", ignoredDone.Output)
+	}
 
 	composite := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "gap", "ChecksumAlgorithm": "SHA256"}, nil)
 	compositeID := composite.Output["UploadId"].(string)

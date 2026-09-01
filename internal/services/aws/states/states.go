@@ -201,15 +201,25 @@ func startTaskTimers(task *pending, now time.Time) {
 	}
 }
 
-func (p *Pack) timeoutExecution(ctx context.Context, req *spi.Request, token string, wait pending) {
-	encoded, found, _ := p.col(req, "ex").Get(ctx, wait.ExecARN)
+func (p *Pack) pendingExecution(ctx context.Context, req *spi.Request, token, executionARN string) (map[string]any, bool) {
+	encoded, found, _ := p.col(req, "ex").Get(ctx, executionARN)
 	if !found {
-		_ = p.col(req, "pending").Delete(ctx, token)
-		return
+		return nil, false
 	}
 	var record map[string]any
-	if json.Unmarshal(encoded, &record) != nil || first(record, "status") != "RUNNING" || first(record, "pendingToken") != token {
+	if json.Unmarshal(encoded, &record) != nil || first(record, "status") != "RUNNING" {
 		_ = p.col(req, "pending").Delete(ctx, token)
+		return nil, false
+	}
+	if first(record, "pendingToken") != token {
+		return nil, false
+	}
+	return record, true
+}
+
+func (p *Pack) timeoutExecution(ctx context.Context, req *spi.Request, token string, wait pending) {
+	record, ready := p.pendingExecution(ctx, req, token, wait.ExecARN)
+	if !ready {
 		return
 	}
 	record["status"], record["error"], record["cause"] = "TIMED_OUT", "States.Timeout", "States.Timeout"
@@ -223,14 +233,8 @@ func (p *Pack) timeoutExecution(ctx context.Context, req *spi.Request, token str
 }
 
 func (p *Pack) resumeWait(ctx context.Context, req *spi.Request, token string, wait pending) {
-	encoded, found, _ := p.col(req, "ex").Get(ctx, wait.ExecARN)
-	if !found {
-		_ = p.col(req, "pending").Delete(ctx, token)
-		return
-	}
-	var record map[string]any
-	if json.Unmarshal(encoded, &record) != nil || first(record, "status") != "RUNNING" || first(record, "pendingToken") != token {
-		_ = p.col(req, "pending").Delete(ctx, token)
+	record, ready := p.pendingExecution(ctx, req, token, wait.ExecARN)
+	if !ready {
 		return
 	}
 	walkRequest := *req
@@ -1658,14 +1662,15 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 		return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
 	}
 	var pend pending
-	_ = json.Unmarshal(b, &pend)
-	_ = p.col(req, "pending").Delete(ctx, tok)
-	exb, eok, _ := p.col(req, "ex").Get(ctx, pend.ExecARN)
-	if !eok {
+	if json.Unmarshal(b, &pend) != nil {
+		_ = p.col(req, "pending").Delete(ctx, tok)
 		return &spi.Response{Output: map[string]any{}}, nil
 	}
-	var rec map[string]any
-	_ = json.Unmarshal(exb, &rec)
+	rec, ready := p.pendingExecution(ctx, req, tok, pend.ExecARN)
+	if !ready {
+		return &spi.Response{Output: map[string]any{}}, nil
+	}
+	_ = p.col(req, "pending").Delete(ctx, tok)
 	data := parseJSON(output)
 	from, definition := pend.StateName, pend.Definition
 	var sm map[string]any

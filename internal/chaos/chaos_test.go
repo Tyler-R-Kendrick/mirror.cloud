@@ -536,6 +536,9 @@ func TestConcurrentListObjectVersionsRemainsPageable(t *testing.T) {
 	if _, err := call("PutObject", map[string]any{"Bucket": "version-list-chaos", "Key": "prefix/key", "ChecksumCRC32": initialChecksum}, "initial"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := call("PutObject", map[string]any{"Bucket": "version-list-chaos", "Key": "url/k ey+"}, "encoded"); err != nil {
+		t.Fatal(err)
+	}
 	errs := make(chan error, 64)
 	var wg sync.WaitGroup
 	for i := range cap(errs) {
@@ -586,6 +589,10 @@ func TestConcurrentListObjectVersionsRemainsPageable(t *testing.T) {
 	}
 	if err != nil || len(versions) != 17 || checksummed != 1 {
 		t.Fatalf("final versions = %#v, err=%v", response, err)
+	}
+	encoded, err := call("ListObjectVersions", map[string]any{"Bucket": "version-list-chaos", "Prefix": "url/", "EncodingType": "url"}, "")
+	if rows := encoded.Output["Versions"].([]any); err != nil || len(rows) != 1 || rows[0].(map[string]any)["Key"] != "url/k%20ey%2B" {
+		t.Fatalf("encoded versions = %#v, err=%v", encoded, err)
 	}
 }
 

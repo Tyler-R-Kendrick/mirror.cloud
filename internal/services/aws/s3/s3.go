@@ -2182,16 +2182,16 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 			}
 		}
 	}
-	checksum, hasChecksum := checksumByAlgorithm(algorithm)
-	if algorithm != "" && !hasChecksum {
+	checksum, copyChecksum := checksumByAlgorithm(algorithm)
+	if algorithm != "" && !copyChecksum {
 		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
-	if hasChecksum {
+	if copyChecksum {
 		req.Input[checksum.input] = checksumValue(checksum.input, body)
 	}
 	req.Body = io.NopCloser(bytes.NewReader(body))
 	response, err := p.putObject(ctx, req, "", "", nil, nil)
-	if err == nil && hasChecksum {
+	if err == nil && copyChecksum {
 		response.Output[checksum.input], response.Output["ChecksumType"] = req.Input[checksum.input], "FULL_OBJECT"
 	}
 	if err == nil && source.version != "" {

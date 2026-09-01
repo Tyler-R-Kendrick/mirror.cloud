@@ -371,7 +371,7 @@ func TestConcurrentListObjectPaginationRemainsOrdered(t *testing.T) {
 		}
 		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
 	}
-	if _, err := call("CreateBucket", map[string]any{"Bucket": "list-pagination"}, nil); err != nil {
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "list-pagination", "LocationConstraint": "us-west-2"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, key := range []string{"folder/a/one", "folder/base"} {
@@ -402,6 +402,10 @@ func TestConcurrentListObjectPaginationRemainsOrdered(t *testing.T) {
 			response, err := call(operation, input, nil)
 			if err != nil {
 				errs <- err
+				return
+			}
+			if response.Output["BucketRegion"] != "us-west-2" {
+				errs <- fmt.Errorf("%s region: %#v", operation, response.Output)
 				return
 			}
 			var values []string

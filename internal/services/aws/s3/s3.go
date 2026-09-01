@@ -2129,6 +2129,9 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 		}
 		out["EncodingType"] = "url"
 	}
+	if req.Identity.Region != "us-east-1" {
+		out["BucketRegion"] = req.Identity.Region
+	}
 	headers := http.Header{}
 	headers.Set("x-amz-bucket-region", req.Identity.Region)
 	return &spi.Response{Headers: headers, Output: out}, nil

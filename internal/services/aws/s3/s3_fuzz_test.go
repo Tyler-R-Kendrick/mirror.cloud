@@ -1396,7 +1396,7 @@ func FuzzListObjectsPagination(f *testing.F) {
 			t.Skip()
 		}
 		p := s3.New(spitest.Deps(t))
-		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-fuzz"}, nil)
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-fuzz", "LocationConstraint": "us-west-2"}, nil)
 		for _, key := range []string{"folder/a/one", "folder/a/two", "folder/b", "folder/c"} {
 			mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-fuzz", "Key": key}, []byte("content"))
 		}
@@ -1409,6 +1409,9 @@ func FuzzListObjectsPagination(f *testing.F) {
 			input["ContinuationToken"], input["FetchOwner"] = marker, fetchOwner
 		}
 		page := mustInvoke(t, p, operation, input, nil).Output
+		if page["BucketRegion"] != "us-west-2" {
+			t.Fatalf("%s BucketRegion = %#v", operation, page["BucketRegion"])
+		}
 		all := []string{"folder/a/", "folder/b", "folder/c"}
 		var want []string
 		for _, value := range all {

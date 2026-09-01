@@ -1646,6 +1646,33 @@ func FuzzMultipartPartNumberFaults(f *testing.F) {
 	})
 }
 
+func FuzzMultipartCompletionFaults(f *testing.F) {
+	f.Add(9, `"missing"`, false)
+	f.Add(0, "", true)
+	f.Add(10001, "wrong", false)
+	f.Fuzz(func(t *testing.T, number int, etag string, empty bool) {
+		if !utf8.ValidString(etag) || len(etag) > 128 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "completion-fault-fuzz"}, nil)
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "completion-fault-fuzz", "Key": "key"}, nil).Output["UploadId"].(string)
+		input := completeInput(uploadID)
+		if !empty {
+			input = completeInput(uploadID, map[string]any{"PartNumber": number, "ETag": etag})
+		}
+		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		fault := asFault(t, err)
+		if empty {
+			if fault.Code != "InvalidRequest" || fault.Message != "You must specify at least one part" {
+				t.Fatalf("empty completion fault = %#v", fault)
+			}
+		} else if fault.Code != "InvalidPart" || fault.Message != "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag." || fault.Fields["ETag"] != strings.Trim(strings.TrimSpace(etag), `"`) || fault.Fields["PartNumber"] != strconv.Itoa(number) || fault.Fields["UploadId"] != uploadID {
+			t.Fatalf("missing part %d %q fault = %#v", number, etag, fault)
+		}
+	})
+}
+
 func FuzzDeleteObjectVersionRestoration(f *testing.F) {
 	f.Add("first", "second", "third", uint8(2))
 	f.Add("", "same", "same", uint8(1))

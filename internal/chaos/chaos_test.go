@@ -667,6 +667,67 @@ func TestConcurrentCompleteMultipartChecksumTypeFaultsRemainModeled(t *testing.T
 	}
 }
 
+func TestConcurrentCompleteMultipartPreconditionFaultsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "complete-precondition-chaos"}, "")
+	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "complete-precondition-chaos", "Key": "key"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID := created.Output["UploadId"].(string)
+	part, err := call("UploadPart", map[string]any{"Bucket": "complete-precondition-chaos", "Key": "key", "UploadId": uploadID, "PartNumber": 1}, "part")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			input := map[string]any{"Bucket": "complete-precondition-chaos", "Key": "key", "UploadId": uploadID, "MultipartUpload": manifest}
+			header, detail := "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"
+			switch i % 3 {
+			case 0:
+				input["IfMatch"], input["IfNoneMatch"] = `"etag"`, "*"
+				header, detail = "If-Match,If-None-Match", "Multiple conditional request headers present in the request"
+			case 1:
+				input["IfNoneMatch"] = `"etag"`
+			case 2:
+				input["IfMatch"] = "*"
+			}
+			_, err := call("CompleteMultipartUpload", input, "")
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != "NotImplemented" || fault.Message != "A header you provided implies functionality that is not implemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fault != "server" || fault.Fields["Header"] != header || fault.Fields["additionalMessage"] != detail {
+				errs <- fmt.Errorf("precondition fault = %#v", fault)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	listed, err := call("ListParts", map[string]any{"Bucket": "complete-precondition-chaos", "Key": "key", "UploadId": uploadID}, "")
+	if err != nil || len(listed.Output["Parts"].([]any)) != 1 {
+		t.Fatalf("rejected completions changed upload = %#v, err=%v", listed, err)
+	}
+}
+
 func TestConcurrentUploadPartContentMD5FaultsRemainModeled(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

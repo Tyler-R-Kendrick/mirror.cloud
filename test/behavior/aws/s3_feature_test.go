@@ -131,12 +131,20 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			t.Fatalf("first V1 page %s", first)
 		}
 		next := list("prefix=folder%2F&delimiter=%2F&max-keys=1&marker=" + url.QueryEscape("folder/aSubfolder/"))
-		if !strings.Contains(next, "<Contents><ETag>") || !strings.Contains(next, "<Key>folder/file1</Key>") || !strings.Contains(next, "<Marker>folder/aSubfolder/</Marker>") {
+		if !strings.Contains(next, "<Contents><ETag>") || !strings.Contains(next, "<Key>folder/file1</Key>") || !strings.Contains(next, "<Owner><ID>000000000000</ID></Owner>") || strings.Contains(next, "<DisplayName>") || !strings.Contains(next, "<Marker>folder/aSubfolder/</Marker>") {
 			t.Fatalf("next V1 page %s", next)
 		}
 		firstV2 := list("list-type=2&prefix=folder%2F&delimiter=%2F&max-keys=1")
 		if !strings.Contains(firstV2, "<CommonPrefixes><Prefix>folder/aSubfolder/</Prefix></CommonPrefixes>") || !strings.Contains(firstV2, "<NextContinuationToken>folder/aSubfolder/</NextContinuationToken>") || !strings.Contains(firstV2, "<KeyCount>1</KeyCount>") {
 			t.Fatalf("first V2 page %s", firstV2)
+		}
+		defaultOwnerV2 := list("list-type=2&prefix=folder%2Ffile&max-keys=1")
+		if strings.Contains(defaultOwnerV2, "<Owner>") {
+			t.Fatalf("default V2 owner %s", defaultOwnerV2)
+		}
+		fetchedOwnerV2 := list("list-type=2&prefix=folder%2Ffile&max-keys=1&fetch-owner=true")
+		if !strings.Contains(fetchedOwnerV2, "<Owner><ID>000000000000</ID></Owner>") || strings.Contains(fetchedOwnerV2, "<DisplayName>") {
+			t.Fatalf("fetched V2 owner %s", fetchedOwnerV2)
 		}
 	})
 

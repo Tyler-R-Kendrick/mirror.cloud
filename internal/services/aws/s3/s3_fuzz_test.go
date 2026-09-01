@@ -2697,6 +2697,27 @@ func FuzzMultipartObjectSize(f *testing.F) {
 	})
 }
 
+func FuzzCompositeAggregateChecksumIgnored(f *testing.F) {
+	f.Add("body", "AA==")
+	f.Add("", "wrong")
+	f.Fuzz(func(t *testing.T, body, aggregate string) {
+		if len(body) > 4096 || len(aggregate) > 256 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-aggregate-fuzz"}, nil)
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-aggregate-fuzz", "Key": "object", "ChecksumAlgorithm": "CRC32"}, nil)
+		uploadID := created.Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "multipart-aggregate-fuzz", "Key": "object", "UploadId": uploadID, "PartNumber": 1}, []byte(body))
+		input := completeInput(uploadID, completedPartWithChecksum(1, part, "ChecksumCRC32", "x-amz-checksum-crc32"))
+		input["ChecksumCRC32"] = aggregate
+		completed := mustInvoke(t, p, "CompleteMultipartUpload", input, nil)
+		if !strings.HasSuffix(fmt.Sprint(completed.Output["ChecksumCRC32"]), "-1") || completed.Output["ChecksumType"] != "COMPOSITE" {
+			t.Fatalf("aggregate=%q output=%#v", aggregate, completed.Output)
+		}
+	})
+}
+
 func FuzzMultipartSSECustomerKey(f *testing.F) {
 	f.Add(uint8(0), []byte("key"), "body")
 	f.Add(uint8(1), []byte("digest-only"), "md5")

@@ -21,6 +21,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/parquet-go/parquet-go"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/batch"
@@ -1422,6 +1423,81 @@ func TestStatesWaitLoopUsesAbsoluteDeadline(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}
+}
+
+func TestResumeWaitKeepsPendingUntilExecutionCommit(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	req := &spi.Request{Identity: spi.Identity{Account: "1", Region: "us-east-1"}}
+	token, executionARN := "pending", "arn:aws:states:us-east-1:1:execution:machine:run"
+	wait := pending{Token: token, ExecARN: executionARN}
+	body, _ := json.Marshal(wait)
+	if err := p.col(req, "pending").Put(ctx, token, body); err != nil {
+		t.Fatal(err)
+	}
+	assertPending := func(want bool) {
+		t.Helper()
+		_, found, err := p.col(req, "pending").Get(ctx, token)
+		if err != nil || found != want {
+			t.Fatalf("pending found=%v err=%v, want %v", found, err, want)
+		}
+	}
+
+	p.resumeWait(ctx, req, token, wait)
+	assertPending(true)
+
+	if err := p.col(req, "ex").Put(ctx, executionARN, []byte(`{"status":"RUNNING","pendingToken":"other"}`)); err != nil {
+		t.Fatal(err)
+	}
+	p.resumeWait(ctx, req, token, wait)
+	assertPending(true)
+
+	if err := p.col(req, "ex").Put(ctx, executionARN, []byte(`{"status":"SUCCEEDED","pendingToken":"pending"}`)); err != nil {
+		t.Fatal(err)
+	}
+	p.resumeWait(ctx, req, token, wait)
+	assertPending(false)
+}
+
+func TestPendingExecutionCommitCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	req := &spi.Request{Identity: spi.Identity{Account: "1", Region: "us-east-1"}}
+	cases := []struct {
+		name, execution string
+	}{
+		{"missing", ""},
+		{"running-match", `{"status":"RUNNING","pendingToken":"running-match"}`},
+		{"running-other", `{"status":"RUNNING","pendingToken":"other"}`},
+		{"succeeded", `{"status":"SUCCEEDED","pendingToken":"succeeded"}`},
+		{"corrupt", `{`},
+	}
+	got := map[string]any{}
+	for _, tc := range cases {
+		executionARN := "arn:aws:states:us-east-1:1:execution:machine:" + tc.name
+		if err := p.col(req, "pending").Put(ctx, tc.name, []byte(`{}`)); err != nil {
+			t.Fatal(err)
+		}
+		if tc.execution != "" {
+			if err := p.col(req, "ex").Put(ctx, executionARN, []byte(tc.execution)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, ready := p.pendingExecution(ctx, req, tc.name, executionARN)
+		_, present, err := p.col(req, "pending").Get(ctx, tc.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got[tc.name] = map[string]bool{"ready": ready, "pending": present}
+	}
+	golden.AssertJSON(t, got)
 }
 
 func TestStatesRetryScheduling(t *testing.T) {

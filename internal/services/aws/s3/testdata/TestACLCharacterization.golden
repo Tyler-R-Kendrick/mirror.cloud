@@ -10,7 +10,6 @@
       }
     ],
     "Owner": {
-      "DisplayName": "mirror",
       "ID": "123456789012"
     }
   },
@@ -18,7 +17,6 @@
     "Grants": [
       {
         "Grantee": {
-          "DisplayName": "mirror",
           "ID": "123456789012",
           "Type": "CanonicalUser"
         },
@@ -33,7 +31,6 @@
       }
     ],
     "Owner": {
-      "DisplayName": "mirror",
       "ID": "123456789012"
     }
   },
@@ -42,7 +39,6 @@
     "Grants": [
       {
         "Grantee": {
-          "DisplayName": "mirror",
           "ID": "123456789012",
           "Type": "CanonicalUser"
         },
@@ -57,7 +53,6 @@
       }
     ],
     "Owner": {
-      "DisplayName": "mirror",
       "ID": "123456789012"
     }
   }

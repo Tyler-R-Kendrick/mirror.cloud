@@ -5026,6 +5026,13 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 	if fault := wantFault(missing, "InvalidPart", map[string]any{"PartNumber": 9, "ETag": `"missing"`}); fault.Message != "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag." || fault.Fields["ETag"] != "missing" || fault.Fields["PartNumber"] != "9" || fault.Fields["UploadId"] != missing {
 		t.Fatalf("missing part fault = %#v", fault)
 	}
+	checksumMismatch := create("checksum-mismatch")
+	checksumPart := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": checksumMismatch, "PartNumber": 1}, []byte("checksum"))
+	checksumManifest := asMapForTest(completedPart(1, checksumPart))
+	checksumManifest["ChecksumCRC64NVME"] = "AA=="
+	if fault := wantFault(checksumMismatch, "InvalidPart", checksumManifest); fault.Message != "One or more of the specified parts could not be found. The part may not have been uploaded, or the specified entity tag may not match the part's entity tag." || fault.Fields["ETag"] != strings.Trim(checksumPart.Headers.Get("ETag"), `"`) || fault.Fields["PartNumber"] != "1" || fault.Fields["UploadId"] != checksumMismatch {
+		t.Fatalf("part checksum fault = %#v", fault)
+	}
 
 	badOrder := create("order")
 	large := bytes.Repeat([]byte("A"), 5<<20)

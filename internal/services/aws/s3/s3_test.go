@@ -3046,6 +3046,36 @@ func TestCopyObjectTaggingDirective(t *testing.T) {
 	}
 }
 
+func TestCopyObjectChecksums(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	body := []byte("copy me")
+	sha256Sum := sha256.Sum256(body)
+	sha256Value := base64.StdEncoding.EncodeToString(sha256Sum[:])
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "source", "ChecksumSHA256": sha256Value}, body)
+
+	inherited := mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "bucket", "Key": "inherited", "CopySource": "bucket/source"}, nil)
+	if inherited.Output["ChecksumSHA256"] != sha256Value || inherited.Output["ChecksumType"] != "FULL_OBJECT" {
+		t.Fatalf("inherited copy checksum = %#v", inherited.Output)
+	}
+	inheritedHead := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "inherited", "ChecksumMode": "ENABLED"}, nil)
+	if inheritedHead.Headers.Get("x-amz-checksum-sha256") != sha256Value || inheritedHead.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+		t.Fatalf("inherited stored checksum = %v", inheritedHead.Headers)
+	}
+
+	crc32Sum := make([]byte, 4)
+	binary.BigEndian.PutUint32(crc32Sum, crc32.ChecksumIEEE(body))
+	crc32Value := base64.StdEncoding.EncodeToString(crc32Sum)
+	overridden := mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "bucket", "Key": "overridden", "CopySource": "bucket/source", "ChecksumAlgorithm": "CRC32"}, nil)
+	if overridden.Output["ChecksumCRC32"] != crc32Value || overridden.Output["ChecksumType"] != "FULL_OBJECT" {
+		t.Fatalf("overridden copy checksum = %#v", overridden.Output)
+	}
+	overriddenHead := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "overridden", "ChecksumMode": "ENABLED"}, nil)
+	if overriddenHead.Headers.Get("x-amz-checksum-crc32") != crc32Value || overriddenHead.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+		t.Fatalf("overridden stored checksum = %v", overriddenHead.Headers)
+	}
+}
+
 func TestCopyObjectDirectiveValidation(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

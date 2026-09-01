@@ -3840,7 +3840,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-lifecycle-emit-copy-expiration",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if req.Operation == "PutObject" || req.Operation == "PostObject" {`,
+			old:  `if req.Operation == "PutObject" || req.Operation == "PostObject" || req.Operation == "CompleteMultipartUpload" {`,
 			new:  `if true {`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestBucketLifecycleExpirationHeaders",
@@ -3848,10 +3848,18 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-lifecycle-drop-post-expiration",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if req.Operation == "PutObject" || req.Operation == "PostObject" {`,
-			new:  `if req.Operation == "PutObject" {`,
+			old:  `if req.Operation == "PutObject" || req.Operation == "PostObject" || req.Operation == "CompleteMultipartUpload" {`,
+			new:  `if req.Operation == "PutObject" || req.Operation == "CompleteMultipartUpload" {`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestPostObjectMultipartUpload",
+		},
+		{
+			name: "s3-lifecycle-drop-complete-expiration",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if req.Operation == "PutObject" || req.Operation == "PostObject" || req.Operation == "CompleteMultipartUpload" {`,
+			new:  `if req.Operation == "PutObject" || req.Operation == "PostObject" {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestBucketLifecycleExpirationHeaders",
 		},
 		{
 			name: "s3-lifecycle-emit-noncurrent-get-expiration",

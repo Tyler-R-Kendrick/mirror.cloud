@@ -1385,13 +1385,13 @@ func FuzzListBucketsPagination(f *testing.F) {
 
 func FuzzListObjectsPagination(f *testing.F) {
 	for _, seed := range []struct {
-		v2     bool
-		max    uint8
-		marker string
-	}{{false, 1, ""}, {false, 1, "folder/a/"}, {true, 2, "folder/a/"}, {true, 3, "folder/b"}} {
-		f.Add(seed.v2, seed.max, seed.marker)
+		v2, fetchOwner bool
+		max            uint8
+		marker         string
+	}{{false, false, 1, ""}, {false, true, 1, "folder/a/"}, {true, false, 2, "folder/a/"}, {true, true, 3, "folder/b"}} {
+		f.Add(seed.v2, seed.fetchOwner, seed.max, seed.marker)
 	}
-	f.Fuzz(func(t *testing.T, v2 bool, maxSeed uint8, marker string) {
+	f.Fuzz(func(t *testing.T, v2, fetchOwner bool, maxSeed uint8, marker string) {
 		if !utf8.ValidString(marker) || len(marker) > 128 {
 			t.Skip()
 		}
@@ -1406,7 +1406,7 @@ func FuzzListObjectsPagination(f *testing.F) {
 		if v2 {
 			operation = "ListObjectsV2"
 			delete(input, "Marker")
-			input["ContinuationToken"] = marker
+			input["ContinuationToken"], input["FetchOwner"] = marker, fetchOwner
 		}
 		page := mustInvoke(t, p, operation, input, nil).Output
 		all := []string{"folder/a/", "folder/b", "folder/c"}
@@ -1425,7 +1425,12 @@ func FuzzListObjectsPagination(f *testing.F) {
 			got = append(got, asMapForTest(value)["Prefix"].(string))
 		}
 		for _, value := range asSliceForTest(page["Contents"]) {
-			got = append(got, asMapForTest(value)["Key"].(string))
+			row := asMapForTest(value)
+			got = append(got, row["Key"].(string))
+			owner := asMapForTest(row["Owner"])
+			if wantOwner := !v2 || fetchOwner; (owner["ID"] == "123456789012") != wantOwner || owner["DisplayName"] != nil {
+				t.Fatalf("%s fetchOwner=%v owner=%#v", operation, fetchOwner, owner)
+			}
 		}
 		if strings.Join(got, "\x00") != strings.Join(want, "\x00") || page["IsTruncated"] != truncated || page["KeyCount"] != len(want) {
 			t.Fatalf("%s marker=%q max=%d page=%#v want=%v", operation, marker, maxKeys, page, want)

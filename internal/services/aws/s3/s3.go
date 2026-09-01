@@ -5538,6 +5538,16 @@ func validateMultipartChecksumContract(req *spi.Request, algorithm, checksumType
 }
 
 func validateMultipartPartChecksum(req *spi.Request, selected struct{ algorithm, input, header string }, body []byte) error {
+	if value := requestCondition(req, "ContentMD5", "Content-MD5"); value != "" {
+		decoded, err := base64.StdEncoding.DecodeString(value)
+		if err != nil || len(decoded) != md5.Size {
+			return &spi.Fault{Code: "InvalidDigest", Message: "The Content-MD5 you specified was invalid.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"Content_MD5": value}}
+		}
+		calculated := checksumValue("ChecksumMD5", body)
+		if value != calculated {
+			return &spi.Fault{Code: "BadDigest", Message: "The Content-MD5 you specified did not match what we received.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ExpectedDigest": value, "CalculatedDigest": calculated}}
+		}
+	}
 	for _, checksum := range checksums {
 		if value := requestCondition(req, checksum.input, checksum.header); value != "" {
 			if checksum.algorithm != selected.algorithm {

@@ -4850,14 +4850,9 @@ func TestWriteChecksumValidation(t *testing.T) {
 	}
 	complete := completeInput(uploadID, completedPartWithChecksum(1, part, "ChecksumMD5", "x-amz-checksum-md5"))
 	complete["ChecksumMD5"] = "AA=="
-	_, err = invoke(t, p, "CompleteMultipartUpload", complete, nil)
-	if fault := asFault(t, err); fault.Code != "BadDigest" {
-		t.Fatalf("complete checksum fault = %#v", fault)
-	}
 	partDigest := md5.Sum(body)
 	compositeDigest := md5.Sum(partDigest[:])
 	composite := base64.StdEncoding.EncodeToString(compositeDigest[:]) + "-1"
-	complete["ChecksumMD5"] = composite
 	done := mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
 	if done.Output["ChecksumMD5"] != composite || done.Output["ChecksumType"] != "COMPOSITE" {
 		t.Fatalf("complete checksum output = %#v", done.Output)

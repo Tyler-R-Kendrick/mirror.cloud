@@ -2461,8 +2461,11 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	}
 	if value := requestCondition(req, "MpuObjectSize", "x-amz-mp-object-size"); value != "" {
 		size, err := strconv.ParseInt(value, 10, 64)
-		if err != nil || size != int64(buf.Len()) {
+		if err != nil {
 			return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: 400, Fault: "client"}
+		}
+		if size != 0 && size != int64(buf.Len()) {
+			return nil, &spi.Fault{Code: "InvalidRequest", Message: fmt.Sprintf("The provided 'x-amz-mp-object-size' header value %d does not match what was computed: %d", size, buf.Len()), HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
 	}
 	sum := md5.Sum(md5s)

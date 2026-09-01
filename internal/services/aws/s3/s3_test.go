@@ -1783,6 +1783,9 @@ func TestBucketLifecycleCharacterization(t *testing.T) {
 	configured := mustInvoke(t, p, "GetBucketLifecycleConfiguration", input, nil)
 	object := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": input["Bucket"], "Key": "logs/app.log"}, []byte("entry"))
 	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": input["Bucket"], "Key": "logs/app.log"}, nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": input["Bucket"], "Key": "logs/multipart.log"}, nil).Output["UploadId"].(string)
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": input["Bucket"], "Key": "logs/multipart.log", "UploadId": uploadID, "PartNumber": 1}, []byte("entry"))
+	completed := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
 	_, invalidErr := invoke(t, p, "PutBucketLifecycleConfiguration", map[string]any{"Bucket": input["Bucket"], "LifecycleConfiguration": map[string]any{"Rules": []any{map[string]any{"ID": "invalid", "Filter": map[string]any{"Prefix": "a", "Tag": map[string]any{"Key": "k", "Value": "v"}}, "Status": "Enabled"}}}}, nil)
 	invalid := asFault(t, invalidErr)
 	preserved := mustInvoke(t, p, "GetBucketLifecycleConfiguration", input, nil)
@@ -1793,7 +1796,7 @@ func TestBucketLifecycleCharacterization(t *testing.T) {
 		"default": map[string]any{"code": before.Code, "message": before.Message, "status": before.HTTPStatus, "bucket": before.Fields["BucketName"]},
 		"put":     map[string]any{"status": put.Status, "transitionMinimum": put.Headers.Get("x-amz-transition-default-minimum-object-size")},
 		"get":     map[string]any{"output": configured.Output, "transitionMinimum": configured.Headers.Get("x-amz-transition-default-minimum-object-size")},
-		"object":  map[string]any{"putExpiration": object.Headers.Get("x-amz-expiration"), "headExpiration": head.Headers.Get("x-amz-expiration")},
+		"object":  map[string]any{"putExpiration": object.Headers.Get("x-amz-expiration"), "headExpiration": head.Headers.Get("x-amz-expiration"), "completeExpiration": completed.Headers.Get("x-amz-expiration")},
 		"invalid": map[string]any{"code": invalid.Code, "status": invalid.HTTPStatus}, "preserved": preserved.Output,
 		"delete":  map[string]any{"status": deleted.Status},
 		"deleted": map[string]any{"code": final.Code, "message": final.Message, "status": final.HTTPStatus, "bucket": final.Fields["BucketName"]},

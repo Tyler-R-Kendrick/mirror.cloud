@@ -5132,6 +5132,8 @@ func TestMultipartChecksumCharacterization(t *testing.T) {
 	mismatch["ChecksumType"] = "FULL_OBJECT"
 	_, err := invoke(t, p, "CompleteMultipartUpload", mismatch, nil)
 	fault := asFault(t, err)
+	_, err = invoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, part)), nil)
+	missing := asFault(t, err)
 	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPartWithChecksum(1, part, "ChecksumSHA256", "x-amz-checksum-sha256")), nil)
 	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "snapshot"}, nil)
 	tags := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "snapshot"}, nil).Output["TagSet"]
@@ -5140,6 +5142,7 @@ func TestMultipartChecksumCharacterization(t *testing.T) {
 		"part":     map[string]any{"checksum": part.Headers.Get("x-amz-checksum-sha256")},
 		"list":     map[string]any{"algorithm": listed.Output["ChecksumAlgorithm"], "type": listed.Output["ChecksumType"], "part": listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumSHA256"]},
 		"mismatch": map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus},
+		"missing":  map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus},
 		"complete": map[string]any{"checksum": done.Output["ChecksumSHA256"], "type": done.Output["ChecksumType"]},
 		"object":   map[string]any{"cacheControl": head.Headers.Get("Cache-Control"), "contentType": head.Headers.Get("Content-Type"), "metadata": head.Headers.Get("x-amz-meta-env"), "redirect": head.Headers.Get("x-amz-website-redirect-location"), "storageClass": head.Headers.Get("x-amz-storage-class"), "tags": tags},
 	})

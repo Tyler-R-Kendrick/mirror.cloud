@@ -413,6 +413,53 @@ func TestS3ETagWireCasingContract(t *testing.T) {
 	}
 }
 
+func TestS3MultipartWithoutChecksumContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.s3"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	do := func(method, path, body string) (*http.Response, []byte) {
+		t.Helper()
+		request, _ := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			t.Fatalf("%s %s: %d %s", method, path, response.StatusCode, payload)
+		}
+		return response, payload
+	}
+	do(http.MethodPut, "/multipart-contract", "")
+	_, initiated := do(http.MethodPost, "/multipart-contract/plain?uploads", "")
+	var upload struct {
+		UploadID string `xml:"UploadId"`
+	}
+	if err := xml.Unmarshal(initiated, &upload); err != nil {
+		t.Fatal(err)
+	}
+	part, _ := do(http.MethodPut, "/multipart-contract/plain?partNumber=1&uploadId="+url.QueryEscape(upload.UploadID), "plain")
+	_, listed := do(http.MethodGet, "/multipart-contract/plain?uploadId="+url.QueryEscape(upload.UploadID), "")
+	if bytes.Contains(listed, []byte("ChecksumAlgorithm")) || bytes.Contains(listed, []byte("ChecksumType")) {
+		t.Fatalf("list exposed checksum metadata: %s", listed)
+	}
+	manifest := "<CompleteMultipartUpload><Part><ETag>" + part.Header.Get("ETag") + "</ETag><PartNumber>1</PartNumber></Part></CompleteMultipartUpload>"
+	_, completed := do(http.MethodPost, "/multipart-contract/plain?uploadId="+url.QueryEscape(upload.UploadID), manifest)
+	if bytes.Contains(completed, []byte("ChecksumCRC64NVME")) || bytes.Contains(completed, []byte("ChecksumType")) {
+		t.Fatalf("completion exposed checksum metadata: %s", completed)
+	}
+	_, got := do(http.MethodGet, "/multipart-contract/plain", "")
+	if string(got) != "plain" {
+		t.Fatalf("body = %q", got)
+	}
+}
+
 func TestAWSChunkedFramingContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.s3"}
@@ -900,7 +947,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || inheritedEncryption.ServerSideEncryption != s3types.ServerSideEncryptionAwsKms || aws.ToString(inheritedEncryption.SSEKMSKeyId) != bucketEncryptionKey || !aws.ToBool(inheritedEncryption.BucketKeyEnabled) {
 		t.Fatalf("inherited bucket encryption: %#v %v", inheritedEncryption, err)
 	}
-	kmsUpload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-kms-multipart")})
+	kmsUpload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-kms-multipart"), ChecksumAlgorithm: s3types.ChecksumAlgorithmCrc64nvme})
 	if err != nil {
 		t.Fatalf("create KMS multipart upload: %v", err)
 	}

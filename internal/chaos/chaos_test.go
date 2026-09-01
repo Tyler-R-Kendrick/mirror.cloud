@@ -368,7 +368,7 @@ func TestConcurrentListMultipartUploadsRemainsPageable(t *testing.T) {
 	if _, err := call("CreateBucket", map[string]any{"Bucket": "multipart-list-chaos"}); err != nil {
 		t.Fatal(err)
 	}
-	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-list-chaos", "Key": "prefix/key"})
+	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-list-chaos", "Key": "prefix/key", "ChecksumAlgorithm": "CRC64NVME"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +381,7 @@ func TestConcurrentListMultipartUploadsRemainsPageable(t *testing.T) {
 			defer wg.Done()
 			switch i % 4 {
 			case 0:
-				_, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-list-chaos", "Key": "prefix/key"})
+				_, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-list-chaos", "Key": "prefix/key", "ChecksumAlgorithm": "CRC64NVME"})
 				errs <- err
 			case 1:
 				response, err := call("ListMultipartUploads", map[string]any{"Bucket": "multipart-list-chaos", "Prefix": "prefix/", "MaxUploads": 3})
@@ -439,7 +439,7 @@ func TestConcurrentListPartsRemainsPageable(t *testing.T) {
 		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
 	}
 	_, _ = call("CreateBucket", map[string]any{"Bucket": "parts-list-chaos"}, "")
-	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "parts-list-chaos", "Key": "key"}, "")
+	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "parts-list-chaos", "Key": "key", "ChecksumAlgorithm": "CRC64NVME"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,6 +484,77 @@ func TestConcurrentListPartsRemainsPageable(t *testing.T) {
 	response, err := call("ListParts", map[string]any{"Bucket": "parts-list-chaos", "Key": "key", "UploadId": uploadID}, "")
 	if err != nil || len(response.Output["Parts"].([]any)) != 32 || response.Output["NextPartNumberMarker"] != 32 {
 		t.Fatalf("final parts = %#v, err=%v", response, err)
+	}
+}
+
+func TestConcurrentChecksumFreeMultipartUploadsRemainPlain(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "multipart-no-checksum-chaos"}, "")
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key, body := fmt.Sprintf("object-%d", i), fmt.Sprintf("part-%d", i)
+			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-no-checksum-chaos", "Key": key}, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			uploadID := created.Output["UploadId"].(string)
+			partInput := map[string]any{"Bucket": "multipart-no-checksum-chaos", "Key": key, "UploadId": uploadID, "PartNumber": 1}
+			if i%2 == 0 {
+				sum := crc32.ChecksumIEEE([]byte(body))
+				partInput["ChecksumAlgorithm"] = "CRC32"
+				partInput["ChecksumCRC32"] = base64.StdEncoding.EncodeToString([]byte{byte(sum >> 24), byte(sum >> 16), byte(sum >> 8), byte(sum)})
+			}
+			part, err := call("UploadPart", partInput, body)
+			if err != nil {
+				errs <- err
+				return
+			}
+			listed, err := call("ListParts", map[string]any{"Bucket": "multipart-no-checksum-chaos", "Key": key, "UploadId": uploadID}, "")
+			if err == nil && (listed.Output["ChecksumAlgorithm"] != nil || listed.Output["ChecksumType"] != nil || listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumCRC32"] != nil) {
+				err = fmt.Errorf("list %d = %#v", i, listed.Output)
+			}
+			if err != nil {
+				errs <- err
+				return
+			}
+			completed, err := call("CompleteMultipartUpload", map[string]any{"Bucket": "multipart-no-checksum-chaos", "Key": key, "UploadId": uploadID, "MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}}, "")
+			if err == nil && (completed.Output["ChecksumCRC64NVME"] != nil || completed.Output["ChecksumType"] != nil) {
+				err = fmt.Errorf("complete %d = %#v", i, completed.Output)
+			}
+			if err != nil {
+				errs <- err
+				return
+			}
+			got, err := call("GetObject", map[string]any{"Bucket": "multipart-no-checksum-chaos", "Key": key, "ChecksumMode": "ENABLED"}, "")
+			if err == nil {
+				payload, readErr := io.ReadAll(got.Stream)
+				if readErr != nil || string(payload) != body || got.Headers.Get("x-amz-checksum-crc32") != "" || got.Headers.Get("x-amz-checksum-crc64nvme") != "" {
+					err = fmt.Errorf("get %d body=%q headers=%v read=%v", i, payload, got.Headers, readErr)
+				}
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
 	}
 }
 
@@ -3078,7 +3149,7 @@ func TestEncryptedMultipartCompletionFailurePreservesUpload(t *testing.T) {
 	_, _ = call("CreateBucket", map[string]any{"Bucket": "multipart-encryption"}, nil)
 	keyID := "arn:aws:kms:us-east-1:000000000000:key/multipart-chaos"
 	spitest.SeedKMSKey(t, deps, id, keyID, "Enabled")
-	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-encryption", "Key": "object", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true}, nil)
+	created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-encryption", "Key": "object", "ChecksumAlgorithm": "CRC64NVME", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

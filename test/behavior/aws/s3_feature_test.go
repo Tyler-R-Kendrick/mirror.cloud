@@ -203,9 +203,17 @@ func TestS3ObjectLifecycle(t *testing.T) {
 	t.Run("Given multipart uploads When listing pages Then markers match LocalStack", func(t *testing.T) {
 		res := do(http.MethodPut, "/multipart-list-bdd", nil, "")
 		res.Body.Close()
-		create := func(key string) string {
+		create := func(key, checksum string) string {
 			t.Helper()
-			response := do(http.MethodPost, "/multipart-list-bdd/"+key+"?uploads", nil, "")
+			request, _ := http.NewRequest(http.MethodPost, ts.URL+"/multipart-list-bdd/"+key+"?uploads", nil)
+			request.Header.Set("Authorization", auth)
+			if checksum != "" {
+				request.Header.Set("x-amz-checksum-algorithm", checksum)
+			}
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
 			defer response.Body.Close()
 			var output struct {
 				UploadID string `xml:"UploadId"`
@@ -215,8 +223,8 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			}
 			return output.UploadID
 		}
-		firstID := create("folder/a/one")
-		create("folder/file1")
+		firstID := create("folder/a/one", "")
+		create("folder/file1", "CRC64NVME")
 		res = do(http.MethodGet, "/multipart-list-bdd?uploads&prefix=folder%2F&delimiter=%2F&max-uploads=1", nil, "")
 		body, _ := io.ReadAll(res.Body)
 		res.Body.Close()
@@ -234,6 +242,35 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(body, []byte("<Message>Invalid uploadId marker</Message>")) || !bytes.Contains(body, []byte("<ArgumentName>upload-id-marker</ArgumentName>")) {
 			t.Fatalf("mismatched multipart marker %d %s", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given a checksum-free multipart upload When completed Then checksum metadata stays absent", func(t *testing.T) {
+		res := do(http.MethodPut, "/multipart-plain-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPost, "/multipart-plain-bdd/object?uploads", nil, "")
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodPut, "/multipart-plain-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("plain"), "")
+		etag := res.Header.Get("ETag")
+		res.Body.Close()
+		res = do(http.MethodGet, "/multipart-plain-bdd/object?uploadId="+url.QueryEscape(created.UploadID), nil, "")
+		listed, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if bytes.Contains(listed, []byte("ChecksumAlgorithm")) || bytes.Contains(listed, []byte("ChecksumType")) {
+			t.Fatalf("list exposed checksum metadata: %s", listed)
+		}
+		manifest := []byte(`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`)
+		res = do(http.MethodPost, "/multipart-plain-bdd/object?uploadId="+url.QueryEscape(created.UploadID), manifest, "")
+		completed, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if bytes.Contains(completed, []byte("ChecksumCRC64NVME")) || bytes.Contains(completed, []byte("ChecksumType")) {
+			t.Fatalf("completion exposed checksum metadata: %s", completed)
 		}
 	})
 
@@ -384,7 +421,13 @@ func TestS3ObjectLifecycle(t *testing.T) {
 	t.Run("Given an invalid upload part checksum When uploaded Then S3 returns modeled faults", func(t *testing.T) {
 		res := do(http.MethodPut, "/upload-part-checksum-bdd", nil, "")
 		res.Body.Close()
-		res = do(http.MethodPost, "/upload-part-checksum-bdd/object?uploads", nil, "")
+		initiate, _ := http.NewRequest(http.MethodPost, ts.URL+"/upload-part-checksum-bdd/object?uploads", nil)
+		initiate.Header.Set("Authorization", auth)
+		initiate.Header.Set("x-amz-checksum-algorithm", "CRC64NVME")
+		res, err := http.DefaultClient.Do(initiate)
+		if err != nil {
+			t.Fatal(err)
+		}
 		var created struct {
 			UploadID string `xml:"UploadId"`
 		}
@@ -450,7 +493,13 @@ func TestS3ObjectLifecycle(t *testing.T) {
 	t.Run("Given a mismatched multipart checksum type When completed Then S3 returns the selected mode", func(t *testing.T) {
 		res := do(http.MethodPut, "/completion-checksum-type-bdd", nil, "")
 		res.Body.Close()
-		res = do(http.MethodPost, "/completion-checksum-type-bdd/object?uploads", nil, "")
+		initiate, _ := http.NewRequest(http.MethodPost, ts.URL+"/completion-checksum-type-bdd/object?uploads", nil)
+		initiate.Header.Set("Authorization", auth)
+		initiate.Header.Set("x-amz-checksum-algorithm", "CRC64NVME")
+		res, err := http.DefaultClient.Do(initiate)
+		if err != nil {
+			t.Fatal(err)
+		}
 		var created struct {
 			UploadID string `xml:"UploadId"`
 		}
@@ -465,7 +514,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		manifest := `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`
 		request, _ := http.NewRequest(http.MethodPost, ts.URL+"/completion-checksum-type-bdd/object?uploadId="+url.QueryEscape(created.UploadID), strings.NewReader(manifest))
 		request.Header.Set("x-amz-checksum-type", "COMPOSITE")
-		res, err := http.DefaultClient.Do(request)
+		res, err = http.DefaultClient.Do(request)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1422,7 +1471,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 				t.Fatalf("%s encryption headers %v", name, response.Header)
 			}
 		}
-		created, createdBody := request(http.MethodPost, "/multipart-encryption/object?uploads", "", map[string]string{"x-amz-server-side-encryption": "aws:kms", "x-amz-server-side-encryption-aws-kms-key-id": keyID, "x-amz-server-side-encryption-bucket-key-enabled": "true"})
+		created, createdBody := request(http.MethodPost, "/multipart-encryption/object?uploads", "", map[string]string{"x-amz-checksum-algorithm": "CRC64NVME", "x-amz-server-side-encryption": "aws:kms", "x-amz-server-side-encryption-aws-kms-key-id": keyID, "x-amz-server-side-encryption-bucket-key-enabled": "true"})
 		var upload struct {
 			ID string `xml:"UploadId"`
 		}

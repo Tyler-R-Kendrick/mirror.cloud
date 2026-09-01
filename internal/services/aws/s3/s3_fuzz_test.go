@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"hash/crc32"
 	"io"
 	"mime"
@@ -2664,6 +2665,34 @@ func FuzzCompositeMultipartPartChecksumRequired(f *testing.F) {
 		_, err := invoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completed), nil)
 		if fault := asFault(t, err); fault.Code != wantCode || fault.Message != wantMessage || fault.HTTPStatus != http.StatusBadRequest {
 			t.Fatalf("alternate=%t fault=%#v", alternate, fault)
+		}
+	})
+}
+
+func FuzzMultipartObjectSize(f *testing.F) {
+	f.Add("sized", int64(0))
+	f.Add("sized", int64(4))
+	f.Add("", int64(-1))
+	f.Fuzz(func(t *testing.T, body string, advertised int64) {
+		if len(body) > 4096 || advertised < -4096 || advertised > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-size-fuzz"}, nil)
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-size-fuzz", "Key": "object"}, nil)
+		uploadID := created.Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "multipart-size-fuzz", "Key": "object", "UploadId": uploadID, "PartNumber": 1}, []byte(body))
+		input := completeInput(uploadID, completedPart(1, part))
+		input["MpuObjectSize"] = strconv.FormatInt(advertised, 10)
+		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		if advertised == 0 || advertised == int64(len(body)) {
+			if err != nil {
+				t.Fatalf("size=%d body=%d: %v", advertised, len(body), err)
+			}
+			return
+		}
+		if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != fmt.Sprintf("The provided 'x-amz-mp-object-size' header value %d does not match what was computed: %d", advertised, len(body)) || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("size=%d body=%d fault=%#v", advertised, len(body), fault)
 		}
 	})
 }

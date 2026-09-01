@@ -1397,13 +1397,13 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		assertEncryption("part", part)
 		manifest := "<CompleteMultipartUpload><Part><ETag>" + part.Header.Get("ETag") + "</ETag><PartNumber>1</PartNumber></Part></CompleteMultipartUpload>"
-		completed, _ := request(http.MethodPost, "/multipart-encryption/object?uploadId="+upload.ID, manifest, nil)
-		if completed.StatusCode != http.StatusOK {
+		completed, completedBody := request(http.MethodPost, "/multipart-encryption/object?uploadId="+upload.ID, manifest, nil)
+		if completed.StatusCode != http.StatusOK || completed.Header.Get("x-amz-checksum-crc64nvme") != "" || completed.Header.Get("x-amz-checksum-type") != "" || bytes.Contains(completedBody, []byte("ChecksumCRC64NVME")) || bytes.Contains(completedBody, []byte("ChecksumType")) {
 			t.Fatalf("complete upload %d", completed.StatusCode)
 		}
 		assertEncryption("complete", completed)
-		stored, body := request(http.MethodGet, "/multipart-encryption/object", "", nil)
-		if stored.StatusCode != http.StatusOK || string(body) != "body" {
+		stored, body := request(http.MethodGet, "/multipart-encryption/object", "", map[string]string{"x-amz-checksum-mode": "ENABLED"})
+		if stored.StatusCode != http.StatusOK || string(body) != "body" || stored.Header.Get("x-amz-checksum-crc64nvme") == "" || stored.Header.Get("x-amz-checksum-type") != "FULL_OBJECT" {
 			t.Fatalf("stored object %d %q", stored.StatusCode, body)
 		}
 		assertEncryption("get", stored)

@@ -5271,6 +5271,71 @@ func TestCompleteMultipartUploadPreconditionFaults(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestCompleteMultipartUploadConditionalConflicts(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	const bucket = "complete-conditional-conflicts"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	put := func(key, body string) string {
+		t.Helper()
+		return mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key}, []byte(body)).Headers.Get("ETag")
+	}
+	upload := func(key string) (string, map[string]any) {
+		t.Helper()
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": bucket, "Key": key}, nil).Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": bucket, "Key": key, "UploadId": uploadID, "PartNumber": 1}, []byte("part"))
+		input := completeInput(uploadID, completedPart(1, part))
+		input["Bucket"], input["Key"] = bucket, key
+		return uploadID, input
+	}
+	wantFault := func(uploadID string, input map[string]any, code, message string, status int, fields map[string]any) {
+		t.Helper()
+		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		fault := asFault(t, err)
+		if fault.Code != code || fault.Message != message || fault.HTTPStatus != status || fault.Fault != "client" || !maps.Equal(fault.Fields, fields) {
+			t.Fatalf("fault = %#v", fault)
+		}
+		listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": bucket, "Key": input["Key"], "UploadId": uploadID}, nil)
+		if len(listed.Output["Parts"].([]any)) != 1 {
+			t.Fatalf("rejected completion changed upload = %#v", listed.Output)
+		}
+	}
+
+	uploadID, input := upload("missing")
+	input["IfMatch"] = `"missing"`
+	wantFault(uploadID, input, "NoSuchKey", "The specified key does not exist.", http.StatusNotFound, map[string]any{"Key": "missing"})
+
+	put("mismatch", "old")
+	uploadID, input = upload("mismatch")
+	input["IfMatch"] = `"wrong"`
+	wantFault(uploadID, input, "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", http.StatusPreconditionFailed, map[string]any{"Condition": "If-Match"})
+
+	uploadID, input = upload("created-after-initiation")
+	put("created-after-initiation", "object")
+	input["IfNoneMatch"] = "*"
+	wantFault(uploadID, input, "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", http.StatusPreconditionFailed, map[string]any{"Condition": "If-None-Match"})
+
+	put("deleted-after-initiation", "object")
+	uploadID, input = upload("deleted-after-initiation")
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "deleted-after-initiation"}, nil)
+	input["IfNoneMatch"] = "*"
+	wantFault(uploadID, input, "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, map[string]any{"Condition": "If-None-Match", "Key": "deleted-after-initiation"})
+
+	put("changed-after-initiation", "old")
+	uploadID, input = upload("changed-after-initiation")
+	_ = deps.Clock.Advance(2 * time.Second)
+	input["IfMatch"] = put("changed-after-initiation", "new")
+	wantFault(uploadID, input, "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, map[string]any{"Condition": "If-Match", "Key": "changed-after-initiation"})
+
+	etag := put("unchanged", "old")
+	_, input = upload("unchanged")
+	input["IfMatch"] = etag
+	mustInvoke(t, p, "CompleteMultipartUpload", input, nil)
+	_, input = upload("absent")
+	input["IfNoneMatch"] = "*"
+	mustInvoke(t, p, "CompleteMultipartUpload", input, nil)
+}
+
 func TestMultipartCompletionFaultCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "completion-fault-golden"}, nil)

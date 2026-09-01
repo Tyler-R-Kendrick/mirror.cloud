@@ -4474,7 +4474,7 @@ func TestListObjectsV2Prefix(t *testing.T) {
 	}
 }
 
-func TestListObjectOwnerIdentity(t *testing.T) {
+func TestListObjectOwnerIdentityCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-owner"}, nil)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-owner", "Key": "key"}, []byte("body"))
@@ -4495,6 +4495,7 @@ func TestListObjectOwnerIdentity(t *testing.T) {
 	if v2Owner["ID"] != "123456789012" || v2Owner["DisplayName"] != nil {
 		t.Fatalf("ListObjectsV2 requested owner = %#v", v2Owner)
 	}
+	golden.AssertJSON(t, map[string]any{"v1": v1, "v2Default": v2["Owner"], "v2FetchOwner": v2Owner})
 }
 
 func TestListEncodingTypeValidation(t *testing.T) {

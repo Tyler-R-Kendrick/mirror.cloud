@@ -616,6 +616,61 @@ func TestConcurrentMultipartCompletionFaultsRemainModeled(t *testing.T) {
 	}
 }
 
+func TestConcurrentUploadPartContentMD5FaultsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "upload-part-md5-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateMultipartUpload", Input: map[string]any{"Bucket": "upload-part-md5-chaos", "Key": "key"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID := created.Output["UploadId"].(string)
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			body := []byte(fmt.Sprintf("part-%d", i))
+			digest := "!"
+			if i%2 != 0 {
+				digest = "AAAAAAAAAAAAAAAAAAAAAA=="
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "UploadPart", Input: map[string]any{"Bucket": "upload-part-md5-chaos", "Key": "key", "UploadId": uploadID, "PartNumber": i + 1, "ContentMD5": digest}, Body: io.NopCloser(bytes.NewReader(body))})
+			var fault *spi.Fault
+			if !errors.As(err, &fault) {
+				errs <- fmt.Errorf("digest fault = %v", err)
+			} else if i%2 == 0 && (fault.Code != "InvalidDigest" || fault.Message != "The Content-MD5 you specified was invalid." || fault.Fields["Content_MD5"] != digest) {
+				errs <- fmt.Errorf("malformed digest fault = %#v", fault)
+			} else if i%2 != 0 {
+				sum := md5.Sum(body)
+				calculated := base64.StdEncoding.EncodeToString(sum[:])
+				if fault.Code != "BadDigest" || fault.Message != "The Content-MD5 you specified did not match what we received." || fault.Fields["ExpectedDigest"] != digest || fault.Fields["CalculatedDigest"] != calculated {
+					errs <- fmt.Errorf("mismatched digest fault = %#v", fault)
+				} else {
+					errs <- nil
+				}
+			} else {
+				errs <- nil
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListParts", Input: map[string]any{"Bucket": "upload-part-md5-chaos", "Key": "key", "UploadId": uploadID}})
+	if err != nil || len(listed.Output["Parts"].([]any)) != 0 {
+		t.Fatalf("rejected digests stored parts = %#v, err=%v", listed, err)
+	}
+}
+
 func TestConcurrentBodyReadFailuresLeaveNoPartialObjects(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

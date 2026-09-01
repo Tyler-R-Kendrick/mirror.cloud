@@ -493,6 +493,30 @@ func TestS3MultipartContract(t *testing.T) {
 	if response.StatusCode != http.StatusOK || !bytes.Contains(completed, []byte("<ChecksumCRC32>")) || bytes.Contains(completed, []byte("<ChecksumCRC32>AA==</ChecksumCRC32>")) {
 		t.Fatalf("ignored composite aggregate: %d %s", response.StatusCode, completed)
 	}
+	request, _ = http.NewRequest(http.MethodPost, ts.URL+"/multipart-contract/alternate?uploads", nil)
+	request.Header.Set("x-amz-checksum-algorithm", "SHA256")
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initiated, _ = io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || xml.Unmarshal(initiated, &upload) != nil {
+		t.Fatalf("initiate alternate checksum: %d %s", response.StatusCode, initiated)
+	}
+	part, _ = do(http.MethodPut, "/multipart-contract/alternate?partNumber=1&uploadId="+url.QueryEscape(upload.UploadID), "checked")
+	manifest = "<CompleteMultipartUpload><Part><ETag>" + part.Header.Get("ETag") + "</ETag><PartNumber>1</PartNumber><ChecksumSHA256>" + part.Header.Get("x-amz-checksum-sha256") + "</ChecksumSHA256></Part></CompleteMultipartUpload>"
+	request, _ = http.NewRequest(http.MethodPost, ts.URL+"/multipart-contract/alternate?uploadId="+url.QueryEscape(upload.UploadID), strings.NewReader(manifest))
+	request.Header.Set("x-amz-checksum-crc32", "AAAAAA==")
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fault, _ = io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("<Code>BadDigest</Code>")) || !bytes.Contains(fault, []byte("The sha256 you specified did not match the calculated checksum.")) {
+		t.Fatalf("alternate object checksum: %d %s", response.StatusCode, fault)
+	}
 	createPart := func(key string) (string, string) {
 		_, initiated := do(http.MethodPost, "/multipart-contract/"+key+"?uploads", "")
 		if err := xml.Unmarshal(initiated, &upload); err != nil {

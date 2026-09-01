@@ -2215,6 +2215,9 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 	checksumType := strings.ToUpper(requestCondition(req, "ChecksumType", "x-amz-checksum-type"))
 	if algorithm != "" && checksumType == "" {
 		checksumType = "COMPOSITE"
+		if algorithm == "CRC64NVME" {
+			checksumType = "FULL_OBJECT"
+		}
 	}
 	if err := validateMultipartChecksumContract(req, algorithm, checksumType); err != nil {
 		return nil, err

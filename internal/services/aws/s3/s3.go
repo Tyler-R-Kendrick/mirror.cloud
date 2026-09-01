@@ -2407,7 +2407,8 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	var completedParts []any
 	previous := 0
 	checksum, hasChecksum := checksumByAlgorithm(u.checksumAlgorithm)
-	if requestedType := strings.ToUpper(requestCondition(req, "ChecksumType", "x-amz-checksum-type")); requestedType != "" && requestedType != u.checksumType {
+	requestedType := strings.ToUpper(requestCondition(req, "ChecksumType", "x-amz-checksum-type"))
+	if requestedType != "" && requestedType != u.checksumType {
 		return nil, &spi.Fault{Code: "InvalidRequest", Message: fmt.Sprintf("The upload was created using the %s checksum mode. The complete request must use the same checksum mode.", u.checksumType), HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
 	for index, completed := range parts {
@@ -2476,8 +2477,8 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 		if u.checksumType == "COMPOSITE" {
 			objectChecksum = checksumValue(checksum.input, partChecksums) + fmt.Sprintf("-%d", len(parts))
 		}
-		if supplied := requestCondition(req, checksum.input, checksum.header); u.checksumType == "FULL_OBJECT" && supplied != "" && supplied != objectChecksum {
-			return nil, &spi.Fault{Code: "BadDigest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		if supplied := requestCondition(req, checksum.input, checksum.header); u.checksumType == "FULL_OBJECT" && supplied != "" && (requestedType == "" || supplied != objectChecksum) {
+			return nil, &spi.Fault{Code: "BadDigest", Message: fmt.Sprintf("The %s you specified did not match the calculated checksum.", strings.ToLower(u.checksumAlgorithm)), HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
 		for _, other := range checksums {
 			if other.algorithm != checksum.algorithm && requestCondition(req, other.input, other.header) != "" {

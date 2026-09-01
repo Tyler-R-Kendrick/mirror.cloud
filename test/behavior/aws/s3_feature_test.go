@@ -624,7 +624,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		partPath := "/completion-checksum-type-bdd/object?partNumber=1&uploadId=" + url.QueryEscape(created.UploadID)
 		res = do(http.MethodPut, partPath, []byte("part"), "application/octet-stream")
-		etag := res.Header.Get("ETag")
+		etag, checksum := res.Header.Get("ETag"), res.Header.Get("x-amz-checksum-crc64nvme")
 		res.Body.Close()
 		manifest := `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`
 		request, _ := http.NewRequest(http.MethodPost, ts.URL+"/completion-checksum-type-bdd/object?uploadId="+url.QueryEscape(created.UploadID), strings.NewReader(manifest))
@@ -637,6 +637,29 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidRequest</Code>")) || !bytes.Contains(body, []byte("<Message>The upload was created using the FULL_OBJECT checksum mode. The complete request must use the same checksum mode.</Message>")) {
 			t.Fatalf("mismatched multipart checksum type %d %s", res.StatusCode, body)
+		}
+		request, _ = http.NewRequest(http.MethodPost, ts.URL+"/completion-checksum-type-bdd/object?uploadId="+url.QueryEscape(created.UploadID), strings.NewReader(manifest))
+		request.Header.Set("x-amz-checksum-crc64nvme", checksum)
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>BadDigest</Code>")) || !bytes.Contains(body, []byte("The crc64nvme you specified did not match the calculated checksum.")) {
+			t.Fatalf("implicit full-object checksum type %d %s", res.StatusCode, body)
+		}
+		request, _ = http.NewRequest(http.MethodPost, ts.URL+"/completion-checksum-type-bdd/object?uploadId="+url.QueryEscape(created.UploadID), strings.NewReader(manifest))
+		request.Header.Set("x-amz-checksum-crc64nvme", checksum)
+		request.Header.Set("x-amz-checksum-type", "FULL_OBJECT")
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<ChecksumType>FULL_OBJECT</ChecksumType>")) {
+			t.Fatalf("explicit full-object checksum type %d %s", res.StatusCode, body)
 		}
 	})
 

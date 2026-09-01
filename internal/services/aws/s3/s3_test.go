@@ -5032,6 +5032,12 @@ func TestMultipartChecksumContract(t *testing.T) {
 	binary.BigEndian.PutUint32(sum, crc32.ChecksumIEEE(body))
 	want := base64.StdEncoding.EncodeToString(sum)
 	complete["ChecksumCRC32"] = want
+	delete(complete, "ChecksumType")
+	_, err = invoke(t, p, "CompleteMultipartUpload", complete, nil)
+	if fault := asFault(t, err); fault.Code != "BadDigest" || fault.Message != "The crc32 you specified did not match the calculated checksum." || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("implicit full-object checksum type fault = %#v", fault)
+	}
+	complete["ChecksumType"] = "FULL_OBJECT"
 	done := mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
 	if done.Output["ChecksumCRC32"] != want || done.Output["ChecksumType"] != "FULL_OBJECT" {
 		t.Fatalf("complete checksum = %#v", done.Output)
@@ -5160,17 +5166,26 @@ func TestMultipartChecksumCharacterization(t *testing.T) {
 	alternateInput["ChecksumCRC32"] = "AAAAAA=="
 	_, err = invoke(t, p, "CompleteMultipartUpload", alternateInput, nil)
 	alternate := asFault(t, err)
+	fullID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "full", "ChecksumAlgorithm": "CRC32", "ChecksumType": "FULL_OBJECT"}, nil).Output["UploadId"].(string)
+	fullPart := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "full", "UploadId": fullID, "PartNumber": 1}, []byte("snapshot"))
+	fullInput := completeInput(fullID, completedPart(1, fullPart))
+	fullSum := make([]byte, 4)
+	binary.BigEndian.PutUint32(fullSum, crc32.ChecksumIEEE([]byte("snapshot")))
+	fullInput["ChecksumCRC32"] = base64.StdEncoding.EncodeToString(fullSum)
+	_, err = invoke(t, p, "CompleteMultipartUpload", fullInput, nil)
+	fullObjectType := asFault(t, err)
 	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "snapshot"}, nil)
 	tags := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "snapshot"}, nil).Output["TagSet"]
 	golden.AssertJSON(t, map[string]any{
-		"create":    map[string]any{"algorithm": created.Output["ChecksumAlgorithm"], "type": created.Output["ChecksumType"], "storageClass": "STANDARD_IA", "tags": "env=snapshot"},
-		"part":      map[string]any{"checksum": part.Headers.Get("x-amz-checksum-sha256")},
-		"list":      map[string]any{"algorithm": listed.Output["ChecksumAlgorithm"], "type": listed.Output["ChecksumType"], "part": listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumSHA256"]},
-		"mismatch":  map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus},
-		"missing":   map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus},
-		"alternate": map[string]any{"code": alternate.Code, "message": alternate.Message, "status": alternate.HTTPStatus},
-		"complete":  map[string]any{"checksum": done.Output["ChecksumSHA256"], "supplied": "AA==", "type": done.Output["ChecksumType"]},
-		"object":    map[string]any{"cacheControl": head.Headers.Get("Cache-Control"), "contentType": head.Headers.Get("Content-Type"), "metadata": head.Headers.Get("x-amz-meta-env"), "redirect": head.Headers.Get("x-amz-website-redirect-location"), "storageClass": head.Headers.Get("x-amz-storage-class"), "tags": tags},
+		"create":         map[string]any{"algorithm": created.Output["ChecksumAlgorithm"], "type": created.Output["ChecksumType"], "storageClass": "STANDARD_IA", "tags": "env=snapshot"},
+		"part":           map[string]any{"checksum": part.Headers.Get("x-amz-checksum-sha256")},
+		"list":           map[string]any{"algorithm": listed.Output["ChecksumAlgorithm"], "type": listed.Output["ChecksumType"], "part": listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumSHA256"]},
+		"mismatch":       map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus},
+		"missing":        map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus},
+		"alternate":      map[string]any{"code": alternate.Code, "message": alternate.Message, "status": alternate.HTTPStatus},
+		"fullObjectType": map[string]any{"code": fullObjectType.Code, "message": fullObjectType.Message, "status": fullObjectType.HTTPStatus},
+		"complete":       map[string]any{"checksum": done.Output["ChecksumSHA256"], "supplied": "AA==", "type": done.Output["ChecksumType"]},
+		"object":         map[string]any{"cacheControl": head.Headers.Get("Cache-Control"), "contentType": head.Headers.Get("Content-Type"), "metadata": head.Headers.Get("x-amz-meta-env"), "redirect": head.Headers.Get("x-amz-website-redirect-location"), "storageClass": head.Headers.Get("x-amz-storage-class"), "tags": tags},
 	})
 }
 

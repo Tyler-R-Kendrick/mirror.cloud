@@ -2746,6 +2746,34 @@ func FuzzAlternateMultipartChecksum(f *testing.F) {
 	})
 }
 
+func FuzzFullObjectChecksumType(f *testing.F) {
+	f.Add("body", false)
+	f.Add("", true)
+	f.Fuzz(func(t *testing.T, body string, explicit bool) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-full-type-fuzz"}, nil)
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-full-type-fuzz", "Key": "object", "ChecksumAlgorithm": "CRC32", "ChecksumType": "FULL_OBJECT"}, nil)
+		uploadID := created.Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "multipart-full-type-fuzz", "Key": "object", "UploadId": uploadID, "PartNumber": 1}, []byte(body))
+		input := completeInput(uploadID, completedPart(1, part))
+		input["ChecksumCRC32"] = part.Headers.Get("x-amz-checksum-crc32")
+		if explicit {
+			input["ChecksumType"] = "FULL_OBJECT"
+			if completed := mustInvoke(t, p, "CompleteMultipartUpload", input, nil); completed.Output["ChecksumType"] != "FULL_OBJECT" {
+				t.Fatalf("explicit output=%#v", completed.Output)
+			}
+			return
+		}
+		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		if fault := asFault(t, err); fault.Code != "BadDigest" || fault.Message != "The crc32 you specified did not match the calculated checksum." {
+			t.Fatalf("implicit fault=%#v", fault)
+		}
+	})
+}
+
 func FuzzMultipartSSECustomerKey(f *testing.F) {
 	f.Add(uint8(0), []byte("key"), "body")
 	f.Add(uint8(1), []byte("digest-only"), "md5")

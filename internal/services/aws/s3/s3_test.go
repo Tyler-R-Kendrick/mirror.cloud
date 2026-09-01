@@ -5057,7 +5057,7 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 	}
 	zeroInput["MpuObjectSize"] = "0"
 	mustInvoke(t, p, "CompleteMultipartUpload", zeroInput, nil)
-	wantFault(create("empty"), "InvalidPart")
+	wantFault(create("empty"), "InvalidRequest")
 }
 
 func TestListPartsAndMultipartUploads(t *testing.T) {

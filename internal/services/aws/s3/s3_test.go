@@ -4801,6 +4801,47 @@ func TestWriteChecksumValidation(t *testing.T) {
 	}
 }
 
+func TestUploadPartContentMD5(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "upload-part-md5"}, nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "upload-part-md5", "Key": "key"}, nil).Output["UploadId"].(string)
+	body := []byte("content-md5")
+	for _, test := range []struct {
+		value, code, message string
+		fields               map[string]any
+	}{
+		{"!", "InvalidDigest", "The Content-MD5 you specified was invalid.", map[string]any{"Content_MD5": "!"}},
+		{"AAAAAAAAAAAAAAAAAAAAAA==", "BadDigest", "The Content-MD5 you specified did not match what we received.", map[string]any{"ExpectedDigest": "AAAAAAAAAAAAAAAAAAAAAA=="}},
+	} {
+		_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "upload-part-md5", "Key": "key", "UploadId": uploadID, "PartNumber": 1, "ContentMD5": test.value}, body)
+		fault := asFault(t, err)
+		if fault.Code != test.code || fault.Message != test.message || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("Content-MD5 %q fault = %#v", test.value, fault)
+		}
+		for key, value := range test.fields {
+			if fault.Fields[key] != value {
+				t.Fatalf("Content-MD5 %q field %s = %#v", test.value, key, fault)
+			}
+		}
+		if test.code == "BadDigest" {
+			sum := md5.Sum(body)
+			if fault.Fields["CalculatedDigest"] != base64.StdEncoding.EncodeToString(sum[:]) {
+				t.Fatalf("Content-MD5 calculated digest = %#v", fault)
+			}
+		}
+	}
+	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "upload-part-md5", "Key": "key", "UploadId": uploadID}, nil)
+	if len(listed.Output["Parts"].([]any)) != 0 {
+		t.Fatalf("rejected digest stored parts = %#v", listed.Output)
+	}
+	sum := md5.Sum(body)
+	mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "upload-part-md5", "Key": "key", "UploadId": uploadID, "PartNumber": 1, "ContentMD5": base64.StdEncoding.EncodeToString(sum[:])}, body)
+	_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "upload-part-md5", "Key": "key", "UploadId": "missing", "PartNumber": 1, "ContentMD5": "!"}, body)
+	if fault := asFault(t, err); fault.Code != "NoSuchUpload" || fault.Fields["UploadId"] != "missing" {
+		t.Fatalf("missing upload digest precedence = %#v", fault)
+	}
+}
+
 func TestMultipartChecksumContract(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

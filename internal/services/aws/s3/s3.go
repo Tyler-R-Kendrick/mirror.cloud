@@ -2466,8 +2466,13 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	}
 	resp.Headers.Set("ETag", etag)
 	resp.Output = map[string]any{"Bucket": bucket, "Key": key, "ETag": etag}
-	resp.Output[checksum.input] = objectChecksum
-	resp.Output["ChecksumType"] = u.checksumType
+	if strings.HasPrefix(u.serverSideEncryption, "aws:kms") {
+		resp.Headers.Del(checksum.header)
+		resp.Headers.Del("x-amz-checksum-type")
+	} else {
+		resp.Output[checksum.input] = objectChecksum
+		resp.Output["ChecksumType"] = u.checksumType
+	}
 	p.mu.Lock()
 	delete(p.mpu, id)
 	p.mu.Unlock()

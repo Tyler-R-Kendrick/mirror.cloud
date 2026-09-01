@@ -2833,6 +2833,11 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 	defer p.versionMu.Unlock()
 	prefix, delimiter := str(req.Input["Prefix"]), str(req.Input["Delimiter"])
 	keyMarker, versionMarker := str(req.Input["KeyMarker"]), str(req.Input["VersionIdMarker"])
+	if str(req.Input["EncodingType"]) == "url" {
+		if decoded, err := url.PathUnescape(keyMarker); err == nil {
+			keyMarker = decoded
+		}
+	}
 	if versionMarker != "" && keyMarker == "" {
 		return nil, &spi.Fault{Code: "InvalidArgument", Message: "A version-id marker cannot be specified without a key marker.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "version-id-marker", "ArgumentValue": versionMarker}}
 	}

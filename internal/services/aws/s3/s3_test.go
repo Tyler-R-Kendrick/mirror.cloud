@@ -5301,9 +5301,18 @@ func TestMultipartPartNumberBounds(t *testing.T) {
 		{"UploadId": uploadID, "PartNumber": 10001},
 	} {
 		_, err := invoke(t, p, "UploadPart", input, []byte("part"))
-		if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+		fault := asFault(t, err)
+		want := 0
+		if number, ok := input["PartNumber"]; ok {
+			want = number.(int)
+		}
+		if fault.Code != "InvalidArgument" || fault.Message != "Part number must be an integer between 1 and 10000, inclusive" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "partNumber" || fault.Fields["ArgumentValue"] != want {
 			t.Fatalf("UploadPart %#v fault = %#v", input, fault)
 		}
+	}
+	_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "k", "UploadId": "missing", "PartNumber": 0}, []byte("part"))
+	if fault := asFault(t, err); fault.Code != "NoSuchUpload" || fault.Fields["UploadId"] != "missing" {
+		t.Fatalf("missing upload precedence fault = %#v", fault)
 	}
 	last := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 10000}, []byte("last"))
 	for _, number := range []int{0, 10001} {
@@ -5317,6 +5326,22 @@ func TestMultipartPartNumberBounds(t *testing.T) {
 	if listed.Output["Parts"].([]any)[0].(map[string]any)["PartNumber"] != 10000 {
 		t.Fatalf("valid boundary part = %v", listed.Output)
 	}
+}
+
+func TestMultipartPartNumberFaultCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "part-number-golden"}, nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "part-number-golden", "Key": "key"}, nil).Output["UploadId"].(string)
+	results := []any{}
+	for _, number := range []int{-1, 0, 10001} {
+		_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "part-number-golden", "Key": "key", "UploadId": uploadID, "PartNumber": number}, []byte("part"))
+		fault := asFault(t, err)
+		results = append(results, map[string]any{"code": fault.Code, "message": fault.Message, "fields": fault.Fields})
+	}
+	_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "part-number-golden", "Key": "key", "UploadId": "missing", "PartNumber": 0}, []byte("part"))
+	fault := asFault(t, err)
+	results = append(results, map[string]any{"code": fault.Code, "message": fault.Message, "fields": fault.Fields})
+	golden.AssertJSON(t, results)
 }
 
 func TestMissingBucket404(t *testing.T) {

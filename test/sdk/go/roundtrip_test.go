@@ -1874,6 +1874,9 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create multipart copy: %v", err)
 	}
+	if _, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, PartNumber: aws.Int32(10001), Body: strings.NewReader("part")}); err == nil || !strings.Contains(err.Error(), "Part number must be an integer between 1 and 10000, inclusive") {
+		t.Fatalf("invalid multipart part number: %v", err)
+	}
 	otherUpload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy")})
 	if err != nil {
 		t.Fatalf("create second multipart copy: %v", err)

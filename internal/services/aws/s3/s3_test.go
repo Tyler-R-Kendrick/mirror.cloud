@@ -4527,6 +4527,7 @@ func TestListObjectChecksumMetadata(t *testing.T) {
 	sum := sha256.Sum256(body)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-checksums", "Key": "checksummed", "ChecksumSHA256": base64.StdEncoding.EncodeToString(sum[:])}, body)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-checksums", "Key": "plain"}, body)
+	characterization := map[string]any{}
 	for _, operation := range []string{"ListObjects", "ListObjectsV2"} {
 		contents := mustInvoke(t, p, operation, map[string]any{"Bucket": "list-checksums"}, nil).Output["Contents"].([]any)
 		checksummed, plain := asMapForTest(contents[0]), asMapForTest(contents[1])
@@ -4536,7 +4537,12 @@ func TestListObjectChecksumMetadata(t *testing.T) {
 		if plain["ChecksumAlgorithm"] != nil || plain["ChecksumType"] != nil {
 			t.Fatalf("%s plain object = %#v", operation, plain)
 		}
+		characterization[operation] = []any{
+			map[string]any{"key": checksummed["Key"], "algorithm": checksummed["ChecksumAlgorithm"], "type": checksummed["ChecksumType"]},
+			map[string]any{"key": plain["Key"], "algorithm": plain["ChecksumAlgorithm"], "type": plain["ChecksumType"]},
+		}
 	}
+	golden.AssertJSON(t, characterization)
 }
 
 func TestListEncodingTypeValidation(t *testing.T) {

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -557,6 +558,50 @@ func TestConcurrentMultipartPartNumberFaultsRemainModeled(t *testing.T) {
 				errs <- fmt.Errorf("missing upload fault = %#v", fault)
 			} else if !missing && (fault.Code != "InvalidArgument" || fault.Message != "Part number must be an integer between 1 and 10000, inclusive" || fault.Fields["ArgumentName"] != "partNumber" || fault.Fields["ArgumentValue"] != number) {
 				errs <- fmt.Errorf("part number %d fault = %#v", number, fault)
+			} else {
+				errs <- nil
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentMultipartCompletionFaultsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "completion-fault-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateMultipartUpload", Input: map[string]any{"Bucket": "completion-fault-chaos", "Key": "key"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID := created.Output["UploadId"].(string)
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			parts := []any{}
+			if i%2 != 0 {
+				parts = []any{map[string]any{"PartNumber": i + 1, "ETag": fmt.Sprintf("missing-%d", i)}}
+			}
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CompleteMultipartUpload", Input: map[string]any{"Bucket": "completion-fault-chaos", "Key": "key", "UploadId": uploadID, "MultipartUpload": map[string]any{"Parts": parts}}})
+			var fault *spi.Fault
+			if !errors.As(err, &fault) {
+				errs <- fmt.Errorf("completion fault = %v", err)
+			} else if i%2 == 0 && (fault.Code != "InvalidRequest" || fault.Message != "You must specify at least one part") {
+				errs <- fmt.Errorf("empty completion fault = %#v", fault)
+			} else if i%2 != 0 && (fault.Code != "InvalidPart" || fault.Message != "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag." || fault.Fields["ETag"] != fmt.Sprintf("missing-%d", i) || fault.Fields["PartNumber"] != strconv.Itoa(i+1) || fault.Fields["UploadId"] != uploadID) {
+				errs <- fmt.Errorf("missing part fault = %#v", fault)
 			} else {
 				errs <- nil
 			}

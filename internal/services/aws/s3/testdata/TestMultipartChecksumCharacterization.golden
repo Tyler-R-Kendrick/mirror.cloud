@@ -1,4 +1,9 @@
 {
+  "alternate": {
+    "code": "BadDigest",
+    "message": "The sha256 you specified did not match the calculated checksum.",
+    "status": 400
+  },
   "complete": {
     "checksum": "lqO4Pw4bCAVpiCS4ITdT8Pwb+k8gptYqB2Yqy6oE9/s=-1",
     "supplied": "AA==",

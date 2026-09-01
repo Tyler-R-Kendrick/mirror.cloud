@@ -2481,7 +2481,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 		}
 		for _, other := range checksums {
 			if other.algorithm != checksum.algorithm && requestCondition(req, other.input, other.header) != "" {
-				return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+				return nil, &spi.Fault{Code: "BadDigest", Message: fmt.Sprintf("The %s you specified did not match the calculated checksum.", strings.ToLower(u.checksumAlgorithm)), HTTPStatus: http.StatusBadRequest, Fault: "client"}
 			}
 		}
 		req.Input[checksum.input], req.Input["ChecksumType"] = objectChecksum, u.checksumType

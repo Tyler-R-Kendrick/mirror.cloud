@@ -2718,6 +2718,34 @@ func FuzzCompositeAggregateChecksumIgnored(f *testing.F) {
 	})
 }
 
+func FuzzAlternateMultipartChecksum(f *testing.F) {
+	f.Add("body", "AAAAAA==")
+	f.Add("", "wrong")
+	f.Add("body", "")
+	f.Fuzz(func(t *testing.T, body, alternate string) {
+		if len(body) > 4096 || len(alternate) > 256 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-alternate-fuzz"}, nil)
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-alternate-fuzz", "Key": "object", "ChecksumAlgorithm": "SHA256"}, nil)
+		uploadID := created.Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "multipart-alternate-fuzz", "Key": "object", "UploadId": uploadID, "PartNumber": 1}, []byte(body))
+		input := completeInput(uploadID, completedPartWithChecksum(1, part, "ChecksumSHA256", "x-amz-checksum-sha256"))
+		input["ChecksumCRC32"] = alternate
+		completed, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		if alternate == "" {
+			if err != nil || completed.Output["ChecksumType"] != "COMPOSITE" {
+				t.Fatalf("empty alternate: output=%#v err=%v", completed, err)
+			}
+			return
+		}
+		if fault := asFault(t, err); fault.Code != "BadDigest" || fault.Message != "The sha256 you specified did not match the calculated checksum." || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("alternate=%q fault=%#v", alternate, fault)
+		}
+	})
+}
+
 func FuzzMultipartSSECustomerKey(f *testing.F) {
 	f.Add(uint8(0), []byte("key"), "body")
 	f.Add(uint8(1), []byte("digest-only"), "md5")

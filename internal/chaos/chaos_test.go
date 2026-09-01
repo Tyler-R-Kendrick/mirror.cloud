@@ -606,6 +606,62 @@ func TestConcurrentCompositeMultipartUploadsRequirePartChecksums(t *testing.T) {
 	}
 }
 
+func TestConcurrentMultipartObjectSizesRemainConsistent(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "multipart-size-chaos"}, "")
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key, body := fmt.Sprintf("object-%d", i), fmt.Sprintf("part-%d", i)
+			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-size-chaos", "Key": key}, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			uploadID := created.Output["UploadId"].(string)
+			part, err := call("UploadPart", map[string]any{"Bucket": "multipart-size-chaos", "Key": key, "UploadId": uploadID, "PartNumber": 1}, body)
+			if err != nil {
+				errs <- err
+				return
+			}
+			size := "0"
+			if i%2 != 0 {
+				size = strconv.Itoa(len(body) + 1)
+			}
+			_, err = call("CompleteMultipartUpload", map[string]any{"Bucket": "multipart-size-chaos", "Key": key, "UploadId": uploadID, "MpuObjectSize": size, "MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}}, "")
+			if i%2 == 0 && err == nil {
+				errs <- nil
+				return
+			}
+			fault, ok := err.(*spi.Fault)
+			if i%2 == 0 || !ok || fault.Code != "InvalidRequest" || fault.Message != fmt.Sprintf("The provided 'x-amz-mp-object-size' header value %d does not match what was computed: %d", len(body)+1, len(body)) {
+				errs <- fmt.Errorf("completion %d: %#v", i, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
 func TestConcurrentMissingMultipartUploadsRemainModeled(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

@@ -2,11 +2,13 @@ package conformance
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/catalog"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -17,6 +19,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/aws/restxml"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/gcp/gcprest"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
@@ -171,5 +174,40 @@ func TestDecodeConsumesBodyOnce(t *testing.T) {
 	rest, _ := io.ReadAll(r.Body)
 	if len(rest) != 0 {
 		t.Fatalf("body not consumed: %q", rest)
+	}
+}
+
+func TestStatesWaitExecutionContract(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := states.New(deps)
+	defer func() { _ = p.Close() }()
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStateMachine", Input: map[string]any{
+		"name": "wait-contract", "definition": `{"StartAt":"Wait","States":{"Wait":{"Type":"Wait","Seconds":1,"End":true}}}`, "roleArn": "arn:aws:iam::000000000000:role/states",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartExecution", Input: map[string]any{"stateMachineArn": created.Output["stateMachineArn"], "name": "run"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := deps.Clock.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		described, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeExecution", Input: map[string]any{"executionArn": started.Output["executionArn"]}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if described.Output["status"] == "SUCCEEDED" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Wait execution remained %#v", described.Output)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

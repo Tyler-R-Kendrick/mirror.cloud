@@ -693,6 +693,7 @@ func SupportMatrix() string {
 	sb.WriteString("CompleteMultipartUpload returns LocalStack-compatible InvalidRequest details when the requested checksum type differs from the mode selected at upload creation.\n")
 	sb.WriteString("CompleteMultipartUpload returns LocalStack-compatible NotImplemented details for combined conditional headers, non-wildcard If-None-Match, and wildcard If-Match values.\n")
 	sb.WriteString("CompleteMultipartUpload returns LocalStack-compatible NoSuchKey, PreconditionFailed, and ConditionalRequestConflict details when If-Match or If-None-Match object state changes across multipart initiation and completion.\n")
+	sb.WriteString("CompleteMultipartUpload omits checksum response fields for KMS-encrypted multipart objects while persisting the checksum for ChecksumMode-enabled reads.\n")
 	sb.WriteString("UploadPart validates Content-MD5 before storing a part, returning LocalStack-compatible InvalidDigest details for malformed values and BadDigest expected/calculated details for body mismatches; rejected digests leave the upload unchanged.\n")
 	sb.WriteString("UploadPart distinguishes checksum algorithm mismatches, malformed checksum header values, and valid-length body mismatches with LocalStack-compatible InvalidRequest and BadDigest messages.\n")
 	sb.WriteString("UploadPart distinguishes missing or unexpected SSE-C parameters from valid but mismatched customer keys using LocalStack-compatible InvalidRequest messages.\n")

@@ -222,6 +222,7 @@ CompleteMultipartUpload returns LocalStack-compatible InvalidRequest, InvalidPar
 CompleteMultipartUpload returns LocalStack-compatible InvalidRequest details when the requested checksum type differs from the mode selected at upload creation.
 CompleteMultipartUpload returns LocalStack-compatible NotImplemented details for combined conditional headers, non-wildcard If-None-Match, and wildcard If-Match values.
 CompleteMultipartUpload returns LocalStack-compatible NoSuchKey, PreconditionFailed, and ConditionalRequestConflict details when If-Match or If-None-Match object state changes across multipart initiation and completion.
+CompleteMultipartUpload omits checksum response fields for KMS-encrypted multipart objects while persisting the checksum for ChecksumMode-enabled reads.
 UploadPart validates Content-MD5 before storing a part, returning LocalStack-compatible InvalidDigest details for malformed values and BadDigest expected/calculated details for body mismatches; rejected digests leave the upload unchanged.
 UploadPart distinguishes checksum algorithm mismatches, malformed checksum header values, and valid-length body mismatches with LocalStack-compatible InvalidRequest and BadDigest messages.
 UploadPart distinguishes missing or unexpected SSE-C parameters from valid but mismatched customer keys using LocalStack-compatible InvalidRequest messages.

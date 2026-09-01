@@ -2041,7 +2041,11 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 		if parsed, err := http.ParseTime(modified); err == nil {
 			modified = parsed.UTC().Format(time.RFC3339)
 		}
-		entries = append(entries, entry{value: key, content: map[string]any{"Key": key, "Size": meta["size"], "ETag": meta["etag"], "LastModified": modified, "StorageClass": meta["storageClass"]}})
+		content := map[string]any{"Key": key, "Size": meta["size"], "ETag": meta["etag"], "LastModified": modified, "StorageClass": meta["storageClass"]}
+		if req.Operation == "ListObjects" || truthy(req.Input["FetchOwner"]) || truthy(req.Input["fetch-owner"]) {
+			content["Owner"] = map[string]any{"ID": req.Identity.Account}
+		}
+		entries = append(entries, entry{value: key, content: content})
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].value < entries[j].value

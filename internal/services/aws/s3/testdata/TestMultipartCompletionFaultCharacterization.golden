@@ -1,0 +1,33 @@
+{
+  "empty": {
+    "code": "InvalidRequest",
+    "fields": {},
+    "message": "You must specify at least one part"
+  },
+  "missing": {
+    "code": "InvalidPart",
+    "fields": {
+      "ETag": "missing",
+      "PartNumber": "9",
+      "UploadId": "\u003cupload-id\u003e"
+    },
+    "message": "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag."
+  },
+  "order": {
+    "code": "InvalidPartOrder",
+    "fields": {
+      "UploadId": "\u003cupload-id\u003e"
+    },
+    "message": "The list of parts was not in ascending order. Parts must be ordered by part number."
+  },
+  "small": {
+    "code": "EntityTooSmall",
+    "fields": {
+      "ETag": "eb5c1399a871211c7e7ed732d15e3a8b",
+      "MinSizeAllowed": 5242880,
+      "PartNumber": "1",
+      "ProposedSize": 5
+    },
+    "message": "Your proposed upload is smaller than the minimum allowed size"
+  }
+}

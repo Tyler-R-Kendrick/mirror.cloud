@@ -5072,6 +5072,40 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 	}
 }
 
+func TestMultipartCompletionFaultCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "completion-fault-golden"}, nil)
+	create := func(key string) string {
+		t.Helper()
+		return mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "completion-fault-golden", "Key": key}, nil).Output["UploadId"].(string)
+	}
+	capture := func(uploadID string, parts ...any) map[string]any {
+		t.Helper()
+		_, err := invoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, parts...), nil)
+		fault := asFault(t, err)
+		fields := map[string]any{}
+		for key, value := range fault.Fields {
+			fields[key] = value
+		}
+		if _, ok := fields["UploadId"]; ok {
+			fields["UploadId"] = "<upload-id>"
+		}
+		return map[string]any{"code": fault.Code, "message": fault.Message, "fields": fields}
+	}
+	results := map[string]any{"empty": capture(create("empty"))}
+	missing := create("missing")
+	results["missing"] = capture(missing, map[string]any{"PartNumber": 9, "ETag": `"missing"`})
+	order := create("order")
+	second := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": order, "PartNumber": 2}, bytes.Repeat([]byte("A"), 5<<20))
+	first := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": order, "PartNumber": 1}, []byte("last"))
+	results["order"] = capture(order, completedPart(2, second), completedPart(1, first))
+	small := create("small")
+	smallFirst := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": small, "PartNumber": 1}, []byte("small"))
+	smallLast := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": small, "PartNumber": 2}, []byte("last"))
+	results["small"] = capture(small, completedPart(1, smallFirst), completedPart(2, smallLast))
+	golden.AssertJSON(t, results)
+}
+
 func TestListPartsAndMultipartUploads(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

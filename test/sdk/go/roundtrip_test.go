@@ -947,7 +947,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || inheritedEncryption.ServerSideEncryption != s3types.ServerSideEncryptionAwsKms || aws.ToString(inheritedEncryption.SSEKMSKeyId) != bucketEncryptionKey || !aws.ToBool(inheritedEncryption.BucketKeyEnabled) {
 		t.Fatalf("inherited bucket encryption: %#v %v", inheritedEncryption, err)
 	}
-	kmsUpload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-kms-multipart")})
+	kmsUpload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-kms-multipart"), ChecksumAlgorithm: s3types.ChecksumAlgorithmCrc64nvme})
 	if err != nil {
 		t.Fatalf("create KMS multipart upload: %v", err)
 	}

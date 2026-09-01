@@ -189,6 +189,26 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given URL encoding When listing V1 and V2 Then response values are percent encoded", func(t *testing.T) {
+		res := do(http.MethodPut, "/list-url-bdd", nil, "")
+		res.Body.Close()
+		for _, key := range []string{"folder/a%20b/file%2Bone", "folder/root%20%3F"} {
+			res = do(http.MethodPut, "/list-url-bdd/"+key, []byte("body"), "")
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("put %q: %d", key, res.StatusCode)
+			}
+		}
+		for _, query := range []string{"prefix=folder%2F&delimiter=%2F&encoding-type=url", "list-type=2&prefix=folder%2F&delimiter=%2F&encoding-type=url"} {
+			res = do(http.MethodGet, "/list-url-bdd?"+query, nil, "")
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<CommonPrefixes><Prefix>folder/a%20b/</Prefix></CommonPrefixes>")) || !bytes.Contains(body, []byte("<Key>folder/root%20%3F</Key>")) || !bytes.Contains(body, []byte("<EncodingType>url</EncodingType>")) {
+				t.Fatalf("list %q: %d %s", query, res.StatusCode, body)
+			}
+		}
+	})
+
 	t.Run("Given invalid list encoding When listing Then S3 rejects every list operation", func(t *testing.T) {
 		res := do(http.MethodPut, "/list-encoding-bdd", nil, "")
 		io.Copy(io.Discard, res.Body)

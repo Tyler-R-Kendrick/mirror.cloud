@@ -2090,7 +2090,10 @@ func TestListBucketsPaginationAndFilters(t *testing.T) {
 		if id.Region != "us-east-1" {
 			input["LocationConstraint"] = id.Region
 		}
-		mustInvokeAs(t, p, id, "CreateBucket", input, nil)
+		created := mustInvokeAs(t, p, id, "CreateBucket", input, nil)
+		if created.Output["BucketArn"] != "arn:aws:s3:::"+name {
+			t.Fatalf("create bucket ARN = %#v", created.Output)
+		}
 		if err := deps.Clock.Advance(time.Second); err != nil {
 			t.Fatal(err)
 		}
@@ -2115,7 +2118,7 @@ func TestListBucketsPaginationAndFilters(t *testing.T) {
 		t.Fatalf("all buckets = %s", got)
 	}
 	firstCreated := stringValue(asMapForTest(all.Output["Buckets"].([]any)[0])["CreationDate"])
-	if firstCreated == "" || asMapForTest(all.Output["Buckets"].([]any)[0])["BucketRegion"] != nil {
+	if firstCreated == "" || asMapForTest(all.Output["Buckets"].([]any)[0])["BucketRegion"] != nil || asMapForTest(all.Output["Buckets"].([]any)[0])["BucketArn"] != "arn:aws:s3:::alpha-bucket" {
 		t.Fatalf("unpaginated bucket = %#v", all.Output["Buckets"].([]any)[0])
 	}
 	if err := deps.Clock.Advance(time.Hour); err != nil {

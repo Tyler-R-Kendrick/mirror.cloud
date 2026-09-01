@@ -1673,6 +1673,53 @@ func FuzzMultipartCompletionFaults(f *testing.F) {
 	})
 }
 
+func FuzzUploadPartContentMD5(f *testing.F) {
+	f.Add([]byte("part"), "!", false)
+	f.Add([]byte("part"), "AAAAAAAAAAAAAAAAAAAAAA==", false)
+	sum := md5.Sum([]byte("part"))
+	f.Add([]byte("part"), base64.StdEncoding.EncodeToString(sum[:]), false)
+	f.Add([]byte("part"), "", false)
+	f.Add([]byte("part"), "!", true)
+	f.Fuzz(func(t *testing.T, body []byte, digest string, missing bool) {
+		if len(body) > 4096 || len(digest) > 128 || !utf8.ValidString(digest) {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "upload-part-md5-fuzz"}, nil)
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "upload-part-md5-fuzz", "Key": "key"}, nil).Output["UploadId"].(string)
+		if missing {
+			uploadID = "missing"
+		}
+		_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "upload-part-md5-fuzz", "Key": "key", "UploadId": uploadID, "PartNumber": 1, "ContentMD5": digest}, body)
+		if missing {
+			if fault := asFault(t, err); fault.Code != "NoSuchUpload" || fault.Fields["UploadId"] != uploadID {
+				t.Fatalf("missing upload fault = %#v", fault)
+			}
+			return
+		}
+		if digest == "" {
+			if err != nil {
+				t.Fatalf("empty digest: %v", err)
+			}
+			return
+		}
+		decoded, decodeErr := base64.StdEncoding.DecodeString(digest)
+		sum := md5.Sum(body)
+		calculated := base64.StdEncoding.EncodeToString(sum[:])
+		if decodeErr != nil || len(decoded) != md5.Size {
+			if fault := asFault(t, err); fault.Code != "InvalidDigest" || fault.Message != "The Content-MD5 you specified was invalid." || fault.Fields["Content_MD5"] != digest {
+				t.Fatalf("malformed digest %q fault = %#v", digest, fault)
+			}
+		} else if digest != calculated {
+			if fault := asFault(t, err); fault.Code != "BadDigest" || fault.Message != "The Content-MD5 you specified did not match what we received." || fault.Fields["ExpectedDigest"] != digest || fault.Fields["CalculatedDigest"] != calculated {
+				t.Fatalf("mismatched digest %q fault = %#v", digest, fault)
+			}
+		} else if err != nil {
+			t.Fatalf("valid digest %q: %v", digest, err)
+		}
+	})
+}
+
 func FuzzDeleteObjectVersionRestoration(f *testing.F) {
 	f.Add("first", "second", "third", uint8(2))
 	f.Add("", "same", "same", uint8(1))

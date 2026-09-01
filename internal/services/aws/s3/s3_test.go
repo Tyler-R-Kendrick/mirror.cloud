@@ -4850,14 +4850,9 @@ func TestWriteChecksumValidation(t *testing.T) {
 	}
 	complete := completeInput(uploadID, completedPartWithChecksum(1, part, "ChecksumMD5", "x-amz-checksum-md5"))
 	complete["ChecksumMD5"] = "AA=="
-	_, err = invoke(t, p, "CompleteMultipartUpload", complete, nil)
-	if fault := asFault(t, err); fault.Code != "BadDigest" {
-		t.Fatalf("complete checksum fault = %#v", fault)
-	}
 	partDigest := md5.Sum(body)
 	compositeDigest := md5.Sum(partDigest[:])
 	composite := base64.StdEncoding.EncodeToString(compositeDigest[:]) + "-1"
-	complete["ChecksumMD5"] = composite
 	done := mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
 	if done.Output["ChecksumMD5"] != composite || done.Output["ChecksumType"] != "COMPOSITE" {
 		t.Fatalf("complete checksum output = %#v", done.Output)
@@ -5058,6 +5053,14 @@ func TestMultipartChecksumContract(t *testing.T) {
 	if fault := asFault(t, err); fault.Code != "BadDigest" || fault.Message != "The sha256 you specified for part 1 did not match what we received." || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("alternate part checksum fault = %#v", fault)
 	}
+	ignored := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "ignored-composite", "ChecksumAlgorithm": "CRC32"}, nil).Output["UploadId"].(string)
+	ignoredPart := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "ignored-composite", "UploadId": ignored, "PartNumber": 1}, body)
+	ignoredInput := completeInput(ignored, completedPartWithChecksum(1, ignoredPart, "ChecksumCRC32", "x-amz-checksum-crc32"))
+	ignoredInput["ChecksumCRC32"] = "AA=="
+	ignoredDone := mustInvoke(t, p, "CompleteMultipartUpload", ignoredInput, nil)
+	if ignoredDone.Output["ChecksumCRC32"] == "AA==" || ignoredDone.Output["ChecksumType"] != "COMPOSITE" {
+		t.Fatalf("ignored composite checksum = %#v", ignoredDone.Output)
+	}
 
 	composite := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "gap", "ChecksumAlgorithm": "SHA256"}, nil)
 	compositeID := composite.Output["UploadId"].(string)
@@ -5140,7 +5143,9 @@ func TestMultipartChecksumCharacterization(t *testing.T) {
 	fault := asFault(t, err)
 	_, err = invoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, part)), nil)
 	missing := asFault(t, err)
-	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPartWithChecksum(1, part, "ChecksumSHA256", "x-amz-checksum-sha256")), nil)
+	completion := completeInput(id, completedPartWithChecksum(1, part, "ChecksumSHA256", "x-amz-checksum-sha256"))
+	completion["ChecksumSHA256"] = "AA=="
+	done := mustInvoke(t, p, "CompleteMultipartUpload", completion, nil)
 	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "snapshot"}, nil)
 	tags := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "snapshot"}, nil).Output["TagSet"]
 	golden.AssertJSON(t, map[string]any{
@@ -5149,7 +5154,7 @@ func TestMultipartChecksumCharacterization(t *testing.T) {
 		"list":     map[string]any{"algorithm": listed.Output["ChecksumAlgorithm"], "type": listed.Output["ChecksumType"], "part": listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumSHA256"]},
 		"mismatch": map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus},
 		"missing":  map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus},
-		"complete": map[string]any{"checksum": done.Output["ChecksumSHA256"], "type": done.Output["ChecksumType"]},
+		"complete": map[string]any{"checksum": done.Output["ChecksumSHA256"], "supplied": "AA==", "type": done.Output["ChecksumType"]},
 		"object":   map[string]any{"cacheControl": head.Headers.Get("Cache-Control"), "contentType": head.Headers.Get("Content-Type"), "metadata": head.Headers.Get("x-amz-meta-env"), "redirect": head.Headers.Get("x-amz-website-redirect-location"), "storageClass": head.Headers.Get("x-amz-storage-class"), "tags": tags},
 	})
 }

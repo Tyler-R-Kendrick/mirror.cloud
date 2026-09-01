@@ -606,6 +606,52 @@ func TestConcurrentCompositeMultipartUploadsRequirePartChecksums(t *testing.T) {
 	}
 }
 
+func TestConcurrentCompositeAggregateChecksumsAreIgnored(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "multipart-aggregate-chaos"}, "")
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("object-%d", i)
+			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-aggregate-chaos", "Key": key, "ChecksumAlgorithm": "CRC32"}, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			uploadID := created.Output["UploadId"].(string)
+			part, err := call("UploadPart", map[string]any{"Bucket": "multipart-aggregate-chaos", "Key": key, "UploadId": uploadID, "PartNumber": 1}, key)
+			if err != nil {
+				errs <- err
+				return
+			}
+			completed, err := call("CompleteMultipartUpload", map[string]any{"Bucket": "multipart-aggregate-chaos", "Key": key, "UploadId": uploadID, "ChecksumCRC32": "AA==", "MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag"), "ChecksumCRC32": part.Headers.Get("x-amz-checksum-crc32")}}}}, "")
+			if err == nil && (completed.Output["ChecksumCRC32"] == "AA==" || completed.Output["ChecksumType"] != "COMPOSITE") {
+				err = fmt.Errorf("completion %d: %#v", i, completed.Output)
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
 func TestConcurrentMultipartObjectSizesRemainConsistent(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

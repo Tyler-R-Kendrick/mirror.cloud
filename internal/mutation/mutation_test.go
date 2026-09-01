@@ -6212,8 +6212,16 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-ignore-completed-object-checksum",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if supplied := requestCondition(req, checksum.input, checksum.header); supplied != "" && supplied != objectChecksum {`,
+			old:  `if supplied := requestCondition(req, checksum.input, checksum.header); u.checksumType == "FULL_OBJECT" && supplied != "" && supplied != objectChecksum {`,
 			new:  `if false {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestMultipartChecksumContract",
+		},
+		{
+			name: "s3-validate-composite-object-checksum",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `u.checksumType == "FULL_OBJECT" && supplied != "" && supplied != objectChecksum`,
+			new:  `supplied != "" && supplied != objectChecksum`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestMultipartChecksumContract",
 		},

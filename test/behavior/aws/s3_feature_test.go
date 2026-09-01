@@ -274,6 +274,35 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a composite multipart upload When a part checksum is omitted Then completion is rejected", func(t *testing.T) {
+		res := do(http.MethodPut, "/multipart-composite-bdd", nil, "")
+		res.Body.Close()
+		initiate, _ := http.NewRequest(http.MethodPost, ts.URL+"/multipart-composite-bdd/object?uploads", nil)
+		initiate.Header.Set("Authorization", auth)
+		initiate.Header.Set("x-amz-checksum-algorithm", "CRC32")
+		res, err := http.DefaultClient.Do(initiate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodPut, "/multipart-composite-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("checked"), "")
+		etag := res.Header.Get("ETag")
+		res.Body.Close()
+		manifest := []byte(`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`)
+		res = do(http.MethodPost, "/multipart-composite-bdd/object?uploadId="+url.QueryEscape(created.UploadID), manifest, "")
+		fault, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("<Code>InvalidRequest</Code>")) || !bytes.Contains(fault, []byte("missing for part 1")) {
+			t.Fatalf("missing composite checksum: %d %s", res.StatusCode, fault)
+		}
+	})
+
 	t.Run("Given multipart parts When listing pages Then empty values use S3 defaults", func(t *testing.T) {
 		res := do(http.MethodPut, "/parts-list-bdd", nil, "")
 		res.Body.Close()

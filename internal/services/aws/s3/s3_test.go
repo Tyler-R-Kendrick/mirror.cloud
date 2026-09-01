@@ -4869,6 +4869,7 @@ func TestUploadPartChecksumFaults(t *testing.T) {
 		code, message string
 	}{
 		{map[string]any{"ChecksumCRC32": "!"}, "InvalidRequest", "Value for x-amz-checksum-crc32 header is invalid."},
+		{map[string]any{"ChecksumCRC32": "AA=="}, "InvalidRequest", "Value for x-amz-checksum-crc32 header is invalid."},
 		{map[string]any{"ChecksumCRC32": "AAAAAA=="}, "BadDigest", "The CRC32 you specified did not match the calculated checksum."},
 		{map[string]any{"ChecksumSHA256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}, "InvalidRequest", "Checksum Type mismatch occurred, expected checksum Type: crc32, actual checksum Type: sha256"},
 		{map[string]any{"ChecksumAlgorithm": "SHA256"}, "InvalidRequest", "Checksum Type mismatch occurred, expected checksum Type: crc32, actual checksum Type: sha256"},

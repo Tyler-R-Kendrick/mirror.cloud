@@ -652,6 +652,54 @@ func TestConcurrentCompositeAggregateChecksumsAreIgnored(t *testing.T) {
 	}
 }
 
+func TestConcurrentAlternateMultipartChecksumsAreRejected(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "multipart-alternate-chaos"}, "")
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("object-%d", i)
+			created, err := call("CreateMultipartUpload", map[string]any{"Bucket": "multipart-alternate-chaos", "Key": key, "ChecksumAlgorithm": "SHA256"}, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			uploadID := created.Output["UploadId"].(string)
+			part, err := call("UploadPart", map[string]any{"Bucket": "multipart-alternate-chaos", "Key": key, "UploadId": uploadID, "PartNumber": 1}, key)
+			if err != nil {
+				errs <- err
+				return
+			}
+			_, err = call("CompleteMultipartUpload", map[string]any{"Bucket": "multipart-alternate-chaos", "Key": key, "UploadId": uploadID, "ChecksumCRC32": "AAAAAA==", "MultipartUpload": map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag"), "ChecksumSHA256": part.Headers.Get("x-amz-checksum-sha256")}}}}, "")
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "BadDigest" || fault.Message != "The sha256 you specified did not match the calculated checksum." || fault.HTTPStatus != http.StatusBadRequest {
+				errs <- fmt.Errorf("completion %d: %#v", i, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
 func TestConcurrentMultipartObjectSizesRemainConsistent(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

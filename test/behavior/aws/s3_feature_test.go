@@ -304,6 +304,32 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given an invalid multipart completion When submitted Then S3 returns modeled faults", func(t *testing.T) {
+		res := do(http.MethodPut, "/completion-fault-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPost, "/completion-fault-bdd/object?uploads", nil, "")
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		path := "/completion-fault-bdd/object?uploadId=" + url.QueryEscape(created.UploadID)
+		res = do(http.MethodPost, path, []byte("<CompleteMultipartUpload/>"), "application/xml")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidRequest</Code>")) || !bytes.Contains(body, []byte("<Message>You must specify at least one part</Message>")) {
+			t.Fatalf("empty multipart completion %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodPost, path, []byte(`<CompleteMultipartUpload><Part><PartNumber>9</PartNumber><ETag>"missing"</ETag></Part></CompleteMultipartUpload>`), "application/xml")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidPart</Code>")) || !bytes.Contains(body, []byte("<Message>One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag.</Message>")) || !bytes.Contains(body, []byte("<ETag>missing</ETag>")) || !bytes.Contains(body, []byte("<PartNumber>9</PartNumber>")) || !bytes.Contains(body, []byte("<UploadId>"+created.UploadID+"</UploadId>")) {
+			t.Fatalf("missing multipart completion part %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given an expired presigned URL When requested Then S3 returns a modeled access denial", func(t *testing.T) {
 		request, err := http.NewRequest(http.MethodGet, ts.URL+"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F19691231%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=19691231T235900Z&X-Amz-Expires=30&X-Amz-SignedHeaders=host&X-Amz-Signature=00", nil)
 		if err != nil {

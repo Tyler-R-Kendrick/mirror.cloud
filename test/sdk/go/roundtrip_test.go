@@ -1877,6 +1877,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, PartNumber: aws.Int32(10001), Body: strings.NewReader("part")}); err == nil || !strings.Contains(err.Error(), "Part number must be an integer between 1 and 10000, inclusive") {
 		t.Fatalf("invalid multipart part number: %v", err)
 	}
+	if _, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, PartNumber: aws.Int32(1), ContentMD5: aws.String("!"), Body: strings.NewReader("part")}); err == nil || !strings.Contains(err.Error(), "The Content-MD5 you specified was invalid") {
+		t.Fatalf("malformed upload part Content-MD5: %v", err)
+	}
+	if _, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, PartNumber: aws.Int32(1), ContentMD5: aws.String("AAAAAAAAAAAAAAAAAAAAAA=="), Body: strings.NewReader("part")}); err == nil || !strings.Contains(err.Error(), "The Content-MD5 you specified did not match what we received") {
+		t.Fatalf("mismatched upload part Content-MD5: %v", err)
+	}
 	if _, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, MultipartUpload: &s3types.CompletedMultipartUpload{}}); err == nil || !strings.Contains(err.Error(), "You must specify at least one part") {
 		t.Fatalf("empty multipart completion: %v", err)
 	}

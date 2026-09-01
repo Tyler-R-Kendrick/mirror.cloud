@@ -1507,7 +1507,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}
 	accountRegional := "sdk-account-000000000000-us-east-1-an"
 	accountRegionalInput := &s3.CreateBucketInput{Bucket: aws.String(accountRegional), BucketNamespace: s3types.BucketNamespaceAccountRegional}
-	if created, err := s3c.CreateBucket(context.Background(), accountRegionalInput); err != nil || aws.ToString(created.Location) != "/"+accountRegional {
+	if created, err := s3c.CreateBucket(context.Background(), accountRegionalInput); err != nil || aws.ToString(created.Location) != "/"+accountRegional || aws.ToString(created.BucketArn) != "arn:aws:s3:::"+accountRegional {
 		t.Fatalf("create account-regional bucket: %#v %v", created, err)
 	}
 	if _, err := s3c.CreateBucket(context.Background(), accountRegionalInput); err == nil || !strings.Contains(err.Error(), "BucketAlreadyOwnedByYou") {
@@ -1537,7 +1537,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := west.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-west-missing")}); err == nil || !strings.Contains(err.Error(), "IllegalLocationConstraintException") {
 		t.Fatalf("missing regional location constraint: %v", err)
 	}
-	if created, err := west.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-west"), CreateBucketConfiguration: &s3types.CreateBucketConfiguration{LocationConstraint: s3types.BucketLocationConstraintUsWest2}}); err != nil || aws.ToString(created.Location) != ts.URL+"/sdk-west/" {
+	if created, err := west.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-west"), CreateBucketConfiguration: &s3types.CreateBucketConfiguration{LocationConstraint: s3types.BucketLocationConstraintUsWest2}}); err != nil || aws.ToString(created.Location) != ts.URL+"/sdk-west/" || aws.ToString(created.BucketArn) != "arn:aws:s3:::sdk-west" {
 		t.Fatalf("matching regional location constraint: %#v %v", created, err)
 	}
 	if location, err := west.GetBucketLocation(context.Background(), &s3.GetBucketLocationInput{Bucket: aws.String("sdk-west")}); err != nil || location.LocationConstraint != s3types.BucketLocationConstraintUsWest2 {
@@ -1560,7 +1560,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		t.Fatalf("unpaginated buckets: %#v %v", unpaginatedBuckets, err)
 	}
 	for _, bucket := range unpaginatedBuckets.Buckets {
-		if bucket.CreationDate == nil || bucket.BucketRegion != nil {
+		if bucket.CreationDate == nil || bucket.BucketRegion != nil || aws.ToString(bucket.BucketArn) != "arn:aws:s3:::"+aws.ToString(bucket.Name) {
 			t.Fatalf("unpaginated bucket: %#v", bucket)
 		}
 	}
@@ -1572,7 +1572,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 			t.Fatalf("paginated buckets: %#v %v", page, err)
 		}
 		for _, bucket := range page.Buckets {
-			if aws.ToString(bucket.BucketRegion) == "" {
+			if aws.ToString(bucket.BucketRegion) == "" || aws.ToString(bucket.BucketArn) != "arn:aws:s3:::"+aws.ToString(bucket.Name) {
 				t.Fatalf("paginated bucket: %#v", bucket)
 			}
 			pagedNames = append(pagedNames, aws.ToString(bucket.Name))
@@ -1582,7 +1582,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		t.Fatalf("paginated bucket names = %s", got)
 	}
 	regionalBuckets, err := west.ListBuckets(context.Background(), &s3.ListBucketsInput{BucketRegion: aws.String("us-west-2"), Prefix: aws.String("sdk")})
-	if err != nil || len(regionalBuckets.Buckets) != 1 || aws.ToString(regionalBuckets.Buckets[0].Name) != "sdk-west" || aws.ToString(regionalBuckets.Buckets[0].BucketRegion) != "us-west-2" {
+	if err != nil || len(regionalBuckets.Buckets) != 1 || aws.ToString(regionalBuckets.Buckets[0].Name) != "sdk-west" || aws.ToString(regionalBuckets.Buckets[0].BucketRegion) != "us-west-2" || aws.ToString(regionalBuckets.Buckets[0].BucketArn) != "arn:aws:s3:::sdk-west" {
 		t.Fatalf("regional buckets: %#v %v", regionalBuckets, err)
 	}
 	if _, err := s3c.GetBucketTagging(context.Background(), &s3.GetBucketTaggingInput{Bucket: aws.String(accountRegional)}); err == nil || !strings.Contains(err.Error(), "NoSuchTagSet") {

@@ -2353,6 +2353,13 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	if !matchesMultipartUpload(u, req) {
 		return nil, noSuchUpload(id)
 	}
+	if match, noneMatch := requestCondition(req, "IfMatch", "If-Match"), requestCondition(req, "IfNoneMatch", "If-None-Match"); match != "" && noneMatch != "" {
+		return nil, &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-Match,If-None-Match", "additionalMessage": "Multiple conditional request headers present in the request"}}
+	} else if noneMatch != "" && noneMatch != "*" {
+		return nil, &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-None-Match", "additionalMessage": "We don't accept the provided value of If-None-Match header for this API"}}
+	} else if match == "*" {
+		return nil, &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-None-Match", "additionalMessage": "We don't accept the provided value of If-None-Match header for this API"}}
+	}
 	parts := asSlice(asMap(req.Input["MultipartUpload"])["Parts"])
 	if len(parts) == 0 {
 		return nil, &spi.Fault{Code: "InvalidRequest", Message: "You must specify at least one part", HTTPStatus: http.StatusBadRequest, Fault: "client"}

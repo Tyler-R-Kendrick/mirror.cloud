@@ -408,6 +408,35 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a mismatched multipart checksum type When completed Then S3 returns the selected mode", func(t *testing.T) {
+		res := do(http.MethodPut, "/completion-checksum-type-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPost, "/completion-checksum-type-bdd/object?uploads", nil, "")
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		partPath := "/completion-checksum-type-bdd/object?partNumber=1&uploadId=" + url.QueryEscape(created.UploadID)
+		res = do(http.MethodPut, partPath, []byte("part"), "application/octet-stream")
+		etag := res.Header.Get("ETag")
+		res.Body.Close()
+		manifest := `<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`
+		request, _ := http.NewRequest(http.MethodPost, ts.URL+"/completion-checksum-type-bdd/object?uploadId="+url.QueryEscape(created.UploadID), strings.NewReader(manifest))
+		request.Header.Set("x-amz-checksum-type", "COMPOSITE")
+		res, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidRequest</Code>")) || !bytes.Contains(body, []byte("<Message>The upload was created using the FULL_OBJECT checksum mode. The complete request must use the same checksum mode.</Message>")) {
+			t.Fatalf("mismatched multipart checksum type %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given an expired presigned URL When requested Then S3 returns a modeled access denial", func(t *testing.T) {
 		request, err := http.NewRequest(http.MethodGet, ts.URL+"/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=test%2F19691231%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=19691231T235900Z&X-Amz-Expires=30&X-Amz-SignedHeaders=host&X-Amz-Signature=00", nil)
 		if err != nil {

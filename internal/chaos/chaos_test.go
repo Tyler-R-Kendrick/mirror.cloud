@@ -400,11 +400,13 @@ func TestConcurrentListObjectPaginationRemainsOrdered(t *testing.T) {
 			operation := "ListObjects"
 			input := map[string]any{"Bucket": "list-pagination", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": 5, "Marker": "folder/a/"}
 			tokenField := "NextMarker"
+			v2 := false
 			if i%4 == 3 {
 				operation = "ListObjectsV2"
 				delete(input, "Marker")
-				input["ContinuationToken"] = "folder/a/"
+				input["ContinuationToken"] = "Zm9sZGVyL2Jhc2U="
 				tokenField = "NextContinuationToken"
+				v2 = true
 			}
 			response, err := call(operation, input, nil)
 			if err != nil {
@@ -437,9 +439,18 @@ func TestConcurrentListObjectPaginationRemainsOrdered(t *testing.T) {
 					return
 				}
 			}
-			if response.Output["IsTruncated"] == true && len(values) > 0 && response.Output[tokenField] != values[len(values)-1] {
-				errs <- fmt.Errorf("%s token: %#v", operation, response.Output)
-				return
+			if response.Output["IsTruncated"] == true && len(values) > 0 {
+				if !v2 && response.Output[tokenField] != values[len(values)-1] {
+					errs <- fmt.Errorf("%s token: %#v", operation, response.Output)
+					return
+				}
+				if v2 {
+					decoded, decodeErr := base64.NewEncoding("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._").DecodeString(response.Output[tokenField].(string))
+					if decodeErr != nil || string(decoded) <= values[len(values)-1] {
+						errs <- fmt.Errorf("%s opaque token: %#v", operation, response.Output)
+						return
+					}
+				}
 			}
 			errs <- nil
 		}()

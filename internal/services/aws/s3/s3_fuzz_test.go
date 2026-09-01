@@ -2584,8 +2584,12 @@ func FuzzMultipartServerSideEncryption(f *testing.F) {
 		if completed.Headers.Get("x-amz-server-side-encryption") != algorithm {
 			t.Fatalf("complete headers=%v", completed.Headers)
 		}
-		get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "multipart-encryption-fuzz", "Key": "object"}, nil)
-		if get.Headers.Get("x-amz-server-side-encryption") != algorithm || string(readStream(t, get)) != body {
+		kms := strings.HasPrefix(algorithm, "aws:kms")
+		if kms && (completed.Headers.Get("x-amz-checksum-crc64nvme") != "" || completed.Headers.Get("x-amz-checksum-type") != "" || completed.Output["ChecksumCRC64NVME"] != nil || completed.Output["ChecksumType"] != nil) {
+			t.Fatalf("KMS completion checksum response headers=%v output=%#v", completed.Headers, completed.Output)
+		}
+		get := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "multipart-encryption-fuzz", "Key": "object", "ChecksumMode": "ENABLED"}, nil)
+		if get.Headers.Get("x-amz-server-side-encryption") != algorithm || get.Headers.Get("x-amz-checksum-crc64nvme") == "" || get.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" || string(readStream(t, get)) != body {
 			t.Fatalf("stored multipart headers=%v", get.Headers)
 		}
 		if algorithm == "aws:kms" && (get.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || bucketKey && get.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true") {

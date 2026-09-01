@@ -316,6 +316,40 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a composite multipart upload When an alternate object checksum is supplied Then completion returns BadDigest", func(t *testing.T) {
+		res := do(http.MethodPut, "/multipart-alternate-bdd", nil, "")
+		res.Body.Close()
+		initiate, _ := http.NewRequest(http.MethodPost, ts.URL+"/multipart-alternate-bdd/object?uploads", nil)
+		initiate.Header.Set("Authorization", auth)
+		initiate.Header.Set("x-amz-checksum-algorithm", "SHA256")
+		res, err := http.DefaultClient.Do(initiate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodPut, "/multipart-alternate-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("checked"), "")
+		manifest := []byte(`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + res.Header.Get("ETag") + `</ETag><ChecksumSHA256>` + res.Header.Get("x-amz-checksum-sha256") + `</ChecksumSHA256></Part></CompleteMultipartUpload>`)
+		res.Body.Close()
+		complete, _ := http.NewRequest(http.MethodPost, ts.URL+"/multipart-alternate-bdd/object?uploadId="+url.QueryEscape(created.UploadID), bytes.NewReader(manifest))
+		complete.Header.Set("Authorization", auth)
+		complete.Header.Set("x-amz-checksum-crc32", "AAAAAA==")
+		res, err = http.DefaultClient.Do(complete)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fault, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("<Code>BadDigest</Code>")) || !bytes.Contains(fault, []byte("The sha256 you specified did not match the calculated checksum.")) {
+			t.Fatalf("alternate object checksum: %d %s", res.StatusCode, fault)
+		}
+	})
+
 	t.Run("Given multipart object sizes When completed Then zero is ignored and mismatches are described", func(t *testing.T) {
 		res := do(http.MethodPut, "/multipart-size-bdd", nil, "")
 		res.Body.Close()

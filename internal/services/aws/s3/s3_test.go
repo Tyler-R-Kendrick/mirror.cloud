@@ -4474,6 +4474,29 @@ func TestListObjectsV2Prefix(t *testing.T) {
 	}
 }
 
+func TestListObjectOwnerIdentity(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-owner"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-owner", "Key": "key"}, []byte("body"))
+	owner := func(output map[string]any) map[string]any {
+		t.Helper()
+		contents := output["Contents"].([]any)
+		return asMapForTest(asMapForTest(contents[0])["Owner"])
+	}
+	v1 := owner(mustInvoke(t, p, "ListObjects", map[string]any{"Bucket": "list-owner"}, nil).Output)
+	if v1["ID"] != "123456789012" || v1["DisplayName"] != nil {
+		t.Fatalf("ListObjects owner = %#v", v1)
+	}
+	v2 := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "list-owner"}, nil).Output["Contents"].([]any)[0].(map[string]any)
+	if v2["Owner"] != nil {
+		t.Fatalf("ListObjectsV2 default owner = %#v", v2["Owner"])
+	}
+	v2Owner := owner(mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "list-owner", "FetchOwner": true}, nil).Output)
+	if v2Owner["ID"] != "123456789012" || v2Owner["DisplayName"] != nil {
+		t.Fatalf("ListObjectsV2 requested owner = %#v", v2Owner)
+	}
+}
+
 func TestListEncodingTypeValidation(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-encoding"}, nil)

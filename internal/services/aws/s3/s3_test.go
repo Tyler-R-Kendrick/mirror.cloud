@@ -5002,7 +5002,7 @@ func TestMultipartChecksumContract(t *testing.T) {
 	delete(complete["MultipartUpload"].(map[string]any)["Parts"].([]any)[0].(map[string]any), "ChecksumCRC32")
 	complete["ChecksumType"] = "COMPOSITE"
 	_, err = invoke(t, p, "CompleteMultipartUpload", complete, nil)
-	if fault := asFault(t, err); fault.Code != "BadDigest" {
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "The upload was created using the FULL_OBJECT checksum mode. The complete request must use the same checksum mode." || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("complete checksum type fault = %#v", fault)
 	}
 	complete["ChecksumType"] = "FULL_OBJECT"

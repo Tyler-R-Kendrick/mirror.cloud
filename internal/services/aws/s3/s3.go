@@ -1092,7 +1092,7 @@ func (p *Pack) listBuckets(ctx context.Context, req *spi.Request) (*spi.Response
 		}
 		buckets = append(buckets, item)
 	}
-	out := map[string]any{"Buckets": buckets, "Owner": map[string]any{"ID": req.Identity.Account, "DisplayName": "mirror"}}
+	out := map[string]any{"Buckets": buckets, "Owner": map[string]any{"ID": req.Identity.Account}}
 	if prefixSet {
 		out["Prefix"] = prefix
 	}
@@ -3489,7 +3489,7 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 		}
 		if req.Operation == "GetBucketAcl" || req.Operation == "GetObjectAcl" {
 			return &spi.Response{Output: map[string]any{
-				"Owner":  map[string]any{"ID": req.Identity.Account, "DisplayName": "mirror"},
+				"Owner":  map[string]any{"ID": req.Identity.Account},
 				"Grants": []any{map[string]any{"Grantee": map[string]any{"ID": req.Identity.Account, "Type": "CanonicalUser"}, "Permission": "FULL_CONTROL"}},
 			}}, nil
 		}
@@ -3596,9 +3596,9 @@ func validateBucketPolicy(policy string) error {
 }
 
 func requestACL(req *spi.Request, required bool) (map[string]any, bool, error) {
-	owner := map[string]any{"ID": req.Identity.Account, "DisplayName": "mirror"}
+	owner := map[string]any{"ID": req.Identity.Account}
 	private := func() map[string]any {
-		return map[string]any{"Owner": owner, "Grants": []any{map[string]any{"Grantee": map[string]any{"ID": owner["ID"], "DisplayName": owner["DisplayName"], "Type": "CanonicalUser"}, "Permission": "FULL_CONTROL"}}}
+		return map[string]any{"Owner": owner, "Grants": []any{map[string]any{"Grantee": map[string]any{"ID": owner["ID"], "Type": "CanonicalUser"}, "Permission": "FULL_CONTROL"}}}
 	}
 	canned := requestCondition(req, "ACL", "x-amz-acl")
 	type grantHeader struct{ input, header, permission string }
@@ -3677,7 +3677,7 @@ func requestACL(req *spi.Request, required bool) (map[string]any, bool, error) {
 					if !validCanonicalID(value, req.Identity.Account) {
 						return nil, false, invalidACLArgument("id", value, "Invalid id")
 					}
-					grantee = map[string]any{"Type": "CanonicalUser", "ID": value, "DisplayName": "webfile"}
+					grantee = map[string]any{"Type": "CanonicalUser", "ID": value}
 				case "emailAddress":
 					grantee = map[string]any{"Type": "AmazonCustomerByEmail", "EmailAddress": value}
 				default:

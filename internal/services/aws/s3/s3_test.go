@@ -4607,6 +4607,7 @@ func TestListURLResponseEncoding(t *testing.T) {
 	if len(contents) != 1 || asMapForTest(contents[0])["Key"] != "folder/a%20b/file%2Bone" || v2["Prefix"] != "folder/a%20b/" || v2["StartAfter"] != "folder/a%20b/" || v2["EncodingType"] != "url" {
 		t.Fatalf("encoded V2 page = %#v", v2)
 	}
+	golden.AssertJSON(t, map[string]any{"v1": first, "v2": v2})
 }
 
 func TestListObjectsPaginationIncludesCommonPrefixes(t *testing.T) {

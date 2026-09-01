@@ -970,6 +970,14 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || len(encodedList.Contents) != 1 || aws.ToString(encodedList.Contents[0].Key) != "encoded/a%20b%2B" || aws.ToString(encodedList.Prefix) != "encoded/" || encodedList.EncodingType != s3types.EncodingTypeUrl {
 		t.Fatalf("encoded list: %#v %v", encodedList, err)
 	}
+	zeroList, err := s3c.ListObjects(context.Background(), &s3.ListObjectsInput{Bucket: aws.String("sdk-list-pagination"), Prefix: aws.String("encoded/"), MaxKeys: aws.Int32(0)})
+	if err != nil || len(zeroList.Contents) != 1 || aws.ToInt32(zeroList.MaxKeys) != 1000 {
+		t.Fatalf("zero max V1 list: %#v %v", zeroList, err)
+	}
+	zeroListV2, err := s3c.ListObjectsV2(context.Background(), &s3.ListObjectsV2Input{Bucket: aws.String("sdk-list-pagination"), Prefix: aws.String("encoded/"), MaxKeys: aws.Int32(0)})
+	if err != nil || len(zeroListV2.Contents) != 1 || aws.ToInt32(zeroListV2.MaxKeys) != 1000 {
+		t.Fatalf("zero max V2 list: %#v %v", zeroListV2, err)
+	}
 	listKeys = append(listKeys, "encoded/a b+")
 	firstList, err := s3c.ListObjects(context.Background(), &s3.ListObjectsInput{Bucket: aws.String("sdk-list-pagination"), Prefix: aws.String("folder/"), Delimiter: aws.String("/"), MaxKeys: aws.Int32(1)})
 	if err != nil || len(firstList.CommonPrefixes) != 1 || aws.ToString(firstList.CommonPrefixes[0].Prefix) != "folder/aSubfolder/" || len(firstList.Contents) != 0 || aws.ToString(firstList.NextMarker) != "folder/aSubfolder/" || !aws.ToBool(firstList.IsTruncated) {
@@ -1023,6 +1031,10 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	checksummedVersions, err := s3c.ListObjectVersions(context.Background(), &s3.ListObjectVersionsInput{Bucket: aws.String("sdk-version-list"), Prefix: aws.String("checksummed")})
 	if err != nil || len(checksummedVersions.Versions) != 1 || len(checksummedVersions.Versions[0].ChecksumAlgorithm) != 1 || checksummedVersions.Versions[0].ChecksumAlgorithm[0] != s3types.ChecksumAlgorithmSha256 || checksummedVersions.Versions[0].ChecksumType != s3types.ChecksumTypeFullObject {
 		t.Fatalf("checksummed versions: %#v %v", checksummedVersions, err)
+	}
+	zeroVersions, err := s3c.ListObjectVersions(context.Background(), &s3.ListObjectVersionsInput{Bucket: aws.String("sdk-version-list"), Prefix: aws.String("checksummed"), MaxKeys: aws.Int32(0)})
+	if err != nil || len(zeroVersions.Versions) != 1 || aws.ToInt32(zeroVersions.MaxKeys) != 1000 {
+		t.Fatalf("zero max version list: %#v %v", zeroVersions, err)
 	}
 	for _, key := range []string{"encoded/a b+", "encoded/a!b+"} {
 		if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-version-list"), Key: aws.String(key), Body: strings.NewReader("body")}); err != nil {

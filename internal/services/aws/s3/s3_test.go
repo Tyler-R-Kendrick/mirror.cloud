@@ -5243,7 +5243,7 @@ func TestCompleteMultipartUploadManifest(t *testing.T) {
 	checksumPart := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": checksumMismatch, "PartNumber": 1}, []byte("checksum"))
 	checksumManifest := asMapForTest(completedPart(1, checksumPart))
 	checksumManifest["ChecksumCRC64NVME"] = "AA=="
-	if fault := wantFault(checksumMismatch, "InvalidPart", checksumManifest); fault.Message != "One or more of the specified parts could not be found. The part may not have been uploaded, or the specified entity tag may not match the part's entity tag." || fault.Fields["ETag"] != strings.Trim(checksumPart.Headers.Get("ETag"), `"`) || fault.Fields["PartNumber"] != "1" || fault.Fields["UploadId"] != checksumMismatch {
+	if fault := wantFault(checksumMismatch, "InvalidPart", checksumManifest); fault.Message != "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag." || fault.Fields["ETag"] != strings.Trim(checksumPart.Headers.Get("ETag"), `"`) || fault.Fields["PartNumber"] != "1" || fault.Fields["UploadId"] != checksumMismatch {
 		t.Fatalf("part checksum fault = %#v", fault)
 	}
 
@@ -5506,7 +5506,7 @@ func TestListPartsCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "parts-golden"}, nil)
-	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "parts-golden", "Key": "object"}, nil).Output["UploadId"].(string)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "parts-golden", "Key": "object", "ChecksumAlgorithm": "CRC64NVME"}, nil).Output["UploadId"].(string)
 	input := map[string]any{"Bucket": "parts-golden", "Key": "object", "UploadId": uploadID}
 	empty := mustInvoke(t, p, "ListParts", maps.Clone(input), nil).Output
 	for _, part := range []struct {
@@ -5605,7 +5605,7 @@ func TestListMultipartUploadsCharacterization(t *testing.T) {
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-list-golden"}, nil)
 	ids := map[string]string{}
 	for _, key := range []string{"folder/a/one", "folder/a/two", "folder/file1", "folder/file2"} {
-		ids[key] = mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-list-golden", "Key": key}, nil).Output["UploadId"].(string)
+		ids[key] = mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-list-golden", "Key": key, "ChecksumAlgorithm": "CRC64NVME"}, nil).Output["UploadId"].(string)
 	}
 	first := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "multipart-list-golden", "Prefix": "folder/", "Delimiter": "/", "MaxUploads": 1}, nil).Output
 	next := mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "multipart-list-golden", "Prefix": "folder/", "Delimiter": "/", "MaxUploads": 1, "KeyMarker": "folder/a/"}, nil).Output

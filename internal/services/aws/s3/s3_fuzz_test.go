@@ -1509,7 +1509,7 @@ func FuzzListMultipartUploadsMarkers(f *testing.F) {
 		p := s3.New(spitest.Deps(t))
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-list-fuzz"}, nil)
 		for range 5 {
-			mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-list-fuzz", "Key": "prefix/key"}, nil)
+			mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-list-fuzz", "Key": "prefix/key", "ChecksumAlgorithm": "CRC64NVME"}, nil)
 		}
 		all := asSliceForTest(mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "multipart-list-fuzz", "Prefix": "prefix/"}, nil).Output["Uploads"])
 		start, maxUploads := int(startSeed)%len(all), int(maxSeed%5)+1

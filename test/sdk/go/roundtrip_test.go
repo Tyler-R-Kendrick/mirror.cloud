@@ -1511,6 +1511,22 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || aws.ToString(multipartCustomer.SSECustomerKeyMD5) != customerKeyMD5 {
 		t.Fatalf("create multipart customer encryption: %#v %v", multipartCustomer, err)
 	}
+	const multipartEncryptionMessage = "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters."
+	if _, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String("multipart-customer-encrypted"), UploadId: multipartCustomer.UploadId, PartNumber: aws.Int32(1), Body: bytes.NewReader([]byte("missing-sse-c"))}); err == nil || !strings.Contains(err.Error(), multipartEncryptionMessage) {
+		t.Fatalf("upload multipart without customer encryption: %v", err)
+	}
+	plainMultipart, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("multipart-plain-sse-fault")})
+	if err != nil {
+		t.Fatalf("create plain multipart for customer encryption fault: %v", err)
+	}
+	if _, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String("multipart-plain-sse-fault"), UploadId: plainMultipart.UploadId, PartNumber: aws.Int32(1), Body: bytes.NewReader([]byte("unexpected-sse-c")), SSECustomerAlgorithm: aws.String("AES256"), SSECustomerKey: aws.String(customerKey64), SSECustomerKeyMD5: aws.String(customerKeyMD5)}); err == nil || !strings.Contains(err.Error(), multipartEncryptionMessage) {
+		t.Fatalf("upload plain multipart with customer encryption: %v", err)
+	}
+	otherCustomerKey := bytes.Repeat([]byte{'b'}, 32)
+	otherCustomerDigest := md5.Sum(otherCustomerKey)
+	if _, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String("multipart-customer-encrypted"), UploadId: multipartCustomer.UploadId, PartNumber: aws.Int32(1), Body: bytes.NewReader([]byte("mismatched-sse-c")), SSECustomerAlgorithm: aws.String("AES256"), SSECustomerKey: aws.String(base64.StdEncoding.EncodeToString(otherCustomerKey)), SSECustomerKeyMD5: aws.String(base64.StdEncoding.EncodeToString(otherCustomerDigest[:]))}); err == nil || !strings.Contains(err.Error(), "The provided encryption parameters did not match the ones used originally.") {
+		t.Fatalf("upload multipart with mismatched customer encryption: %v", err)
+	}
 	multipartPart, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String("multipart-customer-encrypted"), UploadId: multipartCustomer.UploadId, PartNumber: aws.Int32(1), Body: bytes.NewReader([]byte("multipart-sse-c-sdk")), SSECustomerAlgorithm: aws.String("AES256"), SSECustomerKey: aws.String(customerKey64), SSECustomerKeyMD5: aws.String(customerKeyMD5)})
 	if err != nil || aws.ToString(multipartPart.SSECustomerKeyMD5) != customerKeyMD5 {
 		t.Fatalf("upload multipart customer encryption: %#v %v", multipartPart, err)

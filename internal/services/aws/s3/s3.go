@@ -2296,6 +2296,9 @@ func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response,
 			return nil, err
 		}
 	}
+	if stored, provided := str(encryption["sseCustomerKeyMD5"]), requestCondition(req, "SSECustomerKeyMD5", "x-amz-server-side-encryption-customer-key-MD5"); stored == "" && provided != "" || stored != "" && provided == "" {
+		return nil, &spi.Fault{Code: "InvalidRequest", Message: "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
 	if err := validateStoredSSECustomerKey(req, encryption); err != nil {
 		return nil, err
 	}

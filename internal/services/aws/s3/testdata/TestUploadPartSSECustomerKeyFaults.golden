@@ -1,0 +1,17 @@
+{
+  "mismatch": {
+    "code": "InvalidRequest",
+    "message": "The provided encryption parameters did not match the ones used originally.",
+    "status": 400
+  },
+  "missing": {
+    "code": "InvalidRequest",
+    "message": "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters.",
+    "status": 400
+  },
+  "unexpected": {
+    "code": "InvalidRequest",
+    "message": "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters.",
+    "status": 400
+  }
+}

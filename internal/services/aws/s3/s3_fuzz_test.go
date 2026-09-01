@@ -1777,6 +1777,72 @@ func FuzzUploadPartChecksumFaults(f *testing.F) {
 	})
 }
 
+func FuzzUploadPartSSECustomerKeyFaults(f *testing.F) {
+	f.Add([]byte("part"), []byte("different-key"), uint8(0))
+	f.Add([]byte("part"), []byte("different-key"), uint8(1))
+	f.Add([]byte("part"), []byte("different-key"), uint8(2))
+	f.Add([]byte("part"), []byte("different-key"), uint8(3))
+	f.Fuzz(func(t *testing.T, body, seed []byte, mode uint8) {
+		if len(body)+len(seed) > 8192 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "upload-part-sse-c-fuzz"}, nil)
+		customerKey := bytes.Repeat([]byte{'a'}, 32)
+		customerDigest := md5.Sum(customerKey)
+		encryption := map[string]any{"SSECustomerAlgorithm": "AES256", "SSECustomerKey": base64.StdEncoding.EncodeToString(customerKey), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(customerDigest[:])}
+		key := "encrypted"
+		create := map[string]any{"Bucket": "upload-part-sse-c-fuzz", "Key": key}
+		if mode%4 != 1 {
+			for name, value := range encryption {
+				create[name] = value
+			}
+		} else {
+			key = "plain"
+			create["Key"] = key
+		}
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", create, nil).Output["UploadId"].(string)
+		input := map[string]any{"Bucket": "upload-part-sse-c-fuzz", "Key": key, "UploadId": uploadID, "PartNumber": 1}
+		if mode%4 != 0 {
+			provided := encryption
+			if mode%4 == 2 {
+				wrong := sha256.Sum256(seed)
+				if bytes.Equal(wrong[:], customerKey) {
+					wrong[0] ^= 0xff
+				}
+				digest := md5.Sum(wrong[:])
+				provided = map[string]any{"SSECustomerAlgorithm": "AES256", "SSECustomerKey": base64.StdEncoding.EncodeToString(wrong[:]), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(digest[:])}
+			}
+			for name, value := range provided {
+				input[name] = value
+			}
+		}
+		_, err := invoke(t, p, "UploadPart", input, body)
+		switch mode % 4 {
+		case 0, 1:
+			if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters." {
+				t.Fatalf("missing or unexpected encryption fault = %#v", fault)
+			}
+		case 2:
+			if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "The provided encryption parameters did not match the ones used originally." {
+				t.Fatalf("mismatched encryption fault = %#v", fault)
+			}
+		case 3:
+			if err != nil {
+				t.Fatalf("matching encryption: %v", err)
+			}
+		}
+		listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "upload-part-sse-c-fuzz", "Key": key, "UploadId": uploadID}, nil)
+		want := 0
+		if mode%4 == 3 {
+			want = 1
+		}
+		if got := len(listed.Output["Parts"].([]any)); got != want {
+			t.Fatalf("stored parts = %d, want %d", got, want)
+		}
+	})
+}
+
 func FuzzDeleteObjectVersionRestoration(f *testing.F) {
 	f.Add("first", "second", "third", uint8(2))
 	f.Add("", "same", "same", uint8(1))

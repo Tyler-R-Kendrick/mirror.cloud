@@ -2872,6 +2872,52 @@ func TestMultipartSSECustomerKey(t *testing.T) {
 	})
 }
 
+func TestUploadPartSSECustomerKeyFaults(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "upload-part-sse-c-faults"}, nil)
+	key := bytes.Repeat([]byte{'a'}, 32)
+	digest := md5.Sum(key)
+	encryption := map[string]any{"SSECustomerAlgorithm": "AES256", "SSECustomerKey": base64.StdEncoding.EncodeToString(key), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(digest[:])}
+	create := maps.Clone(encryption)
+	create["Bucket"], create["Key"] = "upload-part-sse-c-faults", "encrypted"
+	encryptedID := mustInvoke(t, p, "CreateMultipartUpload", create, nil).Output["UploadId"].(string)
+	plainID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "upload-part-sse-c-faults", "Key": "plain"}, nil).Output["UploadId"].(string)
+
+	otherKey := bytes.Repeat([]byte{'b'}, 32)
+	otherDigest := md5.Sum(otherKey)
+	wrongEncryption := map[string]any{"SSECustomerAlgorithm": "AES256", "SSECustomerKey": base64.StdEncoding.EncodeToString(otherKey), "SSECustomerKeyMD5": base64.StdEncoding.EncodeToString(otherDigest[:])}
+	tests := []struct {
+		name, key, uploadID string
+		encryption          map[string]any
+		message             string
+	}{
+		{"missing", "encrypted", encryptedID, nil, "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters."},
+		{"unexpected", "plain", plainID, encryption, "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters."},
+		{"mismatch", "encrypted", encryptedID, wrongEncryption, "The provided encryption parameters did not match the ones used originally."},
+	}
+	characterization := map[string]any{}
+	for index, test := range tests {
+		input := maps.Clone(test.encryption)
+		if input == nil {
+			input = map[string]any{}
+		}
+		input["Bucket"], input["Key"], input["UploadId"], input["PartNumber"] = "upload-part-sse-c-faults", test.key, test.uploadID, index+1
+		_, err := invoke(t, p, "UploadPart", input, []byte("part"))
+		if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != test.message || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("case %d fault = %#v", index, fault)
+		} else {
+			characterization[test.name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus}
+		}
+	}
+	for _, upload := range []struct{ key, id string }{{"encrypted", encryptedID}, {"plain", plainID}} {
+		listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "upload-part-sse-c-faults", "Key": upload.key, "UploadId": upload.id}, nil)
+		if len(listed.Output["Parts"].([]any)) != 0 {
+			t.Fatalf("rejected SSE-C request stored parts = %#v", listed.Output)
+		}
+	}
+	golden.AssertJSON(t, characterization)
+}
+
 func TestCopyObjectSSECustomerKeys(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "copy-sse-c"}, nil)

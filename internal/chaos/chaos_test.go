@@ -3030,8 +3030,12 @@ func TestEncryptedMultipartCompletionFailurePreservesUpload(t *testing.T) {
 	}
 	blobs.fail = false
 	completed, err := call("CompleteMultipartUpload", complete, nil)
-	if err != nil || completed.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || completed.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+	if err != nil || completed.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || completed.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" || completed.Headers.Get("x-amz-checksum-crc64nvme") != "" || completed.Headers.Get("x-amz-checksum-type") != "" || completed.Output["ChecksumCRC64NVME"] != nil || completed.Output["ChecksumType"] != nil {
 		t.Fatalf("recovered completion: %#v %v", completed, err)
+	}
+	head, err := call("HeadObject", map[string]any{"Bucket": "multipart-encryption", "Key": "object", "ChecksumMode": "ENABLED"}, nil)
+	if err != nil || head.Headers.Get("x-amz-checksum-crc64nvme") == "" || head.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+		t.Fatalf("recovered checksum metadata: %#v %v", head, err)
 	}
 }
 

@@ -1114,7 +1114,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		t.Fatalf("deleted bucket encryption: %#v %v", got, err)
 	}
 	bucketACL, err := s3c.GetBucketAcl(context.Background(), &s3.GetBucketAclInput{Bucket: aws.String("sdk")})
-	if err != nil || bucketACL.Owner == nil || aws.ToString(bucketACL.Owner.ID) != "000000000000" || len(bucketACL.Grants) != 1 {
+	if err != nil || bucketACL.Owner == nil || aws.ToString(bucketACL.Owner.ID) != "000000000000" || bucketACL.Owner.DisplayName != nil || len(bucketACL.Grants) != 1 || bucketACL.Grants[0].Grantee.DisplayName != nil {
 		t.Fatalf("default bucket ACL: %#v %v", bucketACL, err)
 	}
 	if _, err := s3c.PutBucketAcl(context.Background(), &s3.PutBucketAclInput{Bucket: aws.String("sdk"), ACL: s3types.BucketCannedACLPublicRead}); err != nil {
@@ -1556,7 +1556,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		t.Fatalf("invalid location constraint: %v", err)
 	}
 	unpaginatedBuckets, err := s3c.ListBuckets(context.Background(), &s3.ListBucketsInput{})
-	if err != nil || len(unpaginatedBuckets.Buckets) != 4 {
+	if err != nil || unpaginatedBuckets.Owner == nil || aws.ToString(unpaginatedBuckets.Owner.ID) != "000000000000" || unpaginatedBuckets.Owner.DisplayName != nil || len(unpaginatedBuckets.Buckets) != 4 {
 		t.Fatalf("unpaginated buckets: %#v %v", unpaginatedBuckets, err)
 	}
 	for _, bucket := range unpaginatedBuckets.Buckets {

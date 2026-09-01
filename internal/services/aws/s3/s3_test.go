@@ -4498,6 +4498,23 @@ func TestListObjectOwnerIdentityCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"v1": v1, "v2Default": v2["Owner"], "v2FetchOwner": v2Owner})
 }
 
+func TestListObjectsBucketRegion(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "east"}, nil)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "west", "LocationConstraint": "us-west-2"}, nil)
+	for _, bucket := range []string{"east", "west"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "key"}, []byte("body"))
+	}
+	for _, operation := range []string{"ListObjects", "ListObjectsV2"} {
+		if got := mustInvoke(t, p, operation, map[string]any{"Bucket": "west"}, nil).Output["BucketRegion"]; got != "us-west-2" {
+			t.Fatalf("%s west BucketRegion = %#v", operation, got)
+		}
+		if got := mustInvoke(t, p, operation, map[string]any{"Bucket": "east"}, nil).Output["BucketRegion"]; got != nil {
+			t.Fatalf("%s east BucketRegion = %#v", operation, got)
+		}
+	}
+}
+
 func TestListEncodingTypeValidation(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-encoding"}, nil)

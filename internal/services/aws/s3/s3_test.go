@@ -3114,7 +3114,7 @@ func TestCopyObjectChecksums(t *testing.T) {
 	})
 }
 
-func TestCopyObjectLastModified(t *testing.T) {
+func TestCopyObjectLastModifiedCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
@@ -3133,6 +3133,7 @@ func TestCopyObjectLastModified(t *testing.T) {
 	if err != nil || !modified.Equal(stored) {
 		t.Fatalf("copy LastModified %s, stored %q: %v", modified, head.Headers.Get("Last-Modified"), err)
 	}
+	golden.AssertJSON(t, map[string]any{"response": copied.Output["LastModified"], "stored": head.Headers.Get("Last-Modified")})
 }
 
 func TestCopyObjectDirectiveValidation(t *testing.T) {

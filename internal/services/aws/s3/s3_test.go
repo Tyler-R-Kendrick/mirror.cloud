@@ -4774,7 +4774,7 @@ func TestWriteChecksumValidation(t *testing.T) {
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "multipart", "ChecksumAlgorithm": "MD5"}, nil)
 	uploadID := created.Output["UploadId"].(string)
 	_, err = invoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 1, "ChecksumMD5": "AA=="}, body)
-	if fault := asFault(t, err); fault.Code != "BadDigest" {
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" {
 		t.Fatalf("upload checksum fault = %#v", fault)
 	}
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": uploadID, "PartNumber": 1, "ChecksumMD5": checksums["ChecksumMD5"]}, body)

@@ -3102,6 +3102,53 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a checksummed object When copying it Then the checksum is preserved", func(t *testing.T) {
+		res := do(http.MethodPut, "/copy-checksum-behavior", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create bucket %d", res.StatusCode)
+		}
+		body := []byte("copy-checksum")
+		digest := sha256.Sum256(body)
+		checksum := base64.StdEncoding.EncodeToString(digest[:])
+		request := func(method, path string, headers map[string]string) *http.Response {
+			t.Helper()
+			payload := body
+			if method == http.MethodHead || headers["x-amz-copy-source"] != "" {
+				payload = nil
+			}
+			req, err := http.NewRequest(method, ts.URL+path, bytes.NewReader(payload))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", auth)
+			for name, value := range headers {
+				req.Header.Set(name, value)
+			}
+			response, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return response
+		}
+		res = request(http.MethodPut, "/copy-checksum-behavior/source", map[string]string{"x-amz-checksum-sha256": checksum})
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("put source %d", res.StatusCode)
+		}
+		res = request(http.MethodPut, "/copy-checksum-behavior/destination", map[string]string{"x-amz-copy-source": "copy-checksum-behavior/source"})
+		copyResult, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(copyResult, []byte("<ChecksumSHA256>"+checksum+"</ChecksumSHA256>")) || !bytes.Contains(copyResult, []byte("<ChecksumType>FULL_OBJECT</ChecksumType>")) {
+			t.Fatalf("copy result %d %s", res.StatusCode, copyResult)
+		}
+		res = request(http.MethodHead, "/copy-checksum-behavior/destination", map[string]string{"x-amz-checksum-mode": "ENABLED"})
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-checksum-sha256") != checksum || res.Header.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+			t.Fatalf("copied checksum %d %v", res.StatusCode, res.Header)
+		}
+	})
+
 	t.Run("Given an oversized object key When PUT object Then it is rejected", func(t *testing.T) {
 		res := do(http.MethodPut, "/key-limits", nil, "")
 		res.Body.Close()

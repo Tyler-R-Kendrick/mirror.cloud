@@ -172,6 +172,55 @@ func TestConcurrentCopySourcePreconditionsRemainDeterministic(t *testing.T) {
 	}
 }
 
+func TestConcurrentCopyObjectChecksumsRemainDeterministic(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != nil {
+			stream = io.NopCloser(bytes.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "copy-checksum-chaos"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("checksum-source")
+	sum := crc32.ChecksumIEEE(body)
+	checksum := base64.StdEncoding.EncodeToString([]byte{byte(sum >> 24), byte(sum >> 16), byte(sum >> 8), byte(sum)})
+	if _, err := call("PutObject", map[string]any{"Bucket": "copy-checksum-chaos", "Key": "source", "ChecksumCRC32": checksum}, body); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("destination-%d", i)
+			copied, err := call("CopyObject", map[string]any{"Bucket": "copy-checksum-chaos", "Key": key, "CopySource": "copy-checksum-chaos/source"}, nil)
+			if err == nil && (copied.Output["ChecksumCRC32"] != checksum || copied.Output["ChecksumType"] != "FULL_OBJECT") {
+				err = fmt.Errorf("copy %d = %#v", i, copied.Output)
+			}
+			if err == nil {
+				head, headErr := call("HeadObject", map[string]any{"Bucket": "copy-checksum-chaos", "Key": key, "ChecksumMode": "ENABLED"}, nil)
+				if headErr != nil || head.Headers.Get("x-amz-checksum-crc32") != checksum || head.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+					err = fmt.Errorf("head %d = %#v, %v", i, head, headErr)
+				}
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
 func TestConcurrentListObjectPaginationRemainsOrdered(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

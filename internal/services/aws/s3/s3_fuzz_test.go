@@ -2886,6 +2886,45 @@ func FuzzCopyObjectSSECustomerKeys(f *testing.F) {
 	})
 }
 
+func FuzzCopyObjectChecksums(f *testing.F) {
+	f.Add(uint8(0), []byte("inherit"))
+	f.Add(uint8(1), []byte("crc32"))
+	f.Add(uint8(2), []byte("crc32c"))
+	f.Fuzz(func(t *testing.T, mode uint8, body []byte) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "copy-checksum-fuzz"}, nil)
+		sourceSum := sha256.Sum256(body)
+		sourceChecksum := base64.StdEncoding.EncodeToString(sourceSum[:])
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "copy-checksum-fuzz", "Key": "source", "ChecksumSHA256": sourceChecksum}, body)
+
+		input := map[string]any{"Bucket": "copy-checksum-fuzz", "Key": "destination", "CopySource": "copy-checksum-fuzz/source"}
+		output, header, expected := "ChecksumSHA256", "x-amz-checksum-sha256", sourceChecksum
+		switch mode % 3 {
+		case 1:
+			input["ChecksumAlgorithm"], output, header = "CRC32", "ChecksumCRC32", "x-amz-checksum-crc32"
+			sum := make([]byte, 4)
+			binary.BigEndian.PutUint32(sum, crc32.ChecksumIEEE(body))
+			expected = base64.StdEncoding.EncodeToString(sum)
+		case 2:
+			input["ChecksumAlgorithm"], output, header = "CRC32C", "ChecksumCRC32C", "x-amz-checksum-crc32c"
+			sum := make([]byte, 4)
+			binary.BigEndian.PutUint32(sum, crc32.Checksum(body, crc32.MakeTable(crc32.Castagnoli)))
+			expected = base64.StdEncoding.EncodeToString(sum)
+		}
+		copied := mustInvoke(t, p, "CopyObject", input, nil)
+		if copied.Output[output] != expected || copied.Output["ChecksumType"] != "FULL_OBJECT" {
+			t.Fatalf("copy output = %#v", copied.Output)
+		}
+		head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "copy-checksum-fuzz", "Key": "destination", "ChecksumMode": "ENABLED"}, nil)
+		if head.Headers.Get(header) != expected || head.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+			t.Fatalf("copy headers = %v", head.Headers)
+		}
+	})
+}
+
 func FuzzCopySourcePreconditions(f *testing.F) {
 	for mode := uint8(0); mode < 7; mode++ {
 		f.Add(mode, uint16(mode+1))

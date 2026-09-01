@@ -2168,8 +2168,32 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	if metadataDirective != "REPLACE" {
 		req.Input["_ObjectMetadata"] = source.meta["objectMetadata"]
 	}
-	req.Body = source.body
+	body, err := io.ReadAll(source.body)
+	if err != nil {
+		return nil, err
+	}
+	algorithm := strings.ToUpper(requestCondition(req, "ChecksumAlgorithm", "x-amz-checksum-algorithm"))
+	if algorithm == "" {
+		stored := asMap(source.meta["checksums"])
+		for _, checksum := range checksums {
+			if str(stored[checksum.header]) != "" {
+				algorithm = checksum.algorithm
+				break
+			}
+		}
+	}
+	checksum, copyChecksum := checksumByAlgorithm(algorithm)
+	if algorithm != "" && !copyChecksum {
+		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if copyChecksum {
+		req.Input[checksum.input] = checksumValue(checksum.input, body)
+	}
+	req.Body = io.NopCloser(bytes.NewReader(body))
 	response, err := p.putObject(ctx, req, "", "", nil, nil)
+	if err == nil && copyChecksum {
+		response.Output[checksum.input], response.Output["ChecksumType"] = req.Input[checksum.input], "FULL_OBJECT"
+	}
 	if err == nil && source.version != "" {
 		response.Headers.Set("x-amz-copy-source-version-id", source.version)
 	}

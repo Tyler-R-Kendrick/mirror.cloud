@@ -468,6 +468,12 @@ func TestConcurrentListObjectPaginationRemainsOrdered(t *testing.T) {
 			t.Error(err)
 		}
 	}
+	for _, tc := range []struct{ operation, collection string }{{"ListObjects", "Contents"}, {"ListObjectsV2", "Contents"}, {"ListObjectVersions", "Versions"}} {
+		response, err := call(tc.operation, map[string]any{"Bucket": "list-pagination", "Prefix": "folder/", "MaxKeys": 0}, nil)
+		if rows := response.Output[tc.collection].([]any); err != nil || response.Output["MaxKeys"] != 1000 || len(rows) == 0 {
+			t.Fatalf("%s zero max page = %#v, err=%v", tc.operation, response, err)
+		}
+	}
 }
 
 func TestConcurrentListEncodingValidationRemainsDeterministic(t *testing.T) {

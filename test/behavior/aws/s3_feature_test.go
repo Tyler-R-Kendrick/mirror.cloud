@@ -203,9 +203,17 @@ func TestS3ObjectLifecycle(t *testing.T) {
 	t.Run("Given multipart uploads When listing pages Then markers match LocalStack", func(t *testing.T) {
 		res := do(http.MethodPut, "/multipart-list-bdd", nil, "")
 		res.Body.Close()
-		create := func(key string) string {
+		create := func(key, checksum string) string {
 			t.Helper()
-			response := do(http.MethodPost, "/multipart-list-bdd/"+key+"?uploads", nil, "")
+			request, _ := http.NewRequest(http.MethodPost, ts.URL+"/multipart-list-bdd/"+key+"?uploads", nil)
+			request.Header.Set("Authorization", auth)
+			if checksum != "" {
+				request.Header.Set("x-amz-checksum-algorithm", checksum)
+			}
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
 			defer response.Body.Close()
 			var output struct {
 				UploadID string `xml:"UploadId"`
@@ -215,8 +223,8 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			}
 			return output.UploadID
 		}
-		firstID := create("folder/a/one")
-		create("folder/file1")
+		firstID := create("folder/a/one", "")
+		create("folder/file1", "CRC64NVME")
 		res = do(http.MethodGet, "/multipart-list-bdd?uploads&prefix=folder%2F&delimiter=%2F&max-uploads=1", nil, "")
 		body, _ := io.ReadAll(res.Body)
 		res.Body.Close()
@@ -234,6 +242,35 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(body, []byte("<Message>Invalid uploadId marker</Message>")) || !bytes.Contains(body, []byte("<ArgumentName>upload-id-marker</ArgumentName>")) {
 			t.Fatalf("mismatched multipart marker %d %s", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given a checksum-free multipart upload When completed Then checksum metadata stays absent", func(t *testing.T) {
+		res := do(http.MethodPut, "/multipart-plain-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPost, "/multipart-plain-bdd/object?uploads", nil, "")
+		var created struct {
+			UploadID string `xml:"UploadId"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodPut, "/multipart-plain-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("plain"), "")
+		etag := res.Header.Get("ETag")
+		res.Body.Close()
+		res = do(http.MethodGet, "/multipart-plain-bdd/object?uploadId="+url.QueryEscape(created.UploadID), nil, "")
+		listed, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if bytes.Contains(listed, []byte("ChecksumAlgorithm")) || bytes.Contains(listed, []byte("ChecksumType")) {
+			t.Fatalf("list exposed checksum metadata: %s", listed)
+		}
+		manifest := []byte(`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`)
+		res = do(http.MethodPost, "/multipart-plain-bdd/object?uploadId="+url.QueryEscape(created.UploadID), manifest, "")
+		completed, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if bytes.Contains(completed, []byte("ChecksumCRC64NVME")) || bytes.Contains(completed, []byte("ChecksumType")) {
+			t.Fatalf("completion exposed checksum metadata: %s", completed)
 		}
 	})
 

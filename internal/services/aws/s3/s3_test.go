@@ -4842,6 +4842,22 @@ func TestUploadPartContentMD5(t *testing.T) {
 	}
 }
 
+func TestUploadPartContentMD5Characterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "upload-part-md5-golden"}, nil)
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "upload-part-md5-golden", "Key": "key"}, nil).Output["UploadId"].(string)
+	results := map[string]any{}
+	for name, value := range map[string]string{"malformed": "!", "mismatch": "AAAAAAAAAAAAAAAAAAAAAA=="} {
+		_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "upload-part-md5-golden", "Key": "key", "UploadId": uploadID, "PartNumber": 1, "ContentMD5": value}, []byte("content-md5"))
+		fault := asFault(t, err)
+		results[name] = map[string]any{"code": fault.Code, "message": fault.Message, "fields": fault.Fields}
+	}
+	_, err := invoke(t, p, "UploadPart", map[string]any{"Bucket": "upload-part-md5-golden", "Key": "key", "UploadId": "missing", "PartNumber": 1, "ContentMD5": "!"}, []byte("content-md5"))
+	fault := asFault(t, err)
+	results["missing-upload"] = map[string]any{"code": fault.Code, "message": fault.Message, "fields": fault.Fields}
+	golden.AssertJSON(t, results)
+}
+
 func TestMultipartChecksumContract(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

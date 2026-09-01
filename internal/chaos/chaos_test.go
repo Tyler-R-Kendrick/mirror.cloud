@@ -297,6 +297,9 @@ func TestConcurrentS3OwnerIdentitiesRemainDeterministic(t *testing.T) {
 	if _, err := call("CreateBucket", map[string]any{"Bucket": "owner-identity-chaos"}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := call("PutObject", map[string]any{"Bucket": "owner-identity-chaos", "Key": "listed"}); err != nil {
+		t.Fatal(err)
+	}
 	errs := make(chan error, 32)
 	var wg sync.WaitGroup
 	for i := range cap(errs) {
@@ -304,7 +307,7 @@ func TestConcurrentS3OwnerIdentitiesRemainDeterministic(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			var err error
-			switch i % 3 {
+			switch i % 5 {
 			case 0:
 				listed, callErr := call("ListBuckets", nil)
 				err = callErr
@@ -328,6 +331,20 @@ func TestConcurrentS3OwnerIdentitiesRemainDeterministic(t *testing.T) {
 					parts, listErr := call("ListParts", map[string]any{"Bucket": "owner-identity-chaos", "Key": key, "UploadId": created.Output["UploadId"]})
 					if listErr != nil || asMap(parts.Output["Initiator"])["DisplayName"] != "webfile" || asMap(parts.Output["Owner"])["DisplayName"] != nil {
 						err = fmt.Errorf("multipart owner %d = %#v, %v", i, parts, listErr)
+					}
+				}
+			case 3, 4:
+				operation := "ListObjects"
+				input := map[string]any{"Bucket": "owner-identity-chaos"}
+				if i%5 == 4 {
+					operation, input["FetchOwner"] = "ListObjectsV2", true
+				}
+				listed, callErr := call(operation, input)
+				err = callErr
+				if err == nil {
+					owner := asMap(asMap(asSlice(listed.Output["Contents"])[0])["Owner"])
+					if owner["ID"] != id.Account || owner["DisplayName"] != nil {
+						err = fmt.Errorf("object owner %d = %#v", i, owner)
 					}
 				}
 			}

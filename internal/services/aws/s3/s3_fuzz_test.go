@@ -1701,6 +1701,41 @@ func FuzzCompleteMultipartChecksumTypeFault(f *testing.F) {
 	})
 }
 
+func FuzzCompleteMultipartPreconditionFaults(f *testing.F) {
+	f.Add([]byte("part"), uint8(0))
+	f.Add([]byte("part"), uint8(1))
+	f.Add([]byte("part"), uint8(2))
+	f.Fuzz(func(t *testing.T, body []byte, mode uint8) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "complete-precondition-fuzz"}, nil)
+		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "complete-precondition-fuzz", "Key": "key"}, nil).Output["UploadId"].(string)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "complete-precondition-fuzz", "Key": "key", "UploadId": uploadID, "PartNumber": 1}, body)
+		input := completeInput(uploadID, completedPart(1, part))
+		header, detail := "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"
+		switch mode % 3 {
+		case 0:
+			input["IfMatch"], input["IfNoneMatch"] = `"etag"`, "*"
+			header, detail = "If-Match,If-None-Match", "Multiple conditional request headers present in the request"
+		case 1:
+			input["IfNoneMatch"] = `"etag"`
+		case 2:
+			input["IfMatch"] = "*"
+		}
+		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+		fault := asFault(t, err)
+		if fault.Code != "NotImplemented" || fault.Message != "A header you provided implies functionality that is not implemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fault != "server" || fault.Fields["Header"] != header || fault.Fields["additionalMessage"] != detail {
+			t.Fatalf("mode %d fault = %#v", mode%3, fault)
+		}
+		listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "complete-precondition-fuzz", "Key": "key", "UploadId": uploadID}, nil)
+		if parts, _ := listed.Output["Parts"].([]any); len(parts) != 1 {
+			t.Fatalf("mode %d parts = %#v", mode%3, listed.Output["Parts"])
+		}
+	})
+}
+
 func FuzzUploadPartContentMD5(f *testing.F) {
 	f.Add([]byte("part"), "!", false)
 	f.Add([]byte("part"), "AAAAAAAAAAAAAAAAAAAAAA==", false)

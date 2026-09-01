@@ -1925,6 +1925,25 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, MultipartUpload: &s3types.CompletedMultipartUpload{Parts: []s3types.CompletedPart{{PartNumber: aws.Int32(9), ETag: aws.String(`\"missing\"`)}}}}); err == nil || !strings.Contains(err.Error(), "One or more of the specified parts could not be found") {
 		t.Fatalf("missing multipart completion part: %v", err)
 	}
+	preconditionUpload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("complete-precondition-fault")})
+	if err != nil {
+		t.Fatalf("create multipart precondition upload: %v", err)
+	}
+	preconditionPart, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String("complete-precondition-fault"), UploadId: preconditionUpload.UploadId, PartNumber: aws.Int32(1), Body: strings.NewReader("part")})
+	if err != nil {
+		t.Fatalf("upload multipart precondition part: %v", err)
+	}
+	preconditionManifest := &s3types.CompletedMultipartUpload{Parts: []s3types.CompletedPart{{PartNumber: aws.Int32(1), ETag: preconditionPart.ETag}}}
+	for name, conditions := range map[string]struct{ match, noneMatch *string }{
+		"combined":      {aws.String(`"etag"`), aws.String("*")},
+		"if-none-match": {nil, aws.String(`"etag"`)},
+		"if-match-star": {aws.String("*"), nil},
+	} {
+		_, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("complete-precondition-fault"), UploadId: preconditionUpload.UploadId, MultipartUpload: preconditionManifest, IfMatch: conditions.match, IfNoneMatch: conditions.noneMatch})
+		if err == nil || !strings.Contains(err.Error(), "StatusCode: 501") || !strings.Contains(err.Error(), "A header you provided implies functionality that is not implemented") {
+			t.Fatalf("%s multipart precondition fault: %v", name, err)
+		}
+	}
 	otherUpload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy")})
 	if err != nil {
 		t.Fatalf("create second multipart copy: %v", err)

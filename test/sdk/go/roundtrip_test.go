@@ -2106,8 +2106,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	checksumParts, err := s3c.ListParts(context.Background(), &s3.ListPartsInput{
 		Bucket: aws.String("sdk"), Key: aws.String("checksum-multipart"), UploadId: checksumUpload.UploadId,
 	})
-	if err != nil || checksumParts.ChecksumAlgorithm != s3types.ChecksumAlgorithmSha256 || len(checksumParts.Parts) != 1 || aws.ToString(checksumParts.Parts[0].ChecksumSHA256) != aws.ToString(checksumPart.ChecksumSHA256) {
+	if err != nil || checksumParts.ChecksumAlgorithm != s3types.ChecksumAlgorithmSha256 || checksumParts.Initiator == nil || aws.ToString(checksumParts.Initiator.DisplayName) != "webfile" || len(checksumParts.Parts) != 1 || aws.ToString(checksumParts.Parts[0].ChecksumSHA256) != aws.ToString(checksumPart.ChecksumSHA256) {
 		t.Fatalf("list checksum parts: %#v %v", checksumParts, err)
+	}
+	checksumUploads, err := s3c.ListMultipartUploads(context.Background(), &s3.ListMultipartUploadsInput{Bucket: aws.String("sdk"), Prefix: aws.String("checksum-multipart")})
+	if err != nil || len(checksumUploads.Uploads) != 1 || checksumUploads.Uploads[0].ChecksumAlgorithm != s3types.ChecksumAlgorithmSha256 || checksumUploads.Uploads[0].ChecksumType != s3types.ChecksumTypeComposite || checksumUploads.Uploads[0].Initiator == nil || aws.ToString(checksumUploads.Uploads[0].Initiator.DisplayName) != "webfile" {
+		t.Fatalf("list checksum multipart uploads: %#v %v", checksumUploads, err)
 	}
 	checksumComplete, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{
 		Bucket: aws.String("sdk"), Key: aws.String("checksum-multipart"), UploadId: checksumUpload.UploadId,

@@ -253,6 +253,12 @@ func completedPart(number int, response *spi.Response) any {
 	return map[string]any{"PartNumber": number, "ETag": response.Headers.Get("ETag")}
 }
 
+func completedPartWithChecksum(number int, response *spi.Response, input, header string) any {
+	part := completedPart(number, response).(map[string]any)
+	part[input] = response.Headers.Get(header)
+	return part
+}
+
 func completeInput(uploadID string, parts ...any) map[string]any {
 	return map[string]any{"UploadId": uploadID, "MultipartUpload": map[string]any{"Parts": parts}}
 }
@@ -4613,7 +4619,7 @@ func TestMultipartPartReads(t *testing.T) {
 	firstBody := bytes.Repeat([]byte("A"), 5<<20)
 	first := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 1}, firstBody)
 	second := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 2}, []byte("tail"))
-	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, first), completedPart(2, second)), nil)
+	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPartWithChecksum(1, first, "ChecksumSHA256", "x-amz-checksum-sha256"), completedPartWithChecksum(2, second, "ChecksumSHA256", "x-amz-checksum-sha256")), nil)
 	version := done.Headers.Get("x-amz-version-id")
 	if version == "" {
 		t.Fatal("missing multipart version")
@@ -4726,7 +4732,7 @@ func TestGetObjectAttributesContract(t *testing.T) {
 	first := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 1}, bytes.Repeat([]byte("A"), 5<<20))
 	second := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 2}, bytes.Repeat([]byte("B"), 5<<20))
 	third := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": id, "PartNumber": 3}, []byte("tail"))
-	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, first), completedPart(2, second), completedPart(3, third)), nil)
+	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPartWithChecksum(1, first, "ChecksumSHA256", "x-amz-checksum-sha256"), completedPartWithChecksum(2, second, "ChecksumSHA256", "x-amz-checksum-sha256"), completedPartWithChecksum(3, third, "ChecksumSHA256", "x-amz-checksum-sha256")), nil)
 	version := done.Headers.Get("x-amz-version-id")
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "composite"}, []byte("newer"))
 
@@ -4842,7 +4848,7 @@ func TestWriteChecksumValidation(t *testing.T) {
 	if part.Headers.Get("x-amz-checksum-md5") != checksums["ChecksumMD5"] {
 		t.Fatalf("upload checksum headers = %v", part.Headers)
 	}
-	complete := completeInput(uploadID, completedPart(1, part))
+	complete := completeInput(uploadID, completedPartWithChecksum(1, part, "ChecksumMD5", "x-amz-checksum-md5"))
 	complete["ChecksumMD5"] = "AA=="
 	_, err = invoke(t, p, "CompleteMultipartUpload", complete, nil)
 	if fault := asFault(t, err); fault.Code != "BadDigest" {
@@ -5078,7 +5084,7 @@ func TestXXHashMultipartChecksums(t *testing.T) {
 			if part.Headers.Get(tc.header) != tc.part {
 				t.Fatalf("part headers = %v", part.Headers)
 			}
-			complete := completeInput(id, completedPart(1, part))
+			complete := completeInput(id, completedPartWithChecksum(1, part, tc.input, tc.header))
 			complete[tc.input] = tc.composite
 			done := mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
 			if done.Output[tc.input] != tc.composite || done.Output["ChecksumType"] != "COMPOSITE" {
@@ -5110,7 +5116,7 @@ func TestXXHashChecksumCharacterization(t *testing.T) {
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "multipart", "ChecksumAlgorithm": "XXHASH128"}, nil)
 	id := created.Output["UploadId"].(string)
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "multipart", "UploadId": id, "PartNumber": 1}, body)
-	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, part)), nil)
+	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPartWithChecksum(1, part, "ChecksumXXHASH128", "x-amz-checksum-xxhash128")), nil)
 	snapshot["multipart"] = map[string]any{"part": part.Headers.Get("x-amz-checksum-xxhash128"), "complete": done.Output["ChecksumXXHASH128"], "type": done.Output["ChecksumType"]}
 	golden.AssertJSON(t, snapshot)
 }
@@ -5122,11 +5128,11 @@ func TestMultipartChecksumCharacterization(t *testing.T) {
 	id := created.Output["UploadId"].(string)
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "snapshot", "UploadId": id, "PartNumber": 1}, []byte("snapshot"))
 	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "snapshot", "UploadId": id}, nil)
-	mismatch := completeInput(id, completedPart(1, part))
+	mismatch := completeInput(id, completedPartWithChecksum(1, part, "ChecksumSHA256", "x-amz-checksum-sha256"))
 	mismatch["ChecksumType"] = "FULL_OBJECT"
 	_, err := invoke(t, p, "CompleteMultipartUpload", mismatch, nil)
 	fault := asFault(t, err)
-	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPart(1, part)), nil)
+	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(id, completedPartWithChecksum(1, part, "ChecksumSHA256", "x-amz-checksum-sha256")), nil)
 	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "snapshot"}, nil)
 	tags := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "snapshot"}, nil).Output["TagSet"]
 	golden.AssertJSON(t, map[string]any{

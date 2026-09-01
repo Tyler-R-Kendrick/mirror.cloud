@@ -2803,7 +2803,7 @@ func TestMultipartServerSideEncryption(t *testing.T) {
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "multipart-encryption"}, nil)
 	keyID := "arn:aws:kms:us-east-1:123456789012:key/multipart"
 	spitest.SeedKMSKey(t, deps, ident(), keyID, "Enabled")
-	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-encryption", "Key": "object", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-encryption", "Key": "object", "ChecksumAlgorithm": "CRC64NVME", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true}, nil)
 	assertEncryption := func(name string, response *spi.Response) {
 		t.Helper()
 		if response.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || response.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || response.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
@@ -4988,6 +4988,7 @@ func TestMultipartChecksumContract(t *testing.T) {
 	wantCreateFault(map[string]any{"ChecksumAlgorithm": "CRC64NVME", "ChecksumType": "COMPOSITE"}, "InvalidRequest")
 	wantCreateFault(map[string]any{"ChecksumAlgorithm": "CRC32", "ChecksumType": "invalid"}, "InvalidArgument")
 	wantCreateFault(map[string]any{"ChecksumAlgorithm": "XXHASH64", "ChecksumType": "FULL_OBJECT"}, "InvalidRequest")
+	wantCreateFault(map[string]any{"ChecksumType": "FULL_OBJECT"}, "InvalidRequest")
 
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "full", "ChecksumAlgorithm": "CRC32", "ChecksumType": "FULL_OBJECT"}, nil)
 	if created.Headers.Get("x-amz-checksum-algorithm") != "CRC32" || created.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
@@ -5139,12 +5140,15 @@ func TestMultipartWithoutChecksum(t *testing.T) {
 		t.Fatalf("create checksum = %#v", created.Output)
 	}
 	uploadID := created.Output["UploadId"].(string)
-	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "plain", "UploadId": uploadID, "PartNumber": 1}, []byte("plain"))
-	if part.Headers.Get("x-amz-checksum-crc64nvme") != "" || part.Headers.Get("x-amz-checksum-type") != "" {
+	body := []byte("plain")
+	sum := make([]byte, 4)
+	binary.BigEndian.PutUint32(sum, crc32.ChecksumIEEE(body))
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "bucket", "Key": "plain", "UploadId": uploadID, "PartNumber": 1, "ChecksumAlgorithm": "CRC32", "ChecksumCRC32": base64.StdEncoding.EncodeToString(sum)}, body)
+	if part.Headers.Get("x-amz-checksum-crc32") == "" || part.Headers.Get("x-amz-checksum-crc64nvme") != "" || part.Headers.Get("x-amz-checksum-type") != "" {
 		t.Fatalf("part checksum headers = %v", part.Headers)
 	}
 	listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "plain", "UploadId": uploadID}, nil)
-	if listed.Output["ChecksumAlgorithm"] != nil || listed.Output["ChecksumType"] != nil {
+	if listed.Output["ChecksumAlgorithm"] != nil || listed.Output["ChecksumType"] != nil || listed.Output["Parts"].([]any)[0].(map[string]any)["ChecksumCRC32"] != nil {
 		t.Fatalf("list checksum = %#v", listed.Output)
 	}
 	done := mustInvoke(t, p, "CompleteMultipartUpload", completeInput(uploadID, completedPart(1, part)), nil)
@@ -5421,7 +5425,7 @@ func TestMultipartCompletionFaultCharacterization(t *testing.T) {
 func TestListPartsAndMultipartUploads(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
-	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "k"}, nil)
+	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "k", "ChecksumAlgorithm": "CRC64NVME"}, nil)
 	id, _ := created.Output["UploadId"].(string)
 	empty := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "bucket", "Key": "k", "UploadId": id, "MaxParts": 0}, nil).Output
 	if len(empty["Parts"].([]any)) != 0 || empty["MaxParts"] != 1000 || empty["NextPartNumberMarker"] != 0 || asMapForTest(empty["Initiator"])["ID"] != "123456789012" || asMapForTest(empty["Initiator"])["DisplayName"] != "webfile" || asMapForTest(empty["Owner"])["ID"] != "123456789012" {

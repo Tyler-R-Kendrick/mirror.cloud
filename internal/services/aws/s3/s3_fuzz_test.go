@@ -1389,7 +1389,7 @@ func FuzzListObjectsPagination(f *testing.F) {
 		v2, fetchOwner bool
 		max            uint8
 		marker         string
-	}{{false, false, 1, ""}, {false, true, 1, "folder/a/"}, {true, false, 2, "folder/a/"}, {true, true, 3, "folder/b"}} {
+	}{{false, false, 0, ""}, {false, true, 1, "folder/a/"}, {true, false, 2, "folder/a/"}, {true, true, 3, "folder/b"}} {
 		f.Add(seed.v2, seed.fetchOwner, seed.max, seed.marker)
 	}
 	f.Fuzz(func(t *testing.T, v2, fetchOwner bool, maxSeed uint8, marker string) {
@@ -1407,9 +1407,13 @@ func FuzzListObjectsPagination(f *testing.F) {
 			}
 			mustInvoke(t, p, "PutObject", input, body)
 		}
-		maxKeys := int(maxSeed%3) + 1
+		requestedMaxKeys := int(maxSeed % 4)
+		maxKeys := requestedMaxKeys
+		if maxKeys == 0 {
+			maxKeys = 1000
+		}
 		operation := "ListObjects"
-		input := map[string]any{"Bucket": "list-fuzz", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": maxKeys, "Marker": marker, "EncodingType": "url"}
+		input := map[string]any{"Bucket": "list-fuzz", "Prefix": "folder/", "Delimiter": "/", "MaxKeys": requestedMaxKeys, "Marker": marker, "EncodingType": "url"}
 		if v2 {
 			operation = "ListObjectsV2"
 			delete(input, "Marker")
@@ -1461,7 +1465,7 @@ func FuzzListObjectsPagination(f *testing.F) {
 		for i, value := range want {
 			wantEncoded[i] = encode(value)
 		}
-		if strings.Join(got, "\x00") != strings.Join(wantEncoded, "\x00") || page["IsTruncated"] != truncated || page["KeyCount"] != len(want) {
+		if strings.Join(got, "\x00") != strings.Join(wantEncoded, "\x00") || page["MaxKeys"] != maxKeys || page["IsTruncated"] != truncated || page["KeyCount"] != len(want) {
 			t.Fatalf("%s marker=%q max=%d page=%#v want=%v", operation, marker, maxKeys, page, want)
 		}
 		if truncated {
@@ -1516,7 +1520,7 @@ func FuzzListEncodingType(f *testing.F) {
 }
 
 func FuzzListObjectVersionsPagination(f *testing.F) {
-	for _, seed := range []struct{ max, start uint8 }{{1, 0}, {2, 1}, {3, 2}, {5, 4}} {
+	for _, seed := range []struct{ max, start uint8 }{{0, 0}, {2, 1}, {3, 2}, {5, 4}} {
 		f.Add(seed.max, seed.start)
 	}
 	f.Fuzz(func(t *testing.T, maxSeed, startSeed uint8) {
@@ -1535,8 +1539,12 @@ func FuzzListObjectVersionsPagination(f *testing.F) {
 		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-list-fuzz", "Key": "url/k ey+"}, body)
 		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "version-list-fuzz", "Key": "url/k!ey+"}, body)
 		all := asSliceForTest(mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-list-fuzz", "Prefix": "prefix/"}, nil).Output["Versions"])
-		start, maxKeys := int(startSeed)%len(all), int(maxSeed%5)+1
-		input := map[string]any{"Bucket": "version-list-fuzz", "Prefix": "prefix/", "MaxKeys": maxKeys}
+		start, requestedMaxKeys := int(startSeed)%len(all), int(maxSeed%6)
+		maxKeys := requestedMaxKeys
+		if maxKeys == 0 {
+			maxKeys = 1000
+		}
+		input := map[string]any{"Bucket": "version-list-fuzz", "Prefix": "prefix/", "MaxKeys": requestedMaxKeys}
 		if start > 0 {
 			input["KeyMarker"] = "prefix/key"
 			input["VersionIdMarker"] = asMapForTest(all[start-1])["VersionId"]
@@ -1544,7 +1552,7 @@ func FuzzListObjectVersionsPagination(f *testing.F) {
 		page := mustInvoke(t, p, "ListObjectVersions", input, nil).Output
 		got := asSliceForTest(page["Versions"])
 		end := min(start+maxKeys, len(all))
-		if len(got) != end-start || page["IsTruncated"] != (end < len(all)) {
+		if len(got) != end-start || page["MaxKeys"] != maxKeys || page["IsTruncated"] != (end < len(all)) {
 			t.Fatalf("start=%d max=%d page=%#v", start, maxKeys, page)
 		}
 		for index := range got {

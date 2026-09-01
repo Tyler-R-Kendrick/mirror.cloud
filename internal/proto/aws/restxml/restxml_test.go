@@ -355,7 +355,7 @@ func TestACLXML(t *testing.T) {
 }
 
 func TestDecodeCompleteMultipartUploadXML(t *testing.T) {
-	body := `<CompleteMultipartUpload><Part><ETag>"first"</ETag><PartNumber>1</PartNumber></Part><Part><ETag>"third"</ETag><PartNumber>3</PartNumber></Part></CompleteMultipartUpload>`
+	body := `<CompleteMultipartUpload><Part><ETag>"first"</ETag><PartNumber>1</PartNumber><ChecksumCRC32>crc32</ChecksumCRC32><ChecksumCRC32C>crc32c</ChecksumCRC32C><ChecksumCRC64NVME>crc64</ChecksumCRC64NVME><ChecksumMD5>md5</ChecksumMD5><ChecksumSHA1>sha1</ChecksumSHA1><ChecksumSHA256>sha256</ChecksumSHA256><ChecksumXXHASH64>xx64</ChecksumXXHASH64><ChecksumXXHASH3>xx3</ChecksumXXHASH3><ChecksumXXHASH128>xx128</ChecksumXXHASH128></Part><Part><ETag>"third"</ETag><PartNumber>3</PartNumber></Part></CompleteMultipartUpload>`
 	r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/b/k?uploadId=id", strings.NewReader(body))
 	req, err := Codec{}.Decode(&model.Service{ID: "aws.s3"}, &model.Operation{Name: "CompleteMultipartUpload"}, r)
 	if err != nil {
@@ -364,6 +364,10 @@ func TestDecodeCompleteMultipartUploadXML(t *testing.T) {
 	parts := req.Input["MultipartUpload"].(map[string]any)["Parts"].([]any)
 	if len(parts) != 2 || parts[1].(map[string]any)["PartNumber"] != 3 || parts[1].(map[string]any)["ETag"] != `"third"` {
 		t.Fatalf("parts = %#v", parts)
+	}
+	want := map[string]any{"ETag": `"first"`, "PartNumber": 1, "ChecksumCRC32": "crc32", "ChecksumCRC32C": "crc32c", "ChecksumCRC64NVME": "crc64", "ChecksumMD5": "md5", "ChecksumSHA1": "sha1", "ChecksumSHA256": "sha256", "ChecksumXXHASH64": "xx64", "ChecksumXXHASH3": "xx3", "ChecksumXXHASH128": "xx128"}
+	if !reflect.DeepEqual(parts[0], want) {
+		t.Fatalf("checksums = %#v", parts[0])
 	}
 }
 

@@ -2146,9 +2146,21 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 		}
 	}
 	if str(req.Input["EncodingType"]) == "url" || str(req.Input["encoding-type"]) == "url" {
+		encode := func(value any) string {
+			return strings.ReplaceAll(strings.ReplaceAll(url.QueryEscape(str(value)), "+", "%20"), "%2F", "/")
+		}
 		for _, c := range contents {
 			m := asMap(c)
-			m["Key"] = url.QueryEscape(str(m["Key"]))
+			m["Key"] = encode(m["Key"])
+		}
+		for _, p := range prefixes {
+			m := asMap(p)
+			m["Prefix"] = encode(m["Prefix"])
+		}
+		for _, field := range []string{"Prefix", "Delimiter", "StartAfter", "NextMarker"} {
+			if value, ok := out[field]; ok {
+				out[field] = encode(value)
+			}
 		}
 		out["EncodingType"] = "url"
 	}

@@ -963,6 +963,14 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-list-pagination"), Key: aws.String("encoded/a b+"), Body: strings.NewReader("content")}); err != nil {
+		t.Fatal(err)
+	}
+	encodedList, err := s3c.ListObjectsV2(context.Background(), &s3.ListObjectsV2Input{Bucket: aws.String("sdk-list-pagination"), Prefix: aws.String("encoded/"), EncodingType: s3types.EncodingTypeUrl})
+	if err != nil || len(encodedList.Contents) != 1 || aws.ToString(encodedList.Contents[0].Key) != "encoded/a%20b%2B" || aws.ToString(encodedList.Prefix) != "encoded/" || encodedList.EncodingType != s3types.EncodingTypeUrl {
+		t.Fatalf("encoded list: %#v %v", encodedList, err)
+	}
+	listKeys = append(listKeys, "encoded/a b+")
 	firstList, err := s3c.ListObjects(context.Background(), &s3.ListObjectsInput{Bucket: aws.String("sdk-list-pagination"), Prefix: aws.String("folder/"), Delimiter: aws.String("/"), MaxKeys: aws.Int32(1)})
 	if err != nil || len(firstList.CommonPrefixes) != 1 || aws.ToString(firstList.CommonPrefixes[0].Prefix) != "folder/aSubfolder/" || len(firstList.Contents) != 0 || aws.ToString(firstList.NextMarker) != "folder/aSubfolder/" || !aws.ToBool(firstList.IsTruncated) {
 		t.Fatalf("first list page: %#v %v", firstList, err)

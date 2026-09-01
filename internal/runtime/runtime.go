@@ -690,6 +690,7 @@ func SupportMatrix() string {
 	sb.WriteString("UploadPart, CompleteMultipartUpload, ListParts, and AbortMultipartUpload return LocalStack-compatible NoSuchUpload status, message, and UploadId details for missing IDs or mismatched keys.\n")
 	sb.WriteString("UploadPart validates upload identity before the part number and returns LocalStack-compatible InvalidArgument status, message, ArgumentName, and ArgumentValue details for numbers outside 1 through 10,000.\n")
 	sb.WriteString("CompleteMultipartUpload returns LocalStack-compatible InvalidRequest, InvalidPartOrder, InvalidPart, and EntityTooSmall messages and fault details for empty, unordered, missing, mismatched, and undersized part manifests.\n")
+	sb.WriteString("UploadPart validates Content-MD5 before storing a part, returning LocalStack-compatible InvalidDigest details for malformed values and BadDigest expected/calculated details for body mismatches; rejected digests leave the upload unchanged.\n")
 	sb.WriteString("API Gateway is REST + Lambda AWS_PROXY; invoke at `/restapis/{id}/{stage}/_user_request_/{path}`.\n")
 	sb.WriteString("CloudWatch metrics store PutMetricData datapoints in memory; GetMetricStatistics is a sum/min/max/avg of those points, not AWS aggregation windows.\n")
 	sb.WriteString("Route 53 is hosted zones + resource record sets only. ACM issues local untrusted certificates with Status=ISSUED immediately.\n")

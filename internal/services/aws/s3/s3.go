@@ -2300,7 +2300,7 @@ func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response,
 		return nil, err
 	}
 	if requested := strings.ToUpper(requestCondition(req, "ChecksumAlgorithm", "x-amz-sdk-checksum-algorithm")); requested != "" && requested != algorithm {
-		return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		return nil, &spi.Fault{Code: "InvalidRequest", Message: fmt.Sprintf("Checksum Type mismatch occurred, expected checksum Type: %s, actual checksum Type: %s", strings.ToLower(algorithm), strings.ToLower(requested)), HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
 	checksum, _ := checksumByAlgorithm(algorithm)
 	if err := validateMultipartPartChecksum(req, checksum, body); err != nil {
@@ -5551,10 +5551,16 @@ func validateMultipartPartChecksum(req *spi.Request, selected struct{ algorithm,
 	for _, checksum := range checksums {
 		if value := requestCondition(req, checksum.input, checksum.header); value != "" {
 			if checksum.algorithm != selected.algorithm {
-				return &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+				return &spi.Fault{Code: "InvalidRequest", Message: fmt.Sprintf("Checksum Type mismatch occurred, expected checksum Type: %s, actual checksum Type: %s", strings.ToLower(selected.algorithm), strings.ToLower(checksum.algorithm)), HTTPStatus: http.StatusBadRequest, Fault: "client"}
 			}
-			if value != checksumValue(checksum.input, body) {
-				return &spi.Fault{Code: "BadDigest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			calculated := checksumValue(checksum.input, body)
+			decoded, err := base64.StdEncoding.DecodeString(value)
+			expected, _ := base64.StdEncoding.DecodeString(calculated)
+			if err != nil || len(decoded) != len(expected) {
+				return &spi.Fault{Code: "InvalidRequest", Message: "Value for " + checksum.header + " header is invalid.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			if value != calculated {
+				return &spi.Fault{Code: "BadDigest", Message: fmt.Sprintf("The %s you specified did not match the calculated checksum.", checksum.algorithm), HTTPStatus: http.StatusBadRequest, Fault: "client"}
 			}
 		}
 	}

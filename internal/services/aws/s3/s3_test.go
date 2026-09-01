@@ -3075,7 +3075,7 @@ func TestCopyObjectChecksums(t *testing.T) {
 		t.Fatalf("overridden stored checksum = %v", overriddenHead.Headers)
 	}
 	golden.AssertJSON(t, map[string]any{
-		"inherited": map[string]any{"checksum": inherited.Output["ChecksumSHA256"], "type": inherited.Output["ChecksumType"], "stored": inheritedHead.Headers.Get("x-amz-checksum-sha256")},
+		"inherited":  map[string]any{"checksum": inherited.Output["ChecksumSHA256"], "type": inherited.Output["ChecksumType"], "stored": inheritedHead.Headers.Get("x-amz-checksum-sha256")},
 		"overridden": map[string]any{"checksum": overridden.Output["ChecksumCRC32"], "type": overridden.Output["ChecksumType"], "stored": overriddenHead.Headers.Get("x-amz-checksum-crc32")},
 	})
 }

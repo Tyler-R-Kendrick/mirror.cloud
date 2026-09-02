@@ -915,6 +915,36 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given DeleteObject preconditions When deleting Then S3 returns LocalStack NotImplemented faults", func(t *testing.T) {
+		res := do(http.MethodPut, "/delete-precondition-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/delete-precondition-bdd/key", []byte("body"), "")
+		res.Body.Close()
+		for _, condition := range []struct{ header, value string }{{"If-Match", `"841a2d689ad86bd1611447453c22c6fc"`}, {"x-amz-if-match-size", "4"}, {"x-amz-if-match-last-modified-time", "Sun, 06 Nov 1994 08:49:37 GMT"}} {
+			request, err := http.NewRequest(http.MethodDelete, ts.URL+"/delete-precondition-bdd/key", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", auth)
+			request.Header.Set(condition.header, condition.value)
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusNotImplemented || !bytes.Contains(body, []byte("<Code>NotImplemented</Code>")) || !bytes.Contains(body, []byte("<Message>A header you provided implies functionality that is not implemented</Message>")) || !bytes.Contains(body, []byte("<Header>"+condition.header+"</Header>")) {
+				t.Fatalf("%s delete precondition fault %d %s", condition.header, response.StatusCode, body)
+			}
+		}
+		res = do(http.MethodGet, "/delete-precondition-bdd/key", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(body) != "body" {
+			t.Fatalf("object after rejected deletes = %d %q", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given conflicting multipart completion conditions When completed Then S3 returns LocalStack faults", func(t *testing.T) {
 		res := do(http.MethodPut, "/completion-conditional-bdd", nil, "")
 		res.Body.Close()

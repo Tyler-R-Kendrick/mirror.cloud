@@ -1081,7 +1081,7 @@ func TestBucketAccelerateConfiguration(t *testing.T) {
 			t.Fatalf("status %q response=%#v got=%q", status, response, get())
 		}
 	}
-	for _, status := range []string{"", "Invalid"} {
+	for _, status := range []string{"enabled", "random"} {
 		_, err := invoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate", "AccelerateConfiguration": map[string]any{"Status": status}}, nil)
 		if fault := asFault(t, err); fault.Code != "MalformedXML" || fault.HTTPStatus != http.StatusBadRequest {
 			t.Fatalf("status %q fault=%#v", status, fault)
@@ -1091,8 +1091,8 @@ func TestBucketAccelerateConfiguration(t *testing.T) {
 		t.Fatalf("invalid put replaced status = %q", got)
 	}
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "accelerate.with.period"}, nil)
-	_, err := invoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate.with.period", "AccelerateConfiguration": map[string]any{"Status": "Enabled"}}, nil)
-	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.HTTPStatus != http.StatusBadRequest {
+	_, err := invoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate.with.period", "AccelerateConfiguration": map[string]any{"Status": "random"}}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidRequest" || fault.Message != "S3 Transfer Acceleration is not supported for buckets with periods (.) in their names" || fault.HTTPStatus != http.StatusBadRequest {
 		t.Fatalf("period bucket fault=%#v", fault)
 	}
 }
@@ -2221,14 +2221,24 @@ func TestBucketAccelerateConfigurationCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "accelerate-characterization"}, nil)
 	before := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization"}, nil)
-	put := mustInvoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization", "AccelerateConfiguration": map[string]any{"Status": "Enabled"}}, nil)
-	after := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization"}, nil)
-	_, invalidErr := invoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization", "AccelerateConfiguration": map[string]any{"Status": "Invalid"}}, nil)
-	invalid := asFault(t, invalidErr)
+	putEnabled := mustInvoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization", "AccelerateConfiguration": map[string]any{"Status": "Enabled"}}, nil)
+	enabled := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization"}, nil)
+	putSuspended := mustInvoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization", "AccelerateConfiguration": map[string]any{"Status": "Suspended"}}, nil)
+	suspended := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization"}, nil)
+	invalid := map[string]any{}
+	for _, status := range []string{"enabled", "random"} {
+		_, err := invoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization", "AccelerateConfiguration": map[string]any{"Status": status}}, nil)
+		fault := asFault(t, err)
+		invalid[status] = map[string]any{"code": fault.Code, "status": fault.HTTPStatus}
+	}
 	preserved := mustInvoke(t, p, "GetBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate-characterization"}, nil)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "accelerate.characterization"}, nil)
+	_, dottedErr := invoke(t, p, "PutBucketAccelerateConfiguration", map[string]any{"Bucket": "accelerate.characterization", "AccelerateConfiguration": map[string]any{"Status": "random"}}, nil)
+	dotted := asFault(t, dottedErr)
 	golden.AssertJSON(t, map[string]any{
-		"default": before.Output, "put": put.Output, "get": after.Output,
-		"invalid": map[string]any{"code": invalid.Code, "status": invalid.HTTPStatus}, "preserved": preserved.Output,
+		"default": before.Output, "putEnabled": putEnabled.Output, "enabled": enabled.Output,
+		"putSuspended": putSuspended.Output, "suspended": suspended.Output, "invalid": invalid, "preserved": preserved.Output,
+		"dotted": map[string]any{"code": dotted.Code, "message": dotted.Message, "status": dotted.HTTPStatus},
 	})
 }
 

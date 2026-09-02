@@ -3151,9 +3151,15 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK {
 			t.Fatalf("create accelerate bucket %d", res.StatusCode)
 		}
+		res = do(http.MethodGet, "/accelerate-bdd?accelerate", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || bytes.Contains(body, []byte("<Status>")) {
+			t.Fatalf("default acceleration %d %s", res.StatusCode, body)
+		}
 		valid := []byte(`<AccelerateConfiguration><Status>Enabled</Status></AccelerateConfiguration>`)
 		res = do(http.MethodPut, "/accelerate-bdd?accelerate", valid, "")
-		body, _ := io.ReadAll(res.Body)
+		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
 		if res.StatusCode != http.StatusOK || len(body) != 0 {
 			t.Fatalf("put acceleration %d %s", res.StatusCode, body)
@@ -3164,12 +3170,14 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Status>Enabled</Status>")) || bytes.Contains(body, []byte("GetBucketAccelerateConfigurationResult")) {
 			t.Fatalf("get acceleration %d %s", res.StatusCode, body)
 		}
-		invalid := []byte(`<AccelerateConfiguration><Status>Invalid</Status></AccelerateConfiguration>`)
-		res = do(http.MethodPut, "/accelerate-bdd?accelerate", invalid, "")
-		body, _ = io.ReadAll(res.Body)
-		res.Body.Close()
-		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("MalformedXML")) {
-			t.Fatalf("invalid acceleration %d %s", res.StatusCode, body)
+		for _, status := range []string{"enabled", "random"} {
+			invalid := []byte(`<AccelerateConfiguration><Status>` + status + `</Status></AccelerateConfiguration>`)
+			res = do(http.MethodPut, "/accelerate-bdd?accelerate", invalid, "")
+			body, _ = io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>MalformedXML</Code>")) || !bytes.Contains(body, []byte("<Message>The XML you provided was not well-formed or did not validate against our published schema</Message>")) {
+				t.Fatalf("invalid acceleration %q: %d %s", status, res.StatusCode, body)
+			}
 		}
 		res = do(http.MethodGet, "/accelerate-bdd?accelerate", nil, "")
 		body, _ = io.ReadAll(res.Body)
@@ -3177,13 +3185,24 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Status>Enabled</Status>")) {
 			t.Fatalf("acceleration after invalid put %d %s", res.StatusCode, body)
 		}
+		suspended := []byte(`<AccelerateConfiguration><Status>Suspended</Status></AccelerateConfiguration>`)
+		res = do(http.MethodPut, "/accelerate-bdd?accelerate", suspended, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		res = do(http.MethodGet, "/accelerate-bdd?accelerate", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Status>Suspended</Status>")) {
+			t.Fatalf("suspended acceleration %d %s", res.StatusCode, body)
+		}
 		res = do(http.MethodPut, "/accelerate.with.period", nil, "")
 		io.Copy(io.Discard, res.Body)
 		res.Body.Close()
-		res = do(http.MethodPut, "/accelerate.with.period?accelerate", valid, "")
+		invalid := []byte(`<AccelerateConfiguration><Status>random</Status></AccelerateConfiguration>`)
+		res = do(http.MethodPut, "/accelerate.with.period?accelerate", invalid, "")
 		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidRequest")) {
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidRequest</Code>")) || !bytes.Contains(body, []byte("<Message>S3 Transfer Acceleration is not supported for buckets with periods (.) in their names</Message>")) {
 			t.Fatalf("period bucket acceleration %d %s", res.StatusCode, body)
 		}
 	})

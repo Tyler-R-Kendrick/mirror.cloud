@@ -5243,7 +5243,7 @@ func (p *Pack) namedCfg(ctx context.Context, req *spi.Request) (*spi.Response, e
 		}
 		raw, _ := json.Marshal(configuration)
 		_ = collection.Put(ctx, ck, raw)
-		return &spi.Response{Status: 200, Output: map[string]any{}}, nil
+		return &spi.Response{Status: 200}, nil
 	}
 	if strings.HasPrefix(req.Operation, "Delete") {
 		if _, exists, _ := collection.Get(ctx, ck); !exists {

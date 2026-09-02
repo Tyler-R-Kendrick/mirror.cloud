@@ -4359,6 +4359,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestNamedBucketConfigurations",
 		},
 		{
+			name: "s3-named-configurations-return-put-body",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  "raw, _ := json.Marshal(configuration)\n\t\t_ = collection.Put(ctx, ck, raw)\n\t\treturn &spi.Response{Status: 200}, nil",
+			new:  "raw, _ := json.Marshal(configuration)\n\t\t_ = collection.Put(ctx, ck, raw)\n\t\treturn &spi.Response{Status: 200, Output: map[string]any{}}, nil",
+			pkg:  "./test/behavior/aws",
+			run:  "TestS3ObjectLifecycle/Given_bucket_metrics",
+		},
+		{
+			name: "s3-named-configurations-ignore-missing-delete",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  "if strings.HasPrefix(req.Operation, \"Delete\") {\n\t\tif _, exists, _ := collection.Get(ctx, ck); !exists {",
+			new:  "if strings.HasPrefix(req.Operation, \"Delete\") {\n\t\tif _, exists, _ := collection.Get(ctx, ck); false && !exists {",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestBucketMetricsConfigurationCharacterization",
+		},
+		{
 			name: "s3-named-configurations-wrong-metrics-page-size",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `end := min(start+100, len(items))`,

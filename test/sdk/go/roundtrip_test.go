@@ -1729,6 +1729,21 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if string(restoredBody) != "enabled" || aws.ToString(restoredObject.VersionId) != aws.ToString(enabledObject.VersionId) {
 		t.Fatalf("restored object: body=%q output=%#v", restoredBody, restoredObject)
 	}
+	for _, precondition := range []struct {
+		name  string
+		input *s3.DeleteObjectInput
+	}{
+		{"etag", &s3.DeleteObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key"), IfMatch: restoredObject.ETag}},
+		{"size", &s3.DeleteObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key"), IfMatchSize: aws.Int64(int64(len(restoredBody)))}},
+		{"modified", &s3.DeleteObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key"), IfMatchLastModifiedTime: restoredObject.LastModified}},
+	} {
+		if _, err := s3c.DeleteObject(context.Background(), precondition.input); err == nil || !strings.Contains(err.Error(), "NotImplemented") {
+			t.Fatalf("delete %s precondition: %v", precondition.name, err)
+		}
+	}
+	if _, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key")}); err != nil {
+		t.Fatalf("precondition delete changed object: %v", err)
+	}
 	replicationConfiguration := &s3types.ReplicationConfiguration{
 		Role:  aws.String("arn:aws:iam::000000000000:role/replication"),
 		Rules: []s3types.ReplicationRule{{Priority: aws.Int32(1), Status: s3types.ReplicationRuleStatusEnabled, Filter: &s3types.ReplicationRuleFilter{Prefix: aws.String("replica/")}, DeleteMarkerReplication: &s3types.DeleteMarkerReplication{Status: s3types.DeleteMarkerReplicationStatusDisabled}, Destination: &s3types.Destination{Bucket: aws.String("arn:aws:s3:::sdk-west")}}},

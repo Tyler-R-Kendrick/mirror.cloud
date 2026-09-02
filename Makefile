@@ -103,6 +103,7 @@ test-fuzz:
 	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzUploadPartSSECustomerKeyFaults$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCompleteMultipartChecksumTypeFault$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCompleteMultipartPreconditionFaults$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzWritePreconditionFaults$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCompleteMultipartConditionalConflicts$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzDeleteObjectVersionRestoration$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzDeleteObjectMissingKeyVersionIsIdempotent$$' -fuzztime=10000x -parallel=4

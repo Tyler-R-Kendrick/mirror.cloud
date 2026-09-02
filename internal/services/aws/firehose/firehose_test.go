@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/golang/snappy"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	kafkaservice "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kafka"
@@ -46,6 +47,30 @@ const testRoleARN = "arn:aws:iam::123456789012:role/firehose"
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
+
+type delayedRetryWaitClock struct {
+	*clock.Controllable
+	calls   atomic.Int32
+	blocked chan struct{}
+	release chan struct{}
+}
+
+func (c *delayedRetryWaitClock) After(d time.Duration) <-chan time.Time {
+	c.blockSecondWait()
+	return c.Controllable.After(d)
+}
+
+func (c *delayedRetryWaitClock) AfterUntil(at time.Time) <-chan time.Time {
+	c.blockSecondWait()
+	return c.Controllable.AfterUntil(at)
+}
+
+func (c *delayedRetryWaitClock) blockSecondWait() {
+	if c.calls.Add(1) == 2 {
+		close(c.blocked)
+		<-c.release
+	}
+}
 
 func testS3Destination() map[string]any {
 	return map[string]any{"BucketARN": "arn:aws:s3:::out", "RoleARN": testRoleARN}
@@ -1330,6 +1355,8 @@ func TestFirehoseRedshiftPersistentRetry(t *testing.T) {
 
 func TestFirehoseRedshiftRetryExpiryAndDelete(t *testing.T) {
 	deps := spitest.Deps(t)
+	retryClock := &delayedRetryWaitClock{Controllable: deps.Clock.(*clock.Controllable), blocked: make(chan struct{}), release: make(chan struct{})}
+	deps.Clock = retryClock
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	redshift := redshiftservice.New(deps)
 	if _, err := redshift.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateCluster", Input: map[string]any{
@@ -1341,7 +1368,13 @@ func TestFirehoseRedshiftRetryExpiryAndDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := New(deps)
-	defer func() { _ = p.Close() }()
+	released := false
+	defer func() {
+		if !released {
+			close(retryClock.release)
+		}
+		_ = p.Close()
+	}()
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
 		return p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
 	}
@@ -1364,9 +1397,16 @@ func TestFirehoseRedshiftRetryExpiryAndDelete(t *testing.T) {
 	if len(items) != 1 || json.Unmarshal(items[0].Value, &expired) != nil {
 		t.Fatalf("Redshift expiry work %#v", items)
 	}
+	select {
+	case <-retryClock.blocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("retry worker did not reach its wait")
+	}
 	if err := deps.Clock.Advance(5 * time.Minute); err != nil {
 		t.Fatal(err)
 	}
+	close(retryClock.release)
+	released = true
 	for attempt := 0; attempt < 2000; attempt++ {
 		if work, _, _ := collection.List(context.Background(), "redshift-expiry/", "", 0); len(work) == 0 {
 			break

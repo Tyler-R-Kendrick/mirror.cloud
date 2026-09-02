@@ -26,6 +26,7 @@ import (
 	"os/exec"
 	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -5152,6 +5153,32 @@ func TestListObjectsV2OpaqueContinuationTokens(t *testing.T) {
 		if fault.Code != "InvalidArgument" || fault.Message != "The continuation token provided is incorrect" || fault.Fields["ArgumentName"] != "continuation-token" {
 			t.Fatalf("token %q fault = %#v", token, fault)
 		}
+	}
+}
+
+func TestListObjectsV2SafeContinuationTokens(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "safe-tokens"}, nil)
+	keys := []string{"file%2Fname", "test@key/", "test%123", "test key/", "a/😀/", "date=2026-01-01/"}
+	for _, key := range keys {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "safe-tokens", "Key": key}, nil)
+	}
+	first := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "safe-tokens", "MaxKeys": 3}, nil).Output
+	second := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "safe-tokens", "ContinuationToken": first["NextContinuationToken"]}, nil).Output
+	var got []string
+	for _, page := range []map[string]any{first, second} {
+		for _, row := range asSliceForTest(page["Contents"]) {
+			got = append(got, asMapForTest(row)["Key"].(string))
+		}
+	}
+	sort.Strings(keys)
+	if !reflect.DeepEqual(got, keys) || first["NextContinuationToken"] == "" || second["ContinuationToken"] != first["NextContinuationToken"] {
+		t.Fatalf("safe token pages first=%#v second=%#v", first, second)
+	}
+	start := "date=2026-01-01/"
+	after := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "safe-tokens", "StartAfter": start, "MaxKeys": 2, "EncodingType": "url"}, nil).Output
+	if after["StartAfter"] != "date%3D2026-01-01/" || len(asSliceForTest(after["Contents"])) != 2 {
+		t.Fatalf("encoded start-after = %#v", after)
 	}
 }
 

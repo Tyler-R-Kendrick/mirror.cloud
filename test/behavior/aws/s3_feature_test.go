@@ -3289,6 +3289,11 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Status>Enabled</Status>")) {
 			t.Fatalf("enabled versioning %d %s", res.StatusCode, body)
 		}
+		res = do(http.MethodPut, "/versioning-state/version-format", []byte("body"), "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || len(res.Header.Get("x-amz-version-id")) != 32 {
+			t.Fatalf("version id %d %q", res.StatusCode, res.Header.Get("x-amz-version-id"))
+		}
 	})
 
 	t.Run("Given suspended versioning When objects are replaced Then one null version remains", func(t *testing.T) {

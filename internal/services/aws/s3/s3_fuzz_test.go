@@ -1103,6 +1103,12 @@ func FuzzBucketVersioningState(f *testing.F) {
 			if got := mustInvoke(t, p, "GetBucketVersioning", input, nil).Output["Status"]; got != status {
 				t.Fatalf("stored status %q = %v", status, got)
 			}
+			if status == "Enabled" {
+				versionID := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": input["Bucket"], "Key": "format"}, nil).Headers.Get("x-amz-version-id")
+				if len(versionID) != 32 {
+					t.Fatalf("version id = %q", versionID)
+				}
+			}
 			return
 		}
 		want := "MalformedXML"

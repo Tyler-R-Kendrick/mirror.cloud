@@ -1679,6 +1679,18 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key"), Body: strings.NewReader("unversioned")}); err != nil {
 		t.Fatalf("put unversioned object: %v", err)
 	}
+	unversionedNull, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key"), VersionId: aws.String("null")})
+	if err != nil {
+		t.Fatalf("get unversioned null object: %v", err)
+	}
+	unversionedNullBody, _ := io.ReadAll(unversionedNull.Body)
+	_ = unversionedNull.Body.Close()
+	if string(unversionedNullBody) != "unversioned" || unversionedNull.VersionId != nil {
+		t.Fatalf("unversioned null object: body=%q output=%#v", unversionedNullBody, unversionedNull)
+	}
+	if _, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key"), VersionId: aws.String("missing")}); err == nil || !strings.Contains(err.Error(), "InvalidArgument") || !strings.Contains(err.Error(), "Invalid version id specified") {
+		t.Fatalf("get invalid unversioned version: %v", err)
+	}
 	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String("sdk-suspended"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusEnabled}}); err != nil {
 		t.Fatalf("enable suspended bucket: %v", err)
 	}
@@ -1743,6 +1755,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}
 	if _, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key")}); err != nil {
 		t.Fatalf("precondition delete changed object: %v", err)
+	}
+	if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key"), VersionId: enabledObject.VersionId}); err != nil {
+		t.Fatalf("delete enabled object version: %v", err)
+	}
+	if _, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key"), VersionId: enabledObject.VersionId}); err == nil || !strings.Contains(err.Error(), "NoSuchVersion") || !strings.Contains(err.Error(), "The specified version does not exist.") {
+		t.Fatalf("get deleted object version: %v", err)
 	}
 	for _, version := range []string{"missing-version", "null"} {
 		deleted, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("missing-key"), VersionId: aws.String(version)})

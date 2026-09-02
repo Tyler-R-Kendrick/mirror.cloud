@@ -2311,6 +2311,55 @@ func FuzzDeleteObjectUnversionedMissingKeyVersions(f *testing.F) {
 	})
 }
 
+func FuzzGetObjectUnversionedVersions(f *testing.F) {
+	f.Add("null", "body")
+	f.Add("missing-version", "content")
+	f.Fuzz(func(t *testing.T, version, body string) {
+		if version == "" || len(version) > 1024 || len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "unversioned-read-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "unversioned-read-fuzz", "Key": "key"}, []byte(body))
+		response, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "unversioned-read-fuzz", "Key": "key", "VersionId": version}, nil)
+		if version == "null" {
+			if err != nil || string(readStream(t, response)) != body || response.Headers.Get("x-amz-version-id") != "" {
+				t.Fatalf("null version response = %#v, %v", response, err)
+			}
+			return
+		}
+		fault := asFault(t, err)
+		if response != nil || fault.Code != "InvalidArgument" || fault.Fields["ArgumentName"] != "versionId" || fault.Fields["ArgumentValue"] != version {
+			t.Fatalf("version %q response = %#v, fault = %#v", version, response, fault)
+		}
+	})
+}
+
+func FuzzObjectByteRangeFaultDetails(f *testing.F) {
+	f.Add("bytes=-0")
+	f.Add("bytes=10-")
+	f.Add("bytes=0--1")
+	f.Fuzz(func(t *testing.T, value string) {
+		if len(value) > 256 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "range-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "range-fuzz", "Key": "key"}, []byte("0123456789"))
+		response, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "range-fuzz", "Key": "key", "Range": value}, nil)
+		if err == nil {
+			if body := readStream(t, response); len(body) > 10 {
+				t.Fatalf("range %q returned %d bytes", value, len(body))
+			}
+			return
+		}
+		fault := asFault(t, err)
+		if fault.Code != "InvalidRange" || fault.Fields["ActualObjectSize"] != "10" || fault.Fields["RangeRequested"] != value || fault.Headers.Get("Content-Range") != "bytes */10" {
+			t.Fatalf("range %q fault = %#v", value, fault)
+		}
+	})
+}
+
 func FuzzSuspendedNullVersionReplacement(f *testing.F) {
 	f.Add("null", uint8(1), false)
 	f.Add("replacement", uint8(8), true)

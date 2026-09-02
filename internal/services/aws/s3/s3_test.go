@@ -3895,6 +3895,7 @@ func TestObjectReadConditions(t *testing.T) {
 	for _, operation := range []string{"GetObject", "HeadObject", "GetObjectAttributes"} {
 		for _, conditions := range []map[string]any{
 			{"IfMatch": `"wrong"`},
+			{"IfMatch": `"wrong", ` + etag},
 			{"IfUnmodifiedSince": past},
 		} {
 			_, err := call(operation, conditions)
@@ -3913,7 +3914,8 @@ func TestObjectReadConditions(t *testing.T) {
 			}
 		}
 		for _, conditions := range []map[string]any{
-			{"IfMatch": `"wrong", ` + etag, "IfUnmodifiedSince": past},
+			{"IfMatch": etag, "IfUnmodifiedSince": past},
+			{"IfNoneMatch": `"wrong", ` + etag},
 			{"IfNoneMatch": `"wrong"`, "IfModifiedSince": future},
 		} {
 			response, err := call(operation, conditions)

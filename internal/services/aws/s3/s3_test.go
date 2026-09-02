@@ -428,6 +428,8 @@ func TestBucketNotificationConfiguration(t *testing.T) {
 		{"missing events", "MalformedXML", map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:queue"}}}},
 		{"wrong arn service", "InvalidArgument", map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sns:us-east-1:111111111111:queue", "Events": []any{"s3:ObjectCreated:*"}}}}},
 		{"missing destination", "InvalidArgument", map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:missing", "Events": []any{"s3:ObjectCreated:*"}}}}},
+		{"invalid lambda ARN", "InvalidArgument", map[string]any{"LambdaFunctionConfigurations": []any{map[string]any{"LambdaFunctionArn": "invalid-lambda", "Events": []any{"s3:ObjectCreated:*"}}}}},
+		{"missing lambda", "InvalidArgument", map[string]any{"LambdaFunctionConfigurations": []any{map[string]any{"LambdaFunctionArn": "arn:aws:lambda:us-east-1:111111111111:function:missing", "Events": []any{"s3:ObjectCreated:*"}}}}},
 		{"missing filter value", "MalformedXML", notificationWithFilter(map[string]any{"Name": "prefix"})},
 		{"invalid filter name", "InvalidArgument", notificationWithFilter(map[string]any{"Name": "contains", "Value": "x"})},
 		{"unknown field", "MalformedXML", map[string]any{"UnknownConfigurations": []any{}}},
@@ -452,6 +454,15 @@ func TestBucketNotificationConfiguration(t *testing.T) {
 	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": skipped, "SkipDestinationValidation": true}, nil)
 	if stored := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(asSliceForTest(stored["QueueConfigurations"])) != 1 {
 		t.Fatalf("skipped destination validation = %#v", stored)
+	}
+	invalidLambda := map[string]any{"LambdaFunctionConfigurations": []any{map[string]any{"LambdaFunctionArn": "invalid-lambda", "Events": []any{"s3:ObjectCreated:*"}}}}
+	if _, err := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": invalidLambda, "SkipDestinationValidation": true}, nil); asFault(t, err).Code != "InvalidArgument" {
+		t.Fatalf("invalid skipped lambda ARN = %v", err)
+	}
+	skippedLambda := map[string]any{"LambdaFunctionConfigurations": []any{map[string]any{"LambdaFunctionArn": "arn:aws:lambda:us-east-1:111111111111:function:missing", "Events": []any{"s3:ObjectCreated:*"}}}}
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": skippedLambda, "SkipDestinationValidation": true}, nil)
+	if stored := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(asSliceForTest(stored["LambdaFunctionConfigurations"])) != 1 {
+		t.Fatalf("skipped lambda validation = %#v", stored)
 	}
 	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": map[string]any{}}, nil)
 	if cleared := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(cleared) != 0 {
@@ -556,7 +567,7 @@ func TestBucketNotificationLambdaDelivery(t *testing.T) {
 	ctx := context.Background()
 	id := ident()
 	path := t.TempDir() + "/event.json"
-	source := "import json\n\ndef lambda_handler(event, context):\n    open(" + strconv.Quote(path) + ", 'w').write(json.dumps(event))\n"
+	source := "import json\n\ndef lambda_handler(event, context):\n    open(" + strconv.Quote(path) + ", 'a').write(json.dumps(event) + '\\n')\n"
 	if _, err := lambda.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
 		"FunctionName": "handler", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
 		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(source))},
@@ -570,21 +581,41 @@ func TestBucketNotificationLambdaDelivery(t *testing.T) {
 	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{
 		"Bucket": bucket,
 		"NotificationConfiguration": map[string]any{"LambdaFunctionConfigurations": []any{map[string]any{
-			"LambdaFunctionArn": arn, "Events": []any{"s3:ObjectCreated:Put"},
+			"LambdaFunctionArn": arn, "Events": []any{"s3:ObjectCreated:*"},
 		}}},
 	}, nil)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "created"}, []byte("created"))
+	var form bytes.Buffer
+	writer := multipart.NewWriter(&form)
+	_ = writer.WriteField("key", "posted")
+	file, err := writer.CreateFormFile("file", "posted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = file.Write([]byte("posted"))
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	httpRequest := httptest.NewRequest(http.MethodPost, "http://s3.test/"+bucket, &form)
+	httpRequest.Header.Set("Content-Type", writer.FormDataContentType())
+	if _, err := p.Invoke(ctx, &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": bucket}, Identity: id, Body: httpRequest.Body, HTTP: httpRequest}); err != nil {
+		t.Fatal(err)
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		t.Fatal(err)
+	events := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(line), &payload); err != nil {
+			t.Fatal(err)
+		}
+		record := asMapForTest(asSliceForTest(payload["Records"])[0])
+		events[record["eventName"].(string)] = asMapForTest(asMapForTest(record["s3"])["object"])["key"].(string)
 	}
-	record := asMapForTest(asSliceForTest(payload["Records"])[0])
-	if record["eventName"] != "ObjectCreated:Put" || asMapForTest(asMapForTest(record["s3"])["object"])["key"] != "created" {
-		t.Fatalf("lambda notification = %#v", payload)
+	if !reflect.DeepEqual(events, map[string]string{"ObjectCreated:Put": "created", "ObjectCreated:Post": "posted"}) {
+		t.Fatalf("lambda notifications = %#v", events)
 	}
 }
 

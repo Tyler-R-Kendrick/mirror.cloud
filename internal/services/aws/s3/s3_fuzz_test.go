@@ -3312,6 +3312,7 @@ func FuzzCopySourcePreconditions(f *testing.F) {
 		deps := spitest.Deps(t)
 		p := s3.New(deps)
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "copy-condition-fuzz"}, nil)
+		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "copy-condition-fuzz", "Status": "Enabled"}, nil)
 		put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "copy-condition-fuzz", "Key": "source"}, []byte("source"))
 		seconds := int(secondsSeed%60) + 1
 		_ = deps.Clock.Advance(time.Duration(seconds) * time.Second)

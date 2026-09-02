@@ -2679,6 +2679,10 @@ func TestBucketVersioningState(t *testing.T) {
 	if len(versionID) != 32 || strings.IndexFunc(versionID, func(r rune) bool { return !strings.ContainsRune("0123456789abcdef", r) }) >= 0 {
 		t.Fatalf("version id = %q", versionID)
 	}
+	deleted := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": input["Bucket"], "Key": "version-format"}, nil)
+	if markerID := deleted.Headers.Get("x-amz-version-id"); len(markerID) != 32 {
+		t.Fatalf("delete marker version id = %q", markerID)
+	}
 	golden.AssertJSON(t, characterization)
 }
 

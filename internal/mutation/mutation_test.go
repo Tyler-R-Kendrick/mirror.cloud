@@ -17510,8 +17510,16 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-shorten-version-id",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "if versioningStatus == \"Enabled\" {\n\t\t\tvid = p.deps.Rand.Hex(32)\n\t\t}",
-			new:  "if versioningStatus == \"Enabled\" {\n\t\t\tvid = p.deps.Rand.Hex(16)\n\t\t}",
+			old:  "if versioned {\n\t\tvid = \"null\"\n\t\tif versioningStatus == \"Enabled\" {\n\t\t\tvid = p.deps.Rand.Hex(32)\n\t\t}",
+			new:  "if versioned {\n\t\tvid = \"null\"\n\t\tif versioningStatus == \"Enabled\" {\n\t\t\tvid = p.deps.Rand.Hex(16)\n\t\t}",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestBucketVersioningState",
+		},
+		{
+			name: "s3-shorten-delete-marker-version-id",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  "if versioned && wantVer == \"\" {\n\t\tvid := \"null\"\n\t\tif versioningStatus == \"Enabled\" {\n\t\t\tvid = p.deps.Rand.Hex(32)\n\t\t}",
+			new:  "if versioned && wantVer == \"\" {\n\t\tvid := \"null\"\n\t\tif versioningStatus == \"Enabled\" {\n\t\t\tvid = p.deps.Rand.Hex(16)\n\t\t}",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestBucketVersioningState",
 		},

@@ -2,13 +2,50 @@ package mutation
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+func mutationShard(raw string) (int, int, error) {
+	if raw == "" {
+		return 0, 1, nil
+	}
+	indexText, totalText, ok := strings.Cut(raw, "/")
+	index, indexErr := strconv.Atoi(indexText)
+	total, totalErr := strconv.Atoi(totalText)
+	if !ok || indexErr != nil || totalErr != nil || total < 1 || index < 0 || index >= total {
+		return 0, 0, fmt.Errorf("MUTATION_SHARD must be INDEX/TOTAL with 0 <= INDEX < TOTAL, got %q", raw)
+	}
+	return index, total, nil
+}
+
+func TestMutationShard(t *testing.T) {
+	for _, tc := range []struct {
+		raw          string
+		index, total int
+		valid        bool
+	}{
+		{"", 0, 1, true},
+		{"2/4", 2, 4, true},
+		{"-1/4", 0, 0, false},
+		{"4/4", 0, 0, false},
+		{"0/0", 0, 0, false},
+		{"x/4", 0, 0, false},
+		{"0/x", 0, 0, false},
+		{"0/4/8", 0, 0, false},
+	} {
+		index, total, err := mutationShard(tc.raw)
+		if (err == nil) != tc.valid || index != tc.index || total != tc.total {
+			t.Errorf("mutationShard(%q) = %d, %d, %v", tc.raw, index, total, err)
+		}
+	}
+}
 
 // TestMutantsAreKilled is a tiny in-tree mutation suite. Each mutant
 // rewrites one production token via `go test -overlay` and must make
@@ -17685,6 +17722,11 @@ func TestMutantsAreKilled(t *testing.T) {
 		},
 	}
 
+	shard, shards, err := mutationShard(os.Getenv("MUTATION_SHARD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	files := map[string]string{}
 	for _, m := range mutants {
 		src := filepath.Join(root, m.file)
@@ -17702,7 +17744,10 @@ func TestMutantsAreKilled(t *testing.T) {
 		}
 	}
 
-	for _, m := range mutants {
+	for i, m := range mutants {
+		if i%shards != shard {
+			continue
+		}
 		t.Run(m.name, func(t *testing.T) {
 			t.Parallel()
 			src := filepath.Join(root, m.file)

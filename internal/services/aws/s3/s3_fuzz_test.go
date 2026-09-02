@@ -1579,7 +1579,7 @@ func FuzzListMultipartUploadsMarkers(f *testing.F) {
 	for _, seed := range []struct {
 		max, start uint8
 		invalid    bool
-	}{{1, 0, false}, {2, 1, false}, {5, 4, false}, {1, 2, true}} {
+	}{{0, 0, false}, {2, 1, false}, {5, 4, false}, {1, 2, true}} {
 		f.Add(seed.max, seed.start, seed.invalid)
 	}
 	f.Fuzz(func(t *testing.T, maxSeed, startSeed uint8, invalid bool) {
@@ -1589,8 +1589,12 @@ func FuzzListMultipartUploadsMarkers(f *testing.F) {
 			mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-list-fuzz", "Key": "prefix/key", "ChecksumAlgorithm": "CRC64NVME"}, nil)
 		}
 		all := asSliceForTest(mustInvoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "multipart-list-fuzz", "Prefix": "prefix/"}, nil).Output["Uploads"])
-		start, maxUploads := int(startSeed)%len(all), int(maxSeed%5)+1
-		input := map[string]any{"Bucket": "multipart-list-fuzz", "Prefix": "prefix/", "MaxUploads": maxUploads}
+		start, requestedMaxUploads := int(startSeed)%len(all), int(maxSeed%6)
+		maxUploads := requestedMaxUploads
+		if maxUploads == 0 {
+			maxUploads = 1000
+		}
+		input := map[string]any{"Bucket": "multipart-list-fuzz", "Prefix": "prefix/", "MaxUploads": requestedMaxUploads}
 		if start > 0 {
 			input["KeyMarker"] = "prefix/key"
 			input["UploadIdMarker"] = asMapForTest(all[start-1])["UploadId"]
@@ -1608,7 +1612,7 @@ func FuzzListMultipartUploadsMarkers(f *testing.F) {
 		page := mustInvoke(t, p, "ListMultipartUploads", input, nil).Output
 		got := asSliceForTest(page["Uploads"])
 		end := min(start+maxUploads, len(all))
-		if len(got) != end-start || page["IsTruncated"] != (end < len(all)) {
+		if len(got) != end-start || page["MaxUploads"] != maxUploads || page["IsTruncated"] != (end < len(all)) {
 			t.Fatalf("start=%d max=%d page=%#v", start, maxUploads, page)
 		}
 		for index := range got {
@@ -1641,7 +1645,18 @@ func FuzzListPartsPagination(f *testing.F) {
 		if zero {
 			maxParts = 0
 		}
-		page := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": "parts-list-fuzz", "Key": "key", "UploadId": uploadID, "PartNumberMarker": marker, "MaxParts": maxParts}, nil).Output
+		input := map[string]any{"Bucket": "parts-list-fuzz", "Key": "key", "UploadId": uploadID, "PartNumberMarker": marker, "MaxParts": maxParts}
+		var page map[string]any
+		if zero {
+			request := httptest.NewRequest(http.MethodGet, "http://s3.localhost/parts-list-fuzz/key?uploadId="+url.QueryEscape(fmt.Sprint(uploadID))+"&part-number-marker="+strconv.Itoa(marker)+"&max-parts=0", nil)
+			response, err := p.Invoke(context.Background(), &spi.Request{Identity: ident(), Operation: "ListParts", Input: input, HTTP: request})
+			if err != nil {
+				t.Fatal(err)
+			}
+			page = response.Output
+		} else {
+			page = mustInvoke(t, p, "ListParts", input, nil).Output
+		}
 		want := []int{}
 		for _, number := range []int{1, 3, 7} {
 			if number > marker {

@@ -2385,6 +2385,31 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 			}
 		}
 	}
+	for _, operation := range []string{"PutObject", "CopyObject"} {
+		key := "write-if-match-list-" + operation
+		seed, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key), Body: strings.NewReader("old")})
+		if err != nil {
+			t.Fatalf("seed %s If-Match list: %v", operation, err)
+		}
+		condition := aws.String(`"wrong", ` + aws.ToString(seed.ETag))
+		if operation == "PutObject" {
+			_, err = s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key), Body: strings.NewReader("new"), IfMatch: condition})
+		} else {
+			_, err = s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key), CopySource: aws.String("sdk/k"), IfMatch: condition})
+		}
+		if err == nil || !strings.Contains(err.Error(), "StatusCode: 412") || !strings.Contains(err.Error(), "PreconditionFailed") {
+			t.Fatalf("%s If-Match list fault: %v", operation, err)
+		}
+		got, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key)})
+		if err != nil {
+			t.Fatalf("get %s after If-Match list: %v", operation, err)
+		}
+		body, _ := io.ReadAll(got.Body)
+		_ = got.Body.Close()
+		if string(body) != "old" {
+			t.Fatalf("%s If-Match list stored %q", operation, body)
+		}
+	}
 	conditionalUpload := func(key string) (string, *s3types.CompletedMultipartUpload) {
 		t.Helper()
 		created, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String(key)})

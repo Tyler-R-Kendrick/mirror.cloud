@@ -3012,6 +3012,68 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given suspended versioning When objects are replaced Then one null version remains", func(t *testing.T) {
+		for _, request := range []struct {
+			method, path, body string
+		}{
+			{http.MethodPut, "/suspended-version", ""},
+			{http.MethodPut, "/suspended-version/key", "unversioned"},
+			{http.MethodPut, "/suspended-version?versioning", "<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"},
+		} {
+			res := do(request.method, request.path, []byte(request.body), "")
+			res.Body.Close()
+			if res.StatusCode >= 300 {
+				t.Fatalf("%s %s = %d", request.method, request.path, res.StatusCode)
+			}
+		}
+		enabled := do(http.MethodPut, "/suspended-version/key", []byte("enabled"), "")
+		enabled.Body.Close()
+		enabledVersion := enabled.Header.Get("x-amz-version-id")
+		if enabled.StatusCode != http.StatusOK || enabledVersion == "" {
+			t.Fatalf("enabled version = %d %v", enabled.StatusCode, enabled.Header)
+		}
+		suspend := do(http.MethodPut, "/suspended-version?versioning", []byte("<VersioningConfiguration><Status>Suspended</Status></VersioningConfiguration>"), "")
+		suspend.Body.Close()
+		if suspend.StatusCode != http.StatusOK {
+			t.Fatalf("suspend = %d", suspend.StatusCode)
+		}
+		for _, body := range []string{"first null", "second null"} {
+			put := do(http.MethodPut, "/suspended-version/key", []byte(body), "")
+			put.Body.Close()
+			if put.StatusCode != http.StatusOK {
+				t.Fatalf("suspended put = %d", put.StatusCode)
+			}
+		}
+		listed := do(http.MethodGet, "/suspended-version?versions", nil, "")
+		listedBody, _ := io.ReadAll(listed.Body)
+		listed.Body.Close()
+		if listed.StatusCode != http.StatusOK || bytes.Count(listedBody, []byte("<VersionId>null</VersionId>")) != 1 || !bytes.Contains(listedBody, []byte("<VersionId>"+enabledVersion+"</VersionId>")) {
+			t.Fatalf("suspended versions = %d %s", listed.StatusCode, listedBody)
+		}
+		nullObject := do(http.MethodGet, "/suspended-version/key?versionId=null", nil, "")
+		nullBody, _ := io.ReadAll(nullObject.Body)
+		nullObject.Body.Close()
+		if nullObject.StatusCode != http.StatusOK || string(nullBody) != "second null" || nullObject.Header.Get("x-amz-version-id") != "null" {
+			t.Fatalf("null object = %d %q %v", nullObject.StatusCode, nullBody, nullObject.Header)
+		}
+		marker := do(http.MethodDelete, "/suspended-version/key", nil, "")
+		marker.Body.Close()
+		if marker.StatusCode != http.StatusNoContent || marker.Header.Get("x-amz-delete-marker") != "true" || marker.Header.Get("x-amz-version-id") != "null" {
+			t.Fatalf("null marker = %d %v", marker.StatusCode, marker.Header)
+		}
+		deleted := do(http.MethodDelete, "/suspended-version/key?versionId=null", nil, "")
+		deleted.Body.Close()
+		if deleted.StatusCode != http.StatusNoContent {
+			t.Fatalf("delete null marker = %d", deleted.StatusCode)
+		}
+		restored := do(http.MethodGet, "/suspended-version/key", nil, "")
+		restoredBody, _ := io.ReadAll(restored.Body)
+		restored.Body.Close()
+		if restored.StatusCode != http.StatusOK || string(restoredBody) != "enabled" || restored.Header.Get("x-amz-version-id") != enabledVersion {
+			t.Fatalf("restored object = %d %q %v", restored.StatusCode, restoredBody, restored.Header)
+		}
+	})
+
 	t.Run("Given versioned replication When an object is written Then its version is readable from the replica", func(t *testing.T) {
 		for _, bucket := range []string{"replication-source", "replication-destination"} {
 			res := do(http.MethodPut, "/"+bucket, nil, "")

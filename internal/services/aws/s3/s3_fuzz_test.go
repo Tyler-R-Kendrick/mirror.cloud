@@ -2135,6 +2135,39 @@ func FuzzDeleteObjectVersionRestoration(f *testing.F) {
 	})
 }
 
+func FuzzSuspendedNullVersionReplacement(f *testing.F) {
+	f.Add("null", uint8(1), false)
+	f.Add("replacement", uint8(8), true)
+	f.Fuzz(func(t *testing.T, body string, writes uint8, deleteCurrent bool) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "suspended-version-fuzz"}, nil)
+		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "suspended-version-fuzz", "Status": "Enabled"}, nil)
+		enabled := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "suspended-version-fuzz", "Key": "key"}, []byte("enabled"))
+		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "suspended-version-fuzz", "Status": "Suspended"}, nil)
+		for range 1 + int(writes%8) {
+			mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "suspended-version-fuzz", "Key": "key"}, []byte(body))
+		}
+		listed := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "suspended-version-fuzz"}, nil).Output
+		versions := asSliceForTest(listed["Versions"])
+		if len(versions) != 2 || asMapForTest(versions[0])["VersionId"] != "null" || asMapForTest(versions[1])["VersionId"] != enabled.Headers.Get("x-amz-version-id") {
+			t.Fatalf("suspended versions = %#v", listed)
+		}
+		if got := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "suspended-version-fuzz", "Key": "key", "VersionId": "null"}, nil))); got != body {
+			t.Fatalf("null body = %q, want %q", got, body)
+		}
+		if deleteCurrent {
+			mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "suspended-version-fuzz", "Key": "key"}, nil)
+			listed = mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "suspended-version-fuzz"}, nil).Output
+			if markers := asSliceForTest(listed["DeleteMarkers"]); len(markers) != 1 || asMapForTest(markers[0])["VersionId"] != "null" {
+				t.Fatalf("null marker = %#v", listed)
+			}
+		}
+	})
+}
+
 func FuzzDeleteObjectsVersionSemantics(f *testing.F) {
 	f.Add("key", "first", "second", false)
 	f.Add("nested/key", "", "same", true)

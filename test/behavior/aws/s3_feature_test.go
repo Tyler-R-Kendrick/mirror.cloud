@@ -504,6 +504,19 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || !bytes.Contains(completed, []byte("<ChecksumCRC32>")) || bytes.Contains(completed, []byte("<ChecksumCRC32>AA==</ChecksumCRC32>")) {
 			t.Fatalf("ignored composite aggregate: %d %s", res.StatusCode, completed)
 		}
+		attributes, _ := http.NewRequest(http.MethodGet, ts.URL+"/multipart-composite-bdd/object?attributes", nil)
+		attributes.Header.Set("Authorization", auth)
+		attributes.Header.Set("x-amz-object-attributes", "ObjectParts")
+		attributes.Header.Set("x-amz-part-number-marker", "10")
+		res, err = http.DefaultClient.Do(attributes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		empty, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(empty, []byte("<PartNumberMarker>10</PartNumberMarker>")) || !bytes.Contains(empty, []byte("<NextPartNumberMarker>0</NextPartNumberMarker>")) {
+			t.Fatalf("empty object-parts page: %d %s", res.StatusCode, empty)
+		}
 	})
 
 	t.Run("Given a composite multipart upload When an alternate object checksum is supplied Then completion returns BadDigest", func(t *testing.T) {

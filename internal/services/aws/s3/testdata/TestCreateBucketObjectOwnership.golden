@@ -3,6 +3,17 @@
   "bucketownerenforced": "BucketOwnerEnforced",
   "bucketownerpreferred": "BucketOwnerPreferred",
   "default-ownership": "BucketOwnerEnforced",
-  "invalid": "InvalidArgument",
+  "invalid": {
+    "\"\"": {
+      "argument": "x-amz-object-ownership",
+      "code": "InvalidArgument",
+      "message": "Invalid x-amz-object-ownership header: "
+    },
+    "\"RandomValue\"": {
+      "argument": "x-amz-object-ownership",
+      "code": "InvalidArgument",
+      "message": "Invalid x-amz-object-ownership header: RandomValue"
+    }
+  },
   "objectwriter": "ObjectWriter"
 }

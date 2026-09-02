@@ -42,6 +42,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 	testIdentity := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	spitest.SeedKMSKey(t, deps, testIdentity, "arn:aws:kms:us-east-1:000000000000:key/multipart-behavior", "Enabled")
 	spitest.SeedKMSKey(t, deps, testIdentity, "arn:aws:kms:us-east-1:000000000000:key/kms-bdd", "Enabled")
+	spitest.SeedKMSKey(t, deps, testIdentity, "arn:aws:kms:us-east-1:000000000000:key/encryption-bdd", "Enabled")
 	spitest.SeedKMSKey(t, deps, testIdentity, "arn:aws:kms:us-east-1:000000000000:key/disabled-bdd", "Disabled")
 
 	do := func(method, path string, body []byte, storageClass string) *http.Response {
@@ -2904,7 +2905,18 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<SSEAlgorithm>AES256</SSEAlgorithm>")) || !bytes.Contains(body, []byte("<BucketKeyEnabled>false</BucketKeyEnabled>")) {
 			t.Fatalf("default encryption %d %s", res.StatusCode, body)
 		}
-		valid := []byte(`<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>arn:aws:kms:us-east-1:000000000000:key/bdd</KMSMasterKeyID></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`)
+		aes := []byte(`<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`)
+		res = do(http.MethodPut, "/encryption-bdd?encryption", aes, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("put AES encryption %d", res.StatusCode)
+		}
+		res = do(http.MethodPut, "/encryption-bdd/aes", []byte("body"), "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-server-side-encryption") != "AES256" || res.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "" {
+			t.Fatalf("AES encryption %d %v", res.StatusCode, res.Header)
+		}
+		valid := []byte(`<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>arn:aws:kms:us-east-1:000000000000:key/encryption-bdd</KMSMasterKeyID></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`)
 		res = do(http.MethodPut, "/encryption-bdd?encryption", valid, "")
 		io.Copy(io.Discard, res.Body)
 		res.Body.Close()
@@ -2925,10 +2937,10 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			t.Fatalf("invalid encryption %d %s", res.StatusCode, body)
 		}
 		res = do(http.MethodPut, "/encryption-bdd/object", []byte("body"), "")
-		io.Copy(io.Discard, res.Body)
+		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-server-side-encryption") != "aws:kms" || res.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != "arn:aws:kms:us-east-1:000000000000:key/bdd" || res.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
-			t.Fatalf("inherited encryption %d %v", res.StatusCode, res.Header)
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-server-side-encryption") != "aws:kms" || res.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != "arn:aws:kms:us-east-1:000000000000:key/encryption-bdd" || res.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+			t.Fatalf("inherited encryption %d %v %s", res.StatusCode, res.Header, body)
 		}
 		for range 2 {
 			res = do(http.MethodDelete, "/encryption-bdd?encryption", nil, "")
@@ -3258,6 +3270,12 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("IllegalVersioningConfigurationException")) {
 			t.Fatalf("missing versioning status %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodPut, "/versioning-state?versioning", []byte("<VersioningConfiguration><Status>enabled</Status></VersioningConfiguration>"), "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>MalformedXML</Code>")) || !bytes.Contains(body, []byte("<Message>The XML you provided was not well-formed or did not validate against our published schema</Message>")) {
+			t.Fatalf("invalid versioning status %d %s", res.StatusCode, body)
 		}
 		res = do(http.MethodPut, "/versioning-state?versioning", []byte("<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>"), "")
 		body, _ = io.ReadAll(res.Body)

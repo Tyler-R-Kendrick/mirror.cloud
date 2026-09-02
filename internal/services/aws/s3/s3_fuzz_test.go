@@ -2779,11 +2779,12 @@ func FuzzPostObjectChecksums(f *testing.F) {
 }
 
 func FuzzObjectServerSideEncryption(f *testing.F) {
-	f.Add(uint8(0), false, "body")
-	f.Add(uint8(1), true, "kms")
-	f.Add(uint8(2), false, "dsse")
-	f.Add(uint8(3), true, "invalid")
-	f.Fuzz(func(t *testing.T, algorithmIndex uint8, bucketKey bool, body string) {
+	f.Add(uint8(0), true, "body", false)
+	f.Add(uint8(1), true, "kms", false)
+	f.Add(uint8(1), true, "managed", true)
+	f.Add(uint8(2), false, "dsse", false)
+	f.Add(uint8(3), true, "invalid", false)
+	f.Fuzz(func(t *testing.T, algorithmIndex uint8, bucketKey bool, body string, managed bool) {
 		if len(body) > 4096 {
 			t.Skip()
 		}
@@ -2794,7 +2795,7 @@ func FuzzObjectServerSideEncryption(f *testing.F) {
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "encryption-fuzz"}, nil)
 		input := map[string]any{"Bucket": "encryption-fuzz", "Key": "object", "ServerSideEncryption": algorithm, "BucketKeyEnabled": bucketKey}
 		keyID := "arn:aws:kms:us-east-1:123456789012:key/fuzz"
-		if algorithm == "aws:kms" {
+		if algorithm == "aws:kms" && !managed {
 			spitest.SeedKMSKey(t, deps, ident(), keyID, "Enabled")
 			input["SSEKMSKeyId"] = keyID
 		}
@@ -2815,8 +2816,13 @@ func FuzzObjectServerSideEncryption(f *testing.F) {
 		if get.Headers.Get("x-amz-server-side-encryption") != algorithm || string(readStream(t, get)) != body {
 			t.Fatalf("stored encryption headers=%v", get.Headers)
 		}
-		if algorithm == "aws:kms" && (get.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || bucketKey && get.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true") {
-			t.Fatalf("stored kms headers=%v", get.Headers)
+		if algorithm == "aws:kms" {
+			gotKey := get.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id")
+			if !managed && gotKey != keyID || managed && !strings.HasPrefix(gotKey, "arn:aws:kms:us-east-1:123456789012:key/") || bucketKey && get.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+				t.Fatalf("stored kms headers=%v", get.Headers)
+			}
+		} else if get.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "" {
+			t.Fatalf("non-KMS bucket key header=%v", get.Headers)
 		}
 	})
 }

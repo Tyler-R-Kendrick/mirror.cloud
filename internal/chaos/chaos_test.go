@@ -4042,6 +4042,47 @@ func TestConcurrentKMSKeyValidation(t *testing.T) {
 	}
 }
 
+func TestConcurrentManagedS3KMSKeyCreation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "managed-kms-chaos"}}); err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan string, 32)
+	var wg sync.WaitGroup
+	for i := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutObject", Input: map[string]any{"Bucket": "managed-kms-chaos", "Key": fmt.Sprintf("key-%d", i), "ServerSideEncryption": "aws:kms"}, Body: io.NopCloser(strings.NewReader("body"))})
+			if err != nil {
+				results <- "error: " + err.Error()
+				return
+			}
+			results <- response.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id")
+		}()
+	}
+	wg.Wait()
+	close(results)
+	managed := ""
+	for result := range results {
+		if !strings.HasPrefix(result, "arn:aws:kms:us-east-1:000000000000:key/") {
+			t.Fatalf("managed key = %q", result)
+		}
+		if managed == "" {
+			managed = result
+		} else if result != managed {
+			t.Fatalf("managed keys differ: %q != %q", result, managed)
+		}
+	}
+	keys, _, err := deps.Store.Scope(id.Account, id.Region).Collection("kms").List(ctx, "", "", 0)
+	if err != nil || len(keys) != 1 {
+		t.Fatalf("managed key records = %d, %v", len(keys), err)
+	}
+}
+
 func TestConcurrentGetObjectResponseOverrides(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

@@ -1126,7 +1126,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.GetBucketPolicy(context.Background(), &s3.GetBucketPolicyInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchBucketPolicy") {
 		t.Fatalf("get deleted bucket policy: %v", err)
 	}
-	if got, err := s3c.GetBucketEncryption(context.Background(), &s3.GetBucketEncryptionInput{Bucket: aws.String("sdk")}); err != nil || got.ServerSideEncryptionConfiguration != nil {
+	if got, err := s3c.GetBucketEncryption(context.Background(), &s3.GetBucketEncryptionInput{Bucket: aws.String("sdk")}); err != nil || got.ServerSideEncryptionConfiguration == nil || len(got.ServerSideEncryptionConfiguration.Rules) != 1 || got.ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault == nil || got.ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault.SSEAlgorithm != s3types.ServerSideEncryptionAes256 || aws.ToBool(got.ServerSideEncryptionConfiguration.Rules[0].BucketKeyEnabled) {
 		t.Fatalf("default bucket encryption: %#v %v", got, err)
 	}
 	bucketEncryptionKey := "arn:aws:kms:us-east-1:000000000000:key/sdk-default"
@@ -1163,8 +1163,8 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || kmsHead.ChecksumCRC64NVME == nil || kmsHead.ChecksumType != s3types.ChecksumTypeFullObject {
 		t.Fatalf("persisted KMS multipart checksum: %#v %v", kmsHead, err)
 	}
-	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-explicit-kms"), Body: strings.NewReader("encrypted"), ServerSideEncryption: s3types.ServerSideEncryptionAwsKms, SSEKMSKeyId: aws.String(bucketEncryptionKey)}); err != nil {
-		t.Fatalf("explicit kms put: %v", err)
+	if put, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-explicit-kms"), Body: strings.NewReader("encrypted"), ServerSideEncryption: s3types.ServerSideEncryptionAwsKms, SSEKMSKeyId: aws.String("sdk-default")}); err != nil || aws.ToString(put.SSEKMSKeyId) != bucketEncryptionKey {
+		t.Fatalf("explicit kms put: %#v %v", put, err)
 	}
 	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("sdk-missing-kms"), Body: strings.NewReader("rejected"), ServerSideEncryption: s3types.ServerSideEncryptionAwsKms, SSEKMSKeyId: aws.String("arn:aws:kms:us-east-1:000000000000:key/missing")}); err == nil || !strings.Contains(err.Error(), "KMS.NotFoundException") {
 		t.Fatalf("missing kms key: %v", err)
@@ -1186,7 +1186,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 			t.Fatalf("delete bucket encryption: %v", err)
 		}
 	}
-	if got, err := s3c.GetBucketEncryption(context.Background(), &s3.GetBucketEncryptionInput{Bucket: aws.String("sdk")}); err != nil || got.ServerSideEncryptionConfiguration != nil {
+	if got, err := s3c.GetBucketEncryption(context.Background(), &s3.GetBucketEncryptionInput{Bucket: aws.String("sdk")}); err != nil || got.ServerSideEncryptionConfiguration == nil || len(got.ServerSideEncryptionConfiguration.Rules) != 1 || got.ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault == nil || got.ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault.SSEAlgorithm != s3types.ServerSideEncryptionAes256 {
 		t.Fatalf("deleted bucket encryption: %#v %v", got, err)
 	}
 	bucketACL, err := s3c.GetBucketAcl(context.Background(), &s3.GetBucketAclInput{Bucket: aws.String("sdk")})

@@ -4845,6 +4845,7 @@ func TestListObjectVersionsResumesAfterDeletedVersionMarker(t *testing.T) {
 	if versions := asSliceForTest(resumed["Versions"]); len(versions) != 2 {
 		t.Fatalf("versions after deleted marker = %#v", resumed)
 	}
+	golden.AssertJSON(t, map[string]any{"first": first, "resumed": resumed})
 }
 
 func TestListObjectVersionChecksumMetadata(t *testing.T) {

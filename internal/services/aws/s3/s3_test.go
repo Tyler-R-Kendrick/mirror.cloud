@@ -2951,7 +2951,8 @@ func TestBucketEncryptionConfiguration(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	bucket := map[string]any{"Bucket": "bucket-encryption"}
 	mustInvoke(t, p, "CreateBucket", bucket, nil)
-	if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output; len(got) != 0 {
+	defaultRules := []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256"}, "BucketKeyEnabled": false}}
+	if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["Rules"]; !reflect.DeepEqual(got, defaultRules) {
 		t.Fatalf("default encryption = %#v", got)
 	}
 	rule := func(algorithm string, keyID any, bucketKey bool) map[string]any {
@@ -2976,6 +2977,13 @@ func TestBucketEncryptionConfiguration(t *testing.T) {
 		if got := object.Headers.Get("x-amz-server-side-encryption"); got != algorithm {
 			t.Fatalf("%s object encryption = %q", algorithm, got)
 		}
+	}
+	if _, err := put(map[string]any{"Rules": []any{rule("AES256", nil, true)}}); err != nil {
+		t.Fatal(err)
+	}
+	aes := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "aes-bucket-key"}, []byte("body"))
+	if aes.Headers.Get("x-amz-server-side-encryption") != "AES256" || aes.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "" {
+		t.Fatalf("AES bucket key headers = %v", aes.Headers)
 	}
 	keyID := "arn:aws:kms:us-east-1:000000000000:key/bucket-default"
 	baseline := map[string]any{"Rules": []any{rule("aws:kms", keyID, true)}}
@@ -3020,7 +3028,7 @@ func TestBucketEncryptionConfiguration(t *testing.T) {
 	for range 2 {
 		mustInvoke(t, p, "DeleteBucketEncryption", bucket, nil)
 	}
-	if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output; len(got) != 0 {
+	if got := mustInvoke(t, p, "GetBucketEncryption", bucket, nil).Output["Rules"]; !reflect.DeepEqual(got, defaultRules) {
 		t.Fatalf("deleted encryption = %#v", got)
 	}
 }

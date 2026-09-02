@@ -3667,7 +3667,7 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 			return &spi.Response{Output: map[string]any{}}, nil
 		}
 		if req.Operation == "GetBucketEncryption" {
-			return &spi.Response{Output: map[string]any{}}, nil
+			return &spi.Response{Output: map[string]any{"Rules": []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256"}, "BucketKeyEnabled": false}}}}, nil
 		}
 		if req.Operation == "GetBucketCors" {
 			return nil, &spi.Fault{Code: "NoSuchCORSConfiguration", Message: "The CORS configuration does not exist", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": b}}
@@ -4621,7 +4621,7 @@ func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket st
 			algorithm = "AES256"
 		}
 	}
-	bucketKey = bucketKey || defaultBucketKey
+	bucketKey = (algorithm == "aws:kms" || algorithm == "aws:kms:dsse") && (bucketKey || defaultBucketKey)
 	if algorithm != "AES256" && algorithm != "aws:fsx" && algorithm != "aws:backup" && algorithm != "aws:kms" && algorithm != "aws:kms:dsse" {
 		return "", "", false, &spi.Fault{Code: "InvalidArgument", Message: "The encryption method specified is not supported", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}

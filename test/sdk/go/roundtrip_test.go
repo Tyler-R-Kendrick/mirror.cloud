@@ -2622,6 +2622,33 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err := completeConditional("complete-if-none-deleted", uploadID, manifest, nil, aws.String("*")); err != nil {
 		t.Fatalf("restarted complete If-None-Match: %v", err)
 	}
+	ifMatchPut, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("complete-if-match-put"), Body: strings.NewReader("old")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID, manifest = conditionalUpload("complete-if-match-put")
+	ifMatchReplacement, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("complete-if-match-put"), Body: strings.NewReader("new")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := completeConditional("complete-if-match-put", uploadID, manifest, ifMatchPut.ETag, nil); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") || !strings.Contains(err.Error(), "PreconditionFailed") {
+		t.Fatalf("stale complete If-Match: %v", err)
+	}
+	uploadID, manifest = conditionalUpload("complete-if-match-put")
+	if err := completeConditional("complete-if-match-put", uploadID, manifest, ifMatchReplacement.ETag, nil); err != nil {
+		t.Fatalf("restarted complete If-Match: %v", err)
+	}
+	ifMatchDeleted, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("complete-if-match-delete"), Body: strings.NewReader("object")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadID, manifest = conditionalUpload("complete-if-match-delete")
+	if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk"), Key: aws.String("complete-if-match-delete")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := completeConditional("complete-if-match-delete", uploadID, manifest, ifMatchDeleted.ETag, nil); err == nil || !strings.Contains(err.Error(), "StatusCode: 404") || !strings.Contains(err.Error(), "NoSuchKey") {
+		t.Fatalf("deleted complete If-Match: %v", err)
+	}
 	otherUpload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy")})
 	if err != nil {
 		t.Fatalf("create second multipart copy: %v", err)

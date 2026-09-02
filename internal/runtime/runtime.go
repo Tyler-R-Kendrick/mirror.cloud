@@ -710,6 +710,7 @@ func SupportMatrix() string {
 	sb.WriteString("S3 PutObject and CopyObject return LocalStack-compatible NoSuchKey details when destination If-Match targets a missing object and modeled PreconditionFailed conditions for ETag mismatches.\n")
 	sb.WriteString("S3 object reads and copy-source ETag conditions require one exact value with supported wildcard semantics, matching LocalStack rather than accepting comma lists; PutObject and CopyObject destination If-Match uses the same exact rule.\n")
 	sb.WriteString("S3 object-read and copy-source precondition failures include LocalStack-compatible messages and Condition fields.\n")
+	sb.WriteString("S3 object reads ignore If-Modified-Since values at or after the current service time, matching AWS and LocalStack future-date behavior.\n")
 	sb.WriteString("CompleteMultipartUpload applies the same exact destination If-Match rule before manifest validation; rejected list conditions preserve the upload for retry.\n")
 	sb.WriteString("CompleteMultipartUpload returns LocalStack-compatible NoSuchKey, PreconditionFailed, and ConditionalRequestConflict details when If-Match or If-None-Match object state changes across multipart initiation and completion.\n")
 	sb.WriteString("CompleteMultipartUpload omits checksum response fields for KMS-encrypted multipart objects while persisting the checksum for ChecksumMode-enabled reads.\n")

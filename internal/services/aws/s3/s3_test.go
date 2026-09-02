@@ -5118,7 +5118,7 @@ func TestGetObjectAttributesContract(t *testing.T) {
 		t.Fatalf("full object parts = %#v", fullParts)
 	}
 
-	golden.AssertJSON(t, map[string]any{"standard": standard.Output, "page": page.Output, "lastPage": lastPage, "full": fullAttrs})
+	golden.AssertJSON(t, map[string]any{"standard": standard.Output, "page": page.Output, "lastPage": lastPage, "emptyPage": emptyPage, "full": fullAttrs})
 }
 
 func TestWriteChecksumValidation(t *testing.T) {

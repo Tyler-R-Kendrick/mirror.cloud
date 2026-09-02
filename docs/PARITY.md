@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.8% |
-| LocalStack S3 test functions explicitly traced | 101 / 463 (21.8%) |
-| LocalStack S3 test functions not yet traced | 362 / 463 (78.2%) |
+| LocalStack S3 test functions explicitly traced | 108 / 463 (23.3%) |
+| LocalStack S3 test functions not yet traced | 355 / 463 (76.7%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -138,6 +138,13 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3_api.py::TestS3ObjectCRUD::test_delete_object_on_suspended_bucket` | `TestSuspendedVersioningReplacesNullVersion`, SDK contract, HTTP BDD, fuzz, chaos, snapshot, and mutation coverage verify null delete-marker replacement and restoration of the prior enabled version | Mapped and green |
 | `test_s3_api.py::TestS3ObjectCRUD::test_list_object_versions_order_unversioned` | `TestListObjectVersionsUnversionedOrder` verifies unversioned objects are key-ordered, latest, and represented with the null version ID; list pagination and mutation coverage exercise the shared implementation | Mapped and green |
 | `test_s3_api.py::TestS3ObjectCRUD::test_get_object_range` | `TestObjectByteRanges`, SDK contract, HTTP BDD, fuzz, and mutation coverage verify bounded/open/suffix/ignored ranges, checksum handling, 206 metadata, and exact 416 size/request fields | Mapped and green |
+| `test_s3_api.py::TestS3BucketVersioning::test_bucket_versioning_crud` | `TestBucketVersioningState`, SDK contract, HTTP BDD, snapshot, fuzz, and mutation coverage verify unset, suspended, enabled, invalid, empty, and missing-bucket behavior with the exact REST-XML faults | Mapped and green |
+| `test_s3_api.py::TestS3BucketVersioning::test_object_version_id_format` | `TestBucketVersioningState`, HTTP BDD, fuzz, snapshots, and two focused mutants verify object and delete-marker version IDs are 32 lowercase hexadecimal characters | Mapped and green |
+| `test_s3_api.py::TestS3BucketEncryption::test_s3_default_bucket_encryption` | `TestBucketEncryptionConfiguration`, HTTP spine/BDD, SDK contract, snapshot, and mutation coverage verify the fresh and post-delete AES256 default plus idempotent deletion | Mapped and green |
+| `test_s3_api.py::TestS3BucketEncryption::test_s3_default_bucket_encryption_exc` | `TestBucketEncryptionConfiguration`, REST-XML contract, BDD, fuzz, snapshot, and mutation coverage verify missing buckets, invalid rule counts, and exact malformed/invalid-key faults without replacing valid state | Mapped and green |
+| `test_s3_api.py::TestS3BucketEncryption::test_s3_bucket_encryption_sse_s3` | `TestBucketEncryptionConfiguration`, SDK contract, HTTP BDD, fuzz, and snapshots verify AES256 inheritance across writes and reads while suppressing inapplicable bucket-key headers | Mapped and green |
+| `test_s3_api.py::TestS3BucketEncryption::test_s3_bucket_encryption_sse_kms` | `TestExplicitKMSKeyValidation`, `TestBucketEncryptionConfiguration`, SDK contract, BDD, fuzz, chaos, snapshot, and mutation coverage verify canonical KMS ARNs, enabled-state validation, inherited headers, and bucket-key toggles | Mapped and green |
+| `test_s3_api.py::TestS3BucketEncryption::test_s3_bucket_encryption_sse_kms_aws_managed_key` | `TestExplicitKMSKeyValidation` and `TestConcurrentManagedS3KMSKeyCreation` verify one reusable `alias/aws/s3` key with AWS-managed metadata is materialized, returned by S3, and discoverable through KMS under concurrent writes; fuzz and mutation coverage pin reuse | Mapped and green |
 
 ## Source-only findings
 
@@ -149,4 +156,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 101/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 108/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

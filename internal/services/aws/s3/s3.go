@@ -4092,7 +4092,7 @@ func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Res
 			if truncated {
 				listed = listed[:maxParts]
 			}
-			objectParts["IsTruncated"], objectParts["MaxParts"], objectParts["PartNumberMarker"] = truncated, maxParts, strconv.Itoa(marker)
+			objectParts["IsTruncated"], objectParts["MaxParts"], objectParts["PartNumberMarker"], objectParts["NextPartNumberMarker"] = truncated, maxParts, strconv.Itoa(marker), "0"
 			if len(listed) > 0 {
 				objectParts["Parts"] = listed
 				objectParts["NextPartNumberMarker"] = strconv.Itoa(asInt(asMap(listed[len(listed)-1])["PartNumber"]))

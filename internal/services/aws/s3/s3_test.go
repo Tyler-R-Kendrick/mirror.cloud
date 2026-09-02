@@ -5984,7 +5984,7 @@ func TestCompleteMultipartIfMatchRequiresSingleETag(t *testing.T) {
 	}
 	input := completeInput(uploadID, completedPart(1, part))
 	input["Bucket"], input["Key"], input["IfMatch"] = bucket, key, `"wrong", `+seed.Headers.Get("ETag")
-	readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": bucket, "Key": key, "IfMatch": input["IfMatch"]}, nil))
+	readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": bucket, "Key": key, "IfMatch": seed.Headers.Get("ETag")}, nil))
 	_, err = invoke(t, p, "CompleteMultipartUpload", input, nil)
 	fault := asFault(t, err)
 	if fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != "If-Match" {

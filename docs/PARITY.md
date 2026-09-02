@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
-| LocalStack S3 test functions explicitly traced | 158 / 463 (34.1%) |
-| LocalStack S3 test functions not yet traced | 305 / 463 (65.9%) |
+| LocalStack S3 test functions explicitly traced | 159 / 463 (34.3%) |
+| LocalStack S3 test functions not yet traced | 304 / 463 (65.7%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -183,6 +183,7 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3_api.py::TestS3ObjectWritePrecondition::test_multipart_if_match_with_put` | `TestCompleteMultipartUploadConditionalConflicts`, AWS SDK contract, HTTP BDD, characterization snapshot, chaos, fuzz, and mutation coverage verify stale-ETag failure, newer matching-ETag conflict, retained upload state, and successful restart | Mapped and race-clean |
 | `test_s3_api.py::TestS3ObjectWritePrecondition::test_multipart_if_match_with_put_identical` | Atomic and HTTP BDD characterization advance a controlled clock and verify an identical-content overwrite still conflicts by modification time despite an unchanged ETag, while a restarted upload succeeds | Mapped and race-clean |
 | `test_s3_api.py::TestS3ObjectWritePrecondition::test_multipart_if_match_with_delete` | Atomic, AWS SDK contract, HTTP BDD, snapshot, and mutation coverage verify deletion returns `NoSuchKey` and same-ETag recreation after initiation returns the exact conditional conflict without consuming the upload | Mapped and race-clean |
+| `test_s3_api.py::TestS3ObjectWritePrecondition::test_multipart_if_match_etag` | `TestCompleteMultipartIfMatchRequiresSingleETag`, AWS SDK contract, HTTP BDD, snapshot, and mutation coverage verify the first exact match succeeds, its multipart ETag differs, the stale original ETag fails, and the current multipart ETag permits replacement | Mapped and race-clean |
 | `test_s3_api.py::TestS3ObjectWritePrecondition::test_put_object_if_match_versioned_bucket` | Atomic characterization, AWS SDK contract, HTTP BDD, snapshot, and mutation coverage verify only the current live version participates, a delete marker returns `NoSuchKey`, and matching overwrites retain history | Mapped and race-clean |
 | `test_s3_api.py::TestS3ObjectWritePrecondition::test_put_object_if_match_and_if_none_match_validation` | Atomic characterization, AWS SDK contract, HTTP BDD, fuzz, chaos, snapshot, and mutation coverage verify combined write conditions return the exact 501 response before storage mutation | Mapped and race-clean |
 | `test_s3_api.py::TestS3MetricsConfiguration::test_put_bucket_metrics_configuration` | `TestBucketMetricsConfigurationCharacterization`, AWS SDK contract, and HTTP BDD verify exact 200 status, empty body, filter persistence, and ID preservation | Mapped and race-clean |
@@ -206,4 +207,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 158/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 159/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

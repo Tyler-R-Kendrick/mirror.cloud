@@ -5971,10 +5971,16 @@ func TestCompleteMultipartIfMatchRequiresSingleETag(t *testing.T) {
 	seed := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key}, []byte("old"))
 	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": bucket, "Key": key}, nil).Output["UploadId"].(string)
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": bucket, "Key": key, "UploadId": uploadID, "PartNumber": 1}, []byte("new"))
+	empty := completeInput(uploadID)
+	empty["Bucket"], empty["Key"], empty["IfMatch"] = bucket, key, `"wrong", `+seed.Headers.Get("ETag")
+	_, err := invoke(t, p, "CompleteMultipartUpload", empty, nil)
+	if fault := asFault(t, err); fault.Code != "PreconditionFailed" || fault.Fields["Condition"] != "If-Match" {
+		t.Fatalf("validation order fault = %#v", fault)
+	}
 	input := completeInput(uploadID, completedPart(1, part))
 	input["Bucket"], input["Key"], input["IfMatch"] = bucket, key, `"wrong", `+seed.Headers.Get("ETag")
 	readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": bucket, "Key": key, "IfMatch": input["IfMatch"]}, nil))
-	_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+	_, err = invoke(t, p, "CompleteMultipartUpload", input, nil)
 	fault := asFault(t, err)
 	if fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != "If-Match" {
 		t.Fatalf("list fault = %#v", fault)

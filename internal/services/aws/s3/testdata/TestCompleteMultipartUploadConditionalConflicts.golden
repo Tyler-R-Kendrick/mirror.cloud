@@ -25,6 +25,14 @@
     "message": "The conditional request cannot succeed due to a conflicting operation against this resource.",
     "status": 409
   },
+  "existing-before-delete": {
+    "code": "PreconditionFailed",
+    "fields": {
+      "Condition": "If-None-Match"
+    },
+    "message": "At least one of the pre-conditions you specified did not hold",
+    "status": 412
+  },
   "mismatched-if-match": {
     "code": "PreconditionFailed",
     "fields": {

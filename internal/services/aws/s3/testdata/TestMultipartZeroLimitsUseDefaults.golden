@@ -1,0 +1,53 @@
+{
+  "parts": {
+    "Bucket": "multipart-zero-limits",
+    "Initiator": {
+      "DisplayName": "webfile",
+      "ID": "123456789012"
+    },
+    "IsTruncated": false,
+    "Key": "key",
+    "MaxParts": 1000,
+    "NextPartNumberMarker": 1,
+    "Owner": {
+      "ID": "123456789012"
+    },
+    "PartNumberMarker": 0,
+    "Parts": [
+      {
+        "ETag": "\"f4c9385f1902f7334b00b9b4ecd164de\"",
+        "LastModified": "1970-01-01T00:00:00.000Z",
+        "PartNumber": 1,
+        "Size": 4
+      }
+    ],
+    "StorageClass": "STANDARD",
+    "UploadId": "7c5891299f6489f8"
+  },
+  "uploads": {
+    "Bucket": "multipart-zero-limits",
+    "CommonPrefixes": [],
+    "IsTruncated": false,
+    "KeyMarker": "",
+    "MaxUploads": 1000,
+    "NextKeyMarker": "key",
+    "NextUploadIdMarker": "7c5891299f6489f8",
+    "Prefix": "",
+    "UploadIdMarker": "",
+    "Uploads": [
+      {
+        "Initiated": "1970-01-01T00:00:00.000Z",
+        "Initiator": {
+          "DisplayName": "webfile",
+          "ID": "123456789012"
+        },
+        "Key": "key",
+        "Owner": {
+          "ID": "123456789012"
+        },
+        "StorageClass": "STANDARD",
+        "UploadId": "7c5891299f6489f8"
+      }
+    ]
+  }
+}

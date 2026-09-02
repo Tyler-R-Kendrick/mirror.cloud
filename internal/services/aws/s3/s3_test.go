@@ -5813,11 +5813,13 @@ func TestMultipartZeroLimitsUseDefaults(t *testing.T) {
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "multipart-zero-limits", "Key": "key"}, nil)
 	uploadID := created.Output["UploadId"]
 	mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": "multipart-zero-limits", "Key": "key", "UploadId": uploadID, "PartNumber": 1}, []byte("part"))
+	got := map[string]any{}
 	t.Run("ListMultipartUploads", func(t *testing.T) {
 		response, err := invoke(t, p, "ListMultipartUploads", map[string]any{"Bucket": "multipart-zero-limits", "MaxUploads": 0}, nil)
 		if err != nil || response.Output["MaxUploads"] != 1000 || len(asSliceForTest(response.Output["Uploads"])) != 1 {
 			t.Fatalf("zero max uploads = %#v, %v", response, err)
 		}
+		got["uploads"] = response.Output
 	})
 	t.Run("ListPartsHTTP", func(t *testing.T) {
 		request := httptest.NewRequest(http.MethodGet, "http://s3.localhost/multipart-zero-limits/key?uploadId="+url.QueryEscape(fmt.Sprint(uploadID))+"&max-parts=0", nil)
@@ -5825,7 +5827,9 @@ func TestMultipartZeroLimitsUseDefaults(t *testing.T) {
 		if err != nil || response.Output["MaxParts"] != 1000 || len(asSliceForTest(response.Output["Parts"])) != 1 {
 			t.Fatalf("zero max parts = %#v, %v", response, err)
 		}
+		got["parts"] = response.Output
 	})
+	golden.AssertJSON(t, got)
 }
 
 func TestListPartsAndMultipartUploads(t *testing.T) {

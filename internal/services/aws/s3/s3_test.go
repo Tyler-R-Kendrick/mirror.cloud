@@ -4102,6 +4102,7 @@ func TestDeleteObjectDirectoryPreconditionsAreNotImplemented(t *testing.T) {
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("body"))
 
+	var faults []any
 	for _, tc := range []struct {
 		name, header, value string
 	}{
@@ -4117,11 +4118,13 @@ func TestDeleteObjectDirectoryPreconditionsAreNotImplemented(t *testing.T) {
 			if fault.Code != "NotImplemented" || fault.Message != "A header you provided implies functionality that is not implemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fields["Header"] != tc.header {
 				t.Fatalf("fault = %#v", fault)
 			}
+			faults = append(faults, map[string]any{"name": tc.name, "code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "header": fault.Fields["Header"]})
 			if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil))); body != "body" {
 				t.Fatalf("object changed after rejected delete: %q", body)
 			}
 		})
 	}
+	golden.AssertJSON(t, faults)
 }
 
 func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {

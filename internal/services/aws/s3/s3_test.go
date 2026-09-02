@@ -355,6 +355,16 @@ func TestCreateBucketTags(t *testing.T) {
 	if recreate.Code != "BucketAlreadyOwnedByYou" {
 		t.Fatalf("tagged recreation = %v", err)
 	}
+	for _, test := range []struct {
+		name string
+		tags any
+	}{{"empty-tagged-bucket", []any{}}, {"nil-tagged-bucket", nil}} {
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": test.name, "CreateBucketConfiguration": map[string]any{"Tags": test.tags}}, nil)
+		if _, err := invoke(t, p, "GetBucketTagging", map[string]any{"Bucket": test.name}, nil); asFault(t, err).Code != "NoSuchTagSet" {
+			t.Fatalf("%s tags = %v", test.name, err)
+		}
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": test.name}, nil)
+	}
 	invalid := map[string]any{"Bucket": "invalid-tagged-bucket", "CreateBucketConfiguration": map[string]any{"Tags": []any{
 		map[string]any{"Key": "duplicate", "Value": "one"}, map[string]any{"Key": "duplicate", "Value": "two"},
 	}}}
@@ -368,6 +378,14 @@ func TestCreateBucketTags(t *testing.T) {
 	if invalidBucket.Code != "NoSuchBucket" {
 		t.Fatalf("invalid tags reserved bucket = %v", err)
 	}
+	reserved := map[string]any{"Bucket": "reserved-tagged-bucket", "CreateBucketConfiguration": map[string]any{"Tags": []any{
+		map[string]any{"Key": "aws:team", "Value": "storage"},
+	}}}
+	_, err = invoke(t, p, "CreateBucket", reserved, nil)
+	reservedTag := asFault(t, err)
+	if reservedTag.Code != "InvalidTag" || reservedTag.Message != `User-defined tag keys can't start with "aws:". This prefix is reserved for system tags. Remove "aws:" from your tag keys and try again.` || reservedTag.Fields != nil {
+		t.Fatalf("reserved create tag = %#v", reservedTag)
+	}
 	identity := ident()
 	accountRegional := "tagged-" + identity.Account + "-" + identity.Region + "-an"
 	mustInvokeAs(t, p, identity, "CreateBucket", map[string]any{
@@ -378,7 +396,7 @@ func TestCreateBucketTags(t *testing.T) {
 	}
 	golden.AssertJSON(t, map[string]any{
 		"tags": response.Output["TagSet"], "tagged recreation": recreate.Code,
-		"invalid tags": invalidTags.Code, "invalid bucket": invalidBucket.Code,
+		"invalid tags": invalidTags.Code, "invalid bucket": invalidBucket.Code, "reserved tag message": reservedTag.Message,
 	})
 }
 
@@ -3935,12 +3953,16 @@ func TestTagValidationAndBucketSemantics(t *testing.T) {
 	characterization["acceptedBucketTags"] = 50
 	mustInvoke(t, p, "PutObjectTagging", map[string]any{"Bucket": "bucket", "Key": "source", "TagSet": valid}, nil)
 	mustInvoke(t, p, "DeleteBucketTagging", map[string]any{"Bucket": "bucket"}, nil)
+	_, err = invoke(t, p, "PutObjectTagging", map[string]any{"Bucket": "bucket", "Key": "source"}, nil)
+	if fault := asFault(t, err); fault.Code != "MalformedXML" || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("missing tag set = %#v", fault)
+	}
+	characterization["missing-tag-set"] = "MalformedXML"
 	for _, test := range []struct {
 		name string
 		set  any
 		code string
 	}{
-		{"missing-tag-set", nil, "MalformedXML"},
 		{"missing-value", []any{map[string]any{"Key": "key"}}, "MalformedXML"},
 		{"duplicate-key", []any{map[string]any{"Key": "key", "Value": "one"}, map[string]any{"Key": "key", "Value": "two"}}, "InvalidTag"},
 		{"reserved-key", []any{map[string]any{"Key": "aws:team", "Value": "one"}}, "InvalidTag"},
@@ -4002,6 +4024,20 @@ func TestTagValidationAndBucketSemantics(t *testing.T) {
 			t.Fatalf("rejected %s created object: %v", key, err)
 		}
 	}
+	mustInvoke(t, p, "PutObjectTagging", map[string]any{"Bucket": "bucket", "Key": "source", "TagSet": nil}, nil)
+	if got := mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "source"}, nil).Output["TagSet"]; len(asSliceForTest(got)) != 0 {
+		t.Fatalf("nil object tags = %#v", got)
+	}
+	characterization["nilObjectTags"] = []any{}
+	for _, tagSet := range []any{valid, nil, valid, []any{}} {
+		if response := mustInvoke(t, p, "PutBucketTagging", map[string]any{"Bucket": "bucket", "TagSet": tagSet}, nil); response.Status != http.StatusNoContent {
+			t.Fatalf("put bucket tags status = %d", response.Status)
+		}
+	}
+	if _, err := invoke(t, p, "GetBucketTagging", map[string]any{"Bucket": "bucket"}, nil); asFault(t, err).Code != "NoSuchTagSet" {
+		t.Fatalf("empty bucket tags = %v", err)
+	}
+	characterization["emptyBucketTags"] = "NoSuchTagSet"
 	characterization["storedTags"] = mustInvoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "source"}, nil).Output["TagSet"]
 	golden.AssertJSON(t, characterization)
 }

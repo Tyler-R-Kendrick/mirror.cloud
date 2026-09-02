@@ -2250,6 +2250,32 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusConflict || !bytes.Contains(fault, []byte("BucketAlreadyOwnedByYou")) {
 			t.Fatalf("tagged recreation %d %s", res.StatusCode, fault)
 		}
+		emptyConfiguration := []byte(`<CreateBucketConfiguration><Tags></Tags></CreateBucketConfiguration>`)
+		res = do(http.MethodPut, "/create-tagged", emptyConfiguration, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("empty-tag recreation %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/create-tagged?tagging", nil, "")
+		tags, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(tags, []byte("<Key>team</Key>")) {
+			t.Fatalf("tags after empty recreation %d %s", res.StatusCode, tags)
+		}
+		emptyTagging := []byte(`<Tagging><TagSet></TagSet></Tagging>`)
+		res = do(http.MethodPut, "/create-tagged?tagging", emptyTagging, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNoContent {
+			t.Fatalf("empty bucket tags %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/create-tagged?tagging", nil, "")
+		fault, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(fault, []byte("NoSuchTagSet")) {
+			t.Fatalf("tags after empty put %d %s", res.StatusCode, fault)
+		}
 		invalid := []byte(`<CreateBucketConfiguration><Tags><Tag><Key>duplicate</Key><Value>one</Value></Tag><Tag><Key>duplicate</Key><Value>two</Value></Tag></Tags></CreateBucketConfiguration>`)
 		res = do(http.MethodPut, "/invalid-create-tags", invalid, "")
 		fault, _ = io.ReadAll(res.Body)
@@ -2261,6 +2287,13 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusNotFound {
 			t.Fatalf("invalid tags reserved bucket: %d", res.StatusCode)
+		}
+		reserved := []byte(`<CreateBucketConfiguration><Tags><Tag><Key>aws:team</Key><Value>storage</Value></Tag></Tags></CreateBucketConfiguration>`)
+		res = do(http.MethodPut, "/reserved-create-tags", reserved, "")
+		fault, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte(`User-defined tag keys can't start with "aws:".`)) || bytes.Contains(fault, []byte("<TagKey>")) {
+			t.Fatalf("reserved create tag %d %s", res.StatusCode, fault)
 		}
 	})
 

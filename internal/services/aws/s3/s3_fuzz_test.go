@@ -143,13 +143,16 @@ func FuzzCreateBucketTags(f *testing.F) {
 	for _, seed := range []struct {
 		key, value string
 		duplicate  bool
-	}{{"team", "storage", false}, {"duplicate", "one", true}, {"aws:reserved", "value", false}, {"", "value", false}, {"unicode", "東京", false}} {
-		f.Add(seed.key, seed.value, seed.duplicate)
+		empty      bool
+	}{{"team", "storage", false, false}, {"duplicate", "one", true, false}, {"aws:reserved", "value", false, false}, {"", "value", false, false}, {"unicode", "東京", false, false}, {"", "", false, true}} {
+		f.Add(seed.key, seed.value, seed.duplicate, seed.empty)
 	}
-	f.Fuzz(func(t *testing.T, key, value string, duplicate bool) {
+	f.Fuzz(func(t *testing.T, key, value string, duplicate, empty bool) {
 		p := s3.New(spitest.Deps(t))
 		tags := []any{map[string]any{"Key": key, "Value": value}}
-		if duplicate {
+		if empty {
+			tags = []any{}
+		} else if duplicate {
 			tags = append(tags, map[string]any{"Key": key, "Value": "duplicate"})
 		}
 		input := map[string]any{"Bucket": "tagged-fuzz", "CreateBucketConfiguration": map[string]any{"Tags": tags}}
@@ -163,6 +166,13 @@ func FuzzCreateBucketTags(f *testing.F) {
 			}
 			return
 		}
+		if len(tags) == 0 {
+			if _, err := invoke(t, p, "GetBucketTagging", map[string]any{"Bucket": "tagged-fuzz"}, nil); asFault(t, err).Code != "NoSuchTagSet" {
+				t.Fatalf("empty create tags = %v", err)
+			}
+			mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "tagged-fuzz"}, nil)
+			return
+		}
 		response := mustInvoke(t, p, "GetBucketTagging", map[string]any{"Bucket": "tagged-fuzz"}, nil)
 		stored := response.Output["TagSet"].([]any)
 		if len(stored) != len(tags) || stored[0].(map[string]any)["Key"] != key || stored[0].(map[string]any)["Value"] != value {
@@ -170,6 +180,10 @@ func FuzzCreateBucketTags(f *testing.F) {
 		}
 		if _, err := invoke(t, p, "CreateBucket", input, nil); asFault(t, err).Code != "BucketAlreadyOwnedByYou" {
 			t.Fatalf("tagged recreation = %v", err)
+		}
+		mustInvoke(t, p, "PutBucketTagging", map[string]any{"Bucket": "tagged-fuzz", "TagSet": []any{}}, nil)
+		if _, err := invoke(t, p, "GetBucketTagging", map[string]any{"Bucket": "tagged-fuzz"}, nil); asFault(t, err).Code != "NoSuchTagSet" {
+			t.Fatalf("empty put tags = %v", err)
 		}
 	})
 }

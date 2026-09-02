@@ -2427,7 +2427,21 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		_, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String(key), UploadId: aws.String(uploadID), MultipartUpload: manifest, IfMatch: match, IfNoneMatch: noneMatch})
 		return err
 	}
-	uploadID, manifest := conditionalUpload("complete-if-match-missing")
+	seedCompleteList, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("complete-if-match-list"), Body: strings.NewReader("old")})
+	if err != nil {
+		t.Fatalf("seed complete If-Match list: %v", err)
+	}
+	uploadID, manifest := conditionalUpload("complete-if-match-list")
+	if err := completeConditional("complete-if-match-list", uploadID, manifest, aws.String(`"wrong", `+aws.ToString(seedCompleteList.ETag)), nil); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") || !strings.Contains(err.Error(), "PreconditionFailed") {
+		t.Fatalf("complete If-Match list fault: %v", err)
+	}
+	if parts, err := s3c.ListParts(context.Background(), &s3.ListPartsInput{Bucket: aws.String("sdk"), Key: aws.String("complete-if-match-list"), UploadId: aws.String(uploadID)}); err != nil || len(parts.Parts) != 1 {
+		t.Fatalf("complete If-Match list upload: %#v %v", parts, err)
+	}
+	if err := completeConditional("complete-if-match-list", uploadID, manifest, seedCompleteList.ETag, nil); err != nil {
+		t.Fatalf("exact complete If-Match: %v", err)
+	}
+	uploadID, manifest = conditionalUpload("complete-if-match-missing")
 	if err := completeConditional("complete-if-match-missing", uploadID, manifest, aws.String(`"missing"`), nil); err == nil || !strings.Contains(err.Error(), "StatusCode: 404") || !strings.Contains(err.Error(), "NoSuchKey") || !strings.Contains(err.Error(), "The specified key does not exist") {
 		t.Fatalf("missing complete If-Match: %v", err)
 	}

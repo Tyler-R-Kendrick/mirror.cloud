@@ -1,0 +1,8 @@
+{
+  "code": "PreconditionFailed",
+  "fields": {
+    "Condition": "If-Match"
+  },
+  "message": "At least one of the pre-conditions you specified did not hold",
+  "status": 412
+}

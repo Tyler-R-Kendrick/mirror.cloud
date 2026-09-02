@@ -1999,14 +1999,14 @@ func FuzzWriteIfMatchRequiresSingleETag(f *testing.F) {
 }
 
 func FuzzCompleteMultipartConditionalConflicts(f *testing.F) {
-	for mode := uint8(0); mode < 5; mode++ {
+	for mode := uint8(0); mode < 6; mode++ {
 		f.Add([]byte("part"), mode)
 	}
 	f.Fuzz(func(t *testing.T, body []byte, mode uint8) {
 		if len(body) > 4096 {
 			t.Skip()
 		}
-		mode %= 5
+		mode %= 6
 		deps := spitest.Deps(t)
 		p := s3.New(deps)
 		const bucket, key = "complete-conditional-fuzz", "key"
@@ -2014,8 +2014,9 @@ func FuzzCompleteMultipartConditionalConflicts(f *testing.F) {
 		put := func(value []byte) string {
 			return mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key}, value).Headers.Get("ETag")
 		}
-		if mode == 1 || mode == 3 || mode == 4 {
-			put([]byte("old"))
+		seedETag := ""
+		if mode == 1 || mode == 3 || mode == 4 || mode == 5 {
+			seedETag = put([]byte("old"))
 		}
 		uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": bucket, "Key": key}, nil).Output["UploadId"].(string)
 		part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": bucket, "Key": key, "UploadId": uploadID, "PartNumber": 1}, body)
@@ -2038,6 +2039,8 @@ func FuzzCompleteMultipartConditionalConflicts(f *testing.F) {
 			_ = deps.Clock.Advance(2 * time.Second)
 			input["IfMatch"] = put([]byte("changed"))
 			code, message, status, conflictKey = "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, key
+		case 5:
+			input["IfMatch"] = `"wrong", ` + seedETag
 		}
 		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
 		fault := asFault(t, err)
@@ -2047,6 +2050,11 @@ func FuzzCompleteMultipartConditionalConflicts(f *testing.F) {
 		listed := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": bucket, "Key": key, "UploadId": uploadID}, nil)
 		if parts, _ := listed.Output["Parts"].([]any); len(parts) != 1 {
 			t.Fatalf("mode %d parts = %#v", mode, listed.Output["Parts"])
+		}
+		if mode == 5 {
+			if got := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": bucket, "Key": key}, nil))); got != "old" {
+				t.Fatalf("If-Match list stored %q", got)
+			}
 		}
 	})
 }

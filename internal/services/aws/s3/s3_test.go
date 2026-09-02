@@ -5964,6 +5964,34 @@ func TestWriteIfMatchRequiresSingleETag(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestCompleteMultipartIfMatchRequiresSingleETag(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	const bucket, key = "complete-if-match", "key"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	seed := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key}, []byte("old"))
+	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": bucket, "Key": key}, nil).Output["UploadId"].(string)
+	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": bucket, "Key": key, "UploadId": uploadID, "PartNumber": 1}, []byte("new"))
+	input := completeInput(uploadID, completedPart(1, part))
+	input["Bucket"], input["Key"], input["IfMatch"] = bucket, key, `"wrong", `+seed.Headers.Get("ETag")
+	readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": bucket, "Key": key, "IfMatch": input["IfMatch"]}, nil))
+	_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+	fault := asFault(t, err)
+	if fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != "If-Match" {
+		t.Fatalf("list fault = %#v", fault)
+	}
+	golden.AssertJSON(t, map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields})
+	if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": bucket, "Key": key}, nil))); body != "old" {
+		t.Fatalf("rejected completion stored %q", body)
+	}
+	if parts := mustInvoke(t, p, "ListParts", map[string]any{"Bucket": bucket, "Key": key, "UploadId": uploadID}, nil).Output["Parts"].([]any); len(parts) != 1 {
+		t.Fatalf("rejected completion changed upload = %#v", parts)
+	}
+	input["IfMatch"] = seed.Headers.Get("ETag")
+	if _, err := invoke(t, p, "CompleteMultipartUpload", input, nil); err != nil {
+		t.Fatalf("exact ETag: %v", err)
+	}
+}
+
 func TestCompleteMultipartUploadConditionalConflicts(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

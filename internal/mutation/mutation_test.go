@@ -6362,6 +6362,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestWriteIfMatchRequiresSingleETag",
 		},
 		{
+			name: "s3-complete-bypass-shared-write-precondition",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if err := p.checkWritePreconditions(ctx, req, b, key); err != nil {`,
+			new:  `if err := p.checkWritePreconditions(ctx, req, b, key); req.Operation != "CompleteMultipartUpload" && err != nil {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestCompleteMultipartIfMatchRequiresSingleETag",
+		},
+		{
 			name: "s3-write-accept-matching-if-none-match",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `if noneMatch != "" && exists && etagMatches(noneMatch, etag) {`,

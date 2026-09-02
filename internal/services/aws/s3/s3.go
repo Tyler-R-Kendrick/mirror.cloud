@@ -1194,10 +1194,12 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	mtime := p.deps.Clock.Now().UTC().Format(http.TimeFormat)
 	vid := ""
 	var versionOrder []string
+	var deletedVersionNext map[string]any
 	if versioned {
 		vid = p.deps.Rand.Hex(8)
 		current, _ := p.objectMetadata(ctx, req, b, key, "")
 		versionOrder = append(p.objectVersionOrder(ctx, req, b, key, current), vid)
+		deletedVersionNext = asMap(current["deletedVersionNext"])
 		_, _ = p.deps.Blobs.Put(ctx, blobKey(req, b, key)+"@"+vid, bytes.NewReader(body))
 		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "versionOrder": versionOrder, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation, "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled, "sseCustomerKeyMD5": sseCustomerKeyMD5}
 		if len(parts) > 0 {
@@ -1213,6 +1215,9 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	metaDoc := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "versionId": vid, "deleteMarker": false, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation, "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled, "sseCustomerKeyMD5": sseCustomerKeyMD5}
 	if versioned {
 		metaDoc["versionOrder"] = versionOrder
+		if len(deletedVersionNext) > 0 {
+			metaDoc["deletedVersionNext"] = deletedVersionNext
+		}
 	}
 	if len(parts) > 0 {
 		metaDoc["parts"] = parts
@@ -1869,6 +1874,19 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		_ = p.col(req, "objlock").Delete(ctx, objectLockKey(b, key, wantVer, "legalhold"))
 		_ = p.col(req, "objlock").Delete(ctx, objectLockKey(b, key, wantVer, "retention"))
 		order := p.objectVersionOrder(ctx, req, b, key, current)
+		deletedVersionNext := asMap(current["deletedVersionNext"])
+		next := ""
+		for index, version := range order {
+			if version == wantVer && index > 0 {
+				next = order[index-1]
+			}
+		}
+		for marker, version := range deletedVersionNext {
+			if str(version) == wantVer {
+				deletedVersionNext[marker] = next
+			}
+		}
+		deletedVersionNext[wantVer] = next
 		kept := order[:0]
 		for _, version := range order {
 			if version != wantVer {
@@ -1880,11 +1898,12 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 			if len(kept) > 0 {
 				previous = kept[len(kept)-1]
 			}
-			if err := p.restoreCurrentVersion(ctx, req, b, key, previous, kept); err != nil {
+			if err := p.restoreCurrentVersion(ctx, req, b, key, previous, kept, deletedVersionNext); err != nil {
 				return nil, err
 			}
 		} else if currentExists {
 			current["versionOrder"] = kept
+			current["deletedVersionNext"] = deletedVersionNext
 			raw, _ := json.Marshal(current)
 			_ = p.col(req, "objects").Put(ctx, b+"/"+key, raw)
 		}
@@ -2901,6 +2920,7 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 	sort.Strings(keys)
 	var entries []entry
 	common := map[string]bool{}
+	deletedVersionNext := map[string]map[string]any{}
 	for _, key := range keys {
 		if delimiter != "" {
 			rest := strings.TrimPrefix(key, prefix)
@@ -2914,6 +2934,7 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 			}
 		}
 		current, _ := p.objectMetadata(ctx, req, b, key, "")
+		deletedVersionNext[key] = asMap(current["deletedVersionNext"])
 		order := map[string]int{}
 		for index, value := range asSlice(current["versionOrder"]) {
 			order[str(value)] = index
@@ -2947,6 +2968,7 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 	if keyMarker != "" {
 		filtered := entries[:0]
 		versionSeen := versionMarker == ""
+		resumeVersion, deletedMarker := deletedVersionNext[keyMarker][versionMarker]
 		for _, item := range entries {
 			switch {
 			case item.key < keyMarker:
@@ -2959,6 +2981,9 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 				filtered = append(filtered, item)
 			case item.version == versionMarker:
 				versionSeen = true
+			case deletedMarker && item.version == str(resumeVersion):
+				versionSeen = true
+				filtered = append(filtered, item)
 			}
 		}
 		entries = filtered
@@ -5590,7 +5615,7 @@ func (p *Pack) objectVersionOrder(ctx context.Context, req *spi.Request, bucket,
 	return order
 }
 
-func (p *Pack) restoreCurrentVersion(ctx context.Context, req *spi.Request, bucket, key, version string, order []string) error {
+func (p *Pack) restoreCurrentVersion(ctx context.Context, req *spi.Request, bucket, key, version string, order []string, deletedVersionNext map[string]any) error {
 	currentKey := bucket + "/" + key
 	if version == "" {
 		_ = p.col(req, "objects").Delete(ctx, currentKey)
@@ -5604,6 +5629,7 @@ func (p *Pack) restoreCurrentVersion(ctx context.Context, req *spi.Request, buck
 	var meta map[string]any
 	_ = json.Unmarshal(raw, &meta)
 	meta["versionOrder"] = order
+	meta["deletedVersionNext"] = deletedVersionNext
 	current, _ := json.Marshal(meta)
 	_ = p.col(req, "objects").Put(ctx, currentKey, current)
 	if truthy(meta["deleteMarker"]) {

@@ -1925,6 +1925,51 @@ func FuzzWritePreconditionFaults(f *testing.F) {
 	})
 }
 
+func FuzzWriteConditionFaultDetails(f *testing.F) {
+	for mode := uint8(0); mode < 3; mode++ {
+		f.Add([]byte("new"), mode, false)
+		f.Add([]byte("new"), mode, true)
+	}
+	f.Fuzz(func(t *testing.T, body []byte, mode uint8, copyObject bool) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "write-condition-detail-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-condition-detail-fuzz", "Key": "source"}, []byte("source"))
+		operation := "PutObject"
+		input := map[string]any{"Bucket": "write-condition-detail-fuzz", "Key": "destination"}
+		if copyObject {
+			operation = "CopyObject"
+			input["CopySource"] = "write-condition-detail-fuzz/source"
+		}
+		code, message, field, detail, status, existing := "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", "Condition", "If-Match", http.StatusPreconditionFailed, true
+		switch mode % 3 {
+		case 0:
+			input["IfMatch"] = `"missing"`
+			code, message, field, detail, status, existing = "NoSuchKey", "The specified key does not exist.", "Key", "destination", http.StatusNotFound, false
+		case 1:
+			input["IfMatch"] = `"wrong"`
+		case 2:
+			input["IfNoneMatch"] = "*"
+			detail = "If-None-Match"
+		}
+		if existing {
+			mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-condition-detail-fuzz", "Key": "destination"}, []byte("old"))
+		}
+		_, err := invoke(t, p, operation, input, body)
+		fault := asFault(t, err)
+		if fault.Code != code || fault.Message != message || fault.HTTPStatus != status || fault.Fields[field] != detail {
+			t.Fatalf("%s mode %d fault = %#v", operation, mode%3, fault)
+		}
+		if existing {
+			if got := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "write-condition-detail-fuzz", "Key": "destination"}, nil))); got != "old" {
+				t.Fatalf("%s mode %d stored %q", operation, mode%3, got)
+			}
+		}
+	})
+}
+
 func FuzzCompleteMultipartConditionalConflicts(f *testing.F) {
 	for mode := uint8(0); mode < 5; mode++ {
 		f.Add([]byte("part"), mode)

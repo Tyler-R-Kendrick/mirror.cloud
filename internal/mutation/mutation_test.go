@@ -6739,6 +6739,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestCompleteMultipartUploadConditionalConflicts",
 		},
 		{
+			name: "s3-complete-accept-mismatched-if-match-object",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `} else if match != "" && strings.Trim(match, "\"") != strings.Trim(str(current["etag"]), "\"") {`,
+			new:  `} else if false {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestCompleteMultipartIfMatchRequiresSingleETag",
+		},
+		{
 			name: "s3-complete-ignore-newer-if-match-object",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `if modified, modifiedErr := http.ParseTime(str(current["mtime"])); modifiedErr == nil && initiated.Before(modified) {`,

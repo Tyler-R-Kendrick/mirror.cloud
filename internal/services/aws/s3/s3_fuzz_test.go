@@ -1885,6 +1885,46 @@ func FuzzCompleteMultipartPreconditionFaults(f *testing.F) {
 	})
 }
 
+func FuzzWritePreconditionFaults(f *testing.F) {
+	for mode := uint8(0); mode < 3; mode++ {
+		f.Add([]byte("new"), mode, false)
+		f.Add([]byte("new"), mode, true)
+	}
+	f.Fuzz(func(t *testing.T, body []byte, mode uint8, copyObject bool) {
+		if len(body) > 4096 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "write-precondition-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-precondition-fuzz", "Key": "source"}, []byte("source"))
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-precondition-fuzz", "Key": "destination"}, []byte("old"))
+		operation := "PutObject"
+		input := map[string]any{"Bucket": "write-precondition-fuzz", "Key": "destination"}
+		if copyObject {
+			operation = "CopyObject"
+			input["CopySource"] = "write-precondition-fuzz/source"
+		}
+		header, detail := "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"
+		switch mode % 3 {
+		case 0:
+			input["IfMatch"], input["IfNoneMatch"] = `"etag"`, "*"
+			header, detail = "If-Match,If-None-Match", "Multiple conditional request headers present in the request"
+		case 1:
+			input["IfNoneMatch"] = `"etag"`
+		case 2:
+			input["IfMatch"] = "*"
+		}
+		_, err := invoke(t, p, operation, input, body)
+		fault := asFault(t, err)
+		if fault.Code != "NotImplemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fields["Header"] != header || fault.Fields["additionalMessage"] != detail {
+			t.Fatalf("%s mode %d fault = %#v", operation, mode%3, fault)
+		}
+		if got := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "write-precondition-fuzz", "Key": "destination"}, nil))); got != "old" {
+			t.Fatalf("%s mode %d stored %q", operation, mode%3, got)
+		}
+	})
+}
+
 func FuzzCompleteMultipartConditionalConflicts(f *testing.F) {
 	for mode := uint8(0); mode < 5; mode++ {
 		f.Add([]byte("part"), mode)

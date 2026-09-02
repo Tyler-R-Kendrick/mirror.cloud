@@ -4830,6 +4830,23 @@ func TestListObjectVersionsPagination(t *testing.T) {
 	}
 }
 
+func TestListObjectVersionsResumesAfterDeletedVersionMarker(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "deleted-version-marker"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "deleted-version-marker", "Status": "Enabled"}, nil)
+	for range 3 {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "deleted-version-marker", "Key": "key"}, []byte("body"))
+	}
+
+	first := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "deleted-version-marker", "Prefix": "key", "MaxKeys": 1}, nil).Output
+	marker := first["NextVersionIdMarker"]
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "deleted-version-marker", "Key": "key", "VersionId": marker}, nil)
+	resumed := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "deleted-version-marker", "Prefix": "key", "KeyMarker": "key", "VersionIdMarker": marker}, nil).Output
+	if versions := asSliceForTest(resumed["Versions"]); len(versions) != 2 {
+		t.Fatalf("versions after deleted marker = %#v", resumed)
+	}
+}
+
 func TestListObjectVersionChecksumMetadata(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-checksums"}, nil)

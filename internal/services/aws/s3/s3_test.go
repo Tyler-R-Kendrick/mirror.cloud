@@ -4127,6 +4127,18 @@ func TestDeleteObjectDirectoryPreconditionsAreNotImplemented(t *testing.T) {
 	golden.AssertJSON(t, faults)
 }
 
+func TestDeleteObjectMissingKeyVersionIsIdempotent(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	for _, tc := range []struct{ status, version string }{{"Enabled", "missing-version"}, {"Suspended", "null"}} {
+		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": tc.status}, nil)
+		deleted := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "missing", "VersionId": tc.version}, nil)
+		if deleted.Status != http.StatusNoContent || len(deleted.Headers) != 0 {
+			t.Fatalf("%s missing version delete = %#v", tc.status, deleted)
+		}
+	}
+}
+
 func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

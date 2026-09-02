@@ -1,0 +1,24 @@
+{
+  "invalid": {
+    "Code": "InvalidArgument",
+    "Message": "Invalid version id specified",
+    "HTTPStatus": 400,
+    "Fault": "client",
+    "Fields": {
+      "ArgumentName": "versionId",
+      "ArgumentValue": "missing"
+    },
+    "Headers": null
+  },
+  "missing": {
+    "Code": "NoSuchVersion",
+    "Message": "The specified version does not exist.",
+    "HTTPStatus": 404,
+    "Fault": "client",
+    "Fields": {
+      "Key": "key",
+      "VersionId": "7c589129"
+    },
+    "Headers": null
+  }
+}

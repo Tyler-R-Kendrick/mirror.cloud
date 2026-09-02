@@ -4171,6 +4171,26 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestBucketEncryptionXML",
 		},
 		{
+			name: "s3-bucket-policy-return-ok",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old: `if req.Operation == "PutBucketPolicy" {
+			return &spi.Response{Status: http.StatusNoContent}, nil
+		}`,
+			new: `if false {
+			return &spi.Response{Status: http.StatusNoContent}, nil
+		}`,
+			pkg: "./internal/services/aws/s3",
+			run: "TestBucketPolicyConfiguration",
+		},
+		{
+			name: "s3-bucket-policy-change-missing-message",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `return "policy", n("NoSuchBucketPolicy", "The bucket policy does not exist")`,
+			new:  `return "policy", n("NoSuchBucketPolicy", "The bucket policy exists")`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestBucketPolicyConfiguration",
+		},
+		{
 			name: "s3-bucket-policy-skip-validation",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  "if err := validateBucketPolicy(str(req.Input[\"Policy\"])); err != nil {",
@@ -5053,8 +5073,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-ownership-controls-emit-put-body",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "_ = col.Put(ctx, key, raw)\n\t\tif req.Operation == \"PutObjectAcl\" {\n\t\t\tp.notify(ctx, req, b, str(req.Input[\"Key\"]), \"ObjectAcl:Put\", objectMeta)\n\t\t}\n\t\treturn &spi.Response{Status: 200}, nil",
-			new:  "_ = col.Put(ctx, key, raw)\n\t\tif req.Operation == \"PutObjectAcl\" {\n\t\t\tp.notify(ctx, req, b, str(req.Input[\"Key\"]), \"ObjectAcl:Put\", objectMeta)\n\t\t}\n\t\treturn &spi.Response{Status: 200, Output: doc}, nil",
+			old:  "if req.Operation == \"PutBucketPolicy\" {\n\t\t\treturn &spi.Response{Status: http.StatusNoContent}, nil\n\t\t}\n\t\treturn &spi.Response{Status: 200}, nil",
+			new:  "if req.Operation == \"PutBucketPolicy\" {\n\t\t\treturn &spi.Response{Status: http.StatusNoContent}, nil\n\t\t}\n\t\treturn &spi.Response{Status: 200, Output: doc}, nil",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestBucketOwnershipControls",
 		},

@@ -503,8 +503,14 @@ func TestBucketNotificationDeliveryFilters(t *testing.T) {
 	for _, key := range []string{"images/photo.jpg", "images/photo.png", "docs/photo.jpg"} {
 		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": input["Bucket"], "Key": key}, []byte(key))
 	}
+	const trace = "Root=1-3152b799-8954dae64eda91bc9a23a7e8;Parent=7fa8c0f79203be72;Sampled=1"
+	httpRequest := httptest.NewRequest(http.MethodPut, "http://s3.test/notification-delivery/images/traced.jpg", strings.NewReader("traced"))
+	httpRequest.Header.Set("X-Amzn-Trace-Id", trace)
+	if _, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PutObject", Input: map[string]any{"Bucket": input["Bucket"], "Key": "images/traced.jpg"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest}); err != nil {
+		t.Fatal(err)
+	}
 	messages, _, err := deps.Store.Scope(ident().Account, ident().Region).Collection("msgs:queue").List(context.Background(), "", "", 0)
-	if err != nil || len(messages) != 3 {
+	if err != nil || len(messages) != 4 {
 		t.Fatalf("filtered notifications = %#v, err=%v", messages, err)
 	}
 	found := false
@@ -518,6 +524,17 @@ func TestBucketNotificationDeliveryFilters(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("notification messages = %#v", messages)
+	}
+	received, err := sqs.New(deps).Invoke(context.Background(), &spi.Request{Identity: ident(), Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "queue", "MaxNumberOfMessages": 10, "AttributeNames": []any{"AWSTraceHeader"}, "VisibilityTimeout": 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	traceFound := false
+	for _, message := range asSliceForTest(received.Output["Messages"]) {
+		traceFound = traceFound || asMapForTest(asMapForTest(message)["Attributes"])["AWSTraceHeader"] == trace
+	}
+	if !traceFound {
+		t.Fatalf("trace attributes = %#v", received.Output)
 	}
 }
 
@@ -540,6 +557,8 @@ func TestBucketNotificationRemovalAndTaggingEvents(t *testing.T) {
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "plain"}, []byte("plain"))
 	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "plain"}, nil)
 	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "missing"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "batch"}, []byte("batch"))
+	mustInvoke(t, p, "DeleteObjects", map[string]any{"Bucket": bucket, "Delete": map[string]any{"Objects": []any{map[string]any{"Key": "batch"}, map[string]any{"Key": "batch-missing-1"}, map[string]any{"Key": "batch-missing-2"}}, "Quiet": true}}, nil)
 
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}, nil)
 	version := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "versioned"}, []byte("versioned")).Headers.Get("x-amz-version-id")
@@ -570,7 +589,7 @@ func TestBucketNotificationRemovalAndTaggingEvents(t *testing.T) {
 		record := asMapForTest(asSliceForTest(payload["Records"])[0])
 		events[record["eventName"].(string)]++
 	}
-	want := map[string]int{"ObjectRemoved:Delete": 2, "ObjectRemoved:DeleteMarkerCreated": 1, "ObjectTagging:Put": 1, "ObjectTagging:Delete": 1}
+	want := map[string]int{"ObjectRemoved:Delete": 5, "ObjectRemoved:DeleteMarkerCreated": 1, "ObjectTagging:Put": 1, "ObjectTagging:Delete": 1}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("notification events = %#v, want %#v", events, want)
 	}

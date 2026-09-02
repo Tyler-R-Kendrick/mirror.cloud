@@ -2101,7 +2101,7 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 		_ = json.Unmarshal(kv.Value, &meta)
 		modified := str(meta["mtime"])
 		if parsed, err := http.ParseTime(modified); err == nil {
-			modified = parsed.UTC().Format(time.RFC3339)
+			modified = parsed.UTC().Format("2006-01-02T15:04:05.000Z")
 		}
 		content := map[string]any{"Key": key, "Size": meta["size"], "ETag": meta["etag"], "LastModified": modified, "StorageClass": meta["storageClass"]}
 		setListChecksumMetadata(content, meta)

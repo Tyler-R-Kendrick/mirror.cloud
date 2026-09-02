@@ -4822,12 +4822,41 @@ func TestListObjectsV2Prefix(t *testing.T) {
 	for _, item := range contents {
 		m, _ := item.(map[string]any)
 		keys[m["Key"].(string)] = true
-		if _, err := time.Parse(time.RFC3339, m["LastModified"].(string)); err != nil || m["StorageClass"] == "" || m["Key"] == "a/1" && m["StorageClass"] != "STANDARD_IA" {
+		if modified := m["LastModified"].(string); !strings.HasSuffix(modified, ".000Z") || m["StorageClass"] == "" || m["Key"] == "a/1" && m["StorageClass"] != "STANDARD_IA" {
 			t.Fatalf("object metadata: %#v", m)
 		}
 	}
 	if !keys["a/1"] || !keys["a/2"] || keys["z/9"] || len(keys) != 2 {
 		t.Fatalf("prefix list: %v", keys)
+	}
+}
+
+func TestListObjectsDelimiterEncodingAndEmptyMarker(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-delimiters"}, nil)
+	empty := mustInvoke(t, p, "ListObjects", map[string]any{"Bucket": "list-delimiters", "Marker": ""}, nil).Output
+	if empty["Marker"] != "" || len(asSliceForTest(empty["Contents"])) != 0 {
+		t.Fatalf("empty marker = %#v", empty)
+	}
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-delimiters", "Key": "test/foo/bar/123"}, []byte("content 123"))
+	for _, tc := range []struct {
+		delimiter, content, prefix string
+	}{{"", "test/foo/bar/123", ""}, {"/", "", "test/foo/"}, {"%2F", "test/foo/bar/123", ""}} {
+		out := mustInvoke(t, p, "ListObjects", map[string]any{"Bucket": "list-delimiters", "Prefix": "test/", "Delimiter": tc.delimiter, "MaxKeys": 1, "EncodingType": "url"}, nil).Output
+		if tc.content != "" && (len(asSliceForTest(out["Contents"])) != 1 || asMapForTest(asSliceForTest(out["Contents"])[0])["Key"] != tc.content) {
+			t.Fatalf("delimiter %q contents = %#v", tc.delimiter, out)
+		}
+		if tc.prefix != "" && (len(asSliceForTest(out["CommonPrefixes"])) != 1 || asMapForTest(asSliceForTest(out["CommonPrefixes"])[0])["Prefix"] != tc.prefix) {
+			t.Fatalf("delimiter %q prefixes = %#v", tc.delimiter, out)
+		}
+		if tc.delimiter == "%2F" && out["Delimiter"] != "%252F" {
+			t.Fatalf("encoded delimiter = %#v", out)
+		}
+	}
+	request := httptest.NewRequest(http.MethodGet, "https://list-delimiters.s3.us-east-1.amazonaws.com/?prefix=test&delimiter=%2F", nil)
+	routed, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "ListObjectsV2", Input: map[string]any{"Bucket": "list-delimiters"}, Identity: ident(), HTTP: request})
+	if err != nil || len(asSliceForTest(routed.Output["CommonPrefixes"])) != 1 || asMapForTest(asSliceForTest(routed.Output["CommonPrefixes"])[0])["Prefix"] != "test/" {
+		t.Fatalf("raw encoded delimiter = %#v, %v", routed, err)
 	}
 }
 

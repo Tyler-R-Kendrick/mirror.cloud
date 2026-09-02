@@ -4150,9 +4150,11 @@ func TestDeleteObjectRejectsVersionOnUnversionedMissingKey(t *testing.T) {
 	if fault.Code != "InvalidArgument" || fault.Message != "Invalid version id specified" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "versionId" || fault.Fields["ArgumentValue"] != "missing-version" {
 		t.Fatalf("fault = %#v", fault)
 	}
-	if deleted := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "missing", "VersionId": "null"}, nil); deleted.Status != http.StatusNoContent || len(deleted.Headers) != 0 {
+	deleted := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "missing", "VersionId": "null"}, nil)
+	if deleted.Status != http.StatusNoContent || len(deleted.Headers) != 0 {
 		t.Fatalf("null version delete = %#v", deleted)
 	}
+	golden.AssertJSON(t, map[string]any{"invalid": map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}, "null": map[string]any{"status": deleted.Status, "headers": deleted.Headers}})
 }
 
 func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {

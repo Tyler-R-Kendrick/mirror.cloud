@@ -3835,6 +3835,7 @@ func TestCopySourcePreconditionsCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "copy-conditions"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "copy-conditions", "Status": "Enabled"}, nil)
 	put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "copy-conditions", "Key": "source"}, []byte("source"))
 	_ = deps.Clock.Advance(2 * time.Second)
 	etag := put.Headers.Get("ETag")
@@ -3848,6 +3849,8 @@ func TestCopySourcePreconditionsCharacterization(t *testing.T) {
 		"if-none-match":         {"CopySourceIfNoneMatch": etag},
 		"if-none-match-list":    {"CopySourceIfNoneMatch": `"wrong", ` + etag},
 		"if-modified-since":     {"CopySourceIfModifiedSince": modified},
+		"if-modified-before":    {"CopySourceIfModifiedSince": past},
+		"if-unmodified-equal":   {"CopySourceIfUnmodifiedSince": modified},
 		"future-modified-since": {"CopySourceIfModifiedSince": future},
 		"all-positive": {"CopySourceIfMatch": etag, "CopySourceIfNoneMatch": `"wrong"`,
 			"CopySourceIfModifiedSince": past, "CopySourceIfUnmodifiedSince": modified},

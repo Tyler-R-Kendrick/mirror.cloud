@@ -11,6 +11,7 @@
     "condition": "x-amz-copy-source-If-Match",
     "message": "At least one of the pre-conditions you specified did not hold"
   },
+  "if-modified-before": "success",
   "if-modified-since": {
     "code": "PreconditionFailed",
     "condition": "x-amz-copy-source-If-Modified-Since",
@@ -22,6 +23,7 @@
     "message": "At least one of the pre-conditions you specified did not hold"
   },
   "if-none-match-list": "success",
+  "if-unmodified-equal": "success",
   "if-unmodified-since": {
     "code": "PreconditionFailed",
     "condition": "x-amz-copy-source-If-Unmodified-Since",

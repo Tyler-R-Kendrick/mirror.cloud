@@ -742,6 +742,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestCopyObjectConditions",
 		},
 		{
+			name: "s3-accept-conditional-etag-list",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `return condition == "*" || strings.Trim(condition, ` + "`\"`" + `) == strings.Trim(etag, ` + "`\"`" + `)`,
+			new:  `return condition == "*" || strings.Contains(condition, ",") || strings.Trim(condition, ` + "`\"`" + `) == strings.Trim(etag, ` + "`\"`" + `)`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestObjectReadConditions",
+		},
+		{
 			name: "s3-read-ignore-if-match",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  "if match := requestCondition(req, \"IfMatch\", \"If-Match\"); match != \"\" {\n\t\tif !etagMatches(match, etag) {",

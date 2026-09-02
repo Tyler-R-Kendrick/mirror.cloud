@@ -5929,13 +5929,8 @@ func setListChecksumMetadata(row, meta map[string]any) {
 }
 
 func etagMatches(condition, etag string) bool {
-	for _, value := range strings.Split(condition, ",") {
-		value = strings.TrimSpace(value)
-		if value == "*" || strings.Trim(value, `"`) == strings.Trim(etag, `"`) {
-			return true
-		}
-	}
-	return false
+	condition = strings.TrimSpace(condition)
+	return condition == "*" || strings.Trim(condition, `"`) == strings.Trim(etag, `"`)
 }
 
 func preconditionFailed() error {

@@ -3843,8 +3843,10 @@ func TestCopySourcePreconditionsCharacterization(t *testing.T) {
 	future := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat)
 	cases := map[string]map[string]any{
 		"if-match":              {"CopySourceIfMatch": `"wrong"`},
+		"if-match-list":         {"CopySourceIfMatch": `"wrong", ` + etag},
 		"if-unmodified-since":   {"CopySourceIfUnmodifiedSince": past},
 		"if-none-match":         {"CopySourceIfNoneMatch": etag},
+		"if-none-match-list":    {"CopySourceIfNoneMatch": `"wrong", ` + etag},
 		"if-modified-since":     {"CopySourceIfModifiedSince": modified},
 		"future-modified-since": {"CopySourceIfModifiedSince": future},
 		"all-positive": {"CopySourceIfMatch": etag, "CopySourceIfNoneMatch": `"wrong"`,
@@ -3895,6 +3897,7 @@ func TestObjectReadConditions(t *testing.T) {
 	for _, operation := range []string{"GetObject", "HeadObject", "GetObjectAttributes"} {
 		for _, conditions := range []map[string]any{
 			{"IfMatch": `"wrong"`},
+			{"IfMatch": `"wrong", ` + etag},
 			{"IfUnmodifiedSince": past},
 		} {
 			_, err := call(operation, conditions)
@@ -3913,7 +3916,8 @@ func TestObjectReadConditions(t *testing.T) {
 			}
 		}
 		for _, conditions := range []map[string]any{
-			{"IfMatch": `"wrong", ` + etag, "IfUnmodifiedSince": past},
+			{"IfMatch": etag, "IfUnmodifiedSince": past},
+			{"IfNoneMatch": `"wrong", ` + etag},
 			{"IfNoneMatch": `"wrong"`, "IfModifiedSince": future},
 		} {
 			response, err := call(operation, conditions)
@@ -5980,7 +5984,7 @@ func TestCompleteMultipartIfMatchRequiresSingleETag(t *testing.T) {
 	}
 	input := completeInput(uploadID, completedPart(1, part))
 	input["Bucket"], input["Key"], input["IfMatch"] = bucket, key, `"wrong", `+seed.Headers.Get("ETag")
-	readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": bucket, "Key": key, "IfMatch": input["IfMatch"]}, nil))
+	readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": bucket, "Key": key, "IfMatch": seed.Headers.Get("ETag")}, nil))
 	_, err = invoke(t, p, "CompleteMultipartUpload", input, nil)
 	fault := asFault(t, err)
 	if fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != "If-Match" {

@@ -3320,7 +3320,7 @@ func FuzzCopySourcePreconditions(f *testing.F) {
 		wantSuccess := false
 		switch mode % 7 {
 		case 0:
-			conditions["CopySourceIfMatch"] = `"wrong"`
+			conditions["CopySourceIfMatch"] = `"wrong", ` + put.Headers.Get("ETag")
 		case 1:
 			conditions["CopySourceIfModifiedSince"] = modified.Add(time.Duration(seconds+1) * time.Second).Format(http.TimeFormat)
 			wantSuccess = true

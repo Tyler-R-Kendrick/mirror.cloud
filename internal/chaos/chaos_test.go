@@ -184,7 +184,7 @@ func TestConcurrentCopySourcePreconditionsRemainDeterministic(t *testing.T) {
 				input["CopySourceIfMatch"], input["CopySourceIfNoneMatch"] = etag, etag
 				input["CopySourceIfModifiedSince"], input["CopySourceIfUnmodifiedSince"] = past, past
 			case 2:
-				input["CopySourceIfMatch"] = `"wrong"`
+				input["CopySourceIfMatch"] = `"wrong", ` + etag
 			case 3:
 				input["CopySourceIfNoneMatch"] = `"wrong"`
 				input["CopySourceIfModifiedSince"] = modified

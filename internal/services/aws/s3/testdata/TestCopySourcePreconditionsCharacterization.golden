@@ -2,7 +2,9 @@
   "all-positive": "success",
   "future-modified-since": "success",
   "if-match": "PreconditionFailed",
+  "if-match-list": "PreconditionFailed",
   "if-modified-since": "PreconditionFailed",
   "if-none-match": "PreconditionFailed",
+  "if-none-match-list": "success",
   "if-unmodified-since": "PreconditionFailed"
 }

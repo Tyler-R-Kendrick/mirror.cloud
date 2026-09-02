@@ -1694,6 +1694,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 			t.Fatalf("put suspended object: %v", err)
 		}
 	}
+	for range 2 {
+		copied, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key"), CopySource: aws.String("sdk-suspended/key"), MetadataDirective: s3types.MetadataDirectiveReplace})
+		if err != nil || aws.ToString(copied.VersionId) != "null" || aws.ToString(copied.CopySourceVersionId) != "" {
+			t.Fatalf("copy suspended object: %#v %v", copied, err)
+		}
+	}
 	suspendedVersions, err := s3c.ListObjectVersions(context.Background(), &s3.ListObjectVersionsInput{Bucket: aws.String("sdk-suspended")})
 	if err != nil || len(suspendedVersions.Versions) != 2 || aws.ToString(suspendedVersions.Versions[0].VersionId) != "null" || aws.ToString(suspendedVersions.Versions[1].VersionId) != aws.ToString(enabledObject.VersionId) || !aws.ToBool(suspendedVersions.Versions[0].IsLatest) || aws.ToBool(suspendedVersions.Versions[1].IsLatest) {
 		t.Fatalf("suspended versions: %#v %v", suspendedVersions, err)

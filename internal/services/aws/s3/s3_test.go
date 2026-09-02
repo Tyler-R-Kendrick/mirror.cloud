@@ -5979,6 +5979,7 @@ func TestCompleteMultipartIfMatchRequiresSingleETag(t *testing.T) {
 	if fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != "If-Match" {
 		t.Fatalf("list fault = %#v", fault)
 	}
+	golden.AssertJSON(t, map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields})
 	if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": bucket, "Key": key}, nil))); body != "old" {
 		t.Fatalf("rejected completion stored %q", body)
 	}

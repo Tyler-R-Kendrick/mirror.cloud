@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
-| LocalStack S3 test functions explicitly traced | 144 / 463 (31.1%) |
-| LocalStack S3 test functions not yet traced | 319 / 463 (68.9%) |
+| LocalStack S3 test functions explicitly traced | 146 / 463 (31.5%) |
+| LocalStack S3 test functions not yet traced | 317 / 463 (68.5%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -181,6 +181,8 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3_api.py::TestS3MetricsConfiguration::test_get_bucket_metrics_configuration_not_exist` | Characterization and HTTP BDD verify exact `NoSuchConfiguration` code, message, and 404 status | Mapped and race-clean |
 | `test_s3_api.py::TestS3MetricsConfiguration::test_delete_metrics_configuration` | Characterization and HTTP BDD verify 204 deletion followed by the exact missing-configuration fault | Mapped and race-clean |
 | `test_s3_api.py::TestS3MetricsConfiguration::test_delete_metrics_configuration_twice` | Characterization, HTTP BDD, and mutation coverage verify a repeated delete returns the exact missing-configuration fault | Mapped and race-clean |
+| `test_s3_api.py::TestS3BucketNotificationConfiguration::test_bucket_notification_with_missing_values_in_rule` | REST-XML atomic coverage preserves absent `Name` and `Value` members; S3 atomic, characterization snapshot, HTTP BDD, and mutation coverage verify all three missing-field forms return exact `MalformedXML` responses | Mapped and race-clean |
+| `test_s3_api.py::TestS3BucketNotificationConfiguration::test_bucket_notification_with_invalid_filter_rules` | Atomic, characterization snapshot, HTTP BDD, and mutation coverage verify exact invalid-name code, message, fields, and preservation of the prior valid configuration | Mapped and race-clean |
 
 ## Source-only findings
 
@@ -192,4 +194,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 144/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 146/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

@@ -3852,7 +3852,7 @@ func TestCopySourcePreconditionsCharacterization(t *testing.T) {
 		"all-positive": {"CopySourceIfMatch": etag, "CopySourceIfNoneMatch": `"wrong"`,
 			"CopySourceIfModifiedSince": past, "CopySourceIfUnmodifiedSince": modified},
 	}
-	outcomes := map[string]string{}
+	outcomes := map[string]any{}
 	for name, conditions := range cases {
 		input := map[string]any{"Bucket": "copy-conditions", "Key": name, "CopySource": "copy-conditions/source"}
 		for key, value := range conditions {
@@ -3862,7 +3862,8 @@ func TestCopySourcePreconditionsCharacterization(t *testing.T) {
 		if err == nil {
 			outcomes[name] = "success"
 		} else {
-			outcomes[name] = asFault(t, err).Code
+			fault := asFault(t, err)
+			outcomes[name] = map[string]any{"code": fault.Code, "message": fault.Message, "condition": fault.Fields["Condition"]}
 		}
 	}
 	golden.AssertJSON(t, outcomes)
@@ -3895,14 +3896,17 @@ func TestObjectReadConditions(t *testing.T) {
 		return response, err
 	}
 	for _, operation := range []string{"GetObject", "HeadObject", "GetObjectAttributes"} {
-		for _, conditions := range []map[string]any{
-			{"IfMatch": `"wrong"`},
-			{"IfMatch": `"wrong", ` + etag},
-			{"IfUnmodifiedSince": past},
+		for _, test := range []struct {
+			conditions map[string]any
+			condition  string
+		}{
+			{map[string]any{"IfMatch": `"wrong"`}, "If-Match"},
+			{map[string]any{"IfMatch": `"wrong", ` + etag}, "If-Match"},
+			{map[string]any{"IfUnmodifiedSince": past}, "If-Unmodified-Since"},
 		} {
-			_, err := call(operation, conditions)
-			if fault := asFault(t, err); fault.Code != "PreconditionFailed" || fault.HTTPStatus != http.StatusPreconditionFailed {
-				t.Fatalf("%s %#v fault = %#v", operation, conditions, fault)
+			_, err := call(operation, test.conditions)
+			if fault := asFault(t, err); fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != test.condition {
+				t.Fatalf("%s %#v fault = %#v", operation, test.conditions, fault)
 			}
 		}
 		for _, conditions := range []map[string]any{

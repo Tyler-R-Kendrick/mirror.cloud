@@ -2,13 +2,50 @@ package mutation
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+func mutationShard(raw string) (int, int, error) {
+	if raw == "" {
+		return 0, 1, nil
+	}
+	indexText, totalText, ok := strings.Cut(raw, "/")
+	index, indexErr := strconv.Atoi(indexText)
+	total, totalErr := strconv.Atoi(totalText)
+	if !ok || indexErr != nil || totalErr != nil || total < 1 || index < 0 || index >= total {
+		return 0, 0, fmt.Errorf("MUTATION_SHARD must be INDEX/TOTAL with 0 <= INDEX < TOTAL, got %q", raw)
+	}
+	return index, total, nil
+}
+
+func TestMutationShard(t *testing.T) {
+	for _, tc := range []struct {
+		raw          string
+		index, total int
+		valid        bool
+	}{
+		{"", 0, 1, true},
+		{"2/4", 2, 4, true},
+		{"-1/4", 0, 0, false},
+		{"4/4", 0, 0, false},
+		{"0/0", 0, 0, false},
+		{"x/4", 0, 0, false},
+		{"0/x", 0, 0, false},
+		{"0/4/8", 0, 0, false},
+	} {
+		index, total, err := mutationShard(tc.raw)
+		if (err == nil) != tc.valid || index != tc.index || total != tc.total {
+			t.Errorf("mutationShard(%q) = %d, %d, %v", tc.raw, index, total, err)
+		}
+	}
+}
 
 // TestMutantsAreKilled is a tiny in-tree mutation suite. Each mutant
 // rewrites one production token via `go test -overlay` and must make
@@ -4922,6 +4959,30 @@ func TestMutantsAreKilled(t *testing.T) {
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `"BlockPublicPolicy": false`,
 			new:  `"BlockPublicPolicy": true`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestPublicAccessBlock",
+		},
+		{
+			name: "s3-public-access-block-wrong-create-default",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `"BlockPublicAcls": true, "BlockPublicPolicy": true, "IgnorePublicAcls": true, "RestrictPublicBuckets": true`,
+			new:  `"BlockPublicAcls": true, "BlockPublicPolicy": false, "IgnorePublicAcls": true, "RestrictPublicBuckets": true`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestPublicAccessBlock",
+		},
+		{
+			name: "s3-public-access-block-drop-create-persistence",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if err := bucketStore.Collection("bktcfg").Put(ctx, b+"/publicaccessblock", publicAccessDocument); err != nil {`,
+			new:  `if err := error(nil); err != nil {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestPublicAccessBlock",
+		},
+		{
+			name: "s3-public-access-block-drop-missing-bucket",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  "if req.Operation == \"GetPublicAccessBlock\" {\n\t\t\t\tmiss.Fields = map[string]any{\"BucketName\": b}\n\t\t\t}",
+			new:  "if false {\n\t\t\t\tmiss.Fields = map[string]any{\"BucketName\": b}\n\t\t\t}",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestPublicAccessBlock",
 		},
@@ -13418,6 +13479,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFirehoseRedshiftPersistentRetry",
 		},
 		{
+			name: "firehose-use-relative-retry-wait",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `case <-p.deps.Clock.AfterUntil(next):`,
+			new:  `case <-p.deps.Clock.After(next.Sub(p.deps.Clock.Now())):`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseRedshiftRetryExpiryAndDelete",
+		},
+		{
 			name: "firehose-ignore-persisted-redshift-retries",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 			old:  `[]string{"fh-http-buffers", "fh-http-retries", "fh-search-work", "fh-redshift-work"}`,
@@ -16674,6 +16743,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSchedulerFlexibleWindowRetryAndDLQ",
 		},
 		{
+			name: "pipes-register-relative-retry-after-drain",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `case <-p.deps.Clock.AfterUntil(nextPoll):`,
+			new:  `case <-p.deps.Clock.After(time.Second):`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesRetrySurvivesClockAdvanceDuringWaitRegistration",
+		},
+		{
 			name: "pipes-run-stopped-pipe",
 			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
 			old:  `stringValue(pipe["CurrentState"]) != "RUNNING"`,
@@ -17653,6 +17730,11 @@ func TestMutantsAreKilled(t *testing.T) {
 		},
 	}
 
+	shard, shards, err := mutationShard(os.Getenv("MUTATION_SHARD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	files := map[string]string{}
 	for _, m := range mutants {
 		src := filepath.Join(root, m.file)
@@ -17670,7 +17752,10 @@ func TestMutantsAreKilled(t *testing.T) {
 		}
 	}
 
-	for _, m := range mutants {
+	for i, m := range mutants {
+		if i%shards != shard {
+			continue
+		}
 		t.Run(m.name, func(t *testing.T) {
 			t.Parallel()
 			src := filepath.Join(root, m.file)

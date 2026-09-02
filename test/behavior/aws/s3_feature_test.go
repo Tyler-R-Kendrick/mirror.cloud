@@ -1259,11 +1259,20 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodPut, "/completion-conditional-bdd/deleted", []byte("object"), "")
 		res.Body.Close()
 		uploadID, manifest = start("deleted")
+		status, body = complete("deleted", uploadID, manifest, "", "*")
+		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-None-Match</Condition>")) {
+			t.Fatalf("existing complete If-None-Match %d %s", status, body)
+		}
 		res = do(http.MethodDelete, "/completion-conditional-bdd/deleted", nil, "")
 		res.Body.Close()
 		status, body = complete("deleted", uploadID, manifest, "", "*")
 		if status != http.StatusConflict || !bytes.Contains(body, []byte("<Code>ConditionalRequestConflict</Code>")) || !bytes.Contains(body, []byte("<Message>The conditional request cannot succeed due to a conflicting operation against this resource.</Message>")) || !bytes.Contains(body, []byte("<Condition>If-None-Match</Condition>")) || !bytes.Contains(body, []byte("<Key>deleted</Key>")) {
 			t.Fatalf("deleted complete If-None-Match %d %s", status, body)
+		}
+		uploadID, manifest = start("deleted")
+		status, body = complete("deleted", uploadID, manifest, "", "*")
+		if status != http.StatusOK {
+			t.Fatalf("restarted complete If-None-Match %d %s", status, body)
 		}
 	})
 

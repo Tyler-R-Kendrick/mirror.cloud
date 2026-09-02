@@ -2585,11 +2585,18 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		t.Fatal(err)
 	}
 	uploadID, manifest = conditionalUpload("complete-if-none-deleted")
+	if err := completeConditional("complete-if-none-deleted", uploadID, manifest, nil, aws.String("*")); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") || !strings.Contains(err.Error(), "PreconditionFailed") {
+		t.Fatalf("existing complete If-None-Match: %v", err)
+	}
 	if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk"), Key: aws.String("complete-if-none-deleted")}); err != nil {
 		t.Fatal(err)
 	}
 	if err := completeConditional("complete-if-none-deleted", uploadID, manifest, nil, aws.String("*")); err == nil || !strings.Contains(err.Error(), "StatusCode: 409") || !strings.Contains(err.Error(), "ConditionalRequestConflict") || !strings.Contains(err.Error(), "The conditional request cannot succeed due to a conflicting operation against this resource") {
 		t.Fatalf("deleted complete If-None-Match: %v", err)
+	}
+	uploadID, manifest = conditionalUpload("complete-if-none-deleted")
+	if err := completeConditional("complete-if-none-deleted", uploadID, manifest, nil, aws.String("*")); err != nil {
+		t.Fatalf("restarted complete If-None-Match: %v", err)
 	}
 	otherUpload, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy")})
 	if err != nil {

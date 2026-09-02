@@ -1289,6 +1289,7 @@ func FuzzListBucketsPagination(f *testing.F) {
 		{0, "", "", "", false, false},
 		{10001, "", "", "", false, false},
 		{1, "", "!", "", true, false},
+		{1, "", "", "0", false, true},
 	} {
 		f.Add(seed.max, seed.prefix, seed.token, seed.region, seed.setToken, seed.setRegion)
 	}
@@ -1351,6 +1352,10 @@ func FuzzListBucketsPagination(f *testing.F) {
 			after = string(decoded)
 		}
 		if err != nil {
+			fault := asFault(t, err)
+			if setRegion && fault.Code == "InvalidArgument" && fault.Message == fmt.Sprintf("Argument value %s is not a valid AWS Region", region) && fault.Fields["ArgumentName"] == "bucket-region" {
+				return
+			}
 			t.Fatal(err)
 		}
 

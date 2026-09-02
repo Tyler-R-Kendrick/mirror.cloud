@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.6% |
-| LocalStack S3 test functions explicitly traced | 90 / 463 (19.4%) |
-| LocalStack S3 test functions not yet traced | 373 / 463 (80.6%) |
+| LocalStack S3 test functions explicitly traced | 101 / 463 (21.8%) |
+| LocalStack S3 test functions not yet traced | 362 / 463 (78.2%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -127,6 +127,17 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3_list_operations.py::TestS3ListParts::test_list_parts_empty_part_number_marker` | `TestMultipartZeroLimitsUseDefaults` verifies raw HTTP empty `part-number-marker` and `max-parts` values use zero/default semantics without rejection | Mapped and green |
 | `test_s3_list_operations.py::TestS3ListParts::test_s3_list_parts_timestamp_precision` | `TestListPartsAndMultipartUploads` and characterization snapshots verify S3 millisecond `LastModified` precision with semantic mutation coverage | Mapped and green |
 | `test_s3_list_operations.py::TestS3ListParts::test_list_parts_via_object_attrs_pagination` | `TestGetObjectAttributesContract` verifies three checksum-bearing completed parts across first, next, and beyond-final object-attributes pages, including totals and markers | Mapped and green |
+| `test_s3_api.py::TestS3BucketCRUD::test_delete_bucket_with_objects` | `TestDeleteBucketRequiresEmptyBucket` verifies the exact unversioned `BucketNotEmpty` fault, preserves the object after rejection, and deletes the bucket after the object is removed | Mapped and green |
+| `test_s3_api.py::TestS3BucketCRUD::test_delete_versioned_bucket_with_objects` | `TestDeleteBucketRequiresEmptyBucket` verifies version history and a lone delete marker each block deletion with the versioned AWS message, then deletes the bucket after the marker is removed | Mapped and green |
+| `test_s3_api.py::TestS3ObjectCRUD::test_delete_object` | `TestDeleteObjectRejectsVersionOnUnversionedMissingKey` and `TestDeleteObjectMissingKeyVersionIsIdempotent` verify idempotent unversioned deletion plus exact invalid-version handling, with snapshot and mutation coverage | Mapped and green |
+| `test_s3_api.py::TestS3ObjectCRUD::test_delete_objects` | `TestDeleteObjectsVersionAndQuietSemantics` verifies an unversioned wrong version returns `NoSuchVersion` while existing and missing keys are all reported as deleted | Mapped and green |
+| `test_s3_api.py::TestS3ObjectCRUD::test_delete_object_versioned` | `TestDeleteObjectRestoresPreviousVersion`, `TestGetObjectVersionErrors`, SDK contract, HTTP BDD, snapshot, fuzz, and mutation coverage verify markers, explicit version deletion, restoration, and exact `NoSuchVersion` reads | Mapped and green |
+| `test_s3_api.py::TestS3ObjectCRUD::test_delete_objects_versioned` | `TestDeleteObjectsVersionAndQuietSemantics`, SDK contract, HTTP BDD, fuzz, chaos, and mutation coverage verify markers, explicit versions, missing-version errors, quiet responses, and restoration | Mapped and green |
+| `test_s3_api.py::TestS3ObjectCRUD::test_get_object_with_version_unversioned_bucket` | `TestGetObjectVersionErrors`, SDK contract, HTTP BDD, snapshot, fuzz, and five focused mutants verify `versionId=null` reads the current object while other version IDs return exact `InvalidArgument` details | Mapped and green |
+| `test_s3_api.py::TestS3ObjectCRUD::test_put_object_on_suspended_bucket` | `TestSuspendedVersioningReplacesNullVersion`, SDK contract, HTTP BDD, fuzz, chaos, snapshot, and mutation coverage verify one replaceable null version alongside preserved enabled versions | Mapped and green |
+| `test_s3_api.py::TestS3ObjectCRUD::test_delete_object_on_suspended_bucket` | `TestSuspendedVersioningReplacesNullVersion`, SDK contract, HTTP BDD, fuzz, chaos, snapshot, and mutation coverage verify null delete-marker replacement and restoration of the prior enabled version | Mapped and green |
+| `test_s3_api.py::TestS3ObjectCRUD::test_list_object_versions_order_unversioned` | `TestListObjectVersionsUnversionedOrder` verifies unversioned objects are key-ordered, latest, and represented with the null version ID; list pagination and mutation coverage exercise the shared implementation | Mapped and green |
+| `test_s3_api.py::TestS3ObjectCRUD::test_get_object_range` | `TestObjectByteRanges`, SDK contract, HTTP BDD, fuzz, and mutation coverage verify bounded/open/suffix/ignored ranges, checksum handling, 206 metadata, and exact 416 size/request fields | Mapped and green |
 
 ## Source-only findings
 
@@ -138,4 +149,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 90/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 101/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

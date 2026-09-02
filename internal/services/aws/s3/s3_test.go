@@ -4065,6 +4065,7 @@ func TestSuspendedVersioningReplacesNullVersion(t *testing.T) {
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("second null"))
 
 	listed := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "bucket"}, nil).Output
+	suspendedVersions := listed
 	versions := asSliceForTest(listed["Versions"])
 	if len(versions) != 2 || asMapForTest(versions[0])["VersionId"] != "null" || asMapForTest(versions[1])["VersionId"] != enabledVersion {
 		t.Fatalf("suspended versions = %#v", listed)
@@ -4085,9 +4086,11 @@ func TestSuspendedVersioningReplacesNullVersion(t *testing.T) {
 		t.Fatalf("suspended delete marker = %#v", listed)
 	}
 	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "VersionId": "null"}, nil)
-	if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil))); body != "enabled" {
-		t.Fatalf("restored enabled version = %q", body)
+	restoredBody := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil)))
+	if restoredBody != "enabled" {
+		t.Fatalf("restored enabled version = %q", restoredBody)
 	}
+	golden.AssertJSON(t, map[string]any{"suspended": suspendedVersions, "deleted": listed, "restoredBody": restoredBody})
 }
 
 func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {

@@ -4200,7 +4200,7 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 	b := str(req.Input["Bucket"])
 	key := str(req.Input["Key"])
 	switch req.Operation {
-	case "PutBucketTagging", "GetBucketTagging", "DeleteBucketTagging":
+	case "PutBucketTagging", "GetBucketTagging", "DeleteBucketTagging", "PutBucketNotificationConfiguration", "GetBucketNotificationConfiguration":
 		if err := p.requireBucket(ctx, req, b); err != nil {
 			return nil, err
 		}
@@ -4458,7 +4458,7 @@ func (p *Pack) verifyNotificationDestination(ctx context.Context, req *spi.Reque
 		_, err := sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": string(payload)}})
 		return err
 	}
-	_, err := sns.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Publish", Input: map[string]any{"TopicArn": arn, "Message": string(payload)}})
+	_, err := sns.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Publish", Input: map[string]any{"TopicArn": arn, "Message": string(payload), "Subject": "Amazon S3 Notification"}})
 	return err
 }
 
@@ -5345,7 +5345,7 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 		}
 		_, _ = sns.New(p.deps).Invoke(ctx, &spi.Request{
 			Identity: notificationTargetIdentity(req.Identity, arn), Operation: "Publish",
-			Input: map[string]any{"TopicArn": arn, "Message": string(payload)},
+			Input: map[string]any{"TopicArn": arn, "Message": string(payload), "Subject": "Amazon S3 Notification"},
 		})
 	}
 	for _, dest := range asSlice(cfg["LambdaFunctionConfigurations"]) {

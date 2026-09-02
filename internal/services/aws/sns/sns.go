@@ -262,7 +262,11 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 		}
 		payload := body
 		if str(sub["RawMessageDelivery"]) != "true" {
-			env, _ := json.Marshal(map[string]any{"Type": "Notification", "Message": body, "TopicArn": arn, "MessageId": mid})
+			notification := map[string]any{"Type": "Notification", "Message": body, "TopicArn": arn, "MessageId": mid}
+			if subject := str(req.Input["Subject"]); subject != "" {
+				notification["Subject"] = subject
+			}
+			env, _ := json.Marshal(notification)
 			payload = string(env)
 		}
 		switch str(sub["Protocol"]) {
@@ -271,7 +275,11 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 		case "lambda":
 			_, _ = p.deliverLambda(ctx, req, sub, body, mid, msgAttrs)
 		case "http", "https":
-			p.httpPost(str(sub["Endpoint"]), map[string]any{"Type": "Notification", "Message": body, "TopicArn": arn, "MessageId": mid})
+			notification := map[string]any{"Type": "Notification", "Message": body, "TopicArn": arn, "MessageId": mid}
+			if subject := str(req.Input["Subject"]); subject != "" {
+				notification["Subject"] = subject
+			}
+			p.httpPost(str(sub["Endpoint"]), notification)
 		}
 	}
 	return &spi.Response{Output: map[string]any{"MessageId": mid}}, nil

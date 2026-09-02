@@ -428,6 +428,8 @@ func TestBucketNotificationConfiguration(t *testing.T) {
 		{"missing events", "MalformedXML", map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:queue"}}}},
 		{"wrong arn service", "InvalidArgument", map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sns:us-east-1:111111111111:queue", "Events": []any{"s3:ObjectCreated:*"}}}}},
 		{"missing destination", "InvalidArgument", map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:missing", "Events": []any{"s3:ObjectCreated:*"}}}}},
+		{"invalid topic ARN", "InvalidArgument", map[string]any{"TopicConfigurations": []any{map[string]any{"TopicArn": "invalid-topic", "Events": []any{"s3:ObjectCreated:*"}}}}},
+		{"missing topic", "InvalidArgument", map[string]any{"TopicConfigurations": []any{map[string]any{"TopicArn": "arn:aws:sns:us-east-1:111111111111:missing", "Events": []any{"s3:ObjectCreated:*"}}}}},
 		{"invalid lambda ARN", "InvalidArgument", map[string]any{"LambdaFunctionConfigurations": []any{map[string]any{"LambdaFunctionArn": "invalid-lambda", "Events": []any{"s3:ObjectCreated:*"}}}}},
 		{"missing lambda", "InvalidArgument", map[string]any{"LambdaFunctionConfigurations": []any{map[string]any{"LambdaFunctionArn": "arn:aws:lambda:us-east-1:111111111111:function:missing", "Events": []any{"s3:ObjectCreated:*"}}}}},
 		{"missing filter value", "MalformedXML", notificationWithFilter(map[string]any{"Name": "prefix"})},
@@ -463,6 +465,21 @@ func TestBucketNotificationConfiguration(t *testing.T) {
 	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": skippedLambda, "SkipDestinationValidation": true}, nil)
 	if stored := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(asSliceForTest(stored["LambdaFunctionConfigurations"])) != 1 {
 		t.Fatalf("skipped lambda validation = %#v", stored)
+	}
+	invalidTopic := map[string]any{"TopicConfigurations": []any{map[string]any{"TopicArn": "invalid-topic", "Events": []any{"s3:ObjectCreated:*"}}}}
+	if _, err := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": invalidTopic, "SkipDestinationValidation": true}, nil); asFault(t, err).Code != "InvalidArgument" {
+		t.Fatalf("invalid skipped topic ARN = %v", err)
+	}
+	skippedTopic := map[string]any{"TopicConfigurations": []any{map[string]any{"TopicArn": "arn:aws:sns:us-east-1:111111111111:missing", "Events": []any{"s3:ObjectCreated:*"}}}}
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": skippedTopic, "SkipDestinationValidation": true}, nil)
+	if stored := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(asSliceForTest(stored["TopicConfigurations"])) != 1 {
+		t.Fatalf("skipped topic validation = %#v", stored)
+	}
+	if _, err := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": "missing-bucket", "NotificationConfiguration": skippedTopic, "SkipDestinationValidation": true}, nil); asFault(t, err).Code != "NoSuchBucket" {
+		t.Fatalf("missing bucket notification = %v", err)
+	}
+	if _, err := invoke(t, p, "GetBucketNotificationConfiguration", map[string]any{"Bucket": "missing-bucket"}, nil); asFault(t, err).Code != "NoSuchBucket" {
+		t.Fatalf("missing bucket notification read = %v", err)
 	}
 	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": map[string]any{}}, nil)
 	if cleared := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(cleared) != 0 {
@@ -634,7 +651,7 @@ func TestBucketNotificationTopicDelivery(t *testing.T) {
 	invokePack(queuePack, "CreateQueue", map[string]any{"QueueName": "subscriber"})
 	topicARN := invokePack(topicPack, "CreateTopic", map[string]any{"Name": "object-events"}).Output["TopicArn"].(string)
 	invokePack(topicPack, "Subscribe", map[string]any{
-		"TopicArn": topicARN, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:123456789012:subscriber", "RawMessageDelivery": "true",
+		"TopicArn": topicARN, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:123456789012:subscriber",
 	})
 
 	p := s3.New(deps)
@@ -643,20 +660,43 @@ func TestBucketNotificationTopicDelivery(t *testing.T) {
 	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{
 		"Bucket": bucket,
 		"NotificationConfiguration": map[string]any{"TopicConfigurations": []any{map[string]any{
-			"TopicArn": topicARN, "Events": []any{"s3:ObjectCreated:Put"},
+			"Id": "id123", "TopicArn": topicARN, "Events": []any{"s3:ObjectCreated:*"},
+			"Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{map[string]any{"Name": "Prefix", "Value": "testupload/"}}}},
 		}}},
 	}, nil)
-	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "created"}, []byte("created"))
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "test/ignored"}, []byte("ignored"))
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "testupload/created"}, []byte("first event"))
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "testupload/created"}, []byte("second event"))
 	messages := invokePack(queuePack, "ReceiveMessage", map[string]any{"QueueName": "subscriber", "MaxNumberOfMessages": 10}).Output["Messages"].([]any)
-	if len(messages) != 2 {
+	if len(messages) != 3 {
 		t.Fatalf("topic notification = %#v", messages)
 	}
-	found := false
+	events := map[int]string{}
 	for _, message := range messages {
-		found = found || strings.Contains(asMapForTest(message)["Body"].(string), `"eventName":"ObjectCreated:Put"`)
+		var envelope map[string]any
+		if err := json.Unmarshal([]byte(asMapForTest(message)["Body"].(string)), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		body := envelope["Message"].(string)
+		if envelope["Type"] != "Notification" || envelope["TopicArn"] != topicARN || envelope["Subject"] != "Amazon S3 Notification" {
+			t.Fatalf("SNS envelope = %#v", envelope)
+		}
+		if strings.Contains(body, `"s3:TestEvent"`) {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(body), &payload); err != nil {
+			t.Fatal(err)
+		}
+		record := asMapForTest(asSliceForTest(payload["Records"])[0])
+		object := asMapForTest(asMapForTest(record["s3"])["object"])
+		if record["eventSource"] != "aws:s3" || record["eventName"] != "ObjectCreated:Put" || asMapForTest(asMapForTest(record["s3"])["bucket"])["name"] != bucket || object["key"] != "testupload/created" {
+			t.Fatalf("S3 topic event = %#v", record)
+		}
+		events[int(object["size"].(float64))] = object["key"].(string)
 	}
-	if !found {
-		t.Fatalf("topic notification = %#v", messages)
+	if !reflect.DeepEqual(events, map[int]string{len("first event"): "testupload/created", len("second event"): "testupload/created"}) {
+		t.Fatalf("topic notification events = %#v", events)
 	}
 }
 

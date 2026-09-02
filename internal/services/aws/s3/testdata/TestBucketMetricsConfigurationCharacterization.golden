@@ -1,0 +1,52 @@
+{
+  "configured": {
+    "MetricsConfiguration": {
+      "Filter": {
+        "Prefix": "logs/"
+      },
+      "Id": "metrics"
+    }
+  },
+  "deleted": 204,
+  "final": {
+    "code": "NoSuchConfiguration",
+    "message": "The specified configuration does not exist.",
+    "status": 404
+  },
+  "list": {
+    "ids": [
+      "metrics",
+      "other"
+    ],
+    "isTruncated": false
+  },
+  "missing": {
+    "code": "NoSuchConfiguration",
+    "message": "The specified configuration does not exist.",
+    "status": 404
+  },
+  "overwrite": 200,
+  "overwritten": {
+    "MetricsConfiguration": {
+      "Filter": {
+        "Prefix": "logs/new-prefix"
+      },
+      "Id": "metrics"
+    }
+  },
+  "pagination": {
+    "firstCount": 100,
+    "firstId": "100",
+    "firstIsTruncated": true,
+    "secondCount": 2,
+    "secondFirstId": "200",
+    "secondIsTruncated": false,
+    "tokenEchoed": true
+  },
+  "put": 200,
+  "repeatedDelete": {
+    "code": "NoSuchConfiguration",
+    "message": "The specified configuration does not exist.",
+    "status": 404
+  }
+}

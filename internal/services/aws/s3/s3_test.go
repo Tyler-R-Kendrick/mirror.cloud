@@ -1810,6 +1810,62 @@ func TestNamedBucketConfigurations(t *testing.T) {
 	})
 }
 
+func TestBucketMetricsConfigurationCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	bucket := map[string]any{"Bucket": "metrics-characterization"}
+	mustInvoke(t, p, "CreateBucket", bucket, nil)
+	configuration := map[string]any{"Id": "metrics", "Filter": map[string]any{"Prefix": "logs/"}}
+	put := mustInvoke(t, p, "PutBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "metrics", "MetricsConfiguration": configuration}, nil)
+	configured := mustInvoke(t, p, "GetBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "metrics"}, nil)
+	configuration["Filter"] = map[string]any{"Prefix": "logs/new-prefix"}
+	overwrite := mustInvoke(t, p, "PutBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "metrics", "MetricsConfiguration": configuration}, nil)
+	overwritten := mustInvoke(t, p, "GetBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "metrics"}, nil)
+	mustInvoke(t, p, "PutBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "other", "MetricsConfiguration": map[string]any{"Id": "other", "Filter": map[string]any{"Prefix": "logs/prefix"}}}, nil)
+	listed := mustInvoke(t, p, "ListBucketMetricsConfigurations", bucket, nil)
+	_, missingErr := invoke(t, p, "GetBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "missing"}, nil)
+	deleted := mustInvoke(t, p, "DeleteBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "metrics"}, nil)
+	_, finalErr := invoke(t, p, "GetBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "metrics"}, nil)
+	_, repeatedDeleteErr := invoke(t, p, "DeleteBucketMetricsConfiguration", map[string]any{"Bucket": bucket["Bucket"], "Id": "metrics"}, nil)
+
+	pageBucket := map[string]any{"Bucket": "metrics-pagination"}
+	mustInvoke(t, p, "CreateBucket", pageBucket, nil)
+	for i := range 102 {
+		id := fmt.Sprintf("%03d", i+100)
+		mustInvoke(t, p, "PutBucketMetricsConfiguration", map[string]any{"Bucket": pageBucket["Bucket"], "Id": id, "MetricsConfiguration": map[string]any{"Id": id, "Filter": map[string]any{"Prefix": "logs/prefix"}}}, nil)
+	}
+	first := mustInvoke(t, p, "ListBucketMetricsConfigurations", pageBucket, nil)
+	firstItems := asSliceForTest(first.Output["MetricsConfigurationList"])
+	token := first.Output["NextContinuationToken"]
+	second := mustInvoke(t, p, "ListBucketMetricsConfigurations", map[string]any{"Bucket": pageBucket["Bucket"], "ContinuationToken": token}, nil)
+	secondItems := asSliceForTest(second.Output["MetricsConfigurationList"])
+	missing, final, repeatedDelete := asFault(t, missingErr), asFault(t, finalErr), asFault(t, repeatedDeleteErr)
+	listedItems := asSliceForTest(listed.Output["MetricsConfigurationList"])
+
+	golden.AssertJSON(t, map[string]any{
+		"configured": configured.Output,
+		"deleted":    deleted.Status,
+		"final":      map[string]any{"code": final.Code, "message": final.Message, "status": final.HTTPStatus},
+		"list": map[string]any{
+			"ids":         []any{asMapForTest(listedItems[0])["Id"], asMapForTest(listedItems[1])["Id"]},
+			"isTruncated": listed.Output["IsTruncated"],
+		},
+		"missing":        map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus},
+		"overwrite":      overwrite.Status,
+		"overwritten":    overwritten.Output,
+		"put":            put.Status,
+		"repeatedDelete": map[string]any{"code": repeatedDelete.Code, "message": repeatedDelete.Message, "status": repeatedDelete.HTTPStatus},
+		"pagination": map[string]any{
+			"firstCount":        len(firstItems),
+			"firstId":           asMapForTest(firstItems[0])["Id"],
+			"firstIsTruncated":  first.Output["IsTruncated"],
+			"secondCount":       len(secondItems),
+			"secondFirstId":     asMapForTest(secondItems[0])["Id"],
+			"secondIsTruncated": second.Output["IsTruncated"],
+			"tokenEchoed":       second.Output["ContinuationToken"] == token,
+		},
+	})
+}
+
 func TestBucketAndObjectACLConfigurations(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	bucket := map[string]any{"Bucket": "acl-configurations"}

@@ -1291,6 +1291,21 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if status != http.StatusOK {
 			t.Fatalf("exact complete If-Match %d %s", status, body)
 		}
+		res = do(http.MethodHead, "/completion-conditional-bdd/list", nil, "")
+		multipartETag := res.Header.Get("ETag")
+		res.Body.Close()
+		if multipartETag == etag {
+			t.Fatalf("multipart ETag = original ETag %q", multipartETag)
+		}
+		uploadID, manifest = start("list")
+		status, body = complete("list", uploadID, manifest, etag, "")
+		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
+			t.Fatalf("stale original complete If-Match %d %s", status, body)
+		}
+		status, body = complete("list", uploadID, manifest, multipartETag, "")
+		if status != http.StatusOK {
+			t.Fatalf("current multipart complete If-Match %d %s", status, body)
+		}
 		uploadID, manifest = start("created")
 		res = do(http.MethodPut, "/completion-conditional-bdd/created", []byte("object"), "")
 		res.Body.Close()

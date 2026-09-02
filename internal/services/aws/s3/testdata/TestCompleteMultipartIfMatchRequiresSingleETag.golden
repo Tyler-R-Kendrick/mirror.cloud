@@ -7,6 +7,15 @@
     "message": "At least one of the pre-conditions you specified did not hold",
     "status": 412
   },
+  "multipartETag": "\"81527544d981be1c52b9bf986715669c-1\"",
+  "staleOriginalETag": {
+    "code": "PreconditionFailed",
+    "fields": {
+      "Condition": "If-Match"
+    },
+    "message": "At least one of the pre-conditions you specified did not hold",
+    "status": 412
+  },
   "validManifest": {
     "code": "PreconditionFailed",
     "fields": {

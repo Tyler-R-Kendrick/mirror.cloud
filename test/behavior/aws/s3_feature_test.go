@@ -963,6 +963,23 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given an unversioned bucket When deleting a missing key version Then S3 validates the version", func(t *testing.T) {
+		res := do(http.MethodPut, "/unversioned-delete-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodDelete, "/unversioned-delete-bdd/missing?versionId=missing-version", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(body, []byte("<Message>Invalid version id specified</Message>")) || !bytes.Contains(body, []byte("<ArgumentName>versionId</ArgumentName>")) || !bytes.Contains(body, []byte("<ArgumentValue>missing-version</ArgumentValue>")) {
+			t.Fatalf("invalid version response = %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodDelete, "/unversioned-delete-bdd/missing?versionId=null", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNoContent || len(body) != 0 || res.Header.Get("x-amz-version-id") != "" || res.Header.Get("x-amz-delete-marker") != "" {
+			t.Fatalf("null version response = %d headers=%v body=%q", res.StatusCode, res.Header, body)
+		}
+	})
+
 	t.Run("Given conflicting multipart completion conditions When completed Then S3 returns LocalStack faults", func(t *testing.T) {
 		res := do(http.MethodPut, "/completion-conditional-bdd", nil, "")
 		res.Body.Close()

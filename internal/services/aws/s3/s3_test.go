@@ -4820,6 +4820,96 @@ func TestObjectLockBucketGuards(t *testing.T) {
 	})
 }
 
+func TestObjectLockConfigurationParity(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	fault := func(operation string, input map[string]any) *spi.Fault {
+		t.Helper()
+		_, err := invoke(t, p, operation, input, nil)
+		return asFault(t, err)
+	}
+
+	missingBucket := fault("GetBucketObjectLockConfiguration", map[string]any{"Bucket": "missing"})
+	if missingBucket.Code != "NoSuchBucket" || missingBucket.Message != "The specified bucket does not exist" || missingBucket.Fields["BucketName"] != "missing" {
+		t.Fatalf("missing bucket fault = %#v", missingBucket)
+	}
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "plain"}, nil)
+	missingConfiguration := fault("GetBucketObjectLockConfiguration", map[string]any{"Bucket": "plain"})
+	if missingConfiguration.Code != "ObjectLockConfigurationNotFoundError" || missingConfiguration.Message != "Object Lock configuration does not exist for this bucket" ||
+		missingConfiguration.HTTPStatus != http.StatusNotFound || missingConfiguration.Fields["BucketName"] != "plain" {
+		t.Fatalf("missing configuration fault = %#v", missingConfiguration)
+	}
+	for _, bypass := range []bool{true, false} {
+		t.Run(fmt.Sprintf("delete bypass %t", bypass), func(t *testing.T) {
+			got := fault("DeleteObject", map[string]any{"Bucket": "plain", "Key": "key", "BypassGovernanceRetention": bypass})
+			if got.Code != "InvalidArgument" || got.Message != "x-amz-bypass-governance-retention is only applicable to Object Lock enabled buckets." ||
+				got.HTTPStatus != http.StatusBadRequest || got.Fields["ArgumentName"] != "x-amz-bypass-governance-retention" {
+				t.Fatalf("delete bypass fault = %#v", got)
+			}
+		})
+	}
+	bulkBypass := fault("DeleteObjects", map[string]any{"Bucket": "plain", "Objects": []any{map[string]any{"Key": "key"}}, "BypassGovernanceRetention": true})
+	if bulkBypass.Code != "InvalidArgument" || bulkBypass.Fields["ArgumentName"] != "x-amz-bypass-governance-retention" {
+		t.Fatalf("bulk bypass fault = %#v", bulkBypass)
+	}
+
+	noVersioning := fault("PutBucketObjectLockConfiguration", map[string]any{"Bucket": "plain", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled"}})
+	if noVersioning.Code != "InvalidBucketState" || noVersioning.HTTPStatus != http.StatusConflict {
+		t.Fatalf("unversioned configuration fault = %#v", noVersioning)
+	}
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "plain", "Status": "Suspended"}, nil)
+	suspended := fault("PutBucketObjectLockConfiguration", map[string]any{"Bucket": "plain", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled"}})
+	if suspended.Code != "InvalidBucketState" || suspended.Message != "Versioning must be 'Enabled' on the bucket to apply a Object Lock configuration" {
+		t.Fatalf("suspended configuration fault = %#v", suspended)
+	}
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "plain", "Status": "Enabled"}, nil)
+
+	invalidConfigurations := []struct {
+		name          string
+		configuration map[string]any
+	}{
+		{"no enabled", map[string]any{"Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "GOVERNANCE", "Days": 1}}}},
+		{"empty", map[string]any{}},
+		{"empty rule", map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{}}},
+		{"empty retention", map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{}}}},
+		{"no duration", map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "GOVERNANCE"}}}},
+		{"bad mode", map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "INVALID", "Days": 1}}}},
+		{"both durations", map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "GOVERNANCE", "Days": 1, "Years": 1}}}},
+	}
+	for _, tc := range invalidConfigurations {
+		t.Run(tc.name, func(t *testing.T) {
+			got := fault("PutBucketObjectLockConfiguration", map[string]any{"Bucket": "plain", "ObjectLockConfiguration": tc.configuration})
+			if got.Code != "MalformedXML" || got.HTTPStatus != http.StatusBadRequest {
+				t.Fatalf("invalid configuration fault = %#v", got)
+			}
+		})
+	}
+
+	configuration := map[string]any{"ObjectLockEnabled": "Enabled", "Rule": map[string]any{"DefaultRetention": map[string]any{"Mode": "GOVERNANCE", "Days": 1}}}
+	mustInvoke(t, p, "PutBucketObjectLockConfiguration", map[string]any{"Bucket": "plain", "ObjectLockConfiguration": configuration}, nil)
+	configured := mustInvoke(t, p, "GetBucketObjectLockConfiguration", map[string]any{"Bucket": "plain"}, nil)
+	mustInvoke(t, p, "PutBucketObjectLockConfiguration", map[string]any{"Bucket": "plain", "ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled"}}, nil)
+	enabledOnly := mustInvoke(t, p, "GetBucketObjectLockConfiguration", map[string]any{"Bucket": "plain"}, nil)
+	if _, exists := asMapForTest(enabledOnly.Output["ObjectLockConfiguration"])["Rule"]; exists {
+		t.Fatalf("enabled-only configuration retained rule: %#v", enabledOnly.Output)
+	}
+	suspendLocked := fault("PutBucketVersioning", map[string]any{"Bucket": "plain", "Status": "Suspended"})
+	if suspendLocked.Code != "InvalidBucketState" || suspendLocked.Message != "An Object Lock configuration is present on this bucket, so the versioning state cannot be changed." {
+		t.Fatalf("locked versioning fault = %#v", suspendLocked)
+	}
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "plain", "Status": "Enabled"}, nil)
+
+	golden.AssertJSON(t, map[string]any{
+		"missingBucket":        map[string]any{"code": missingBucket.Code, "message": missingBucket.Message, "bucket": missingBucket.Fields["BucketName"]},
+		"missingConfiguration": map[string]any{"code": missingConfiguration.Code, "message": missingConfiguration.Message, "bucket": missingConfiguration.Fields["BucketName"]},
+		"bulkBypass":           map[string]any{"code": bulkBypass.Code, "argument": bulkBypass.Fields["ArgumentName"]},
+		"noVersioning":         map[string]any{"code": noVersioning.Code, "message": noVersioning.Message},
+		"suspended":            map[string]any{"code": suspended.Code, "message": suspended.Message},
+		"configured":           configured.Output,
+		"enabledOnly":          enabledOnly.Output,
+		"suspendLocked":        map[string]any{"code": suspendLocked.Code, "message": suspendLocked.Message},
+	})
+}
+
 func TestVersionedObjectTaggingCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

@@ -1,0 +1,44 @@
+{
+  "bulkBypass": {
+    "argument": "x-amz-bypass-governance-retention",
+    "code": "InvalidArgument"
+  },
+  "configured": {
+    "ObjectLockConfiguration": {
+      "ObjectLockEnabled": "Enabled",
+      "Rule": {
+        "DefaultRetention": {
+          "Days": 1,
+          "Mode": "GOVERNANCE"
+        }
+      }
+    }
+  },
+  "enabledOnly": {
+    "ObjectLockConfiguration": {
+      "ObjectLockEnabled": "Enabled"
+    }
+  },
+  "missingBucket": {
+    "bucket": "missing",
+    "code": "NoSuchBucket",
+    "message": "The specified bucket does not exist"
+  },
+  "missingConfiguration": {
+    "bucket": "plain",
+    "code": "ObjectLockConfigurationNotFoundError",
+    "message": "Object Lock configuration does not exist for this bucket"
+  },
+  "noVersioning": {
+    "code": "InvalidBucketState",
+    "message": "Versioning must be 'Enabled' on the bucket to apply a Object Lock configuration"
+  },
+  "suspendLocked": {
+    "code": "InvalidBucketState",
+    "message": "An Object Lock configuration is present on this bucket, so the versioning state cannot be changed."
+  },
+  "suspended": {
+    "code": "InvalidBucketState",
+    "message": "Versioning must be 'Enabled' on the bucket to apply a Object Lock configuration"
+  }
+}

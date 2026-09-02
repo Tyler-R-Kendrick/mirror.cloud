@@ -1978,6 +1978,11 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK {
 			t.Fatalf("create bucket %d", res.StatusCode)
 		}
+		res = do(http.MethodPut, "/copy-conditions?versioning", []byte(`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`), "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("enable copy versioning %d", res.StatusCode)
+		}
 		request := func(key string, headers map[string]string) (*http.Response, []byte) {
 			t.Helper()
 			req, _ := http.NewRequest(http.MethodPut, ts.URL+"/copy-conditions/"+key, nil)

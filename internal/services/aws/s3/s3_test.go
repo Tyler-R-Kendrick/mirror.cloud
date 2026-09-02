@@ -4842,10 +4842,22 @@ func TestListObjectVersionsResumesAfterDeletedVersionMarker(t *testing.T) {
 	marker := first["NextVersionIdMarker"]
 	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "deleted-version-marker", "Key": "key", "VersionId": marker}, nil)
 	resumed := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "deleted-version-marker", "Prefix": "key", "KeyMarker": "key", "VersionIdMarker": marker}, nil).Output
-	if versions := asSliceForTest(resumed["Versions"]); len(versions) != 2 {
+	versions := asSliceForTest(resumed["Versions"])
+	if len(versions) != 2 {
 		t.Fatalf("versions after deleted marker = %#v", resumed)
 	}
 	golden.AssertJSON(t, map[string]any{"first": first, "resumed": resumed})
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "deleted-version-marker", "Key": "key", "VersionId": asMapForTest(versions[0])["VersionId"]}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "deleted-version-marker", "Key": "key"}, []byte("newer"))
+	chained := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "deleted-version-marker", "Prefix": "key", "KeyMarker": "key", "VersionIdMarker": marker}, nil).Output
+	if rows := asSliceForTest(chained["Versions"]); len(rows) != 1 || asMapForTest(rows[0])["VersionId"] != asMapForTest(versions[1])["VersionId"] {
+		t.Fatalf("versions after chained deletion = %#v", chained)
+	}
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "deleted-version-marker", "Key": "key", "VersionId": asMapForTest(versions[1])["VersionId"]}, nil)
+	terminal := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "deleted-version-marker", "Prefix": "key", "KeyMarker": "key", "VersionIdMarker": marker}, nil).Output
+	if rows := asSliceForTest(terminal["Versions"]); len(rows) != 0 {
+		t.Fatalf("versions after deleting resume target = %#v", terminal)
+	}
 }
 
 func TestListObjectVersionChecksumMetadata(t *testing.T) {

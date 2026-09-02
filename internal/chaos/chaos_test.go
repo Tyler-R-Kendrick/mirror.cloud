@@ -3105,6 +3105,9 @@ func TestConcurrentCreateBucketOwnershipRemainsAtomic(t *testing.T) {
 		if !errors.As(result.err, &fault) || valid && fault.Code != "BucketAlreadyOwnedByYou" || !valid && fault.Code != "InvalidArgument" && fault.Code != "BucketAlreadyOwnedByYou" {
 			t.Fatalf("concurrent create ownership=%s: %v", result.ownership, result.err)
 		}
+		if !valid && fault.Code == "InvalidArgument" && (fault.Message != "Invalid x-amz-object-ownership header: invalid" || len(fault.Fields) != 1 || fault.Fields["ArgumentName"] != "x-amz-object-ownership") {
+			t.Fatalf("concurrent invalid ownership fault = %#v", fault)
+		}
 	}
 	if successes != 1 {
 		t.Fatalf("successful creates = %d, want 1", successes)

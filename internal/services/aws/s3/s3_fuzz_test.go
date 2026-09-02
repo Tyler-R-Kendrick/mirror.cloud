@@ -204,7 +204,8 @@ func FuzzCreateBucketObjectOwnership(f *testing.F) {
 		_, err := invoke(t, p, "CreateBucket", input, nil)
 		valid := !set || ownership == "BucketOwnerPreferred" || ownership == "ObjectWriter" || ownership == "BucketOwnerEnforced"
 		if !valid {
-			if fault := asFault(t, err); fault.Code != "InvalidArgument" {
+			if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Message != "Invalid x-amz-object-ownership header: "+ownership ||
+				fault.HTTPStatus != http.StatusBadRequest || len(fault.Fields) != 1 || fault.Fields["ArgumentName"] != "x-amz-object-ownership" {
 				t.Fatalf("ownership=%q: %#v", ownership, fault)
 			}
 			if _, err := invoke(t, p, "HeadBucket", map[string]any{"Bucket": "ownership-fuzz"}, nil); asFault(t, err).Code != "NoSuchBucket" {

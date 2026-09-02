@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 61184)
-Total output lines: 6308
-
 // Package s3 is the emulate-tier S3 behavior pack.
 package s3
 
@@ -1576,7 +1573,3164 @@ func validatePostPolicy(fields map[string]string, bucket string, size int, now t
 	return nil
 }
 
-func verifyPostPolicyCondition(condition any, form map[string]string, bucket string, size int) (b…31184 tokens truncated…:
+func verifyPostPolicyCondition(condition any, form map[string]string, bucket string, size int) (bool, error) {
+	switch value := condition.(type) {
+	case map[string]any:
+		if len(value) > 1 {
+			return false, &spi.Fault{Code: "InvalidPolicyDocument", Message: "Invalid Policy: Invalid Simple-Condition: Simple-Conditions must have exactly one property specified.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		for key, expected := range value {
+			want, ok := expected.(string)
+			if !ok {
+				return false, nil
+			}
+			if strings.EqualFold(key, "bucket") {
+				return bucket == want, nil
+			}
+			return form[strings.ToLower(key)] == want, nil
+		}
+	case []any:
+		if len(value) == 3 {
+			op, _ := value[0].(string)
+			if op == "content-length-range" {
+				minimum, minErr := strconv.ParseInt(fmt.Sprint(value[1]), 10, 64)
+				maximum, maxErr := strconv.ParseInt(fmt.Sprint(value[2]), 10, 64)
+				if minErr != nil || maxErr != nil {
+					return false, nil
+				}
+				if int64(size) < minimum {
+					return false, &spi.Fault{Code: "EntityTooSmall", Message: "Your proposed upload is smaller than the minimum allowed size", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ProposedSize": size, "MinSizeAllowed": minimum}}
+				}
+				if int64(size) > maximum {
+					return false, &spi.Fault{Code: "EntityTooLarge", Message: "Your proposed upload exceeds the maximum allowed size", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ProposedSize": size, "MaxSizeAllowed": maximum}}
+				}
+				return true, nil
+			}
+			field, fieldOK := value[1].(string)
+			expected, expectedOK := value[2].(string)
+			if !fieldOK || !expectedOK || !strings.HasPrefix(field, "$") {
+				return false, nil
+			}
+			actual := form[strings.ToLower(strings.TrimPrefix(field, "$"))]
+			if strings.EqualFold(field, "$bucket") {
+				actual = bucket
+			}
+			switch op {
+			case "eq":
+				return actual == expected, nil
+			case "starts-with":
+				return strings.HasPrefix(actual, expected), nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if websiteRequest(req) && !truthy(req.Input["_websiteRaw"]) {
+		return p.websiteObject(ctx, req)
+	}
+	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
+	wantVer := str(req.Input["VersionId"])
+	if p.versioningStatus(ctx, req, b) == "" {
+		if wantVer == "null" {
+			wantVer = ""
+		} else if wantVer != "" {
+			return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid version id specified", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "versionId", "ArgumentValue": wantVer}}
+		}
+	}
+	meta, exists := p.objectMetadata(ctx, req, b, key, wantVer)
+	if !exists {
+		return nil, objectReadNotFound(key, wantVer)
+	}
+	if truthy(meta["deleteMarker"]) {
+		return nil, deleteMarkerReadFault(meta, wantVer != "")
+	}
+	if err := validateStoredSSECustomerKey(req, meta); err != nil {
+		return nil, err
+	}
+	if keyID := str(meta["ssekmsKeyId"]); keyID != "" {
+		if _, err := p.validateKMSKey(ctx, req, keyID); err != nil {
+			return nil, err
+		}
+	}
+	if err := p.requireRestored(ctx, req, b, key, meta); err != nil {
+		return nil, err
+	}
+	bk := blobKey(req, b, key)
+	if wantVer != "" {
+		bk = bk + "@" + wantVer
+	}
+	rc, info, err := p.deps.Blobs.Get(ctx, bk)
+	if err != nil {
+		return nil, objectReadNotFound(key, wantVer)
+	}
+	h := http.Header{}
+	etag := objectETag(meta, info.MD5)
+	h.Set("ETag", etag)
+	h.Set("Accept-Ranges", "bytes")
+	setObjectMetadataHeaders(h, meta)
+	for _, override := range []struct{ input, query, header string }{
+		{"ResponseCacheControl", "response-cache-control", "Cache-Control"},
+		{"ResponseContentDisposition", "response-content-disposition", "Content-Disposition"},
+		{"ResponseContentEncoding", "response-content-encoding", "Content-Encoding"},
+		{"ResponseContentLanguage", "response-content-language", "Content-Language"},
+		{"ResponseContentType", "response-content-type", "Content-Type"},
+		{"ResponseExpires", "response-expires", "Expires"},
+	} {
+		value := str(req.Input[override.input])
+		if value == "" {
+			value = str(req.Input[override.query])
+		}
+		if value != "" {
+			h.Set(override.header, value)
+		}
+	}
+	if restore, ok := p.restoreState(ctx, req, b, key, meta); ok {
+		h.Set("x-amz-restore", restore)
+	}
+	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
+	mtime := str(meta["mtime"])
+	if mtime == "" {
+		mtime = p.deps.Clock.Now().UTC().Format(http.TimeFormat)
+	}
+	h.Set("Last-Modified", mtime)
+	if vid := str(meta["versionId"]); vid != "" {
+		h.Set("x-amz-version-id", vid)
+	}
+	tags := p.storedTags(ctx, req, b, key, wantVer)
+	if count := len(tags); count > 0 {
+		h.Set("x-amz-tagging-count", strconv.Itoa(count))
+	}
+	if wantVer == "" || p.currentObjectVersion(ctx, req, b, key) == wantVer {
+		p.setLifecycleExpirationHeader(ctx, req, b, key, info.Size, tags, mtime, h)
+	}
+	setObjectEncryptionHeaders(h, meta)
+	if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
+		setChecksumHeaders(h, meta)
+	}
+	setReplicationHeaders(h, meta)
+	notModified, conditionErr := checkReadPreconditions(req, etag, mtime, p.deps.Clock.Now())
+	if conditionErr != nil || notModified {
+		_ = rc.Close()
+		if conditionErr != nil {
+			return nil, conditionErr
+		}
+		return &spi.Response{Status: http.StatusNotModified, Headers: h}, nil
+	}
+	data, readErr := io.ReadAll(rc)
+	_ = rc.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	start, length, count, requested, err := objectPartRange(req, meta, int64(len(data)))
+	if err != nil {
+		return nil, err
+	}
+	if requested {
+		data = data[start : start+length]
+		h.Set("Content-Length", strconv.FormatInt(length, 10))
+		h.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, start+length-1, info.Size))
+		if count > 0 {
+			h.Set("x-amz-mp-parts-count", strconv.Itoa(count))
+		}
+		if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
+			setPartChecksumHeaders(h, meta, partMetadata(meta, partNumber(req)), length == info.Size)
+		}
+	}
+	if rng := requestCondition(req, "Range", "Range"); rng != "" {
+		rangeStart, rangeLength, ranged, err := objectByteRange(rng, int64(len(data)))
+		if err != nil {
+			return nil, err
+		}
+		if ranged {
+			data = data[rangeStart : rangeStart+rangeLength]
+			h.Set("Content-Length", strconv.FormatInt(rangeLength, 10))
+			h.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", rangeStart, rangeStart+rangeLength-1, info.Size))
+			setPartChecksumHeaders(h, meta, nil, rangeLength == info.Size)
+			return &spi.Response{Status: http.StatusPartialContent, Headers: h, Stream: io.NopCloser(bytes.NewReader(data))}, nil
+		}
+	}
+	if requested {
+		return &spi.Response{Status: 206, Headers: h, Stream: io.NopCloser(bytes.NewReader(data))}, nil
+	}
+	return &spi.Response{Status: 200, Headers: h, Stream: io.NopCloser(bytes.NewReader(data))}, nil
+}
+
+func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
+	wantVer := str(req.Input["VersionId"])
+	meta, exists := p.objectMetadata(ctx, req, b, key, wantVer)
+	if !exists {
+		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
+	}
+	if truthy(meta["deleteMarker"]) {
+		return nil, deleteMarkerReadFault(meta, wantVer != "")
+	}
+	if err := validateStoredSSECustomerKey(req, meta); err != nil {
+		return nil, err
+	}
+	bk := blobKey(req, b, key)
+	if wantVer != "" {
+		bk += "@" + wantVer
+	}
+	info, err := p.deps.Blobs.Stat(ctx, bk)
+	if err != nil {
+		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
+	}
+	h := http.Header{}
+	h.Set("ETag", objectETag(meta, info.MD5))
+	h.Set("Accept-Ranges", "bytes")
+	setObjectMetadataHeaders(h, meta)
+	setObjectEncryptionHeaders(h, meta)
+	if restore, ok := p.restoreState(ctx, req, b, key, meta); ok {
+		h.Set("x-amz-restore", restore)
+	}
+	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
+	h.Set("Last-Modified", str(meta["mtime"]))
+	if version := str(meta["versionId"]); version != "" {
+		h.Set("x-amz-version-id", version)
+	}
+	tags := p.storedTags(ctx, req, b, key, wantVer)
+	if count := len(tags); count > 0 {
+		h.Set("x-amz-tagging-count", strconv.Itoa(count))
+	}
+	if wantVer == "" {
+		p.setLifecycleExpirationHeader(ctx, req, b, key, info.Size, tags, str(meta["mtime"]), h)
+	}
+	if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
+		setChecksumHeaders(h, meta)
+	}
+	setReplicationHeaders(h, meta)
+	if notModified, err := checkReadPreconditions(req, h.Get("ETag"), h.Get("Last-Modified"), p.deps.Clock.Now()); err != nil {
+		return nil, err
+	} else if notModified {
+		return &spi.Response{Status: http.StatusNotModified, Headers: h}, nil
+	}
+	start, length, count, requested, err := objectPartRange(req, meta, info.Size)
+	if err != nil {
+		return nil, err
+	}
+	status := 200
+	if requested {
+		status = 206
+		h.Set("Content-Length", strconv.FormatInt(length, 10))
+		h.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, start+length-1, info.Size))
+		if count > 0 {
+			h.Set("x-amz-mp-parts-count", strconv.Itoa(count))
+		}
+		if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
+			setPartChecksumHeaders(h, meta, partMetadata(meta, partNumber(req)), length == info.Size)
+		}
+	}
+	if rng := requestCondition(req, "Range", "Range"); rng != "" {
+		rangeStart, rangeLength, ranged, err := objectByteRange(rng, info.Size)
+		if err != nil {
+			return nil, err
+		}
+		if ranged {
+			status = http.StatusPartialContent
+			h.Set("Content-Length", strconv.FormatInt(rangeLength, 10))
+			h.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", rangeStart, rangeStart+rangeLength-1, info.Size))
+			setPartChecksumHeaders(h, meta, nil, rangeLength == info.Size)
+		}
+	}
+	return &spi.Response{Status: status, Headers: h}, nil
+}
+
+func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
+	if err := p.validateGovernanceBypass(ctx, req, b); err != nil {
+		return nil, err
+	}
+	unsupportedPrecondition := ""
+	for _, condition := range []struct{ input, header string }{{"IfMatch", "If-Match"}, {"IfMatchSize", "x-amz-if-match-size"}, {"IfMatchLastModifiedTime", "x-amz-if-match-last-modified-time"}} {
+		if requestCondition(req, condition.input, condition.header) != "" {
+			unsupportedPrecondition = condition.header
+		}
+	}
+	if unsupportedPrecondition != "" {
+		return nil, &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": unsupportedPrecondition}}
+	}
+	wantVer := str(req.Input["VersionId"])
+	versioningStatus := p.versioningStatus(ctx, req, b)
+	versioned := versioningStatus != ""
+	if !versioned && wantVer == "null" {
+		wantVer = ""
+	}
+	if versioned || wantVer != "" {
+		p.versionMu.Lock()
+		defer p.versionMu.Unlock()
+	}
+	if versioned && wantVer == "" {
+		vid := "null"
+		if versioningStatus == "Enabled" {
+			vid = p.deps.Rand.Hex(32)
+		}
+		mtime := p.deps.Clock.Now().UTC().Format(http.TimeFormat)
+		current, _ := p.objectMetadata(ctx, req, b, key, "")
+		order := p.objectVersionOrder(ctx, req, b, key, current)
+		kept := order[:0]
+		for _, version := range order {
+			if version != vid {
+				kept = append(kept, version)
+			}
+		}
+		metaDoc := map[string]any{"deleteMarker": true, "versionId": vid, "versionOrder": append(kept, vid), "mtime": mtime, "key": key}
+		meta, _ := json.Marshal(metaDoc)
+		_ = p.col(req, "objects").Put(ctx, b+"/"+key, meta)
+		_ = p.col(req, "versions").Put(ctx, b+"/"+key+"/"+vid, meta)
+		_ = p.deps.Blobs.Delete(ctx, blobKey(req, b, key)+"@"+vid)
+		h := http.Header{}
+		h.Set("x-amz-delete-marker", "true")
+		h.Set("x-amz-version-id", vid)
+		if status := p.replicateDeleteMarker(ctx, req, b, key, meta); status != "" {
+			h.Set("x-amz-replication-status", status)
+		}
+		_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, ""))
+		_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, vid))
+		p.notify(ctx, req, b, key, "ObjectRemoved:DeleteMarkerCreated", metaDoc)
+		return &spi.Response{Status: 204, Headers: h}, nil
+	}
+	if wantVer != "" {
+		current, currentExists := p.objectMetadata(ctx, req, b, key, "")
+		if !currentExists && versioned {
+			return &spi.Response{Status: http.StatusNoContent}, nil
+		}
+		meta, exists := p.objectMetadata(ctx, req, b, key, wantVer)
+		if !exists {
+			return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid version id specified", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "versionId", "ArgumentValue": wantVer}}
+		}
+		if p.objectVersionLocked(ctx, req, b, key, wantVer) {
+			return nil, &spi.Fault{Code: "AccessDenied", Message: "Access Denied", HTTPStatus: http.StatusForbidden, Fault: "client"}
+		}
+		_ = p.deps.Blobs.Delete(ctx, blobKey(req, b, key)+"@"+wantVer)
+		_ = p.col(req, "versions").Delete(ctx, b+"/"+key+"/"+wantVer)
+		_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, wantVer))
+		_ = p.col(req, "objlock").Delete(ctx, objectLockKey(b, key, wantVer, "legalhold"))
+		_ = p.col(req, "objlock").Delete(ctx, objectLockKey(b, key, wantVer, "retention"))
+		order := p.objectVersionOrder(ctx, req, b, key, current)
+		deletedVersionNext := asMap(current["deletedVersionNext"])
+		next := ""
+		for index, version := range order {
+			if version == wantVer && index > 0 {
+				next = order[index-1]
+			}
+		}
+		for marker, version := range deletedVersionNext {
+			if str(version) == wantVer {
+				deletedVersionNext[marker] = next
+			}
+		}
+		deletedVersionNext[wantVer] = next
+		kept := order[:0]
+		for _, version := range order {
+			if version != wantVer {
+				kept = append(kept, version)
+			}
+		}
+		if currentExists && str(current["versionId"]) == wantVer {
+			previous := ""
+			if len(kept) > 0 {
+				previous = kept[len(kept)-1]
+			}
+			if err := p.restoreCurrentVersion(ctx, req, b, key, previous, kept, deletedVersionNext); err != nil {
+				return nil, err
+			}
+		} else if currentExists {
+			current["versionOrder"] = kept
+			current["deletedVersionNext"] = deletedVersionNext
+			raw, _ := json.Marshal(current)
+			_ = p.col(req, "objects").Put(ctx, b+"/"+key, raw)
+		}
+		h := http.Header{}
+		h.Set("x-amz-version-id", wantVer)
+		if truthy(meta["deleteMarker"]) {
+			h.Set("x-amz-delete-marker", "true")
+		}
+		p.notify(ctx, req, b, key, "ObjectRemoved:Delete", meta)
+		return &spi.Response{Status: 204, Headers: h}, nil
+	}
+	meta, existed := p.objectMetadata(ctx, req, b, key, "")
+	_ = p.deps.Blobs.Delete(ctx, blobKey(req, b, key))
+	_ = p.col(req, "objects").Delete(ctx, b+"/"+key)
+	_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, ""))
+	if existed {
+		p.notify(ctx, req, b, key, "ObjectRemoved:Delete", meta)
+	}
+	return &spi.Response{Status: 204}, nil
+}
+
+func (p *Pack) deleteObjects(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	b := str(req.Input["Bucket"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
+	if err := p.validateGovernanceBypass(ctx, req, b); err != nil {
+		return nil, err
+	}
+	if req.HTTP != nil {
+		checksumPresent := requestCondition(req, "ContentMD5", "Content-MD5") != ""
+		for _, checksum := range checksums {
+			checksumPresent = checksumPresent || requestCondition(req, checksum.input, checksum.header) != ""
+		}
+		if !checksumPresent {
+			return nil, &spi.Fault{Code: "MissingContentMD5", Message: "Missing required header for this request: Content-MD5", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		if requested := strings.ToUpper(requestCondition(req, "ChecksumAlgorithm", "x-amz-sdk-checksum-algorithm")); requested != "" {
+			checksum, ok := checksumByAlgorithm(requested)
+			if !ok || requestCondition(req, checksum.input, checksum.header) == "" {
+				return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+		}
+		if err := validateChecksum(req, []byte(str(req.Input["_body"]))); err != nil {
+			return nil, err
+		}
+	}
+	objs, _ := req.Input["Objects"].([]any)
+	if objs == nil {
+		if d, ok := req.Input["Delete"].(map[string]any); ok {
+			objs, _ = d["Objects"].([]any)
+		}
+	}
+	if len(objs) == 0 || len(objs) > 1000 {
+		return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	quiet := truthy(req.Input["Quiet"])
+	if d, ok := req.Input["Delete"].(map[string]any); ok {
+		quiet = quiet || truthy(d["Quiet"])
+	}
+	var deleted []any
+	var failures []any
+	versioningStatus := p.versioningStatus(ctx, req, b)
+	for _, o := range objs {
+		m, _ := o.(map[string]any)
+		key := str(m["Key"])
+		if key == "" {
+			continue
+		}
+		child := *req
+		child.Input = cloneMap(req.Input)
+		child.Input["Key"] = key
+		versionID := str(m["VersionId"])
+		if versionID != "" {
+			child.Input["VersionId"] = versionID
+		} else {
+			delete(child.Input, "VersionId")
+		}
+		_, existed, _ := p.col(req, "objects").Get(ctx, b+"/"+key)
+		resp, err := p.deleteObject(ctx, &child)
+		if err != nil {
+			fault, ok := err.(*spi.Fault)
+			if !ok {
+				return nil, err
+			}
+			code, message := fault.Code, fault.Message
+			if versionID != "" && code == "InvalidArgument" {
+				code, message = "NoSuchVersion", "The specified version does not exist."
+			}
+			item := map[string]any{"Key": key, "Code": code, "Message": message}
+			if versionID != "" {
+				item["VersionId"] = versionID
+			}
+			failures = append(failures, item)
+			continue
+		}
+		if !existed && versionID == "" && versioningStatus == "" {
+			p.notify(ctx, &child, b, key, "ObjectRemoved:Delete")
+		}
+		if quiet {
+			continue
+		}
+		item := map[string]any{"Key": key}
+		if versionID != "" {
+			item["VersionId"] = versionID
+		}
+		if resp.Headers.Get("x-amz-delete-marker") == "true" {
+			item["DeleteMarkerVersionId"] = resp.Headers.Get("x-amz-version-id")
+			item["DeleteMarker"] = true
+		}
+		deleted = append(deleted, item)
+	}
+	output := map[string]any{}
+	if len(deleted) > 0 {
+		output["Deleted"] = deleted
+	}
+	if len(failures) > 0 {
+		output["Errors"] = failures
+	}
+	return &spi.Response{Output: output}, nil
+}
+
+func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	b := str(req.Input["Bucket"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
+	if err := validateListEncodingType(req); err != nil {
+		return nil, err
+	}
+	prefix := str(req.Input["prefix"])
+	if prefix == "" {
+		prefix = str(req.Input["Prefix"])
+	}
+	delim := str(req.Input["delimiter"])
+	if delim == "" {
+		delim = str(req.Input["Delimiter"])
+	}
+	kvs, _, _ := p.col(req, "objects").List(ctx, b+"/"+prefix, "", 0)
+	type entry struct {
+		value   string
+		content any
+		prefix  bool
+	}
+	var entries []entry
+	common := map[string]bool{}
+	for _, kv := range kvs {
+		key := strings.TrimPrefix(kv.Key, b+"/")
+		if delim != "" {
+			rest := strings.TrimPrefix(key, prefix)
+			if i := strings.Index(rest, delim); i >= 0 {
+				pfx := prefix + rest[:i+len(delim)]
+				if !common[pfx] {
+					common[pfx] = true
+					entries = append(entries, entry{value: pfx, prefix: true})
+				}
+				continue
+			}
+		}
+		var meta map[string]any
+		_ = json.Unmarshal(kv.Value, &meta)
+		modified := str(meta["mtime"])
+		if parsed, err := http.ParseTime(modified); err == nil {
+			modified = parsed.UTC().Format("2006-01-02T15:04:05.000Z")
+		}
+		content := map[string]any{"Key": key, "Size": meta["size"], "ETag": meta["etag"], "LastModified": modified, "StorageClass": meta["storageClass"]}
+		setListChecksumMetadata(content, meta)
+		if req.Operation == "ListObjects" || truthy(req.Input["FetchOwner"]) || truthy(req.Input["fetch-owner"]) {
+			content["Owner"] = map[string]any{"ID": req.Identity.Account}
+		}
+		entries = append(entries, entry{value: key, content: content})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].value < entries[j].value
+	})
+	maxKeys := 1000
+	if value, ok := req.Input["MaxKeys"]; ok {
+		if value := asInt(value); value != 0 {
+			maxKeys = max(0, value)
+		}
+	} else if value, ok := req.Input["max-keys"]; ok {
+		if value := asInt(value); value != 0 {
+			maxKeys = max(0, value)
+		}
+	}
+	marker := str(req.Input["marker"])
+	if marker == "" {
+		marker = str(req.Input["Marker"])
+	}
+	continuationValue, continuationProvided := req.Input["continuation-token"]
+	if !continuationProvided {
+		continuationValue, continuationProvided = req.Input["ContinuationToken"]
+	}
+	continuation := str(continuationValue)
+	decodedContinuation := ""
+	if req.Operation == "ListObjectsV2" && continuationProvided {
+		decoded, err := continuationEncoding.DecodeString(continuation)
+		if err != nil || continuation == "" {
+			return nil, &spi.Fault{Code: "InvalidArgument", Message: "The continuation token provided is incorrect", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "continuation-token"}}
+		}
+		decodedContinuation = string(decoded)
+	}
+	startAfter := str(req.Input["start-after"])
+	if startAfter == "" {
+		startAfter = str(req.Input["StartAfter"])
+	}
+	token := marker
+	inclusive := false
+	if req.Operation == "ListObjectsV2" {
+		token = startAfter
+		if continuation != "" {
+			token, inclusive = decodedContinuation, true
+		}
+	}
+	if token != "" {
+		var rest []entry
+		for _, item := range entries {
+			if item.value > token || inclusive && item.value == token {
+				rest = append(rest, item)
+			}
+		}
+		entries = rest
+	}
+	truncated := false
+	next := ""
+	if len(entries) > maxKeys {
+		truncated = true
+		if req.Operation == "ListObjectsV2" {
+			next = entries[maxKeys].value
+		} else if maxKeys > 0 {
+			next = entries[maxKeys-1].value
+		}
+		entries = entries[:maxKeys]
+	}
+	var contents, prefixes []any
+	for _, item := range entries {
+		if item.prefix {
+			prefixes = append(prefixes, map[string]any{"Prefix": item.value})
+		} else {
+			contents = append(contents, item.content)
+		}
+	}
+	out := map[string]any{
+		"Name": b, "Prefix": prefix, "Delimiter": delim,
+		"IsTruncated": truncated, "MaxKeys": maxKeys,
+		"Contents": contents, "CommonPrefixes": prefixes, "KeyCount": len(entries),
+	}
+	if req.Operation == "ListObjectsV2" {
+		if continuation != "" {
+			out["ContinuationToken"] = continuation
+		}
+		if startAfter != "" {
+			out["StartAfter"] = startAfter
+		}
+		if next != "" {
+			out["NextContinuationToken"] = continuationEncoding.EncodeToString([]byte(next))
+		}
+	} else {
+		out["Marker"] = marker
+		if next != "" && delim != "" {
+			out["NextMarker"] = next
+		}
+	}
+	if str(req.Input["EncodingType"]) == "url" || str(req.Input["encoding-type"]) == "url" {
+		for _, c := range contents {
+			m := asMap(c)
+			m["Key"] = s3URLEncode(m["Key"])
+		}
+		for _, p := range prefixes {
+			m := asMap(p)
+			m["Prefix"] = s3URLEncode(m["Prefix"])
+		}
+		for _, field := range []string{"Prefix", "Delimiter", "StartAfter", "NextMarker"} {
+			if value, ok := out[field]; ok {
+				out[field] = s3URLEncode(value)
+			}
+		}
+		out["EncodingType"] = "url"
+	}
+	if req.Identity.Region != "us-east-1" {
+		out["BucketRegion"] = req.Identity.Region
+	}
+	headers := http.Header{}
+	headers.Set("x-amz-bucket-region", req.Identity.Region)
+	return &spi.Response{Headers: headers, Output: out}, nil
+}
+
+func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if err := validateObjectKey(str(req.Input["Key"])); err != nil {
+		return nil, err
+	}
+	if err := p.requireBucket(ctx, req, str(req.Input["Bucket"])); err != nil {
+		return nil, err
+	}
+	source, err := p.openCopySource(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	defer source.body.Close()
+	if err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta["mtime"]), p.deps.Clock.Now()); err != nil {
+		return nil, err
+	}
+	_, bucketEncrypted, _ := p.col(req, "bktcfg").Get(ctx, source.bucket+"/encryption")
+	_, sourceRestored := p.restoreState(ctx, req, source.bucket, source.key, source.meta)
+	if source.bucket == str(req.Input["Bucket"]) && source.key == str(req.Input["Key"]) &&
+		requestCondition(req, "StorageClass", "x-amz-storage-class") == "" &&
+		requestCondition(req, "ServerSideEncryption", "x-amz-server-side-encryption") == "" &&
+		requestCondition(req, "SSECustomerKeyMD5", "x-amz-server-side-encryption-customer-key-MD5") == "" &&
+		requestCondition(req, "MetadataDirective", "x-amz-metadata-directive") != "REPLACE" &&
+		requestCondition(req, "WebsiteRedirectLocation", "x-amz-website-redirect-location") == "" && !bucketEncrypted && !sourceRestored {
+		return nil, &spi.Fault{Code: "InvalidRequest", Message: "This copy request is illegal because it is trying to copy an object to itself without changing the object's metadata, storage class, website redirect location or encryption attributes.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	directive, err := copyDirective(req, "TaggingDirective", "x-amz-tagging-directive")
+	if err != nil {
+		return nil, err
+	}
+	if directive != "REPLACE" {
+		values := url.Values{}
+		for key, value := range p.storedTags(ctx, req, source.bucket, source.key, source.version) {
+			values.Set(key, value)
+		}
+		req.Input["Tagging"] = values.Encode()
+	}
+	metadataDirective, err := copyDirective(req, "MetadataDirective", "x-amz-metadata-directive")
+	if err != nil {
+		return nil, err
+	}
+	if metadataDirective != "REPLACE" {
+		req.Input["_ObjectMetadata"] = source.meta["objectMetadata"]
+	}
+	body, err := io.ReadAll(source.body)
+	if err != nil {
+		return nil, err
+	}
+	algorithm := strings.ToUpper(requestCondition(req, "ChecksumAlgorithm", "x-amz-checksum-algorithm"))
+	if algorithm == "" {
+		stored := asMap(source.meta["checksums"])
+		for _, checksum := range checksums {
+			if str(stored[checksum.header]) != "" {
+				algorithm = checksum.algorithm
+				break
+			}
+		}
+	}
+	checksum, copyChecksum := checksumByAlgorithm(algorithm)
+	if algorithm != "" && !copyChecksum {
+		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if copyChecksum {
+		req.Input[checksum.input] = checksumValue(checksum.input, body)
+	}
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	response, err := p.putObject(ctx, req, "", "", nil, nil)
+	if err == nil && copyChecksum {
+		response.Output[checksum.input], response.Output["ChecksumType"] = req.Input[checksum.input], "FULL_OBJECT"
+	}
+	if err == nil && source.version != "" {
+		response.Headers.Set("x-amz-copy-source-version-id", source.version)
+	}
+	return response, err
+}
+
+func copyDirective(req *spi.Request, input, header string) (string, error) {
+	directive := requestCondition(req, input, header)
+	if directive == "" {
+		return "COPY", nil
+	}
+	if directive != "COPY" && directive != "REPLACE" {
+		return "", &spi.Fault{Code: "InvalidArgument", Message: "Unknown metadata directive", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": header, "ArgumentValue": directive}}
+	}
+	return directive, nil
+}
+
+func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
+	storageClass, err := requestStorageClass(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateObjectKey(key); err != nil {
+		return nil, err
+	}
+	acl, explicitACL, err := requestACL(req, false)
+	if err != nil {
+		return nil, err
+	}
+	if !explicitACL {
+		acl = nil
+	}
+	if _, err := requestTags(req); err != nil {
+		return nil, err
+	}
+	lockDocs, err := p.objectLockForWrite(ctx, req, b)
+	if err != nil {
+		return nil, err
+	}
+	algorithm := strings.ToUpper(requestCondition(req, "ChecksumAlgorithm", "x-amz-checksum-algorithm"))
+	checksumType := strings.ToUpper(requestCondition(req, "ChecksumType", "x-amz-checksum-type"))
+	if algorithm != "" && checksumType == "" {
+		checksumType = "COMPOSITE"
+		if algorithm == "CRC64NVME" {
+			checksumType = "FULL_OBJECT"
+		}
+	}
+	if err := validateMultipartChecksumContract(req, algorithm, checksumType); err != nil {
+		return nil, err
+	}
+	sseCustomerKeyMD5, err := requestSSECustomerKey(req)
+	if err != nil {
+		return nil, err
+	}
+	serverSideEncryption, sseKMSKeyID, bucketKeyEnabled := "", "", false
+	if sseCustomerKeyMD5 == "" {
+		serverSideEncryption, sseKMSKeyID, bucketKeyEnabled, err = p.objectEncryption(ctx, req, b)
+		if err != nil {
+			return nil, err
+		}
+	}
+	id := p.deps.Rand.Hex(16)
+	raw, precondition, _ := p.col(req, "objects").Get(ctx, b+"/"+key)
+	var current map[string]any
+	_ = json.Unmarshal(raw, &current)
+	precondition = precondition && !truthy(current["deleteMarker"])
+	p.mu.Lock()
+	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), tagging: requestCondition(req, "Tagging", "x-amz-tagging"), checksumAlgorithm: algorithm, checksumType: checksumType, serverSideEncryption: serverSideEncryption, sseKMSKeyID: sseKMSKeyID, sseCustomerKeyMD5: sseCustomerKeyMD5, bucketKeyEnabled: bucketKeyEnabled, precondition: precondition, objectMetadata: requestObjectMetadata(req), websiteRedirectLocation: requestCondition(req, "WebsiteRedirectLocation", "x-amz-website-redirect-location"), initiator: map[string]any{"ID": req.Identity.Account, "DisplayName": "webfile"}, acl: acl, lockDocs: lockDocs, parts: map[int]multipartPart{}}
+	p.mu.Unlock()
+	h := http.Header{}
+	out := map[string]any{"Bucket": b, "Key": key, "UploadId": id}
+	if algorithm != "" {
+		h.Set("x-amz-checksum-algorithm", algorithm)
+		h.Set("x-amz-checksum-type", checksumType)
+		out["ChecksumAlgorithm"], out["ChecksumType"] = algorithm, checksumType
+	}
+	setObjectEncryptionHeaders(h, map[string]any{"serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "sseCustomerKeyMD5": sseCustomerKeyMD5, "bucketKeyEnabled": bucketKeyEnabled})
+	return &spi.Response{Headers: h, Output: out}, nil
+}
+
+func (p *Pack) uploadPartCopy(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if err := p.requireMultipartBucket(ctx, req); err != nil {
+		return nil, err
+	}
+	source, err := p.openCopySource(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	defer source.body.Close()
+	if err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta["mtime"]), p.deps.Clock.Now()); err != nil {
+		return nil, err
+	}
+	req.Body = source.body
+	if rawRange := requestCondition(req, "CopySourceRange", "x-amz-copy-source-range"); rawRange != "" {
+		body, err := io.ReadAll(source.body)
+		if err != nil {
+			return nil, err
+		}
+		body, err = applyCopySourceRange(body, rawRange)
+		if err != nil {
+			return nil, err
+		}
+		req.Body = io.NopCloser(bytes.NewReader(body))
+	}
+	response, err := p.uploadPart(ctx, req)
+	if err == nil && source.version != "" {
+		response.Headers.Set("x-amz-copy-source-version-id", source.version)
+	}
+	return response, err
+}
+
+func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if err := p.requireMultipartBucket(ctx, req); err != nil {
+		return nil, err
+	}
+	id := mpuID(req)
+	p.mu.Lock()
+	u := p.mpu[id]
+	if !matchesMultipartUpload(u, req) {
+		p.mu.Unlock()
+		return nil, noSuchUpload(id)
+	}
+	algorithm := u.checksumAlgorithm
+	encryption := map[string]any{"serverSideEncryption": u.serverSideEncryption, "ssekmsKeyId": u.sseKMSKeyID, "sseCustomerKeyMD5": u.sseCustomerKeyMD5, "bucketKeyEnabled": u.bucketKeyEnabled}
+	p.mu.Unlock()
+	pn := partNumber(req)
+	if pn < 1 || pn > 10000 {
+		return nil, &spi.Fault{Code: "InvalidArgument", Message: "Part number must be an integer between 1 and 10000, inclusive", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "partNumber", "ArgumentValue": pn}}
+	}
+	var body []byte
+	if req.Body != nil {
+		var err error
+		body, err = io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if stored, provided := str(encryption["sseCustomerKeyMD5"]), requestCondition(req, "SSECustomerKeyMD5", "x-amz-server-side-encryption-customer-key-MD5"); stored == "" && provided != "" || stored != "" && provided == "" {
+		return nil, &spi.Fault{Code: "InvalidRequest", Message: "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if err := validateStoredSSECustomerKey(req, encryption); err != nil {
+		return nil, err
+	}
+	if requested := strings.ToUpper(requestCondition(req, "ChecksumAlgorithm", "x-amz-sdk-checksum-algorithm")); algorithm == "" {
+		algorithm = requested
+	} else if requested != "" && requested != algorithm {
+		return nil, &spi.Fault{Code: "InvalidRequest", Message: fmt.Sprintf("Checksum Type mismatch occurred, expected checksum Type: %s, actual checksum Type: %s", strings.ToLower(algorithm), strings.ToLower(requested)), HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	checksum, hasChecksum := checksumByAlgorithm(algorithm)
+	if err := validateMultipartPartChecksum(req, checksum, body); err != nil {
+		return nil, err
+	}
+	provided := map[string]string{}
+	if hasChecksum {
+		provided[checksum.header] = checksumValue(checksum.input, body)
+	}
+	p.mu.Lock()
+	u = p.mpu[id]
+	if !matchesMultipartUpload(u, req) {
+		p.mu.Unlock()
+		return nil, noSuchUpload(id)
+	}
+	u.parts[pn] = multipartPart{body: body, modified: p.deps.Clock.Now().UTC().Format(time.RFC3339), checksums: provided}
+	p.mu.Unlock()
+	sum := md5.Sum(body)
+	etag := `"` + hex.EncodeToString(sum[:]) + `"`
+	h := http.Header{}
+	h.Set("ETag", etag)
+	for header, value := range provided {
+		h.Set(header, value)
+	}
+	setObjectEncryptionHeaders(h, encryption)
+	response := &spi.Response{Headers: h}
+	if req.Operation == "UploadPartCopy" {
+		response.Output = map[string]any{"ETag": etag}
+	}
+	return response, nil
+}
+
+func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if err := p.requireMultipartBucket(ctx, req); err != nil {
+		return nil, err
+	}
+	id := mpuID(req)
+	p.mu.Lock()
+	u := p.mpu[id]
+	var bucket, key string
+	stored := map[int]multipartPart{}
+	if u != nil {
+		bucket, key = u.bucket, u.key
+		for number, part := range u.parts {
+			stored[number] = part
+		}
+	}
+	p.mu.Unlock()
+	if !matchesMultipartUpload(u, req) {
+		return nil, noSuchUpload(id)
+	}
+	match, noneMatch := requestCondition(req, "IfMatch", "If-Match"), requestCondition(req, "IfNoneMatch", "If-None-Match")
+	if match != "" && noneMatch != "" {
+		return nil, &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-Match,If-None-Match", "additionalMessage": "Multiple conditional request headers present in the request"}}
+	} else if noneMatch != "" && noneMatch != "*" {
+		return nil, &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-None-Match", "additionalMessage": "We don't accept the provided value of If-None-Match header for this API"}}
+	} else if match == "*" {
+		return nil, &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-None-Match", "additionalMessage": "We don't accept the provided value of If-None-Match header for this API"}}
+	}
+	if noneMatch == "*" || match != "" {
+		raw, exists, _ := p.col(req, "objects").Get(ctx, bucket+"/"+key)
+		var current map[string]any
+		_ = json.Unmarshal(raw, &current)
+		exists = exists && !truthy(current["deleteMarker"])
+		if noneMatch == "*" && exists {
+			return nil, &spi.Fault{Code: "PreconditionFailed", Message: "At least one of the pre-conditions you specified did not hold", HTTPStatus: http.StatusPreconditionFailed, Fault: "client", Fields: map[string]any{"Condition": "If-None-Match"}}
+		} else if noneMatch == "*" && u.precondition {
+			return nil, &spi.Fault{Code: "ConditionalRequestConflict", Message: "The conditional request cannot succeed due to a conflicting operation against this resource.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"Condition": "If-None-Match", "Key": key}}
+		} else if match != "" && !exists {
+			return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"Key": key}}
+		} else if match != "" && strings.Trim(match, "\"") != strings.Trim(str(current["etag"]), "\"") {
+			return nil, &spi.Fault{Code: "PreconditionFailed", Message: "At least one of the pre-conditions you specified did not hold", HTTPStatus: http.StatusPreconditionFailed, Fault: "client", Fields: map[string]any{"Condition": "If-Match"}}
+		} else if initiated, initiatedErr := time.Parse(time.RFC3339Nano, u.initiated); match != "" && initiatedErr == nil {
+			if modified, modifiedErr := http.ParseTime(str(current["mtime"])); modifiedErr == nil && initiated.Before(modified) {
+				return nil, &spi.Fault{Code: "ConditionalRequestConflict", Message: "The conditional request cannot succeed due to a conflicting operation against this resource.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"Condition": "If-Match", "Key": key}}
+			}
+		}
+	}
+	parts := asSlice(asMap(req.Input["MultipartUpload"])["Parts"])
+	if len(parts) == 0 {
+		return nil, &spi.Fault{Code: "InvalidRequest", Message: "You must specify at least one part", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	var buf bytes.Buffer
+	var md5s []byte
+	var partChecksums []byte
+	var completedParts []any
+	previous := 0
+	checksum, hasChecksum := checksumByAlgorithm(u.checksumAlgorithm)
+	requestedType := strings.ToUpper(requestCondition(req, "ChecksumType", "x-amz-checksum-type"))
+	if requestedType != "" && requestedType != u.checksumType {
+		return nil, &spi.Fault{Code: "InvalidRequest", Message: fmt.Sprintf("The upload was created using the %s checksum mode. The complete request must use the same checksum mode.", u.checksumType), HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	for index, completed := range parts {
+		item := asMap(completed)
+		number := asInt(item["PartNumber"])
+		etag := strings.Trim(strings.TrimSpace(str(item["ETag"])), `"`)
+		if number < 1 || number > 10000 {
+			return nil, invalidMultipartPart(id, etag, number)
+		}
+		if number <= previous {
+			return nil, &spi.Fault{Code: "InvalidPartOrder", Message: "The list of parts was not in ascending order. Parts must be ordered by part number.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"UploadId": id}}
+		}
+		part, exists := stored[number]
+		s := md5.Sum(part.body)
+		if !exists || etag != hex.EncodeToString(s[:]) {
+			return nil, invalidMultipartPart(id, etag, number)
+		}
+		if index < len(parts)-1 && len(part.body) < 5<<20 {
+			return nil, &spi.Fault{Code: "EntityTooSmall", Message: "Your proposed upload is smaller than the minimum allowed size", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ETag": etag, "PartNumber": strconv.Itoa(number), "MinSizeAllowed": 5 << 20, "ProposedSize": len(part.body)}}
+		}
+		if u.checksumType == "COMPOSITE" && number != index+1 {
+			return nil, &spi.Fault{Code: "InternalError", HTTPStatus: http.StatusInternalServerError, Fault: "server"}
+		}
+		if hasChecksum {
+			partChecksum := part.checksums[checksum.header]
+			supplied := str(item[checksum.input])
+			if supplied == "" && u.checksumType == "COMPOSITE" {
+				for _, candidate := range checksums {
+					if str(item[candidate.input]) != "" {
+						return nil, &spi.Fault{Code: "BadDigest", Message: fmt.Sprintf("The %s you specified for part %d did not match what we received.", strings.ToLower(candidate.algorithm), number), HTTPStatus: http.StatusBadRequest, Fault: "client"}
+					}
+				}
+				return nil, &spi.Fault{Code: "InvalidRequest", Message: fmt.Sprintf("The upload was created using a %s checksum. The complete request must include the checksum for each part. It was missing for part %d in the request.", strings.ToLower(u.checksumAlgorithm), number), HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			if supplied != "" && supplied != partChecksum {
+				return nil, invalidMultipartPart(id, etag, number)
+			}
+			decoded, _ := base64.StdEncoding.DecodeString(partChecksum)
+			partChecksums = append(partChecksums, decoded...)
+		} else {
+			for _, candidate := range checksums {
+				if str(item[candidate.input]) != "" {
+					return nil, invalidMultipartPart(id, etag, number)
+				}
+			}
+		}
+		completedParts = append(completedParts, map[string]any{"number": number, "size": len(part.body), "checksums": part.checksums})
+		buf.Write(part.body)
+		md5s = append(md5s, s[:]...)
+		previous = number
+	}
+	if value := requestCondition(req, "MpuObjectSize", "x-amz-mp-object-size"); value != "" {
+		size, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: 400, Fault: "client"}
+		}
+		if size != 0 && size != int64(buf.Len()) {
+			return nil, &spi.Fault{Code: "InvalidRequest", Message: fmt.Sprintf("The provided 'x-amz-mp-object-size' header value %d does not match what was computed: %d", size, buf.Len()), HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+	}
+	sum := md5.Sum(md5s)
+	etag := fmt.Sprintf(`"%s-%d"`, hex.EncodeToString(sum[:]), len(parts))
+	objectChecksum := ""
+	if hasChecksum {
+		objectChecksum = checksumValue(checksum.input, buf.Bytes())
+		if u.checksumType == "COMPOSITE" {
+			objectChecksum = checksumValue(checksum.input, partChecksums) + fmt.Sprintf("-%d", len(parts))
+		}
+		if supplied := requestCondition(req, checksum.input, checksum.header); u.checksumType == "FULL_OBJECT" && supplied != "" && (requestedType == "" || supplied != objectChecksum) {
+			return nil, &spi.Fault{Code: "BadDigest", Message: fmt.Sprintf("The %s you specified did not match the calculated checksum.", strings.ToLower(u.checksumAlgorithm)), HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		for _, other := range checksums {
+			if other.algorithm != checksum.algorithm && requestCondition(req, other.input, other.header) != "" {
+				return nil, &spi.Fault{Code: "BadDigest", Message: fmt.Sprintf("The %s you specified did not match the calculated checksum.", strings.ToLower(u.checksumAlgorithm)), HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+		}
+		req.Input[checksum.input], req.Input["ChecksumType"] = objectChecksum, u.checksumType
+	}
+	req.Input["Bucket"], req.Input["Key"], req.Input["StorageClass"], req.Input["Tagging"] = bucket, key, u.storageClass, u.tagging
+	req.Input["_ObjectMetadata"], req.Input["WebsiteRedirectLocation"] = u.objectMetadata, u.websiteRedirectLocation
+	if u.acl != nil {
+		req.Input["AccessControlPolicy"] = u.acl
+	}
+	req.Input["_ObjectEncryption"] = map[string]any{"serverSideEncryption": u.serverSideEncryption, "ssekmsKeyId": u.sseKMSKeyID, "sseCustomerKeyMD5": u.sseCustomerKeyMD5, "bucketKeyEnabled": u.bucketKeyEnabled}
+	req.Body = io.NopCloser(&buf)
+	resp, err := p.putObject(ctx, req, etag, u.checksumType, completedParts, u.lockDocs)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Headers == nil {
+		resp.Headers = http.Header{}
+	}
+	resp.Headers.Set("ETag", etag)
+	resp.Output = map[string]any{"Bucket": bucket, "Key": key, "ETag": etag}
+	if strings.HasPrefix(u.serverSideEncryption, "aws:kms") && hasChecksum {
+		resp.Headers.Del(checksum.header)
+		resp.Headers.Del("x-amz-checksum-type")
+	} else if hasChecksum {
+		resp.Output[checksum.input] = objectChecksum
+		resp.Output["ChecksumType"] = u.checksumType
+	}
+	p.mu.Lock()
+	delete(p.mpu, id)
+	p.mu.Unlock()
+	return resp, nil
+}
+
+func invalidMultipartPart(uploadID, etag string, number int) *spi.Fault {
+	return &spi.Fault{Code: "InvalidPart", Message: "One or more of the specified parts could not be found.  The part may not have been uploaded, or the specified entity tag may not match the part's entity tag.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ETag": etag, "PartNumber": strconv.Itoa(number), "UploadId": uploadID}}
+}
+
+func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if err := p.requireMultipartBucket(ctx, req); err != nil {
+		return nil, err
+	}
+	id := mpuID(req)
+	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	marker := asInt(req.Input["PartNumberMarker"])
+	maxParts := 1000
+	if value := asInt(req.Input["MaxParts"]); value != 0 {
+		maxParts = value
+	}
+	if req.HTTP != nil {
+		if raw := req.HTTP.URL.Query().Get("part-number-marker"); raw != "" {
+			var err error
+			marker, err = strconv.Atoi(raw)
+			if err != nil {
+				return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+		}
+		if raw := req.HTTP.URL.Query().Get("max-parts"); raw != "" {
+			var err error
+			maxParts, err = strconv.Atoi(raw)
+			if err != nil {
+				return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+		}
+	}
+	if maxParts == 0 {
+		maxParts = 1000
+	}
+	if marker < 0 || maxParts < 0 || maxParts > 1000 {
+		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	u := p.mpu[id]
+	if !matchesMultipartUpload(u, req) {
+		return nil, noSuchUpload(id)
+	}
+	numbers := make([]int, 0, len(u.parts))
+	for number := range u.parts {
+		if number > marker {
+			numbers = append(numbers, number)
+		}
+	}
+	sort.Ints(numbers)
+	truncated := len(numbers) > maxParts
+	if truncated {
+		numbers = numbers[:maxParts]
+	}
+	parts := make([]any, 0, len(numbers))
+	for _, number := range numbers {
+		part := u.parts[number]
+		sum := md5.Sum(part.body)
+		modified := part.modified
+		if parsed, err := time.Parse(time.RFC3339Nano, modified); err == nil {
+			modified = parsed.UTC().Format("2006-01-02T15:04:05.000Z")
+		}
+		row := map[string]any{"PartNumber": number, "ETag": `"` + hex.EncodeToString(sum[:]) + `"`, "Size": len(part.body), "LastModified": modified}
+		if u.checksumAlgorithm != "" {
+			for _, checksum := range checksums {
+				if value := part.checksums[checksum.header]; value != "" {
+					row[checksum.input] = value
+				}
+			}
+		}
+		parts = append(parts, row)
+	}
+	identity := map[string]any{"ID": req.Identity.Account}
+	out := map[string]any{
+		"Bucket": b, "Key": key, "UploadId": id, "PartNumberMarker": marker,
+		"MaxParts": maxParts, "IsTruncated": truncated, "Parts": parts, "StorageClass": u.storageClass,
+		"Initiator": cloneMap(u.initiator), "Owner": identity, "NextPartNumberMarker": 0,
+	}
+	if u.checksumAlgorithm != "" {
+		out["ChecksumAlgorithm"], out["ChecksumType"] = u.checksumAlgorithm, u.checksumType
+	}
+	if len(numbers) > 0 {
+		out["NextPartNumberMarker"] = numbers[len(numbers)-1]
+	}
+	return &spi.Response{Output: out}, nil
+}
+
+func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	bucket := str(req.Input["Bucket"])
+	if err := p.requireBucket(ctx, req, bucket); err != nil {
+		return nil, err
+	}
+	if err := validateListEncodingType(req); err != nil {
+		return nil, err
+	}
+	parameter := func(input, query string) string {
+		if value := str(req.Input[input]); value != "" {
+			return value
+		}
+		if req.HTTP != nil {
+			return req.HTTP.URL.Query().Get(query)
+		}
+		return ""
+	}
+	prefix := parameter("Prefix", "prefix")
+	delimiter := parameter("Delimiter", "delimiter")
+	keyMarker := parameter("KeyMarker", "key-marker")
+	uploadMarker := parameter("UploadIdMarker", "upload-id-marker")
+	encoding := parameter("EncodingType", "encoding-type")
+	maxUploads := 1000
+	if _, provided := req.Input["MaxUploads"]; provided {
+		maxUploads = asInt(req.Input["MaxUploads"])
+	}
+	if raw := parameter("", "max-uploads"); raw != "" {
+		var err error
+		maxUploads, err = strconv.Atoi(raw)
+		if err != nil {
+			return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+	}
+	if maxUploads == 0 {
+		maxUploads = 1000
+	}
+	if maxUploads < 1 || maxUploads > 1000 {
+		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+
+	type uploadListing struct {
+		key, id, initiated, storageClass, checksumAlgorithm, checksumType string
+		initiator                                                         map[string]any
+	}
+	p.mu.Lock()
+	uploads := make([]uploadListing, 0, len(p.mpu))
+	for id, upload := range p.mpu {
+		if upload.bucket == bucket && strings.HasPrefix(upload.key, prefix) {
+			uploads = append(uploads, uploadListing{upload.key, id, upload.initiated, upload.storageClass, upload.checksumAlgorithm, upload.checksumType, cloneMap(upload.initiator)})
+		}
+	}
+	p.mu.Unlock()
+	sort.Slice(uploads, func(i, j int) bool {
+		if uploads[i].key != uploads[j].key {
+			return uploads[i].key < uploads[j].key
+		}
+		if uploads[i].initiated != uploads[j].initiated {
+			return uploads[i].initiated < uploads[j].initiated
+		}
+		return uploads[i].id < uploads[j].id
+	})
+	if keyMarker != "" && uploadMarker != "" {
+		valid := false
+		for _, upload := range uploads {
+			valid = valid || upload.key == keyMarker && upload.id == uploadMarker
+		}
+		if !valid {
+			return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid uploadId marker", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "upload-id-marker", "ArgumentValue": uploadMarker}}
+		}
+	}
+
+	type entry struct {
+		key, uploadID string
+		row           map[string]any
+		common        bool
+	}
+	entries := make([]entry, 0, len(uploads))
+	common := map[string]bool{}
+	markerPassed := keyMarker == ""
+	for _, upload := range uploads {
+		if !markerPassed {
+			switch {
+			case upload.key > keyMarker:
+				markerPassed = true
+			case upload.key == keyMarker && uploadMarker != "" && upload.id == uploadMarker:
+				markerPassed = true
+				continue
+			default:
+				continue
+			}
+		}
+		if delimiter != "" {
+			remainder := strings.TrimPrefix(upload.key, prefix)
+			if index := strings.Index(remainder, delimiter); index >= 0 {
+				value := prefix + remainder[:index+len(delimiter)]
+				if value <= keyMarker || common[value] {
+					continue
+				}
+				common[value] = true
+				entries = append(entries, entry{key: value, row: map[string]any{"Prefix": value}, common: true})
+				continue
+			}
+		}
+		owner := map[string]any{"ID": req.Identity.Account}
+		initiated := upload.initiated
+		if parsed, err := time.Parse(time.RFC3339Nano, initiated); err == nil {
+			initiated = parsed.UTC().Format("2006-01-02T15:04:05.000Z")
+		}
+		row := map[string]any{
+			"Key": upload.key, "UploadId": upload.id, "Initiated": initiated,
+			"StorageClass": upload.storageClass, "Initiator": upload.initiator, "Owner": owner,
+		}
+		if upload.checksumAlgorithm != "" {
+			row["ChecksumAlgorithm"], row["ChecksumType"] = upload.checksumAlgorithm, upload.checksumType
+		}
+		entries = append(entries, entry{key: upload.key, uploadID: upload.id, row: row})
+	}
+	truncated := len(entries) > maxUploads
+	if truncated {
+		entries = entries[:maxUploads]
+	}
+	listed, prefixes := []any{}, []any{}
+	for _, item := range entries {
+		if item.common {
+			prefixes = append(prefixes, item.row)
+		} else {
+			listed = append(listed, item.row)
+		}
+	}
+	out := map[string]any{
+		"Bucket": bucket, "Prefix": prefix, "KeyMarker": keyMarker, "UploadIdMarker": "",
+		"MaxUploads": maxUploads, "IsTruncated": truncated, "Uploads": listed, "CommonPrefixes": prefixes,
+		"NextKeyMarker": "", "NextUploadIdMarker": "",
+	}
+	if keyMarker != "" {
+		out["UploadIdMarker"] = uploadMarker
+	}
+	if delimiter != "" {
+		out["Delimiter"] = delimiter
+	}
+	if len(listed) > 0 {
+		last := asMap(listed[len(listed)-1])
+		out["NextKeyMarker"], out["NextUploadIdMarker"] = last["Key"], last["UploadId"]
+	}
+	if encoding == "url" {
+		encode := func(value string) string { return strings.ReplaceAll(url.QueryEscape(value), "+", "%20") }
+		for _, item := range append(listed, prefixes...) {
+			row := asMap(item)
+			for _, field := range []string{"Key", "Prefix"} {
+				if value := str(row[field]); value != "" {
+					row[field] = encode(value)
+				}
+			}
+		}
+		for _, field := range []string{"Prefix", "Delimiter", "KeyMarker", "NextKeyMarker"} {
+			if value := str(out[field]); value != "" {
+				out[field] = encode(value)
+			}
+		}
+		out["EncodingType"] = "url"
+	}
+	return &spi.Response{Output: out}, nil
+}
+
+func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	b := str(req.Input["Bucket"])
+	if err := validateListEncodingType(req); err != nil {
+		return nil, err
+	}
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
+	p.versionMu.Lock()
+	defer p.versionMu.Unlock()
+	prefix, delimiter := str(req.Input["Prefix"]), str(req.Input["Delimiter"])
+	keyMarker, versionMarker := str(req.Input["KeyMarker"]), str(req.Input["VersionIdMarker"])
+	if str(req.Input["EncodingType"]) == "url" {
+		if decoded, err := url.PathUnescape(keyMarker); err == nil {
+			keyMarker = decoded
+		}
+	}
+	if versionMarker != "" && keyMarker == "" {
+		return nil, &spi.Fault{Code: "InvalidArgument", Message: "A version-id marker cannot be specified without a key marker.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "version-id-marker", "ArgumentValue": versionMarker}}
+	}
+	maxKeys := 1000
+	if value, ok := req.Input["MaxKeys"]; ok {
+		if value := asInt(value); value != 0 {
+			maxKeys = max(0, value)
+		}
+	}
+
+	records := map[string][]map[string]any{}
+	kvs, _, _ := p.col(req, "versions").List(ctx, b+"/", "", 0)
+	for _, kv := range kvs {
+		var meta map[string]any
+		_ = json.Unmarshal(kv.Value, &meta)
+		key := str(meta["key"])
+		if key == "" {
+			parts := strings.Split(strings.TrimPrefix(kv.Key, b+"/"), "/")
+			if len(parts) > 0 {
+				key = strings.Join(parts[:len(parts)-1], "/")
+			}
+		}
+		if strings.HasPrefix(key, prefix) {
+			records[key] = append(records[key], meta)
+		}
+	}
+	objects, _, _ := p.col(req, "objects").List(ctx, b+"/"+prefix, "", 0)
+	for _, kv := range objects {
+		key := strings.TrimPrefix(kv.Key, b+"/")
+		if _, versioned := records[key]; versioned {
+			continue
+		}
+		var meta map[string]any
+		_ = json.Unmarshal(kv.Value, &meta)
+		if !truthy(meta["deleteMarker"]) {
+			meta["key"], meta["versionId"] = key, "null"
+			records[key] = []map[string]any{meta}
+		}
+	}
+
+	type entry struct {
+		key, version string
+		row          map[string]any
+		marker       bool
+		prefix       bool
+	}
+	keys := make([]string, 0, len(records))
+	for key := range records {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var entries []entry
+	common := map[string]bool{}
+	deletedVersionNext := map[string]map[string]any{}
+	for _, key := range keys {
+		if delimiter != "" {
+			rest := strings.TrimPrefix(key, prefix)
+			if i := strings.Index(rest, delimiter); i >= 0 {
+				value := prefix + rest[:i+len(delimiter)]
+				if !common[value] {
+					common[value] = true
+					entries = append(entries, entry{key: value, row: map[string]any{"Prefix": value}, prefix: true})
+				}
+				continue
+			}
+		}
+		current, _ := p.objectMetadata(ctx, req, b, key, "")
+		deletedVersionNext[key] = asMap(current["deletedVersionNext"])
+		order := map[string]int{}
+		for index, value := range asSlice(current["versionOrder"]) {
+			order[str(value)] = index
+		}
+		sort.Slice(records[key], func(i, j int) bool {
+			left, right := str(records[key][i]["versionId"]), str(records[key][j]["versionId"])
+			return order[left] > order[right]
+		})
+		for _, meta := range records[key] {
+			version := str(meta["versionId"])
+			modified := str(meta["mtime"])
+			if parsed, err := http.ParseTime(modified); err == nil {
+				modified = parsed.UTC().Format("2006-01-02T15:04:05.000Z")
+			}
+			currentVersion := str(current["versionId"])
+			row := map[string]any{
+				"Key": key, "VersionId": version, "IsLatest": currentVersion == version || version == "null" && currentVersion == "",
+				"LastModified": modified, "Owner": map[string]any{"ID": req.Identity.Account},
+			}
+			deleteMarker := truthy(meta["deleteMarker"])
+			if !deleteMarker {
+				storageClass := str(meta["storageClass"])
+				if storageClass == "" {
+					storageClass = "STANDARD"
+				}
+				row["ETag"], row["Size"], row["StorageClass"] = meta["etag"], meta["size"], storageClass
+				setListChecksumMetadata(row, meta)
+			}
+			entries = append(entries, entry{key: key, version: version, row: row, marker: deleteMarker})
+		}
+	}
+	if keyMarker != "" {
+		filtered := entries[:0]
+		versionSeen := versionMarker == ""
+		resumeVersion, deletedMarker := deletedVersionNext[keyMarker][versionMarker]
+		for _, item := range entries {
+			switch {
+			case item.key < keyMarker:
+				continue
+			case item.key > keyMarker:
+				filtered = append(filtered, item)
+			case versionMarker == "":
+				continue
+			case versionSeen:
+				filtered = append(filtered, item)
+			case item.version == versionMarker:
+				versionSeen = true
+			case deletedMarker && item.version == str(resumeVersion):
+				versionSeen = true
+				filtered = append(filtered, item)
+			}
+		}
+		entries = filtered
+	}
+	truncated := len(entries) > maxKeys
+	if truncated {
+		entries = entries[:maxKeys]
+	}
+	var versions, markers, prefixes []any
+	for _, item := range entries {
+		switch {
+		case item.prefix:
+			prefixes = append(prefixes, item.row)
+		case item.marker:
+			markers = append(markers, item.row)
+		default:
+			versions = append(versions, item.row)
+		}
+	}
+	out := map[string]any{
+		"Name": b, "Prefix": prefix, "Delimiter": delimiter, "KeyMarker": keyMarker, "VersionIdMarker": versionMarker,
+		"MaxKeys": maxKeys, "IsTruncated": truncated, "Versions": versions, "DeleteMarkers": markers, "CommonPrefixes": prefixes,
+	}
+	if truncated && len(entries) > 0 {
+		last := entries[len(entries)-1]
+		out["NextKeyMarker"] = last.key
+		if last.version != "" {
+			out["NextVersionIdMarker"] = last.version
+		}
+	}
+	if str(req.Input["EncodingType"]) == "url" {
+		for _, collection := range [][]any{versions, markers, prefixes} {
+			for _, value := range collection {
+				row := asMap(value)
+				for _, field := range []string{"Key", "Prefix"} {
+					if raw := str(row[field]); raw != "" {
+						row[field] = s3URLEncode(raw)
+					}
+				}
+			}
+		}
+		for _, field := range []string{"Prefix", "Delimiter", "KeyMarker", "NextKeyMarker"} {
+			if raw := str(out[field]); raw != "" {
+				out[field] = s3URLEncode(raw)
+			}
+		}
+		out["EncodingType"] = "url"
+	}
+	return &spi.Response{Output: out}, nil
+}
+
+func s3URLEncode(value any) string {
+	return strings.ReplaceAll(strings.ReplaceAll(url.QueryEscape(str(value)), "+", "%20"), "%2F", "/")
+}
+
+func validateListEncodingType(req *spi.Request) error {
+	value, provided := req.Input["EncodingType"]
+	if !provided {
+		value, provided = req.Input["encoding-type"]
+	}
+	if !provided && req.HTTP != nil {
+		values := req.HTTP.URL.Query()
+		_, provided = values["encoding-type"]
+		value = values.Get("encoding-type")
+	}
+	if !provided || str(value) == "url" {
+		return nil
+	}
+	return &spi.Fault{
+		Code: "InvalidArgument", Message: "Invalid Encoding Method specified in Request",
+		HTTPStatus: http.StatusBadRequest, Fault: "client",
+		Fields: map[string]any{"ArgumentName": "encoding-type", "ArgumentValue": str(value)},
+	}
+}
+
+func (p *Pack) abortMPU(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if err := p.requireMultipartBucket(ctx, req); err != nil {
+		return nil, err
+	}
+	id := mpuID(req)
+	p.mu.Lock()
+	if !matchesMultipartUpload(p.mpu[id], req) {
+		p.mu.Unlock()
+		return nil, noSuchUpload(id)
+	}
+	delete(p.mpu, id)
+	p.mu.Unlock()
+	return &spi.Response{Status: 204}, nil
+}
+
+func matchesMultipartUpload(upload *mpu, req *spi.Request) bool {
+	bucket, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	return upload != nil && (bucket == "" || upload.bucket == bucket) && (key == "" || upload.key == key)
+}
+
+func noSuchUpload(id string) *spi.Fault {
+	return &spi.Fault{Code: "NoSuchUpload", Message: "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"UploadId": id}}
+}
+
+func (p *Pack) versioning(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	b := str(req.Input["Bucket"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
+	if req.Operation == "PutBucketVersioning" {
+		st := str(req.Input["Status"])
+		if st == "" {
+			return nil, &spi.Fault{Code: "IllegalVersioningConfigurationException", Message: "The Versioning element must be specified", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		if st != "Enabled" && st != "Suspended" {
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		if st == "Suspended" && p.bucketObjectLockEnabled(ctx, req, b) {
+			return nil, &spi.Fault{Code: "InvalidBucketState", Message: "An Object Lock configuration is present on this bucket, so the versioning state cannot be changed.", HTTPStatus: http.StatusConflict, Fault: "client"}
+		}
+		_, configured, _ := p.col(req, "versioning").Get(ctx, b)
+		if !configured {
+			p.versionMu.Lock()
+			defer p.versionMu.Unlock()
+			objects, _, _ := p.col(req, "objects").List(ctx, b+"/", "", 0)
+			for _, object := range objects {
+				key := strings.TrimPrefix(object.Key, b+"/")
+				var meta map[string]any
+				_ = json.Unmarshal(object.Value, &meta)
+				if str(meta["versionId"]) != "" || truthy(meta["deleteMarker"]) {
+					continue
+				}
+				body, _, err := p.deps.Blobs.Get(ctx, blobKey(req, b, key))
+				if err != nil {
+					return nil, err
+				}
+				if _, err := p.deps.Blobs.Put(ctx, blobKey(req, b, key)+"@null", body); err != nil {
+					body.Close()
+					return nil, err
+				}
+				body.Close()
+				meta["key"], meta["versionId"], meta["versionOrder"] = key, "null", []string{"null"}
+				raw, _ := json.Marshal(meta)
+				_ = p.col(req, "objects").Put(ctx, object.Key, raw)
+				_ = p.col(req, "versions").Put(ctx, object.Key+"/null", raw)
+				if tags, ok, _ := p.col(req, "tags").Get(ctx, objectTagKey(b, key, "")); ok {
+					_ = p.col(req, "tags").Put(ctx, objectTagKey(b, key, "null"), tags)
+				}
+				if acl, ok, _ := p.col(req, "bktcfg").Get(ctx, objectTagKey(b, key, "")+"/acl"); ok {
+					_ = p.col(req, "bktcfg").Put(ctx, objectTagKey(b, key, "null")+"/acl", acl)
+				}
+			}
+		}
+		_ = p.col(req, "versioning").Put(ctx, b, []byte(st))
+		return &spi.Response{Status: 200}, nil
+	}
+	raw, ok, _ := p.col(req, "versioning").Get(ctx, b)
+	if !ok || len(raw) == 0 {
+		return &spi.Response{Output: map[string]any{}}, nil
+	}
+	return &spi.Response{Output: map[string]any{"Status": string(raw)}}, nil
+}
+
+func putGetDel(method, put, get, del string) string {
+	switch method {
+	case http.MethodPut:
+		return put
+	case http.MethodDelete:
+		if del != "" {
+			return del
+		}
+		return get
+	default:
+		return get
+	}
+}
+
+func (p *Pack) bucketLifecycle(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	bucket := str(req.Input["Bucket"])
+	if err := p.requireBucket(ctx, req, bucket); err != nil {
+		return nil, err
+	}
+	key := bucket + "/lifecycle"
+	collection := p.col(req, "bktcfg")
+	if req.Operation == "DeleteBucketLifecycle" {
+		_ = collection.Delete(ctx, key)
+		return &spi.Response{Status: http.StatusNoContent}, nil
+	}
+	if req.Operation == "PutBucketLifecycleConfiguration" {
+		configuration, err := validateLifecycleConfiguration(req.Input["LifecycleConfiguration"])
+		if err != nil {
+			return nil, err
+		}
+		minimumValue, specified := req.Input["TransitionDefaultMinimumObjectSize"]
+		minimum := str(minimumValue)
+		if !specified && req.HTTP != nil {
+			_, specified = req.HTTP.Header[http.CanonicalHeaderKey("x-amz-transition-default-minimum-object-size")]
+			minimum = req.HTTP.Header.Get("x-amz-transition-default-minimum-object-size")
+		}
+		if !specified {
+			minimum = "all_storage_classes_128K"
+		}
+		if minimum != "all_storage_classes_128K" && minimum != "varies_by_storage_class" {
+			return nil, &spi.Fault{Code: "InvalidRequest", Message: "Invalid TransitionDefaultMinimumObjectSize found: " + minimum, HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		document := map[string]any{"Rules": configuration["Rules"], "TransitionDefaultMinimumObjectSize": minimum}
+		raw, _ := json.Marshal(document)
+		_ = collection.Put(ctx, key, raw)
+		headers := http.Header{}
+		headers.Set("x-amz-transition-default-minimum-object-size", minimum)
+		return &spi.Response{Status: http.StatusOK, Headers: headers}, nil
+	}
+	raw, exists, _ := collection.Get(ctx, key)
+	if !exists {
+		return nil, &spi.Fault{Code: "NoSuchLifecycleConfiguration", Message: "The lifecycle configuration does not exist", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": bucket}}
+	}
+	var document map[string]any
+	_ = json.Unmarshal(raw, &document)
+	minimum := str(document["TransitionDefaultMinimumObjectSize"])
+	headers := http.Header{}
+	headers.Set("x-amz-transition-default-minimum-object-size", minimum)
+	return &spi.Response{Status: http.StatusOK, Headers: headers, Output: map[string]any{"Rules": asSlice(document["Rules"])}}, nil
+}
+
+func validateLifecycleConfiguration(value any) (map[string]any, error) {
+	configuration, ok := value.(map[string]any)
+	if !ok {
+		return nil, malformedXML()
+	}
+	rules, ok := configuration["Rules"].([]any)
+	if !ok || len(rules) == 0 {
+		return nil, malformedXML()
+	}
+	for _, value := range rules {
+		rule, ok := value.(map[string]any)
+		if !ok {
+			return nil, malformedXML()
+		}
+		for _, field := range []string{"ID", "Filter", "Status"} {
+			if _, exists := rule[field]; !exists {
+				return nil, malformedXML()
+			}
+		}
+		filter, ok := rule["Filter"].(map[string]any)
+		if !ok || len(filter) > 1 {
+			return nil, malformedXML()
+		}
+		if value, exists := rule["NoncurrentVersionExpiration"]; exists {
+			expiration, ok := value.(map[string]any)
+			if !ok {
+				return nil, malformedXML()
+			}
+			if _, newer := expiration["NewerNoncurrentVersions"]; !newer {
+				if _, days := expiration["NoncurrentDays"]; !days {
+					return nil, malformedXML()
+				}
+			}
+		}
+		if value, exists := rule["Expiration"]; exists {
+			expiration, ok := value.(map[string]any)
+			if !ok {
+				return nil, malformedXML()
+			}
+			if _, marker := expiration["ExpiredObjectDeleteMarker"]; marker && len(expiration) > 1 {
+				return nil, malformedXML()
+			}
+			if value, exists := expiration["Date"]; exists {
+				date, valid := lifecycleDate(value)
+				_, offset := date.Zone()
+				if !valid {
+					return nil, malformedXML()
+				}
+				if date.Hour() != 0 || date.Minute() != 0 || date.Second() != 0 || date.Nanosecond() != 0 || offset != 0 {
+					return nil, &spi.Fault{Code: "InvalidArgument", Message: "'Date' must be at midnight GMT", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "Date", "ArgumentValue": value}}
+				}
+			}
+		}
+		and := asMap(filter["And"])
+		seen := map[string]bool{}
+		for _, value := range asSlice(and["Tags"]) {
+			key := str(asMap(value)["Key"])
+			if seen[key] {
+				return nil, &spi.Fault{Code: "InvalidRequest", Message: "Duplicate Tag Keys are not allowed.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			seen[key] = true
+		}
+	}
+	return configuration, nil
+}
+
+func malformedXML() *spi.Fault {
+	return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+}
+
+func lifecycleDate(value any) (time.Time, bool) {
+	if date, ok := value.(time.Time); ok {
+		return date, true
+	}
+	date, err := time.Parse(time.RFC3339Nano, str(value))
+	return date, err == nil
+}
+
+func (p *Pack) setLifecycleExpirationHeader(ctx context.Context, req *spi.Request, bucket, key string, size int64, tags map[string]string, modified string, headers http.Header) {
+	raw, exists, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/lifecycle")
+	if !exists {
+		return
+	}
+	var configuration map[string]any
+	_ = json.Unmarshal(raw, &configuration)
+	for _, value := range asSlice(configuration["Rules"]) {
+		rule := asMap(value)
+		expiration, configured := rule["Expiration"].(map[string]any)
+		if _, deleteMarker := expiration["ExpiredObjectDeleteMarker"]; !configured || deleteMarker || !lifecycleFilterMatches(asMap(rule["Filter"]), key, size, tags) {
+			continue
+		}
+		var expires time.Time
+		if days := asInt(expiration["Days"]); days != 0 {
+			lastModified, err := http.ParseTime(modified)
+			if err != nil {
+				return
+			}
+			expires = time.Date(lastModified.Year(), lastModified.Month(), lastModified.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, days+1)
+		} else {
+			var ok bool
+			expires, ok = lifecycleDate(expiration["Date"])
+			if !ok {
+				return
+			}
+		}
+		headers.Set("x-amz-expiration", fmt.Sprintf(`expiry-date="%s", rule-id="%s"`, expires.UTC().Format(http.TimeFormat), str(rule["ID"])))
+		return
+	}
+}
+
+func lifecycleFilterMatches(filter map[string]any, key string, size int64, tags map[string]string) bool {
+	if len(filter) == 0 {
+		return true
+	}
+	if value, exists := filter["And"]; exists {
+		and := asMap(value)
+		if len(and) == 0 {
+			return false
+		}
+		for field, value := range and {
+			if !lifecyclePredicateMatches(field, value, key, size, tags) {
+				return false
+			}
+		}
+		return true
+	}
+	for field, value := range filter {
+		return lifecyclePredicateMatches(field, value, key, size, tags)
+	}
+	return false
+}
+
+func lifecyclePredicateMatches(field string, value any, key string, size int64, tags map[string]string) bool {
+	switch field {
+	case "Prefix":
+		return strings.HasPrefix(key, str(value))
+	case "Tag":
+		tag := asMap(value)
+		actual, exists := tags[str(tag["Key"])]
+		return exists && actual == str(tag["Value"])
+	case "ObjectSizeGreaterThan":
+		return size > lifecycleSize(value)
+	case "ObjectSizeLessThan":
+		return size < lifecycleSize(value)
+	case "Tags":
+		if len(tags) == 0 {
+			return false
+		}
+		for _, value := range asSlice(value) {
+			tag := asMap(value)
+			if tags[str(tag["Key"])] != str(tag["Value"]) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func lifecycleSize(value any) int64 {
+	switch size := value.(type) {
+	case int:
+		return int64(size)
+	case int64:
+		return size
+	case float64:
+		return int64(size)
+	case string:
+		parsed, _ := strconv.ParseInt(size, 10, 64)
+		return parsed
+	}
+	return 0
+}
+
+func (p *Pack) currentObjectVersion(ctx context.Context, req *spi.Request, bucket, key string) string {
+	current, exists := p.objectMetadata(ctx, req, bucket, key, "")
+	if !exists {
+		return ""
+	}
+	return str(current["versionId"])
+}
+
+func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	b := str(req.Input["Bucket"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
+	kind, miss := cfgKind(req.Operation)
+	key := b + "/" + kind
+	var objectMeta map[string]any
+	if keyObj := str(req.Input["Key"]); keyObj != "" {
+		if req.Operation == "GetObjectAcl" || req.Operation == "PutObjectAcl" {
+			var exists bool
+			objectMeta, exists = p.objectMetadata(ctx, req, b, keyObj, str(req.Input["VersionId"]))
+			if !exists {
+				return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client"}
+			}
+			if truthy(objectMeta["deleteMarker"]) {
+				explicit := str(req.Input["VersionId"]) != ""
+				if req.Operation == "PutObjectAcl" || explicit {
+					fault := deleteMarkerReadFault(objectMeta, true)
+					fault.Message = "The specified method is not allowed against this resource."
+					fault.Fields = map[string]any{"Method": strings.ToUpper(strings.TrimSuffix(req.Operation, "ObjectAcl")), "ResourceType": "DeleteMarker"}
+					return nil, fault
+				}
+				fault := deleteMarkerReadFault(objectMeta, false)
+				fault.Fields = map[string]any{"Key": keyObj}
+				return nil, fault
+			}
+			version := str(objectMeta["versionId"])
+			if version == "null" {
+				version = ""
+			}
+			key = objectTagKey(b, keyObj, version) + "/" + kind
+		} else {
+			key = b + "/" + keyObj + "/" + kind
+		}
+	}
+	col := p.col(req, "bktcfg")
+	if strings.HasPrefix(req.Operation, "Put") {
+		if req.Operation == "PutBucketEncryption" {
+			configuration, err := validateBucketEncryption(req.Input["ServerSideEncryptionConfiguration"])
+			if err != nil {
+				return nil, err
+			}
+			delete(req.Input, "Document")
+			delete(req.Input, "_body")
+			req.Input["ServerSideEncryptionConfiguration"] = configuration
+		}
+		if req.Operation == "PutBucketPolicy" {
+			if err := validateBucketPolicy(str(req.Input["Policy"])); err != nil {
+				return nil, err
+			}
+		}
+		if req.Operation == "PutBucketAcl" || req.Operation == "PutObjectAcl" {
+			acl, _, err := requestACL(req, true)
+			if err != nil {
+				return nil, err
+			}
+			raw, _ := json.Marshal(acl)
+			_ = col.Put(ctx, key, raw)
+			if req.Operation == "PutObjectAcl" {
+				p.notify(ctx, req, b, str(req.Input["Key"]), "ObjectAcl:Put", objectMeta)
+			}
+			return &spi.Response{Status: http.StatusOK}, nil
+		}
+		if req.Operation == "PutBucketWebsite" {
+			if str(req.Input["_body"]) != "" {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			if err := validateWebsiteConfiguration(req.Input["WebsiteConfiguration"]); err != nil {
+				return nil, err
+			}
+		}
+		if req.Operation == "PutBucketCors" {
+			if str(req.Input["_body"]) != "" {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			configuration := asMap(req.Input["CORSConfiguration"])
+			rules := asSlice(configuration["CORSRules"])
+			if len(rules) == 0 {
+				rules = asSlice(req.Input["CORSRules"])
+			}
+			if len(rules) == 0 || len(rules) > 100 {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			for _, value := range rules {
+				rule, ok := value.(map[string]any)
+				if !ok {
+					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+				}
+				if _, ok := rule["AllowedMethods"]; !ok {
+					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+				}
+				if _, ok := rule["AllowedOrigins"]; !ok {
+					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+				}
+				for field := range rule {
+					switch field {
+					case "AllowedMethods", "AllowedOrigins", "AllowedHeaders", "ExposeHeaders", "MaxAgeSeconds", "ID":
+					default:
+						return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+					}
+				}
+				for _, value := range asSlice(rule["AllowedMethods"]) {
+					method := str(value)
+					if method != "GET" && method != "PUT" && method != "HEAD" && method != "POST" && method != "DELETE" {
+						return nil, &spi.Fault{Code: "InvalidRequest", Message: "Found unsupported HTTP method in CORS config. Unsupported method is " + method, HTTPStatus: http.StatusBadRequest, Fault: "client"}
+					}
+				}
+			}
+			delete(req.Input, "CORSRules")
+			req.Input["CORSConfiguration"] = map[string]any{"CORSRules": rules}
+		}
+		if req.Operation == "PutBucketLogging" {
+			if str(req.Input["_body"]) != "" {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			logging := asMap(asMap(req.Input["BucketLoggingStatus"])["LoggingEnabled"])
+			if len(logging) == 0 {
+				_ = col.Delete(ctx, key)
+				return &spi.Response{Status: 200}, nil
+			}
+			target := str(logging["TargetBucket"])
+			if target == "" {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			if _, exists, _ := p.col(req, "buckets").Get(ctx, target); !exists {
+				raw, found, _ := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets").Get(ctx, target)
+				var location struct {
+					Account string `json:"account"`
+					Region  string `json:"region"`
+				}
+				if found {
+					_ = json.Unmarshal(raw, &location)
+				}
+				if location.Account == req.Identity.Account && location.Region != "" && location.Region != req.Identity.Region {
+					fields := map[string]any{"TargetBucketLocation": location.Region}
+					if req.Identity.Region != "us-east-1" {
+						fields["SourceBucketLocation"] = req.Identity.Region
+					}
+					return nil, &spi.Fault{Code: "CrossLocationLoggingProhibitted", Message: "Cross S3 location logging not allowed. ", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: fields}
+				}
+				return nil, &spi.Fault{Code: "InvalidTargetBucketForLogging", Message: "The target bucket for logging does not exist", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"TargetBucket": target}}
+			}
+			logging["TargetPrefix"] = str(logging["TargetPrefix"])
+			req.Input["BucketLoggingStatus"] = map[string]any{"LoggingEnabled": logging}
+		}
+		if req.Operation == "PutBucketAccelerateConfiguration" {
+			if strings.Contains(b, ".") {
+				return nil, &spi.Fault{Code: "InvalidRequest", Message: "S3 Transfer Acceleration is not supported for buckets with periods (.) in their names", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			status := str(asMap(req.Input["AccelerateConfiguration"])["Status"])
+			if status != "Enabled" && status != "Suspended" {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			req.Input["AccelerateConfiguration"] = map[string]any{"Status": status}
+		}
+		if req.Operation == "PutBucketRequestPayment" {
+			payer := str(asMap(req.Input["RequestPaymentConfiguration"])["Payer"])
+			if payer != "Requester" && payer != "BucketOwner" {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			req.Input["RequestPaymentConfiguration"] = map[string]any{"Payer": payer}
+		}
+		if req.Operation == "PutPublicAccessBlock" {
+			configuration, err := normalizePublicAccessBlock(req.Input["PublicAccessBlockConfiguration"])
+			if err != nil {
+				return nil, err
+			}
+			req.Input["PublicAccessBlockConfiguration"] = configuration
+		}
+		if req.Operation == "PutBucketOwnershipControls" {
+			if err := validateOwnershipControls(req.Input["OwnershipControls"]); err != nil {
+				return nil, err
+			}
+		}
+		if req.Operation == "PutBucketReplication" {
+			if !p.versioningEnabled(ctx, req, b) {
+				return nil, &spi.Fault{Code: "InvalidRequest", Message: "Versioning must be 'Enabled' on the bucket to apply a replication configuration", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			if err := p.prepareReplicationConfiguration(ctx, req, req.Input["ReplicationConfiguration"]); err != nil {
+				return nil, err
+			}
+		}
+		if req.Operation == "PutBucketObjectLockConfiguration" || req.Operation == "PutObjectLockConfiguration" {
+			if !p.versioningEnabled(ctx, req, b) {
+				return nil, &spi.Fault{Code: "InvalidBucketState", Message: "Versioning must be 'Enabled' on the bucket to apply a Object Lock configuration", HTTPStatus: http.StatusConflict, Fault: "client"}
+			}
+			if err := validateObjectLockConfiguration(req.Input["ObjectLockConfiguration"]); err != nil {
+				return nil, err
+			}
+			p.setBucketObjectLockEnabled(ctx, req, b)
+		}
+		doc := map[string]any{}
+		for k, v := range req.Input {
+			if k == "Bucket" || k == "Key" {
+				continue
+			}
+			doc[k] = v
+		}
+		raw, _ := json.Marshal(doc)
+		_ = col.Put(ctx, key, raw)
+		if req.Operation == "PutObjectAcl" {
+			p.notify(ctx, req, b, str(req.Input["Key"]), "ObjectAcl:Put", objectMeta)
+		}
+		return &spi.Response{Status: 200}, nil
+	}
+	if strings.HasPrefix(req.Operation, "Delete") {
+		_ = col.Delete(ctx, key)
+		return &spi.Response{Status: 204}, nil
+	}
+	raw, ok, _ := col.Get(ctx, key)
+	if !ok {
+		if (req.Operation == "GetBucketObjectLockConfiguration" || req.Operation == "GetObjectLockConfiguration") && p.bucketObjectLockEnabled(ctx, req, b) {
+			return &spi.Response{Output: map[string]any{"ObjectLockConfiguration": map[string]any{"ObjectLockEnabled": "Enabled"}}}, nil
+		}
+		if req.Operation == "GetBucketAcl" || req.Operation == "GetObjectAcl" {
+			return &spi.Response{Output: map[string]any{
+				"Owner":  map[string]any{"ID": req.Identity.Account},
+				"Grants": []any{map[string]any{"Grantee": map[string]any{"ID": req.Identity.Account, "Type": "CanonicalUser"}, "Permission": "FULL_CONTROL"}},
+			}}, nil
+		}
+		if req.Operation == "GetBucketLogging" {
+			return &spi.Response{Output: map[string]any{}}, nil
+		}
+		if req.Operation == "GetBucketRequestPayment" {
+			return &spi.Response{Output: map[string]any{"Payer": "BucketOwner"}}, nil
+		}
+		if req.Operation == "GetBucketAccelerateConfiguration" {
+			return &spi.Response{Output: map[string]any{}}, nil
+		}
+		if req.Operation == "GetBucketEncryption" {
+			return &spi.Response{Output: map[string]any{"Rules": []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256"}, "BucketKeyEnabled": false}}}}, nil
+		}
+		if req.Operation == "GetBucketCors" {
+			return nil, &spi.Fault{Code: "NoSuchCORSConfiguration", Message: "The CORS configuration does not exist", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": b}}
+		}
+		if req.Operation == "GetBucketWebsite" {
+			return nil, &spi.Fault{Code: "NoSuchWebsiteConfiguration", Message: "The specified bucket does not have a website configuration", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": b}}
+		}
+		if miss != nil {
+			if req.Operation == "GetBucketPolicy" {
+				miss.Fields = map[string]any{"BucketName": b}
+			}
+			if req.Operation == "GetBucketObjectLockConfiguration" || req.Operation == "GetObjectLockConfiguration" {
+				miss.Fields = map[string]any{"BucketName": b}
+			}
+			return nil, miss
+		}
+		return &spi.Response{Output: map[string]any{}}, nil
+	}
+	var doc map[string]any
+	_ = json.Unmarshal(raw, &doc)
+	if req.Operation == "GetBucketAcl" || req.Operation == "GetObjectAcl" {
+		return &spi.Response{Status: http.StatusOK, Output: doc}, nil
+	}
+	if req.Operation == "GetBucketRequestPayment" {
+		return &spi.Response{Status: 200, Output: map[string]any{"Payer": asMap(doc["RequestPaymentConfiguration"])["Payer"]}}, nil
+	}
+	if req.Operation == "GetBucketAccelerateConfiguration" {
+		return &spi.Response{Status: 200, Output: map[string]any{"Status": asMap(doc["AccelerateConfiguration"])["Status"]}}, nil
+	}
+	if req.Operation == "GetBucketLogging" {
+		return &spi.Response{Status: 200, Output: map[string]any{"LoggingEnabled": asMap(doc["BucketLoggingStatus"])["LoggingEnabled"]}}, nil
+	}
+	if req.Operation == "GetBucketCors" {
+		return &spi.Response{Status: 200, Output: map[string]any{"CORSRules": asMap(doc["CORSConfiguration"])["CORSRules"]}}, nil
+	}
+	if req.Operation == "GetBucketWebsite" {
+		return &spi.Response{Status: 200, Output: asMap(doc["WebsiteConfiguration"])}, nil
+	}
+	if req.Operation == "GetBucketEncryption" {
+		return &spi.Response{Status: 200, Output: map[string]any{"Rules": asMap(doc["ServerSideEncryptionConfiguration"])["Rules"]}}, nil
+	}
+	return &spi.Response{Status: 200, Output: doc}, nil
+}
+
+func validateBucketEncryption(value any) (map[string]any, error) {
+	malformed := func() error {
+		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	configuration, ok := value.(map[string]any)
+	if !ok {
+		return nil, malformed()
+	}
+	rules, ok := configuration["Rules"].([]any)
+	if !ok || len(rules) != 1 {
+		return nil, malformed()
+	}
+	rule, ok := rules[0].(map[string]any)
+	if !ok {
+		return nil, malformed()
+	}
+	defaults, ok := rule["ApplyServerSideEncryptionByDefault"].(map[string]any)
+	if !ok {
+		return nil, malformed()
+	}
+	algorithm := str(defaults["SSEAlgorithm"])
+	if algorithm != "AES256" && algorithm != "aws:fsx" && algorithm != "aws:backup" && algorithm != "aws:kms" && algorithm != "aws:kms:dsse" {
+		return nil, malformed()
+	}
+	if _, exists := defaults["KMSMasterKeyID"]; algorithm != "aws:kms" && exists {
+		return nil, &spi.Fault{
+			Code: "InvalidArgument", Message: "a KMSMasterKeyID is not applicable if the default sse algorithm is not aws:kms or aws:kms:dsse",
+			HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "ApplyServerSideEncryptionByDefault"},
+		}
+	}
+	return map[string]any{"Rules": rules}, nil
+}
+
+func validateBucketPolicy(policy string) error {
+	malformed := func(message string) error {
+		return &spi.Fault{Code: "MalformedPolicy", Message: message, HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if policy == "" || policy[0] != '{' {
+		return malformed("Policies must be valid JSON and the first byte must be '{'")
+	}
+	var document map[string]any
+	if json.Unmarshal([]byte(policy), &document) != nil {
+		return malformed("Policies must be valid JSON and the first byte must be '{'")
+	}
+	if len(document) == 0 {
+		return malformed("Missing required field Statement")
+	}
+	return nil
+}
+
+func requestACL(req *spi.Request, required bool) (map[string]any, bool, error) {
+	owner := map[string]any{"ID": req.Identity.Account}
+	private := func() map[string]any {
+		return map[string]any{"Owner": owner, "Grants": []any{map[string]any{"Grantee": map[string]any{"ID": owner["ID"], "Type": "CanonicalUser"}, "Permission": "FULL_CONTROL"}}}
+	}
+	canned := requestCondition(req, "ACL", "x-amz-acl")
+	type grantHeader struct{ input, header, permission string }
+	headers := []grantHeader{
+		{"GrantFullControl", "x-amz-grant-full-control", "FULL_CONTROL"},
+		{"GrantRead", "x-amz-grant-read", "READ"},
+		{"GrantReadACP", "x-amz-grant-read-acp", "READ_ACP"},
+		{"GrantWrite", "x-amz-grant-write", "WRITE"},
+		{"GrantWriteACP", "x-amz-grant-write-acp", "WRITE_ACP"},
+	}
+	var grants []grantHeader
+	for _, header := range headers {
+		if requestCondition(req, header.input, header.header) != "" {
+			grants = append(grants, header)
+		}
+	}
+	policy, hasPolicy := req.Input["AccessControlPolicy"].(map[string]any)
+	if canned == "" && len(grants) == 0 && !hasPolicy {
+		if str(req.Input["_body"]) != "" {
+			return nil, false, malformedACL()
+		}
+		if required {
+			return nil, false, &spi.Fault{Code: "MissingSecurityHeader", Message: "Your request was missing a required header", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"MissingHeaderName": "x-amz-acl"}}
+		}
+		return private(), false, nil
+	}
+	if canned != "" && len(grants) != 0 {
+		return nil, false, &spi.Fault{Code: "InvalidRequest", Message: "Specifying both Canned ACLs and Header Grants is not allowed", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if (canned != "" || len(grants) != 0) && hasPolicy {
+		return nil, false, &spi.Fault{Code: "UnexpectedContent", Message: "This request does not support content", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if canned != "" {
+		acl := private()
+		allUsers := map[string]any{"Type": "Group", "URI": "http://acs.amazonaws.com/groups/global/AllUsers"}
+		authenticated := map[string]any{"Type": "Group", "URI": "http://acs.amazonaws.com/groups/global/AuthenticatedUsers"}
+		logDelivery := map[string]any{"Type": "Group", "URI": "http://acs.amazonaws.com/groups/s3/LogDelivery"}
+		appendGrant := func(grantee map[string]any, permission string) {
+			acl["Grants"] = append(asSlice(acl["Grants"]), map[string]any{"Grantee": grantee, "Permission": permission})
+		}
+		switch canned {
+		case "private", "bucket-owner-read", "bucket-owner-full-control", "aws-exec-read":
+		case "public-read":
+			appendGrant(allUsers, "READ")
+		case "public-read-write":
+			appendGrant(allUsers, "READ")
+			appendGrant(allUsers, "WRITE")
+		case "authenticated-read":
+			appendGrant(authenticated, "READ")
+		case "log-delivery-write":
+			appendGrant(logDelivery, "READ_ACP")
+			appendGrant(logDelivery, "WRITE")
+		default:
+			return nil, false, invalidACLArgument("x-amz-acl", canned, "")
+		}
+		return acl, true, nil
+	}
+	if len(grants) != 0 {
+		acl := private()
+		acl["Grants"] = []any{}
+		for _, header := range grants {
+			for _, serialized := range strings.Split(requestCondition(req, header.input, header.header), ",") {
+				parts := strings.SplitN(strings.TrimSpace(serialized), "=", 2)
+				if len(parts) != 2 {
+					return nil, false, invalidACLArgument(header.header, serialized, "Argument format not recognized")
+				}
+				kind, value := parts[0], strings.Trim(strings.TrimSpace(parts[1]), `"`)
+				grantee := map[string]any{}
+				switch kind {
+				case "uri":
+					if !validACLGroup(value) {
+						return nil, false, invalidACLArgument("uri", value, "Invalid group uri")
+					}
+					grantee = map[string]any{"Type": "Group", "URI": value}
+				case "id":
+					if !validCanonicalID(value, req.Identity.Account) {
+						return nil, false, invalidACLArgument("id", value, "Invalid id")
+					}
+					grantee = map[string]any{"Type": "CanonicalUser", "ID": value}
+				case "emailAddress":
+					grantee = map[string]any{"Type": "AmazonCustomerByEmail", "EmailAddress": value}
+				default:
+					return nil, false, invalidACLArgument(header.header, serialized, "Argument format not recognized")
+				}
+				acl["Grants"] = append(asSlice(acl["Grants"]), map[string]any{"Grantee": grantee, "Permission": header.permission})
+			}
+		}
+		return acl, true, nil
+	}
+	if err := validateACLPolicy(policy, req.Identity.Account); err != nil {
+		return nil, false, err
+	}
+	return policy, true, nil
+}
+
+func validateACLPolicy(policy map[string]any, account string) error {
+	owner, ownerOK := policy["Owner"].(map[string]any)
+	grants, grantsOK := policy["Grants"].([]any)
+	if !ownerOK || !grantsOK {
+		return malformedACL()
+	}
+	if id := str(owner["ID"]); !validCanonicalID(id, account) {
+		return invalidACLArgument("CanonicalUser/ID", id, "Invalid id")
+	}
+	for _, value := range grants {
+		grant, ok := value.(map[string]any)
+		if !ok {
+			return malformedACL()
+		}
+		switch str(grant["Permission"]) {
+		case "FULL_CONTROL", "READ", "WRITE", "READ_ACP", "WRITE_ACP":
+		default:
+			return malformedACL()
+		}
+		grantee, ok := grant["Grantee"].(map[string]any)
+		if !ok {
+			return malformedACL()
+		}
+		switch str(grantee["Type"]) {
+		case "Group":
+			if uri := str(grantee["URI"]); !validACLGroup(uri) {
+				return invalidACLArgument("Group/URI", uri, "Invalid group uri")
+			}
+		case "CanonicalUser":
+			if id := str(grantee["ID"]); !validCanonicalID(id, account) {
+				return invalidACLArgument("CanonicalUser/ID", id, "Invalid id")
+			}
+		case "AmazonCustomerByEmail":
+		default:
+			return malformedACL()
+		}
+	}
+	return nil
+}
+
+func validCanonicalID(value, account string) bool {
+	if value == account {
+		return true
+	}
+	if len(value) != 64 {
+		return false
+	}
+	for _, r := range value {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+func validACLGroup(value string) bool {
+	return value == "http://acs.amazonaws.com/groups/global/AllUsers" || value == "http://acs.amazonaws.com/groups/global/AuthenticatedUsers" || value == "http://acs.amazonaws.com/groups/s3/LogDelivery"
+}
+
+func malformedACL() *spi.Fault {
+	return &spi.Fault{Code: "MalformedACLError", Message: "The XML you provided was not well-formed or did not validate against our published schema", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+}
+
+func invalidACLArgument(name, value, message string) *spi.Fault {
+	return &spi.Fault{Code: "InvalidArgument", Message: message, HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": name, "ArgumentValue": value}}
+}
+
+func validateWebsiteConfiguration(value any) error {
+	configuration, ok := value.(map[string]any)
+	if !ok {
+		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if redirect := asMap(configuration["RedirectAllRequestsTo"]); len(redirect) != 0 {
+		if len(configuration) > 1 {
+			return &spi.Fault{Code: "InvalidArgument", Message: "RedirectAllRequestsTo cannot be provided in conjunction with other Routing Rules.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "RedirectAllRequestsTo", "ArgumentValue": "not null"}}
+		}
+		if _, ok := redirect["HostName"]; !ok {
+			return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		if protocol := str(redirect["Protocol"]); protocol != "" && protocol != "http" && protocol != "https" {
+			return &spi.Fault{Code: "InvalidRequest", Message: "Invalid protocol, protocol can be http or https. If not defined the protocol will be selected automatically.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		return nil
+	}
+	index := asMap(configuration["IndexDocument"])
+	if len(index) == 0 {
+		return &spi.Fault{Code: "InvalidArgument", Message: "A value for IndexDocument Suffix must be provided if RedirectAllRequestsTo is empty", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "IndexDocument", "ArgumentValue": nil}}
+	}
+	suffix := str(index["Suffix"])
+	if suffix == "" || strings.Contains(suffix, "/") {
+		argumentValue := any(suffix)
+		if suffix == "" {
+			argumentValue = nil
+		}
+		return &spi.Fault{Code: "InvalidArgument", Message: "The IndexDocument Suffix is not well formed", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "IndexDocument", "ArgumentValue": argumentValue}}
+	}
+	if _, exists := configuration["ErrorDocument"]; exists && str(asMap(configuration["ErrorDocument"])["Key"]) == "" {
+		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if _, exists := configuration["RoutingRules"]; exists {
+		rules := asSlice(configuration["RoutingRules"])
+		if len(rules) == 0 {
+			return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		if len(rules) > 50 {
+			return &spi.Fault{Code: "InternalError", Message: "Too many routing rules", HTTPStatus: http.StatusInternalServerError, Fault: "server"}
+		}
+		for _, value := range rules {
+			rule := asMap(value)
+			redirect := asMap(rule["Redirect"])
+			_, prefix := redirect["ReplaceKeyPrefixWith"]
+			_, key := redirect["ReplaceKeyWith"]
+			if prefix && key {
+				return &spi.Fault{Code: "InvalidRequest", Message: "You can only define ReplaceKeyPrefix or ReplaceKey but not both.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			if _, exists := rule["Condition"]; exists && len(asMap(rule["Condition"])) == 0 {
+				return &spi.Fault{Code: "InvalidRequest", Message: "Condition cannot be empty. To redirect all requests without a condition, the condition element shouldn't be present.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			if protocol := str(redirect["Protocol"]); protocol != "" && protocol != "http" && protocol != "https" {
+				return &spi.Fault{Code: "InvalidRequest", Message: "Invalid protocol, protocol can be http or https. If not defined the protocol will be selected automatically.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+		}
+	}
+	return nil
+}
+
+func normalizePublicAccessBlock(value any) (map[string]any, error) {
+	configuration, ok := value.(map[string]any)
+	if !ok {
+		return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	normalized := map[string]any{"BlockPublicAcls": false, "BlockPublicPolicy": false, "IgnorePublicAcls": false, "RestrictPublicBuckets": false}
+	for field, value := range configuration {
+		if _, ok := normalized[field]; !ok {
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		flag, ok := value.(bool)
+		if !ok {
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		normalized[field] = flag
+	}
+	return normalized, nil
+}
+
+func validateOwnershipControls(value any) error {
+	rules := asSlice(asMap(value)["Rules"])
+	if len(rules) == 1 {
+		switch str(asMap(rules[0])["ObjectOwnership"]) {
+		case "BucketOwnerPreferred", "ObjectWriter", "BucketOwnerEnforced":
+			return nil
+		}
+	}
+	return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+}
+
+func validateObjectLockConfiguration(value any) error {
+	configuration := asMap(value)
+	malformed := func() error {
+		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if str(configuration["ObjectLockEnabled"]) != "Enabled" {
+		return malformed()
+	}
+	rule, exists := configuration["Rule"]
+	if !exists {
+		return nil
+	}
+	retention := asMap(asMap(rule)["DefaultRetention"])
+	mode := str(retention["Mode"])
+	_, days := retention["Days"]
+	_, years := retention["Years"]
+	if (mode != "GOVERNANCE" && mode != "COMPLIANCE") || days == years || days && asInt(retention["Days"]) < 1 || years && asInt(retention["Years"]) < 1 {
+		return malformed()
+	}
+	return nil
+}
+
+func cfgKind(op string) (string, *spi.Fault) {
+	n := func(code, msg string) *spi.Fault {
+		return &spi.Fault{Code: code, Message: msg, HTTPStatus: 404, Fault: "client"}
+	}
+	switch {
+	case strings.Contains(op, "Policy"):
+		return "policy", n("NoSuchBucketPolicy", "The bucket policy does not exist")
+	case strings.Contains(op, "Cors"):
+		return "cors", n("NoSuchCORSConfiguration", "The CORS configuration does not exist")
+	case strings.Contains(op, "Website"):
+		return "website", n("NoSuchWebsiteConfiguration", "The specified bucket does not have a website configuration")
+	case strings.Contains(op, "Notification"):
+		return "notification", nil
+	case strings.Contains(op, "Lifecycle"):
+		return "lifecycle", n("NoSuchLifecycleConfiguration", "The lifecycle configuration does not exist")
+	case strings.Contains(op, "Encryption"):
+		return "encryption", n("ServerSideEncryptionConfigurationNotFoundError", "The server side encryption configuration was not found")
+	case strings.Contains(op, "Replication"):
+		return "replication", n("ReplicationConfigurationNotFoundError", "The replication configuration was not found")
+	case strings.Contains(op, "ObjectLock"):
+		return "objectlock", n("ObjectLockConfigurationNotFoundError", "Object Lock configuration does not exist for this bucket")
+	case strings.Contains(op, "Abac"):
+		return "abac", n("NoSuchAbacConfiguration", "The ABAC configuration does not exist")
+	case strings.Contains(op, "Logging"):
+		return "logging", nil
+	case strings.Contains(op, "RequestPayment"):
+		return "requestpayment", nil
+	case strings.Contains(op, "Accelerate"):
+		return "accelerate", nil
+	case strings.Contains(op, "Acl"):
+		return "acl", nil
+	case strings.Contains(op, "PublicAccessBlock"):
+		return "publicaccessblock", n("NoSuchPublicAccessBlockConfiguration", "The public access block configuration was not found")
+	case strings.Contains(op, "OwnershipControls"):
+		return "ownershipcontrols", n("OwnershipControlsNotFoundError", "The bucket ownership controls were not found")
+	}
+	return strings.ToLower(op), nil
+}
+
+func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
+	meta, ok := p.objectMetadata(ctx, req, b, key, str(req.Input["VersionId"]))
+	if !ok {
+		return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: 404, Fault: "client"}
+	}
+	if truthy(meta["deleteMarker"]) {
+		return nil, deleteMarkerReadFault(meta, str(req.Input["VersionId"]) != "")
+	}
+	requested := map[string]bool{}
+	add := func(value string) {
+		for _, attr := range strings.Split(value, ",") {
+			requested[strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(attr), "_", ""))] = true
+		}
+	}
+	switch attrs := req.Input["ObjectAttributes"].(type) {
+	case []any:
+		for _, attr := range attrs {
+			add(str(attr))
+		}
+	case []string:
+		for _, attr := range attrs {
+			add(attr)
+		}
+	case string:
+		add(attrs)
+	}
+	if req.HTTP != nil {
+		for _, value := range req.HTTP.Header.Values("x-amz-object-attributes") {
+			add(value)
+		}
+	}
+	out := map[string]any{}
+	if requested["ETAG"] {
+		out["ETag"] = meta["etag"]
+	}
+	if requested["OBJECTSIZE"] {
+		out["ObjectSize"] = asInt(meta["size"])
+	}
+	if requested["STORAGECLASS"] {
+		out["StorageClass"] = meta["storageClass"]
+	}
+	parts := asSlice(meta["parts"])
+	if requested["CHECKSUM"] && len(asMap(meta["checksums"])) > 0 {
+		values := map[string]any{"ChecksumType": meta["checksumType"]}
+		for _, checksum := range checksums {
+			if value := str(asMap(meta["checksums"])[checksum.header]); value != "" {
+				if len(parts) > 0 {
+					value = strings.SplitN(value, "-", 2)[0]
+				}
+				values[checksum.input] = value
+			}
+		}
+		out["Checksum"] = values
+	}
+	if requested["OBJECTPARTS"] && len(parts) > 0 {
+		objectParts := map[string]any{"TotalPartsCount": len(parts)}
+		if str(meta["checksumType"]) == "COMPOSITE" {
+			readInt := func(input, header string, fallback int) (int, error) {
+				value := ""
+				if raw, ok := req.Input[input]; ok {
+					value = fmt.Sprint(raw)
+				} else if req.HTTP != nil {
+					value = req.HTTP.Header.Get(header)
+				}
+				if value == "" {
+					return fallback, nil
+				}
+				return strconv.Atoi(value)
+			}
+			marker, markerErr := readInt("PartNumberMarker", "x-amz-part-number-marker", 0)
+			maxParts, maxErr := readInt("MaxParts", "x-amz-max-parts", 1000)
+			if markerErr != nil || maxErr != nil || marker < 0 || maxParts < 0 || maxParts > 1000 {
+				return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			if maxParts == 0 {
+				maxParts = 1000
+			}
+			sort.Slice(parts, func(i, j int) bool { return asInt(asMap(parts[i])["number"]) < asInt(asMap(parts[j])["number"]) })
+			var listed []any
+			for _, raw := range parts {
+				part := asMap(raw)
+				number := asInt(part["number"])
+				if number <= marker {
+					continue
+				}
+				item := map[string]any{"PartNumber": number, "Size": asInt(part["size"])}
+				for _, checksum := range checksums {
+					if value := str(asMap(part["checksums"])[checksum.header]); value != "" {
+						item[checksum.input] = value
+					}
+				}
+				listed = append(listed, item)
+			}
+			truncated := len(listed) > maxParts
+			if truncated {
+				listed = listed[:maxParts]
+			}
+			objectParts["IsTruncated"], objectParts["MaxParts"], objectParts["PartNumberMarker"], objectParts["NextPartNumberMarker"] = truncated, maxParts, strconv.Itoa(marker), "0"
+			if len(listed) > 0 {
+				objectParts["Parts"] = listed
+				objectParts["NextPartNumberMarker"] = strconv.Itoa(asInt(asMap(listed[len(listed)-1])["PartNumber"]))
+			}
+		}
+		out["ObjectParts"] = objectParts
+	}
+	h := http.Header{}
+	h.Set("Last-Modified", str(meta["mtime"]))
+	if version := str(meta["versionId"]); version != "" {
+		h.Set("x-amz-version-id", version)
+	}
+	if notModified, err := checkReadPreconditions(req, str(meta["etag"]), str(meta["mtime"]), p.deps.Clock.Now()); err != nil {
+		return nil, err
+	} else if notModified {
+		return &spi.Response{Status: http.StatusNotModified, Headers: h}, nil
+	}
+	return &spi.Response{Headers: h, Output: out}, nil
+}
+
+func (p *Pack) objectTagTarget(ctx context.Context, req *spi.Request) (string, string, error) {
+	b, key, version := str(req.Input["Bucket"]), str(req.Input["Key"]), str(req.Input["VersionId"])
+	if err := p.requireBucket(ctx, req, b); err != nil {
+		return "", "", err
+	}
+	meta, ok := p.objectMetadata(ctx, req, b, key, version)
+	if !ok {
+		fault := objectReadNotFound(key, version)
+		if version == "" && req.Operation == "GetObjectTagging" {
+			fault.Fields["Key"] = b + "/" + key
+		}
+		return "", "", fault
+	}
+	if truthy(meta["deleteMarker"]) {
+		fault := deleteMarkerReadFault(meta, true)
+		fault.Message = "The specified method is not allowed against this resource."
+		fault.Fields = map[string]any{"Method": strings.ToUpper(strings.TrimSuffix(req.Operation, "ObjectTagging")), "ResourceType": "DeleteMarker"}
+		fault.Headers.Set("Allow", "DELETE")
+		return "", "", fault
+	}
+	return objectTagKey(b, key, version), str(meta["versionId"]), nil
+}
+
+func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	b := str(req.Input["Bucket"])
+	key := str(req.Input["Key"])
+	switch req.Operation {
+	case "PutBucketTagging", "GetBucketTagging", "DeleteBucketTagging", "PutBucketNotificationConfiguration", "GetBucketNotificationConfiguration":
+		if err := p.requireBucket(ctx, req, b); err != nil {
+			return nil, err
+		}
+	}
+	switch req.Operation {
+	case "DeleteBucketTagging", "DeleteObjectTagging":
+		tagKey := b
+		objectVersion := ""
+		if req.Operation == "DeleteObjectTagging" {
+			var err error
+			if tagKey, objectVersion, err = p.objectTagTarget(ctx, req); err != nil {
+				return nil, err
+			}
+			if str(req.Input["VersionId"]) == "" && objectVersion != "" {
+				_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, objectVersion))
+			}
+		}
+		_ = p.col(req, "tags").Delete(ctx, tagKey)
+		h := http.Header{}
+		if objectVersion != "" {
+			h.Set("x-amz-version-id", objectVersion)
+		}
+		if req.Operation == "DeleteObjectTagging" {
+			p.notify(ctx, req, b, key, "ObjectTagging:Delete")
+		}
+		return &spi.Response{Status: 204, Headers: h, Output: map[string]any{}}, nil
+	case "PutBucketTagging", "PutObjectTagging":
+		tagKey := b
+		objectVersion := ""
+		if req.Operation == "PutObjectTagging" {
+			var err error
+			if tagKey, objectVersion, err = p.objectTagTarget(ctx, req); err != nil {
+				return nil, err
+			}
+		}
+		limit, kind := 50, "bucket"
+		if req.Operation == "PutObjectTagging" {
+			limit, kind = 10, "object"
+		}
+		tagSet := req.Input["TagSet"]
+		if _, exists := req.Input["TagSet"]; exists && tagSet == nil {
+			tagSet = []any{}
+		}
+		if err := validateTagSet(tagSet, limit, kind); err != nil {
+			return nil, err
+		}
+		raw, _ := json.Marshal(tagSet)
+		if len(raw) == 0 || string(raw) == "null" {
+			raw = []byte("[]")
+		}
+		if req.Operation == "PutBucketTagging" && len(asSlice(tagSet)) == 0 {
+			_ = p.col(req, "tags").Delete(ctx, tagKey)
+		} else {
+			_ = p.col(req, "tags").Put(ctx, tagKey, raw)
+		}
+		if req.Operation == "PutObjectTagging" {
+			if str(req.Input["VersionId"]) == "" {
+				if objectVersion != "" {
+					_ = p.col(req, "tags").Put(ctx, objectTagKey(b, key, objectVersion), raw)
+				}
+				p.syncReplicaTags(ctx, req, b, key, objectVersion, raw)
+			}
+		}
+		h := http.Header{}
+		if objectVersion != "" {
+			h.Set("x-amz-version-id", objectVersion)
+		}
+		if req.Operation == "PutObjectTagging" {
+			p.notify(ctx, req, b, key, "ObjectTagging:Put")
+		}
+		status := http.StatusOK
+		if req.Operation == "PutBucketTagging" {
+			status = http.StatusNoContent
+		}
+		return &spi.Response{Status: status, Headers: h, Output: map[string]any{"TagSet": json.RawMessage(raw)}}, nil
+	case "GetBucketTagging", "GetObjectTagging":
+		tagKey := b
+		objectVersion := ""
+		if req.Operation == "GetObjectTagging" {
+			var err error
+			if tagKey, objectVersion, err = p.objectTagTarget(ctx, req); err != nil {
+				return nil, err
+			}
+		}
+		raw, ok, _ := p.col(req, "tags").Get(ctx, tagKey)
+		h := http.Header{}
+		if objectVersion != "" {
+			h.Set("x-amz-version-id", objectVersion)
+		}
+		if !ok {
+			if req.Operation == "GetBucketTagging" {
+				return nil, &spi.Fault{Code: "NoSuchTagSet", Message: "The TagSet does not exist", HTTPStatus: http.StatusNotFound, Fault: "client"}
+			}
+			return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"TagSet": []any{}}}, nil
+		}
+		var tags any
+		_ = json.Unmarshal(raw, &tags)
+		if tags == nil {
+			tags = []any{}
+		}
+		return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"TagSet": tags}}, nil
+	case "PutBucketNotificationConfiguration":
+		configuration, err := p.prepareNotificationConfiguration(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		raw, _ := json.Marshal(configuration)
+		_ = p.col(req, "notify").Put(ctx, b, raw)
+		return &spi.Response{Status: 200}, nil
+	case "GetBucketNotificationConfiguration":
+		raw, ok, _ := p.col(req, "notify").Get(ctx, b)
+		if !ok {
+			return &spi.Response{Status: 200, Output: map[string]any{}}, nil
+		}
+		var m map[string]any
+		_ = json.Unmarshal(raw, &m)
+		return &spi.Response{Status: 200, Output: m}, nil
+	}
+	// Terraform refresh reads: empty document is the documented "not configured" response.
+	return &spi.Response{Status: 200, Output: map[string]any{}}, nil
+}
+
+func (p *Pack) prepareNotificationConfiguration(ctx context.Context, req *spi.Request) (map[string]any, error) {
+	skipDestinationValidation := false
+	if value, ok := req.Input["SkipDestinationValidation"].(bool); ok {
+		skipDestinationValidation = value
+	}
+	if req.HTTP != nil && strings.EqualFold(req.HTTP.Header.Get("x-amz-skip-destination-validation"), "true") {
+		skipDestinationValidation = true
+	}
+	configuration := map[string]any{}
+	if value, exists := req.Input["NotificationConfiguration"]; exists {
+		var ok bool
+		if configuration, ok = value.(map[string]any); !ok {
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+	} else {
+		if str(req.Input["_body"]) != "" {
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		for _, field := range []string{"QueueConfigurations", "TopicConfigurations", "LambdaFunctionConfigurations", "EventBridgeConfiguration"} {
+			if value, exists := req.Input[field]; exists {
+				configuration[field] = value
+			}
+		}
+	}
+	normalized := make(map[string]any, len(configuration))
+	var verified []struct{ service, arn string }
+	for field, value := range configuration {
+		if field == "EventBridgeConfiguration" {
+			if eventBridge, ok := value.(map[string]any); !ok || len(eventBridge) != 0 {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			normalized[field] = map[string]any{}
+			continue
+		}
+		arnField, service, argumentName := "", "", ""
+		switch field {
+		case "QueueConfigurations":
+			arnField, service, argumentName = "QueueArn", "sqs", "Queue"
+		case "TopicConfigurations":
+			arnField, service, argumentName = "TopicArn", "sns", "TopicArn"
+		case "LambdaFunctionConfigurations":
+			arnField, service, argumentName = "LambdaFunctionArn", "lambda", "LambdaFunctionArn"
+		default:
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		configurations, ok := value.([]any)
+		if !ok {
+			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		items := make([]any, 0, len(configurations))
+		for _, value := range configurations {
+			configuration, ok := value.(map[string]any)
+			if !ok || len(asSlice(configuration["Events"])) == 0 {
+				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+			}
+			arn := str(configuration[arnField])
+			parts := strings.SplitN(arn, ":", 4)
+			if len(parts) != 4 || parts[0] != "arn" || parts[2] != service {
+				return nil, &spi.Fault{Code: "InvalidArgument", Message: "The ARN could not be parsed", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": argumentName, "ArgumentValue": arn}}
+			}
+			if !skipDestinationValidation {
+				arnParts := strings.Split(arn, ":")
+				if len(arnParts) < 6 {
+					return nil, &spi.Fault{Code: "InvalidArgument", Message: "The ARN could not be parsed", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": argumentName, "ArgumentValue": arn}}
+				}
+				name, collection, missing := arnParts[len(arnParts)-1], "", ""
+				switch service {
+				case "sqs":
+					collection, missing = "queues", "The destination queue does not exist"
+				case "sns":
+					collection, missing = "topics", "The destination topic does not exist"
+				case "lambda":
+					collection, missing = "lambda", "The destination Lambda does not exist"
+					if _, resource, found := strings.Cut(arn, ":function:"); found {
+						name, _, _ = strings.Cut(resource, ":")
+					}
+				}
+				if _, exists, _ := p.deps.Store.Scope(arnParts[4], arnParts[3]).Collection(collection).Get(ctx, name); !exists {
+					return nil, &spi.Fault{Code: "InvalidArgument", Message: "Unable to validate the following destination configurations", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": arn, "ArgumentValue": missing}}
+				}
+				verified = append(verified, struct{ service, arn string }{service, arn})
+			}
+			for key := range configuration {
+				if key != "Id" && key != arnField && key != "Events" && key != "Filter" {
+					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+				}
+			}
+			item := map[string]any{arnField: arn, "Events": configuration["Events"], "Id": str(configuration["Id"])}
+			if item["Id"] == "" {
+				item["Id"] = p.deps.Rand.Hex(8)
+			}
+			if value, exists := configuration["Filter"]; exists {
+				filter := asMap(value)
+				key := asMap(filter["Key"])
+				rules, ok := key["FilterRules"].([]any)
+				if !ok {
+					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+				}
+				normalizedRules := make([]any, 0, len(rules))
+				for _, value := range rules {
+					rule, ok := value.(map[string]any)
+					name, hasName := rule["Name"].(string)
+					value, hasValue := rule["Value"].(string)
+					if !ok || !hasName || !hasValue {
+						return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+					}
+					switch strings.ToLower(name) {
+					case "prefix":
+						name = "Prefix"
+					case "suffix":
+						name = "Suffix"
+					default:
+						return nil, &spi.Fault{Code: "InvalidArgument", Message: "filter rule name must be either prefix or suffix", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "FilterRule.Name", "ArgumentValue": name}}
+					}
+					normalizedRules = append(normalizedRules, map[string]any{"Name": name, "Value": value})
+				}
+				item["Filter"] = map[string]any{"Key": map[string]any{"FilterRules": normalizedRules}}
+			}
+			items = append(items, item)
+		}
+		normalized[field] = items
+	}
+	for _, destination := range verified {
+		if err := p.verifyNotificationDestination(ctx, req, destination.service, destination.arn); err != nil {
+			return nil, err
+		}
+	}
+	return normalized, nil
+}
+
+func (p *Pack) verifyNotificationDestination(ctx context.Context, req *spi.Request, service, arn string) error {
+	identity := notificationTargetIdentity(req.Identity, arn)
+	name := arn[strings.LastIndex(arn, ":")+1:]
+	if service == "lambda" {
+		_, name, _ = strings.Cut(arn, ":function:")
+		name, _, _ = strings.Cut(name, ":")
+		_, err := lambda.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Invoke", Input: map[string]any{"FunctionName": name, "InvocationType": "DryRun"}})
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"Service": "Amazon S3", "Event": "s3:TestEvent", "Time": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		"Bucket": str(req.Input["Bucket"]), "RequestId": "mirror", "HostId": "eftixk72aD6Ap51TnqcoF8eFidJG9Z/2",
+	})
+	if service == "sqs" {
+		_, err := sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": string(payload)}})
+		return err
+	}
+	_, err := sns.New(p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "Publish", Input: map[string]any{"TopicArn": arn, "Message": string(payload), "Subject": "Amazon S3 Notification"}})
+	return err
+}
+
+func validateTagSet(value any, limit int, kind string) error {
+	tags, ok := value.([]any)
+	if !ok {
+		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if len(tags) > limit {
+		return &spi.Fault{Code: "InvalidTag", Message: "The number of tags exceeds the limit", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	keys := make(map[string]struct{}, len(tags))
+	for _, item := range tags {
+		tag, ok := item.(map[string]any)
+		keyValue, hasKey := tag["Key"]
+		valueValue, hasValue := tag["Value"]
+		key, keyOK := keyValue.(string)
+		tagValue, valueOK := valueValue.(string)
+		if !ok || !hasKey || !hasValue || !keyOK || !valueOK || len(tag) != 2 {
+			return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		if _, duplicate := keys[key]; duplicate {
+			return &spi.Fault{Code: "InvalidTag", Message: "Cannot provide multiple Tags with the same key", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"TagKey": key}}
+		}
+		if strings.HasPrefix(key, "aws:") {
+			message := "System tags cannot be added/updated by requester"
+			fields := map[string]any{"TagKey": key}
+			if kind == "object" {
+				message = "Your TagKey cannot be prefixed with aws:"
+			} else if kind == "create-bucket" {
+				message = `User-defined tag keys can't start with "aws:". This prefix is reserved for system tags. Remove "aws:" from your tag keys and try again.`
+				fields = nil
+			}
+			return &spi.Fault{Code: "InvalidTag", Message: message, HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: fields}
+		}
+		if utf8.RuneCountInString(key) < 1 || utf8.RuneCountInString(key) > 128 || !validTagText(key) {
+			return &spi.Fault{Code: "InvalidTag", Message: "The TagKey you have provided is invalid", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"TagKey": key}}
+		}
+		if utf8.RuneCountInString(tagValue) > 256 || !validTagText(tagValue) {
+			return &spi.Fault{Code: "InvalidTag", Message: "The TagValue you have provided is invalid", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"TagKey": key, "TagValue": tagValue}}
+		}
+		keys[key] = struct{}{}
+	}
+	return nil
+}
+
+func validTagText(value string) bool {
+	for _, r := range value {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.IsSpace(r) && !strings.ContainsRune("_.:/=+-@", r) {
+			return false
+		}
+	}
+	return true
+}
+
+func requestObjectMetadata(req *spi.Request) map[string]any {
+	if copied := asMap(req.Input["_ObjectMetadata"]); len(copied) > 0 {
+		return cloneMap(copied)
+	}
+	metadata := map[string]any{}
+	for _, field := range []struct{ key, input, header string }{
+		{"cacheControl", "CacheControl", "Cache-Control"},
+		{"contentDisposition", "ContentDisposition", "Content-Disposition"},
+		{"contentEncoding", "ContentEncoding", "Content-Encoding"},
+		{"contentLanguage", "ContentLanguage", "Content-Language"},
+		{"contentType", "ContentType", "Content-Type"},
+		{"expires", "Expires", "Expires"},
+	} {
+		if value := requestCondition(req, field.input, field.header); value != "" {
+			metadata[field.key] = value
+		}
+	}
+	if str(metadata["contentType"]) == "" {
+		metadata["contentType"] = "binary/octet-stream"
+	}
+	user := map[string]any{}
+	for key, value := range asMap(req.Input["Metadata"]) {
+		metadataValue := str(value)
+		if req.Operation != "PostObject" {
+			metadataValue = decodeRFC2047Header(metadataValue)
+		}
+		user[strings.ToLower(key)] = metadataValue
+	}
+	if req.HTTP != nil {
+		for key, values := range req.HTTP.Header {
+			if name, ok := strings.CutPrefix(strings.ToLower(key), "x-amz-meta-"); ok && len(values) > 0 {
+				user[name] = decodeRFC2047Header(strings.Join(values, ","))
+			}
+		}
+	}
+	if len(user) > 0 {
+		metadata["user"] = user
+	}
+	return metadata
+}
+
+func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket string) (string, string, bool, error) {
+	if resolved := asMap(req.Input["_ObjectEncryption"]); len(resolved) > 0 {
+		return str(resolved["serverSideEncryption"]), str(resolved["ssekmsKeyId"]), truthy(resolved["bucketKeyEnabled"]), nil
+	}
+	algorithm := requestCondition(req, "ServerSideEncryption", "x-amz-server-side-encryption")
+	keyID := requestCondition(req, "SSEKMSKeyId", "x-amz-server-side-encryption-aws-kms-key-id")
+	bucketKey := truthy(req.Input["BucketKeyEnabled"])
+	if !bucketKey && req.HTTP != nil {
+		bucketKey = truthy(req.HTTP.Header.Get("x-amz-server-side-encryption-bucket-key-enabled"))
+	}
+	defaultAlgorithm, defaultKeyID := "", ""
+	defaultBucketKey := false
+	raw, ok, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/encryption")
+	if ok {
+		var document map[string]any
+		_ = json.Unmarshal(raw, &document)
+		configuration := asMap(document["ServerSideEncryptionConfiguration"])
+		if len(configuration) == 0 {
+			configuration = document
+		}
+		if rules := asSlice(configuration["Rules"]); len(rules) > 0 {
+			rule := asMap(rules[0])
+			defaults := asMap(rule["ApplyServerSideEncryptionByDefault"])
+			defaultAlgorithm = str(defaults["SSEAlgorithm"])
+			defaultKeyID = str(defaults["KMSMasterKeyID"])
+			defaultBucketKey = truthy(rule["BucketKeyEnabled"])
+		} else if encoded := str(document["Document"]); encoded != "" {
+			var parsed struct {
+				Rules []struct {
+					Defaults struct {
+						Algorithm string `xml:"SSEAlgorithm"`
+						KeyID     string `xml:"KMSMasterKeyID"`
+					} `xml:"ApplyServerSideEncryptionByDefault"`
+					BucketKey bool `xml:"BucketKeyEnabled"`
+				} `xml:"Rule"`
+			}
+			if xml.Unmarshal([]byte(encoded), &parsed) == nil && len(parsed.Rules) > 0 {
+				defaultAlgorithm = parsed.Rules[0].Defaults.Algorithm
+				defaultKeyID = parsed.Rules[0].Defaults.KeyID
+				defaultBucketKey = parsed.Rules[0].BucketKey
+			}
+		}
+	}
+	if algorithm == "" {
+		algorithm = defaultAlgorithm
+		if algorithm == "" {
+			algorithm = "AES256"
+		}
+	}
+	bucketKey = bucketKey || defaultBucketKey
+	if algorithm != "AES256" && algorithm != "aws:fsx" && algorithm != "aws:backup" && algorithm != "aws:kms" && algorithm != "aws:kms:dsse" {
+		return "", "", false, &spi.Fault{Code: "InvalidArgument", Message: "The encryption method specified is not supported", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	if algorithm == "aws:kms" && keyID == "" {
+		keyID = defaultKeyID
+		if keyID == "" {
+			var err error
+			keyID, err = p.ensureAWSManagedS3Key(ctx, req)
+			if err != nil {
+				return "", "", false, err
+			}
+		}
+	}
+	if keyID != "" && req.Operation != "PostObject" {
+		var err error
+		keyID, err = p.validateKMSKey(ctx, req, keyID)
+		if err != nil {
+			return "", "", false, err
+		}
+	}
+	return algorithm, keyID, bucketKey, nil
+}
+
+func (p *Pack) ensureAWSManagedS3Key(ctx context.Context, req *spi.Request) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	scope := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region)
+	aliases := scope.Collection("kmsalias")
+	if raw, ok, _ := aliases.Get(ctx, "alias/aws/s3"); ok {
+		var alias map[string]any
+		_ = json.Unmarshal(raw, &alias)
+		return p.validateKMSKey(ctx, req, str(alias["TargetKeyId"]))
+	}
+	id := p.deps.Rand.Hex(16)
+	arn := fmt.Sprintf("arn:aws:kms:%s:%s:key/%s", req.Identity.Region, req.Identity.Account, id)
+	record := map[string]any{
+		"AWSAccountId": req.Identity.Account, "Arn": arn, "CreationDate": p.deps.Clock.Now().UTC().Format(time.RFC3339),
+		"CurrentKeyMaterialId": p.deps.Rand.Hex(16), "CustomerMasterKeySpec": "SYMMETRIC_DEFAULT",
+		"Description": "Default key that protects my S3 objects when no other key is defined", "Enabled": true,
+		"EncryptionAlgorithms": []any{"SYMMETRIC_DEFAULT"}, "KeyId": id, "KeyManager": "AWS", "KeySpec": "SYMMETRIC_DEFAULT",
+		"KeyState": "Enabled", "KeyUsage": "ENCRYPT_DECRYPT", "MultiRegion": false, "Origin": "AWS_KMS",
+		"KeyMaterial": base64.StdEncoding.EncodeToString(p.deps.Rand.Bytes(32)),
+	}
+	raw, _ := json.Marshal(record)
+	if err := scope.Collection("kms").Put(ctx, id, raw); err != nil {
+		return "", err
+	}
+	raw, _ = json.Marshal(map[string]any{"AliasName": "alias/aws/s3", "TargetKeyId": id})
+	if err := aliases.Put(ctx, "alias/aws/s3", raw); err != nil {
+		return "", err
+	}
+	return arn, nil
+}
+
+func (p *Pack) validateKMSKey(ctx context.Context, req *spi.Request, keyID string) (string, error) {
+	identity := req.Identity
+	if arn := strings.SplitN(keyID, ":", 6); len(arn) == 6 && arn[0] == "arn" && arn[2] == "kms" {
+		if arn[3] != identity.Region {
+			return "", &spi.Fault{Code: "KMS.NotFoundException", Message: "Invalid arn " + arn[3], HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		}
+		identity.Account = arn[4]
+	}
+	scope := p.deps.Store.Scope(identity.Account, identity.Region)
+	if strings.HasPrefix(keyID, "alias/") || strings.Contains(keyID, ":alias/") {
+		name := keyID[strings.Index(keyID, "alias/"):]
+		if raw, ok, _ := scope.Collection("kmsalias").Get(ctx, name); ok {
+			var alias map[string]any
+			_ = json.Unmarshal(raw, &alias)
+			keyID = str(alias["TargetKeyId"])
+		}
+	}
+	if slash := strings.LastIndex(keyID, "/"); slash >= 0 {
+		keyID = keyID[slash+1:]
+	}
+	raw, ok, _ := scope.Collection("kms").Get(ctx, keyID)
+	if !ok {
+		return "", &spi.Fault{Code: "KMS.NotFoundException", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+	}
+	var key map[string]any
+	_ = json.Unmarshal(raw, &key)
+	arn := str(key["Arn"])
+	switch str(key["KeyState"]) {
+	case "Enabled":
 		return arn, nil
 	case "PendingDeletion":
 		return "", &spi.Fault{Code: "KMS.KMSInvalidStateException", Message: arn + " is pending deletion.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
@@ -2227,7 +5381,7 @@ func (p *Pack) requireBucketOwner(ctx context.Context, req *spi.Request, b, expe
 		}
 	}
 	if !ok {
-		return &spi.Fault{Code: "NoSuchBucket", Message: "The specified bucket does not exist", HTTPStatus: 404, Fault: "client"}
+		return &spi.Fault{Code: "NoSuchBucket", Message: "The specified bucket does not exist", HTTPStatus: 404, Fault: "client", Fields: map[string]any{"BucketName": b}}
 	}
 	if expected != "" && expected != req.Identity.Account {
 		return &spi.Fault{Code: "AccessDenied", Message: "Access Denied", HTTPStatus: http.StatusForbidden, Fault: "client"}

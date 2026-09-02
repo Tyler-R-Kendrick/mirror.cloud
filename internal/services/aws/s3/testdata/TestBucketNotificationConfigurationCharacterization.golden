@@ -50,6 +50,36 @@
       "Time": "1970-01-01T00:00:00.000Z"
     }
   },
+  "filterFaults": {
+    "invalidName": {
+      "argument": "FilterRule.Name",
+      "code": "InvalidArgument",
+      "message": "filter rule name must be either prefix or suffix",
+      "status": 400,
+      "value": "INVALID"
+    },
+    "missing": {
+      "argument": null,
+      "code": "MalformedXML",
+      "message": "",
+      "status": 400,
+      "value": null
+    },
+    "missingName": {
+      "argument": null,
+      "code": "MalformedXML",
+      "message": "",
+      "status": 400,
+      "value": null
+    },
+    "missingValue": {
+      "argument": null,
+      "code": "MalformedXML",
+      "message": "",
+      "status": 400,
+      "value": null
+    }
+  },
   "get": {
     "QueueConfigurations": [
       {

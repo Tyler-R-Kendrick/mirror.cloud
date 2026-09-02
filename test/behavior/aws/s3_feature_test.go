@@ -3088,6 +3088,20 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if err != nil || len(messages) != 2 || !matched {
 			t.Fatalf("notification messages = %#v, err=%v", messages, err)
 		}
+		for _, test := range []struct{ name, rule, code, message string }{
+			{"missing fields", `<FilterRule></FilterRule>`, "MalformedXML", "The XML you provided was not well-formed or did not validate against our published schema"},
+			{"missing value", `<FilterRule><Name>prefix</Name></FilterRule>`, "MalformedXML", "The XML you provided was not well-formed or did not validate against our published schema"},
+			{"missing name", `<FilterRule><Value>test</Value></FilterRule>`, "MalformedXML", "The XML you provided was not well-formed or did not validate against our published schema"},
+			{"invalid name", `<FilterRule><Name>INVALID</Name><Value>test</Value></FilterRule>`, "InvalidArgument", "filter rule name must be either prefix or suffix"},
+		} {
+			configuration := []byte(`<NotificationConfiguration><QueueConfiguration><Queue>arn:aws:sqs:us-east-1:000000000000:notification-queue</Queue><Event>s3:ObjectCreated:*</Event><Filter><S3Key>` + test.rule + `</S3Key></Filter></QueueConfiguration></NotificationConfiguration>`)
+			res = do(http.MethodPut, "/notification-bdd?notification", configuration, "")
+			body, _ = io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>"+test.code+"</Code>")) || !bytes.Contains(body, []byte("<Message>"+test.message+"</Message>")) {
+				t.Fatalf("%s notification filter %d %s", test.name, res.StatusCode, body)
+			}
+		}
 		invalid := []byte(`<NotificationConfiguration><QueueConfiguration><Queue>arn:aws:sqs:us-east-1:000000000000:missing</Queue><Event>s3:ObjectCreated:*</Event></QueueConfiguration></NotificationConfiguration>`)
 		res = do(http.MethodPut, "/notification-bdd?notification", invalid, "")
 		body, _ = io.ReadAll(res.Body)

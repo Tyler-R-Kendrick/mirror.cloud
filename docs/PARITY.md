@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.8% |
 | S3 statement coverage | 89.1% |
-| LocalStack S3 test functions explicitly traced | 28 / 463 (6.0%) |
-| LocalStack S3 test functions not yet traced | 435 / 463 (94.0%) |
+| LocalStack S3 test functions explicitly traced | 33 / 463 (7.1%) |
+| LocalStack S3 test functions not yet traced | 430 / 463 (92.9%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -65,6 +65,11 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3_cors.py::TestS3Cors::test_put_cors_empty_origin` | `TestBucketCors` empty-origin round trip | Mapped and green |
 | `test_s3_cors.py::TestS3Cors::test_delete_cors` | `TestBucketCors`, characterization snapshot, SDK contract, BDD, fuzz, and mutation coverage | Mapped and green |
 | `test_s3_cors.py::TestS3Cors::test_s3_cors_disabled` | `TestS3AWSChunkedContentEncodingCharacterization`, SDK contract, HTTP BDD, and content-encoding mutation coverage; Mirror has no custom-CORS toggle in its decoding path | Mapped and green |
+| `test_s3_notifications_eventbridge.py::TestS3NotificationsToEventBridge::test_object_created_put` | `TestBucketNotificationEventBridgeDelivery` verifies EventBridge-to-SQS create and delete delivery, distinct event types, and object details | Mapped and green |
+| `test_s3_notifications_eventbridge.py::TestS3NotificationsToEventBridge::test_object_put_acl` | `TestBucketNotificationEventBridgeDelivery` verifies ACL update delivery and omits size/sequencer; restore/ACL record coverage also exists | Mapped and green |
+| `test_s3_notifications_eventbridge.py::TestS3NotificationsToEventBridge::test_restore_object` | `TestBucketNotificationEventBridgeDelivery` verifies initiated/completed restore events, expiry, source storage class, and source-IP omission | Mapped and green |
+| `test_s3_notifications_eventbridge.py::TestS3NotificationsToEventBridge::test_object_created_put_in_different_region` | `TestBucketNotificationEventBridgeDelivery` writes through a secondary-region identity and verifies the stored bucket region in every event | Mapped and green |
+| `test_s3_notifications_eventbridge.py::TestS3NotificationsToEventBridge::test_object_created_put_versioned` | `TestBucketNotificationEventBridgeDelivery` verifies enabled/suspended puts, version IDs, delete markers, and permanent deletion events | Mapped and green |
 
 ## Source-only findings
 
@@ -76,4 +81,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 28/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 33/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

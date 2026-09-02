@@ -1020,6 +1020,45 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a destination If-Match list When putting or copying Then S3 requires one ETag", func(t *testing.T) {
+		res := do(http.MethodPut, "/write-if-match-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/write-if-match-bdd/source", []byte("source"), "")
+		res.Body.Close()
+		for _, operation := range []string{"PutObject", "CopyObject"} {
+			key := "destination-" + operation
+			res = do(http.MethodPut, "/write-if-match-bdd/"+key, []byte("old"), "")
+			etag := res.Header.Get("ETag")
+			res.Body.Close()
+			request, err := http.NewRequest(http.MethodPut, ts.URL+"/write-if-match-bdd/"+key, strings.NewReader("new"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", auth)
+			request.Header.Set("If-Match", `"wrong", `+etag)
+			if operation == "CopyObject" {
+				request.Body = http.NoBody
+				request.ContentLength = 0
+				request.Header.Set("x-amz-copy-source", "/write-if-match-bdd/source")
+			}
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
+				t.Fatalf("%s If-Match list fault = %d %s", operation, response.StatusCode, body)
+			}
+			res = do(http.MethodGet, "/write-if-match-bdd/"+key, nil, "")
+			body, _ = io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK || string(body) != "old" {
+				t.Fatalf("%s If-Match list stored %d %q", operation, res.StatusCode, body)
+			}
+		}
+	})
+
 	t.Run("Given DeleteObject preconditions When deleting Then S3 returns LocalStack NotImplemented faults", func(t *testing.T) {
 		res := do(http.MethodPut, "/delete-precondition-bdd", nil, "")
 		res.Body.Close()

@@ -1581,6 +1581,28 @@ func FuzzListObjectVersionsPagination(f *testing.F) {
 	})
 }
 
+func FuzzGetObjectAttributesStorageClass(f *testing.F) {
+	for _, attribute := range []string{"StorageClass", "storage_class", "ETag", "ETag, StorageClass"} {
+		f.Add(attribute)
+	}
+	f.Fuzz(func(t *testing.T, attribute string) {
+		if len(attribute) > 64 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "storage-attributes-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "storage-attributes-fuzz", "Key": "key"}, []byte("body"))
+		output := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": "storage-attributes-fuzz", "Key": "key", "ObjectAttributes": attribute}, nil).Output
+		requested := false
+		for _, value := range strings.Split(attribute, ",") {
+			requested = requested || strings.EqualFold(strings.ReplaceAll(strings.TrimSpace(value), "_", ""), "StorageClass")
+		}
+		if got, present := output["StorageClass"]; requested != present || present && got != "STANDARD" {
+			t.Fatalf("attribute %q output = %#v", attribute, output)
+		}
+	})
+}
+
 func FuzzListMultipartUploadsMarkers(f *testing.F) {
 	for _, seed := range []struct {
 		max, start uint8

@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.8% |
 | S3 statement coverage | 89.1% |
-| LocalStack S3 test functions explicitly traced | 9 / 463 (1.9%) |
-| LocalStack S3 test functions not yet traced | 454 / 463 (98.1%) |
+| LocalStack S3 test functions explicitly traced | 28 / 463 (6.0%) |
+| LocalStack S3 test functions not yet traced | 435 / 463 (94.0%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -46,6 +46,25 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3_concurrency.py::TestParallelBucketCreation::test_parallel_object_creation_and_listing` | `TestConcurrentListObjectPaginationRemainsOrdered`, list pagination characterization, AWS SDK contract, HTTP BDD, fuzz, and mutation coverage | Mapped and race-clean |
 | `test_s3_concurrency.py::TestParallelBucketCreation::test_parallel_object_creation_and_read` | `TestConcurrentPutsAndGetsSameKey`, object round-trip unit, AWS SDK contract, and HTTP BDD coverage | Mapped and race-clean |
 | `test_s3_concurrency.py::TestParallelBucketCreation::test_parallel_object_read_range` | `TestConcurrentPutsAndGetsSameKey`, `TestObjectByteRanges`, AWS SDK contract, HTTP BDD, and mutation coverage | Mapped and race-clean |
+| `test_s3_cors.py::TestS3Cors::test_cors_http_options_no_config` | `TestBucketCorsHTTP`, `TestBucketCorsCharacterization`, HTTP BDD, and mutation coverage | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_cors_http_get_no_config` | `TestBucketCorsHTTP` unconfigured actual-request checks and HTTP BDD coverage | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_cors_no_config_localstack_allowed` | `TestBucketCorsHTTP` and characterization coverage for LocalStack default origins | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_cors_list_buckets` | `TestBucketCorsHTTP` preflight and actual-request checks for `ListBuckets` | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_cors_http_options_non_existent_bucket` | `TestBucketCorsHTTP` missing-origin, unconfigured, and missing-bucket checks | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_cors_http_options_non_existent_bucket_ls_allowed` | `TestBucketCorsHTTP` missing-bucket LocalStack-default check | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_cors_match_origins` | `TestBucketCorsHTTP`, characterization snapshot, SDK contract, BDD, fuzz, chaos, and mutation coverage | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_cors_options_match_partial_origin` | `TestBucketCorsHTTP` wildcard-origin match and CORS fuzz coverage | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_cors_options_fails_partial_origin` | `TestBucketCorsHTTP` trailing-path rejection and mutation coverage | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_cors_match_methods` | `TestBucketCorsHTTP`, SDK contract, BDD, fuzz, chaos, and mutation coverage | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_cors_match_headers` | `TestBucketCorsHTTP` case-insensitive wildcard and comma-separated header checks plus mutation coverage | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_cors_expose_headers` | `TestBucketCorsHTTP`, characterization snapshot, SDK contract, and mutation coverage | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_get_cors` | `TestBucketCors`, characterization snapshot, SDK contract, BDD, fuzz, chaos, and mutation coverage | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_put_cors` | `TestBucketCors`, characterization snapshot, SDK contract, BDD, fuzz, chaos, and mutation coverage | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_put_cors_default_values` | `TestBucketCors` optional-field round trip and HTTP preflight coverage | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_put_cors_invalid_rules` | `TestBucketCors`, characterization snapshot, BDD, fuzz, chaos, and mutation coverage | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_put_cors_empty_origin` | `TestBucketCors` empty-origin round trip | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_delete_cors` | `TestBucketCors`, characterization snapshot, SDK contract, BDD, fuzz, and mutation coverage | Mapped and green |
+| `test_s3_cors.py::TestS3Cors::test_s3_cors_disabled` | `TestS3AWSChunkedContentEncodingCharacterization`, SDK contract, HTTP BDD, and content-encoding mutation coverage; Mirror has no custom-CORS toggle in its decoding path | Mapped and green |
 
 ## Source-only findings
 
@@ -57,4 +76,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 9/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 28/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

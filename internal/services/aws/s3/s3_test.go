@@ -967,6 +967,11 @@ func TestBucketCors(t *testing.T) {
 		map[string]any{"AllowedMethods": []any{"GET", "HEAD"}, "AllowedOrigins": []any{"https://example.test"}, "AllowedHeaders": []any{"*"}, "ExposeHeaders": []any{"ETag"}, "MaxAgeSeconds": float64(300), "ID": "read"},
 		map[string]any{"AllowedMethods": []any{"PUT", "POST", "DELETE"}, "AllowedOrigins": []any{"*"}},
 	}
+	emptyOrigin := []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{""}}}
+	mustInvoke(t, p, "PutBucketCors", map[string]any{"Bucket": "cors", "CORSConfiguration": map[string]any{"CORSRules": emptyOrigin}}, nil)
+	if got := mustInvoke(t, p, "GetBucketCors", input, nil).Output["CORSRules"]; !reflect.DeepEqual(got, emptyOrigin) {
+		t.Fatalf("empty CORS origin = %#v", got)
+	}
 	mustInvoke(t, p, "PutBucketCors", map[string]any{"Bucket": "cors", "CORSConfiguration": map[string]any{"CORSRules": rules}}, nil)
 	if got := mustInvoke(t, p, "GetBucketCors", input, nil).Output["CORSRules"]; !reflect.DeepEqual(got, rules) {
 		t.Fatalf("CORS rules = %#v", got)
@@ -1058,6 +1063,7 @@ func TestBucketCorsHTTP(t *testing.T) {
 
 	unconfigured := s3.New(spitest.Deps(t))
 	mustInvoke(t, unconfigured, "CreateBucket", map[string]any{"Bucket": "cors-none"}, nil)
+	mustInvoke(t, unconfigured, "PutObject", map[string]any{"Bucket": "cors-none", "Key": "key"}, []byte("body"))
 	noConfig := httptest.NewRequest(http.MethodOptions, "https://cors-none.s3.us-east-1.amazonaws.com/key", nil)
 	noConfig.Header.Set("Origin", "https://app.example.test")
 	_, err = unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: noConfig})
@@ -1085,6 +1091,38 @@ func TestBucketCorsHTTP(t *testing.T) {
 		if fault := asFault(t, err); fault.Code != "AccessForbidden" {
 			t.Errorf("forbidden default origin %q = %#v", origin, fault)
 		}
+	}
+	for origin, want := range map[string]string{"https://unconfigured.example": "", "https://app.localstack.cloud": "https://app.localstack.cloud"} {
+		request := httptest.NewRequest(http.MethodGet, "https://cors-none.s3.us-east-1.amazonaws.com/key", nil)
+		request.Header.Set("Origin", origin)
+		response, err := unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "GetObject", Input: map[string]any{}, Identity: ident(), HTTP: request})
+		if err != nil {
+			t.Errorf("unconfigured GET origin %q = %#v, %v", origin, response, err)
+			continue
+		}
+		if response.Headers.Get("Access-Control-Allow-Origin") != want {
+			t.Errorf("unconfigured GET origin %q = %#v", origin, response)
+		}
+		if response.Stream != nil {
+			_ = response.Stream.Close()
+		}
+	}
+	for name, target := range map[string]struct {
+		operation string
+		input     map[string]any
+	}{"list buckets": {"ListBuckets", map[string]any{}}, "missing bucket": {"GetObject", map[string]any{"Bucket": "missing", "Key": "key"}}} {
+		request := httptest.NewRequest(http.MethodOptions, "https://s3.us-east-1.amazonaws.com/", nil)
+		request.Header.Set("Origin", "https://app.localstack.cloud")
+		response, err := unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: target.operation, Input: target.input, Identity: ident(), HTTP: request})
+		if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != "https://app.localstack.cloud" {
+			t.Errorf("LocalStack default %s = %#v, %v", name, response, err)
+		}
+	}
+	list := httptest.NewRequest(http.MethodGet, "https://s3.us-east-1.amazonaws.com/", nil)
+	list.Header.Set("Origin", "https://app.localstack.cloud")
+	response, err = unconfigured.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "ListBuckets", Input: map[string]any{}, Identity: ident(), HTTP: list})
+	if err != nil || response.Headers.Get("Access-Control-Allow-Origin") != "https://app.localstack.cloud" {
+		t.Fatalf("LocalStack default ListBuckets GET = %#v, %v", response, err)
 	}
 
 	get := httptest.NewRequest(http.MethodGet, "https://cors-http.s3.us-east-1.amazonaws.com/key", nil)

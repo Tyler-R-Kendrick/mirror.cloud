@@ -3207,6 +3207,58 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given bucket metrics When managing configurations Then S3 persists and reports missing IDs", func(t *testing.T) {
+		res := do(http.MethodPut, "/metrics-bdd", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("create metrics bucket %d", res.StatusCode)
+		}
+		configuration := []byte(`<MetricsConfiguration><Id>metrics</Id><Filter><Prefix>logs/</Prefix></Filter></MetricsConfiguration>`)
+		res = do(http.MethodPut, "/metrics-bdd?metrics&id=metrics", configuration, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || len(body) != 0 {
+			t.Fatalf("put metrics %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/metrics-bdd?metrics&id=metrics", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Id>metrics</Id>")) || !bytes.Contains(body, []byte("<Prefix>logs/</Prefix>")) {
+			t.Fatalf("get metrics %d %s", res.StatusCode, body)
+		}
+		overwrite := []byte(`<MetricsConfiguration><Id>metrics</Id><Filter><Prefix>logs/new-prefix</Prefix></Filter></MetricsConfiguration>`)
+		res = do(http.MethodPut, "/metrics-bdd?metrics&id=metrics", overwrite, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		res = do(http.MethodGet, "/metrics-bdd?metrics&id=metrics", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Prefix>logs/new-prefix</Prefix>")) {
+			t.Fatalf("overwritten metrics %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodGet, "/metrics-bdd?metrics", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<ListBucketMetricsConfigurationsResult")) || !bytes.Contains(body, []byte("<MetricsConfiguration>")) || !bytes.Contains(body, []byte("<IsTruncated>false</IsTruncated>")) {
+			t.Fatalf("list metrics %d %s", res.StatusCode, body)
+		}
+		res = do(http.MethodDelete, "/metrics-bdd?metrics&id=metrics", nil, "")
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNoContent {
+			t.Fatalf("delete metrics %d", res.StatusCode)
+		}
+		for _, method := range []string{http.MethodGet, http.MethodDelete} {
+			res = do(method, "/metrics-bdd?metrics&id=metrics", nil, "")
+			body, _ = io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchConfiguration</Code>")) || !bytes.Contains(body, []byte("<Message>The specified configuration does not exist.</Message>")) {
+				t.Fatalf("missing metrics %s %d %s", method, res.StatusCode, body)
+			}
+		}
+	})
+
 	t.Run("Given a globally owned bucket When another identity creates it Then ownership errors are returned", func(t *testing.T) {
 		create := func(account, region string) (int, []byte) {
 			t.Helper()

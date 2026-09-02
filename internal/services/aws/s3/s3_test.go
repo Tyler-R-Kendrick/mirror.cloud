@@ -1579,13 +1579,14 @@ func TestBucketPolicyConfiguration(t *testing.T) {
 	input := map[string]any{"Bucket": "policy"}
 	mustInvoke(t, p, "CreateBucket", input, nil)
 	_, err := invoke(t, p, "GetBucketPolicy", input, nil)
-	if fault := asFault(t, err); fault.Code != "NoSuchBucketPolicy" || fault.HTTPStatus != http.StatusNotFound || fault.Fields["BucketName"] != "policy" {
+	if fault := asFault(t, err); fault.Code != "NoSuchBucketPolicy" || fault.Message != "The bucket policy does not exist" ||
+		fault.HTTPStatus != http.StatusNotFound || fault.Fields["BucketName"] != "policy" {
 		t.Fatalf("default policy fault = %#v", fault)
 	}
 
 	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::policy/*"}]}`
 	put := mustInvoke(t, p, "PutBucketPolicy", map[string]any{"Bucket": "policy", "Policy": policy}, nil)
-	if put.Status != http.StatusOK || len(put.Output) != 0 {
+	if put.Status != http.StatusNoContent || len(put.Output) != 0 {
 		t.Fatalf("put policy = %#v", put)
 	}
 	if got := mustInvoke(t, p, "GetBucketPolicy", input, nil).Output["Policy"]; got != policy {
@@ -1613,10 +1614,13 @@ func TestBucketPolicyConfiguration(t *testing.T) {
 		})
 	}
 	for range 2 {
-		mustInvoke(t, p, "DeleteBucketPolicy", input, nil)
+		if deleted := mustInvoke(t, p, "DeleteBucketPolicy", input, nil); deleted.Status != http.StatusNoContent {
+			t.Fatalf("delete policy = %#v", deleted)
+		}
 	}
 	_, err = invoke(t, p, "GetBucketPolicy", input, nil)
-	if fault := asFault(t, err); fault.Code != "NoSuchBucketPolicy" {
+	if fault := asFault(t, err); fault.Code != "NoSuchBucketPolicy" || fault.Message != "The bucket policy does not exist" ||
+		fault.HTTPStatus != http.StatusNotFound || fault.Fields["BucketName"] != "policy" {
 		t.Fatalf("deleted policy fault = %#v", fault)
 	}
 }
@@ -2004,14 +2008,15 @@ func TestBucketPolicyCharacterization(t *testing.T) {
 	_, invalidErr := invoke(t, p, "PutBucketPolicy", map[string]any{"Bucket": input["Bucket"], "Policy": `{}`}, nil)
 	preserved := mustInvoke(t, p, "GetBucketPolicy", input, nil)
 	deleted := mustInvoke(t, p, "DeleteBucketPolicy", input, nil)
+	idempotentDelete := mustInvoke(t, p, "DeleteBucketPolicy", input, nil)
 	_, finalErr := invoke(t, p, "GetBucketPolicy", input, nil)
 	missing, invalid, final := asFault(t, missingErr), asFault(t, invalidErr), asFault(t, finalErr)
 	golden.AssertJSON(t, map[string]any{
 		"configured": configured.Output,
-		"deleted":    deleted.Status,
-		"final":      map[string]any{"code": final.Code, "bucket": final.Fields["BucketName"]},
+		"deleted":    []any{deleted.Status, idempotentDelete.Status},
+		"final":      map[string]any{"code": final.Code, "message": final.Message, "status": final.HTTPStatus, "bucket": final.Fields["BucketName"]},
 		"invalid":    map[string]any{"code": invalid.Code, "message": invalid.Message},
-		"missing":    map[string]any{"code": missing.Code, "bucket": missing.Fields["BucketName"]},
+		"missing":    map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus, "bucket": missing.Fields["BucketName"]},
 		"preserved":  preserved.Output,
 		"put":        put.Status,
 	})

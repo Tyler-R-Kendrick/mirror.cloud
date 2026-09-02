@@ -11,9 +11,9 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
-| S3 statement coverage | 89.8% |
-| LocalStack S3 test functions explicitly traced | 132 / 463 (28.5%) |
-| LocalStack S3 test functions not yet traced | 331 / 463 (71.5%) |
+| S3 statement coverage | 89.9% |
+| LocalStack S3 test functions explicitly traced | 134 / 463 (28.9%) |
+| LocalStack S3 test functions not yet traced | 329 / 463 (71.1%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -169,6 +169,8 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3_api.py::TestS3BucketOwnershipControls::test_crud_bucket_ownership_controls` | `TestCreateBucketObjectOwnership`, `TestBucketOwnershipControls`, characterization snapshots, AWS SDK contract, HTTP BDD, fuzz, chaos, and mutation coverage verify enforced defaults, create-time overrides, replacement, idempotent deletion, and exact missing-control faults | Mapped and race-clean |
 | `test_s3_api.py::TestS3BucketOwnershipControls::test_bucket_ownership_controls_exc` | Atomic ownership validation cases, AWS SDK contract, HTTP BDD, fuzz, chaos, snapshots, and mutation coverage verify malformed rules plus exact invalid create-header messages and fields without reserving buckets | Mapped and race-clean |
 | `test_s3_api.py::TestS3PublicAccessBlock::test_crud_public_access_block` | `TestPublicAccessBlock`, characterization snapshots, AWS SDK contract, HTTP BDD, fuzz, chaos, and mutation coverage verify all-true create defaults, partial replacement defaults, idempotent deletion, and exact missing-configuration faults | Mapped and race-clean |
+| `test_s3_api.py::TestS3BucketPolicy::test_bucket_policy_crud` | `TestBucketPolicyConfiguration`, characterization snapshots, AWS SDK contract, HTTP BDD, fuzz, concurrent chaos, and mutation coverage verify exact JSON preservation, 204 writes, idempotent deletion, and exact missing-policy faults | Mapped and race-clean |
+| `test_s3_api.py::TestS3BucketPolicy::test_bucket_policy_exc` | Atomic invalid-policy cases, characterization snapshots, AWS SDK contract, HTTP BDD, fuzz, chaos, and mutation coverage verify empty, non-object, malformed, and empty-object policies fail without replacing valid state | Mapped and race-clean |
 
 ## Source-only findings
 
@@ -180,4 +182,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 132/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 134/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

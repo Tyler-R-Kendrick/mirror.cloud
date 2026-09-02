@@ -2926,14 +2926,15 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodGet, "/policy-bdd?policy", nil, "")
 		body, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("NoSuchBucketPolicy")) {
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchBucketPolicy</Code>")) ||
+			!bytes.Contains(body, []byte("<Message>The bucket policy does not exist</Message>")) || !bytes.Contains(body, []byte("<BucketName>policy-bdd</BucketName>")) {
 			t.Fatalf("missing policy %d %s", res.StatusCode, body)
 		}
 		policy := []byte(`{"Version":"2012-10-17", "Statement":[{"Effect":"Allow","Principal":"*"}]}`)
 		res = do(http.MethodPut, "/policy-bdd?policy", policy, "")
 		io.Copy(io.Discard, res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK {
+		if res.StatusCode != http.StatusNoContent {
 			t.Fatalf("put policy %d", res.StatusCode)
 		}
 		res = do(http.MethodGet, "/policy-bdd?policy", nil, "")
@@ -2961,6 +2962,13 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			if res.StatusCode != http.StatusNoContent {
 				t.Fatalf("delete policy %d", res.StatusCode)
 			}
+		}
+		res = do(http.MethodGet, "/policy-bdd?policy", nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchBucketPolicy</Code>")) ||
+			!bytes.Contains(body, []byte("<Message>The bucket policy does not exist</Message>")) || !bytes.Contains(body, []byte("<BucketName>policy-bdd</BucketName>")) {
+			t.Fatalf("deleted policy %d %s", res.StatusCode, body)
 		}
 	})
 

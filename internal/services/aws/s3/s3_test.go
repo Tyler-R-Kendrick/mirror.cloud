@@ -5866,6 +5866,7 @@ func TestWritePreconditionFaults(t *testing.T) {
 		{"if-none-match", map[string]any{"IfNoneMatch": `"etag"`}, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
 		{"if-match-star", map[string]any{"IfMatch": "*"}, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
 	}
+	characterization := map[string]any{}
 	for _, operation := range []string{"PutObject", "CopyObject"} {
 		for _, test := range tests {
 			t.Run(operation+"/"+test.name, func(t *testing.T) {
@@ -5882,12 +5883,14 @@ func TestWritePreconditionFaults(t *testing.T) {
 				if fault.Code != "NotImplemented" || fault.Message != "A header you provided implies functionality that is not implemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fault != "server" || fault.Fields["Header"] != test.header || fault.Fields["additionalMessage"] != test.additional {
 					t.Fatalf("fault = %#v", fault)
 				}
+				characterization[operation+"/"+test.name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
 				if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "write-preconditions", "Key": "destination"}, nil))); body != "old" {
 					t.Fatalf("rejected write stored %q", body)
 				}
 			})
 		}
 	}
+	golden.AssertJSON(t, characterization)
 }
 
 func TestCompleteMultipartUploadConditionalConflicts(t *testing.T) {

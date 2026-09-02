@@ -1999,6 +1999,18 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("conditional copy: %v", err)
 	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("modified-copy"), CopySource: aws.String("sdk/k"), CopySourceIfModifiedSince: aws.Time(got.LastModified.Add(-time.Minute))}); err != nil {
+		t.Fatalf("versioned modified-since copy: %v", err)
+	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("modified-copy-rejected"), CopySource: aws.String("sdk/k"), CopySourceIfModifiedSince: got.LastModified}); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") {
+		t.Fatalf("versioned modified-since boundary: %v", err)
+	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("unmodified-copy"), CopySource: aws.String("sdk/k"), CopySourceIfUnmodifiedSince: got.LastModified}); err != nil {
+		t.Fatalf("versioned unmodified-since copy: %v", err)
+	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("unmodified-copy-rejected"), CopySource: aws.String("sdk/k"), CopySourceIfUnmodifiedSince: aws.Time(got.LastModified.Add(-time.Minute))}); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") {
+		t.Fatalf("versioned unmodified-since boundary: %v", err)
+	}
 	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("listed-copy"), CopySource: aws.String("sdk/k"), CopySourceIfMatch: listETag}); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") || !strings.Contains(err.Error(), "At least one of the pre-conditions you specified did not hold") {
 		t.Fatalf("copy source If-Match list: %v", err)
 	}

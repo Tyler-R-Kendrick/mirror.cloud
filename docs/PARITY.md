@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.6% |
-| LocalStack S3 test functions explicitly traced | 58 / 463 (12.5%) |
-| LocalStack S3 test functions not yet traced | 405 / 463 (87.5%) |
+| LocalStack S3 test functions explicitly traced | 65 / 463 (14.0%) |
+| LocalStack S3 test functions not yet traced | 398 / 463 (86.0%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -95,6 +95,13 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3_notifications_sqs.py::TestS3NotificationsToSQS::test_object_put_acl` | `TestBucketNotificationRestoreAndACLEvents` verifies `ObjectAcl:Put` queue delivery and record fields | Mapped and green |
 | `test_s3_notifications_sqs.py::TestS3NotificationsToSQS::test_restore_object` | `TestBucketNotificationRestoreAndACLEvents` verifies initiated and completed restore queue events, expiry, and storage class | Mapped and green |
 | `test_s3_notifications_sqs.py::TestS3NotificationsToSQS::test_object_created_put_versioned` | `TestBucketNotificationRemovalAndTaggingEvents` verifies a versioned PUT queue record includes the exact version ID, alongside delete-marker and permanent-delete events | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListBuckets::test_list_buckets_by_prefix_with_case_sensitivity` | `TestListBucketsPaginationAndFilters` verifies uppercase and lowercase prefixes are distinct and the requested prefix is returned | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListBuckets::test_list_buckets_with_max_buckets` | `TestListBucketsPaginationAndFilters`, SDK paginator contract, HTTP BDD, fuzz, snapshot, and mutation coverage verify bounded pages and opaque continuation tokens | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListBuckets::test_list_buckets_when_continuation_token_is_empty` | `TestListBucketsPaginationAndFilters` verifies an explicit empty token starts at the first matching bucket and still returns pagination metadata | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListBuckets::test_list_buckets_by_bucket_region` | `TestListBucketsPaginationAndFilters` and the SDK contract verify exact region filtering and `BucketRegion` output | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListBuckets::test_list_buckets_with_continuation_token` | `TestListBucketsPaginationAndFilters`, SDK paginator contract, HTTP BDD, fuzz, snapshot, and mutation coverage verify distinct ordered pages | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListBuckets::test_list_buckets_region_validation` | `TestListBucketsPaginationAndFilters` verifies the exact `InvalidArgument`, message, status, and `bucket-region` field for an unknown AWS region | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListBuckets::test_region_validation_non_standard_regions_enabled` | `TestListBucketsPaginationAndFilters` verifies opt-in creation and filtering in a nonstandard region plus cross-region endpoint rejection; config env/file unit and mutation coverage pin the opt-in | Mapped and green |
 
 ## Source-only findings
 
@@ -106,4 +113,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 58/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 65/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

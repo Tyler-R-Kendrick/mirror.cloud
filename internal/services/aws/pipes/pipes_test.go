@@ -178,6 +178,59 @@ func TestPipesRetriesFailedTargetWithoutDeletingSource(t *testing.T) {
 	})
 }
 
+func TestPipesRetrySurvivesClockAdvanceDuringWaitRegistration(t *testing.T) {
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	testClock := &delayedSecondWaitClock{
+		Controllable:   deps.Clock.(*clock.Controllable),
+		initialBlocked: make(chan struct{}),
+		initialRelease: make(chan struct{}),
+		blocked:        make(chan struct{}),
+		release:        make(chan struct{}),
+	}
+	deps.Clock = testClock
+	p := New(deps)
+	t.Cleanup(func() {
+		closeIfOpen(testClock.initialRelease)
+		closeIfOpen(testClock.release)
+		_ = p.Close()
+	})
+	select {
+	case <-testClock.initialBlocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not reach initial wait")
+	}
+	queue := sqs.New(deps)
+	invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": "source"})
+	invoke(t, p, id, "CreatePipe", pipeInput("retry-registration", "source", "late"))
+	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "source", "MessageBody": "retry-me"})
+	close(testClock.initialRelease)
+	select {
+	case <-testClock.blocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not reach retry wait")
+	}
+	if got := storedMessages(t, deps, id, "source"); len(got) != 1 || got[0]["receiveCount"] != float64(1) {
+		t.Fatalf("failed delivery changed source messages: %v", got)
+	}
+	invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": "late"})
+	if err := testClock.Advance(30 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	close(testClock.release)
+	eventually(t, func() bool {
+		return len(storedMessages(t, deps, id, "source")) == 0 && len(storedMessages(t, deps, id, "late")) == 1
+	})
+}
+
+func closeIfOpen(ch chan struct{}) {
+	select {
+	case <-ch:
+	default:
+		close(ch)
+	}
+}
+
 func TestPipesKinesisDeliveryAndCheckpoint(t *testing.T) {
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	deps := spitest.Deps(t)
@@ -973,5 +1026,36 @@ func eventually(t *testing.T, condition func() bool) {
 		default:
 			time.Sleep(time.Millisecond)
 		}
+	}
+}
+
+type delayedSecondWaitClock struct {
+	*clock.Controllable
+	calls          int
+	initialBlocked chan struct{}
+	initialRelease chan struct{}
+	blocked        chan struct{}
+	release        chan struct{}
+}
+
+func (c *delayedSecondWaitClock) After(d time.Duration) <-chan time.Time {
+	c.blockSecondWait()
+	return c.Controllable.After(d)
+}
+
+func (c *delayedSecondWaitClock) AfterUntil(at time.Time) <-chan time.Time {
+	c.blockSecondWait()
+	return c.Controllable.AfterUntil(at)
+}
+
+func (c *delayedSecondWaitClock) blockSecondWait() {
+	c.calls++
+	switch c.calls {
+	case 1:
+		close(c.initialBlocked)
+		<-c.initialRelease
+	case 2:
+		close(c.blocked)
+		<-c.release
 	}
 }

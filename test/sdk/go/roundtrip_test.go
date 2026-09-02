@@ -2414,6 +2414,13 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || aws.ToInt32(checksumPartHead.PartsCount) != 1 || aws.ToInt64(checksumPartHead.ContentLength) != 12 || aws.ToString(checksumPartHead.ChecksumSHA256) != aws.ToString(checksumPart.ChecksumSHA256) {
 		t.Fatalf("head multipart part: %#v %v", checksumPartHead, err)
 	}
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("standard-attributes"), Body: strings.NewReader("body")}); err != nil {
+		t.Fatal(err)
+	}
+	standardAttributes, err := s3c.GetObjectAttributes(context.Background(), &s3.GetObjectAttributesInput{Bucket: aws.String("sdk"), Key: aws.String("standard-attributes"), ObjectAttributes: []s3types.ObjectAttributes{s3types.ObjectAttributesStorageClass}})
+	if err != nil || standardAttributes.StorageClass != s3types.StorageClassStandard {
+		t.Fatalf("standard storage attributes: %#v %v", standardAttributes, err)
+	}
 	checksumAttributes, err := s3c.GetObjectAttributes(context.Background(), &s3.GetObjectAttributesInput{
 		Bucket: aws.String("sdk"), Key: aws.String("checksum-multipart"), MaxParts: aws.Int32(1),
 		ObjectAttributes: []s3types.ObjectAttributes{s3types.ObjectAttributesEtag, s3types.ObjectAttributesChecksum, s3types.ObjectAttributesObjectParts, s3types.ObjectAttributesStorageClass, s3types.ObjectAttributesObjectSize},

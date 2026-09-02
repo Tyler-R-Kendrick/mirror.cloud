@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.8% |
-| LocalStack S3 test functions explicitly traced | 116 / 463 (25.1%) |
-| LocalStack S3 test functions not yet traced | 347 / 463 (74.9%) |
+| LocalStack S3 test functions explicitly traced | 123 / 463 (26.6%) |
+| LocalStack S3 test functions not yet traced | 340 / 463 (73.4%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -153,6 +153,13 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3_api.py::TestS3BucketObjectTagging::test_create_bucket_with_tags_exc` | `TestCreateBucketTags`, HTTP BDD, fuzz, snapshot, and mutation coverage verify malformed entries, duplicate and invalid text, and the create-specific reserved-prefix message without a `TagKey` field | Mapped and green |
 | `test_s3_api.py::TestS3BucketObjectTagging::test_put_bucket_tagging_none_value` | `TestTagValidationAndBucketSemantics`, AWS SDK contract, HTTP BDD, fuzz, chaos, snapshot, and mutation coverage verify null and empty sets clear bucket tags and return HTTP 204 | Mapped and green |
 | `test_s3_api.py::TestS3BucketObjectTagging::test_put_object_tagging_none_value` | `TestTagValidationAndBucketSemantics` and the AWS SDK contract verify null and empty sets succeed with HTTP 200 and read back as an empty object tag set; shared validation is mutation-tested | Mapped and green |
+| `test_s3_api.py::TestS3BucketObjectTagging::test_object_tagging_crud` | `TestTagValidationAndBucketSemantics`, `TestVersionedObjectTaggingCharacterization`, AWS SDK contract, HTTP BDD, snapshot, fuzz, chaos, and mutation coverage verify empty reads, create, overwrite, delete, and object preservation | Mapped and green |
+| `test_s3_api.py::TestS3BucketObjectTagging::test_object_tagging_exc` | `TestVersionedObjectTaggingCharacterization`, AWS SDK contract, and HTTP BDD verify missing bucket/key faults, including AWS's GetObjectTagging bucket/key field anomaly and explicit missing-version handling; header validation has snapshot and mutation coverage | Mapped and green |
+| `test_s3_api.py::TestS3BucketObjectTagging::test_object_tagging_versioned` | `TestVersionedObjectTaggingCharacterization`, AWS SDK contract, HTTP BDD, fuzz, chaos, snapshot, and six focused mutants verify per-version isolation, current/explicit response IDs, deletion, copy, and exact delete-marker method faults | Mapped and green |
+| `test_s3_api.py::TestS3BucketObjectTagging::test_put_object_with_tags` | `TestTagValidationAndBucketSemantics`, `TestVersionedObjectTaggingCharacterization`, AWS SDK contract, HTTP BDD, and mutation coverage verify URL-query tag creation, deterministic reads, overwrite, permissive empty-value parsing, and tag counts | Mapped and green |
+| `test_s3_api.py::TestS3BucketObjectTagging::test_head_object_with_tags` | `TestVersionedObjectTaggingCharacterization`, AWS SDK contract, and HTTP BDD verify HEAD/GET tag counts after create, overwrite, and empty-set removal | Mapped and green |
+| `test_s3_api.py::TestS3BucketObjectTagging::test_object_tags_delete_or_overwrite_object` | `TestVersionedObjectTaggingCharacterization`, AWS SDK contract, snapshot, and mutation coverage verify unversioned overwrite/delete/recreate clears current tags while versioned writes preserve older-version tags | Mapped and green |
+| `test_s3_api.py::TestS3BucketObjectTagging::test_tagging_validation` | `TestTagValidationAndBucketSemantics`, AWS SDK contract, HTTP BDD, fuzz, snapshot, and mutation coverage verify duplicate, malformed, reserved-prefix, invalid-text, null-field, and count-limit faults for bucket and object tag sets | Mapped and green |
 
 ## Source-only findings
 
@@ -164,4 +171,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 116/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 123/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

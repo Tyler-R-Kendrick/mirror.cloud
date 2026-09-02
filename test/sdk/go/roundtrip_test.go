@@ -1327,6 +1327,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.PutBucketOwnershipControls(context.Background(), &s3.PutBucketOwnershipControlsInput{Bucket: aws.String("sdk"), OwnershipControls: controls}); err != nil {
 		t.Fatalf("restore bucket ownership controls: %v", err)
 	}
+	publicDefaults, err := s3c.GetPublicAccessBlock(context.Background(), &s3.GetPublicAccessBlockInput{Bucket: aws.String("sdk")})
+	if err != nil || publicDefaults.PublicAccessBlockConfiguration == nil || !aws.ToBool(publicDefaults.PublicAccessBlockConfiguration.BlockPublicAcls) ||
+		!aws.ToBool(publicDefaults.PublicAccessBlockConfiguration.BlockPublicPolicy) || !aws.ToBool(publicDefaults.PublicAccessBlockConfiguration.IgnorePublicAcls) ||
+		!aws.ToBool(publicDefaults.PublicAccessBlockConfiguration.RestrictPublicBuckets) {
+		t.Fatalf("default public access block: %#v %v", publicDefaults, err)
+	}
 	publicAccessBlock := &s3types.PublicAccessBlockConfiguration{BlockPublicAcls: aws.Bool(true)}
 	if _, err := s3c.PutPublicAccessBlock(context.Background(), &s3.PutPublicAccessBlockInput{Bucket: aws.String("sdk"), PublicAccessBlockConfiguration: publicAccessBlock}); err != nil {
 		t.Fatalf("put public access block: %v", err)

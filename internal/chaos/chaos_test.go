@@ -3181,6 +3181,15 @@ func TestConcurrentPublicAccessBlockRemainsValid(t *testing.T) {
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateBucket", Input: map[string]any{"Bucket": "public-access-block-chaos"}}); err != nil {
 		t.Fatal(err)
 	}
+	defaults, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetPublicAccessBlock", Input: map[string]any{"Bucket": "public-access-block-chaos"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for field, value := range defaults.Output["PublicAccessBlockConfiguration"].(map[string]any) {
+		if value != true {
+			t.Fatalf("default public access block %s = %#v", field, value)
+		}
+	}
 	errs := make(chan error, 32)
 	var wg sync.WaitGroup
 	for i := 0; i < cap(errs); i++ {

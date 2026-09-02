@@ -451,7 +451,9 @@ func TestBucketNotificationConfiguration(t *testing.T) {
 		{"missing topic", "InvalidArgument", map[string]any{"TopicConfigurations": []any{map[string]any{"TopicArn": "arn:aws:sns:us-east-1:111111111111:missing", "Events": []any{"s3:ObjectCreated:*"}}}}},
 		{"invalid lambda ARN", "InvalidArgument", map[string]any{"LambdaFunctionConfigurations": []any{map[string]any{"LambdaFunctionArn": "invalid-lambda", "Events": []any{"s3:ObjectCreated:*"}}}}},
 		{"missing lambda", "InvalidArgument", map[string]any{"LambdaFunctionConfigurations": []any{map[string]any{"LambdaFunctionArn": "arn:aws:lambda:us-east-1:111111111111:function:missing", "Events": []any{"s3:ObjectCreated:*"}}}}},
+		{"missing filter name and value", "MalformedXML", notificationWithFilter(map[string]any{})},
 		{"missing filter value", "MalformedXML", notificationWithFilter(map[string]any{"Name": "prefix"})},
+		{"missing filter name", "MalformedXML", notificationWithFilter(map[string]any{"Value": "test"})},
 		{"invalid filter name", "InvalidArgument", notificationWithFilter(map[string]any{"Name": "contains", "Value": "x"})},
 		{"unknown field", "MalformedXML", map[string]any{"UnknownConfigurations": []any{}}},
 	}
@@ -2240,6 +2242,21 @@ func TestBucketNotificationConfigurationCharacterization(t *testing.T) {
 			delivery["object"] = payload
 		}
 	}
+	filterFaults := map[string]any{}
+	for name, rule := range map[string]map[string]any{
+		"missing":      {},
+		"missingName":  {"Value": "test"},
+		"missingValue": {"Name": "prefix"},
+		"invalidName":  {"Name": "INVALID", "Value": "test"},
+	} {
+		configuration := map[string]any{"QueueConfigurations": []any{map[string]any{
+			"QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue", "Events": []any{"s3:ObjectCreated:*"},
+			"Filter": map[string]any{"Key": map[string]any{"FilterRules": []any{rule}}},
+		}}}
+		_, err := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": configuration, "SkipDestinationValidation": true}, nil)
+		fault := asFault(t, err)
+		filterFaults[name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "argument": fault.Fields["ArgumentName"], "value": fault.Fields["ArgumentValue"]}
+	}
 	_, invalidErr := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:123456789012:missing", "Events": []any{"s3:ObjectCreated:*"}}}}}, nil)
 	invalid := asFault(t, invalidErr)
 	preserved := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil)
@@ -2247,8 +2264,9 @@ func TestBucketNotificationConfigurationCharacterization(t *testing.T) {
 	final := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil)
 	golden.AssertJSON(t, map[string]any{
 		"default": before.Output, "put": put.Output, "get": after.Output, "delivery": delivery,
-		"invalid":   map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus, "argument": invalid.Fields["ArgumentName"], "value": invalid.Fields["ArgumentValue"]},
-		"preserved": preserved.Output, "clear": cleared.Output, "cleared": final.Output,
+		"filterFaults": filterFaults,
+		"invalid":      map[string]any{"code": invalid.Code, "message": invalid.Message, "status": invalid.HTTPStatus, "argument": invalid.Fields["ArgumentName"], "value": invalid.Fields["ArgumentValue"]},
+		"preserved":    preserved.Output, "clear": cleared.Output, "cleared": final.Output,
 	})
 }
 

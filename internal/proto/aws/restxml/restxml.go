@@ -1149,8 +1149,8 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 			Filter        *struct {
 				Key *struct {
 					Rules []struct {
-						Name  string `xml:"Name"`
-						Value string `xml:"Value"`
+						Name  *string `xml:"Name"`
+						Value *string `xml:"Value"`
 					} `xml:"FilterRule"`
 				} `xml:"S3Key"`
 			} `xml:"Filter"`
@@ -1182,7 +1182,14 @@ func parseXMLInput(op string, raw []byte, in map[string]any) {
 					if source.Filter.Key != nil {
 						rules := make([]any, 0, len(source.Filter.Key.Rules))
 						for _, rule := range source.Filter.Key.Rules {
-							rules = append(rules, map[string]any{"Name": rule.Name, "Value": rule.Value})
+							decoded := map[string]any{}
+							if rule.Name != nil {
+								decoded["Name"] = *rule.Name
+							}
+							if rule.Value != nil {
+								decoded["Value"] = *rule.Value
+							}
+							rules = append(rules, decoded)
 						}
 						filter["Key"] = map[string]any{"FilterRules": rules}
 					}

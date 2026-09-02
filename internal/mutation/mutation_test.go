@@ -16698,6 +16698,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSchedulerFlexibleWindowRetryAndDLQ",
 		},
 		{
+			name: "pipes-register-relative-retry-after-drain",
+			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
+			old:  `case <-p.deps.Clock.AfterUntil(nextPoll):`,
+			new:  `case <-p.deps.Clock.After(time.Second):`,
+			pkg:  "./internal/services/aws/pipes",
+			run:  "TestPipesRetrySurvivesClockAdvanceDuringWaitRegistration",
+		},
+		{
 			name: "pipes-run-stopped-pipe",
 			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
 			old:  `stringValue(pipe["CurrentState"]) != "RUNNING"`,

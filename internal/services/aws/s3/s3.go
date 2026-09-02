@@ -816,6 +816,9 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		ownership = "BucketOwnerEnforced"
 	}
 	var ownershipDocument []byte
+	publicAccessDocument, _ := json.Marshal(map[string]any{"PublicAccessBlockConfiguration": map[string]any{
+		"BlockPublicAcls": true, "BlockPublicPolicy": true, "IgnorePublicAcls": true, "RestrictPublicBuckets": true,
+	}})
 	validateOwnership := func() error {
 		switch ownership {
 		case "BucketOwnerPreferred", "ObjectWriter", "BucketOwnerEnforced":
@@ -862,6 +865,11 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 			}
 		}
 		if err := bucketStore.Collection("bktcfg").Put(ctx, b+"/ownershipcontrols", ownershipDocument); err != nil {
+			_ = bucketStore.Collection("tags").Delete(ctx, b)
+			return err
+		}
+		if err := bucketStore.Collection("bktcfg").Put(ctx, b+"/publicaccessblock", publicAccessDocument); err != nil {
+			_ = bucketStore.Collection("bktcfg").Delete(ctx, b+"/ownershipcontrols")
 			_ = bucketStore.Collection("tags").Delete(ctx, b)
 			return err
 		}
@@ -3687,6 +3695,9 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 				miss.Fields = map[string]any{"BucketName": b}
 			}
 			if req.Operation == "GetBucketOwnershipControls" {
+				miss.Fields = map[string]any{"BucketName": b}
+			}
+			if req.Operation == "GetPublicAccessBlock" {
 				miss.Fields = map[string]any{"BucketName": b}
 			}
 			return nil, miss

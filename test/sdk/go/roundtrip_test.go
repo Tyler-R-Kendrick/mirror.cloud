@@ -1750,6 +1750,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 			t.Fatalf("delete missing key version %q: %#v %v", version, deleted, err)
 		}
 	}
+	if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk"), Key: aws.String("missing-unversioned-key"), VersionId: aws.String("missing-version")}); err == nil || !strings.Contains(err.Error(), "InvalidArgument") {
+		t.Fatalf("delete invalid unversioned version: %v", err)
+	}
+	if deleted, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk"), Key: aws.String("missing-unversioned-key"), VersionId: aws.String("null")}); err != nil || deleted.VersionId != nil || deleted.DeleteMarker != nil {
+		t.Fatalf("delete null unversioned version: %#v %v", deleted, err)
+	}
 	replicationConfiguration := &s3types.ReplicationConfiguration{
 		Role:  aws.String("arn:aws:iam::000000000000:role/replication"),
 		Rules: []s3types.ReplicationRule{{Priority: aws.Int32(1), Status: s3types.ReplicationRuleStatusEnabled, Filter: &s3types.ReplicationRuleFilter{Prefix: aws.String("replica/")}, DeleteMarkerReplication: &s3types.DeleteMarkerReplication{Status: s3types.DeleteMarkerReplicationStatusDisabled}, Destination: &s3types.Destination{Bucket: aws.String("arn:aws:s3:::sdk-west")}}},

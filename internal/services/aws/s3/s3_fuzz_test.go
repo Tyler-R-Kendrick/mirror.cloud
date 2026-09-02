@@ -2160,6 +2160,30 @@ func FuzzDeleteObjectMissingKeyVersionIsIdempotent(f *testing.F) {
 	})
 }
 
+func FuzzDeleteObjectUnversionedMissingKeyVersions(f *testing.F) {
+	f.Add("null")
+	f.Add("missing-version")
+	f.Add("0")
+	f.Fuzz(func(t *testing.T, version string) {
+		if version == "" || len(version) > 1024 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "unversioned-delete-fuzz"}, nil)
+		response, err := invoke(t, p, "DeleteObject", map[string]any{"Bucket": "unversioned-delete-fuzz", "Key": "missing", "VersionId": version}, nil)
+		if version == "null" {
+			if err != nil || response.Status != http.StatusNoContent || len(response.Headers) != 0 {
+				t.Fatalf("null version response = %#v, %v", response, err)
+			}
+			return
+		}
+		fault := asFault(t, err)
+		if response != nil || fault.Code != "InvalidArgument" || fault.Fields["ArgumentName"] != "versionId" || fault.Fields["ArgumentValue"] != version {
+			t.Fatalf("version %q response = %#v, fault = %#v", version, response, fault)
+		}
+	})
+}
+
 func FuzzSuspendedNullVersionReplacement(f *testing.F) {
 	f.Add("null", uint8(1), false)
 	f.Add("replacement", uint8(8), true)

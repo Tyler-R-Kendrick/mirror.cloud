@@ -1815,6 +1815,15 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if aws.ToString(got.ContentType) != "text/plain" || aws.ToString(got.CacheControl) != "max-age=60" || got.Metadata["owner"] != "mirror" || aws.ToString(got.WebsiteRedirectLocation) != "/old" {
 		t.Fatalf("s3 metadata %#v", got)
 	}
+	listETag := aws.String(`"wrong", ` + aws.ToString(got.ETag))
+	if _, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), IfMatch: listETag}); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") {
+		t.Fatalf("get If-Match list: %v", err)
+	}
+	listRead, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), IfNoneMatch: listETag})
+	if err != nil {
+		t.Fatalf("get If-None-Match list: %v", err)
+	}
+	_ = listRead.Body.Close()
 	overrideExpiry := time.Date(2015, time.October, 21, 7, 28, 0, 0, time.UTC)
 	overridden, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{
 		Bucket: aws.String("sdk"), Key: aws.String("k"), ResponseCacheControl: aws.String("max-age=74"),
@@ -1984,6 +1993,9 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		Bucket: aws.String("sdk"), Key: aws.String("copied"), CopySource: aws.String("sdk/k"), CopySourceIfMatch: got.ETag, ExpectedSourceBucketOwner: aws.String("000000000000"),
 	}); err != nil {
 		t.Fatalf("conditional copy: %v", err)
+	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("listed-copy"), CopySource: aws.String("sdk/k"), CopySourceIfMatch: listETag}); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") {
+		t.Fatalf("copy source If-Match list: %v", err)
 	}
 	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{
 		Bucket: aws.String("sdk"), Key: aws.String("future-copy"), CopySource: aws.String("sdk/k"), CopySourceIfModifiedSince: aws.Time(time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)),

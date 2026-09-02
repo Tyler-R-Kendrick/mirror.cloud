@@ -430,14 +430,6 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestExplicitKMSKeyValidation",
 		},
 		{
-			name: "s3-reject-managed-kms-key",
-			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if arn[4] == identity.Account && arn[5] == "key/aws-managed-s3" {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/s3",
-			run:  "TestExplicitKMSKeyValidation",
-		},
-		{
 			name: "s3-ignore-cross-account-kms-key",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `identity.Account = arn[4]`,

@@ -1892,7 +1892,7 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 	}
 	if wantVer != "" {
 		current, currentExists := p.objectMetadata(ctx, req, b, key, "")
-		if !currentExists {
+		if !currentExists && versioned {
 			return &spi.Response{Status: http.StatusNoContent}, nil
 		}
 		meta, exists := p.objectMetadata(ctx, req, b, key, wantVer)

@@ -4041,6 +4041,7 @@ func TestObjectReadConditionsCharacterization(t *testing.T) {
 		for _, conditions := range []map[string]any{
 			{"IfMatch": etag, "IfUnmodifiedSince": past},
 			{"IfNoneMatch": `"wrong", ` + etag},
+			{"IfNoneMatch": `"wrong"`, "IfModifiedSince": notModified},
 			{"IfNoneMatch": `"wrong"`, "IfModifiedSince": future},
 			{"IfModifiedSince": future},
 		} {

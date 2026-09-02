@@ -1181,6 +1181,10 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		etag := res.Header.Get("ETag")
 		res.Body.Close()
 		uploadID, manifest = start("list")
+		status, body = complete("list", uploadID, `<CompleteMultipartUpload/>`, `"wrong", `+etag, "")
+		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
+			t.Fatalf("listed complete If-Match validation order %d %s", status, body)
+		}
 		status, body = complete("list", uploadID, manifest, `"wrong", `+etag, "")
 		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
 			t.Fatalf("listed complete If-Match %d %s", status, body)

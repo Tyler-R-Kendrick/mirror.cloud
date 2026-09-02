@@ -5971,15 +5971,25 @@ func TestCompleteMultipartIfMatchRequiresSingleETag(t *testing.T) {
 	seed := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key}, []byte("old"))
 	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": bucket, "Key": key}, nil).Output["UploadId"].(string)
 	part := mustInvoke(t, p, "UploadPart", map[string]any{"Bucket": bucket, "Key": key, "UploadId": uploadID, "PartNumber": 1}, []byte("new"))
+	empty := completeInput(uploadID)
+	empty["Bucket"], empty["Key"], empty["IfMatch"] = bucket, key, `"wrong", `+seed.Headers.Get("ETag")
+	_, err := invoke(t, p, "CompleteMultipartUpload", empty, nil)
+	orderFault := asFault(t, err)
+	if orderFault.Code != "PreconditionFailed" || orderFault.Fields["Condition"] != "If-Match" {
+		t.Fatalf("validation order fault = %#v", orderFault)
+	}
 	input := completeInput(uploadID, completedPart(1, part))
 	input["Bucket"], input["Key"], input["IfMatch"] = bucket, key, `"wrong", `+seed.Headers.Get("ETag")
 	readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": bucket, "Key": key, "IfMatch": input["IfMatch"]}, nil))
-	_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
+	_, err = invoke(t, p, "CompleteMultipartUpload", input, nil)
 	fault := asFault(t, err)
 	if fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != "If-Match" {
 		t.Fatalf("list fault = %#v", fault)
 	}
-	golden.AssertJSON(t, map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields})
+	golden.AssertJSON(t, map[string]any{
+		"beforeManifest": map[string]any{"code": orderFault.Code, "message": orderFault.Message, "status": orderFault.HTTPStatus, "fields": orderFault.Fields},
+		"validManifest":  map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields},
+	})
 	if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": bucket, "Key": key}, nil))); body != "old" {
 		t.Fatalf("rejected completion stored %q", body)
 	}

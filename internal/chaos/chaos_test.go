@@ -1457,6 +1457,75 @@ func TestConcurrentWritePreconditionFaultsNeverMutateObject(t *testing.T) {
 	}
 }
 
+func TestConcurrentWriteConditionFaultDetailsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "write-condition-detail-chaos"}, "")
+	_, _ = call("PutObject", map[string]any{"Bucket": "write-condition-detail-chaos", "Key": "source"}, "source")
+	for _, key := range []string{"wrong", "none"} {
+		_, _ = call("PutObject", map[string]any{"Bucket": "write-condition-detail-chaos", "Key": key}, "old")
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			operation := "PutObject"
+			if i%2 != 0 {
+				operation = "CopyObject"
+			}
+			input := map[string]any{"Bucket": "write-condition-detail-chaos"}
+			code, message, field, detail, status := "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", "Condition", "If-Match", http.StatusPreconditionFailed
+			switch i % 3 {
+			case 0:
+				input["Key"], input["IfMatch"] = "missing", `"missing"`
+				code, message, field, detail, status = "NoSuchKey", "The specified key does not exist.", "Key", "missing", http.StatusNotFound
+			case 1:
+				input["Key"], input["IfMatch"] = "wrong", `"wrong"`
+			case 2:
+				input["Key"], input["IfNoneMatch"] = "none", "*"
+				detail = "If-None-Match"
+			}
+			if operation == "CopyObject" {
+				input["CopySource"] = "write-condition-detail-chaos/source"
+			}
+			_, err := call(operation, input, "new")
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != code || fault.Message != message || fault.HTTPStatus != status || fault.Fields[field] != detail {
+				errs <- fmt.Errorf("%s case %d fault = %#v", operation, i%3, fault)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	for _, key := range []string{"wrong", "none"} {
+		got, err := call("GetObject", map[string]any{"Bucket": "write-condition-detail-chaos", "Key": key}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(got.Stream)
+		if string(body) != "old" {
+			t.Fatalf("%s changed to %q", key, body)
+		}
+	}
+}
+
 func TestConcurrentCompleteMultipartConditionalConflictsRemainModeled(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

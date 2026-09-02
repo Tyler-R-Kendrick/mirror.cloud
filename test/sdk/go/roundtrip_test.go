@@ -2503,6 +2503,30 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 			t.Fatalf("%s If-None-Match put after delete: %v", name, err)
 		}
 	}
+	ifMatchBucket := "sdk-if-match-versioned"
+	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String(ifMatchBucket)}); err != nil {
+		t.Fatalf("create If-Match bucket: %v", err)
+	}
+	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String(ifMatchBucket), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusEnabled}}); err != nil {
+		t.Fatalf("enable If-Match bucket: %v", err)
+	}
+	ifMatchFirst, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String(ifMatchBucket), Key: aws.String("key"), Body: strings.NewReader("first")})
+	if err != nil {
+		t.Fatalf("seed If-Match object: %v", err)
+	}
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String(ifMatchBucket), Key: aws.String("key"), Body: strings.NewReader("wrong"), IfMatch: aws.String("d41d8cd98f00b204e9800998ecf8427e")}); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") || !strings.Contains(err.Error(), "PreconditionFailed") {
+		t.Fatalf("wrong If-Match put: %v", err)
+	}
+	ifMatchSecond, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String(ifMatchBucket), Key: aws.String("key"), Body: strings.NewReader("matched"), IfMatch: ifMatchFirst.ETag})
+	if err != nil {
+		t.Fatalf("matched If-Match put: %v", err)
+	}
+	if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String(ifMatchBucket), Key: aws.String("key")}); err != nil {
+		t.Fatalf("delete If-Match object: %v", err)
+	}
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String(ifMatchBucket), Key: aws.String("key"), IfMatch: ifMatchSecond.ETag}); err == nil || !strings.Contains(err.Error(), "StatusCode: 404") || !strings.Contains(err.Error(), "NoSuchKey") {
+		t.Fatalf("delete-marker If-Match put: %v", err)
+	}
 	for _, operation := range []string{"PutObject", "CopyObject"} {
 		key := "write-if-match-list-" + operation
 		seed, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key), Body: strings.NewReader("old")})

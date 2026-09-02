@@ -6669,6 +6669,53 @@ func TestPutObjectIfNoneMatchLifecycleCharacterization(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestPutObjectIfMatchLifecycleCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	const bucket, key = "put-if-match", "key"
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}, nil)
+	first := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key}, []byte("first"))
+	faults := map[string]any{}
+	for name, input := range map[string]map[string]any{
+		"wrong":    {"IfMatch": "d41d8cd98f00b204e9800998ecf8427e"},
+		"star":     {"IfMatch": "*"},
+		"combined": {"IfMatch": "abcdef", "IfNoneMatch": "*"},
+	} {
+		input["Bucket"], input["Key"] = bucket, key
+		_, err := invoke(t, p, "PutObject", input, nil)
+		fault := asFault(t, err)
+		if name == "wrong" && (fault.Code != "PreconditionFailed" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != "If-Match") || name == "star" && (fault.Code != "NotImplemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fields["Header"] != "If-None-Match") || name == "combined" && (fault.Code != "NotImplemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fields["Header"] != "If-Match,If-None-Match") {
+			t.Fatalf("%s If-Match fault = %#v", name, fault)
+		}
+		faults[name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+	}
+	matched := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key, "IfMatch": first.Headers.Get("ETag")}, []byte("matched"))
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": key}, nil)
+	_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key, "IfMatch": matched.Headers.Get("ETag")}, nil)
+	deletedFault := asFault(t, err)
+	if deletedFault.Code != "NoSuchKey" || deletedFault.HTTPStatus != http.StatusNotFound || deletedFault.Fields["Key"] != key {
+		t.Fatalf("delete-marker If-Match fault = %#v", deletedFault)
+	}
+	for name, value := range map[string]string{"bad-value": "abcdef", "bad-characters": "bad-char_/"} {
+		missingKey := "missing-" + name
+		_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": missingKey, "IfMatch": value}, nil)
+		fault := asFault(t, err)
+		if fault.Code != "NoSuchKey" || fault.HTTPStatus != http.StatusNotFound || fault.Fields["Key"] != missingKey {
+			t.Fatalf("%s If-Match validation fault = %#v", name, fault)
+		}
+		faults[name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
+	}
+	afterDelete := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key}, []byte("after-delete"))
+	final := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": key, "IfMatch": afterDelete.Headers.Get("ETag")}, []byte("final"))
+	listed := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": bucket}, nil).Output
+	golden.AssertJSON(t, map[string]any{
+		"faults":       faults,
+		"deleteMarker": map[string]any{"code": deletedFault.Code, "message": deletedFault.Message, "status": deletedFault.HTTPStatus, "fields": deletedFault.Fields},
+		"matchedETag":  matched.Headers.Get("ETag"), "finalETag": final.Headers.Get("ETag"),
+		"versions": len(asSliceForTest(listed["Versions"])), "deleteMarkers": len(asSliceForTest(listed["DeleteMarkers"])),
+	})
+}
+
 func TestWriteIfMatchRequiresSingleETag(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "write-if-match"}, nil)

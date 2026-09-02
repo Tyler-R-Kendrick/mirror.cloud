@@ -3869,7 +3869,7 @@ func TestCopySourcePreconditionsCharacterization(t *testing.T) {
 	golden.AssertJSON(t, outcomes)
 }
 
-func TestObjectReadConditions(t *testing.T) {
+func TestObjectReadConditionsCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
@@ -3898,6 +3898,7 @@ func TestObjectReadConditions(t *testing.T) {
 		}
 		return response, err
 	}
+	futureOutcomes := map[string]string{}
 	for _, operation := range []string{"GetObject", "HeadObject", "GetObjectAttributes"} {
 		for _, test := range []struct {
 			conditions map[string]any
@@ -3932,8 +3933,12 @@ func TestObjectReadConditions(t *testing.T) {
 			if err != nil || response.Status == http.StatusNotModified {
 				t.Fatalf("%s precedence %#v: %#v %v", operation, conditions, response, err)
 			}
+			if len(conditions) == 1 && conditions["IfModifiedSince"] == future {
+				futureOutcomes[operation] = "success"
+			}
 		}
 	}
+	golden.AssertJSON(t, futureOutcomes)
 }
 
 func TestCopyObjectSourceVersions(t *testing.T) {

@@ -747,7 +747,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  "func preconditionFailed(condition string) error {\n\treturn &spi.Fault{Code: \"PreconditionFailed\", Message: \"At least one of the pre-conditions you specified did not hold\", HTTPStatus: 412, Fault: \"client\", Fields: map[string]any{\"Condition\": condition}}\n}",
 			new:  "func preconditionFailed(condition string) error {\n\treturn &spi.Fault{Code: \"PreconditionFailed\", HTTPStatus: 412, Fault: \"client\"}\n}",
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestObjectReadConditions",
+			run:  "TestObjectReadConditionsCharacterization",
 		},
 		{
 			name: "s3-accept-conditional-etag-list",
@@ -755,7 +755,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  `return condition == "*" || strings.Trim(condition, ` + "`\"`" + `) == strings.Trim(etag, ` + "`\"`" + `)`,
 			new:  `return condition == "*" || strings.Contains(condition, ",") || strings.Trim(condition, ` + "`\"`" + `) == strings.Trim(etag, ` + "`\"`" + `)`,
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestObjectReadConditions",
+			run:  "TestObjectReadConditionsCharacterization",
 		},
 		{
 			name: "s3-read-ignore-if-match",
@@ -763,7 +763,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  "if match := requestCondition(req, \"IfMatch\", \"If-Match\"); match != \"\" {\n\t\tif !etagMatches(match, etag) {",
 			new:  "if match := requestCondition(req, \"IfMatch\", \"If-Match\"); match != \"\" {\n\t\tif false {",
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestObjectReadConditions",
+			run:  "TestObjectReadConditionsCharacterization",
 		},
 		{
 			name: "s3-read-ignore-if-unmodified-since",
@@ -771,7 +771,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  `if condition, err := http.ParseTime(value); err == nil && sourceModifiedAfter(modified, condition) {`,
 			new:  `if condition, err := http.ParseTime(value); false {`,
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestObjectReadConditions",
+			run:  "TestObjectReadConditionsCharacterization",
 		},
 		{
 			name: "s3-read-break-if-match-precedence",
@@ -779,7 +779,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  `} else if value := requestCondition(req, "IfUnmodifiedSince", "If-Unmodified-Since"); value != "" {`,
 			new:  "}\n\tif value := requestCondition(req, \"IfUnmodifiedSince\", \"If-Unmodified-Since\"); value != \"\" {",
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestObjectReadConditions",
+			run:  "TestObjectReadConditionsCharacterization",
 		},
 		{
 			name: "s3-read-ignore-if-none-match",
@@ -787,7 +787,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  `return etagMatches(noneMatch, etag), nil`,
 			new:  `return false, nil`,
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestObjectReadConditions",
+			run:  "TestObjectReadConditionsCharacterization",
 		},
 		{
 			name: "s3-read-break-if-none-match-precedence",
@@ -795,7 +795,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  "if noneMatch := requestCondition(req, \"IfNoneMatch\", \"If-None-Match\"); noneMatch != \"\" {\n\t\treturn etagMatches(noneMatch, etag), nil\n\t}",
 			new:  "if noneMatch := requestCondition(req, \"IfNoneMatch\", \"If-None-Match\"); noneMatch != \"\" && etagMatches(noneMatch, etag) {\n\t\treturn true, nil\n\t}",
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestObjectReadConditions",
+			run:  "TestObjectReadConditionsCharacterization",
 		},
 		{
 			name: "s3-read-ignore-if-modified-since",
@@ -803,7 +803,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  `if condition, err := http.ParseTime(value); err == nil && !sourceModifiedAfter(modified, condition) {`,
 			new:  `if condition, err := http.ParseTime(value); false {`,
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestObjectReadConditions",
+			run:  "TestObjectReadConditionsCharacterization",
 		},
 		{
 			name: "s3-get-skip-read-conditions",
@@ -811,7 +811,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  `notModified, conditionErr := checkReadPreconditions(req, etag, mtime)`,
 			new:  `notModified, conditionErr := false, error(nil)`,
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestObjectReadConditions",
+			run:  "TestObjectReadConditionsCharacterization",
 		},
 		{
 			name: "s3-head-skip-read-conditions",
@@ -819,7 +819,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  `if notModified, err := checkReadPreconditions(req, h.Get("ETag"), h.Get("Last-Modified")); err != nil {`,
 			new:  `if notModified, err := false, error(nil); err != nil {`,
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestObjectReadConditions",
+			run:  "TestObjectReadConditionsCharacterization",
 		},
 		{
 			name: "s3-attributes-skip-read-conditions",
@@ -827,7 +827,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  `if notModified, err := checkReadPreconditions(req, str(meta["etag"]), str(meta["mtime"])); err != nil {`,
 			new:  `if notModified, err := false, error(nil); err != nil {`,
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestObjectReadConditions",
+			run:  "TestObjectReadConditionsCharacterization",
 		},
 		{
 			name: "s3-ignore-copy-source-match",

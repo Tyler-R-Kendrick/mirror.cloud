@@ -794,9 +794,10 @@ func (p *Pack) col(req *spi.Request, name string) spi.Collection {
 func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b := str(req.Input["Bucket"])
 	configuration := asMap(req.Input["CreateBucketConfiguration"])
-	tags := asSlice(configuration["Tags"])
-	if _, ok := configuration["Tags"]; ok {
-		if err := validateTagSet(configuration["Tags"], 50, "bucket"); err != nil {
+	tagSet, tagsSet := configuration["Tags"]
+	tags := asSlice(tagSet)
+	if tagsSet && tagSet != nil {
+		if err := validateTagSet(tagSet, 50, "create-bucket"); err != nil {
 			return nil, err
 		}
 	}
@@ -4256,14 +4257,22 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 		if req.Operation == "PutObjectTagging" {
 			limit, kind = 10, "object"
 		}
-		if err := validateTagSet(req.Input["TagSet"], limit, kind); err != nil {
+		tagSet := req.Input["TagSet"]
+		if _, exists := req.Input["TagSet"]; exists && tagSet == nil {
+			tagSet = []any{}
+		}
+		if err := validateTagSet(tagSet, limit, kind); err != nil {
 			return nil, err
 		}
-		raw, _ := json.Marshal(req.Input["TagSet"])
+		raw, _ := json.Marshal(tagSet)
 		if len(raw) == 0 || string(raw) == "null" {
 			raw = []byte("[]")
 		}
-		_ = p.col(req, "tags").Put(ctx, tagKey, raw)
+		if req.Operation == "PutBucketTagging" && len(asSlice(tagSet)) == 0 {
+			_ = p.col(req, "tags").Delete(ctx, tagKey)
+		} else {
+			_ = p.col(req, "tags").Put(ctx, tagKey, raw)
+		}
 		if req.Operation == "PutObjectTagging" {
 			if str(req.Input["VersionId"]) == "" {
 				if objectVersion != "" {
@@ -4279,7 +4288,11 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 		if req.Operation == "PutObjectTagging" {
 			p.notify(ctx, req, b, key, "ObjectTagging:Put")
 		}
-		return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"TagSet": json.RawMessage(raw)}}, nil
+		status := http.StatusOK
+		if req.Operation == "PutBucketTagging" {
+			status = http.StatusNoContent
+		}
+		return &spi.Response{Status: status, Headers: h, Output: map[string]any{"TagSet": json.RawMessage(raw)}}, nil
 	case "GetBucketTagging", "GetObjectTagging":
 		tagKey := b
 		objectVersion := ""
@@ -4501,10 +4514,14 @@ func validateTagSet(value any, limit int, kind string) error {
 		}
 		if strings.HasPrefix(key, "aws:") {
 			message := "System tags cannot be added/updated by requester"
+			fields := map[string]any{"TagKey": key}
 			if kind == "object" {
 				message = "Your TagKey cannot be prefixed with aws:"
+			} else if kind == "create-bucket" {
+				message = `User-defined tag keys can't start with "aws:". This prefix is reserved for system tags. Remove "aws:" from your tag keys and try again.`
+				fields = nil
 			}
-			return &spi.Fault{Code: "InvalidTag", Message: message, HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"TagKey": key}}
+			return &spi.Fault{Code: "InvalidTag", Message: message, HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: fields}
 		}
 		if utf8.RuneCountInString(key) < 1 || utf8.RuneCountInString(key) > 128 || !validTagText(key) {
 			return &spi.Fault{Code: "InvalidTag", Message: "The TagKey you have provided is invalid", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"TagKey": key}}

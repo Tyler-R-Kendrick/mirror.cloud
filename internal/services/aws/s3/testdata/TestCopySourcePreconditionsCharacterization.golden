@@ -1,10 +1,30 @@
 {
   "all-positive": "success",
   "future-modified-since": "success",
-  "if-match": "PreconditionFailed",
-  "if-match-list": "PreconditionFailed",
-  "if-modified-since": "PreconditionFailed",
-  "if-none-match": "PreconditionFailed",
+  "if-match": {
+    "code": "PreconditionFailed",
+    "condition": "x-amz-copy-source-If-Match",
+    "message": "At least one of the pre-conditions you specified did not hold"
+  },
+  "if-match-list": {
+    "code": "PreconditionFailed",
+    "condition": "x-amz-copy-source-If-Match",
+    "message": "At least one of the pre-conditions you specified did not hold"
+  },
+  "if-modified-since": {
+    "code": "PreconditionFailed",
+    "condition": "x-amz-copy-source-If-Modified-Since",
+    "message": "At least one of the pre-conditions you specified did not hold"
+  },
+  "if-none-match": {
+    "code": "PreconditionFailed",
+    "condition": "x-amz-copy-source-If-None-Match",
+    "message": "At least one of the pre-conditions you specified did not hold"
+  },
   "if-none-match-list": "success",
-  "if-unmodified-since": "PreconditionFailed"
+  "if-unmodified-since": {
+    "code": "PreconditionFailed",
+    "condition": "x-amz-copy-source-If-Unmodified-Since",
+    "message": "At least one of the pre-conditions you specified did not hold"
+  }
 }

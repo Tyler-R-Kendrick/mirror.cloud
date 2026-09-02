@@ -3852,7 +3852,7 @@ func TestCopySourcePreconditionsCharacterization(t *testing.T) {
 		"all-positive": {"CopySourceIfMatch": etag, "CopySourceIfNoneMatch": `"wrong"`,
 			"CopySourceIfModifiedSince": past, "CopySourceIfUnmodifiedSince": modified},
 	}
-	outcomes := map[string]string{}
+	outcomes := map[string]any{}
 	for name, conditions := range cases {
 		input := map[string]any{"Bucket": "copy-conditions", "Key": name, "CopySource": "copy-conditions/source"}
 		for key, value := range conditions {
@@ -3862,7 +3862,8 @@ func TestCopySourcePreconditionsCharacterization(t *testing.T) {
 		if err == nil {
 			outcomes[name] = "success"
 		} else {
-			outcomes[name] = asFault(t, err).Code
+			fault := asFault(t, err)
+			outcomes[name] = map[string]any{"code": fault.Code, "message": fault.Message, "condition": fault.Fields["Condition"]}
 		}
 	}
 	golden.AssertJSON(t, outcomes)

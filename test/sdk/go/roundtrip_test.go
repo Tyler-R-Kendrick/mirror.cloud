@@ -1096,6 +1096,9 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		}
 	}
 	createTags := []s3types.Tag{{Key: aws.String("team"), Value: aws.String("storage")}, {Key: aws.String("env"), Value: aws.String("test")}}
+	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-invalid-ownership"), ObjectOwnership: s3types.ObjectOwnership("RandomValue")}); err == nil || !strings.Contains(err.Error(), "Invalid x-amz-object-ownership header: RandomValue") {
+		t.Fatalf("invalid create ownership: %v", err)
+	}
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk"), CreateBucketConfiguration: &s3types.CreateBucketConfiguration{Tags: createTags}, ObjectOwnership: s3types.ObjectOwnershipBucketOwnerPreferred}); err != nil {
 		t.Fatalf("create bucket: %v", err)
 	}
@@ -1317,7 +1320,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.DeleteBucketOwnershipControls(context.Background(), &s3.DeleteBucketOwnershipControlsInput{Bucket: aws.String("sdk")}); err != nil {
 		t.Fatalf("delete bucket ownership controls: %v", err)
 	}
-	if _, err := s3c.GetBucketOwnershipControls(context.Background(), &s3.GetBucketOwnershipControlsInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "OwnershipControlsNotFoundError") {
+	if _, err := s3c.GetBucketOwnershipControls(context.Background(), &s3.GetBucketOwnershipControlsInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "OwnershipControlsNotFoundError") || !strings.Contains(err.Error(), "The bucket ownership controls were not found") {
 		t.Fatalf("get deleted ownership controls: %v", err)
 	}
 	controls.Rules[0].ObjectOwnership = s3types.ObjectOwnershipBucketOwnerPreferred

@@ -1,0 +1,50 @@
+{
+  "CopyObject/if-none-match": {
+    "code": "PreconditionFailed",
+    "fields": {
+      "Condition": "If-None-Match"
+    },
+    "message": "At least one of the pre-conditions you specified did not hold",
+    "status": 412
+  },
+  "CopyObject/missing-if-match": {
+    "code": "NoSuchKey",
+    "fields": {
+      "Key": "destination"
+    },
+    "message": "The specified key does not exist.",
+    "status": 404
+  },
+  "CopyObject/wrong-if-match": {
+    "code": "PreconditionFailed",
+    "fields": {
+      "Condition": "If-Match"
+    },
+    "message": "At least one of the pre-conditions you specified did not hold",
+    "status": 412
+  },
+  "PutObject/if-none-match": {
+    "code": "PreconditionFailed",
+    "fields": {
+      "Condition": "If-None-Match"
+    },
+    "message": "At least one of the pre-conditions you specified did not hold",
+    "status": 412
+  },
+  "PutObject/missing-if-match": {
+    "code": "NoSuchKey",
+    "fields": {
+      "Key": "destination"
+    },
+    "message": "The specified key does not exist.",
+    "status": 404
+  },
+  "PutObject/wrong-if-match": {
+    "code": "PreconditionFailed",
+    "fields": {
+      "Condition": "If-Match"
+    },
+    "message": "At least one of the pre-conditions you specified did not hold",
+    "status": 412
+  }
+}

@@ -963,6 +963,63 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given supported write conditions When they fail Then S3 returns LocalStack fault details", func(t *testing.T) {
+		res := do(http.MethodPut, "/write-condition-detail-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/write-condition-detail-bdd/source", []byte("source"), "")
+		res.Body.Close()
+		for _, operation := range []string{"PutObject", "CopyObject"} {
+			for _, test := range []struct {
+				name, match, noneMatch, code, message, field, detail string
+				status                                               int
+				existing                                             bool
+			}{
+				{"missing-if-match", `"missing"`, "", "NoSuchKey", "The specified key does not exist.", "Key", "destination-" + operation + "-missing-if-match", http.StatusNotFound, false},
+				{"wrong-if-match", `"wrong"`, "", "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", "Condition", "If-Match", http.StatusPreconditionFailed, true},
+				{"if-none-match", "", "*", "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", "Condition", "If-None-Match", http.StatusPreconditionFailed, true},
+			} {
+				key := "destination-" + operation + "-" + test.name
+				if test.existing {
+					res = do(http.MethodPut, "/write-condition-detail-bdd/"+key, []byte("old"), "")
+					res.Body.Close()
+				}
+				request, err := http.NewRequest(http.MethodPut, ts.URL+"/write-condition-detail-bdd/"+key, strings.NewReader("new"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.Header.Set("Authorization", auth)
+				if operation == "CopyObject" {
+					request.Body = http.NoBody
+					request.ContentLength = 0
+					request.Header.Set("x-amz-copy-source", "/write-condition-detail-bdd/source")
+				}
+				if test.match != "" {
+					request.Header.Set("If-Match", test.match)
+				}
+				if test.noneMatch != "" {
+					request.Header.Set("If-None-Match", test.noneMatch)
+				}
+				response, err := http.DefaultClient.Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, _ := io.ReadAll(response.Body)
+				response.Body.Close()
+				if response.StatusCode != test.status || !bytes.Contains(body, []byte("<Code>"+test.code+"</Code>")) || !bytes.Contains(body, []byte("<Message>"+test.message+"</Message>")) || !bytes.Contains(body, []byte("<"+test.field+">"+test.detail+"</"+test.field+">")) {
+					t.Fatalf("%s %s fault = %d %s", operation, test.name, response.StatusCode, body)
+				}
+				if test.existing {
+					res = do(http.MethodGet, "/write-condition-detail-bdd/"+key, nil, "")
+					body, _ = io.ReadAll(res.Body)
+					res.Body.Close()
+					if res.StatusCode != http.StatusOK || string(body) != "old" {
+						t.Fatalf("%s %s changed destination = %d %q", operation, test.name, res.StatusCode, body)
+					}
+				}
+			}
+		}
+	})
+
 	t.Run("Given DeleteObject preconditions When deleting Then S3 returns LocalStack NotImplemented faults", func(t *testing.T) {
 		res := do(http.MethodPut, "/delete-precondition-bdd", nil, "")
 		res.Body.Close()

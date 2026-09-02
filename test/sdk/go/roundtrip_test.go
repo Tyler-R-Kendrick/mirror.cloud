@@ -2347,6 +2347,44 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 			t.Fatalf("%s rejected write body = %q", name, body)
 		}
 	}
+	for _, operation := range []string{"PutObject", "CopyObject"} {
+		for _, test := range []struct {
+			name, code, status, message string
+			match, noneMatch            *string
+			existing                    bool
+		}{
+			{"missing-if-match", "NoSuchKey", "StatusCode: 404", "The specified key does not exist.", aws.String(`"missing"`), nil, false},
+			{"wrong-if-match", "PreconditionFailed", "StatusCode: 412", "At least one of the pre-conditions you specified did not hold", aws.String(`"wrong"`), nil, true},
+			{"if-none-match", "PreconditionFailed", "StatusCode: 412", "At least one of the pre-conditions you specified did not hold", nil, aws.String("*"), true},
+		} {
+			key := "write-condition-detail-" + operation + "-" + test.name
+			if test.existing {
+				if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key), Body: strings.NewReader("old")}); err != nil {
+					t.Fatalf("seed %s %s: %v", operation, test.name, err)
+				}
+			}
+			var err error
+			if operation == "PutObject" {
+				_, err = s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key), Body: strings.NewReader("new"), IfMatch: test.match, IfNoneMatch: test.noneMatch})
+			} else {
+				_, err = s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key), CopySource: aws.String("sdk/k"), IfMatch: test.match, IfNoneMatch: test.noneMatch})
+			}
+			if err == nil || !strings.Contains(err.Error(), test.status) || !strings.Contains(err.Error(), test.code) || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("%s %s fault: %v", operation, test.name, err)
+			}
+			if test.existing {
+				got, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key)})
+				if err != nil {
+					t.Fatalf("get %s %s after rejection: %v", operation, test.name, err)
+				}
+				body, _ := io.ReadAll(got.Body)
+				_ = got.Body.Close()
+				if string(body) != "old" {
+					t.Fatalf("%s %s rejected body = %q", operation, test.name, body)
+				}
+			}
+		}
+	}
 	conditionalUpload := func(key string) (string, *s3types.CompletedMultipartUpload) {
 		t.Helper()
 		created, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String(key)})

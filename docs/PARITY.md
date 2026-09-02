@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.6% |
-| LocalStack S3 test functions explicitly traced | 70 / 463 (15.1%) |
-| LocalStack S3 test functions not yet traced | 393 / 463 (84.9%) |
+| LocalStack S3 test functions explicitly traced | 76 / 463 (16.4%) |
+| LocalStack S3 test functions not yet traced | 387 / 463 (83.6%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -107,6 +107,12 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3_list_operations.py::TestS3ListObjects::test_s3_list_objects_empty_marker` | `TestListObjectsDelimiterEncodingAndEmptyMarker` verifies an explicit empty marker on an empty bucket returns an empty first page | Mapped and green |
 | `test_s3_list_operations.py::TestS3ListObjects::test_list_objects_marker_common_prefixes` | `TestListObjectsPaginationIncludesCommonPrefixes` and characterization snapshots verify common-prefix, object, terminal, and manual-marker pages | Mapped and green |
 | `test_s3_list_operations.py::TestS3ListObjects::test_s3_list_objects_timestamp_precision` | `TestListObjectsV2Prefix` and the pagination characterization verify V1/V2 timestamps retain S3 millisecond precision; a semantic mutant rejects RFC3339 values without `.000Z` | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListObjectsV2::test_list_objects_v2_with_prefix` | `TestListObjectsV2Prefix`, raw HTTP prefix routing in `TestListObjectsDelimiterEncodingAndEmptyMarker`, SDK contract, BDD, and fuzz coverage verify nested prefix selection | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListObjectsV2::test_list_objects_v2_with_prefix_and_delimiter` | `TestListObjectsPaginationIncludesCommonPrefixes`, `TestListURLResponseEncoding`, characterization snapshots, and mutation coverage verify prefix/delimiter pages and tokens | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListObjectsV2::test_list_objects_v2_continuation_start_after` | `TestListObjectsV2OpaqueContinuationTokens`, `TestListObjectsV2SafeContinuationTokens`, `TestListURLResponseEncoding`, fuzz, and mutation coverage verify continuation precedence, `StartAfter`, truncation, and empty-token rejection | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListObjectsV2::test_list_objects_v2_continuation_common_prefixes` | `TestListObjectsPaginationIncludesCommonPrefixes` and characterization snapshots verify common-prefix, object, and terminal continuation pages | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListObjectsV2::test_list_objects_v2_continuation_token_safe_chars` | `TestListObjectsV2SafeContinuationTokens` round-trips percent signs, spaces, at signs, slashes, equals signs, and Unicode across pages and URL-encoded `StartAfter`; fuzz and opaque-token mutations cover the shared cursor logic | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListObjectsV2::test_list_ops_encoding_type_validation` | `TestListEncodingTypeValidation`, characterization snapshots, fuzz, and mutation coverage verify missing/`url` success plus wrong and empty values across all four list operations | Mapped and green |
 
 ## Source-only findings
 
@@ -118,4 +124,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 70/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 76/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

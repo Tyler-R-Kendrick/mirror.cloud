@@ -6754,6 +6754,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "FuzzDeleteObjectDirectoryPreconditions",
 		},
 		{
+			name: "s3-reject-missing-key-version-delete",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if !currentExists {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestDeleteObjectMissingKeyVersionIsIdempotent",
+		},
+		{
 			name: "s3-generate-suspended-object-version",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  "if versioned {\n\t\tvid = \"null\"\n\t\tif versioningStatus == \"Enabled\" {",

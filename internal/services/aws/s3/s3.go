@@ -1891,6 +1891,10 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		return &spi.Response{Status: 204, Headers: h}, nil
 	}
 	if wantVer != "" {
+		current, currentExists := p.objectMetadata(ctx, req, b, key, "")
+		if !currentExists {
+			return &spi.Response{Status: http.StatusNoContent}, nil
+		}
 		meta, exists := p.objectMetadata(ctx, req, b, key, wantVer)
 		if !exists {
 			return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid version id specified", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "versionId", "ArgumentValue": wantVer}}
@@ -1898,7 +1902,6 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		if p.objectVersionLocked(ctx, req, b, key, wantVer) {
 			return nil, &spi.Fault{Code: "AccessDenied", Message: "Access Denied", HTTPStatus: http.StatusForbidden, Fault: "client"}
 		}
-		current, currentExists := p.objectMetadata(ctx, req, b, key, "")
 		_ = p.deps.Blobs.Delete(ctx, blobKey(req, b, key)+"@"+wantVer)
 		_ = p.col(req, "versions").Delete(ctx, b+"/"+key+"/"+wantVer)
 		_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, wantVer))

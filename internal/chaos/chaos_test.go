@@ -2381,6 +2381,54 @@ func TestConcurrentNonEmptyBucketDeletesAreRejected(t *testing.T) {
 	}
 }
 
+func TestConcurrentDeletePreconditionsNeverMutateObject(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != "" {
+			stream = io.NopCloser(strings.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "delete-precondition-chaos"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutObject", map[string]any{"Bucket": "delete-precondition-chaos", "Key": "key"}, "body"); err != nil {
+		t.Fatal(err)
+	}
+	headers := []struct{ name, value string }{{"If-Match", `"841a2d689ad86bd1611447453c22c6fc"`}, {"x-amz-if-match-size", "4"}, {"x-amz-if-match-last-modified-time", "Sun, 06 Nov 1994 08:49:37 GMT"}}
+	errs := make(chan error, 48)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			header := headers[i%len(headers)]
+			request := httptest.NewRequest(http.MethodDelete, "http://127.0.0.1/delete-precondition-chaos/key", nil)
+			request.Header.Set(header.name, header.value)
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteObject", Input: map[string]any{"Bucket": "delete-precondition-chaos", "Key": "key"}, HTTP: request})
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != "NotImplemented" || fault.Fields["Header"] != header.name {
+				errs <- fmt.Errorf("%s fault = %v", header.name, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	if _, err := call("HeadObject", map[string]any{"Bucket": "delete-precondition-chaos", "Key": "key"}, ""); err != nil {
+		t.Fatalf("object changed: %v", err)
+	}
+}
+
 func TestConcurrentBucketCreationHasOneOwner(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

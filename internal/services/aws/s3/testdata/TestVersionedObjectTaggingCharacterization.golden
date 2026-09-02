@@ -5,14 +5,12 @@
       "Value": "retagged"
     }
   ],
-  "currentMarker": "NoSuchKey",
   "currentTags": [
     {
       "Key": "stage",
       "Value": "second"
     }
   ],
-  "explicitMarker": "MethodNotAllowed",
   "firstVersionTags": [
     {
       "Key": "stage",
@@ -23,6 +21,15 @@
       "Value": "storage"
     }
   ],
+  "markerFaults": {
+    "DeleteObjectTaggingCurrent": "MethodNotAllowed",
+    "DeleteObjectTaggingExplicit": "MethodNotAllowed",
+    "GetObjectTaggingCurrent": "MethodNotAllowed",
+    "GetObjectTaggingExplicit": "MethodNotAllowed",
+    "PutObjectTaggingCurrent": "MethodNotAllowed",
+    "PutObjectTaggingExplicit": "MethodNotAllowed"
+  },
+  "missingVersion": "NoSuchVersion",
   "retainedTags": [
     {
       "Key": "stage",

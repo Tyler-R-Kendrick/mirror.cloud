@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
-| LocalStack S3 test functions explicitly traced | 129 / 463 (27.9%) |
-| LocalStack S3 test functions not yet traced | 334 / 463 (72.1%) |
+| LocalStack S3 test functions explicitly traced | 131 / 463 (28.3%) |
+| LocalStack S3 test functions not yet traced | 332 / 463 (71.7%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -166,6 +166,8 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3_api.py::TestS3ObjectLock::test_get_object_lock_configuration_exc` | `TestObjectLockConfigurationParity`, HTTP BDD, snapshot, SDK contract, and mutation coverage verify exact missing-configuration and missing-bucket codes, messages, statuses, and bucket fields | Mapped and green |
 | `test_s3_api.py::TestS3ObjectLock::test_disable_versioning_on_locked_bucket` | `TestObjectLockConfigurationParity`, `TestObjectLockBucketGuards`, AWS SDK contract, snapshot, and mutation coverage verify suspension rejection and idempotent re-enablement | Mapped and green |
 | `test_s3_api.py::TestS3ObjectLock::test_delete_object_with_no_locking` | `TestObjectLockConfigurationParity`, AWS SDK contract, HTTP BDD, concurrent chaos, snapshot, and mutation coverage verify true/false single-delete and bulk-delete bypass requests fail before mutation | Mapped and race-clean |
+| `test_s3_api.py::TestS3BucketOwnershipControls::test_crud_bucket_ownership_controls` | `TestCreateBucketObjectOwnership`, `TestBucketOwnershipControls`, characterization snapshots, AWS SDK contract, HTTP BDD, fuzz, chaos, and mutation coverage verify enforced defaults, create-time overrides, replacement, idempotent deletion, and exact missing-control faults | Mapped and race-clean |
+| `test_s3_api.py::TestS3BucketOwnershipControls::test_bucket_ownership_controls_exc` | Atomic ownership validation cases, AWS SDK contract, HTTP BDD, fuzz, chaos, snapshots, and mutation coverage verify malformed rules plus exact invalid create-header messages and fields without reserving buckets | Mapped and race-clean |
 
 ## Source-only findings
 
@@ -177,4 +179,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 129/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 131/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

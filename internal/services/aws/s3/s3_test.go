@@ -4142,6 +4142,19 @@ func TestDeleteObjectMissingKeyVersionIsIdempotent(t *testing.T) {
 	golden.AssertJSON(t, results)
 }
 
+func TestDeleteObjectRejectsVersionOnUnversionedMissingKey(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	_, err := invoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "missing", "VersionId": "missing-version"}, nil)
+	fault := asFault(t, err)
+	if fault.Code != "InvalidArgument" || fault.Message != "Invalid version id specified" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "versionId" || fault.Fields["ArgumentValue"] != "missing-version" {
+		t.Fatalf("fault = %#v", fault)
+	}
+	if deleted := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "missing", "VersionId": "null"}, nil); deleted.Status != http.StatusNoContent || len(deleted.Headers) != 0 {
+		t.Fatalf("null version delete = %#v", deleted)
+	}
+}
+
 func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

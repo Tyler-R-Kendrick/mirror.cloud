@@ -928,15 +928,21 @@ func TestCreateBucketObjectOwnership(t *testing.T) {
 	}
 	assertOwnership("bucketownerpreferred", "BucketOwnerPreferred")
 
-	_, err := invoke(t, p, "CreateBucket", map[string]any{"Bucket": "invalid-ownership", "ObjectOwnership": ""}, nil)
-	fault := asFault(t, err)
-	if fault.Code != "InvalidArgument" || fault.Fields["ArgumentName"] != "x-amz-object-ownership" {
-		t.Fatalf("invalid ownership = %#v", fault)
+	invalidOwnership := map[string]any{}
+	for i, ownership := range []string{"RandomValue", ""} {
+		bucket := fmt.Sprintf("invalid-ownership-%d", i)
+		_, err := invoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket, "ObjectOwnership": ownership}, nil)
+		fault := asFault(t, err)
+		if fault.Code != "InvalidArgument" || fault.Message != "Invalid x-amz-object-ownership header: "+ownership || fault.HTTPStatus != http.StatusBadRequest ||
+			len(fault.Fields) != 1 || fault.Fields["ArgumentName"] != "x-amz-object-ownership" {
+			t.Fatalf("invalid ownership %q = %#v", ownership, fault)
+		}
+		invalidOwnership[fmt.Sprintf("%q", ownership)] = map[string]any{"code": fault.Code, "message": fault.Message, "argument": fault.Fields["ArgumentName"]}
+		if _, err := invoke(t, p, "HeadBucket", map[string]any{"Bucket": bucket}, nil); asFault(t, err).Code != "NoSuchBucket" {
+			t.Fatalf("invalid ownership %q reserved bucket: %v", ownership, err)
+		}
 	}
-	characterization["invalid"] = fault.Code
-	if _, err := invoke(t, p, "HeadBucket", map[string]any{"Bucket": "invalid-ownership"}, nil); asFault(t, err).Code != "NoSuchBucket" {
-		t.Fatalf("invalid ownership reserved bucket: %v", err)
-	}
+	characterization["invalid"] = invalidOwnership
 
 	id := ident()
 	regional := "owned-" + id.Account + "-" + id.Region + "-an"
@@ -2255,12 +2261,15 @@ func TestBucketOwnershipControlsCharacterization(t *testing.T) {
 	secondDelete := mustInvoke(t, p, "DeleteBucketOwnershipControls", map[string]any{"Bucket": "ownership-characterization"}, nil)
 	_, missingErr := invoke(t, p, "GetBucketOwnershipControls", map[string]any{"Bucket": "ownership-characterization"}, nil)
 	missing := asFault(t, missingErr)
+	if missing.Code != "OwnershipControlsNotFoundError" || missing.Message != "The bucket ownership controls were not found" || missing.HTTPStatus != http.StatusNotFound || missing.Fields["BucketName"] != "ownership-characterization" {
+		t.Fatalf("missing ownership controls = %#v", missing)
+	}
 	golden.AssertJSON(t, map[string]any{
 		"put":     map[string]any{"status": put.Status, "output": put.Output},
 		"get":     get.Output,
 		"invalid": map[string]any{"code": invalid.Code, "status": invalid.HTTPStatus},
 		"delete":  []any{firstDelete.Status, secondDelete.Status},
-		"missing": map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus},
+		"missing": map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus, "bucket": missing.Fields["BucketName"]},
 	})
 }
 

@@ -2241,6 +2241,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || len(quietDeleted.Deleted) != 0 || len(quietDeleted.Errors) != 1 || aws.ToString(quietDeleted.Errors[0].Code) != "NoSuchVersion" || aws.ToString(quietDeleted.Errors[0].VersionId) != "missing" {
 		t.Fatalf("quiet multi-delete: %#v %v", quietDeleted, err)
 	}
+	if _, err := s3c.GetObjectLockConfiguration(context.Background(), &s3.GetObjectLockConfigurationInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "ObjectLockConfigurationNotFoundError") || !strings.Contains(err.Error(), "Object Lock configuration does not exist for this bucket") {
+		t.Fatalf("missing object-lock configuration: %v", err)
+	}
+	if _, err := s3c.DeleteObjects(context.Background(), &s3.DeleteObjectsInput{Bucket: aws.String("sdk"), BypassGovernanceRetention: aws.Bool(false), Delete: &s3types.Delete{Objects: []s3types.ObjectIdentifier{{Key: aws.String("multi-delete")}}}}); err == nil || !strings.Contains(err.Error(), "InvalidArgument") || !strings.Contains(err.Error(), "only applicable to Object Lock enabled buckets") {
+		t.Fatalf("multi-delete bypass without object lock: %v", err)
+	}
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-lock"), ObjectLockEnabledForBucket: aws.Bool(true)}); err != nil {
 		t.Fatalf("create object-lock bucket: %v", err)
 	}

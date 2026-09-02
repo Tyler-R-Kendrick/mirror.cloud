@@ -4293,6 +4293,55 @@ func TestEncryptedMultipartCompletionFailurePreservesUpload(t *testing.T) {
 	}
 }
 
+func TestConcurrentInvalidObjectLockBypassLeavesObjectIntact(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
+		var stream io.ReadCloser
+		if body != nil {
+			stream = io.NopCloser(bytes.NewReader(body))
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: stream})
+	}
+	_, _ = call("CreateBucket", map[string]any{"Bucket": "object-lock-bypass"}, nil)
+	_, _ = call("PutObject", map[string]any{"Bucket": "object-lock-bypass", "Key": "key"}, []byte("body"))
+
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			operation := "DeleteObject"
+			input := map[string]any{"Bucket": "object-lock-bypass", "Key": "key", "BypassGovernanceRetention": i%2 == 0}
+			if i%2 == 1 {
+				operation = "DeleteObjects"
+				input = map[string]any{"Bucket": "object-lock-bypass", "Objects": []any{map[string]any{"Key": "key"}}, "BypassGovernanceRetention": false}
+			}
+			_, err := call(operation, input, nil)
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidArgument" {
+				errs <- fmt.Errorf("%s: %v", operation, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	got, err := call("GetObject", map[string]any{"Bucket": "object-lock-bypass", "Key": "key"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(got.Stream)
+	_ = got.Stream.Close()
+	if string(body) != "body" {
+		t.Fatalf("object after invalid bypass storm = %q", body)
+	}
+}
+
 func TestCustomerEncryptedMultipartCompletionFailurePreservesUpload(t *testing.T) {
 	deps := spitest.Deps(t)
 	blobs := &failBlobs{BlobStore: deps.Blobs}

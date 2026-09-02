@@ -13479,6 +13479,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFirehoseRedshiftPersistentRetry",
 		},
 		{
+			name: "firehose-use-relative-retry-wait",
+			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
+			old:  `case <-p.deps.Clock.AfterUntil(next):`,
+			new:  `case <-p.deps.Clock.After(next.Sub(p.deps.Clock.Now())):`,
+			pkg:  "./internal/services/aws/firehose",
+			run:  "TestFirehoseRedshiftRetryExpiryAndDelete",
+		},
+		{
 			name: "firehose-ignore-persisted-redshift-retries",
 			file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 			old:  `[]string{"fh-http-buffers", "fh-http-retries", "fh-search-work", "fh-redshift-work"}`,

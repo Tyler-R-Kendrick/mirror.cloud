@@ -1873,7 +1873,7 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 	if versioned && wantVer == "" {
 		vid := "null"
 		if versioningStatus == "Enabled" {
-			vid = p.deps.Rand.Hex(8)
+			vid = p.deps.Rand.Hex(32)
 		}
 		mtime := p.deps.Clock.Now().UTC().Format(http.TimeFormat)
 		current, _ := p.objectMetadata(ctx, req, b, key, "")

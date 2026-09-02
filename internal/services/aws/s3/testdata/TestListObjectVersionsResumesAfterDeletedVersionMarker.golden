@@ -8,7 +8,7 @@
     "MaxKeys": 1,
     "Name": "deleted-version-marker",
     "NextKeyMarker": "key",
-    "NextVersionIdMarker": "9c8e2cb0",
+    "NextVersionIdMarker": "9c8e2cb00724681e24b29522455f06cd",
     "Prefix": "key",
     "VersionIdMarker": "",
     "Versions": [
@@ -22,7 +22,7 @@
         },
         "Size": 4,
         "StorageClass": "STANDARD",
-        "VersionId": "9c8e2cb0"
+        "VersionId": "9c8e2cb00724681e24b29522455f06cd"
       }
     ]
   },
@@ -35,7 +35,7 @@
     "MaxKeys": 1000,
     "Name": "deleted-version-marker",
     "Prefix": "key",
-    "VersionIdMarker": "9c8e2cb0",
+    "VersionIdMarker": "9c8e2cb00724681e24b29522455f06cd",
     "Versions": [
       {
         "ETag": "\"841a2d689ad86bd1611447453c22c6fc\"",
@@ -47,7 +47,7 @@
         },
         "Size": 4,
         "StorageClass": "STANDARD",
-        "VersionId": "5f59f223"
+        "VersionId": "5f59f223d7974d142efbc70e360dac9b"
       },
       {
         "ETag": "\"841a2d689ad86bd1611447453c22c6fc\"",
@@ -59,7 +59,7 @@
         },
         "Size": 4,
         "StorageClass": "STANDARD",
-        "VersionId": "7c589129"
+        "VersionId": "7c5891299f6489f8b140efe7f0cd8bce"
       }
     ]
   }

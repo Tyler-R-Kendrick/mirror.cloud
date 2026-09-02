@@ -1,5 +1,5 @@
 {
-  "deleteVersion": "9c8e2cb0",
+  "deleteVersion": "9c8e2cb00724681e24b29522455f06cd",
   "listed": {
     "CommonPrefixes": null,
     "DeleteMarkers": [
@@ -10,7 +10,7 @@
         "Owner": {
           "ID": "123456789012"
         },
-        "VersionId": "9c8e2cb0"
+        "VersionId": "9c8e2cb00724681e24b29522455f06cd"
       }
     ],
     "Delimiter": "",
@@ -31,10 +31,10 @@
         },
         "Size": 10,
         "StorageClass": "STANDARD_IA",
-        "VersionId": "5f59f223"
+        "VersionId": "5f59f223d7974d142efbc70e360dac9b"
       }
     ]
   },
-  "objectVersion": "5f59f223",
+  "objectVersion": "5f59f223d7974d142efbc70e360dac9b",
   "restoredBody": "replicated"
 }

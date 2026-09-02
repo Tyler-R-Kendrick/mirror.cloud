@@ -9,7 +9,7 @@
     "MaxKeys": 1,
     "Name": "version-url-markers",
     "NextKeyMarker": "folder/a%20key",
-    "NextVersionIdMarker": "7c589129",
+    "NextVersionIdMarker": "7c5891299f6489f8b140efe7f0cd8bce",
     "Prefix": "folder/",
     "VersionIdMarker": "",
     "Versions": [
@@ -23,7 +23,7 @@
         },
         "Size": 12,
         "StorageClass": "STANDARD",
-        "VersionId": "7c589129"
+        "VersionId": "7c5891299f6489f8b140efe7f0cd8bce"
       }
     ]
   },
@@ -37,7 +37,7 @@
     "MaxKeys": 1,
     "Name": "version-url-markers",
     "Prefix": "folder/",
-    "VersionIdMarker": "7c589129",
+    "VersionIdMarker": "7c5891299f6489f8b140efe7f0cd8bce",
     "Versions": [
       {
         "ETag": "\"45a8a011dfec580ec89b1f379664d5a2\"",
@@ -49,7 +49,7 @@
         },
         "Size": 12,
         "StorageClass": "STANDARD",
-        "VersionId": "5f59f223"
+        "VersionId": "5f59f223d7974d142efbc70e360dac9b"
       }
     ]
   }

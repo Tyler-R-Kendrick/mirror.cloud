@@ -1849,8 +1849,8 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
-	if bypassSet, _ := governanceBypass(req); bypassSet && !p.bucketObjectLockEnabled(ctx, req, b) {
-		return nil, &spi.Fault{Code: "InvalidArgument", Message: "x-amz-bypass-governance-retention is only applicable to Object Lock enabled buckets.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-bypass-governance-retention"}}
+	if err := p.validateGovernanceBypass(ctx, req, b); err != nil {
+		return nil, err
 	}
 	unsupportedPrecondition := ""
 	for _, condition := range []struct{ input, header string }{{"IfMatch", "If-Match"}, {"IfMatchSize", "x-amz-if-match-size"}, {"IfMatchLastModifiedTime", "x-amz-if-match-last-modified-time"}} {
@@ -1973,6 +1973,9 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 func (p *Pack) deleteObjects(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	b := str(req.Input["Bucket"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
+		return nil, err
+	}
+	if err := p.validateGovernanceBypass(ctx, req, b); err != nil {
 		return nil, err
 	}
 	if req.HTTP != nil {
@@ -3680,6 +3683,9 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 			if req.Operation == "GetBucketPolicy" {
 				miss.Fields = map[string]any{"BucketName": b}
 			}
+			if req.Operation == "GetBucketObjectLockConfiguration" || req.Operation == "GetObjectLockConfiguration" {
+				miss.Fields = map[string]any{"BucketName": b}
+			}
 			return nil, miss
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
@@ -4057,7 +4063,7 @@ func cfgKind(op string) (string, *spi.Fault) {
 	case strings.Contains(op, "Replication"):
 		return "replication", n("ReplicationConfigurationNotFoundError", "The replication configuration was not found")
 	case strings.Contains(op, "ObjectLock"):
-		return "objectlock", n("ObjectLockConfigurationNotFoundError", "Object Lock configuration does not exist")
+		return "objectlock", n("ObjectLockConfigurationNotFoundError", "Object Lock configuration does not exist for this bucket")
 	case strings.Contains(op, "Abac"):
 		return "abac", n("NoSuchAbacConfiguration", "The ABAC configuration does not exist")
 	case strings.Contains(op, "Logging"):
@@ -5070,6 +5076,13 @@ func governanceBypass(req *spi.Request) (bool, bool) {
 		}
 	}
 	return false, false
+}
+
+func (p *Pack) validateGovernanceBypass(ctx context.Context, req *spi.Request, bucket string) error {
+	if set, _ := governanceBypass(req); set && !p.bucketObjectLockEnabled(ctx, req, bucket) {
+		return &spi.Fault{Code: "InvalidArgument", Message: "x-amz-bypass-governance-retention is only applicable to Object Lock enabled buckets.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-bypass-governance-retention"}}
+	}
+	return nil
 }
 
 func (p *Pack) bucketObjectLockEnabled(ctx context.Context, req *spi.Request, bucket string) bool {

@@ -928,6 +928,12 @@ func TestConcurrentCompositeAggregateChecksumsAreIgnored(t *testing.T) {
 			if err == nil && (completed.Output["ChecksumCRC32"] == "AA==" || completed.Output["ChecksumType"] != "COMPOSITE") {
 				err = fmt.Errorf("completion %d: %#v", i, completed.Output)
 			}
+			if err == nil {
+				attributes, attrErr := call("GetObjectAttributes", map[string]any{"Bucket": "multipart-aggregate-chaos", "Key": key, "ObjectAttributes": []string{"ObjectParts"}, "PartNumberMarker": 10}, "")
+				if attrErr != nil || attributes.Output["ObjectParts"].(map[string]any)["NextPartNumberMarker"] != "0" {
+					err = fmt.Errorf("empty attributes %d: %#v, %v", i, attributes, attrErr)
+				}
+			}
 			errs <- err
 		}()
 	}

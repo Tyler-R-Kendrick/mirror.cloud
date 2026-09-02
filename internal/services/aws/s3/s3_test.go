@@ -4444,6 +4444,22 @@ func TestGetObjectVersionErrors(t *testing.T) {
 
 func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "unversioned"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "unversioned", "Key": "key"}, []byte("body"))
+	wrongVersion := mustInvoke(t, p, "DeleteObjects", map[string]any{"Bucket": "unversioned", "Objects": []any{map[string]any{"Key": "key", "VersionId": "missing"}}}, nil).Output
+	if failures := asSliceForTest(wrongVersion["Errors"]); len(failures) != 1 || asMapForTest(failures[0])["Code"] != "NoSuchVersion" || asMapForTest(failures[0])["VersionId"] != "missing" {
+		t.Fatalf("unversioned wrong version = %#v", wrongVersion)
+	}
+	bulk := mustInvoke(t, p, "DeleteObjects", map[string]any{"Bucket": "unversioned", "Objects": []any{map[string]any{"Key": "key"}, map[string]any{"Key": "c-missing"}, map[string]any{"Key": "a-missing"}}}, nil).Output
+	deletedKeys := []string{}
+	for _, raw := range asSliceForTest(bulk["Deleted"]) {
+		deletedKeys = append(deletedKeys, asMapForTest(raw)["Key"].(string))
+	}
+	sort.Strings(deletedKeys)
+	if !reflect.DeepEqual(deletedKeys, []string{"a-missing", "c-missing", "key"}) || bulk["Errors"] != nil {
+		t.Fatalf("unversioned bulk delete = %#v", bulk)
+	}
+
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Enabled"}, nil)
 	first := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("first"))
@@ -4797,6 +4813,24 @@ func TestVersionedObjectTaggingCharacterization(t *testing.T) {
 		"currentMarker":    asFault(t, currentErr).Code,
 		"explicitMarker":   asFault(t, markerErr).Code,
 	})
+}
+
+func TestListObjectVersionsUnversionedOrder(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "unversioned-order"}, nil)
+	for _, key := range []string{"c", "a", "b"} {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "unversioned-order", "Key": key}, []byte(key))
+	}
+	versions := asSliceForTest(mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "unversioned-order"}, nil).Output["Versions"])
+	if len(versions) != 3 {
+		t.Fatalf("versions = %#v", versions)
+	}
+	for index, key := range []string{"a", "b", "c"} {
+		version := asMapForTest(versions[index])
+		if version["Key"] != key || version["VersionId"] != "null" || version["IsLatest"] != true {
+			t.Fatalf("version %d = %#v", index, version)
+		}
+	}
 }
 
 func TestUploadPartCopyConditionsAndRange(t *testing.T) {

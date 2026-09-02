@@ -2,10 +2,15 @@
   "configured": {
     "Policy": "{\"Version\":\"2012-10-17\", \"Statement\":[{\"Effect\":\"Allow\",\"Principal\":\"*\"}]}"
   },
-  "deleted": 204,
+  "deleted": [
+    204,
+    204
+  ],
   "final": {
     "bucket": "policy-characterization",
-    "code": "NoSuchBucketPolicy"
+    "code": "NoSuchBucketPolicy",
+    "message": "The bucket policy does not exist",
+    "status": 404
   },
   "invalid": {
     "code": "MalformedPolicy",
@@ -13,10 +18,12 @@
   },
   "missing": {
     "bucket": "policy-characterization",
-    "code": "NoSuchBucketPolicy"
+    "code": "NoSuchBucketPolicy",
+    "message": "The bucket policy does not exist",
+    "status": 404
   },
   "preserved": {
     "Policy": "{\"Version\":\"2012-10-17\", \"Statement\":[{\"Effect\":\"Allow\",\"Principal\":\"*\"}]}"
   },
-  "put": 200
+  "put": 204
 }

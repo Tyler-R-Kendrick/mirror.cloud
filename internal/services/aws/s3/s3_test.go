@@ -3869,8 +3869,9 @@ func TestCopySourcePreconditionsCharacterization(t *testing.T) {
 	golden.AssertJSON(t, outcomes)
 }
 
-func TestObjectReadConditions(t *testing.T) {
-	p := s3.New(spitest.Deps(t))
+func TestObjectReadConditionsCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
 	put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "conditional"}, []byte("body"))
 	head := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "conditional"}, nil)
@@ -3878,7 +3879,9 @@ func TestObjectReadConditions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	past, future := modified.Add(-time.Hour).Format(http.TimeFormat), modified.Add(time.Hour).Format(http.TimeFormat)
+	_ = deps.Clock.Advance(2 * time.Second)
+	past, notModified := modified.Add(-time.Hour).Format(http.TimeFormat), modified.Add(time.Second).Format(http.TimeFormat)
+	future := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat)
 	etag := put.Headers.Get("ETag")
 	call := func(operation string, conditions map[string]any) (*spi.Response, error) {
 		t.Helper()
@@ -3895,6 +3898,7 @@ func TestObjectReadConditions(t *testing.T) {
 		}
 		return response, err
 	}
+	futureOutcomes := map[string]string{}
 	for _, operation := range []string{"GetObject", "HeadObject", "GetObjectAttributes"} {
 		for _, test := range []struct {
 			conditions map[string]any
@@ -3912,7 +3916,7 @@ func TestObjectReadConditions(t *testing.T) {
 		for _, conditions := range []map[string]any{
 			{"IfNoneMatch": etag},
 			{"IfNoneMatch": "*"},
-			{"IfModifiedSince": future},
+			{"IfModifiedSince": notModified},
 		} {
 			response, err := call(operation, conditions)
 			if err != nil || response.Status != http.StatusNotModified {
@@ -3923,13 +3927,18 @@ func TestObjectReadConditions(t *testing.T) {
 			{"IfMatch": etag, "IfUnmodifiedSince": past},
 			{"IfNoneMatch": `"wrong", ` + etag},
 			{"IfNoneMatch": `"wrong"`, "IfModifiedSince": future},
+			{"IfModifiedSince": future},
 		} {
 			response, err := call(operation, conditions)
 			if err != nil || response.Status == http.StatusNotModified {
 				t.Fatalf("%s precedence %#v: %#v %v", operation, conditions, response, err)
 			}
+			if len(conditions) == 1 && conditions["IfModifiedSince"] == future {
+				futureOutcomes[operation] = "success"
+			}
 		}
 	}
+	golden.AssertJSON(t, futureOutcomes)
 }
 
 func TestCopyObjectSourceVersions(t *testing.T) {

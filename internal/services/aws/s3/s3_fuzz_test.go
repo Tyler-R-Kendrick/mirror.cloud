@@ -3316,6 +3316,7 @@ func FuzzCopySourcePreconditions(f *testing.F) {
 		seconds := int(secondsSeed%60) + 1
 		_ = deps.Clock.Advance(time.Duration(seconds) * time.Second)
 		modified := time.Unix(0, 0).UTC()
+		readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "copy-condition-fuzz", "Key": "source", "IfModifiedSince": modified.Add(time.Duration(seconds+1) * time.Second).Format(http.TimeFormat)}, nil))
 		conditions := map[string]any{}
 		wantSuccess := false
 		faultCondition := ""

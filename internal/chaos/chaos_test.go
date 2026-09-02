@@ -214,7 +214,7 @@ func TestConcurrentCopySourcePreconditionsRemainDeterministic(t *testing.T) {
 		}
 	}
 	for i := range 32 {
-		response, err := call("GetObject", map[string]any{"Bucket": "copy-conditions", "Key": fmt.Sprintf("destination-%d", i)}, nil)
+		response, err := call("GetObject", map[string]any{"Bucket": "copy-conditions", "Key": fmt.Sprintf("destination-%d", i), "IfModifiedSince": future}, nil)
 		if i%4 < 2 {
 			if err != nil {
 				t.Fatalf("get copied %d: %v", i, err)

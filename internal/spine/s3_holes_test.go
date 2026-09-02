@@ -147,8 +147,8 @@ func TestBootedServerS3VersioningPaginationPresign(t *testing.T) {
 		t.Fatalf("put ims %d %s", code, b)
 	}
 	etag := conditionHeaders.Get("ETag")
-	if code, _, _ := do(http.MethodGet, "/holes/ims", "", map[string]string{"Authorization": auth, "If-Modified-Since": "Mon, 01 Jan 2099 00:00:00 GMT"}); code != 304 {
-		t.Fatalf("If-Modified-Since future %d", code)
+	if code, b, _ := do(http.MethodGet, "/holes/ims", "", map[string]string{"Authorization": auth, "If-Modified-Since": "Mon, 01 Jan 2099 00:00:00 GMT"}); code != 200 || string(b) != "body" {
+		t.Fatalf("If-Modified-Since future %d %s", code, b)
 	}
 	if code, b, _ := do(http.MethodGet, "/holes/ims", "", map[string]string{"Authorization": auth, "If-Modified-Since": "Mon, 01 Jan 1990 00:00:00 GMT"}); code != 200 || string(b) != "body" {
 		t.Fatalf("If-Modified-Since past %d %s", code, b)

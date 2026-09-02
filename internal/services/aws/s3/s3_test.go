@@ -452,6 +452,15 @@ func TestBucketNotificationConfiguration(t *testing.T) {
 	if preserved := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; !reflect.DeepEqual(preserved, got) {
 		t.Fatalf("invalid replacement = %#v", preserved)
 	}
+	emptyFilter := notificationWithFilter(map[string]any{"Name": "suffix", "Value": ""})
+	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": emptyFilter, "SkipDestinationValidation": true}, nil)
+	storedFilter := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output
+	queue = asMapForTest(asSliceForTest(storedFilter["QueueConfigurations"])[0])
+	key := asMapForTest(asMapForTest(queue["Filter"])["Key"])
+	rule := asMapForTest(asSliceForTest(key["FilterRules"])[0])
+	if rule["Name"] != "Suffix" || rule["Value"] != "" {
+		t.Fatalf("empty filter = %#v", storedFilter)
+	}
 	skipped := map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:111111111111:missing", "Events": []any{"s3:ObjectCreated:*"}}}}
 	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": skipped, "SkipDestinationValidation": true}, nil)
 	if stored := mustInvoke(t, p, "GetBucketNotificationConfiguration", input, nil).Output; len(asSliceForTest(stored["QueueConfigurations"])) != 1 {
@@ -469,6 +478,17 @@ func TestBucketNotificationConfiguration(t *testing.T) {
 	invalidTopic := map[string]any{"TopicConfigurations": []any{map[string]any{"TopicArn": "invalid-topic", "Events": []any{"s3:ObjectCreated:*"}}}}
 	if _, err := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": invalidTopic, "SkipDestinationValidation": true}, nil); asFault(t, err).Code != "InvalidArgument" {
 		t.Fatalf("invalid skipped topic ARN = %v", err)
+	}
+	invalidQueue := map[string]any{"QueueConfigurations": []any{map[string]any{"QueueArn": "invalid-queue", "Events": []any{"s3:ObjectCreated:*"}}}}
+	if _, err := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": invalidQueue, "SkipDestinationValidation": true}, nil); asFault(t, err).Code != "InvalidArgument" {
+		t.Fatalf("invalid skipped queue ARN = %v", err)
+	}
+	multipleInvalidQueues := map[string]any{"QueueConfigurations": []any{
+		map[string]any{"QueueArn": "invalid-queue-1", "Events": []any{"s3:ObjectCreated:*"}},
+		map[string]any{"QueueArn": "invalid-queue-2", "Events": []any{"s3:ObjectRemoved:*"}},
+	}}
+	if _, err := invoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": multipleInvalidQueues}, nil); asFault(t, err).Code != "InvalidArgument" {
+		t.Fatalf("multiple invalid queue ARNs = %v", err)
 	}
 	skippedTopic := map[string]any{"TopicConfigurations": []any{map[string]any{"TopicArn": "arn:aws:sns:us-east-1:111111111111:missing", "Events": []any{"s3:ObjectCreated:*"}}}}
 	mustInvoke(t, p, "PutBucketNotificationConfiguration", map[string]any{"Bucket": input["Bucket"], "NotificationConfiguration": skippedTopic, "SkipDestinationValidation": true}, nil)
@@ -550,7 +570,7 @@ func TestBucketNotificationRemovalAndTaggingEvents(t *testing.T) {
 		"Bucket": bucket,
 		"NotificationConfiguration": map[string]any{"QueueConfigurations": []any{map[string]any{
 			"QueueArn": "arn:aws:sqs:us-east-1:123456789012:queue",
-			"Events":   []any{"s3:ObjectRemoved:*", "s3:ObjectTagging:*"},
+			"Events":   []any{"s3:ObjectCreated:Put", "s3:ObjectRemoved:*", "s3:ObjectTagging:*"},
 		}}},
 	}, nil)
 
@@ -587,9 +607,14 @@ func TestBucketNotificationRemovalAndTaggingEvents(t *testing.T) {
 			continue
 		}
 		record := asMapForTest(asSliceForTest(payload["Records"])[0])
-		events[record["eventName"].(string)]++
+		event := record["eventName"].(string)
+		object := asMapForTest(asMapForTest(record["s3"])["object"])
+		if event == "ObjectCreated:Put" && object["key"] == "versioned" && object["versionId"] != version {
+			t.Fatalf("versioned notification = %#v", record)
+		}
+		events[event]++
 	}
-	want := map[string]int{"ObjectRemoved:Delete": 5, "ObjectRemoved:DeleteMarkerCreated": 1, "ObjectTagging:Put": 1, "ObjectTagging:Delete": 1}
+	want := map[string]int{"ObjectCreated:Put": 4, "ObjectRemoved:Delete": 5, "ObjectRemoved:DeleteMarkerCreated": 1, "ObjectTagging:Put": 1, "ObjectTagging:Delete": 1}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("notification events = %#v, want %#v", events, want)
 	}
@@ -7223,12 +7248,12 @@ func TestPostObjectChecksums(t *testing.T) {
 func TestObjectCreatedEventNames(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)
-	var events []string
+	var events []map[string]any
 	cancel := deps.Bus.(*bus.Memory).Subscribe("s3:events", func(_ context.Context, payload []byte) {
 		var envelope map[string]any
 		_ = json.Unmarshal(payload, &envelope)
 		records := envelope["Records"].([]any)
-		events = append(events, records[0].(map[string]any)["eventName"].(string))
+		events = append(events, records[0].(map[string]any))
 	})
 	defer cancel()
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "events"}, nil)
@@ -7249,9 +7274,20 @@ func TestObjectCreatedEventNames(t *testing.T) {
 	if _, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "PostObject", Input: map[string]any{"Bucket": "events"}, Identity: ident(), Body: httpRequest.Body, HTTP: httpRequest}); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"ObjectCreated:Put", "ObjectCreated:Copy", "ObjectCreated:CompleteMultipartUpload", "ObjectCreated:Post"}
-	if !reflect.DeepEqual(events, want) {
-		t.Fatalf("events=%v want=%v", events, want)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "events", "Key": "a@b"}, []byte("something"))
+	var names, keys []string
+	var sizes []int
+	for _, event := range events {
+		object := asMapForTest(asMapForTest(event["s3"])["object"])
+		names = append(names, event["eventName"].(string))
+		keys = append(keys, object["key"].(string))
+		sizes = append(sizes, int(object["size"].(float64)))
+	}
+	wantNames := []string{"ObjectCreated:Put", "ObjectCreated:Copy", "ObjectCreated:CompleteMultipartUpload", "ObjectCreated:Post", "ObjectCreated:Put"}
+	wantKeys := []string{"source", "copy", "multipart", "post", "a%40b"}
+	wantSizes := []int{4, 4, 4, 4, 9}
+	if !reflect.DeepEqual(names, wantNames) || !reflect.DeepEqual(keys, wantKeys) || !reflect.DeepEqual(sizes, wantSizes) {
+		t.Fatalf("events names=%v keys=%v sizes=%v", names, keys, sizes)
 	}
 }
 

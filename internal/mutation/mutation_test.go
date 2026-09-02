@@ -843,7 +843,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  "func checkCopySourcePreconditions(req *spi.Request, etag, modified string, now time.Time) error {\n\tmatch := requestCondition(req, \"CopySourceIfMatch\", \"x-amz-copy-source-if-match\")\n\tif match != \"\" {\n\t\tif !etagMatches(match, etag) {",
 			new:  "func checkCopySourcePreconditions(req *spi.Request, etag, modified string, now time.Time) error {\n\tmatch := requestCondition(req, \"CopySourceIfMatch\", \"x-amz-copy-source-if-match\")\n\tif match != \"\" {\n\t\tif false {",
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestCopyObjectConditions",
+			run:  "TestCopySourcePreconditionsCharacterization",
 		},
 		{
 			name: "s3-copy-source-ignore-match-modified-time",
@@ -867,7 +867,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  `if etagMatches(noneMatch, etag) {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestCopyObjectConditions",
+			run:  "TestCopySourcePreconditionsCharacterization",
 		},
 		{
 			name: "s3-ignore-copy-source-unmodified-time",
@@ -875,7 +875,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  `err != nil || sourceModifiedAfter(modified, condition)`,
 			new:  `err != nil && sourceModifiedAfter(modified, condition)`,
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestCopyObjectConditions",
+			run:  "TestCopySourcePreconditionsCharacterization",
 		},
 		{
 			name: "s3-ignore-copy-source-modified-time",
@@ -883,7 +883,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  `err != nil || !sourceModifiedAfter(modified, condition)`,
 			new:  `err != nil && !sourceModifiedAfter(modified, condition)`,
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestCopyObjectConditions",
+			run:  "TestCopySourcePreconditionsCharacterization",
 		},
 		{
 			name: "s3-copy-source-suppress-modified-after-none-mismatch",
@@ -899,7 +899,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  `if condition, err := http.ParseTime(value); err != nil || !sourceModifiedAfter(modified, condition) && condition.Before(now) {`,
 			new:  `if condition, err := http.ParseTime(value); err != nil || !sourceModifiedAfter(modified, condition) {`,
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestCopyObjectConditions",
+			run:  "TestCopySourcePreconditionsCharacterization",
 		},
 		{
 			name: "s3-skip-copy-source-unescape",

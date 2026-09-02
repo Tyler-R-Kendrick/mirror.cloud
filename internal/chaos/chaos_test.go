@@ -160,6 +160,9 @@ func TestConcurrentCopySourcePreconditionsRemainDeterministic(t *testing.T) {
 	if _, err := call("CreateBucket", map[string]any{"Bucket": "copy-conditions"}, nil); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "copy-conditions", "Status": "Enabled"}, nil); err != nil {
+		t.Fatal(err)
+	}
 	put, err := call("PutObject", map[string]any{"Bucket": "copy-conditions", "Key": "source"}, []byte("source"))
 	if err != nil {
 		t.Fatal(err)

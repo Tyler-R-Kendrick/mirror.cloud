@@ -4059,6 +4059,10 @@ func TestSuspendedVersioningReplacesNullVersion(t *testing.T) {
 	if body := string(readStream(t, beforeSuspension)); body != "unversioned" {
 		t.Fatalf("converted null version = %q", body)
 	}
+	converted := asSliceForTest(mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "bucket"}, nil).Output["Versions"])
+	if len(converted) != 2 || asMapForTest(converted[0])["VersionId"] != enabledVersion || asMapForTest(converted[0])["IsLatest"] != true || asMapForTest(converted[1])["VersionId"] != "null" || asMapForTest(converted[1])["IsLatest"] != false {
+		t.Fatalf("converted versions = %#v", converted)
+	}
 
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Suspended"}, nil)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("first null"))

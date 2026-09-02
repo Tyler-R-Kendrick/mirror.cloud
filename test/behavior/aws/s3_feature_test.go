@@ -2022,6 +2022,27 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a future If-Modified-Since When reading Then S3 ignores the condition", func(t *testing.T) {
+		for _, path := range []string{"/future-read-bdd", "/future-read-bdd/object"} {
+			response := do(http.MethodPut, path, nil, "")
+			response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("put %s: %d", path, response.StatusCode)
+			}
+		}
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/future-read-bdd/object", nil)
+		req.Header.Set("Authorization", auth)
+		req.Header.Set("If-Modified-Since", time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat))
+		response, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("future read = %d", response.StatusCode)
+		}
+	})
+
 	t.Run("Given KMS multipart encryption When completing the upload Then every stage preserves its headers", func(t *testing.T) {
 		res := do(http.MethodPut, "/multipart-encryption", nil, "")
 		io.Copy(io.Discard, res.Body)

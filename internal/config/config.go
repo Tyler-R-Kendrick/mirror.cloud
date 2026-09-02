@@ -22,6 +22,7 @@ type Config struct {
 	DefaultRegion                 string
 	DefaultAccount                string
 	S3ValidatePresignedSignatures bool
+	S3AllowNonstandardRegions     bool
 	TLSCert                       string
 	TLSKey                        string
 	ProxyMode                     string
@@ -69,6 +70,9 @@ func FromEnv(c Config) Config {
 	if v := os.Getenv("MIRROR_S3_VALIDATE_PRESIGNED_SIGNATURES"); v == "1" || strings.EqualFold(v, "true") {
 		c.S3ValidatePresignedSignatures = true
 	}
+	if v := os.Getenv("MIRROR_S3_ALLOW_NONSTANDARD_REGIONS"); v == "1" || strings.EqualFold(v, "true") {
+		c.S3AllowNonstandardRegions = true
+	}
 	if v := os.Getenv("MIRROR_PROXY_MODE"); v != "" {
 		c.ProxyMode = v
 	}
@@ -100,6 +104,7 @@ func FromFile(c Config, path string) Config {
 		DefaultRegion                 string            `json:"region"`
 		DefaultAccount                string            `json:"account"`
 		S3ValidatePresignedSignatures bool              `json:"s3_validate_presigned_signatures"`
+		S3AllowNonstandardRegions     bool              `json:"s3_allow_nonstandard_regions"`
 		Services                      []string          `json:"services"`
 		Tiers                         map[string]string `json:"tiers"`
 	}
@@ -129,6 +134,9 @@ func FromFile(c Config, path string) Config {
 	}
 	if f.S3ValidatePresignedSignatures {
 		c.S3ValidatePresignedSignatures = true
+	}
+	if f.S3AllowNonstandardRegions {
+		c.S3AllowNonstandardRegions = true
 	}
 	if len(f.Services) > 0 {
 		c.Services = f.Services

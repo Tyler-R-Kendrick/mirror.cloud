@@ -100,15 +100,16 @@ func NotImplemented(serviceID, operation, requiredTier string) *Fault {
 
 // Deps is the dependency bundle every behavior pack receives at construction.
 type Deps struct {
-	Store      Store
-	Blobs      BlobStore
-	Bus        Bus
-	Clock      Clock
-	Rand       Rand
-	Journal    Journal
-	Model      *model.Bundle
-	Authorizer Authorizer
-	Compute    ComputeProvider
+	Store                     Store
+	Blobs                     BlobStore
+	Bus                       Bus
+	Clock                     Clock
+	Rand                      Rand
+	Journal                   Journal
+	Model                     *model.Bundle
+	Authorizer                Authorizer
+	Compute                   ComputeProvider
+	S3AllowNonstandardRegions bool
 }
 
 // Store is account+region namespaced structured state.

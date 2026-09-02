@@ -451,13 +451,14 @@ func Boot(cfg config.Config) (*Runtime, error) {
 		bundle.Services[i].Operations = append([]model.Operation(nil), base.Services[i].Operations...)
 	}
 	deps := spi.Deps{
-		Store:   store.NewMemory(cfg.LockSHA),
-		Blobs:   blobs.NewMemory(),
-		Bus:     bus.New(),
-		Clock:   clk,
-		Rand:    rand.New(cfg.Seed),
-		Journal: journal.New(),
-		Model:   &bundle,
+		Store:                     store.NewMemory(cfg.LockSHA),
+		Blobs:                     blobs.NewMemory(),
+		Bus:                       bus.New(),
+		Clock:                     clk,
+		Rand:                      rand.New(cfg.Seed),
+		Journal:                   journal.New(),
+		Model:                     &bundle,
+		S3AllowNonstandardRegions: cfg.S3AllowNonstandardRegions,
 	}
 	deps.Authorizer = iam.NewAuthorizer(deps.Store)
 	if cfg.PersistDir != "" {

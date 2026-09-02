@@ -6696,7 +6696,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  `exists = exists && !truthy(meta["deleteMarker"])`,
 			new:  `exists = exists`,
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestPutObjectIfNoneMatchLifecycleCharacterization",
+			run:  "TestPutObjectIf(None)?MatchLifecycleCharacterization",
 		},
 		{
 			name: "s3-complete-drop-precondition-message",

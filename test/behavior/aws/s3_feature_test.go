@@ -1027,6 +1027,49 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given an absent object or delete marker When putting with If-None-Match Then S3 creates it", func(t *testing.T) {
+		put := func(path, body string) (int, []byte) {
+			t.Helper()
+			request, err := http.NewRequest(http.MethodPut, ts.URL+path, strings.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", auth)
+			request.Header.Set("If-None-Match", "*")
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			responseBody, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response.StatusCode, responseBody
+		}
+		for _, versioned := range []bool{false, true} {
+			name := "unversioned"
+			if versioned {
+				name = "versioned"
+			}
+			bucket, path := "if-none-match-bdd-"+name, "/if-none-match-bdd-"+name+"/key"
+			res := do(http.MethodPut, "/"+bucket, nil, "")
+			res.Body.Close()
+			if versioned {
+				res = do(http.MethodPut, "/"+bucket+"?versioning", []byte(`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`), "")
+				res.Body.Close()
+			}
+			if status, body := put(path, "first"); status != http.StatusOK {
+				t.Fatalf("first %s conditional put = %d %s", name, status, body)
+			}
+			if status, body := put(path, "blocked"); status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-None-Match</Condition>")) {
+				t.Fatalf("second %s conditional put = %d %s", name, status, body)
+			}
+			res = do(http.MethodDelete, path, nil, "")
+			res.Body.Close()
+			if status, body := put(path, "after-delete"); status != http.StatusOK {
+				t.Fatalf("%s conditional put after delete = %d %s", name, status, body)
+			}
+		}
+	})
+
 	t.Run("Given a destination If-Match list When putting or copying Then S3 requires one ETag", func(t *testing.T) {
 		res := do(http.MethodPut, "/write-if-match-bdd", nil, "")
 		res.Body.Close()

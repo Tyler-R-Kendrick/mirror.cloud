@@ -6632,6 +6632,43 @@ func TestWritePreconditionFaultDetails(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestPutObjectIfNoneMatchLifecycleCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	characterization := map[string]any{}
+	for _, versioned := range []bool{false, true} {
+		name := "unversioned"
+		if versioned {
+			name = "versioned"
+		}
+		bucket := "put-if-none-match-" + name
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+		if versioned {
+			mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": bucket, "Status": "Enabled"}, nil)
+		}
+		first := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "key", "IfNoneMatch": "*"}, []byte("first"))
+		_, err := invoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "key", "IfNoneMatch": "*"}, []byte("blocked"))
+		fault := asFault(t, err)
+		if fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != "If-None-Match" {
+			t.Fatalf("%s fault = %#v", name, fault)
+		}
+		mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "key"}, nil)
+		afterDelete := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": bucket, "Key": "key", "IfNoneMatch": "*"}, []byte("after-delete"))
+		if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": bucket, "Key": "key"}, nil))); body != "after-delete" {
+			t.Fatalf("%s body = %q", name, body)
+		}
+		entry := map[string]any{
+			"firstETag": first.Headers.Get("ETag"), "afterDeleteETag": afterDelete.Headers.Get("ETag"),
+			"blocked": map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields},
+		}
+		if versioned {
+			listed := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": bucket}, nil).Output
+			entry["versions"], entry["deleteMarkers"] = len(asSliceForTest(listed["Versions"])), len(asSliceForTest(listed["DeleteMarkers"]))
+		}
+		characterization[name] = entry
+	}
+	golden.AssertJSON(t, characterization)
+}
+
 func TestWriteIfMatchRequiresSingleETag(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "write-if-match"}, nil)

@@ -2473,6 +2473,36 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 			}
 		}
 	}
+	for _, versioned := range []bool{false, true} {
+		name := "unversioned"
+		if versioned {
+			name = "versioned"
+		}
+		bucket := "sdk-if-none-match-" + name
+		if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String(bucket)}); err != nil {
+			t.Fatalf("create %s If-None-Match bucket: %v", name, err)
+		}
+		if versioned {
+			if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String(bucket), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusEnabled}}); err != nil {
+				t.Fatalf("enable %s If-None-Match bucket: %v", name, err)
+			}
+		}
+		input := &s3.PutObjectInput{Bucket: aws.String(bucket), Key: aws.String("key"), Body: strings.NewReader("first"), IfNoneMatch: aws.String("*")}
+		if _, err := s3c.PutObject(context.Background(), input); err != nil {
+			t.Fatalf("first %s If-None-Match put: %v", name, err)
+		}
+		input.Body = strings.NewReader("blocked")
+		if _, err := s3c.PutObject(context.Background(), input); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") || !strings.Contains(err.Error(), "PreconditionFailed") {
+			t.Fatalf("second %s If-None-Match put: %v", name, err)
+		}
+		if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String(bucket), Key: aws.String("key")}); err != nil {
+			t.Fatalf("delete %s If-None-Match object: %v", name, err)
+		}
+		input.Body = strings.NewReader("after-delete")
+		if _, err := s3c.PutObject(context.Background(), input); err != nil {
+			t.Fatalf("%s If-None-Match put after delete: %v", name, err)
+		}
+	}
 	for _, operation := range []string{"PutObject", "CopyObject"} {
 		key := "write-if-match-list-" + operation
 		seed, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key), Body: strings.NewReader("old")})

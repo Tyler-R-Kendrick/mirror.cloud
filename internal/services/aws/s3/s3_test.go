@@ -5897,6 +5897,7 @@ func TestWritePreconditionFaultDetails(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "write-precondition-details"}, nil)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-precondition-details", "Key": "source"}, []byte("source"))
+	characterization := map[string]any{}
 	for _, operation := range []string{"PutObject", "CopyObject"} {
 		for _, test := range []struct {
 			name, condition, value, code, message, field, detail string
@@ -5922,6 +5923,7 @@ func TestWritePreconditionFaultDetails(t *testing.T) {
 				if fault.Code != test.code || fault.Message != test.message || fault.HTTPStatus != test.status || fault.Fault != "client" || fault.Fields[test.field] != test.detail {
 					t.Fatalf("fault = %#v", fault)
 				}
+				characterization[operation+"/"+test.name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
 				if test.existing {
 					if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "write-precondition-details", "Key": "destination"}, nil))); body != "old" {
 						t.Fatalf("rejected write stored %q", body)
@@ -5930,6 +5932,7 @@ func TestWritePreconditionFaultDetails(t *testing.T) {
 			})
 		}
 	}
+	golden.AssertJSON(t, characterization)
 }
 
 func TestCompleteMultipartUploadConditionalConflicts(t *testing.T) {

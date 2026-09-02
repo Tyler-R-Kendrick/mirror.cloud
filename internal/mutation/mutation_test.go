@@ -6738,6 +6738,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSuspendedVersioningReplacesNullVersion",
 		},
 		{
+			name: "s3-accept-delete-directory-preconditions",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if unsupportedPrecondition != "" {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestDeleteObjectDirectoryPreconditionsAreNotImplemented",
+		},
+		{
+			name: "s3-use-first-delete-directory-precondition",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if requestCondition(req, condition.input, condition.header) != "" {`,
+			new:  `if requestCondition(req, condition.input, condition.header) != "" && unsupportedPrecondition == "" {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "FuzzDeleteObjectDirectoryPreconditions",
+		},
+		{
 			name: "s3-generate-suspended-object-version",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  "if versioned {\n\t\tvid = \"null\"\n\t\tif versioningStatus == \"Enabled\" {",

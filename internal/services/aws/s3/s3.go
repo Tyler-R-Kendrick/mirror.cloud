@@ -2611,6 +2611,9 @@ func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, 
 			}
 		}
 	}
+	if maxParts == 0 {
+		maxParts = 1000
+	}
 	if marker < 0 || maxParts < 0 || maxParts > 1000 {
 		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
@@ -2696,6 +2699,9 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 		if err != nil {
 			return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
+	}
+	if maxUploads == 0 {
+		maxUploads = 1000
 	}
 	if maxUploads < 1 || maxUploads > 1000 {
 		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}

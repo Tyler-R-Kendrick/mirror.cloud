@@ -1861,8 +1861,12 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 	}
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(status)
+	message := f.Message
+	if message == "" && f.Code == "MalformedXML" {
+		message = "The XML you provided was not well-formed or did not validate against our published schema"
+	}
 	var body strings.Builder
-	fmt.Fprintf(&body, `<Error><Code>%s</Code><Message>%s</Message>`, xmlEscape(f.Code), xmlEscape(f.Message))
+	fmt.Fprintf(&body, `<Error><Code>%s</Code><Message>%s</Message>`, xmlEscape(f.Code), xmlEscape(message))
 	write(f.Fields, &body)
 	fmt.Fprintf(&body, `<RequestId>%s</RequestId><HostId>mirror</HostId></Error>`, xmlEscape(requestID))
 	_, err := io.WriteString(w, body.String())

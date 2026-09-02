@@ -2901,7 +2901,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodGet, "/encryption-bdd?encryption", nil, "")
 		body, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || len(body) != 0 {
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<SSEAlgorithm>AES256</SSEAlgorithm>")) || !bytes.Contains(body, []byte("<BucketKeyEnabled>false</BucketKeyEnabled>")) {
 			t.Fatalf("default encryption %d %s", res.StatusCode, body)
 		}
 		valid := []byte(`<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>arn:aws:kms:us-east-1:000000000000:key/bdd</KMSMasterKeyID></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`)

@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.6% |
-| LocalStack S3 test functions explicitly traced | 65 / 463 (14.0%) |
-| LocalStack S3 test functions not yet traced | 398 / 463 (86.0%) |
+| LocalStack S3 test functions explicitly traced | 70 / 463 (15.1%) |
+| LocalStack S3 test functions not yet traced | 393 / 463 (84.9%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -102,6 +102,11 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3_list_operations.py::TestS3ListBuckets::test_list_buckets_with_continuation_token` | `TestListBucketsPaginationAndFilters`, SDK paginator contract, HTTP BDD, fuzz, snapshot, and mutation coverage verify distinct ordered pages | Mapped and green |
 | `test_s3_list_operations.py::TestS3ListBuckets::test_list_buckets_region_validation` | `TestListBucketsPaginationAndFilters` verifies the exact `InvalidArgument`, message, status, and `bucket-region` field for an unknown AWS region | Mapped and green |
 | `test_s3_list_operations.py::TestS3ListBuckets::test_region_validation_non_standard_regions_enabled` | `TestListBucketsPaginationAndFilters` verifies opt-in creation and filtering in a nonstandard region plus cross-region endpoint rejection; config env/file unit and mutation coverage pin the opt-in | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListObjects::test_list_objects_with_prefix` | `TestListObjectsDelimiterEncodingAndEmptyMarker` verifies empty, slash, double-encoded `%2F`, and raw `%2F` delimiters with prefix and URL-encoding behavior | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListObjects::test_list_objects_next_marker` | `TestListObjectsPaginationIncludesCommonPrefixes` verifies V1 next-marker presence with a delimiter, omission without one, and ordered continuation | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListObjects::test_s3_list_objects_empty_marker` | `TestListObjectsDelimiterEncodingAndEmptyMarker` verifies an explicit empty marker on an empty bucket returns an empty first page | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListObjects::test_list_objects_marker_common_prefixes` | `TestListObjectsPaginationIncludesCommonPrefixes` and characterization snapshots verify common-prefix, object, terminal, and manual-marker pages | Mapped and green |
+| `test_s3_list_operations.py::TestS3ListObjects::test_s3_list_objects_timestamp_precision` | `TestListObjectsV2Prefix` and the pagination characterization verify V1/V2 timestamps retain S3 millisecond precision; a semantic mutant rejects RFC3339 values without `.000Z` | Mapped and green |
 
 ## Source-only findings
 
@@ -113,4 +118,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 65/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 70/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

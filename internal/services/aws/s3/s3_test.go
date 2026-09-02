@@ -6784,9 +6784,13 @@ func TestCompleteMultipartUploadConditionalConflicts(t *testing.T) {
 
 	put("deleted-after-initiation", "object")
 	uploadID, input = upload("deleted-after-initiation")
-	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "deleted-after-initiation"}, nil)
 	input["IfNoneMatch"] = "*"
+	wantFault("existing-before-delete", uploadID, input, "PreconditionFailed", "At least one of the pre-conditions you specified did not hold", http.StatusPreconditionFailed, map[string]any{"Condition": "If-None-Match"})
+	mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": bucket, "Key": "deleted-after-initiation"}, nil)
 	wantFault("deleted-after-initiation", uploadID, input, "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, map[string]any{"Condition": "If-None-Match", "Key": "deleted-after-initiation"})
+	_, input = upload("deleted-after-initiation")
+	input["IfNoneMatch"] = "*"
+	mustInvoke(t, p, "CompleteMultipartUpload", input, nil)
 
 	put("changed-after-initiation", "old")
 	uploadID, input = upload("changed-after-initiation")

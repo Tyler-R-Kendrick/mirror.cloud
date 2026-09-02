@@ -1673,6 +1673,56 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String("sdk"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatus("Invalid")}}); err == nil || !strings.Contains(err.Error(), "MalformedXML") {
 		t.Fatalf("invalid versioning status: %v", err)
 	}
+	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-suspended")}); err != nil {
+		t.Fatalf("create suspended bucket: %v", err)
+	}
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key"), Body: strings.NewReader("unversioned")}); err != nil {
+		t.Fatalf("put unversioned object: %v", err)
+	}
+	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String("sdk-suspended"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusEnabled}}); err != nil {
+		t.Fatalf("enable suspended bucket: %v", err)
+	}
+	enabledObject, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key"), Body: strings.NewReader("enabled")})
+	if err != nil {
+		t.Fatalf("put enabled object: %v", err)
+	}
+	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String("sdk-suspended"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusSuspended}}); err != nil {
+		t.Fatalf("suspend versioning: %v", err)
+	}
+	for _, body := range []string{"first null", "second null"} {
+		if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key"), Body: strings.NewReader(body)}); err != nil {
+			t.Fatalf("put suspended object: %v", err)
+		}
+	}
+	suspendedVersions, err := s3c.ListObjectVersions(context.Background(), &s3.ListObjectVersionsInput{Bucket: aws.String("sdk-suspended")})
+	if err != nil || len(suspendedVersions.Versions) != 2 || aws.ToString(suspendedVersions.Versions[0].VersionId) != "null" || aws.ToString(suspendedVersions.Versions[1].VersionId) != aws.ToString(enabledObject.VersionId) || !aws.ToBool(suspendedVersions.Versions[0].IsLatest) || aws.ToBool(suspendedVersions.Versions[1].IsLatest) {
+		t.Fatalf("suspended versions: %#v %v", suspendedVersions, err)
+	}
+	nullObject, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key"), VersionId: aws.String("null")})
+	if err != nil {
+		t.Fatalf("get null object: %v", err)
+	}
+	nullBody, _ := io.ReadAll(nullObject.Body)
+	_ = nullObject.Body.Close()
+	if string(nullBody) != "second null" || aws.ToString(nullObject.VersionId) != "null" {
+		t.Fatalf("null object: body=%q output=%#v", nullBody, nullObject)
+	}
+	suspendedMarker, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key")})
+	if err != nil || !aws.ToBool(suspendedMarker.DeleteMarker) || aws.ToString(suspendedMarker.VersionId) != "null" {
+		t.Fatalf("suspended delete marker: %#v %v", suspendedMarker, err)
+	}
+	if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key"), VersionId: aws.String("null")}); err != nil {
+		t.Fatalf("delete null marker: %v", err)
+	}
+	restoredObject, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key")})
+	if err != nil {
+		t.Fatalf("get restored object: %v", err)
+	}
+	restoredBody, _ := io.ReadAll(restoredObject.Body)
+	_ = restoredObject.Body.Close()
+	if string(restoredBody) != "enabled" || aws.ToString(restoredObject.VersionId) != aws.ToString(enabledObject.VersionId) {
+		t.Fatalf("restored object: body=%q output=%#v", restoredBody, restoredObject)
+	}
 	replicationConfiguration := &s3types.ReplicationConfiguration{
 		Role:  aws.String("arn:aws:iam::000000000000:role/replication"),
 		Rules: []s3types.ReplicationRule{{Priority: aws.Int32(1), Status: s3types.ReplicationRuleStatusEnabled, Filter: &s3types.ReplicationRuleFilter{Prefix: aws.String("replica/")}, DeleteMarkerReplication: &s3types.DeleteMarkerReplication{Status: s3types.DeleteMarkerReplicationStatusDisabled}, Destination: &s3types.Destination{Bucket: aws.String("arn:aws:s3:::sdk-west")}}},

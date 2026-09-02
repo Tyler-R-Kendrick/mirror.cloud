@@ -3895,14 +3895,17 @@ func TestObjectReadConditions(t *testing.T) {
 		return response, err
 	}
 	for _, operation := range []string{"GetObject", "HeadObject", "GetObjectAttributes"} {
-		for _, conditions := range []map[string]any{
-			{"IfMatch": `"wrong"`},
-			{"IfMatch": `"wrong", ` + etag},
-			{"IfUnmodifiedSince": past},
+		for _, test := range []struct {
+			conditions map[string]any
+			condition  string
+		}{
+			{map[string]any{"IfMatch": `"wrong"`}, "If-Match"},
+			{map[string]any{"IfMatch": `"wrong", ` + etag}, "If-Match"},
+			{map[string]any{"IfUnmodifiedSince": past}, "If-Unmodified-Since"},
 		} {
-			_, err := call(operation, conditions)
-			if fault := asFault(t, err); fault.Code != "PreconditionFailed" || fault.HTTPStatus != http.StatusPreconditionFailed {
-				t.Fatalf("%s %#v fault = %#v", operation, conditions, fault)
+			_, err := call(operation, test.conditions)
+			if fault := asFault(t, err); fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != test.condition {
+				t.Fatalf("%s %#v fault = %#v", operation, test.conditions, fault)
 			}
 		}
 		for _, conditions := range []map[string]any{

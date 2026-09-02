@@ -599,6 +599,34 @@ func TestConcurrentListObjectVersionsRemainsPageable(t *testing.T) {
 	if err != nil || len(versions) != 17 || checksummed != 1 {
 		t.Fatalf("final versions = %#v, err=%v", response, err)
 	}
+	first, err := call("ListObjectVersions", map[string]any{"Bucket": "version-list-chaos", "Prefix": "prefix/", "MaxKeys": 1}, "")
+	if err != nil || first.Output["NextVersionIdMarker"] == nil {
+		t.Fatalf("deleted marker first page = %#v, err=%v", first, err)
+	}
+	if _, err := call("DeleteObject", map[string]any{"Bucket": "version-list-chaos", "Key": first.Output["NextKeyMarker"], "VersionId": first.Output["NextVersionIdMarker"]}, ""); err != nil {
+		t.Fatal(err)
+	}
+	resumeErrs := make(chan error, 16)
+	var resumeWG sync.WaitGroup
+	for range cap(resumeErrs) {
+		resumeWG.Add(1)
+		go func() {
+			defer resumeWG.Done()
+			page, err := call("ListObjectVersions", map[string]any{"Bucket": "version-list-chaos", "Prefix": "prefix/", "KeyMarker": first.Output["NextKeyMarker"], "VersionIdMarker": first.Output["NextVersionIdMarker"]}, "")
+			if err != nil || len(page.Output["Versions"].([]any)) != 16 {
+				resumeErrs <- fmt.Errorf("deleted marker page = %#v, err=%v", page, err)
+				return
+			}
+			resumeErrs <- nil
+		}()
+	}
+	resumeWG.Wait()
+	close(resumeErrs)
+	for err := range resumeErrs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
 	encoded, err := call("ListObjectVersions", map[string]any{"Bucket": "version-list-chaos", "Prefix": "url/", "MaxKeys": 1, "EncodingType": "url"}, "")
 	if rows := encoded.Output["Versions"].([]any); err != nil || len(rows) != 1 || rows[0].(map[string]any)["Key"] != "url/k%20ey%2B" || encoded.Output["NextVersionIdMarker"] == nil {
 		t.Fatalf("encoded versions = %#v, err=%v", encoded, err)

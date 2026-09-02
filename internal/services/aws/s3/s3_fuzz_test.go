@@ -1520,10 +1520,13 @@ func FuzzListEncodingType(f *testing.F) {
 }
 
 func FuzzListObjectVersionsPagination(f *testing.F) {
-	for _, seed := range []struct{ max, start uint8 }{{0, 0}, {2, 1}, {3, 2}, {5, 4}} {
-		f.Add(seed.max, seed.start)
+	for _, seed := range []struct {
+		max, start uint8
+		deleted    bool
+	}{{0, 0, false}, {2, 1, true}, {3, 2, true}, {5, 4, false}} {
+		f.Add(seed.max, seed.start, seed.deleted)
 	}
-	f.Fuzz(func(t *testing.T, maxSeed, startSeed uint8) {
+	f.Fuzz(func(t *testing.T, maxSeed, startSeed uint8, deleted bool) {
 		p := s3.New(spitest.Deps(t))
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-list-fuzz"}, nil)
 		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "version-list-fuzz", "Status": "Enabled"}, nil)
@@ -1548,6 +1551,9 @@ func FuzzListObjectVersionsPagination(f *testing.F) {
 		if start > 0 {
 			input["KeyMarker"] = "prefix/key"
 			input["VersionIdMarker"] = asMapForTest(all[start-1])["VersionId"]
+			if deleted {
+				mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "version-list-fuzz", "Key": "prefix/key", "VersionId": input["VersionIdMarker"]}, nil)
+			}
 		}
 		page := mustInvoke(t, p, "ListObjectVersions", input, nil).Output
 		got := asSliceForTest(page["Versions"])

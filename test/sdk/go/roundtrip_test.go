@@ -1071,6 +1071,22 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || len(lastVersions.Versions) != 2 || aws.ToBool(lastVersions.IsTruncated) {
 		t.Fatalf("last version list page: %#v %v", lastVersions, err)
 	}
+	for range 3 {
+		if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-version-list"), Key: aws.String("deleted-marker/key"), Body: strings.NewReader("body")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deletedMarkerPage, err := s3c.ListObjectVersions(context.Background(), &s3.ListObjectVersionsInput{Bucket: aws.String("sdk-version-list"), Prefix: aws.String("deleted-marker/key"), MaxKeys: aws.Int32(1)})
+	if err != nil || aws.ToString(deletedMarkerPage.NextVersionIdMarker) == "" {
+		t.Fatalf("deleted marker first page: %#v %v", deletedMarkerPage, err)
+	}
+	if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk-version-list"), Key: aws.String("deleted-marker/key"), VersionId: deletedMarkerPage.NextVersionIdMarker}); err != nil {
+		t.Fatal(err)
+	}
+	resumedVersions, err := s3c.ListObjectVersions(context.Background(), &s3.ListObjectVersionsInput{Bucket: aws.String("sdk-version-list"), Prefix: aws.String("deleted-marker/key"), KeyMarker: aws.String("deleted-marker/key"), VersionIdMarker: deletedMarkerPage.NextVersionIdMarker})
+	if err != nil || len(resumedVersions.Versions) != 2 {
+		t.Fatalf("deleted marker next page: %#v %v", resumedVersions, err)
+	}
 	if _, err := s3c.ListObjectVersions(context.Background(), &s3.ListObjectVersionsInput{Bucket: aws.String("sdk-version-list"), VersionIdMarker: aws.String("orphan")}); err == nil || !strings.Contains(err.Error(), "InvalidArgument") {
 		t.Fatalf("orphan version marker: %v", err)
 	}

@@ -1608,7 +1608,7 @@ func TestConcurrentCompleteMultipartConditionalConflictsRemainModeled(t *testing
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			key, mode := fmt.Sprintf("key-%d", i), i%5
+			key, mode := fmt.Sprintf("key-%d", i), i%6
 			put := func(body string) (string, error) {
 				response, err := call("PutObject", map[string]any{"Bucket": "complete-conditional-chaos", "Key": key}, body)
 				if err != nil {
@@ -1616,8 +1616,10 @@ func TestConcurrentCompleteMultipartConditionalConflictsRemainModeled(t *testing
 				}
 				return response.Headers.Get("ETag"), nil
 			}
-			if mode == 1 || mode == 3 || mode == 4 {
-				if _, err := put("old"); err != nil {
+			seedETag := ""
+			var err error
+			if mode == 1 || mode == 3 || mode == 4 || mode == 5 {
+				if seedETag, err = put("old"); err != nil {
 					errs <- err
 					return
 				}
@@ -1652,6 +1654,8 @@ func TestConcurrentCompleteMultipartConditionalConflictsRemainModeled(t *testing
 				_ = deps.Clock.Advance(2 * time.Second)
 				input["IfMatch"], err = put("changed")
 				code, message, status, conflictKey = "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, key
+			case 5:
+				input["IfMatch"] = `"wrong", ` + seedETag
 			}
 			if err != nil {
 				errs <- err
@@ -1667,6 +1671,18 @@ func TestConcurrentCompleteMultipartConditionalConflictsRemainModeled(t *testing
 			if err != nil || len(listed.Output["Parts"].([]any)) != 1 {
 				errs <- fmt.Errorf("mode %d rejected completion changed upload = %#v, err=%v", mode, listed, err)
 				return
+			}
+			if mode == 5 {
+				got, err := call("GetObject", map[string]any{"Bucket": "complete-conditional-chaos", "Key": key}, "")
+				if err != nil {
+					errs <- err
+					return
+				}
+				body, _ := io.ReadAll(got.Stream)
+				if string(body) != "old" {
+					errs <- fmt.Errorf("If-Match list changed object to %q", body)
+					return
+				}
 			}
 			errs <- nil
 		}()

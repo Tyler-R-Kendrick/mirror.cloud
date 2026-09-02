@@ -11,7 +11,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
-| S3 statement coverage | 89.8% |
+| S3 statement coverage | 89.9% |
 | LocalStack S3 test functions explicitly traced | 134 / 463 (28.9%) |
 | LocalStack S3 test functions not yet traced | 329 / 463 (71.1%) |
 

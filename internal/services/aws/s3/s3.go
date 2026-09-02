@@ -820,7 +820,7 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		switch ownership {
 		case "BucketOwnerPreferred", "ObjectWriter", "BucketOwnerEnforced":
 		default:
-			return &spi.Fault{Code: "InvalidArgument", Message: "Invalid x-amz-object-ownership header", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-object-ownership", "ArgumentValue": ownership}}
+			return &spi.Fault{Code: "InvalidArgument", Message: "Invalid x-amz-object-ownership header: " + ownership, HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-object-ownership"}}
 		}
 		ownershipDocument, _ = json.Marshal(map[string]any{"OwnershipControls": map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": ownership}}}})
 		return nil
@@ -3684,6 +3684,9 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 				miss.Fields = map[string]any{"BucketName": b}
 			}
 			if req.Operation == "GetBucketObjectLockConfiguration" || req.Operation == "GetObjectLockConfiguration" {
+				miss.Fields = map[string]any{"BucketName": b}
+			}
+			if req.Operation == "GetBucketOwnershipControls" {
 				miss.Fields = map[string]any{"BucketName": b}
 			}
 			return nil, miss

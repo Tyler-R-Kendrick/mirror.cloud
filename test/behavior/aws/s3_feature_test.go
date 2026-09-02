@@ -64,6 +64,9 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if method == http.MethodPut && path == "/invalid-create-owned" {
 			req.Header.Set("x-amz-object-ownership", "")
 		}
+		if method == http.MethodPut && path == "/invalid-create-owned-random" {
+			req.Header.Set("x-amz-object-ownership", "RandomValue")
+		}
 		if strings.Contains(path, "?delete") {
 			digest := md5.Sum(body)
 			req.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(digest[:]))
@@ -2313,16 +2316,20 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || !bytes.Contains(controls, []byte("<Rule><ObjectOwnership>BucketOwnerPreferred</ObjectOwnership></Rule>")) || bytes.Contains(controls, []byte("<member>")) {
 			t.Fatalf("created ownership %d %s", res.StatusCode, controls)
 		}
-		res = do(http.MethodPut, "/invalid-create-owned", nil, "")
-		fault, _ := io.ReadAll(res.Body)
-		res.Body.Close()
-		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("InvalidArgument")) {
-			t.Fatalf("invalid ownership %d %s", res.StatusCode, fault)
-		}
-		res = do(http.MethodHead, "/invalid-create-owned", nil, "")
-		res.Body.Close()
-		if res.StatusCode != http.StatusNotFound {
-			t.Fatalf("invalid ownership reserved bucket: %d", res.StatusCode)
+		for _, invalid := range []struct{ path, value string }{{"/invalid-create-owned", ""}, {"/invalid-create-owned-random", "RandomValue"}} {
+			res = do(http.MethodPut, invalid.path, nil, "")
+			fault, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			message := "<Message>Invalid x-amz-object-ownership header: " + invalid.value + "</Message>"
+			if res.StatusCode != http.StatusBadRequest || !bytes.Contains(fault, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(fault, []byte(message)) ||
+				!bytes.Contains(fault, []byte("<ArgumentName>x-amz-object-ownership</ArgumentName>")) || bytes.Contains(fault, []byte("<ArgumentValue>")) {
+				t.Fatalf("invalid ownership %q = %d %s", invalid.value, res.StatusCode, fault)
+			}
+			res = do(http.MethodHead, invalid.path, nil, "")
+			res.Body.Close()
+			if res.StatusCode != http.StatusNotFound {
+				t.Fatalf("invalid ownership %q reserved bucket: %d", invalid.value, res.StatusCode)
+			}
 		}
 	})
 
@@ -2370,7 +2377,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res = do(http.MethodGet, "/ownership-controls?ownershipControls", nil, "")
 		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("OwnershipControlsNotFoundError")) {
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("OwnershipControlsNotFoundError")) || !bytes.Contains(body, []byte("<BucketName>ownership-controls</BucketName>")) {
 			t.Fatalf("get deleted ownership controls %d %s", res.StatusCode, body)
 		}
 	})

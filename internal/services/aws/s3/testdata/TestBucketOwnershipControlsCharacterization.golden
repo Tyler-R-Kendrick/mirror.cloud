@@ -17,6 +17,7 @@
     "status": 400
   },
   "missing": {
+    "bucket": "ownership-characterization",
     "code": "OwnershipControlsNotFoundError",
     "message": "The bucket ownership controls were not found",
     "status": 404

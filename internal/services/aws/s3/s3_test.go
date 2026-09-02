@@ -5243,6 +5243,26 @@ func TestListObjectVersionsPagination(t *testing.T) {
 	}
 }
 
+func TestListObjectVersionsManyVersionsPagination(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "many-versions"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "many-versions", "Status": "Enabled"}, nil)
+	for range 101 {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "many-versions", "Key": "prefixed-key"}, nil)
+	}
+	first := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "many-versions", "Prefix": "prefix", "MaxKeys": 100}, nil).Output
+	if len(asSliceForTest(first["Versions"])) != 100 || first["IsTruncated"] != true || first["NextKeyMarker"] != "prefixed-key" || first["NextVersionIdMarker"] == nil {
+		t.Fatalf("first version page = %#v", first)
+	}
+	second := mustInvoke(t, p, "ListObjectVersions", map[string]any{
+		"Bucket": "many-versions", "Prefix": "prefix", "MaxKeys": 100,
+		"KeyMarker": first["NextKeyMarker"], "VersionIdMarker": first["NextVersionIdMarker"],
+	}, nil).Output
+	if len(asSliceForTest(second["Versions"])) != 1 || second["IsTruncated"] != false || second["NextKeyMarker"] != nil || second["NextVersionIdMarker"] != nil {
+		t.Fatalf("second version page = %#v", second)
+	}
+}
+
 func TestListObjectVersionsResumesAfterDeletedVersionMarker(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "deleted-version-marker"}, nil)

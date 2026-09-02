@@ -2429,6 +2429,46 @@ func TestConcurrentDeletePreconditionsNeverMutateObject(t *testing.T) {
 	}
 }
 
+func TestConcurrentMissingKeyVersionDeletesAreIdempotent(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "missing-version-chaos"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "missing-version-chaos", "Status": "Suspended"}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			version := "null"
+			if i%2 == 0 {
+				version = fmt.Sprintf("missing-%d", i)
+			}
+			response, err := call("DeleteObject", map[string]any{"Bucket": "missing-version-chaos", "Key": "missing", "VersionId": version})
+			if err != nil || response.Status != http.StatusNoContent || len(response.Headers) != 0 {
+				errs <- fmt.Errorf("version %q: %#v, %v", version, response, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
 func TestConcurrentBucketCreationHasOneOwner(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

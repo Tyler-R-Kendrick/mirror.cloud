@@ -5087,6 +5087,13 @@ func TestGetObjectAttributesContract(t *testing.T) {
 	if lastParts["IsTruncated"] != false || lastParts["PartNumberMarker"] != "2" || lastParts["NextPartNumberMarker"] != "3" || len(lastParts["Parts"].([]any)) != 1 || asMapForTest(lastParts["Parts"].([]any)[0])["PartNumber"] != 3 {
 		t.Fatalf("object parts final page = %#v", lastParts)
 	}
+	emptyPage := mustInvoke(t, p, "GetObjectAttributes", map[string]any{
+		"Bucket": "bucket", "Key": "composite", "VersionId": version, "ObjectAttributes": []string{"ObjectParts"}, "PartNumberMarker": "10", "MaxParts": 2,
+	}, nil).Output
+	emptyParts := asMapForTest(emptyPage["ObjectParts"])
+	if emptyParts["IsTruncated"] != false || emptyParts["PartNumberMarker"] != "10" || emptyParts["NextPartNumberMarker"] != "0" || emptyParts["Parts"] != nil || emptyParts["TotalPartsCount"] != 3 {
+		t.Fatalf("object parts empty page = %#v", emptyParts)
+	}
 	selected := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": "bucket", "Key": "composite", "VersionId": version, "ObjectAttributes": []string{"ObjectSize"}}, nil)
 	if len(selected.Output) != 1 || selected.Output["ObjectSize"] == nil {
 		t.Fatalf("selected attributes = %#v", selected.Output)

@@ -1,4 +1,12 @@
 {
+  "default": {
+    "PublicAccessBlockConfiguration": {
+      "BlockPublicAcls": true,
+      "BlockPublicPolicy": true,
+      "IgnorePublicAcls": true,
+      "RestrictPublicBuckets": true
+    }
+  },
   "delete": 204,
   "get": {
     "PublicAccessBlockConfiguration": {
@@ -13,7 +21,9 @@
     "status": 400
   },
   "missing": {
+    "bucket": "public-access-block-characterization",
     "code": "NoSuchPublicAccessBlockConfiguration",
+    "message": "The public access block configuration was not found",
     "status": 404
   },
   "put": null

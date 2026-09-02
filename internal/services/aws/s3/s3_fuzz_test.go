@@ -3318,15 +3318,18 @@ func FuzzCopySourcePreconditions(f *testing.F) {
 		modified := time.Unix(0, 0).UTC()
 		conditions := map[string]any{}
 		wantSuccess := false
+		faultCondition := ""
 		switch mode % 7 {
 		case 0:
 			conditions["CopySourceIfMatch"] = `"wrong", ` + put.Headers.Get("ETag")
+			faultCondition = "x-amz-copy-source-If-Match"
 		case 1:
 			conditions["CopySourceIfModifiedSince"] = modified.Add(time.Duration(seconds+1) * time.Second).Format(http.TimeFormat)
 			wantSuccess = true
 		case 2:
 			conditions["CopySourceIfNoneMatch"] = `"wrong"`
 			conditions["CopySourceIfModifiedSince"] = modified.Format(http.TimeFormat)
+			faultCondition = "x-amz-copy-source-If-Modified-Since"
 		case 3:
 			conditions["CopySourceIfMatch"] = put.Headers.Get("ETag")
 			conditions["CopySourceIfNoneMatch"] = put.Headers.Get("ETag")
@@ -3335,8 +3338,10 @@ func FuzzCopySourcePreconditions(f *testing.F) {
 			wantSuccess = true
 		case 4:
 			conditions["CopySourceIfUnmodifiedSince"] = modified.Add(-time.Second).Format(http.TimeFormat)
+			faultCondition = "x-amz-copy-source-If-Unmodified-Since"
 		case 5:
 			conditions["CopySourceIfNoneMatch"] = put.Headers.Get("ETag")
+			faultCondition = "x-amz-copy-source-If-None-Match"
 		case 6:
 			conditions["CopySourceIfModifiedSince"] = modified.Add(-time.Second).Format(http.TimeFormat)
 			wantSuccess = true
@@ -3349,8 +3354,11 @@ func FuzzCopySourcePreconditions(f *testing.F) {
 		if wantSuccess && err != nil {
 			t.Fatalf("mode %d: %v", mode%7, err)
 		}
-		if !wantSuccess && asFault(t, err).Code != "PreconditionFailed" {
-			t.Fatalf("mode %d: %v", mode%7, err)
+		if !wantSuccess {
+			fault := asFault(t, err)
+			if fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.Fields["Condition"] != faultCondition {
+				t.Fatalf("mode %d: %#v", mode%7, fault)
+			}
 		}
 	})
 }

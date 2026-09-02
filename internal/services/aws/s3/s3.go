@@ -85,7 +85,7 @@ type copySource struct {
 
 const bucketLocationConstraints = "|EU|af-south-1|ap-east-1|ap-east-2|ap-northeast-1|ap-northeast-2|ap-northeast-3|ap-south-1|ap-south-2|ap-southeast-1|ap-southeast-2|ap-southeast-3|ap-southeast-4|ap-southeast-5|ap-southeast-6|ap-southeast-7|ca-central-1|ca-west-1|cn-north-1|cn-northwest-1|eu-central-1|eu-central-2|eu-north-1|eu-south-1|eu-south-2|eu-west-1|eu-west-2|eu-west-3|il-central-1|me-central-1|me-south-1|mx-central-1|sa-east-1|us-east-2|us-gov-east-1|us-gov-west-1|us-west-1|us-west-2|"
 
-func createBucketRegion(endpoint, constraint string) (string, error) {
+func createBucketRegion(endpoint, constraint string, allowNonstandard bool) (string, error) {
 	illegal := func() error {
 		value := constraint
 		if value == "" {
@@ -100,7 +100,7 @@ func createBucketRegion(endpoint, constraint string) (string, error) {
 		return "us-east-1", nil
 	}
 	if endpoint == "us-east-1" {
-		if !strings.Contains(bucketLocationConstraints, "|"+constraint+"|") {
+		if !allowNonstandard && !strings.Contains(bucketLocationConstraints, "|"+constraint+"|") {
 			return "", &spi.Fault{Code: "InvalidLocationConstraint", Message: "The specified location-constraint is not valid", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"LocationConstraint": constraint}}
 		}
 		if constraint == "EU" {
@@ -840,7 +840,7 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 	if constraint == "" {
 		constraint = str(configuration["LocationConstraint"])
 	}
-	bucketRegion, err := createBucketRegion(req.Identity.Region, constraint)
+	bucketRegion, err := createBucketRegion(req.Identity.Region, constraint, p.deps.S3AllowNonstandardRegions)
 	if err != nil {
 		return nil, err
 	}
@@ -1023,6 +1023,9 @@ func (p *Pack) headBucket(ctx context.Context, req *spi.Request) (*spi.Response,
 func (p *Pack) listBuckets(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	prefix, prefixSet := req.Input["Prefix"].(string)
 	region, regionSet := req.Input["BucketRegion"].(string)
+	if regionSet && !p.deps.S3AllowNonstandardRegions && region != "us-east-1" && !strings.Contains(bucketLocationConstraints, "|"+region+"|") {
+		return nil, &spi.Fault{Code: "InvalidArgument", Message: "Argument value " + region + " is not a valid AWS Region", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "bucket-region"}}
+	}
 	token, tokenSet := req.Input["ContinuationToken"].(string)
 	_, maxSet := req.Input["MaxBuckets"]
 	maxBuckets := 0
@@ -2098,7 +2101,7 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 		_ = json.Unmarshal(kv.Value, &meta)
 		modified := str(meta["mtime"])
 		if parsed, err := http.ParseTime(modified); err == nil {
-			modified = parsed.UTC().Format(time.RFC3339)
+			modified = parsed.UTC().Format("2006-01-02T15:04:05.000Z")
 		}
 		content := map[string]any{"Key": key, "Size": meta["size"], "ETag": meta["etag"], "LastModified": modified, "StorageClass": meta["storageClass"]}
 		setListChecksumMetadata(content, meta)

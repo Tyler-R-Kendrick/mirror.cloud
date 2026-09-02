@@ -21,7 +21,7 @@
       {
         "ETag": "\"9a0364b9e99bb480dd25e1f0284c8555\"",
         "Key": "folder/file1",
-        "LastModified": "1970-01-01T00:00:00Z",
+        "LastModified": "1970-01-01T00:00:00.000Z",
         "Owner": {
           "ID": "123456789012"
         },
@@ -59,7 +59,7 @@
       {
         "ETag": "\"9a0364b9e99bb480dd25e1f0284c8555\"",
         "Key": "folder/file1",
-        "LastModified": "1970-01-01T00:00:00Z",
+        "LastModified": "1970-01-01T00:00:00.000Z",
         "Size": 7,
         "StorageClass": "STANDARD"
       }

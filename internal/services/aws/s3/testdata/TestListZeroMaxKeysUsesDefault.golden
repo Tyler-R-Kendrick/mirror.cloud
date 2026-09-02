@@ -30,7 +30,7 @@
       {
         "ETag": "\"841a2d689ad86bd1611447453c22c6fc\"",
         "Key": "key",
-        "LastModified": "1970-01-01T00:00:00Z",
+        "LastModified": "1970-01-01T00:00:00.000Z",
         "Owner": {
           "ID": "123456789012"
         },
@@ -52,7 +52,7 @@
       {
         "ETag": "\"841a2d689ad86bd1611447453c22c6fc\"",
         "Key": "key",
-        "LastModified": "1970-01-01T00:00:00Z",
+        "LastModified": "1970-01-01T00:00:00.000Z",
         "Size": 4,
         "StorageClass": "STANDARD"
       }

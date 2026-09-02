@@ -26,6 +26,7 @@ import (
 	"os/exec"
 	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -2347,6 +2348,9 @@ func TestListBucketsPaginationAndFilters(t *testing.T) {
 	if got := strings.Join(names(all), ","); got != "alpha-bucket,team-alpha,team-beta,team-charlie" {
 		t.Fatalf("all buckets = %s", got)
 	}
+	if upper := mustInvokeAs(t, p, east, "ListBuckets", map[string]any{"Prefix": "TEAM-"}, nil); len(names(upper)) != 0 || upper.Output["Prefix"] != "TEAM-" {
+		t.Fatalf("case-sensitive prefix = %#v", upper.Output)
+	}
 	firstCreated := stringValue(asMapForTest(all.Output["Buckets"].([]any)[0])["CreationDate"])
 	if firstCreated == "" || asMapForTest(all.Output["Buckets"].([]any)[0])["BucketRegion"] != nil || asMapForTest(all.Output["Buckets"].([]any)[0])["BucketArn"] != "arn:aws:s3:::alpha-bucket" {
 		t.Fatalf("unpaginated bucket = %#v", all.Output["Buckets"].([]any)[0])
@@ -2372,6 +2376,10 @@ func TestListBucketsPaginationAndFilters(t *testing.T) {
 	if token == "" || token == "team-beta" {
 		t.Fatalf("continuation token = %q", token)
 	}
+	emptyToken := mustInvokeAs(t, p, east, "ListBuckets", map[string]any{"MaxBuckets": 1, "Prefix": "team-", "ContinuationToken": ""}, nil)
+	if got := strings.Join(names(emptyToken), ","); got != "team-alpha" || emptyToken.Output["ContinuationToken"] == "" {
+		t.Fatalf("empty continuation token = %#v", emptyToken.Output)
+	}
 	last := mustInvokeAs(t, p, east, "ListBuckets", map[string]any{"MaxBuckets": 2, "Prefix": "team-", "ContinuationToken": token}, nil)
 	if got := strings.Join(names(last), ","); got != "team-charlie" || last.Output["ContinuationToken"] != nil {
 		t.Fatalf("last page = %#v", last.Output)
@@ -2380,11 +2388,34 @@ func TestListBucketsPaginationAndFilters(t *testing.T) {
 	if got := strings.Join(names(regional), ","); got != "team-beta,team-charlie" {
 		t.Fatalf("regional buckets = %#v", regional.Output)
 	}
+	_, err := invokeAs(t, p, east, "ListBuckets", map[string]any{"BucketRegion": "eu-east-1"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Message != "Argument value eu-east-1 is not a valid AWS Region" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "bucket-region" {
+		t.Fatalf("invalid bucket region = %#v", fault)
+	}
 
 	for _, input := range []map[string]any{{"MaxBuckets": 0}, {"MaxBuckets": 10001}, {"MaxBuckets": "invalid"}, {"ContinuationToken": "!"}, {"ContinuationToken": strings.Repeat("a", 1025)}} {
 		_, err := invokeAs(t, p, east, "ListBuckets", input, nil)
 		if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
 			t.Fatalf("invalid input %#v = %#v", input, fault)
+		}
+	}
+	nonstandardDeps := spitest.Deps(t)
+	nonstandardDeps.S3AllowNonstandardRegions = true
+	nonstandard := s3.New(nonstandardDeps)
+	badRegion := spi.Identity{Account: east.Account, Region: "eu-east-1"}
+	mustInvokeAs(t, nonstandard, east, "CreateBucket", map[string]any{"Bucket": "nonstandard-east", "LocationConstraint": badRegion.Region}, nil)
+	mustInvokeAs(t, nonstandard, badRegion, "CreateBucket", map[string]any{"Bucket": "nonstandard-native", "LocationConstraint": badRegion.Region}, nil)
+	_, err = invokeAs(t, nonstandard, badRegion, "CreateBucket", map[string]any{"Bucket": "nonstandard-mismatch", "LocationConstraint": east.Region}, nil)
+	if fault := asFault(t, err); fault.Code != "IllegalLocationConstraintException" || fault.Message != "The us-east-1 location constraint is incompatible for the region specific endpoint this request was sent to." {
+		t.Fatalf("nonstandard region mismatch = %#v", fault)
+	}
+	nonstandardList := mustInvokeAs(t, nonstandard, east, "ListBuckets", map[string]any{"BucketRegion": badRegion.Region}, nil)
+	if got := strings.Join(names(nonstandardList), ","); got != "nonstandard-east,nonstandard-native" {
+		t.Fatalf("nonstandard regions = %#v", nonstandardList.Output)
+	}
+	for _, bucket := range nonstandardList.Output["Buckets"].([]any) {
+		if asMapForTest(bucket)["BucketRegion"] != badRegion.Region {
+			t.Fatalf("nonstandard bucket = %#v", bucket)
 		}
 	}
 	golden.AssertJSON(t, map[string]any{"all": all.Output, "page": page.Output, "last": last.Output, "regional": regional.Output})
@@ -4792,12 +4823,41 @@ func TestListObjectsV2Prefix(t *testing.T) {
 	for _, item := range contents {
 		m, _ := item.(map[string]any)
 		keys[m["Key"].(string)] = true
-		if _, err := time.Parse(time.RFC3339, m["LastModified"].(string)); err != nil || m["StorageClass"] == "" || m["Key"] == "a/1" && m["StorageClass"] != "STANDARD_IA" {
+		if modified := m["LastModified"].(string); !strings.HasSuffix(modified, ".000Z") || m["StorageClass"] == "" || m["Key"] == "a/1" && m["StorageClass"] != "STANDARD_IA" {
 			t.Fatalf("object metadata: %#v", m)
 		}
 	}
 	if !keys["a/1"] || !keys["a/2"] || keys["z/9"] || len(keys) != 2 {
 		t.Fatalf("prefix list: %v", keys)
+	}
+}
+
+func TestListObjectsDelimiterEncodingAndEmptyMarker(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "list-delimiters"}, nil)
+	empty := mustInvoke(t, p, "ListObjects", map[string]any{"Bucket": "list-delimiters", "Marker": ""}, nil).Output
+	if empty["Marker"] != "" || len(asSliceForTest(empty["Contents"])) != 0 {
+		t.Fatalf("empty marker = %#v", empty)
+	}
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "list-delimiters", "Key": "test/foo/bar/123"}, []byte("content 123"))
+	for _, tc := range []struct {
+		delimiter, content, prefix string
+	}{{"", "test/foo/bar/123", ""}, {"/", "", "test/foo/"}, {"%2F", "test/foo/bar/123", ""}} {
+		out := mustInvoke(t, p, "ListObjects", map[string]any{"Bucket": "list-delimiters", "Prefix": "test/", "Delimiter": tc.delimiter, "MaxKeys": 1, "EncodingType": "url"}, nil).Output
+		if tc.content != "" && (len(asSliceForTest(out["Contents"])) != 1 || asMapForTest(asSliceForTest(out["Contents"])[0])["Key"] != tc.content) {
+			t.Fatalf("delimiter %q contents = %#v", tc.delimiter, out)
+		}
+		if tc.prefix != "" && (len(asSliceForTest(out["CommonPrefixes"])) != 1 || asMapForTest(asSliceForTest(out["CommonPrefixes"])[0])["Prefix"] != tc.prefix) {
+			t.Fatalf("delimiter %q prefixes = %#v", tc.delimiter, out)
+		}
+		if tc.delimiter == "%2F" && out["Delimiter"] != "%252F" {
+			t.Fatalf("encoded delimiter = %#v", out)
+		}
+	}
+	request := httptest.NewRequest(http.MethodGet, "https://list-delimiters.s3.us-east-1.amazonaws.com/?prefix=test&delimiter=%2F", nil)
+	routed, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "ListObjectsV2", Input: map[string]any{"Bucket": "list-delimiters"}, Identity: ident(), HTTP: request})
+	if err != nil || len(asSliceForTest(routed.Output["CommonPrefixes"])) != 1 || asMapForTest(asSliceForTest(routed.Output["CommonPrefixes"])[0])["Prefix"] != "test/" {
+		t.Fatalf("raw encoded delimiter = %#v, %v", routed, err)
 	}
 }
 
@@ -5096,6 +5156,32 @@ func TestListObjectsV2OpaqueContinuationTokens(t *testing.T) {
 	}
 }
 
+func TestListObjectsV2SafeContinuationTokens(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "safe-tokens"}, nil)
+	keys := []string{"file%2Fname", "test@key/", "test%123", "test key/", "a/😀/", "date=2026-01-01/"}
+	for _, key := range keys {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "safe-tokens", "Key": key}, nil)
+	}
+	first := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "safe-tokens", "MaxKeys": 3}, nil).Output
+	second := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "safe-tokens", "ContinuationToken": first["NextContinuationToken"]}, nil).Output
+	var got []string
+	for _, page := range []map[string]any{first, second} {
+		for _, row := range asSliceForTest(page["Contents"]) {
+			got = append(got, asMapForTest(row)["Key"].(string))
+		}
+	}
+	sort.Strings(keys)
+	if !reflect.DeepEqual(got, keys) || first["NextContinuationToken"] == "" || second["ContinuationToken"] != first["NextContinuationToken"] {
+		t.Fatalf("safe token pages first=%#v second=%#v", first, second)
+	}
+	start := "date=2026-01-01/"
+	after := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "safe-tokens", "StartAfter": start, "MaxKeys": 2, "EncodingType": "url"}, nil).Output
+	if after["StartAfter"] != "date%3D2026-01-01/" || len(asSliceForTest(after["Contents"])) != 2 {
+		t.Fatalf("encoded start-after = %#v", after)
+	}
+}
+
 func TestListObjectVersionsPagination(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-list"}, nil)
@@ -5154,6 +5240,26 @@ func TestListObjectVersionsPagination(t *testing.T) {
 	all := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "version-list"}, nil).Output
 	if len(asSliceForTest(all["DeleteMarkers"])) != 1 {
 		t.Fatalf("delete markers = %#v", all)
+	}
+}
+
+func TestListObjectVersionsManyVersionsPagination(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "many-versions"}, nil)
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "many-versions", "Status": "Enabled"}, nil)
+	for range 101 {
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "many-versions", "Key": "prefixed-key"}, nil)
+	}
+	first := mustInvoke(t, p, "ListObjectVersions", map[string]any{"Bucket": "many-versions", "Prefix": "prefix", "MaxKeys": 100}, nil).Output
+	if len(asSliceForTest(first["Versions"])) != 100 || first["IsTruncated"] != true || first["NextKeyMarker"] != "prefixed-key" || first["NextVersionIdMarker"] == nil {
+		t.Fatalf("first version page = %#v", first)
+	}
+	second := mustInvoke(t, p, "ListObjectVersions", map[string]any{
+		"Bucket": "many-versions", "Prefix": "prefix", "MaxKeys": 100,
+		"KeyMarker": first["NextKeyMarker"], "VersionIdMarker": first["NextVersionIdMarker"],
+	}, nil).Output
+	if len(asSliceForTest(second["Versions"])) != 1 || second["IsTruncated"] != false || second["NextKeyMarker"] != nil || second["NextVersionIdMarker"] != nil {
+		t.Fatalf("second version page = %#v", second)
 	}
 }
 
@@ -6336,10 +6442,14 @@ func TestMultipartZeroLimitsUseDefaults(t *testing.T) {
 		got["uploads"] = response.Output
 	})
 	t.Run("ListPartsHTTP", func(t *testing.T) {
-		request := httptest.NewRequest(http.MethodGet, "http://s3.localhost/multipart-zero-limits/key?uploadId="+url.QueryEscape(fmt.Sprint(uploadID))+"&max-parts=0", nil)
-		response, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "ListParts", Input: map[string]any{"Bucket": "multipart-zero-limits", "Key": "key", "UploadId": uploadID}, Identity: ident(), HTTP: request})
-		if err != nil || response.Output["MaxParts"] != 1000 || len(asSliceForTest(response.Output["Parts"])) != 1 {
-			t.Fatalf("zero max parts = %#v, %v", response, err)
+		var response *spi.Response
+		for _, query := range []string{"&max-parts=0", "&max-parts=&part-number-marker="} {
+			request := httptest.NewRequest(http.MethodGet, "http://s3.localhost/multipart-zero-limits/key?uploadId="+url.QueryEscape(fmt.Sprint(uploadID))+query, nil)
+			var err error
+			response, err = p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "ListParts", Input: map[string]any{"Bucket": "multipart-zero-limits", "Key": "key", "UploadId": uploadID}, Identity: ident(), HTTP: request})
+			if err != nil || response.Output["MaxParts"] != 1000 || response.Output["PartNumberMarker"] != 0 || len(asSliceForTest(response.Output["Parts"])) != 1 {
+				t.Fatalf("default list parts %q = %#v, %v", query, response, err)
+			}
 		}
 		got["parts"] = response.Output
 	})

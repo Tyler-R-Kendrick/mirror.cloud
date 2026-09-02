@@ -5981,11 +5981,14 @@ func (p *Pack) checkWritePreconditions(ctx context.Context, req *spi.Request, bu
 	_ = json.Unmarshal(raw, &meta)
 	exists = exists && !truthy(meta["deleteMarker"])
 	etag := str(meta["etag"])
-	if match != "" && (!exists || !etagMatches(match, etag)) {
-		return preconditionFailed()
+	if match != "" && !exists {
+		return &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"Key": key}}
+	}
+	if match != "" && !etagMatches(match, etag) {
+		return &spi.Fault{Code: "PreconditionFailed", Message: "At least one of the pre-conditions you specified did not hold", HTTPStatus: http.StatusPreconditionFailed, Fault: "client", Fields: map[string]any{"Condition": "If-Match"}}
 	}
 	if noneMatch != "" && exists && etagMatches(noneMatch, etag) {
-		return preconditionFailed()
+		return &spi.Fault{Code: "PreconditionFailed", Message: "At least one of the pre-conditions you specified did not hold", HTTPStatus: http.StatusPreconditionFailed, Fault: "client", Fields: map[string]any{"Condition": "If-None-Match"}}
 	}
 	return nil
 }

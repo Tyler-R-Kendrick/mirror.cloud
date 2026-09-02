@@ -744,10 +744,10 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-drop-precondition-fault-details",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old: "func preconditionFailed(condition string) error {\n\treturn &spi.Fault{Code: \"PreconditionFailed\", Message: \"At least one of the pre-conditions you specified did not hold\", HTTPStatus: 412, Fault: \"client\", Fields: map[string]any{\"Condition\": condition}}\n}",
-			new: "func preconditionFailed(condition string) error {\n\treturn &spi.Fault{Code: \"PreconditionFailed\", HTTPStatus: 412, Fault: \"client\"}\n}",
-			pkg: "./internal/services/aws/s3",
-			run: "TestObjectReadConditions",
+			old:  "func preconditionFailed(condition string) error {\n\treturn &spi.Fault{Code: \"PreconditionFailed\", Message: \"At least one of the pre-conditions you specified did not hold\", HTTPStatus: 412, Fault: \"client\", Fields: map[string]any{\"Condition\": condition}}\n}",
+			new:  "func preconditionFailed(condition string) error {\n\treturn &spi.Fault{Code: \"PreconditionFailed\", HTTPStatus: 412, Fault: \"client\"}\n}",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestObjectReadConditions",
 		},
 		{
 			name: "s3-accept-conditional-etag-list",

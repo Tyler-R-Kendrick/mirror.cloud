@@ -1824,6 +1824,11 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		t.Fatalf("get If-None-Match list: %v", err)
 	}
 	_ = listRead.Body.Close()
+	futureRead, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), IfModifiedSince: aws.Time(time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))})
+	if err != nil {
+		t.Fatalf("get future If-Modified-Since: %v", err)
+	}
+	_ = futureRead.Body.Close()
 	overrideExpiry := time.Date(2015, time.October, 21, 7, 28, 0, 0, time.UTC)
 	overridden, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{
 		Bucket: aws.String("sdk"), Key: aws.String("k"), ResponseCacheControl: aws.String("max-age=74"),

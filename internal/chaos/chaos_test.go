@@ -1656,6 +1656,7 @@ func TestConcurrentCompleteMultipartConditionalConflictsRemainModeled(t *testing
 				code, message, status, conflictKey = "ConditionalRequestConflict", "The conditional request cannot succeed due to a conflicting operation against this resource.", http.StatusConflict, key
 			case 5:
 				input["IfMatch"] = `"wrong", ` + seedETag
+				input["MultipartUpload"] = map[string]any{}
 			}
 			if err != nil {
 				errs <- err

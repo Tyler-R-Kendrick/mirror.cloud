@@ -2429,6 +2429,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || aws.ToString(checksumAttributes.ETag) != aws.ToString(checksumComplete.ETag) || aws.ToInt64(checksumAttributes.ObjectSize) != 12 || checksumAttributes.StorageClass != s3types.StorageClassStandardIa || checksumAttributes.LastModified == nil || checksumAttributes.Checksum == nil || aws.ToString(checksumAttributes.Checksum.ChecksumSHA256) != wantAttributeChecksum || checksumAttributes.ObjectParts == nil || aws.ToInt32(checksumAttributes.ObjectParts.TotalPartsCount) != 1 || len(checksumAttributes.ObjectParts.Parts) != 1 || aws.ToInt32(checksumAttributes.ObjectParts.Parts[0].PartNumber) != 1 || aws.ToInt64(checksumAttributes.ObjectParts.Parts[0].Size) != 12 || aws.ToString(checksumAttributes.ObjectParts.Parts[0].ChecksumSHA256) != aws.ToString(checksumPart.ChecksumSHA256) {
 		t.Fatalf("get object attributes: etag=%q size=%d class=%q modified=%v checksum=%q parts=%#v err=%v", aws.ToString(checksumAttributes.ETag), aws.ToInt64(checksumAttributes.ObjectSize), checksumAttributes.StorageClass, checksumAttributes.LastModified, aws.ToString(checksumAttributes.Checksum.ChecksumSHA256), checksumAttributes.ObjectParts, err)
 	}
+	emptyAttributes, err := s3c.GetObjectAttributes(context.Background(), &s3.GetObjectAttributesInput{
+		Bucket: aws.String("sdk"), Key: aws.String("checksum-multipart"), MaxParts: aws.Int32(1), PartNumberMarker: aws.String("10"), ObjectAttributes: []s3types.ObjectAttributes{s3types.ObjectAttributesObjectParts},
+	})
+	if err != nil || emptyAttributes.ObjectParts == nil || len(emptyAttributes.ObjectParts.Parts) != 0 || aws.ToString(emptyAttributes.ObjectParts.PartNumberMarker) != "10" || aws.ToString(emptyAttributes.ObjectParts.NextPartNumberMarker) != "0" || aws.ToBool(emptyAttributes.ObjectParts.IsTruncated) {
+		t.Fatalf("empty object attributes page: %#v %v", emptyAttributes, err)
+	}
 	checksumTags, err := s3c.GetObjectTagging(context.Background(), &s3.GetObjectTaggingInput{Bucket: aws.String("sdk"), Key: aws.String("checksum-multipart")})
 	if err != nil || len(checksumTags.TagSet) != 2 || aws.ToString(checksumTags.TagSet[0].Key) != "env" || aws.ToString(checksumTags.TagSet[0].Value) != "test" || aws.ToString(checksumTags.TagSet[1].Key) != "team" || aws.ToString(checksumTags.TagSet[1].Value) != "storage" {
 		t.Fatalf("multipart creation tags: %#v %v", checksumTags, err)

@@ -6794,6 +6794,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestGetObjectAttributesContract",
 		},
 		{
+			name: "s3-object-attributes-repeat-marker-on-empty-page",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `objectParts["IsTruncated"], objectParts["MaxParts"], objectParts["PartNumberMarker"], objectParts["NextPartNumberMarker"] = truncated, maxParts, strconv.Itoa(marker), "0"`,
+			new:  `objectParts["IsTruncated"], objectParts["MaxParts"], objectParts["PartNumberMarker"], objectParts["NextPartNumberMarker"] = truncated, maxParts, strconv.Itoa(marker), strconv.Itoa(marker)`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestGetObjectAttributesContract",
+		},
+		{
 			name: "s3-object-attributes-ignore-limit",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `truncated := len(listed) > maxParts`,

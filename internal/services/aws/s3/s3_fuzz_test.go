@@ -1603,6 +1603,28 @@ func FuzzGetObjectAttributesStorageClass(f *testing.F) {
 	})
 }
 
+func FuzzGetObjectAttributesPartMarkers(f *testing.F) {
+	for _, marker := range []uint8{0, 1, 2, 255} {
+		f.Add(marker)
+	}
+	f.Fuzz(func(t *testing.T, marker uint8) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "object-parts-fuzz"}, nil)
+		created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "object-parts-fuzz", "Key": "key", "ChecksumAlgorithm": "CRC32"}, nil)
+		part := mustInvoke(t, p, "UploadPart", map[string]any{"UploadId": created.Output["UploadId"], "PartNumber": 1}, []byte("body"))
+		mustInvoke(t, p, "CompleteMultipartUpload", completeInput(created.Output["UploadId"].(string), completedPartWithChecksum(1, part, "ChecksumCRC32", "x-amz-checksum-crc32")), nil)
+		output := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": "object-parts-fuzz", "Key": "key", "ObjectAttributes": []string{"ObjectParts"}, "PartNumberMarker": int(marker), "MaxParts": 1}, nil).Output
+		objectParts := asMapForTest(output["ObjectParts"])
+		wantNext, wantParts := "0", 0
+		if marker == 0 {
+			wantNext, wantParts = "1", 1
+		}
+		if objectParts["NextPartNumberMarker"] != wantNext || len(asSliceForTest(objectParts["Parts"])) != wantParts {
+			t.Fatalf("marker %d object parts = %#v", marker, objectParts)
+		}
+	})
+}
+
 func FuzzListMultipartUploadsMarkers(f *testing.F) {
 	for _, seed := range []struct {
 		max, start uint8

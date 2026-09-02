@@ -4097,6 +4097,33 @@ func TestSuspendedVersioningReplacesNullVersion(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"suspended": suspendedVersions, "deleted": listed, "restoredBody": restoredBody})
 }
 
+func TestDeleteObjectDirectoryPreconditionsAreNotImplemented(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("body"))
+
+	for _, tc := range []struct {
+		name, header, value string
+	}{
+		{"etag", "If-Match", `"841a2d689ad86bd1611447453c22c6fc"`},
+		{"size", "x-amz-if-match-size", "4"},
+		{"modified", "x-amz-if-match-last-modified-time", "Sun, 06 Nov 1994 08:49:37 GMT"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			httpRequest := httptest.NewRequest(http.MethodDelete, "http://127.0.0.1/bucket/key", nil)
+			httpRequest.Header.Set(tc.header, tc.value)
+			_, err := p.Invoke(context.Background(), &spi.Request{Identity: ident(), Operation: "DeleteObject", Input: map[string]any{"Bucket": "bucket", "Key": "key"}, HTTP: httpRequest})
+			fault := asFault(t, err)
+			if fault.Code != "NotImplemented" || fault.Message != "A header you provided implies functionality that is not implemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fields["Header"] != tc.header {
+				t.Fatalf("fault = %#v", fault)
+			}
+			if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil))); body != "body" {
+				t.Fatalf("object changed after rejected delete: %q", body)
+			}
+		})
+	}
+}
+
 func TestDeleteObjectsVersionAndQuietSemantics(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)

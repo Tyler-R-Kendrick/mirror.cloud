@@ -11,6 +11,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
 
@@ -22,6 +23,7 @@ func TestBootedServerS3BucketConfigsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	spitest.SeedKMSKey(t, rt.Deps, spi.Identity{Account: "000000000000", Region: "us-east-1"}, "arn:aws:kms:us-east-1:000000000000:key/contract", "Enabled")
 	ts := httptest.NewServer(rt.Handler())
 	defer ts.Close()
 	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/s3/aws4_request, SignedHeaders=host, Signature=00"
@@ -50,7 +52,7 @@ func TestBootedServerS3BucketConfigsRoundTrip(t *testing.T) {
 	if code, b := do(http.MethodPut, "/cfgb", ""); code >= 300 {
 		t.Fatalf("mb %d %s", code, b)
 	}
-	if code, b := do(http.MethodGet, "/cfgb?encryption", ""); code != http.StatusOK || len(b) != 0 {
+	if code, b := do(http.MethodGet, "/cfgb?encryption", ""); code != http.StatusOK || !bytes.Contains(b, []byte("<SSEAlgorithm>AES256</SSEAlgorithm>")) || !bytes.Contains(b, []byte("<BucketKeyEnabled>false</BucketKeyEnabled>")) {
 		t.Fatalf("default encryption %d %s", code, b)
 	}
 	enc := `<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>arn:aws:kms:us-east-1:000000000000:key/contract</KMSMasterKeyID></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled></Rule></ServerSideEncryptionConfiguration>`

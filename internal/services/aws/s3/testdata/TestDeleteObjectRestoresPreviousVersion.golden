@@ -1,8 +1,8 @@
 {
-  "deletedCurrentVersion": "9c8e2cb0",
+  "deletedCurrentVersion": "9c8e2cb00724681e24b29522455f06cd",
   "deletedMarker": "true",
-  "deletedMarkerVersion": "33f6fc5d",
-  "deletedNoncurrentVersion": "5f59f223",
+  "deletedMarkerVersion": "33f6fc5d83b79b8e49c4f349b79ed4dd",
+  "deletedNoncurrentVersion": "5f59f223d7974d142efbc70e360dac9b",
   "markerRestoredBody": "first",
   "restoredBody": "first",
   "restoredTags": [
@@ -11,5 +11,5 @@
       "Value": "first"
     }
   ],
-  "restoredVersion": "7c589129"
+  "restoredVersion": "7c5891299f6489f8b140efe7f0cd8bce"
 }

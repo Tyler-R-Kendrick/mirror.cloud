@@ -802,6 +802,13 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	if w.Header().Get("x-amz-bucket-region") != "us-east-1" || !strings.Contains(w.Body.String(), "<BucketName>bucket&lt;&amp;</BucketName><Region>us-east-1</Region>") {
 		t.Fatalf("structured fault %d %#v %s", w.Code, w.Header(), w.Body.String())
 	}
+	w = httptest.NewRecorder()
+	if err := codec.EncodeFault(svc, &model.Operation{Name: "PutBucketVersioning"}, w, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest}, "request"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(w.Body.String(), "<Message>The XML you provided was not well-formed or did not validate against our published schema</Message>") {
+		t.Fatalf("malformed XML fault %s", w.Body.String())
+	}
 }
 
 func str(v any) string {

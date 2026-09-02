@@ -1202,7 +1202,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	if versioned {
 		vid = "null"
 		if versioningStatus == "Enabled" {
-			vid = p.deps.Rand.Hex(8)
+			vid = p.deps.Rand.Hex(32)
 		}
 		current, _ := p.objectMetadata(ctx, req, b, key, "")
 		for _, version := range p.objectVersionOrder(ctx, req, b, key, current) {
@@ -1652,7 +1652,7 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 		return nil, err
 	}
 	if keyID := str(meta["ssekmsKeyId"]); keyID != "" {
-		if err := p.validateKMSKey(ctx, req, keyID); err != nil {
+		if _, err := p.validateKMSKey(ctx, req, keyID); err != nil {
 			return nil, err
 		}
 	}
@@ -1873,7 +1873,7 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 	if versioned && wantVer == "" {
 		vid := "null"
 		if versioningStatus == "Enabled" {
-			vid = p.deps.Rand.Hex(8)
+			vid = p.deps.Rand.Hex(32)
 		}
 		mtime := p.deps.Clock.Now().UTC().Format(http.TimeFormat)
 		current, _ := p.objectMetadata(ctx, req, b, key, "")
@@ -3667,7 +3667,7 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 			return &spi.Response{Output: map[string]any{}}, nil
 		}
 		if req.Operation == "GetBucketEncryption" {
-			return &spi.Response{Output: map[string]any{}}, nil
+			return &spi.Response{Output: map[string]any{"Rules": []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256"}, "BucketKeyEnabled": false}}}}, nil
 		}
 		if req.Operation == "GetBucketCors" {
 			return nil, &spi.Fault{Code: "NoSuchCORSConfiguration", Message: "The CORS configuration does not exist", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": b}}
@@ -4573,11 +4573,6 @@ func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket st
 	}
 	algorithm := requestCondition(req, "ServerSideEncryption", "x-amz-server-side-encryption")
 	keyID := requestCondition(req, "SSEKMSKeyId", "x-amz-server-side-encryption-aws-kms-key-id")
-	if keyID != "" && req.Operation != "PostObject" {
-		if err := p.validateKMSKey(ctx, req, keyID); err != nil {
-			return "", "", false, err
-		}
-	}
 	bucketKey := truthy(req.Input["BucketKeyEnabled"])
 	if !bucketKey && req.HTTP != nil {
 		bucketKey = truthy(req.HTTP.Header.Get("x-amz-server-side-encryption-bucket-key-enabled"))
@@ -4628,20 +4623,59 @@ func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket st
 	if algorithm == "aws:kms" && keyID == "" {
 		keyID = defaultKeyID
 		if keyID == "" {
-			keyID = fmt.Sprintf("arn:aws:kms:%s:%s:key/aws-managed-s3", req.Identity.Region, req.Identity.Account)
+			var err error
+			keyID, err = p.ensureAWSManagedS3Key(ctx, req)
+			if err != nil {
+				return "", "", false, err
+			}
+		}
+	}
+	if keyID != "" && req.Operation != "PostObject" {
+		var err error
+		keyID, err = p.validateKMSKey(ctx, req, keyID)
+		if err != nil {
+			return "", "", false, err
 		}
 	}
 	return algorithm, keyID, bucketKey, nil
 }
 
-func (p *Pack) validateKMSKey(ctx context.Context, req *spi.Request, keyID string) error {
+func (p *Pack) ensureAWSManagedS3Key(ctx context.Context, req *spi.Request) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	scope := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region)
+	aliases := scope.Collection("kmsalias")
+	if raw, ok, _ := aliases.Get(ctx, "alias/aws/s3"); ok {
+		var alias map[string]any
+		_ = json.Unmarshal(raw, &alias)
+		return p.validateKMSKey(ctx, req, str(alias["TargetKeyId"]))
+	}
+	id := p.deps.Rand.Hex(16)
+	arn := fmt.Sprintf("arn:aws:kms:%s:%s:key/%s", req.Identity.Region, req.Identity.Account, id)
+	record := map[string]any{
+		"AWSAccountId": req.Identity.Account, "Arn": arn, "CreationDate": p.deps.Clock.Now().UTC().Format(time.RFC3339),
+		"CurrentKeyMaterialId": p.deps.Rand.Hex(16), "CustomerMasterKeySpec": "SYMMETRIC_DEFAULT",
+		"Description": "Default key that protects my S3 objects when no other key is defined", "Enabled": true,
+		"EncryptionAlgorithms": []any{"SYMMETRIC_DEFAULT"}, "KeyId": id, "KeyManager": "AWS", "KeySpec": "SYMMETRIC_DEFAULT",
+		"KeyState": "Enabled", "KeyUsage": "ENCRYPT_DECRYPT", "MultiRegion": false, "Origin": "AWS_KMS",
+		"KeyMaterial": base64.StdEncoding.EncodeToString(p.deps.Rand.Bytes(32)),
+	}
+	raw, _ := json.Marshal(record)
+	if err := scope.Collection("kms").Put(ctx, id, raw); err != nil {
+		return "", err
+	}
+	raw, _ = json.Marshal(map[string]any{"AliasName": "alias/aws/s3", "TargetKeyId": id})
+	if err := aliases.Put(ctx, "alias/aws/s3", raw); err != nil {
+		return "", err
+	}
+	return arn, nil
+}
+
+func (p *Pack) validateKMSKey(ctx context.Context, req *spi.Request, keyID string) (string, error) {
 	identity := req.Identity
 	if arn := strings.SplitN(keyID, ":", 6); len(arn) == 6 && arn[0] == "arn" && arn[2] == "kms" {
 		if arn[3] != identity.Region {
-			return &spi.Fault{Code: "KMS.NotFoundException", Message: "Invalid arn " + arn[3], HTTPStatus: http.StatusBadRequest, Fault: "client"}
-		}
-		if arn[4] == identity.Account && arn[5] == "key/aws-managed-s3" {
-			return nil
+			return "", &spi.Fault{Code: "KMS.NotFoundException", Message: "Invalid arn " + arn[3], HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
 		identity.Account = arn[4]
 	}
@@ -4659,18 +4693,18 @@ func (p *Pack) validateKMSKey(ctx context.Context, req *spi.Request, keyID strin
 	}
 	raw, ok, _ := scope.Collection("kms").Get(ctx, keyID)
 	if !ok {
-		return &spi.Fault{Code: "KMS.NotFoundException", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		return "", &spi.Fault{Code: "KMS.NotFoundException", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
 	var key map[string]any
 	_ = json.Unmarshal(raw, &key)
 	arn := str(key["Arn"])
 	switch str(key["KeyState"]) {
 	case "Enabled":
-		return nil
+		return arn, nil
 	case "PendingDeletion":
-		return &spi.Fault{Code: "KMS.KMSInvalidStateException", Message: arn + " is pending deletion.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		return "", &spi.Fault{Code: "KMS.KMSInvalidStateException", Message: arn + " is pending deletion.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	default:
-		return &spi.Fault{Code: "KMS.DisabledException", Message: arn + " is disabled.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
+		return "", &spi.Fault{Code: "KMS.DisabledException", Message: arn + " is disabled.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
 }
 

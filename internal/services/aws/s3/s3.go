@@ -4677,9 +4677,6 @@ func (p *Pack) validateKMSKey(ctx context.Context, req *spi.Request, keyID strin
 		if arn[3] != identity.Region {
 			return "", &spi.Fault{Code: "KMS.NotFoundException", Message: "Invalid arn " + arn[3], HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
-		if arn[4] == identity.Account && arn[5] == "key/aws-managed-s3" {
-			return keyID, nil
-		}
 		identity.Account = arn[4]
 	}
 	scope := p.deps.Store.Scope(identity.Account, identity.Region)

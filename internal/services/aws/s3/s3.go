@@ -5966,6 +5966,13 @@ func checkReadPreconditions(req *spi.Request, etag, modified string) (bool, erro
 func (p *Pack) checkWritePreconditions(ctx context.Context, req *spi.Request, bucket, key string) error {
 	match := requestCondition(req, "IfMatch", "If-Match")
 	noneMatch := requestCondition(req, "IfNoneMatch", "If-None-Match")
+	if match != "" && noneMatch != "" {
+		return &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-Match,If-None-Match", "additionalMessage": "Multiple conditional request headers present in the request"}}
+	} else if noneMatch != "" && noneMatch != "*" {
+		return &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-None-Match", "additionalMessage": "We don't accept the provided value of If-None-Match header for this API"}}
+	} else if match == "*" {
+		return &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-None-Match", "additionalMessage": "We don't accept the provided value of If-None-Match header for this API"}}
+	}
 	if match == "" && noneMatch == "" {
 		return nil
 	}

@@ -5939,6 +5939,7 @@ func TestWriteIfMatchRequiresSingleETag(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "write-if-match"}, nil)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-if-match", "Key": "source"}, []byte("source"))
+	characterization := map[string]any{}
 	for _, operation := range []string{"PutObject", "CopyObject"} {
 		key := "destination-" + operation
 		seed := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-if-match", "Key": key}, []byte("old"))
@@ -5951,6 +5952,7 @@ func TestWriteIfMatchRequiresSingleETag(t *testing.T) {
 		if fault.Code != "PreconditionFailed" || fault.Message != "At least one of the pre-conditions you specified did not hold" || fault.HTTPStatus != http.StatusPreconditionFailed || fault.Fields["Condition"] != "If-Match" {
 			t.Fatalf("%s list fault = %#v", operation, fault)
 		}
+		characterization[operation] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
 		if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "write-if-match", "Key": key}, nil))); body != "old" {
 			t.Fatalf("%s rejected list stored %q", operation, body)
 		}
@@ -5959,6 +5961,7 @@ func TestWriteIfMatchRequiresSingleETag(t *testing.T) {
 			t.Fatalf("%s exact ETag: %v", operation, err)
 		}
 	}
+	golden.AssertJSON(t, characterization)
 }
 
 func TestCompleteMultipartUploadConditionalConflicts(t *testing.T) {

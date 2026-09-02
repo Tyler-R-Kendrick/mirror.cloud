@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.8% |
 | S3 statement coverage | 89.5% |
-| LocalStack S3 test functions explicitly traced | 36 / 463 (7.8%) |
-| LocalStack S3 test functions not yet traced | 427 / 463 (92.2%) |
+| LocalStack S3 test functions explicitly traced | 40 / 463 (8.6%) |
+| LocalStack S3 test functions not yet traced | 423 / 463 (91.4%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -73,6 +73,10 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3_notifications_lambda.py::TestS3NotificationsToLambda::test_create_object_put_via_dynamodb` | `TestBucketNotificationLambdaDelivery` invokes a real Lambda function and verifies the delivered PUT record and object key; Mirror reads the function output directly instead of using DynamoDB as a test intermediary | Mapped and green |
 | `test_s3_notifications_lambda.py::TestS3NotificationsToLambda::test_create_object_by_presigned_request_via_dynamodb` | `TestBucketNotificationLambdaDelivery` verifies PUT and multipart POST event delivery; `TestBootedServerS3VersioningPaginationPresign` covers presigned PUT through the HTTP edge and `TestPostObjectPolicySignatureCharacterization` covers signed browser POST policies | Mapped and green |
 | `test_s3_notifications_lambda.py::TestS3NotificationsToLambda::test_invalid_lambda_arn` | `TestBucketNotificationConfiguration` verifies malformed and missing Lambda ARNs with destination validation enabled, malformed ARN rejection when skipped, and missing-destination persistence when skipped | Mapped and green |
+| `test_s3_notifications_sns.py::TestS3NotificationsToSns::test_object_created_put` | `TestBucketNotificationTopicDelivery` verifies two S3 PUT records through SNS to SQS, including notification envelope type, topic, subject, event source/name, bucket, key, and distinct object sizes | Mapped and green |
+| `test_s3_notifications_sns.py::TestS3NotificationsToSns::test_bucket_notifications_with_filter` | `TestBucketNotificationTopicDelivery` verifies a topic prefix filter excludes a nonmatching key and delivers both matching writes | Mapped and green |
+| `test_s3_notifications_sns.py::TestS3NotificationsToSns::test_bucket_not_exist` | `TestBucketNotificationConfiguration` verifies PUT and GET notification configuration return `NoSuchBucket`, including when destination validation is skipped | Mapped and green |
+| `test_s3_notifications_sns.py::TestS3NotificationsToSns::test_invalid_topic_arn` | `TestBucketNotificationConfiguration` verifies malformed and missing topic ARNs with validation enabled, malformed ARN rejection when skipped, and missing-destination persistence when skipped | Mapped and green |
 
 ## Source-only findings
 
@@ -84,4 +88,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 36/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 40/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

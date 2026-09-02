@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.8% |
-| LocalStack S3 test functions explicitly traced | 123 / 463 (26.6%) |
-| LocalStack S3 test functions not yet traced | 340 / 463 (73.4%) |
+| LocalStack S3 test functions explicitly traced | 129 / 463 (27.9%) |
+| LocalStack S3 test functions not yet traced | 334 / 463 (72.1%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -160,6 +160,12 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3_api.py::TestS3BucketObjectTagging::test_head_object_with_tags` | `TestVersionedObjectTaggingCharacterization`, AWS SDK contract, and HTTP BDD verify HEAD/GET tag counts after create, overwrite, and empty-set removal | Mapped and green |
 | `test_s3_api.py::TestS3BucketObjectTagging::test_object_tags_delete_or_overwrite_object` | `TestVersionedObjectTaggingCharacterization`, AWS SDK contract, snapshot, and mutation coverage verify unversioned overwrite/delete/recreate clears current tags while versioned writes preserve older-version tags | Mapped and green |
 | `test_s3_api.py::TestS3BucketObjectTagging::test_tagging_validation` | `TestTagValidationAndBucketSemantics`, AWS SDK contract, HTTP BDD, fuzz, snapshot, and mutation coverage verify duplicate, malformed, reserved-prefix, invalid-text, null-field, and count-limit faults for bucket and object tag sets | Mapped and green |
+| `test_s3_api.py::TestS3ObjectLock::test_put_object_lock_configuration_on_existing_bucket` | `TestObjectLockConfigurationParity`, AWS SDK contract, HTTP BDD, snapshot, and mutation coverage verify unconfigured, suspended, enabled, and configured existing-bucket states with exact faults | Mapped and green |
+| `test_s3_api.py::TestS3ObjectLock::test_get_put_object_lock_configuration` | `TestObjectLockConfigurationParity`, `TestObjectLockBucketGuards`, AWS SDK contract, snapshot, fuzz, and mutation coverage verify create-time enablement, default-retention round trips, and enabled-only replacement | Mapped and green |
+| `test_s3_api.py::TestS3ObjectLock::test_put_object_lock_configuration_exc` | Seven atomic `TestObjectLockConfigurationParity` cases plus fuzz and mutation coverage verify missing enablement, empty rules/retention, missing duration, bad mode, and dual duration faults | Mapped and green |
+| `test_s3_api.py::TestS3ObjectLock::test_get_object_lock_configuration_exc` | `TestObjectLockConfigurationParity`, HTTP BDD, snapshot, SDK contract, and mutation coverage verify exact missing-configuration and missing-bucket codes, messages, statuses, and bucket fields | Mapped and green |
+| `test_s3_api.py::TestS3ObjectLock::test_disable_versioning_on_locked_bucket` | `TestObjectLockConfigurationParity`, `TestObjectLockBucketGuards`, AWS SDK contract, snapshot, and mutation coverage verify suspension rejection and idempotent re-enablement | Mapped and green |
+| `test_s3_api.py::TestS3ObjectLock::test_delete_object_with_no_locking` | `TestObjectLockConfigurationParity`, AWS SDK contract, HTTP BDD, concurrent chaos, snapshot, and mutation coverage verify true/false single-delete and bulk-delete bypass requests fail before mutation | Mapped and race-clean |
 
 ## Source-only findings
 
@@ -171,4 +177,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 123/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 129/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

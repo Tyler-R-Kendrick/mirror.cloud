@@ -6691,6 +6691,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestWritePreconditionFaultDetails",
 		},
 		{
+			name: "s3-write-treat-delete-marker-as-current-object",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `exists = exists && !truthy(meta["deleteMarker"])`,
+			new:  `exists = exists`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestPutObjectIfNoneMatchLifecycleCharacterization",
+		},
+		{
 			name: "s3-complete-drop-precondition-message",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `return nil, &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-Match,If-None-Match", "additionalMessage": "Multiple conditional request headers present in the request"}}`,

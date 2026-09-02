@@ -1983,11 +1983,13 @@ func TestBucketPolicyCharacterization(t *testing.T) {
 }
 
 func TestBucketEncryptionCharacterization(t *testing.T) {
-	p := s3.New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
 	bucket := map[string]any{"Bucket": "encryption-characterization"}
 	mustInvoke(t, p, "CreateBucket", bucket, nil)
 	before := mustInvoke(t, p, "GetBucketEncryption", bucket, nil)
 	keyID := "arn:aws:kms:us-east-1:000000000000:key/characterization"
+	spitest.SeedKMSKey(t, deps, spi.Identity{Account: "000000000000", Region: "us-east-1"}, keyID, "Enabled")
 	rules := []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "aws:kms", "KMSMasterKeyID": keyID}, "BucketKeyEnabled": true}}
 	put := mustInvoke(t, p, "PutBucketEncryption", map[string]any{"Bucket": bucket["Bucket"], "ServerSideEncryptionConfiguration": map[string]any{"Rules": rules}}, nil)
 	configured := mustInvoke(t, p, "GetBucketEncryption", bucket, nil)
@@ -2909,10 +2911,21 @@ func TestExplicitKMSKeyValidation(t *testing.T) {
 	mustInvoke(t, s3Pack, "CreateBucket", map[string]any{"Bucket": "kms-validation"}, nil)
 	mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "source"}, []byte("source"))
 	keyID, keyARN := createKey(t, owner)
-	mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "enabled", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID}, []byte("body"))
+	bare := mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "enabled", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID}, []byte("body"))
+	if bare.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyARN {
+		t.Fatalf("bare key response = %v", bare.Headers)
+	}
 	kmsCall(t, owner, "CreateAlias", map[string]any{"AliasName": "alias/s3", "TargetKeyId": keyID})
 	mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "alias", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": "arn:aws:kms:us-east-1:123456789012:alias/s3"}, []byte("body"))
-	mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "managed", "ServerSideEncryption": "aws:kms"}, []byte("body"))
+	managed := mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "managed", "ServerSideEncryption": "aws:kms"}, []byte("body"))
+	managedMetadata := asMapForTest(kmsCall(t, owner, "DescribeKey", map[string]any{"KeyId": managed.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id")}).Output["KeyMetadata"])
+	if managedMetadata["KeyManager"] != "AWS" || managedMetadata["Description"] != "Default key that protects my S3 objects when no other key is defined" {
+		t.Fatalf("managed key metadata = %#v", managedMetadata)
+	}
+	managedAgain := mustInvoke(t, s3Pack, "PutObject", map[string]any{"Bucket": "kms-validation", "Key": "managed-again", "ServerSideEncryption": "aws:kms"}, []byte("body"))
+	if managedAgain.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != managed.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") {
+		t.Fatalf("managed key changed: %v != %v", managedAgain.Headers, managed.Headers)
+	}
 	mustInvoke(t, s3Pack, "GetObject", map[string]any{"Bucket": "kms-validation", "Key": "managed"}, nil)
 
 	faults := map[string]any{}
@@ -2948,7 +2961,8 @@ func TestExplicitKMSKeyValidation(t *testing.T) {
 }
 
 func TestBucketEncryptionConfiguration(t *testing.T) {
-	p := s3.New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
 	bucket := map[string]any{"Bucket": "bucket-encryption"}
 	mustInvoke(t, p, "CreateBucket", bucket, nil)
 	defaultRules := []any{map[string]any{"ApplyServerSideEncryptionByDefault": map[string]any{"SSEAlgorithm": "AES256"}, "BucketKeyEnabled": false}}
@@ -2986,6 +3000,7 @@ func TestBucketEncryptionConfiguration(t *testing.T) {
 		t.Fatalf("AES bucket key headers = %v", aes.Headers)
 	}
 	keyID := "arn:aws:kms:us-east-1:000000000000:key/bucket-default"
+	spitest.SeedKMSKey(t, deps, spi.Identity{Account: "000000000000", Region: "us-east-1"}, keyID, "Enabled")
 	baseline := map[string]any{"Rules": []any{rule("aws:kms", keyID, true)}}
 	if _, err := put(baseline); err != nil {
 		t.Fatal(err)
@@ -2994,6 +3009,11 @@ func TestBucketEncryptionConfiguration(t *testing.T) {
 	if inherited.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || inherited.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || inherited.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
 		t.Fatalf("inherited bucket encryption = %v", inherited.Headers)
 	}
+	spitest.SeedKMSKey(t, deps, spi.Identity{Account: "000000000000", Region: "us-east-1"}, keyID, "Disabled")
+	if _, err := invoke(t, p, "PutObject", map[string]any{"Bucket": bucket["Bucket"], "Key": "disabled-default"}, []byte("body")); asFault(t, err).Code != "KMS.DisabledException" {
+		t.Fatalf("disabled bucket key = %v", err)
+	}
+	spitest.SeedKMSKey(t, deps, spi.Identity{Account: "000000000000", Region: "us-east-1"}, keyID, "Enabled")
 
 	invalid := []struct {
 		name, code string

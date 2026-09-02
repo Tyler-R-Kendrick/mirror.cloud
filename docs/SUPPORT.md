@@ -238,6 +238,7 @@ CompleteMultipartUpload returns LocalStack-compatible NotImplemented details for
 S3 PutObject and CopyObject return LocalStack-compatible NotImplemented details for combined destination conditional headers, non-wildcard If-None-Match, and wildcard If-Match values.
 S3 PutObject and CopyObject return LocalStack-compatible NoSuchKey details when destination If-Match targets a missing object and modeled PreconditionFailed conditions for ETag mismatches.
 S3 object reads and copy-source ETag conditions require one exact value with supported wildcard semantics, matching LocalStack rather than accepting comma lists; PutObject and CopyObject destination If-Match uses the same exact rule.
+S3 object-read and copy-source precondition failures include LocalStack-compatible messages and Condition fields.
 CompleteMultipartUpload applies the same exact destination If-Match rule before manifest validation; rejected list conditions preserve the upload for retry.
 CompleteMultipartUpload returns LocalStack-compatible NoSuchKey, PreconditionFailed, and ConditionalRequestConflict details when If-Match or If-None-Match object state changes across multipart initiation and completion.
 CompleteMultipartUpload omits checksum response fields for KMS-encrypted multipart objects while persisting the checksum for ChecksumMode-enabled reads.

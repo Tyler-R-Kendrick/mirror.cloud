@@ -2347,6 +2347,9 @@ func TestListBucketsPaginationAndFilters(t *testing.T) {
 	if got := strings.Join(names(all), ","); got != "alpha-bucket,team-alpha,team-beta,team-charlie" {
 		t.Fatalf("all buckets = %s", got)
 	}
+	if upper := mustInvokeAs(t, p, east, "ListBuckets", map[string]any{"Prefix": "TEAM-"}, nil); len(names(upper)) != 0 || upper.Output["Prefix"] != "TEAM-" {
+		t.Fatalf("case-sensitive prefix = %#v", upper.Output)
+	}
 	firstCreated := stringValue(asMapForTest(all.Output["Buckets"].([]any)[0])["CreationDate"])
 	if firstCreated == "" || asMapForTest(all.Output["Buckets"].([]any)[0])["BucketRegion"] != nil || asMapForTest(all.Output["Buckets"].([]any)[0])["BucketArn"] != "arn:aws:s3:::alpha-bucket" {
 		t.Fatalf("unpaginated bucket = %#v", all.Output["Buckets"].([]any)[0])
@@ -2372,6 +2375,10 @@ func TestListBucketsPaginationAndFilters(t *testing.T) {
 	if token == "" || token == "team-beta" {
 		t.Fatalf("continuation token = %q", token)
 	}
+	emptyToken := mustInvokeAs(t, p, east, "ListBuckets", map[string]any{"MaxBuckets": 1, "Prefix": "team-", "ContinuationToken": ""}, nil)
+	if got := strings.Join(names(emptyToken), ","); got != "team-alpha" || emptyToken.Output["ContinuationToken"] == "" {
+		t.Fatalf("empty continuation token = %#v", emptyToken.Output)
+	}
 	last := mustInvokeAs(t, p, east, "ListBuckets", map[string]any{"MaxBuckets": 2, "Prefix": "team-", "ContinuationToken": token}, nil)
 	if got := strings.Join(names(last), ","); got != "team-charlie" || last.Output["ContinuationToken"] != nil {
 		t.Fatalf("last page = %#v", last.Output)
@@ -2380,11 +2387,34 @@ func TestListBucketsPaginationAndFilters(t *testing.T) {
 	if got := strings.Join(names(regional), ","); got != "team-beta,team-charlie" {
 		t.Fatalf("regional buckets = %#v", regional.Output)
 	}
+	_, err := invokeAs(t, p, east, "ListBuckets", map[string]any{"BucketRegion": "eu-east-1"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Message != "Argument value eu-east-1 is not a valid AWS Region" || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "bucket-region" {
+		t.Fatalf("invalid bucket region = %#v", fault)
+	}
 
 	for _, input := range []map[string]any{{"MaxBuckets": 0}, {"MaxBuckets": 10001}, {"MaxBuckets": "invalid"}, {"ContinuationToken": "!"}, {"ContinuationToken": strings.Repeat("a", 1025)}} {
 		_, err := invokeAs(t, p, east, "ListBuckets", input, nil)
 		if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
 			t.Fatalf("invalid input %#v = %#v", input, fault)
+		}
+	}
+	nonstandardDeps := spitest.Deps(t)
+	nonstandardDeps.S3AllowNonstandardRegions = true
+	nonstandard := s3.New(nonstandardDeps)
+	badRegion := spi.Identity{Account: east.Account, Region: "eu-east-1"}
+	mustInvokeAs(t, nonstandard, east, "CreateBucket", map[string]any{"Bucket": "nonstandard-east", "LocationConstraint": badRegion.Region}, nil)
+	mustInvokeAs(t, nonstandard, badRegion, "CreateBucket", map[string]any{"Bucket": "nonstandard-native", "LocationConstraint": badRegion.Region}, nil)
+	_, err = invokeAs(t, nonstandard, badRegion, "CreateBucket", map[string]any{"Bucket": "nonstandard-mismatch", "LocationConstraint": east.Region}, nil)
+	if fault := asFault(t, err); fault.Code != "IllegalLocationConstraintException" || fault.Message != "The us-east-1 location constraint is incompatible for the region specific endpoint this request was sent to." {
+		t.Fatalf("nonstandard region mismatch = %#v", fault)
+	}
+	nonstandardList := mustInvokeAs(t, nonstandard, east, "ListBuckets", map[string]any{"BucketRegion": badRegion.Region}, nil)
+	if got := strings.Join(names(nonstandardList), ","); got != "nonstandard-east,nonstandard-native" {
+		t.Fatalf("nonstandard regions = %#v", nonstandardList.Output)
+	}
+	for _, bucket := range nonstandardList.Output["Buckets"].([]any) {
+		if asMapForTest(bucket)["BucketRegion"] != badRegion.Region {
+			t.Fatalf("nonstandard bucket = %#v", bucket)
 		}
 	}
 	golden.AssertJSON(t, map[string]any{"all": all.Output, "page": page.Output, "last": last.Output, "regional": regional.Output})

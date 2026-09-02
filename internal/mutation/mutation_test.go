@@ -5078,6 +5078,30 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestListBucketsPaginationAndFilters",
 		},
 		{
+			name: "s3-list-buckets-accept-invalid-region",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if regionSet && !p.deps.S3AllowNonstandardRegions && region != "us-east-1" && !strings.Contains(bucketLocationConstraints, "|"+region+"|") {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestListBucketsPaginationAndFilters",
+		},
+		{
+			name: "s3-create-bucket-reject-nonstandard-region-when-enabled",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if !allowNonstandard && !strings.Contains(bucketLocationConstraints, "|"+constraint+"|") {`,
+			new:  `if !strings.Contains(bucketLocationConstraints, "|"+constraint+"|") {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestListBucketsPaginationAndFilters",
+		},
+		{
+			name: "config-ignore-s3-nonstandard-region-env",
+			file: filepath.Join("internal", "config", "config.go"),
+			old:  `if v := os.Getenv("MIRROR_S3_ALLOW_NONSTANDARD_REGIONS"); v == "1" || strings.EqualFold(v, "true") {`,
+			new:  `if false {`,
+			pkg:  "./internal/config",
+			run:  "TestFromEnvOverridesDefault",
+		},
+		{
 			name: "s3-list-buckets-route-ignore-max",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `if has("max-buckets") {`,
@@ -5192,7 +5216,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-bucket-location-skip-validation",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `bucketRegion, err := createBucketRegion(req.Identity.Region, constraint)`,
+			old:  `bucketRegion, err := createBucketRegion(req.Identity.Region, constraint, p.deps.S3AllowNonstandardRegions)`,
 			new:  `bucketRegion, err := req.Identity.Region, error(nil)`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCreateBucketLocationConstraints",
@@ -5208,7 +5232,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-bucket-location-allow-invalid-east",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `if !strings.Contains(bucketLocationConstraints, "|"+constraint+"|") {`,
+			old:  `if !allowNonstandard && !strings.Contains(bucketLocationConstraints, "|"+constraint+"|") {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCreateBucketLocationConstraints",

@@ -274,13 +274,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 func (p *Pack) loop() {
 	defer close(p.done)
 	for {
+		nextPoll := p.deps.Clock.Now().Add(time.Second)
 		if p.drain(context.Background()) {
 			continue
 		}
 		// ponytail: one-second fallback poll covers delayed/failed SQS visibility; add per-queue deadlines if throughput demands it.
 		select {
 		case <-p.wake:
-		case <-p.deps.Clock.After(time.Second):
+		case <-p.deps.Clock.AfterUntil(nextPoll):
 		case <-p.stop:
 			return
 		}

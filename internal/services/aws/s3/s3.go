@@ -1702,7 +1702,7 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 		setChecksumHeaders(h, meta)
 	}
 	setReplicationHeaders(h, meta)
-	notModified, conditionErr := checkReadPreconditions(req, etag, mtime)
+	notModified, conditionErr := checkReadPreconditions(req, etag, mtime, p.deps.Clock.Now())
 	if conditionErr != nil || notModified {
 		_ = rc.Close()
 		if conditionErr != nil {
@@ -1797,7 +1797,7 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		setChecksumHeaders(h, meta)
 	}
 	setReplicationHeaders(h, meta)
-	if notModified, err := checkReadPreconditions(req, h.Get("ETag"), h.Get("Last-Modified")); err != nil {
+	if notModified, err := checkReadPreconditions(req, h.Get("ETag"), h.Get("Last-Modified"), p.deps.Clock.Now()); err != nil {
 		return nil, err
 	} else if notModified {
 		return &spi.Response{Status: http.StatusNotModified, Headers: h}, nil
@@ -4173,7 +4173,7 @@ func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Res
 	if version := str(meta["versionId"]); version != "" {
 		h.Set("x-amz-version-id", version)
 	}
-	if notModified, err := checkReadPreconditions(req, str(meta["etag"]), str(meta["mtime"])); err != nil {
+	if notModified, err := checkReadPreconditions(req, str(meta["etag"]), str(meta["mtime"]), p.deps.Clock.Now()); err != nil {
 		return nil, err
 	} else if notModified {
 		return &spi.Response{Status: http.StatusNotModified, Headers: h}, nil
@@ -5937,7 +5937,7 @@ func preconditionFailed(condition string) error {
 	return &spi.Fault{Code: "PreconditionFailed", Message: "At least one of the pre-conditions you specified did not hold", HTTPStatus: 412, Fault: "client", Fields: map[string]any{"Condition": condition}}
 }
 
-func checkReadPreconditions(req *spi.Request, etag, modified string) (bool, error) {
+func checkReadPreconditions(req *spi.Request, etag, modified string, now time.Time) (bool, error) {
 	if match := requestCondition(req, "IfMatch", "If-Match"); match != "" {
 		if !etagMatches(match, etag) {
 			return false, preconditionFailed("If-Match")
@@ -5951,7 +5951,7 @@ func checkReadPreconditions(req *spi.Request, etag, modified string) (bool, erro
 		return etagMatches(noneMatch, etag), nil
 	}
 	if value := requestCondition(req, "IfModifiedSince", "If-Modified-Since"); value != "" {
-		if condition, err := http.ParseTime(value); err == nil && !sourceModifiedAfter(modified, condition) {
+		if condition, err := http.ParseTime(value); err == nil && !sourceModifiedAfter(modified, condition) && condition.Before(now) {
 			return true, nil
 		}
 	}

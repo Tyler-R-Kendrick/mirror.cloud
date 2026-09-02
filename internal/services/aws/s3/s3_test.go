@@ -4870,13 +4870,42 @@ func TestVersionedObjectTaggingCharacterization(t *testing.T) {
 	if tags := asSliceForTest(retained.Output["TagSet"]); len(tags) != 1 || asMapForTest(tags[0])["Value"] != "second" {
 		t.Fatalf("delete marker lost version tags: %#v", retained.Output)
 	}
-	_, currentErr := invoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "source"}, nil)
-	_, markerErr := invoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "source", "VersionId": marker}, nil)
+	markerFaults := map[string]any{}
+	for _, version := range []string{"", marker} {
+		for _, operation := range []string{"GetObjectTagging", "PutObjectTagging", "DeleteObjectTagging"} {
+			input := map[string]any{"Bucket": "bucket", "Key": "source", "TagSet": currentTag}
+			if version != "" {
+				input["VersionId"] = version
+			}
+			_, err := invoke(t, p, operation, input, nil)
+			fault := asFault(t, err)
+			method := strings.ToUpper(strings.TrimSuffix(operation, "ObjectTagging"))
+			if fault.Code != "MethodNotAllowed" || fault.Message != "The specified method is not allowed against this resource." || fault.HTTPStatus != http.StatusMethodNotAllowed ||
+				fault.Fields["Method"] != method || fault.Fields["ResourceType"] != "DeleteMarker" || fault.Headers.Get("x-amz-delete-marker") != "true" ||
+				fault.Headers.Get("x-amz-version-id") != marker || fault.Headers.Get("Allow") != "DELETE" {
+				t.Fatalf("%s marker %q = %#v", operation, version, fault)
+			}
+			suffix := "Current"
+			if version != "" {
+				suffix = "Explicit"
+			}
+			markerFaults[operation+suffix] = fault.Code
+		}
+	}
 	for _, operation := range []string{"GetObjectTagging", "PutObjectTagging", "DeleteObjectTagging"} {
 		_, err := invoke(t, p, operation, map[string]any{"Bucket": "bucket", "Key": "missing", "TagSet": currentTag}, nil)
-		if fault := asFault(t, err); fault.Code != "NoSuchKey" || fault.HTTPStatus != http.StatusNotFound {
+		fault := asFault(t, err)
+		wantKey := "missing"
+		if operation == "GetObjectTagging" {
+			wantKey = "bucket/missing"
+		}
+		if fault.Code != "NoSuchKey" || fault.HTTPStatus != http.StatusNotFound || fault.Fields["Key"] != wantKey {
 			t.Fatalf("%s missing object fault = %#v", operation, fault)
 		}
+	}
+	_, missingVersionErr := invoke(t, p, "GetObjectTagging", map[string]any{"Bucket": "bucket", "Key": "source", "VersionId": "missing-version"}, nil)
+	if fault := asFault(t, missingVersionErr); fault.Code != "NoSuchVersion" || fault.Fields["Key"] != "source" || fault.Fields["VersionId"] != "missing-version" {
+		t.Fatalf("missing tag version = %#v", fault)
 	}
 
 	golden.AssertJSON(t, map[string]any{
@@ -4884,8 +4913,8 @@ func TestVersionedObjectTaggingCharacterization(t *testing.T) {
 		"currentTags":      current.Output["TagSet"],
 		"retainedTags":     retained.Output["TagSet"],
 		"copiedTags":       copiedTags.Output["TagSet"],
-		"currentMarker":    asFault(t, currentErr).Code,
-		"explicitMarker":   asFault(t, markerErr).Code,
+		"markerFaults":     markerFaults,
+		"missingVersion":   asFault(t, missingVersionErr).Code,
 	})
 }
 

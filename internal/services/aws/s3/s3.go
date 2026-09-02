@@ -4205,10 +4205,18 @@ func (p *Pack) objectTagTarget(ctx context.Context, req *spi.Request) (string, s
 	}
 	meta, ok := p.objectMetadata(ctx, req, b, key, version)
 	if !ok {
-		return "", "", &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: 404, Fault: "client"}
+		fault := objectReadNotFound(key, version)
+		if version == "" && req.Operation == "GetObjectTagging" {
+			fault.Fields["Key"] = b + "/" + key
+		}
+		return "", "", fault
 	}
 	if truthy(meta["deleteMarker"]) {
-		return "", "", deleteMarkerReadFault(meta, version != "")
+		fault := deleteMarkerReadFault(meta, true)
+		fault.Message = "The specified method is not allowed against this resource."
+		fault.Fields = map[string]any{"Method": strings.ToUpper(strings.TrimSuffix(req.Operation, "ObjectTagging")), "ResourceType": "DeleteMarker"}
+		fault.Headers.Set("Allow", "DELETE")
+		return "", "", fault
 	}
 	return objectTagKey(b, key, version), str(meta["versionId"]), nil
 }

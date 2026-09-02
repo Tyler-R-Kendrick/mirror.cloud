@@ -1971,7 +1971,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
-	t.Run("Given copy source preconditions When copying Then LocalStack evaluation order is preserved", func(t *testing.T) {
+	t.Run("Given copy source preconditions When copying Then LocalStack order and exact ETags are preserved", func(t *testing.T) {
 		res := do(http.MethodPut, "/copy-conditions", nil, "")
 		io.Copy(io.Discard, res.Body)
 		res.Body.Close()
@@ -1998,6 +1998,10 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			t.Fatalf("put source %d", source.StatusCode)
 		}
 		copySource := "/copy-conditions/source"
+		listed := request("listed", map[string]string{"x-amz-copy-source": copySource, "x-amz-copy-source-if-match": `"wrong", ` + source.Header.Get("ETag")})
+		if listed.StatusCode != http.StatusPreconditionFailed {
+			t.Fatalf("listed source condition %d", listed.StatusCode)
+		}
 		future := request("future", map[string]string{
 			"x-amz-copy-source":                   copySource,
 			"x-amz-copy-source-if-modified-since": time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat),

@@ -5853,6 +5853,43 @@ func TestCompleteMultipartUploadPreconditionFaults(t *testing.T) {
 	golden.AssertJSON(t, characterization)
 }
 
+func TestWritePreconditionFaults(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "write-preconditions"}, nil)
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-preconditions", "Key": "source"}, []byte("source"))
+	tests := []struct {
+		name               string
+		conditions         map[string]any
+		header, additional string
+	}{
+		{"combined", map[string]any{"IfMatch": `"etag"`, "IfNoneMatch": "*"}, "If-Match,If-None-Match", "Multiple conditional request headers present in the request"},
+		{"if-none-match", map[string]any{"IfNoneMatch": `"etag"`}, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+		{"if-match-star", map[string]any{"IfMatch": "*"}, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+	}
+	for _, operation := range []string{"PutObject", "CopyObject"} {
+		for _, test := range tests {
+			t.Run(operation+"/"+test.name, func(t *testing.T) {
+				mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "write-preconditions", "Key": "destination"}, []byte("old"))
+				input := map[string]any{"Bucket": "write-preconditions", "Key": "destination"}
+				if operation == "CopyObject" {
+					input["CopySource"] = "write-preconditions/source"
+				}
+				for name, value := range test.conditions {
+					input[name] = value
+				}
+				_, err := invoke(t, p, operation, input, []byte("new"))
+				fault := asFault(t, err)
+				if fault.Code != "NotImplemented" || fault.Message != "A header you provided implies functionality that is not implemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fault != "server" || fault.Fields["Header"] != test.header || fault.Fields["additionalMessage"] != test.additional {
+					t.Fatalf("fault = %#v", fault)
+				}
+				if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "write-preconditions", "Key": "destination"}, nil))); body != "old" {
+					t.Fatalf("rejected write stored %q", body)
+				}
+			})
+		}
+	}
+}
+
 func TestCompleteMultipartUploadConditionalConflicts(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

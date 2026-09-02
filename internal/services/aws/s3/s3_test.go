@@ -3843,8 +3843,10 @@ func TestCopySourcePreconditionsCharacterization(t *testing.T) {
 	future := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat)
 	cases := map[string]map[string]any{
 		"if-match":              {"CopySourceIfMatch": `"wrong"`},
+		"if-match-list":         {"CopySourceIfMatch": `"wrong", ` + etag},
 		"if-unmodified-since":   {"CopySourceIfUnmodifiedSince": past},
 		"if-none-match":         {"CopySourceIfNoneMatch": etag},
+		"if-none-match-list":    {"CopySourceIfNoneMatch": `"wrong", ` + etag},
 		"if-modified-since":     {"CopySourceIfModifiedSince": modified},
 		"future-modified-since": {"CopySourceIfModifiedSince": future},
 		"all-positive": {"CopySourceIfMatch": etag, "CopySourceIfNoneMatch": `"wrong"`,

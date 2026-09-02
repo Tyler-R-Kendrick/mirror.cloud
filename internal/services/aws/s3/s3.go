@@ -1178,7 +1178,8 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 			return nil, err
 		}
 	}
-	versioned := p.versioningEnabled(ctx, req, b)
+	versioningStatus := p.versioningStatus(ctx, req, b)
+	versioned := versioningStatus != ""
 	if versioned {
 		p.versionMu.Lock()
 		defer p.versionMu.Unlock()
@@ -1196,9 +1197,17 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	var versionOrder []string
 	var deletedVersionNext map[string]any
 	if versioned {
-		vid = p.deps.Rand.Hex(8)
+		vid = "null"
+		if versioningStatus == "Enabled" {
+			vid = p.deps.Rand.Hex(8)
+		}
 		current, _ := p.objectMetadata(ctx, req, b, key, "")
-		versionOrder = append(p.objectVersionOrder(ctx, req, b, key, current), vid)
+		for _, version := range p.objectVersionOrder(ctx, req, b, key, current) {
+			if version != vid {
+				versionOrder = append(versionOrder, version)
+			}
+		}
+		versionOrder = append(versionOrder, vid)
 		deletedVersionNext = asMap(current["deletedVersionNext"])
 		_, _ = p.deps.Blobs.Put(ctx, blobKey(req, b, key)+"@"+vid, bytes.NewReader(body))
 		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "versionOrder": versionOrder, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation, "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled, "sseCustomerKeyMD5": sseCustomerKeyMD5}
@@ -1254,7 +1263,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	}
 	h := http.Header{}
 	h.Set("ETag", etag)
-	if vid != "" {
+	if versioningStatus == "Enabled" || vid == "null" && (req.Operation == "CopyObject" || req.Operation == "CompleteMultipartUpload") {
 		h.Set("x-amz-version-id", vid)
 	}
 	for header, value := range provided {
@@ -1833,7 +1842,8 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		return nil, &spi.Fault{Code: "InvalidArgument", Message: "x-amz-bypass-governance-retention is only applicable to Object Lock enabled buckets.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-bypass-governance-retention"}}
 	}
 	wantVer := str(req.Input["VersionId"])
-	versioned := p.versioningEnabled(ctx, req, b)
+	versioningStatus := p.versioningStatus(ctx, req, b)
+	versioned := versioningStatus != ""
 	if !versioned && wantVer == "null" {
 		wantVer = ""
 	}
@@ -1842,13 +1852,24 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		defer p.versionMu.Unlock()
 	}
 	if versioned && wantVer == "" {
-		vid := p.deps.Rand.Hex(8)
+		vid := "null"
+		if versioningStatus == "Enabled" {
+			vid = p.deps.Rand.Hex(8)
+		}
 		mtime := p.deps.Clock.Now().UTC().Format(http.TimeFormat)
 		current, _ := p.objectMetadata(ctx, req, b, key, "")
-		metaDoc := map[string]any{"deleteMarker": true, "versionId": vid, "versionOrder": append(p.objectVersionOrder(ctx, req, b, key, current), vid), "mtime": mtime, "key": key}
+		order := p.objectVersionOrder(ctx, req, b, key, current)
+		kept := order[:0]
+		for _, version := range order {
+			if version != vid {
+				kept = append(kept, version)
+			}
+		}
+		metaDoc := map[string]any{"deleteMarker": true, "versionId": vid, "versionOrder": append(kept, vid), "mtime": mtime, "key": key}
 		meta, _ := json.Marshal(metaDoc)
 		_ = p.col(req, "objects").Put(ctx, b+"/"+key, meta)
 		_ = p.col(req, "versions").Put(ctx, b+"/"+key+"/"+vid, meta)
+		_ = p.deps.Blobs.Delete(ctx, blobKey(req, b, key)+"@"+vid)
 		h := http.Header{}
 		h.Set("x-amz-delete-marker", "true")
 		h.Set("x-amz-version-id", vid)
@@ -1856,6 +1877,7 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 			h.Set("x-amz-replication-status", status)
 		}
 		_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, ""))
+		_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, vid))
 		p.notify(ctx, req, b, key, "ObjectRemoved:DeleteMarkerCreated", metaDoc)
 		return &spi.Response{Status: 204, Headers: h}, nil
 	}
@@ -2949,8 +2971,9 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 			if parsed, err := http.ParseTime(modified); err == nil {
 				modified = parsed.UTC().Format("2006-01-02T15:04:05.000Z")
 			}
+			currentVersion := str(current["versionId"])
 			row := map[string]any{
-				"Key": key, "VersionId": version, "IsLatest": version == "null" || str(current["versionId"]) == version,
+				"Key": key, "VersionId": version, "IsLatest": currentVersion == version || version == "null" && currentVersion == "",
 				"LastModified": modified, "Owner": map[string]any{"ID": req.Identity.Account},
 			}
 			deleteMarker := truthy(meta["deleteMarker"])
@@ -3098,6 +3121,39 @@ func (p *Pack) versioning(ctx context.Context, req *spi.Request) (*spi.Response,
 		}
 		if st == "Suspended" && p.bucketObjectLockEnabled(ctx, req, b) {
 			return nil, &spi.Fault{Code: "InvalidBucketState", Message: "An Object Lock configuration is present on this bucket, so the versioning state cannot be changed.", HTTPStatus: http.StatusConflict, Fault: "client"}
+		}
+		_, configured, _ := p.col(req, "versioning").Get(ctx, b)
+		if !configured {
+			p.versionMu.Lock()
+			defer p.versionMu.Unlock()
+			objects, _, _ := p.col(req, "objects").List(ctx, b+"/", "", 0)
+			for _, object := range objects {
+				key := strings.TrimPrefix(object.Key, b+"/")
+				var meta map[string]any
+				_ = json.Unmarshal(object.Value, &meta)
+				if str(meta["versionId"]) != "" || truthy(meta["deleteMarker"]) {
+					continue
+				}
+				body, _, err := p.deps.Blobs.Get(ctx, blobKey(req, b, key))
+				if err != nil {
+					return nil, err
+				}
+				if _, err := p.deps.Blobs.Put(ctx, blobKey(req, b, key)+"@null", body); err != nil {
+					body.Close()
+					return nil, err
+				}
+				body.Close()
+				meta["key"], meta["versionId"], meta["versionOrder"] = key, "null", []string{"null"}
+				raw, _ := json.Marshal(meta)
+				_ = p.col(req, "objects").Put(ctx, object.Key, raw)
+				_ = p.col(req, "versions").Put(ctx, object.Key+"/null", raw)
+				if tags, ok, _ := p.col(req, "tags").Get(ctx, objectTagKey(b, key, "")); ok {
+					_ = p.col(req, "tags").Put(ctx, objectTagKey(b, key, "null"), tags)
+				}
+				if acl, ok, _ := p.col(req, "bktcfg").Get(ctx, objectTagKey(b, key, "")+"/acl"); ok {
+					_ = p.col(req, "bktcfg").Put(ctx, objectTagKey(b, key, "null")+"/acl", acl)
+				}
+			}
 		}
 		_ = p.col(req, "versioning").Put(ctx, b, []byte(st))
 		return &spi.Response{Status: 200}, nil
@@ -5980,8 +6036,15 @@ func truthy(v any) bool {
 }
 
 func (p *Pack) versioningEnabled(ctx context.Context, req *spi.Request, b string) bool {
+	return p.versioningStatus(ctx, req, b) == "Enabled"
+}
+
+func (p *Pack) versioningStatus(ctx context.Context, req *spi.Request, b string) string {
 	raw, ok, _ := p.col(req, "versioning").Get(ctx, b)
-	return ok && string(raw) == "Enabled"
+	if !ok {
+		return ""
+	}
+	return string(raw)
 }
 
 func mpuID(req *spi.Request) string {

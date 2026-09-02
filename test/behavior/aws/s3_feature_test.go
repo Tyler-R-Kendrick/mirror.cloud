@@ -330,6 +330,33 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Version>")) || !bytes.Contains(body, []byte("<Key>folder/file1</Key>")) || !bytes.Contains(body, []byte("<LastModified>")) {
 			t.Fatalf("next version page %d %s", res.StatusCode, body)
 		}
+		for range 3 {
+			res = do(http.MethodPut, "/version-list-bdd/deleted-marker", []byte("body"), "")
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("put deleted-marker version: %d", res.StatusCode)
+			}
+		}
+		res = do(http.MethodGet, "/version-list-bdd?versions&prefix=deleted-marker&max-keys=1", nil, "")
+		var marker struct {
+			Key     string `xml:"NextKeyMarker"`
+			Version string `xml:"NextVersionIdMarker"`
+		}
+		if err := xml.NewDecoder(res.Body).Decode(&marker); err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodDelete, "/version-list-bdd/deleted-marker?versionId="+url.QueryEscape(marker.Version), nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusNoContent {
+			t.Fatalf("delete version marker: %d", res.StatusCode)
+		}
+		res = do(http.MethodGet, "/version-list-bdd?versions&prefix=deleted-marker&key-marker="+url.QueryEscape(marker.Key)+"&version-id-marker="+url.QueryEscape(marker.Version), nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || bytes.Count(body, []byte("<Version>")) != 2 {
+			t.Fatalf("deleted version marker page %d %s", res.StatusCode, body)
+		}
 		res = do(http.MethodGet, "/version-list-bdd?versions&version-id-marker=orphan", nil, "")
 		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()

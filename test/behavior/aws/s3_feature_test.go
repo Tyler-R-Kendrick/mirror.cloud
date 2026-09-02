@@ -1177,6 +1177,24 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Message>At least one of the pre-conditions you specified did not hold</Message>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
 			t.Fatalf("mismatched complete If-Match %d %s", status, body)
 		}
+		res = do(http.MethodPut, "/completion-conditional-bdd/list", []byte("old"), "")
+		etag := res.Header.Get("ETag")
+		res.Body.Close()
+		uploadID, manifest = start("list")
+		status, body = complete("list", uploadID, manifest, `"wrong", `+etag, "")
+		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
+			t.Fatalf("listed complete If-Match %d %s", status, body)
+		}
+		res = do(http.MethodGet, "/completion-conditional-bdd/list?uploadId="+url.QueryEscape(uploadID), nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<Part>")) {
+			t.Fatalf("listed completion upload %d %s", res.StatusCode, body)
+		}
+		status, body = complete("list", uploadID, manifest, etag, "")
+		if status != http.StatusOK {
+			t.Fatalf("exact complete If-Match %d %s", status, body)
+		}
 		uploadID, manifest = start("created")
 		res = do(http.MethodPut, "/completion-conditional-bdd/created", []byte("object"), "")
 		res.Body.Close()

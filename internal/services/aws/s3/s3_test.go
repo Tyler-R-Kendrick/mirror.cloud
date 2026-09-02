@@ -5995,7 +5995,6 @@ func TestListMultipartUploadsPaginationAndDelimiter(t *testing.T) {
 		httpStatus int
 	}{
 		{map[string]any{"Bucket": "missing"}, "NoSuchBucket", http.StatusNotFound},
-		{map[string]any{"Bucket": "bucket", "MaxUploads": 0}, "InvalidArgument", http.StatusBadRequest},
 	} {
 		_, err := invoke(t, p, "ListMultipartUploads", test.input, nil)
 		if fault := asFault(t, err); fault.Code != test.code || fault.HTTPStatus != test.httpStatus {

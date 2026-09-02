@@ -2821,7 +2821,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
-	t.Run("Given an object delete marker When reading or writing its ACL Then S3 returns LocalStack faults", func(t *testing.T) {
+	t.Run("Given an object delete marker When reading or writing its ACL or tags Then S3 returns LocalStack faults", func(t *testing.T) {
 		for _, request := range []struct {
 			method, path, body string
 		}{
@@ -2857,6 +2857,44 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			if res.StatusCode != request.status || !bytes.Contains(body, []byte("<Code>"+request.code+"</Code>")) || !bytes.Contains(body, []byte(request.field)) {
 				t.Fatalf("%s %s = %d %s", request.method, request.path, res.StatusCode, body)
 			}
+		}
+		for _, suffix := range []string{"", "&versionId=" + url.QueryEscape(versionID)} {
+			for _, request := range []struct {
+				method, body string
+			}{
+				{http.MethodPut, "<Tagging><TagSet></TagSet></Tagging>"},
+				{http.MethodGet, ""},
+				{http.MethodDelete, ""},
+			} {
+				res = do(request.method, "/acl-marker-bdd/object?tagging"+suffix, []byte(request.body), "")
+				body, _ := io.ReadAll(res.Body)
+				res.Body.Close()
+				if res.StatusCode != http.StatusMethodNotAllowed || res.Header.Get("Allow") != "DELETE" ||
+					!bytes.Contains(body, []byte("<Code>MethodNotAllowed</Code>")) || !bytes.Contains(body, []byte("<Method>"+request.method+"</Method>")) ||
+					!bytes.Contains(body, []byte("<ResourceType>DeleteMarker</ResourceType>")) {
+					t.Fatalf("%s tagging%s = %d %#v %s", request.method, suffix, res.StatusCode, res.Header, body)
+				}
+			}
+		}
+		for _, request := range []struct {
+			method, body, key string
+		}{
+			{http.MethodPut, "<Tagging><TagSet></TagSet></Tagging>", "missing"},
+			{http.MethodGet, "", "acl-marker-bdd/missing"},
+			{http.MethodDelete, "", "missing"},
+		} {
+			res = do(request.method, "/acl-marker-bdd/missing?tagging", []byte(request.body), "")
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchKey</Code>")) || !bytes.Contains(body, []byte("<Key>"+request.key+"</Key>")) {
+				t.Fatalf("%s missing tags = %d %s", request.method, res.StatusCode, body)
+			}
+		}
+		res = do(http.MethodGet, "/acl-marker-bdd/object?tagging&versionId=missing", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchVersion</Code>")) || !bytes.Contains(body, []byte("<VersionId>missing</VersionId>")) {
+			t.Fatalf("missing tag version = %d %s", res.StatusCode, body)
 		}
 	})
 

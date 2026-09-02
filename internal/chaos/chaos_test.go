@@ -3015,6 +3015,57 @@ func TestConcurrentCreateBucketTagsRemainAtomic(t *testing.T) {
 	}
 }
 
+func TestConcurrentDeleteMarkerTaggingRejected(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "tag-marker-chaos"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutBucketVersioning", map[string]any{"Bucket": "tag-marker-chaos", "Status": "Enabled"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutObject", map[string]any{"Bucket": "tag-marker-chaos", "Key": "object"}); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := call("DeleteObject", map[string]any{"Bucket": "tag-marker-chaos", "Key": "object"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := deleted.Headers.Get("x-amz-version-id")
+	errs := make(chan error, 48)
+	var wg sync.WaitGroup
+	operations := []string{"GetObjectTagging", "PutObjectTagging", "DeleteObjectTagging"}
+	for n := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			operation := operations[n%len(operations)]
+			input := map[string]any{"Bucket": "tag-marker-chaos", "Key": "object", "TagSet": []any{}}
+			if n%2 != 0 {
+				input["VersionId"] = marker
+			}
+			_, err := call(operation, input)
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != "MethodNotAllowed" || fault.Fields["Method"] != strings.ToUpper(strings.TrimSuffix(operation, "ObjectTagging")) {
+				errs <- fmt.Errorf("%s: %w", operation, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestConcurrentCreateBucketOwnershipRemainsAtomic(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

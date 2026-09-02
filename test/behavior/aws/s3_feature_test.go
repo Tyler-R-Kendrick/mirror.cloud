@@ -1070,6 +1070,46 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a versioned object When putting with If-Match Then S3 checks only the current version", func(t *testing.T) {
+		const bucket, path = "if-match-bdd", "/if-match-bdd/key"
+		res := do(http.MethodPut, "/"+bucket, nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/"+bucket+"?versioning", []byte(`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`), "")
+		res.Body.Close()
+		res = do(http.MethodPut, path, []byte("first"), "")
+		etag := res.Header.Get("ETag")
+		res.Body.Close()
+		put := func(match, body string) (int, []byte, string) {
+			t.Helper()
+			request, err := http.NewRequest(http.MethodPut, ts.URL+path, strings.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", auth)
+			request.Header.Set("If-Match", match)
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			responseBody, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response.StatusCode, responseBody, response.Header.Get("ETag")
+		}
+		status, body, _ := put("d41d8cd98f00b204e9800998ecf8427e", "wrong")
+		if status != http.StatusPreconditionFailed || !bytes.Contains(body, []byte("<Code>PreconditionFailed</Code>")) || !bytes.Contains(body, []byte("<Condition>If-Match</Condition>")) {
+			t.Fatalf("wrong If-Match = %d %s", status, body)
+		}
+		status, body, etag = put(etag, "matched")
+		if status != http.StatusOK {
+			t.Fatalf("matched If-Match = %d %s", status, body)
+		}
+		res = do(http.MethodDelete, path, nil, "")
+		res.Body.Close()
+		if status, body, _ := put(etag, "after-delete"); status != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchKey</Code>")) || !bytes.Contains(body, []byte("<Key>key</Key>")) {
+			t.Fatalf("delete-marker If-Match = %d %s", status, body)
+		}
+	})
+
 	t.Run("Given a destination If-Match list When putting or copying Then S3 requires one ETag", func(t *testing.T) {
 		res := do(http.MethodPut, "/write-if-match-bdd", nil, "")
 		res.Body.Close()

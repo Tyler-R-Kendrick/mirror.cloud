@@ -4895,6 +4895,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestBucketAccelerateConfiguration",
 		},
 		{
+			name: "s3-accelerate-change-period-message",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `Message: "S3 Transfer Acceleration is not supported for buckets with periods (.) in their names"`,
+			new:  `Message: "S3 Transfer Acceleration is not supported for this bucket"`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestBucketAccelerateConfiguration",
+		},
+		{
 			name: "s3-accelerate-accept-invalid-status",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `if status != "Enabled" && status != "Suspended" {`,

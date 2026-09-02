@@ -5050,7 +5050,8 @@ func TestGetObjectAttributesContract(t *testing.T) {
 		t.Fatalf("missing attributes bucket = %#v", fault)
 	}
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "standard"}, []byte("body"))
-	if standard := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": "bucket", "Key": "standard", "ObjectAttributes": []string{"StorageClass"}}, nil); len(standard.Output) != 1 || standard.Output["StorageClass"] != "STANDARD" {
+	standard := mustInvoke(t, p, "GetObjectAttributes", map[string]any{"Bucket": "bucket", "Key": "standard", "ObjectAttributes": []string{"StorageClass"}}, nil)
+	if len(standard.Output) != 1 || standard.Output["StorageClass"] != "STANDARD" {
 		t.Fatalf("standard storage class attributes = %#v", standard.Output)
 	}
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Enabled"}, nil)
@@ -5110,7 +5111,7 @@ func TestGetObjectAttributesContract(t *testing.T) {
 		t.Fatalf("full object parts = %#v", fullParts)
 	}
 
-	golden.AssertJSON(t, map[string]any{"page": page.Output, "lastPage": lastPage, "full": fullAttrs})
+	golden.AssertJSON(t, map[string]any{"standard": standard.Output, "page": page.Output, "lastPage": lastPage, "full": fullAttrs})
 }
 
 func TestWriteChecksumValidation(t *testing.T) {

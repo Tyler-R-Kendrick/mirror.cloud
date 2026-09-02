@@ -51,5 +51,8 @@
     },
     "ObjectSize": 10485764,
     "StorageClass": "STANDARD_IA"
+  },
+  "standard": {
+    "StorageClass": "STANDARD"
   }
 }

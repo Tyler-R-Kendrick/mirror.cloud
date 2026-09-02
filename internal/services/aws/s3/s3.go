@@ -1202,7 +1202,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	if versioned {
 		vid = "null"
 		if versioningStatus == "Enabled" {
-			vid = p.deps.Rand.Hex(8)
+			vid = p.deps.Rand.Hex(32)
 		}
 		current, _ := p.objectMetadata(ctx, req, b, key, "")
 		for _, version := range p.objectVersionOrder(ctx, req, b, key, current) {

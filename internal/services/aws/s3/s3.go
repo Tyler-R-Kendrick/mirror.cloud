@@ -3652,6 +3652,9 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 		if req.Operation == "PutObjectAcl" {
 			p.notify(ctx, req, b, str(req.Input["Key"]), "ObjectAcl:Put", objectMeta)
 		}
+		if req.Operation == "PutBucketPolicy" {
+			return &spi.Response{Status: http.StatusNoContent}, nil
+		}
 		return &spi.Response{Status: 200}, nil
 	}
 	if strings.HasPrefix(req.Operation, "Delete") {

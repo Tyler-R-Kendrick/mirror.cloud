@@ -2992,6 +2992,27 @@ func TestConcurrentCreateBucketTagsRemainAtomic(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(response.Output["TagSet"], valid) {
 		t.Fatalf("persisted create tags = %#v %v", response, err)
 	}
+	clearErrors := make(chan error, 32)
+	for range cap(clearErrors) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutBucketTagging", Input: map[string]any{"Bucket": "atomic-create-tags", "TagSet": []any{}}})
+			clearErrors <- err
+		}()
+	}
+	wg.Wait()
+	close(clearErrors)
+	for err := range clearErrors {
+		if err != nil {
+			t.Fatalf("concurrent tag clear: %v", err)
+		}
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetBucketTagging", Input: map[string]any{"Bucket": "atomic-create-tags"}})
+	var fault *spi.Fault
+	if !errors.As(err, &fault) || fault.Code != "NoSuchTagSet" {
+		t.Fatalf("tags after concurrent clear = %v", err)
+	}
 }
 
 func TestConcurrentCreateBucketOwnershipRemainsAtomic(t *testing.T) {

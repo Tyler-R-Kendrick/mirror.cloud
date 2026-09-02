@@ -1102,6 +1102,21 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if tagged, err := s3c.GetBucketTagging(context.Background(), &s3.GetBucketTaggingInput{Bucket: aws.String("sdk")}); err != nil || !reflect.DeepEqual(tagged.TagSet, createTags) {
 		t.Fatalf("create bucket tags: %#v %v", tagged, err)
 	}
+	if _, err := s3c.PutBucketTagging(context.Background(), &s3.PutBucketTaggingInput{Bucket: aws.String("sdk"), Tagging: &s3types.Tagging{TagSet: []s3types.Tag{}}}); err != nil {
+		t.Fatalf("clear bucket tags: %v", err)
+	}
+	if _, err := s3c.GetBucketTagging(context.Background(), &s3.GetBucketTaggingInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchTagSet") {
+		t.Fatalf("cleared bucket tags: %v", err)
+	}
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("empty-tags"), Body: strings.NewReader("body")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s3c.PutObjectTagging(context.Background(), &s3.PutObjectTaggingInput{Bucket: aws.String("sdk"), Key: aws.String("empty-tags"), Tagging: &s3types.Tagging{TagSet: []s3types.Tag{}}}); err != nil {
+		t.Fatalf("clear object tags: %v", err)
+	}
+	if tagged, err := s3c.GetObjectTagging(context.Background(), &s3.GetObjectTaggingInput{Bucket: aws.String("sdk"), Key: aws.String("empty-tags")}); err != nil || len(tagged.TagSet) != 0 {
+		t.Fatalf("cleared object tags: %#v %v", tagged, err)
+	}
 	if _, err := s3c.GetBucketPolicy(context.Background(), &s3.GetBucketPolicyInput{Bucket: aws.String("sdk")}); err == nil || !strings.Contains(err.Error(), "NoSuchBucketPolicy") {
 		t.Fatalf("default bucket policy: %v", err)
 	}

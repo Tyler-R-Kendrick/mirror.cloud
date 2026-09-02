@@ -5381,7 +5381,7 @@ func (p *Pack) requireBucketOwner(ctx context.Context, req *spi.Request, b, expe
 		}
 	}
 	if !ok {
-		return &spi.Fault{Code: "NoSuchBucket", Message: "The specified bucket does not exist", HTTPStatus: 404, Fault: "client"}
+		return &spi.Fault{Code: "NoSuchBucket", Message: "The specified bucket does not exist", HTTPStatus: 404, Fault: "client", Fields: map[string]any{"BucketName": b}}
 	}
 	if expected != "" && expected != req.Identity.Account {
 		return &spi.Fault{Code: "AccessDenied", Message: "Access Denied", HTTPStatus: http.StatusForbidden, Fault: "client"}

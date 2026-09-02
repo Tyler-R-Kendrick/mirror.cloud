@@ -1256,6 +1256,17 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.GetObjectAcl(context.Background(), &s3.GetObjectAclInput{Bucket: aws.String("sdk-acl-marker"), Key: aws.String("object"), VersionId: marker.VersionId}); err == nil || !strings.Contains(err.Error(), "MethodNotAllowed") {
 		t.Fatalf("get explicit delete marker acl: %v", err)
 	}
+	for _, versionID := range []*string{nil, marker.VersionId} {
+		if _, err := s3c.PutObjectTagging(context.Background(), &s3.PutObjectTaggingInput{Bucket: aws.String("sdk-acl-marker"), Key: aws.String("object"), VersionId: versionID, Tagging: &s3types.Tagging{TagSet: []s3types.Tag{}}}); err == nil || !strings.Contains(err.Error(), "MethodNotAllowed") {
+			t.Fatalf("put delete marker tags version=%v: %v", versionID, err)
+		}
+		if _, err := s3c.GetObjectTagging(context.Background(), &s3.GetObjectTaggingInput{Bucket: aws.String("sdk-acl-marker"), Key: aws.String("object"), VersionId: versionID}); err == nil || !strings.Contains(err.Error(), "MethodNotAllowed") {
+			t.Fatalf("get delete marker tags version=%v: %v", versionID, err)
+		}
+		if _, err := s3c.DeleteObjectTagging(context.Background(), &s3.DeleteObjectTaggingInput{Bucket: aws.String("sdk-acl-marker"), Key: aws.String("object"), VersionId: versionID}); err == nil || !strings.Contains(err.Error(), "MethodNotAllowed") {
+			t.Fatalf("delete delete marker tags version=%v: %v", versionID, err)
+		}
+	}
 	for _, versionID := range []*string{marker.VersionId, object.VersionId} {
 		if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk-acl-marker"), Key: aws.String("object"), VersionId: versionID}); err != nil {
 			t.Fatalf("delete acl marker version %v: %v", versionID, err)

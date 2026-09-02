@@ -2723,6 +2723,31 @@ func FuzzPostObjectTagging(f *testing.F) {
 	})
 }
 
+func FuzzObjectTaggingDeleteMarker(f *testing.F) {
+	for operation := range 3 {
+		f.Add(operation, false)
+		f.Add(operation, true)
+	}
+	f.Fuzz(func(t *testing.T, choice int, explicit bool) {
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "tag-marker-fuzz"}, nil)
+		mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "tag-marker-fuzz", "Status": "Enabled"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "tag-marker-fuzz", "Key": "object"}, []byte("body"))
+		marker := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "tag-marker-fuzz", "Key": "object"}, nil).Headers.Get("x-amz-version-id")
+		operations := []string{"GetObjectTagging", "PutObjectTagging", "DeleteObjectTagging"}
+		operation := operations[(choice%len(operations)+len(operations))%len(operations)]
+		input := map[string]any{"Bucket": "tag-marker-fuzz", "Key": "object", "TagSet": []any{}}
+		if explicit {
+			input["VersionId"] = marker
+		}
+		_, err := invoke(t, p, operation, input, nil)
+		fault := asFault(t, err)
+		if fault.Code != "MethodNotAllowed" || fault.Fields["Method"] != strings.ToUpper(strings.TrimSuffix(operation, "ObjectTagging")) || fault.Fields["ResourceType"] != "DeleteMarker" {
+			t.Fatalf("%s explicit=%t: %#v", operation, explicit, fault)
+		}
+	})
+}
+
 func FuzzPostObjectExpires(f *testing.F) {
 	f.Add("Thu, 27 Aug 2026 12:00:00 GMT")
 	f.Add("tomorrow")

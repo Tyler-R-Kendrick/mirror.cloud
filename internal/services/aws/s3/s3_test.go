@@ -2673,6 +2673,12 @@ func TestBucketVersioningState(t *testing.T) {
 			characterization[status] = got
 		}
 	}
+	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": input["Bucket"], "Status": "Enabled"}, nil)
+	put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": input["Bucket"], "Key": "version-format"}, nil)
+	versionID := put.Headers.Get("x-amz-version-id")
+	if len(versionID) != 32 || strings.IndexFunc(versionID, func(r rune) bool { return !strings.ContainsRune("0123456789abcdef", r) }) >= 0 {
+		t.Fatalf("version id = %q", versionID)
+	}
 	golden.AssertJSON(t, characterization)
 }
 

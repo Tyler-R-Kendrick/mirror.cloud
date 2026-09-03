@@ -63,10 +63,28 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = json.Unmarshal(b, &rec)
 		p.ensureStream(req, rec, table)
 		b, _ = json.Marshal(rec)
-		_ = p.col(req, "tables").Put(ctx, table, b)
+		if err := p.col(req, "tables").Txn(ctx, func(tx spi.Tx) error {
+			if _, ok, err := tx.Get(table); err != nil {
+				return err
+			} else if ok {
+				return &spi.Fault{Code: "ResourceInUseException", Message: "Table already exists: " + table, HTTPStatus: 400, Fault: "client"}
+			}
+			return tx.Put(table, b)
+		}); err != nil {
+			return nil, err
+		}
 		return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{"TableName": table, "TableStatus": "ACTIVE", "LatestStreamArn": rec["LatestStreamArn"]}}}, nil
 	case "DeleteTable":
-		_ = p.col(req, "tables").Delete(ctx, table)
+		if err := p.col(req, "tables").Txn(ctx, func(tx spi.Tx) error {
+			if _, ok, err := tx.Get(table); err != nil {
+				return err
+			} else if !ok {
+				return &spi.Fault{Code: "ResourceNotFoundException", Message: "Requested resource not found: Table: " + table + " not found", HTTPStatus: 400, Fault: "client"}
+			}
+			return tx.Delete(table)
+		}); err != nil {
+			return nil, err
+		}
 		return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{"TableName": table, "TableStatus": "DELETING"}}}, nil
 	case "DescribeTable":
 		b, ok, _ := p.col(req, "tables").Get(ctx, table)

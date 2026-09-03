@@ -1,0 +1,27 @@
+{
+  "default": {
+    "TimeToLiveDescription": {
+      "TimeToLiveStatus": "DISABLED"
+    }
+  },
+  "enable": {
+    "TimeToLiveSpecification": {
+      "AttributeName": "ttl",
+      "Enabled": true
+    }
+  },
+  "enabled": {
+    "TimeToLiveDescription": {
+      "AttributeName": "ttl",
+      "TimeToLiveStatus": "ENABLED"
+    }
+  },
+  "missingDescribe": {
+    "code": "ResourceNotFoundException",
+    "message": "Cannot do operations on a non-existent table"
+  },
+  "missingUpdate": {
+    "code": "ResourceNotFoundException",
+    "message": "Cannot do operations on a non-existent table"
+  }
+}

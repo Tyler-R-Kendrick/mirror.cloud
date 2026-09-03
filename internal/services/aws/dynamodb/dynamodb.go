@@ -85,6 +85,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}); err != nil {
 			return nil, err
 		}
+		_ = p.col(req, "ttl").Delete(ctx, table)
 		return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{"TableName": table, "TableStatus": "DELETING"}}}, nil
 	case "DescribeTable":
 		b, ok, _ := p.col(req, "tables").Get(ctx, table)
@@ -166,11 +167,17 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		p.emitStream(ctx, req, table, ev, item, old)
 		return p.returnValues(req, old, item, touched), nil
 	case "UpdateTimeToLive":
+		if _, ok, _ := p.col(req, "tables").Get(ctx, table); !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Cannot do operations on a non-existent table", HTTPStatus: 400, Fault: "client"}
+		}
 		spec := req.Input["TimeToLiveSpecification"]
 		b, _ := json.Marshal(spec)
 		_ = p.col(req, "ttl").Put(ctx, table, b)
 		return &spi.Response{Output: map[string]any{"TimeToLiveSpecification": spec}}, nil
 	case "DescribeTimeToLive":
+		if _, ok, _ := p.col(req, "tables").Get(ctx, table); !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Cannot do operations on a non-existent table", HTTPStatus: 400, Fault: "client"}
+		}
 		b, ok, _ := p.col(req, "ttl").Get(ctx, table)
 		if !ok {
 			return &spi.Response{Output: map[string]any{"TimeToLiveDescription": map[string]any{"TimeToLiveStatus": "DISABLED"}}}, nil

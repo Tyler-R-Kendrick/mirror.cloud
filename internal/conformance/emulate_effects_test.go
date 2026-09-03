@@ -214,6 +214,7 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv("EnableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": "arn:k"})
 		inv("DisableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": "arn:k"})
 		inv("DeleteItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "1"}}})
+		inv("CreateTable", map[string]any{"TableName": "gone"})
 		inv("DeleteTable", map[string]any{"TableName": "gone"})
 		fat := map[string]any{"TableName": "T", "GlobalTableName": "GT", "ExportArn": "arn:e", "ImportArn": "arn:i",
 			"Statement": "SELECT * FROM T", "ReplicationGroup": []any{map[string]any{"RegionName": "us-east-1"}},

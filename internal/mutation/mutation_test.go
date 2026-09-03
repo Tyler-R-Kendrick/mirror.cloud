@@ -8571,6 +8571,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestDynamoDBQueryIndexProjection",
 		},
 		{
+			name: "dynamodb-update-only-first-set-expression",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "expr", "expr.go"),
+			old:  `for _, assign := range splitArgs(strings.TrimPrefix(part, "SET ")) {`,
+			new:  `for _, assign := range splitArgs(strings.TrimPrefix(part, "SET "))[:1] {`,
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestDynamoDBMultipleUpdateExpressions",
+		},
+		{
 			name: "dynamodb-batch-write-missing-table",
 			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
 			old:  "case \"BatchWriteItem\":\n\t\tif ri, ok := req.Input[\"RequestItems\"].(map[string]any); ok {\n\t\t\tfor tbl, spec := range ri {\n\t\t\t\tif err := requireTable(tbl); err != nil {",

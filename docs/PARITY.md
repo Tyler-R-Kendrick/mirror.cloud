@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
-| LocalStack S3 test functions explicitly traced | 216 / 463 (46.7%) |
-| LocalStack S3 test functions not yet traced | 247 / 463 (53.3%) |
+| LocalStack S3 test functions explicitly traced | 228 / 463 (49.2%) |
+| LocalStack S3 test functions not yet traced | 235 / 463 (50.8%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -72,6 +72,18 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3.py::TestS3::test_create_bucket_via_host_name` | Virtual-host edge routing, `TestCreateBucketLocationConstraints`, SDK and raw HTTP contracts, fuzz, concurrent chaos, snapshots, and mutation coverage verify virtual-host creation, Location response, lookup, and deletion | Mapped and race-clean |
 | `test_s3.py::TestS3::test_create_bucket_with_eu_location_constraint` | `TestCreateBucketLocationConstraints`, `TestListBucketsPaginationAndFilters`, SDK/HTTP contracts, fuzz, concurrent chaos, snapshots, and mutations verify `EU` aliases `eu-west-1` while preserving the configured location response | Mapped and race-clean |
 | `test_s3.py::TestS3::test_create_bucket_with_eu_location_constraint_raises` | Location-constraint atomic, SDK/HTTP, fuzz, snapshot, and mutation coverage verify `EU` is rejected outside the matching `eu-west-1` request region | Mapped and green |
+| `test_s3.py::TestS3::test_create_bucket_with_invalid_location_constraint` | `TestCreateBucketLocationConstraints`, AWS SDK and raw HTTP contracts, characterization snapshot, exhaustive fuzz seeds, and semantic mutations verify invalid and region-mismatched constraints return the endpoint-specific exact fault before reserving a bucket | Mapped and green |
+| `test_s3.py::TestS3::test_get_bucket_policy` | `TestBucketPolicyConfiguration`, characterization snapshot, AWS SDK contract, raw HTTP BDD, fuzz, concurrent chaos, and mutations verify exact JSON preservation plus the exact default missing-policy fault | Mapped and race-clean |
+| `test_s3.py::TestS3::test_get_bucket_policy_invalid_account_id` | `TestExpectedBucketOwnerAndDeleteBoundary` pins all four invalid IDs; the SDK/raw HTTP contracts, snapshot, and shared owner-validation mutants verify exact 400 `InvalidBucketOwnerAWSAccountID` behavior | Mapped and green |
+| `test_s3.py::TestS3::test_put_bucket_policy` | Bucket-policy atomic, SDK, BDD, fuzz, chaos, snapshot, and mutation coverage verify exact JSON persistence, HTTP 204, malformed-policy rejection, and preservation of the prior policy | Mapped and race-clean |
+| `test_s3.py::TestS3::test_put_bucket_policy_expected_bucket_owner` | `TestExpectedBucketOwnerAcrossBucketScopedOperations`, AWS SDK contract, and raw HTTP BDD verify matching-owner success and mismatched-owner 403 without changing the policy; shared owner validation is snapshot- and mutation-tested | Mapped and green |
+| `test_s3.py::TestS3::test_put_bucket_policy_invalid_account_id` | The exact invalid-ID characterization, SDK/raw HTTP contracts, snapshot, and shared owner-validation mutants verify policy validation never runs before the 400 owner-ID fault | Mapped and green |
+| `test_s3.py::TestS3::test_delete_bucket_policy` | Bucket-policy atomic, SDK, and raw HTTP contracts plus snapshot and mutation coverage verify HTTP 204, idempotent deletion, and the exact post-delete missing-policy fault | Mapped and green |
+| `test_s3.py::TestS3::test_delete_bucket_policy_expected_bucket_owner` | `TestExpectedBucketOwnerAcrossBucketScopedOperations`, SDK contract, and raw HTTP BDD verify mismatched and invalid owners cannot delete the configured policy while matching-owner deletion retains normal idempotency | Mapped and green |
+| `test_s3.py::TestS3::test_put_object_tagging_empty_list` | `TestTagValidationAndBucketSemantics`, AWS SDK contract, raw HTTP BDD, fuzz, concurrent chaos, characterization snapshot, and mutations verify empty object tag sets succeed and read back empty | Mapped and race-clean |
+| `test_s3.py::TestS3::test_head_object_fields` | `TestObjectMetadata`, object checksum and conditional-read characterizations, AWS SDK/raw HTTP contracts, fuzz, chaos, snapshots, and mutations verify populated HEAD metadata and exact missing-key behavior | Mapped and race-clean |
+| `test_s3.py::TestS3::test_get_object_after_deleted_in_versioned_bucket` | Versioning/delete-marker atomic tests, AWS SDK/raw HTTP contracts, fuzz, concurrent chaos, snapshots, and mutations verify a current delete marker makes an unversioned GET return the exact missing-key fault while retaining historical versions | Mapped and race-clean |
+| `test_s3.py::TestS3::test_s3_copy_metadata_replace` | `TestObjectMetadata`, AWS SDK/raw HTTP contracts, fuzz, concurrent chaos, characterization snapshot, and semantic mutations verify `REPLACE` drops inherited system/user metadata and persists only explicit replacement values | Mapped and race-clean |
 | `test_s3_preconditions.py::test_s3_copy_object_preconditions` | `TestCopySourcePreconditionsCharacterization`, AWS SDK contract, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_modified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_unmodified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
@@ -264,4 +276,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 216/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 228/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

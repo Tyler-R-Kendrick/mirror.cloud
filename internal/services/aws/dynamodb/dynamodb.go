@@ -166,6 +166,15 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "Scan":
 		return p.listItems(ctx, req, table, "", str(req.Input["FilterExpression"]))
 	case "Query":
+		if indexName := str(req.Input["IndexName"]); indexName != "" {
+			index := indexSpec(p.tableDef(ctx, req, table), indexName)
+			if len(index) == 0 {
+				return nil, &spi.Fault{Code: "ValidationException", Message: "The table does not have the specified index: " + indexName, HTTPStatus: 400, Fault: "client"}
+			}
+			if str(req.Input["Select"]) == "ALL_ATTRIBUTES" && str(asMap(index["Projection"])["ProjectionType"]) != "ALL" {
+				return nil, &spi.Fault{Code: "ValidationException", Message: "Select type ALL_ATTRIBUTES is not supported for global secondary index " + indexName + " because its projection type is not ALL", HTTPStatus: 400, Fault: "client"}
+			}
+		}
 		return p.listItems(ctx, req, table, str(req.Input["KeyConditionExpression"]), str(req.Input["FilterExpression"]))
 	case "UpdateItem":
 		key := p.itemKeyFrom(ctx, req, table, asMap(req.Input["Key"]))
@@ -815,16 +824,7 @@ func (p *Pack) projectIndex(td map[string]any, indexName string, item map[string
 	if indexName == "" {
 		return item
 	}
-	var spec map[string]any
-	for _, key := range []string{"GlobalSecondaryIndexes", "LocalSecondaryIndexes"} {
-		arr, _ := td[key].([]any)
-		for _, ix := range arr {
-			m := asMap(ix)
-			if str(m["IndexName"]) == indexName {
-				spec = m
-			}
-		}
-	}
+	spec := indexSpec(td, indexName)
 	if len(spec) == 0 {
 		return item
 	}
@@ -851,6 +851,18 @@ func (p *Pack) projectIndex(td map[string]any, indexName string, item map[string
 		}
 	}
 	return out
+}
+
+func indexSpec(td map[string]any, indexName string) map[string]any {
+	for _, key := range []string{"GlobalSecondaryIndexes", "LocalSecondaryIndexes"} {
+		for _, ix := range asSlice(td[key]) {
+			m := asMap(ix)
+			if str(m["IndexName"]) == indexName {
+				return m
+			}
+		}
+	}
+	return nil
 }
 
 func asSlice(v any) []any {

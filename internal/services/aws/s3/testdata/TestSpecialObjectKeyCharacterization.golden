@@ -1,0 +1,53 @@
+{
+  "copies": {
+    "a/%F0%9F%98%80/": "body-10",
+    "file%2Fname": "body-3",
+    "test key/": "body-7",
+    "test key//": "body-8",
+    "test+key": "body-14",
+    "test@key/": "body-4"
+  },
+  "listed": [
+    "/bar/foo/",
+    "/foo",
+    "a/",
+    "a/%F0%9F%98%80/",
+    "bar",
+    "file%2Fname",
+    "t/",
+    "test key/",
+    "test key//",
+    "test%123",
+    "test%123/",
+    "test%40key",
+    "test%40key/",
+    "test%percent",
+    "test+key",
+    "test@key/",
+    "u/"
+  ],
+  "missing": {
+    "//foo": "NoSuchKey",
+    "/bar": "NoSuchKey",
+    "foo": "NoSuchKey"
+  },
+  "objects": {
+    "/bar/foo/": "body-2",
+    "/foo": "body-0",
+    "a/": "body-11",
+    "a/%F0%9F%98%80/": "body-10",
+    "bar": "body-1",
+    "file%2Fname": "body-3",
+    "t/": "body-12",
+    "test key/": "body-7",
+    "test key//": "body-8",
+    "test%123": "body-5",
+    "test%123/": "body-9",
+    "test%40key": "body-16",
+    "test%40key/": "body-15",
+    "test%percent": "body-6",
+    "test+key": "body-14",
+    "test@key/": "body-4",
+    "u/": "body-13"
+  }
+}

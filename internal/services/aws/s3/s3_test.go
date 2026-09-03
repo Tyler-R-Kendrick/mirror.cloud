@@ -5740,7 +5740,7 @@ func TestSpecialObjectKeyCharacterization(t *testing.T) {
 	for _, bucket := range []string{"special-keys", "special-key-copies"} {
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
 	}
-	keys := []string{"/foo", "bar", "/bar/foo/", "file%2Fname", "test@key/", "test%123", "test%percent", "test key/", "test key//", "test%123/", "a/%F0%9F%98%80/", "a/", "t/", "u/", "test+key", "test%40key/", "test%40key"}
+	keys := []string{"/foo", "bar", "/bar/foo/", "file%2Fname", "test@key/", "test%123", "test%percent", "test key/", "test key//", "test%123/", "a/%F0%9F%98%80/", "a/", "t/", "u/", "test+key", "test%40key/", "test%40key", "#key-with-hash-prefix"}
 	got := map[string]any{"objects": map[string]any{}, "copies": map[string]any{}, "missing": map[string]any{}}
 	objects, copies, missing := got["objects"].(map[string]any), got["copies"].(map[string]any), got["missing"].(map[string]any)
 	for i, key := range keys {

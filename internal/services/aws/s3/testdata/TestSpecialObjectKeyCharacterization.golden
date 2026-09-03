@@ -8,6 +8,7 @@
     "test@key/": "body-4"
   },
   "listed": [
+    "#key-with-hash-prefix",
     "/bar/foo/",
     "/foo",
     "a/",
@@ -32,6 +33,7 @@
     "foo": "NoSuchKey"
   },
   "objects": {
+    "#key-with-hash-prefix": "body-17",
     "/bar/foo/": "body-2",
     "/foo": "body-0",
     "a/": "body-11",

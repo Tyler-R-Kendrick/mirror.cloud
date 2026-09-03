@@ -182,6 +182,15 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || string(body) != "space" {
 			t.Fatalf("copy encoded source %d %q", res.StatusCode, body)
 		}
+		hashPath := "/special-key-bdd/" + url.PathEscape("#key-with-hash-prefix")
+		res = do(http.MethodPut, hashPath, []byte("test 123"), "")
+		res.Body.Close()
+		res = do(http.MethodGet, hashPath, nil, "")
+		body, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(body) != "test 123" {
+			t.Fatalf("hash-prefixed key %d %q", res.StatusCode, body)
+		}
 	})
 
 	t.Run("Given a missing bucket When accessed Then each operation returns NoSuchBucket", func(t *testing.T) {

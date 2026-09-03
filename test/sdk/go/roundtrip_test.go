@@ -1924,7 +1924,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if string(utf8Body) != "abc123" || utf8Get.ServerSideEncryption != s3types.ServerSideEncryptionAes256 || aws.ToString(utf8Get.ChecksumCRC32) != aws.ToString(utf8Put.ChecksumCRC32) {
 		t.Fatalf("stored utf8 key: body=%q output=%#v", utf8Body, utf8Get)
 	}
-	for _, key := range []string{"test@key/", "test%40key/", "test key/", "test+key"} {
+	for _, key := range []string{"#key-with-hash-prefix", "test@key/", "test%40key/", "test key/", "test+key"} {
 		if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key), Body: strings.NewReader(key)}); err != nil {
 			t.Fatalf("put special key %q: %v", key, err)
 		}

@@ -91,6 +91,29 @@ func TestDynamoDBTTLMissingTableFaults(t *testing.T) {
 	}
 }
 
+func TestDynamoDBTTLDoesNotSurviveTableRecreation(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	must := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	table := map[string]any{"TableName": "T"}
+	must("CreateTable", table)
+	must("UpdateTimeToLive", map[string]any{"TableName": "T", "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}})
+	must("DeleteTable", table)
+	must("CreateTable", table)
+	description := asMap(must("DescribeTimeToLive", table).Output["TimeToLiveDescription"])
+	if description["TimeToLiveStatus"] != "DISABLED" || description["AttributeName"] != nil {
+		t.Fatalf("recreated table retained ttl %#v", description)
+	}
+}
+
 func TestDynamoDBTTLCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

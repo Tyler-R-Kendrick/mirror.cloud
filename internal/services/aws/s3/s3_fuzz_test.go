@@ -24,6 +24,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/cespare/xxhash/v2"
@@ -2982,7 +2983,17 @@ func FuzzGetObjectResponseOverrides(f *testing.F) {
 		} else {
 			input[field.input] = value
 		}
-		response := mustInvoke(t, p, "GetObject", input, nil)
+		response, err := p.Invoke(context.Background(), &spi.Request{Identity: ident(), Operation: "GetObject", Input: input})
+		if strings.IndexFunc(value, func(r rune) bool { return r > unicode.MaxLatin1 }) >= 0 {
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidArgument" || fault.Fields["ArgumentName"] != field.query || fault.Fields["ArgumentValue"] != value {
+				t.Fatalf("non-Latin-1 override fault %#v", err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
 		if response.Headers.Get(field.header) != value || string(readStream(t, response)) != "body" {
 			t.Fatalf("override %s = %q", field.header, response.Headers.Get(field.header))
 		}

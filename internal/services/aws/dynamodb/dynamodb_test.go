@@ -2,6 +2,8 @@ package dynamodb
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
@@ -238,6 +240,58 @@ func TestDynamoDBTagCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{
 		"tableArn": arn, "initial": initial, "updated": updated, "remaining": remaining,
 		"afterDelete": must("ListTagsOfResource", map[string]any{"ResourceArn": arn}).Output["Tags"],
+	})
+}
+
+func TestDynamoDBUnicodeAndLargeScan(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	must := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	must("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
+	for i, value := range []string{"foobar123 ✓", "foobar123 £", "foobar123 ¢"} {
+		id := "unicode-" + strconv.Itoa(i)
+		must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": id}, "data": map[string]any{"S": value}}})
+		got := asMap(must("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": id}}}).Output["Item"])
+		if str(asMap(got["data"])["S"]) != value {
+			t.Fatalf("unicode item %#v", got)
+		}
+	}
+	for i := 0; i < 20; i++ {
+		must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "large-" + strconv.Itoa(i)}, "data": map[string]any{"S": strings.Repeat("foobar123 ", 1000)}}})
+	}
+	scan := must("Scan", map[string]any{"TableName": "T"}).Output
+	if scan["Count"] != 23 || scan["ScannedCount"] != 23 || len(asSlice(scan["Items"])) != 23 {
+		t.Fatalf("large scan %#v", scan)
+	}
+}
+
+func TestDynamoDBDataCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+	call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
+	for i, value := range []string{"✓", "£", "¢"} {
+		call("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": strconv.Itoa(i)}, "data": map[string]any{"S": value}}})
+	}
+	golden.AssertJSON(t, map[string]any{
+		"unicode": call("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "0"}}})["Item"],
+		"scan":    call("Scan", map[string]any{"TableName": "T"}),
 	})
 }
 

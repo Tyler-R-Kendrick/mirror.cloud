@@ -3131,7 +3131,9 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}
 	if _, err := ddb.PutItem(context.Background(), &dynamodb.PutItemInput{
 		TableName: aws.String("T"),
-		Item:      map[string]ddbtypes.AttributeValue{"id": &ddbtypes.AttributeValueMemberS{Value: "1"}},
+		Item: map[string]ddbtypes.AttributeValue{
+			"id": &ddbtypes.AttributeValueMemberS{Value: "1"}, "data": &ddbtypes.AttributeValueMemberS{Value: "foobar123 ✓ £ ¢"},
+		},
 	}); err != nil {
 		t.Fatalf("put item: %v", err)
 	}
@@ -3145,6 +3147,9 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	idAttr, ok := item.Item["id"].(*ddbtypes.AttributeValueMemberS)
 	if !ok || idAttr.Value != "1" {
 		t.Fatalf("ddb item %#v", item.Item)
+	}
+	if data, ok := item.Item["data"].(*ddbtypes.AttributeValueMemberS); !ok || data.Value != "foobar123 ✓ £ ¢" {
+		t.Fatalf("ddb unicode item %#v", item.Item)
 	}
 	if _, err := ddb.DeleteTable(context.Background(), &dynamodb.DeleteTableInput{TableName: aws.String("T")}); err != nil {
 		t.Fatalf("delete table: %v", err)

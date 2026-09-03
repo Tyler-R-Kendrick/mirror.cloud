@@ -89,7 +89,7 @@ func FuzzStorageClassValidation(f *testing.F) {
 }
 
 func FuzzObjectKeyLength(f *testing.F) {
-	for _, key := range []string{"", "key", strings.Repeat("a", 1024), strings.Repeat("é", 512), strings.Repeat("a", 1025), strings.Repeat("é", 513)} {
+	for _, key := range []string{"", "key", "Ā0Ä", strings.Repeat("a", 1024), strings.Repeat("é", 512), strings.Repeat("a", 1025), strings.Repeat("é", 513)} {
 		f.Add(key)
 	}
 	f.Fuzz(func(t *testing.T, key string) {
@@ -99,6 +99,9 @@ func FuzzObjectKeyLength(f *testing.F) {
 		if len(key) <= 1024 {
 			if err != nil {
 				t.Fatalf("valid %d-byte key: %v", len(key), err)
+			}
+			if got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "keys", "Key": key}, nil); string(readStream(t, got)) != "body" {
+				t.Fatalf("valid %d-byte key did not round trip", len(key))
 			}
 			return
 		}
@@ -2970,6 +2973,22 @@ func FuzzGetObjectResponseOverrides(f *testing.F) {
 		stored := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "override-fuzz", "Key": "object"}, nil)
 		if stored.Headers.Get("Content-Type") != "application/json" {
 			t.Fatalf("stored content type = %q", stored.Headers.Get("Content-Type"))
+		}
+	})
+}
+
+func FuzzObjectSystemMetadata(f *testing.F) {
+	f.Add("no-cache", "de", `attachment; filename="foo.jpg"`, "abc123")
+	f.Fuzz(func(t *testing.T, cacheControl, language, disposition, body string) {
+		if len(cacheControl) > 256 || len(language) > 256 || len(disposition) > 256 || len(body) > 4096 || !utf8.ValidString(cacheControl) || !utf8.ValidString(language) || !utf8.ValidString(disposition) || !utf8.ValidString(body) || strings.IndexFunc(cacheControl+language+disposition, func(r rune) bool { return r < ' ' || r == 0x7f }) >= 0 {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "metadata-fuzz"}, nil)
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "metadata-fuzz", "Key": "object", "CacheControl": cacheControl, "ContentLanguage": language, "ContentDisposition": disposition}, []byte(body))
+		got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "metadata-fuzz", "Key": "object"}, nil)
+		if stored := string(readStream(t, got)); stored != body || got.Headers.Get("Cache-Control") != cacheControl || got.Headers.Get("Content-Language") != language || got.Headers.Get("Content-Disposition") != disposition {
+			t.Fatalf("body=%q headers=%v", stored, got.Headers)
 		}
 	})
 }

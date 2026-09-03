@@ -166,6 +166,7 @@ func TestDynamoDBTTLExpiration(t *testing.T) {
 	for _, table := range []string{"hash", "range"} {
 		must("UpdateTimeToLive", map[string]any{"TableName": table, "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}})
 	}
+	must("UpdateTimeToLive", map[string]any{"TableName": "disabled", "TimeToLiveSpecification": map[string]any{"Enabled": false, "AttributeName": "ttl"}})
 	past, future := strconv.FormatInt(deps.Clock.Now().Unix()-10, 10), strconv.FormatInt(deps.Clock.Now().Unix()+120, 10)
 	must("PutItem", map[string]any{"TableName": "hash", "Item": map[string]any{"id": map[string]any{"S": "expired"}, "ttl": map[string]any{"N": past}}})
 	must("PutItem", map[string]any{"TableName": "hash", "Item": map[string]any{"id": map[string]any{"S": "future"}, "ttl": map[string]any{"N": future}}})

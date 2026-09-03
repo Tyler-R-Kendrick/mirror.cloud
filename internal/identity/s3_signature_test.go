@@ -34,8 +34,12 @@ func TestVerifyS3PresignedV4AWSExample(t *testing.T) {
 	query := request.URL.Query()
 	query.Set("X-Amz-Signature", "00eed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404")
 	request.URL.RawQuery = query.Encode()
-	if fault := VerifyS3PresignedV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault == nil || fault.Code != "SignatureDoesNotMatch" {
+	if fault := VerifyS3PresignedV4(request, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault == nil || fault.Code != "SignatureDoesNotMatch" || !strings.HasPrefix(fault.Fields["CanonicalRequest"].(string), "GET\n/test.txt\n") || fault.Fields["SignatureProvided"] != query.Get("X-Amz-Signature") {
 		t.Fatalf("tampered signature accepted: %#v", fault)
+	}
+	slash := httptest.NewRequest(http.MethodGet, strings.Replace(rawURL, "/test.txt", "/%2Ftest.txt", 1), nil)
+	if fault := VerifyS3PresignedV4(slash, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"); fault == nil || !strings.HasPrefix(fault.Fields["CanonicalRequest"].(string), "GET\n//test.txt\n") {
+		t.Fatalf("encoded slash canonical request missing: %#v", fault)
 	}
 }
 

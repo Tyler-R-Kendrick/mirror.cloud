@@ -2628,6 +2628,36 @@ func TestConcurrentStandardStorageAttributesRemainVisible(t *testing.T) {
 	}
 }
 
+func TestConcurrentMissingBucketFaultsRemainModeled(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	operations := []string{"GetObject", "DeleteBucket", "GetBucketNotificationConfiguration"}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			bucket := fmt.Sprintf("missing-%d", i)
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operations[i%len(operations)], Input: map[string]any{"Bucket": bucket, "Key": "foobar"}})
+			var fault *spi.Fault
+			if !errors.As(err, &fault) || fault.Code != "NoSuchBucket" || fault.Message != "The specified bucket does not exist" || fault.HTTPStatus != http.StatusNotFound || fault.Fields["BucketName"] != bucket {
+				errs <- fmt.Errorf("missing bucket %d: %#v", i, fault)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
 func TestCustomerEncryptionValidationFailurePreservesObject(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	ctx := context.Background()

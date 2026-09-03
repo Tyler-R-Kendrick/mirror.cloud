@@ -1671,6 +1671,21 @@ func FuzzGetObjectAttributesStorageClass(f *testing.F) {
 	})
 }
 
+func FuzzMissingBucketFaults(f *testing.F) {
+	for operation := uint8(0); operation < 3; operation++ {
+		f.Add(operation, uint64(operation+1))
+	}
+	f.Fuzz(func(t *testing.T, operation uint8, suffix uint64) {
+		operations := []string{"GetObject", "DeleteBucket", "GetBucketNotificationConfiguration"}
+		bucket := fmt.Sprintf("missing-%x", suffix)
+		_, err := invoke(t, s3.New(spitest.Deps(t)), operations[int(operation)%len(operations)], map[string]any{"Bucket": bucket, "Key": "foobar"}, nil)
+		fault := asFault(t, err)
+		if fault.Code != "NoSuchBucket" || fault.Message != "The specified bucket does not exist" || fault.HTTPStatus != http.StatusNotFound || fault.Fields["BucketName"] != bucket {
+			t.Fatalf("missing bucket %q = %#v", bucket, fault)
+		}
+	})
+}
+
 func FuzzGetObjectAttributesPartMarkers(f *testing.F) {
 	for _, marker := range []uint8{0, 1, 2, 255} {
 		f.Add(marker)

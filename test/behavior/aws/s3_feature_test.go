@@ -96,7 +96,8 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		body, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("<StorageClass>STANDARD</StorageClass>")) || !bytes.Contains(body, []byte("<ObjectSize>4</ObjectSize>")) {
+		etag, storageClass, objectSize := bytes.Index(body, []byte("<ETag>")), bytes.Index(body, []byte("<StorageClass>")), bytes.Index(body, []byte("<ObjectSize>"))
+		if res.StatusCode != http.StatusOK || etag < 0 || !(etag < storageClass && storageClass < objectSize) || !bytes.Contains(body, []byte("<StorageClass>STANDARD</StorageClass>")) || !bytes.Contains(body, []byte("<ObjectSize>4</ObjectSize>")) {
 			t.Fatalf("standard storage attributes %d %s", res.StatusCode, body)
 		}
 		request, _ = http.NewRequest(http.MethodGet, ts.URL+"/standard-attributes-bdd/key?attributes", nil)
@@ -2466,8 +2467,8 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		head := do(http.MethodHead, "/upload-part-copy-bdd/source", nil, "")
 		modified, err := http.ParseTime(head.Header.Get("Last-Modified"))
 		head.Body.Close()
-		if err != nil {
-			t.Fatal(err)
+		if err != nil || !strings.HasSuffix(head.Header.Get("Last-Modified"), " GMT") {
+			t.Fatalf("Last-Modified = %q: %v", head.Header.Get("Last-Modified"), err)
 		}
 		_ = deps.Clock.Advance(2 * time.Second)
 		defer deps.Clock.Advance(-2 * time.Second)

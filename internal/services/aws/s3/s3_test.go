@@ -6129,6 +6129,13 @@ func TestGetObjectAttributesContract(t *testing.T) {
 	if len(standard.Output) != 1 || standard.Output["StorageClass"] != "STANDARD" {
 		t.Fatalf("standard storage class attributes = %#v", standard.Output)
 	}
+	httpRequest := httptest.NewRequest(http.MethodGet, "https://bucket.s3.us-east-1.amazonaws.com/standard?attributes", nil)
+	httpRequest.Header.Add("x-amz-object-attributes", "ETag")
+	httpRequest.Header.Add("x-amz-object-attributes", "StorageClass")
+	multi, err := p.Invoke(context.Background(), &spi.Request{Identity: ident(), Operation: "GetObjectAttributes", Input: map[string]any{"Bucket": "bucket", "Key": "standard"}, HTTP: httpRequest})
+	if err != nil || len(multi.Output) != 2 || multi.Output["ETag"] == nil || multi.Output["StorageClass"] != "STANDARD" {
+		t.Fatalf("repeated attribute headers = %#v: %v", multi, err)
+	}
 	mustInvoke(t, p, "PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Enabled"}, nil)
 	created := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "composite", "ChecksumAlgorithm": "SHA256", "StorageClass": "STANDARD_IA"}, nil)
 	id := created.Output["UploadId"].(string)

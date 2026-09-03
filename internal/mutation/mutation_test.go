@@ -947,6 +947,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSpecialObjectKeyCharacterization",
 		},
 		{
+			name: "s3-complete-multipart-omit-location",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `resp.Output = map[string]any{"Bucket": bucket, "Key": key, "ETag": etag, "Location": location}`,
+			new:  `resp.Output = map[string]any{"Bucket": bucket, "Key": key, "ETag": etag}`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestMultipartUnicodeLocationCharacterization",
+		},
+		{
+			name: "s3-complete-multipart-location-unescaped",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `location := (&url.URL{Scheme: "http", Host: bucket + ".s3.amazonaws.com", Path: "/" + key}).String()`,
+			new:  `location := "http://" + bucket + ".s3.amazonaws.com/" + key`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestMultipartUnicodeLocationCharacterization",
+		},
+		{
 			name: "s3-copy-ignore-requested-checksum-algorithm",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  "algorithm := strings.ToUpper(requestCondition(req, \"ChecksumAlgorithm\", \"x-amz-checksum-algorithm\"))\n\tif algorithm == \"\" {\n\t\tstored := asMap(source.meta[\"checksums\"])",

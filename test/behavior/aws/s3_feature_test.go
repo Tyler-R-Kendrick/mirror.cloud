@@ -141,6 +141,37 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given encoded and literal object keys When copied Then S3 keeps each key distinct", func(t *testing.T) {
+		for _, bucket := range []string{"special-key-bdd", "special-key-copy-bdd"} {
+			res := do(http.MethodPut, "/"+bucket, nil, "")
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("create %s: %d", bucket, res.StatusCode)
+			}
+		}
+		request, _ := http.NewRequest(http.MethodPut, ts.URL+"/special-key-bdd/test%20key/", strings.NewReader("space"))
+		request.Header.Set("Authorization", auth)
+		res, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		request, _ = http.NewRequest(http.MethodPut, ts.URL+"/special-key-copy-bdd/copied", nil)
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("x-amz-copy-source", "special-key-bdd%2Ftest+key%2F")
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodGet, "/special-key-copy-bdd/copied", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(body) != "space" {
+			t.Fatalf("copy encoded source %d %q", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given a bucket in another Region When accessed Then S3 resolves it and reports its Region", func(t *testing.T) {
 		configuration := []byte(`<CreateBucketConfiguration><LocationConstraint>us-west-2</LocationConstraint></CreateBucketConfiguration>`)
 		res := do(http.MethodPut, "/cross-region-bdd", configuration, "")
@@ -486,7 +517,8 @@ func TestS3ObjectLifecycle(t *testing.T) {
 	t.Run("Given a checksum-free multipart upload When completed Then checksum metadata stays absent", func(t *testing.T) {
 		res := do(http.MethodPut, "/multipart-plain-bdd", nil, "")
 		res.Body.Close()
-		res = do(http.MethodPost, "/multipart-plain-bdd/object?uploads", nil, "")
+		path := "/multipart-plain-bdd/" + url.PathEscape("test-unicode_—_file")
+		res = do(http.MethodPost, path+"?uploads", nil, "")
 		var created struct {
 			UploadID string `xml:"UploadId"`
 		}
@@ -494,20 +526,20 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 		res.Body.Close()
-		res = do(http.MethodPut, "/multipart-plain-bdd/object?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("plain"), "")
+		res = do(http.MethodPut, path+"?partNumber=1&uploadId="+url.QueryEscape(created.UploadID), []byte("plain"), "")
 		etag := res.Header.Get("ETag")
 		res.Body.Close()
-		res = do(http.MethodGet, "/multipart-plain-bdd/object?uploadId="+url.QueryEscape(created.UploadID), nil, "")
+		res = do(http.MethodGet, path+"?uploadId="+url.QueryEscape(created.UploadID), nil, "")
 		listed, _ := io.ReadAll(res.Body)
 		res.Body.Close()
 		if bytes.Contains(listed, []byte("ChecksumAlgorithm")) || bytes.Contains(listed, []byte("ChecksumType")) {
 			t.Fatalf("list exposed checksum metadata: %s", listed)
 		}
 		manifest := []byte(`<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>` + etag + `</ETag></Part></CompleteMultipartUpload>`)
-		res = do(http.MethodPost, "/multipart-plain-bdd/object?uploadId="+url.QueryEscape(created.UploadID), manifest, "")
+		res = do(http.MethodPost, path+"?uploadId="+url.QueryEscape(created.UploadID), manifest, "")
 		completed, _ := io.ReadAll(res.Body)
 		res.Body.Close()
-		if bytes.Contains(completed, []byte("ChecksumCRC64NVME")) || bytes.Contains(completed, []byte("ChecksumType")) {
+		if bytes.Contains(completed, []byte("ChecksumCRC64NVME")) || bytes.Contains(completed, []byte("ChecksumType")) || !bytes.Contains(completed, []byte("<Location>")) || !bytes.Contains(completed, []byte("test-unicode_%E2%80%94_file")) {
 			t.Fatalf("completion exposed checksum metadata: %s", completed)
 		}
 	})

@@ -1906,6 +1906,35 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if string(utf8Body) != "abc123" || utf8Get.ServerSideEncryption != s3types.ServerSideEncryptionAes256 || aws.ToString(utf8Get.ChecksumCRC32) != aws.ToString(utf8Put.ChecksumCRC32) {
 		t.Fatalf("stored utf8 key: body=%q output=%#v", utf8Body, utf8Get)
 	}
+	for _, key := range []string{"test@key/", "test%40key/", "test key/", "test+key"} {
+		if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key), Body: strings.NewReader(key)}); err != nil {
+			t.Fatalf("put special key %q: %v", key, err)
+		}
+	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("copied special key"), CopySource: aws.String(url.QueryEscape("sdk/test key/"))}); err != nil {
+		t.Fatalf("copy special key: %v", err)
+	}
+	specialCopy, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("copied special key")})
+	if err != nil {
+		t.Fatalf("get copied special key: %v", err)
+	}
+	specialCopyBody, _ := io.ReadAll(specialCopy.Body)
+	_ = specialCopy.Body.Close()
+	if string(specialCopyBody) != "test key/" {
+		t.Fatalf("copied special key body = %q", specialCopyBody)
+	}
+	unicodeMultipart, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("test-unicode_—_file")})
+	if err != nil {
+		t.Fatalf("create Unicode multipart: %v", err)
+	}
+	unicodePart, err := s3c.UploadPart(context.Background(), &s3.UploadPartInput{Bucket: aws.String("sdk"), Key: aws.String("test-unicode_—_file"), UploadId: unicodeMultipart.UploadId, PartNumber: aws.Int32(1), Body: strings.NewReader("upload-part-1")})
+	if err != nil {
+		t.Fatalf("upload Unicode multipart: %v", err)
+	}
+	unicodeComplete, err := s3c.CompleteMultipartUpload(context.Background(), &s3.CompleteMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String("test-unicode_—_file"), UploadId: unicodeMultipart.UploadId, MultipartUpload: &s3types.CompletedMultipartUpload{Parts: []s3types.CompletedPart{{PartNumber: aws.Int32(1), ETag: unicodePart.ETag}}}})
+	if err != nil || !strings.HasSuffix(aws.ToString(unicodeComplete.Location), "/sdk/test-unicode_%E2%80%94_file") {
+		t.Fatalf("complete Unicode multipart: %#v %v", unicodeComplete, err)
+	}
 	listETag := aws.String(`"wrong", ` + aws.ToString(got.ETag))
 	if _, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), IfMatch: listETag}); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") || !strings.Contains(err.Error(), "At least one of the pre-conditions you specified did not hold") {
 		t.Fatalf("get If-Match list: %v", err)

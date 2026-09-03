@@ -1148,6 +1148,21 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if got, err := s3c.GetBucketPolicy(context.Background(), &s3.GetBucketPolicyInput{Bucket: aws.String("sdk")}); err != nil || aws.ToString(got.Policy) != bucketPolicy {
 		t.Fatalf("bucket policy round trip: %#v %v", got, err)
 	}
+	if got, err := s3c.GetBucketPolicy(context.Background(), &s3.GetBucketPolicyInput{Bucket: aws.String("sdk"), ExpectedBucketOwner: aws.String("000000000000")}); err != nil || aws.ToString(got.Policy) != bucketPolicy {
+		t.Fatalf("bucket policy matching owner: %#v %v", got, err)
+	}
+	if _, err := s3c.GetBucketPolicy(context.Background(), &s3.GetBucketPolicyInput{Bucket: aws.String("sdk"), ExpectedBucketOwner: aws.String("999999999999")}); err == nil || !strings.Contains(err.Error(), "AccessDenied") {
+		t.Fatalf("get bucket policy mismatched owner: %v", err)
+	}
+	if _, err := s3c.PutBucketPolicy(context.Background(), &s3.PutBucketPolicyInput{Bucket: aws.String("sdk"), Policy: aws.String(`{}`), ExpectedBucketOwner: aws.String("999999999999")}); err == nil || !strings.Contains(err.Error(), "AccessDenied") {
+		t.Fatalf("put bucket policy mismatched owner: %v", err)
+	}
+	if _, err := s3c.DeleteBucketPolicy(context.Background(), &s3.DeleteBucketPolicyInput{Bucket: aws.String("sdk"), ExpectedBucketOwner: aws.String("999999999999")}); err == nil || !strings.Contains(err.Error(), "AccessDenied") {
+		t.Fatalf("delete bucket policy mismatched owner: %v", err)
+	}
+	if _, err := s3c.GetBucketPolicy(context.Background(), &s3.GetBucketPolicyInput{Bucket: aws.String("sdk"), ExpectedBucketOwner: aws.String("invalid")}); err == nil || !strings.Contains(err.Error(), "InvalidBucketOwnerAWSAccountID") {
+		t.Fatalf("get bucket policy invalid owner: %v", err)
+	}
 	if _, err := s3c.PutBucketPolicy(context.Background(), &s3.PutBucketPolicyInput{Bucket: aws.String("sdk"), Policy: aws.String(" " + bucketPolicy)}); err == nil || !strings.Contains(err.Error(), "MalformedPolicy") {
 		t.Fatalf("invalid bucket policy: %v", err)
 	}

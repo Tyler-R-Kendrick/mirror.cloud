@@ -1,0 +1,19 @@
+{
+  "globalIndexCount": 25,
+  "localItems": [
+    {
+      "LSI1SK": {
+        "N": "123"
+      },
+      "PK": {
+        "S": "test one"
+      },
+      "SK": {
+        "S": "hello"
+      },
+      "data": {
+        "S": "value"
+      }
+    }
+  ]
+}

@@ -3,6 +3,7 @@ package edge
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net"
@@ -151,6 +152,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	id := identity.Parse(r, s.cfg.DefaultAccount, s.cfg.DefaultRegion, s.deps.Clock.Now())
+	if r.Method == http.MethodDelete && r.URL.Path == "/_aws/dynamodb/expired" {
+		s.expireDynamoDBItems(ctx, w, r, id, rid, start)
+		return
+	}
 	if identity.Expired(id) {
 		if svc != nil && svc.ID == "aws.s3" {
 			fields := map[string]any{"ServerTime": s.deps.Clock.Now().UTC().Format(time.RFC3339)}
@@ -315,6 +320,28 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp.Headers.Set("x-mirror-fidelity", string(tier))
 	resp.Headers.Set("x-mirror-request-id", rid)
 	_ = codec.Encode(svc, op, w, resp)
+}
+
+func (s *Server) expireDynamoDBItems(ctx context.Context, w http.ResponseWriter, r *http.Request, id spi.Identity, requestID string, start time.Time) {
+	const serviceID = "aws.dynamodb"
+	pack, ok := s.reg.Resolve(serviceID)
+	if !ok || pack == nil || !s.serviceEnabled(serviceID) {
+		http.Error(w, "MirrorNotImplemented: aws.dynamodb", http.StatusNotImplemented)
+		return
+	}
+	response, err := pack.Invoke(ctx, &spi.Request{Identity: id, ServiceID: serviceID, Operation: "ExpireItems", HTTP: r})
+	status, errorCode := http.StatusOK, ""
+	if err != nil {
+		status, errorCode = http.StatusInternalServerError, "InternalError"
+	}
+	s.deps.Journal.Record(spi.Entry{At: start, RequestID: requestID, ServiceID: serviceID, Operation: "ExpireItems", Tier: pack.Tier(), Account: id.Account, Region: id.Region, Status: status, ErrorCode: errorCode, Duration: s.deps.Clock.Since(start)})
+	if err != nil {
+		http.Error(w, err.Error(), status)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("x-mirror-fidelity", string(pack.Tier()))
+	_ = json.NewEncoder(w).Encode(response.Output)
 }
 
 func signedGatewayHost(host, bind string) string {

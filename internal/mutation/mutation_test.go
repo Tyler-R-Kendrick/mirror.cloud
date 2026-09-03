@@ -933,10 +933,18 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-skip-copy-source-unescape",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `path, err = url.PathUnescape(path)`,
+			old:  `path, err = url.QueryUnescape(path)`,
 			new:  `path, err = path, error(nil)`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCopyObjectSourceVersions",
+		},
+		{
+			name: "s3-copy-source-preserve-form-plus",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `path, err = url.QueryUnescape(path)`,
+			new:  `path, err = url.PathUnescape(path)`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestSpecialObjectKeyCharacterization",
 		},
 		{
 			name: "s3-copy-ignore-requested-checksum-algorithm",

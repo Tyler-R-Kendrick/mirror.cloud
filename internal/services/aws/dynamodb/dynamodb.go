@@ -67,7 +67,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if _, ok, err := tx.Get(table); err != nil {
 				return err
 			} else if ok {
-				return &spi.Fault{Code: "ResourceInUseException", Message: "Cannot create preexisting table", HTTPStatus: 400, Fault: "client"}
+				return &spi.Fault{Code: "ResourceInUseException", Message: "Table already exists: " + table, HTTPStatus: 400, Fault: "client"}
 			}
 			return tx.Put(table, b)
 		}); err != nil {
@@ -79,7 +79,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if _, ok, err := tx.Get(table); err != nil {
 				return err
 			} else if !ok {
-				return &spi.Fault{Code: "ResourceNotFoundException", Message: "Cannot do operations on a non-existent table", HTTPStatus: 400, Fault: "client"}
+				return &spi.Fault{Code: "ResourceNotFoundException", Message: "Requested resource not found: Table: " + table + " not found", HTTPStatus: 400, Fault: "client"}
 			}
 			return tx.Delete(table)
 		}); err != nil {

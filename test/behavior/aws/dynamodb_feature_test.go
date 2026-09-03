@@ -44,7 +44,7 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 		if status, body := call("CreateTable"); status != http.StatusOK {
 			t.Fatalf("first create %d %s", status, body)
 		}
-		if status, body := call("CreateTable"); status != http.StatusBadRequest || !bytes.Contains(body, []byte("ResourceInUseException")) {
+		if status, body := call("CreateTable"); status != http.StatusBadRequest || !bytes.Contains(body, []byte("ResourceInUseException")) || !bytes.Contains(body, []byte("Table already exists: T")) {
 			t.Fatalf("duplicate create %d %s", status, body)
 		}
 	})
@@ -53,7 +53,7 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 		if status, body := call("DeleteTable"); status != http.StatusOK {
 			t.Fatalf("first delete %d %s", status, body)
 		}
-		if status, body := call("DeleteTable"); status != http.StatusBadRequest || !bytes.Contains(body, []byte("ResourceNotFoundException")) {
+		if status, body := call("DeleteTable"); status != http.StatusBadRequest || !bytes.Contains(body, []byte("ResourceNotFoundException")) || !bytes.Contains(body, []byte("Requested resource not found: Table: T not found")) {
 			t.Fatalf("missing delete %d %s", status, body)
 		}
 	})

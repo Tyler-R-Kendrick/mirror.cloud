@@ -3096,7 +3096,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		KeySchema:            []ddbtypes.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: ddbtypes.KeyTypeHash}},
 		AttributeDefinitions: []ddbtypes.AttributeDefinition{{AttributeName: aws.String("id"), AttributeType: ddbtypes.ScalarAttributeTypeS}},
 		BillingMode:          ddbtypes.BillingModePayPerRequest,
-	}); err == nil || !strings.Contains(err.Error(), "ResourceInUseException") {
+	}); err == nil || !strings.Contains(err.Error(), "ResourceInUseException") || !strings.Contains(err.Error(), "Table already exists: T") {
 		t.Fatalf("duplicate table create: %v", err)
 	}
 	if _, err := ddb.PutItem(context.Background(), &dynamodb.PutItemInput{
@@ -3119,7 +3119,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := ddb.DeleteTable(context.Background(), &dynamodb.DeleteTableInput{TableName: aws.String("T")}); err != nil {
 		t.Fatalf("delete table: %v", err)
 	}
-	if _, err := ddb.DeleteTable(context.Background(), &dynamodb.DeleteTableInput{TableName: aws.String("T")}); err == nil || !strings.Contains(err.Error(), "ResourceNotFoundException") {
+	if _, err := ddb.DeleteTable(context.Background(), &dynamodb.DeleteTableInput{TableName: aws.String("T")}); err == nil || !strings.Contains(err.Error(), "ResourceNotFoundException") || !strings.Contains(err.Error(), "Requested resource not found: Table: T not found") {
 		t.Fatalf("missing table delete: %v", err)
 	}
 

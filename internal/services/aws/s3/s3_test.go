@@ -2960,6 +2960,34 @@ func TestGetObjectResponseHeaderOverrides(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"overrides": got, "range": map[string]any{"body": "bo", "contentType": ranged.Headers.Get("Content-Type"), "status": ranged.Status}, "stored": map[string]any{"cacheControl": stored.Headers.Get("Cache-Control"), "contentType": stored.Headers.Get("Content-Type"), "expires": stored.Headers.Get("Expires")}})
 }
 
+func TestCopyObjectKMSEncryptionCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "kms-copy"}, nil)
+	keyID := "arn:aws:kms:us-east-1:123456789012:key/copy"
+	spitest.SeedKMSKey(t, deps, ident(), keyID, "Enabled")
+	source := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "kms-copy", "Key": "source", "ChecksumCRC32": "DUoRhQ=="}, []byte("hello world"))
+	copied := mustInvoke(t, p, "CopyObject", map[string]any{
+		"Bucket": "kms-copy", "Key": "copied", "CopySource": "kms-copy/source",
+		"ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true,
+	}, nil)
+	stored := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "kms-copy", "Key": "copied", "ChecksumMode": "ENABLED"}, nil)
+	body := string(readStream(t, stored))
+	for name, response := range map[string]*spi.Response{"copy": copied, "get": stored} {
+		if response.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || response.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || response.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+			t.Fatalf("%s encryption = %v", name, response.Headers)
+		}
+	}
+	if body != "hello world" || copied.Headers.Get("ETag") != source.Headers.Get("ETag") || copied.Output["ChecksumCRC32"] == "" || copied.Output["ChecksumType"] != "FULL_OBJECT" {
+		t.Fatalf("copy = %#v headers=%v body=%q", copied.Output, copied.Headers, body)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"body": body, "etagMatches": copied.Headers.Get("ETag") == source.Headers.Get("ETag"),
+		"copy": map[string]any{"algorithm": copied.Headers.Get("x-amz-server-side-encryption"), "key": copied.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id"), "bucketKey": copied.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled"), "checksum": copied.Output["ChecksumCRC32"], "checksumType": copied.Output["ChecksumType"]},
+		"get":  map[string]any{"algorithm": stored.Headers.Get("x-amz-server-side-encryption"), "key": stored.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id"), "bucketKey": stored.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled"), "checksum": stored.Headers.Get("x-amz-checksum-crc32"), "checksumType": stored.Headers.Get("x-amz-checksum-type")},
+	})
+}
+
 func TestObjectServerSideEncryption(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

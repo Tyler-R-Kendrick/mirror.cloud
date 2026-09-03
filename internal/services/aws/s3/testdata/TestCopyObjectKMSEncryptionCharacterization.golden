@@ -1,0 +1,18 @@
+{
+  "body": "hello world",
+  "copy": {
+    "algorithm": "aws:kms",
+    "bucketKey": "true",
+    "checksum": "DUoRhQ==",
+    "checksumType": "FULL_OBJECT",
+    "key": "arn:aws:kms:us-east-1:123456789012:key/copy"
+  },
+  "etagMatches": true,
+  "get": {
+    "algorithm": "aws:kms",
+    "bucketKey": "true",
+    "checksum": "DUoRhQ==",
+    "checksumType": "FULL_OBJECT",
+    "key": "arn:aws:kms:us-east-1:123456789012:key/copy"
+  }
+}

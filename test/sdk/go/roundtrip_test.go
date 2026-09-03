@@ -1776,11 +1776,23 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if string(restoredBody) != "enabled" || aws.ToString(restoredObject.VersionId) != aws.ToString(enabledObject.VersionId) {
 		t.Fatalf("restored object: body=%q output=%#v", restoredBody, restoredObject)
 	}
+	conditionalDelete, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("conditional-delete"), Body: strings.NewReader("body")})
+	if err != nil {
+		t.Fatalf("seed conditional delete: %v", err)
+	}
+	if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk"), Key: aws.String("conditional-delete"), IfMatch: aws.String(`"wrong"`)}); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") || !strings.Contains(err.Error(), "PreconditionFailed") {
+		t.Fatalf("wrong conditional delete: %v", err)
+	}
+	if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk"), Key: aws.String("conditional-delete"), IfMatch: conditionalDelete.ETag}); err != nil {
+		t.Fatalf("matching conditional delete: %v", err)
+	}
+	if _, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String("conditional-delete")}); err == nil {
+		t.Fatal("matching conditional delete left object")
+	}
 	for _, precondition := range []struct {
 		name  string
 		input *s3.DeleteObjectInput
 	}{
-		{"etag", &s3.DeleteObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key"), IfMatch: restoredObject.ETag}},
 		{"size", &s3.DeleteObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key"), IfMatchSize: aws.Int64(int64(len(restoredBody)))}},
 		{"modified", &s3.DeleteObjectInput{Bucket: aws.String("sdk-suspended"), Key: aws.String("key"), IfMatchLastModifiedTime: restoredObject.LastModified}},
 	} {

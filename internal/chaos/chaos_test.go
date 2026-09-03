@@ -2644,7 +2644,7 @@ func TestConcurrentDeletePreconditionsNeverMutateObject(t *testing.T) {
 	if _, err := call("PutObject", map[string]any{"Bucket": "delete-precondition-chaos", "Key": "key"}, "body"); err != nil {
 		t.Fatal(err)
 	}
-	headers := []struct{ name, value string }{{"If-Match", `"841a2d689ad86bd1611447453c22c6fc"`}, {"x-amz-if-match-size", "4"}, {"x-amz-if-match-last-modified-time", "Sun, 06 Nov 1994 08:49:37 GMT"}}
+	headers := []struct{ name, value string }{{"If-Match", `"wrong"`}, {"x-amz-if-match-size", "4"}, {"x-amz-if-match-last-modified-time", "Sun, 06 Nov 1994 08:49:37 GMT"}}
 	errs := make(chan error, 48)
 	var wg sync.WaitGroup
 	for i := range cap(errs) {
@@ -2656,7 +2656,7 @@ func TestConcurrentDeletePreconditionsNeverMutateObject(t *testing.T) {
 			request.Header.Set(header.name, header.value)
 			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteObject", Input: map[string]any{"Bucket": "delete-precondition-chaos", "Key": "key"}, HTTP: request})
 			var fault *spi.Fault
-			if !errors.As(err, &fault) || fault.Code != "NotImplemented" || fault.Fields["Header"] != header.name {
+			if !errors.As(err, &fault) || header.name == "If-Match" && (fault.Code != "PreconditionFailed" || fault.Fields["Condition"] != "If-Match") || header.name != "If-Match" && (fault.Code != "NotImplemented" || fault.Fields["Header"] != header.name) {
 				errs <- fmt.Errorf("%s fault = %v", header.name, err)
 				return
 			}

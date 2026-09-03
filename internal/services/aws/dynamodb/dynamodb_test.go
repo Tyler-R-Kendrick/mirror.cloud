@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -31,6 +32,48 @@ func TestTablePutGet(t *testing.T) {
 	if got.Output["Item"] == nil {
 		t.Fatal("missing item — Put/Get keys must match")
 	}
+}
+
+func TestTableLifecycleFaults(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string) error {
+		t.Helper()
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: map[string]any{"TableName": "T"}})
+		return err
+	}
+	if err := call("CreateTable"); err != nil {
+		t.Fatal(err)
+	}
+	if fault, ok := call("CreateTable").(*spi.Fault); !ok || fault.Code != "ResourceInUseException" || fault.Message != "Table already exists: T" {
+		t.Fatalf("duplicate create fault %#v", fault)
+	}
+	if err := call("DeleteTable"); err != nil {
+		t.Fatal(err)
+	}
+	if fault, ok := call("DeleteTable").(*spi.Fault); !ok || fault.Code != "ResourceNotFoundException" || fault.Message != "Requested resource not found: Table: T not found" {
+		t.Fatalf("missing delete fault %#v", fault)
+	}
+}
+
+func TestTableLifecycleCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string) any {
+		t.Helper()
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: map[string]any{"TableName": "T"}})
+		if err == nil {
+			return "success"
+		}
+		fault := err.(*spi.Fault)
+		return map[string]any{"code": fault.Code, "message": fault.Message}
+	}
+	golden.AssertJSON(t, map[string]any{
+		"create": call("CreateTable"), "duplicateCreate": call("CreateTable"),
+		"delete": call("DeleteTable"), "missingDelete": call("DeleteTable"),
+	})
 }
 
 func TestQueryKeyConditionNotUnfilteredScan(t *testing.T) {

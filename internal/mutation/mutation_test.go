@@ -1107,6 +1107,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestRESTXMLEncodeAndFaultContracts",
 		},
 		{
+			name: "s3-ignore-repeated-object-attribute-headers",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `for _, value := range req.HTTP.Header.Values("x-amz-object-attributes") {`,
+			new:  `for _, value := range []string{req.HTTP.Header.Get("x-amz-object-attributes")} {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestGetObjectAttributesContract",
+		},
+		{
 			name: "s3-ignore-copy-source-version",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  "if version != \"\" {\n\t\tcollection, metaKey = \"versions\", metaKey+\"/\"+version",

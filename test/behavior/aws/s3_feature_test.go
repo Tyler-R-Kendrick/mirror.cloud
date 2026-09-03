@@ -100,6 +100,31 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a UTF-8 key and system metadata When put and fetched Then the object round trips", func(t *testing.T) {
+		res := do(http.MethodPut, "/utf8-metadata-bdd", nil, "")
+		res.Body.Close()
+		path := "/utf8-metadata-bdd/" + url.PathEscape("Ā0Ä")
+		request, _ := http.NewRequest(http.MethodPut, ts.URL+path, strings.NewReader("abc123"))
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("Cache-Control", "no-cache")
+		request.Header.Set("Content-Language", "de")
+		request.Header.Set("Content-Disposition", `attachment; filename="foo.jpg"`)
+		res, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-server-side-encryption") != "AES256" {
+			t.Fatalf("put UTF-8 object %d %#v", res.StatusCode, res.Header)
+		}
+		res = do(http.MethodGet, path, nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(body) != "abc123" || res.Header.Get("Cache-Control") != "no-cache" || res.Header.Get("Content-Language") != "de" || res.Header.Get("Content-Disposition") != `attachment; filename="foo.jpg"` || res.Header.Get("Content-Type") != "binary/octet-stream" || res.Header.Get("x-amz-server-side-encryption") != "AES256" {
+			t.Fatalf("get UTF-8 object %d %#v %q", res.StatusCode, res.Header, body)
+		}
+	})
+
 	t.Run("Given a bucket in another Region When accessed Then S3 resolves it and reports its Region", func(t *testing.T) {
 		configuration := []byte(`<CreateBucketConfiguration><LocationConstraint>us-west-2</LocationConstraint></CreateBucketConfiguration>`)
 		res := do(http.MethodPut, "/cross-region-bdd", configuration, "")
@@ -1878,6 +1903,24 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		enabledARN := "arn:aws:kms:us-east-1:000000000000:key/kms-bdd"
 		if response, body := request(http.MethodPut, "/kms-validation-bdd/enabled", enabledARN); response.StatusCode != http.StatusOK {
 			t.Fatalf("enabled key %d %s", response.StatusCode, body)
+		}
+		copyRequest, _ := http.NewRequest(http.MethodPut, ts.URL+"/kms-validation-bdd/copied", nil)
+		copyRequest.Header.Set("Authorization", auth)
+		copyRequest.Header.Set("x-amz-copy-source", "/kms-validation-bdd/enabled")
+		copyRequest.Header.Set("x-amz-server-side-encryption", "aws:kms")
+		copyRequest.Header.Set("x-amz-server-side-encryption-aws-kms-key-id", enabledARN)
+		copyRequest.Header.Set("x-amz-server-side-encryption-bucket-key-enabled", "true")
+		copied, err := http.DefaultClient.Do(copyRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		copyBody, _ := io.ReadAll(copied.Body)
+		copied.Body.Close()
+		if copied.StatusCode != http.StatusOK || copied.Header.Get("x-amz-server-side-encryption") != "aws:kms" || copied.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != enabledARN || copied.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" || !bytes.Contains(copyBody, []byte("<CopyObjectResult>")) {
+			t.Fatalf("kms copy %d %#v %s", copied.StatusCode, copied.Header, copyBody)
+		}
+		if response, body := request(http.MethodGet, "/kms-validation-bdd/copied", ""); response.StatusCode != http.StatusOK || string(body) != "body" || response.Header.Get("x-amz-server-side-encryption") != "aws:kms" || response.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != enabledARN || response.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+			t.Fatalf("stored kms copy %d %#v %s", response.StatusCode, response.Header, body)
 		}
 		if response, body := request(http.MethodPut, "/kms-validation-bdd/missing", "arn:aws:kms:us-east-1:000000000000:key/missing"); response.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>KMS.NotFoundException</Code>")) {
 			t.Fatalf("missing key %d %s", response.StatusCode, body)

@@ -2860,11 +2860,17 @@ func TestObjectMetadata(t *testing.T) {
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "default"}, []byte("body"))
 	defaultHead := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "default"}, nil)
 	assert("default", defaultHead, "binary/octet-stream", "")
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "pinned-system-metadata", "CacheControl": "no-cache", "ContentLanguage": "de", "ContentDisposition": `attachment; filename="foo.jpg"`}, []byte("abc123"))
+	pinned := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "pinned-system-metadata"}, nil)
+	if body := string(readStream(t, pinned)); body != "abc123" || pinned.Headers.Get("Cache-Control") != "no-cache" || pinned.Headers.Get("Content-Language") != "de" || pinned.Headers.Get("Content-Disposition") != `attachment; filename="foo.jpg"` {
+		t.Fatalf("pinned system metadata body=%q headers=%v", body, pinned.Headers)
+	}
 	golden.AssertJSON(t, map[string]any{
 		"get":      map[string]any{"contentType": get.Headers.Get("Content-Type"), "cacheControl": get.Headers.Get("Cache-Control"), "owner": get.Headers.Get("x-amz-meta-owner"), "redirect": get.Headers.Get("x-amz-website-redirect-location")},
 		"head":     map[string]any{"contentType": head.Headers.Get("Content-Type"), "owner": head.Headers.Get("x-amz-meta-owner")},
 		"replaced": map[string]any{"contentType": replaced.Headers.Get("Content-Type"), "cacheControl": replaced.Headers.Get("Cache-Control"), "owner": replaced.Headers.Get("x-amz-meta-owner")},
 		"default":  map[string]any{"contentType": defaultHead.Headers.Get("Content-Type")},
+		"pinned":   map[string]any{"cacheControl": pinned.Headers.Get("Cache-Control"), "contentDisposition": pinned.Headers.Get("Content-Disposition"), "contentLanguage": pinned.Headers.Get("Content-Language")},
 	})
 }
 
@@ -2958,6 +2964,34 @@ func TestGetObjectResponseHeaderOverrides(t *testing.T) {
 		t.Fatalf("overrides changed stored metadata = %v", stored.Headers)
 	}
 	golden.AssertJSON(t, map[string]any{"overrides": got, "range": map[string]any{"body": "bo", "contentType": ranged.Headers.Get("Content-Type"), "status": ranged.Status}, "stored": map[string]any{"cacheControl": stored.Headers.Get("Cache-Control"), "contentType": stored.Headers.Get("Content-Type"), "expires": stored.Headers.Get("Expires")}})
+}
+
+func TestCopyObjectKMSEncryptionCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "kms-copy"}, nil)
+	keyID := "arn:aws:kms:us-east-1:123456789012:key/copy"
+	spitest.SeedKMSKey(t, deps, ident(), keyID, "Enabled")
+	source := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "kms-copy", "Key": "source", "ChecksumCRC32": "DUoRhQ=="}, []byte("hello world"))
+	copied := mustInvoke(t, p, "CopyObject", map[string]any{
+		"Bucket": "kms-copy", "Key": "copied", "CopySource": "kms-copy/source",
+		"ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true,
+	}, nil)
+	stored := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "kms-copy", "Key": "copied", "ChecksumMode": "ENABLED"}, nil)
+	body := string(readStream(t, stored))
+	for name, response := range map[string]*spi.Response{"copy": copied, "get": stored} {
+		if response.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || response.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || response.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+			t.Fatalf("%s encryption = %v", name, response.Headers)
+		}
+	}
+	if body != "hello world" || copied.Headers.Get("ETag") != source.Headers.Get("ETag") || copied.Output["ChecksumCRC32"] == "" || copied.Output["ChecksumType"] != "FULL_OBJECT" {
+		t.Fatalf("copy = %#v headers=%v body=%q", copied.Output, copied.Headers, body)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"body": body, "etagMatches": copied.Headers.Get("ETag") == source.Headers.Get("ETag"),
+		"copy": map[string]any{"algorithm": copied.Headers.Get("x-amz-server-side-encryption"), "key": copied.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id"), "bucketKey": copied.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled"), "checksum": copied.Output["ChecksumCRC32"], "checksumType": copied.Output["ChecksumType"]},
+		"get":  map[string]any{"algorithm": stored.Headers.Get("x-amz-server-side-encryption"), "key": stored.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id"), "bucketKey": stored.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled"), "checksum": stored.Headers.Get("x-amz-checksum-crc32"), "checksumType": stored.Headers.Get("x-amz-checksum-type")},
+	})
 }
 
 func TestObjectServerSideEncryption(t *testing.T) {
@@ -3797,7 +3831,7 @@ func TestObjectKeyLengthValidation(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "keys"}, nil)
 	valid := map[string]any{}
-	for name, key := range map[string]string{"ascii": strings.Repeat("a", 1024), "utf8": strings.Repeat("é", 512)} {
+	for name, key := range map[string]string{"ascii": strings.Repeat("a", 1024), "pinned_utf8": "Ā0Ä", "utf8": strings.Repeat("é", 512)} {
 		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "keys", "Key": key}, []byte(name))
 		if got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "keys", "Key": key}, nil); string(readStream(t, got)) != name {
 			t.Fatalf("%s boundary key was not stored", name)

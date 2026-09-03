@@ -288,9 +288,12 @@ func TestConcurrentCopySourcePreconditionsRemainDeterministic(t *testing.T) {
 }
 
 func TestConcurrentCopyObjectChecksumsRemainDeterministic(t *testing.T) {
-	p := s3.New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := s3.New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	keyID := "arn:aws:kms:us-east-1:000000000000:key/copy-chaos"
+	spitest.SeedKMSKey(t, deps, id, keyID, "Enabled")
 	call := func(operation string, input map[string]any, body []byte) (*spi.Response, error) {
 		var stream io.ReadCloser
 		if body != nil {
@@ -314,8 +317,8 @@ func TestConcurrentCopyObjectChecksumsRemainDeterministic(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			key := fmt.Sprintf("destination-%d", i)
-			copied, err := call("CopyObject", map[string]any{"Bucket": "copy-checksum-chaos", "Key": key, "CopySource": "copy-checksum-chaos/source"}, nil)
-			if err == nil && (copied.Output["ChecksumCRC32"] != checksum || copied.Output["ChecksumType"] != "FULL_OBJECT") {
+			copied, err := call("CopyObject", map[string]any{"Bucket": "copy-checksum-chaos", "Key": key, "CopySource": "copy-checksum-chaos/source", "ServerSideEncryption": "aws:kms", "SSEKMSKeyId": keyID, "BucketKeyEnabled": true}, nil)
+			if err == nil && (copied.Output["ChecksumCRC32"] != checksum || copied.Output["ChecksumType"] != "FULL_OBJECT" || copied.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || copied.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || copied.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true") {
 				err = fmt.Errorf("copy %d = %#v", i, copied.Output)
 			}
 			var modified time.Time
@@ -330,7 +333,7 @@ func TestConcurrentCopyObjectChecksumsRemainDeterministic(t *testing.T) {
 				head, headErr := call("HeadObject", map[string]any{"Bucket": "copy-checksum-chaos", "Key": key, "ChecksumMode": "ENABLED"}, nil)
 				if headErr != nil {
 					err = fmt.Errorf("head %d = %#v, %v", i, head, headErr)
-				} else if stored, storedErr := http.ParseTime(head.Headers.Get("Last-Modified")); storedErr != nil || !modified.Equal(stored) || head.Headers.Get("x-amz-checksum-crc32") != checksum || head.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" {
+				} else if stored, storedErr := http.ParseTime(head.Headers.Get("Last-Modified")); storedErr != nil || !modified.Equal(stored) || head.Headers.Get("x-amz-checksum-crc32") != checksum || head.Headers.Get("x-amz-checksum-type") != "FULL_OBJECT" || head.Headers.Get("x-amz-server-side-encryption") != "aws:kms" || head.Headers.Get("x-amz-server-side-encryption-aws-kms-key-id") != keyID || head.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
 					err = fmt.Errorf("head %d = %#v", i, head)
 				}
 			}
@@ -4294,7 +4297,7 @@ func TestConcurrentUserMetadataRFC2047(t *testing.T) {
 			defer wg.Done()
 			key := fmt.Sprintf("key-%d", i)
 			value := fmt.Sprintf("Ä-%d", i)
-			if _, err := call("PutObject", map[string]any{"Bucket": "rfc2047-chaos", "Key": key, "Metadata": map[string]any{"value": value}}, "body"); err != nil {
+			if _, err := call("PutObject", map[string]any{"Bucket": "rfc2047-chaos", "Key": key, "CacheControl": "no-cache", "ContentLanguage": "de", "ContentDisposition": `attachment; filename="foo.jpg"`, "Metadata": map[string]any{"value": value}}, "body"); err != nil {
 				errs <- err
 				return
 			}
@@ -4304,7 +4307,7 @@ func TestConcurrentUserMetadataRFC2047(t *testing.T) {
 				errs <- err
 				return
 			}
-			if got := response.Headers.Get("x-amz-meta-value"); got != want {
+			if got := response.Headers.Get("x-amz-meta-value"); got != want || response.Headers.Get("Cache-Control") != "no-cache" || response.Headers.Get("Content-Language") != "de" || response.Headers.Get("Content-Disposition") != `attachment; filename="foo.jpg"` {
 				errs <- fmt.Errorf("metadata %d: %q", i, got)
 			}
 		}()

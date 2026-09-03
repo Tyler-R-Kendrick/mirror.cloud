@@ -17,6 +17,7 @@
   },
   "valid_bytes": {
     "ascii": 1024,
+    "pinned_utf8": 5,
     "utf8": 1024
   }
 }

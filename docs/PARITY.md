@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
-| LocalStack S3 test functions explicitly traced | 183 / 463 (39.5%) |
-| LocalStack S3 test functions not yet traced | 280 / 463 (60.5%) |
+| LocalStack S3 test functions explicitly traced | 188 / 463 (40.6%) |
+| LocalStack S3 test functions not yet traced | 275 / 463 (59.4%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -39,6 +39,11 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 |---|---|---|
 | `test_s3.py::TestS3::test_s3_get_object_preconditions` | `TestObjectReadConditionsCharacterization`, AWS SDK contract, HTTP BDD, fuzz, chaos, mutation; PRs #229-#231 | Mapped and green |
 | `test_s3.py::TestS3::test_precondition_failed_error` | `TestObjectReadConditionsCharacterization`, AWS SDK contract, HTTP BDD, snapshot, mutation; PR #230 | Mapped and green |
+| `test_s3.py::TestS3::test_copy_object_kms` | `TestCopyObjectKMSEncryptionCharacterization`, AWS SDK contract, HTTP BDD, fuzz, concurrent chaos, snapshot, and mutation coverage verify checksum inheritance plus explicit KMS key and bucket-key persistence on copied objects | Mapped and race-clean |
+| `test_s3.py::TestS3::test_region_header_exists_outside_us_east_1` | `TestCrossRegionBucketResolutionAndHeadMetadata`, `TestListObjectsBucketRegionCharacterization`, AWS SDK contract, HTTP BDD, fuzz, concurrent chaos, snapshots, and mutation coverage verify the owning region header on both `HeadBucket` and `ListObjectsV2` when called through another regional endpoint | Mapped and race-clean |
+| `test_s3.py::TestS3::test_delete_bucket_with_content` | `TestDeleteBucketRequiresEmptyBucket`, AWS SDK contract, HTTP BDD, fuzz, concurrent chaos, characterization snapshot, and mutation coverage verify non-empty rejection without mutation plus successful deletion after emptying | Mapped and race-clean |
+| `test_s3.py::TestS3::test_put_and_get_object_with_utf8_key` | `TestObjectKeyLengthValidation`, AWS SDK contract, raw HTTP BDD, fuzz, concurrent chaos, characterization snapshot, and mutation coverage verify the pinned `Ā0Ä` key and body round trip with checksum and default encryption metadata | Mapped and race-clean |
+| `test_s3.py::TestS3::test_put_and_get_object_with_content_language_disposition` | `TestObjectMetadata`, AWS SDK contract, raw HTTP BDD, fuzz, concurrent chaos, characterization snapshot, and focused mapping mutants verify the pinned cache-control, language, disposition, body, and default content type | Mapped and race-clean |
 | `test_s3_preconditions.py::test_s3_copy_object_preconditions` | `TestCopySourcePreconditionsCharacterization`, AWS SDK contract, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_modified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_unmodified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
@@ -231,4 +236,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 183/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 188/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

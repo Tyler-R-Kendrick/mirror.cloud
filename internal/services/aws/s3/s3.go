@@ -2653,7 +2653,18 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 		resp.Headers = http.Header{}
 	}
 	resp.Headers.Set("ETag", etag)
-	resp.Output = map[string]any{"Bucket": bucket, "Key": key, "ETag": etag}
+	location := (&url.URL{Scheme: "http", Host: bucket + ".s3.amazonaws.com", Path: "/" + key}).String()
+	if req.HTTP != nil {
+		scheme, path := req.HTTP.URL.Scheme, "/"+bucket+"/"+key
+		if scheme == "" {
+			scheme = "http"
+		}
+		if strings.Contains(req.HTTP.Host, ".s3.") {
+			path = "/" + key
+		}
+		location = (&url.URL{Scheme: scheme, Host: req.HTTP.Host, Path: path}).String()
+	}
+	resp.Output = map[string]any{"Bucket": bucket, "Key": key, "ETag": etag, "Location": location}
 	if strings.HasPrefix(u.serverSideEncryption, "aws:kms") && hasChecksum {
 		resp.Headers.Del(checksum.header)
 		resp.Headers.Del("x-amz-checksum-type")

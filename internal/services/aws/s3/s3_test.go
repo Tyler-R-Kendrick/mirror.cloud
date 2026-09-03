@@ -4581,6 +4581,7 @@ func TestCopyObjectSourceVersions(t *testing.T) {
 	for _, invalid := range []struct {
 		source, code string
 	}{
+		{"wrongformat", "InvalidArgument"},
 		{"bucket/bad%zz", "InvalidArgument"},
 		{source + "?versionId=missing", "NoSuchKey"},
 		{source + "?versionId=", "InvalidArgument"},

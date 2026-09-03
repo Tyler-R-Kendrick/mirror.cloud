@@ -3598,6 +3598,27 @@ func FuzzCopySourceEncoding(f *testing.F) {
 	})
 }
 
+func FuzzInvalidCopySourceFormat(f *testing.F) {
+	for _, source := range []string{"wrongformat", "bucket", "%2F", "😀"} {
+		f.Add(source)
+	}
+	f.Fuzz(func(t *testing.T, source string) {
+		if len(source) > 256 || !utf8.ValidString(source) {
+			t.Skip()
+		}
+		source = url.PathEscape(strings.ReplaceAll(source, "/", ""))
+		if source == "" {
+			source = "wrongformat"
+		}
+		p := s3.New(spitest.Deps(t))
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "invalid-copy-source"}, nil)
+		_, err := invoke(t, p, "CopyObject", map[string]any{"Bucket": "invalid-copy-source", "Key": "copy", "CopySource": source}, nil)
+		if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.HTTPStatus != http.StatusBadRequest {
+			t.Fatalf("copy source %q fault = %#v", source, fault)
+		}
+	})
+}
+
 func FuzzMultipartObjectLocation(f *testing.F) {
 	for _, key := range []string{"object", "test-unicode_—_file", "test key/", "a/😀/"} {
 		f.Add(key, "body")

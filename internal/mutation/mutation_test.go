@@ -16995,6 +16995,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestInvokeReceivesFunctionEnvironment",
 		},
 		{
+			name: "s3-ignore-advertised-multipart-location",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if advertise != nil && advertise.Scheme != "" && advertise.Host != "" {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestMultipartUnicodeLocationCharacterization",
+		},
+		{
 			name: "pipes-ignore-updated-state",
 			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
 			old:  `rec["CurrentState"] = state`,

@@ -1,0 +1,17 @@
+{
+  "invalidSchema": {
+    "code": "ValidationException",
+    "message": "One or more parameter values were invalid: Missing the key id in the item",
+    "status": 400
+  },
+  "queryDeleted": {
+    "code": "ResourceNotFoundException",
+    "message": "Requested resource not found",
+    "status": 400
+  },
+  "transactionMissing": {
+    "code": "ResourceNotFoundException",
+    "message": "Requested resource not found",
+    "status": 400
+  }
+}

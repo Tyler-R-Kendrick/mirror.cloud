@@ -3115,6 +3115,9 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if tags, err := ddb.ListTagsOfResource(context.Background(), &dynamodb.ListTagsOfResourceInput{ResourceArn: &arn}); err != nil || len(tags.Tags) != 1 || aws.ToString(tags.Tags[0].Key) != "env" {
 		t.Fatalf("remaining tags: %#v %v", tags, err)
 	}
+	if _, err := ddb.BatchWriteItem(context.Background(), &dynamodb.BatchWriteItemInput{RequestItems: map[string][]ddbtypes.WriteRequest{"T": {{PutRequest: &ddbtypes.PutRequest{Item: map[string]ddbtypes.AttributeValue{"nonKey": &ddbtypes.AttributeValueMemberS{Value: "value"}}}}}}}); err == nil || !strings.Contains(err.Error(), "ValidationException") {
+		t.Fatalf("invalid batch schema: %v", err)
+	}
 	if ttl, err := ddb.DescribeTimeToLive(context.Background(), &dynamodb.DescribeTimeToLiveInput{TableName: aws.String("T")}); err != nil || ttl.TimeToLiveDescription == nil || ttl.TimeToLiveDescription.TimeToLiveStatus != ddbtypes.TimeToLiveStatusDisabled {
 		t.Fatalf("default ttl: %#v %v", ttl, err)
 	}
@@ -3172,6 +3175,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}
 	if _, err := ddb.DeleteTable(context.Background(), &dynamodb.DeleteTableInput{TableName: aws.String("T")}); err == nil || !strings.Contains(err.Error(), "ResourceNotFoundException") || !strings.Contains(err.Error(), "Requested resource not found: Table: T not found") {
 		t.Fatalf("missing table delete: %v", err)
+	}
+	if _, err := ddb.Query(context.Background(), &dynamodb.QueryInput{TableName: aws.String("T")}); err == nil || !strings.Contains(err.Error(), "ResourceNotFoundException") {
+		t.Fatalf("query deleted table: %v", err)
+	}
+	if _, err := ddb.TransactWriteItems(context.Background(), &dynamodb.TransactWriteItemsInput{TransactItems: []ddbtypes.TransactWriteItem{{Put: &ddbtypes.Put{TableName: aws.String("missing"), Item: map[string]ddbtypes.AttributeValue{}}}}}); err == nil || !strings.Contains(err.Error(), "ResourceNotFoundException") {
+		t.Fatalf("transaction missing table: %v", err)
 	}
 
 	sqsc := sqs.NewFromConfig(awscfg, func(o *sqs.Options) { o.BaseEndpoint = aws.String(ts.URL) })

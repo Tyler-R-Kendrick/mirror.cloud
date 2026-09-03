@@ -17,6 +17,10 @@
     "contentDisposition": "attachment; filename=\"foo.jpg\"",
     "contentLanguage": "de"
   },
+  "query": {
+    "contentType": "binary/octet-stream",
+    "owner": "presigned"
+  },
   "replaced": {
     "cacheControl": "",
     "contentType": "application/json",

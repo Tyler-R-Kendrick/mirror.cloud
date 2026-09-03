@@ -4625,6 +4625,11 @@ func requestObjectMetadata(req *spi.Request) map[string]any {
 		user[strings.ToLower(key)] = metadataValue
 	}
 	if req.HTTP != nil {
+		for key, values := range req.HTTP.URL.Query() {
+			if name, ok := strings.CutPrefix(strings.ToLower(key), "x-amz-meta-"); ok {
+				user[name] = decodeRFC2047Header(strings.Join(values, ","))
+			}
+		}
 		for key, values := range req.HTTP.Header {
 			if name, ok := strings.CutPrefix(strings.ToLower(key), "x-amz-meta-"); ok && len(values) > 0 {
 				user[name] = decodeRFC2047Header(strings.Join(values, ","))

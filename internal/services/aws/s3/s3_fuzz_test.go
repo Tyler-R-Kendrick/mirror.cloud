@@ -1936,6 +1936,7 @@ func FuzzCompleteMultipartPreconditionFaults(f *testing.F) {
 			input["IfNoneMatch"] = `"etag"`
 		case 2:
 			input["IfMatch"] = "*"
+			header, detail = "If-Match", "We don't accept the provided value of If-Match header for this API"
 		}
 		_, err := invoke(t, p, "CompleteMultipartUpload", input, nil)
 		fault := asFault(t, err)
@@ -1977,6 +1978,7 @@ func FuzzWritePreconditionFaults(f *testing.F) {
 			input["IfNoneMatch"] = `"etag"`
 		case 2:
 			input["IfMatch"] = "*"
+			header, detail = "If-Match", "We don't accept the provided value of If-Match header for this API"
 		}
 		_, err := invoke(t, p, operation, input, body)
 		fault := asFault(t, err)

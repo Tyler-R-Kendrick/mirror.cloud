@@ -896,7 +896,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		for name, conditions := range map[string]struct{ match, noneMatch, header, detail string }{
 			"combined":      {`"etag"`, "*", "If-Match,If-None-Match", "Multiple conditional request headers present in the request"},
 			"if-none-match": {"", `"etag"`, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
-			"if-match-star": {"*", "", "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+			"if-match-star": {"*", "", "If-Match", "We don't accept the provided value of If-Match header for this API"},
 		} {
 			request, err := http.NewRequest(http.MethodPost, ts.URL+"/completion-precondition-bdd/object?uploadId="+url.QueryEscape(created.UploadID), strings.NewReader(manifest))
 			if err != nil {
@@ -931,7 +931,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			for name, conditions := range map[string]struct{ match, noneMatch, header, detail string }{
 				"combined":      {`"etag"`, "*", "If-Match,If-None-Match", "Multiple conditional request headers present in the request"},
 				"if-none-match": {"", `"etag"`, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
-				"if-match-star": {"*", "", "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+				"if-match-star": {"*", "", "If-Match", "We don't accept the provided value of If-Match header for this API"},
 			} {
 				res = do(http.MethodPut, "/write-precondition-bdd/destination", []byte("old"), "")
 				res.Body.Close()

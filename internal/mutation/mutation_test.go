@@ -6667,6 +6667,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestWritePreconditionFaults",
 		},
 		{
+			name: "s3-write-mislabel-wildcard-if-match",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `return &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-Match", "additionalMessage": "We don't accept the provided value of If-Match header for this API"}}`,
+			new:  `return &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-None-Match", "additionalMessage": "We don't accept the provided value of If-None-Match header for this API"}}`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestWritePreconditionFaults",
+		},
+		{
 			name: "s3-write-use-precondition-failed-for-missing-if-match",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `if !exists && match != "" {`,
@@ -6707,10 +6715,10 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestCompleteMultipartUploadPreconditionFaults",
 		},
 		{
-			name: "s3-complete-correct-wildcard-if-match-header",
+			name: "s3-complete-mislabel-wildcard-if-match",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "} else if match == \"*\" {\n\t\treturn nil, &spi.Fault{Code: \"NotImplemented\", Message: \"A header you provided implies functionality that is not implemented\", HTTPStatus: http.StatusNotImplemented, Fault: \"server\", Fields: map[string]any{\"Header\": \"If-None-Match\", \"additionalMessage\": \"We don't accept the provided value of If-None-Match header for this API\"}}",
-			new:  "} else if match == \"*\" {\n\t\treturn nil, &spi.Fault{Code: \"NotImplemented\", Message: \"A header you provided implies functionality that is not implemented\", HTTPStatus: http.StatusNotImplemented, Fault: \"server\", Fields: map[string]any{\"Header\": \"If-Match\", \"additionalMessage\": \"We don't accept the provided value of If-None-Match header for this API\"}}",
+			old:  "} else if match == \"*\" {\n\t\treturn nil, &spi.Fault{Code: \"NotImplemented\", Message: \"A header you provided implies functionality that is not implemented\", HTTPStatus: http.StatusNotImplemented, Fault: \"server\", Fields: map[string]any{\"Header\": \"If-Match\", \"additionalMessage\": \"We don't accept the provided value of If-Match header for this API\"}}",
+			new:  "} else if match == \"*\" {\n\t\treturn nil, &spi.Fault{Code: \"NotImplemented\", Message: \"A header you provided implies functionality that is not implemented\", HTTPStatus: http.StatusNotImplemented, Fault: \"server\", Fields: map[string]any{\"Header\": \"If-None-Match\", \"additionalMessage\": \"We don't accept the provided value of If-None-Match header for this API\"}}",
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCompleteMultipartUploadPreconditionFaults",
 		},

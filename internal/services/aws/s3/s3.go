@@ -2521,7 +2521,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	} else if noneMatch != "" && noneMatch != "*" {
 		return nil, &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-None-Match", "additionalMessage": "We don't accept the provided value of If-None-Match header for this API"}}
 	} else if match == "*" {
-		return nil, &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-None-Match", "additionalMessage": "We don't accept the provided value of If-None-Match header for this API"}}
+		return nil, &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-Match", "additionalMessage": "We don't accept the provided value of If-Match header for this API"}}
 	}
 	if noneMatch == "*" || match != "" {
 		raw, exists, _ := p.col(req, "objects").Get(ctx, bucket+"/"+key)
@@ -6082,7 +6082,7 @@ func (p *Pack) checkWritePreconditions(ctx context.Context, req *spi.Request, bu
 	} else if noneMatch != "*" && noneMatch != "" {
 		return &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-None-Match", "additionalMessage": "We don't accept the provided value of If-None-Match header for this API"}}
 	} else if match == "*" && noneMatch == "" {
-		return &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-None-Match", "additionalMessage": "We don't accept the provided value of If-None-Match header for this API"}}
+		return &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": "If-Match", "additionalMessage": "We don't accept the provided value of If-Match header for this API"}}
 	}
 	if match == "" && noneMatch == "" {
 		return nil

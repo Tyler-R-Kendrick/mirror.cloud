@@ -200,6 +200,9 @@ func TestDynamoDBTagLifecycle(t *testing.T) {
 	if arn != "arn:aws:dynamodb:us-east-1:000000000000:table/T" {
 		t.Fatalf("table arn %q", arn)
 	}
+	if tags := must("ListTagsOfResource", map[string]any{"ResourceArn": arn}).Output["Tags"].([]any); len(tags) != 2 || str(asMap(tags[0])["Value"]) != "dev" || str(asMap(tags[1])["Value"]) != "platform" {
+		t.Fatalf("creation tags %#v", tags)
+	}
 	must("TagResource", map[string]any{"ResourceArn": arn, "Tags": []any{map[string]any{"Key": "env", "Value": "prod"}}})
 	must("UntagResource", map[string]any{"ResourceArn": arn, "TagKeys": []any{"team"}})
 	tags := must("ListTagsOfResource", map[string]any{"ResourceArn": arn}).Output["Tags"].([]any)

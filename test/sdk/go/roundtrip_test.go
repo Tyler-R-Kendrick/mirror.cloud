@@ -3118,6 +3118,36 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := ddb.BatchWriteItem(context.Background(), &dynamodb.BatchWriteItemInput{RequestItems: map[string][]ddbtypes.WriteRequest{"T": {{PutRequest: &ddbtypes.PutRequest{Item: map[string]ddbtypes.AttributeValue{"nonKey": &ddbtypes.AttributeValueMemberS{Value: "value"}}}}}}}); err == nil || !strings.Contains(err.Error(), "ValidationException") {
 		t.Fatalf("invalid batch schema: %v", err)
 	}
+	if _, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{
+		TableName: aws.String("Indexes"), BillingMode: ddbtypes.BillingModePayPerRequest,
+		KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: ddbtypes.KeyTypeHash}},
+		AttributeDefinitions: []ddbtypes.AttributeDefinition{
+			{AttributeName: aws.String("id"), AttributeType: ddbtypes.ScalarAttributeTypeS},
+			{AttributeName: aws.String("fieldA"), AttributeType: ddbtypes.ScalarAttributeTypeS},
+			{AttributeName: aws.String("fieldB"), AttributeType: ddbtypes.ScalarAttributeTypeS},
+		},
+		GlobalSecondaryIndexes: []ddbtypes.GlobalSecondaryIndex{
+			{IndexName: aws.String("keys"), KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("fieldA"), KeyType: ddbtypes.KeyTypeHash}}, Projection: &ddbtypes.Projection{ProjectionType: ddbtypes.ProjectionTypeKeysOnly}},
+			{IndexName: aws.String("all"), KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("fieldB"), KeyType: ddbtypes.KeyTypeHash}}, Projection: &ddbtypes.Projection{ProjectionType: ddbtypes.ProjectionTypeAll}},
+		},
+	}); err != nil {
+		t.Fatalf("create index table: %v", err)
+	}
+	if _, err := ddb.PutItem(context.Background(), &dynamodb.PutItemInput{TableName: aws.String("Indexes"), Item: map[string]ddbtypes.AttributeValue{
+		"id": &ddbtypes.AttributeValueMemberS{Value: "1"}, "fieldA": &ddbtypes.AttributeValueMemberS{Value: "a"}, "fieldB": &ddbtypes.AttributeValueMemberS{Value: "b"}, "data": &ddbtypes.AttributeValueMemberS{Value: "value"},
+	}}); err != nil {
+		t.Fatalf("put indexed item: %v", err)
+	}
+	if _, err := ddb.Query(context.Background(), &dynamodb.QueryInput{TableName: aws.String("Indexes"), IndexName: aws.String("keys"), Select: ddbtypes.SelectAllAttributes}); err == nil || !strings.Contains(err.Error(), "ValidationException") {
+		t.Fatalf("invalid index projection: %v", err)
+	}
+	indexed, err := ddb.Query(context.Background(), &dynamodb.QueryInput{TableName: aws.String("Indexes"), IndexName: aws.String("all"), KeyConditionExpression: aws.String("fieldB = :v"), ExpressionAttributeValues: map[string]ddbtypes.AttributeValue{":v": &ddbtypes.AttributeValueMemberS{Value: "b"}}, Select: ddbtypes.SelectAllAttributes})
+	if err != nil || len(indexed.Items) != 1 {
+		t.Fatalf("all index projection: %#v %v", indexed, err)
+	}
+	if data, ok := indexed.Items[0]["data"].(*ddbtypes.AttributeValueMemberS); !ok || data.Value != "value" {
+		t.Fatalf("indexed data %#v", indexed.Items)
+	}
 	if ttl, err := ddb.DescribeTimeToLive(context.Background(), &dynamodb.DescribeTimeToLiveInput{TableName: aws.String("T")}); err != nil || ttl.TimeToLiveDescription == nil || ttl.TimeToLiveDescription.TimeToLiveStatus != ddbtypes.TimeToLiveStatusDisabled {
 		t.Fatalf("default ttl: %#v %v", ttl, err)
 	}

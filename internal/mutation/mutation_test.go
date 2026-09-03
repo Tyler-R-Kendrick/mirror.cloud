@@ -3155,6 +3155,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestS3ObjectLifecycle",
 		},
 		{
+			name: "s3-omit-signature-canonical-request",
+			file: filepath.Join("internal", "identity", "s3_signature.go"),
+			old:  `"CanonicalRequest": canonicalRequest`,
+			new:  `"IgnoredCanonicalRequest": canonicalRequest`,
+			pkg:  "./internal/identity",
+			run:  "TestVerifyS3PresignedV4AWSExample",
+		},
+		{
+			name: "s3-preserve-encoded-slash-in-canonical-path",
+			file: filepath.Join("internal", "identity", "s3_signature.go"),
+			old:  `return (&url.URL{Path: u.Path}).EscapedPath()`,
+			new:  `return u.EscapedPath()`,
+			pkg:  "./internal/identity",
+			run:  "TestVerifyS3PresignedV4AWSExample",
+		},
+		{
 			name: "s3-object-metadata-ignore-http-user-metadata",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `if name, ok := strings.CutPrefix(strings.ToLower(key), "x-amz-meta-"); ok && len(values) > 0 {`,

@@ -349,7 +349,9 @@ func verifyS3V4Signature(credential []string, date, canonicalRequest, signature,
 	signingKey := s3V4SigningKey(credential, secret)
 	want := hmacSHA256(signingKey, stringToSign)
 	if !s3V4SignatureMatches(signature, want) {
-		return signatureFault()
+		fault := signatureFault()
+		fault.Fields = map[string]any{"AWSAccessKeyId": credential[0], "CanonicalRequest": canonicalRequest, "SignatureProvided": signature, "StringToSign": stringToSign}
+		return fault
 	}
 	return nil
 }
@@ -484,8 +486,8 @@ func s3AmzHeadersSigned(r *http.Request, names []string) bool {
 }
 
 func canonicalPath(u *url.URL) string {
-	if path := u.EscapedPath(); path != "" {
-		return path
+	if u.Path != "" {
+		return (&url.URL{Path: u.Path}).EscapedPath()
 	}
 	return "/"
 }

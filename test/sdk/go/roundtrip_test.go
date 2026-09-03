@@ -3034,6 +3034,29 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || emptyAttributes.ObjectParts == nil || len(emptyAttributes.ObjectParts.Parts) != 0 || aws.ToString(emptyAttributes.ObjectParts.PartNumberMarker) != "10" || aws.ToString(emptyAttributes.ObjectParts.NextPartNumberMarker) != "0" || aws.ToBool(emptyAttributes.ObjectParts.IsTruncated) {
 		t.Fatalf("empty object attributes page: %#v %v", emptyAttributes, err)
 	}
+	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-versioned-attributes")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String("sdk-versioned-attributes"), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusEnabled}}); err != nil {
+		t.Fatal(err)
+	}
+	firstAttributesVersion, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-versioned-attributes"), Key: aws.String("key"), Body: strings.NewReader("69\n420\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk-versioned-attributes"), Key: aws.String("key"), Body: strings.NewReader("version 2")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String("sdk-versioned-attributes"), Key: aws.String("key")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s3c.GetObjectAttributes(context.Background(), &s3.GetObjectAttributesInput{Bucket: aws.String("sdk-versioned-attributes"), Key: aws.String("key"), ObjectAttributes: []s3types.ObjectAttributes{s3types.ObjectAttributesEtag}}); err == nil || !strings.Contains(err.Error(), "NoSuchKey") {
+		t.Fatalf("deleted current object attributes: %v", err)
+	}
+	versionedAttributes, err := s3c.GetObjectAttributes(context.Background(), &s3.GetObjectAttributesInput{Bucket: aws.String("sdk-versioned-attributes"), Key: aws.String("key"), VersionId: firstAttributesVersion.VersionId, ObjectAttributes: []s3types.ObjectAttributes{s3types.ObjectAttributesEtag, s3types.ObjectAttributesStorageClass, s3types.ObjectAttributesObjectSize}})
+	if err != nil || aws.ToInt64(versionedAttributes.ObjectSize) != 7 || versionedAttributes.StorageClass != s3types.StorageClassStandard || aws.ToString(versionedAttributes.ETag) != aws.ToString(firstAttributesVersion.ETag) {
+		t.Fatalf("versioned object attributes: %#v %v", versionedAttributes, err)
+	}
 	checksumTags, err := s3c.GetObjectTagging(context.Background(), &s3.GetObjectTaggingInput{Bucket: aws.String("sdk"), Key: aws.String("checksum-multipart")})
 	if err != nil || len(checksumTags.TagSet) != 2 || aws.ToString(checksumTags.TagSet[0].Key) != "env" || aws.ToString(checksumTags.TagSet[0].Value) != "test" || aws.ToString(checksumTags.TagSet[1].Key) != "team" || aws.ToString(checksumTags.TagSet[1].Value) != "storage" {
 		t.Fatalf("multipart creation tags: %#v %v", checksumTags, err)

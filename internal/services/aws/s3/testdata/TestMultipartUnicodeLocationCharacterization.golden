@@ -1,0 +1,6 @@
+{
+  "Bucket": "multipart-unicode-location",
+  "ETag": "\"209b3f7345bfc0220995968302e3e9a8-1\"",
+  "Key": "test-unicode_—_file",
+  "Location": "http://multipart-unicode-location.s3.amazonaws.com/test-unicode_%E2%80%94_file"
+}

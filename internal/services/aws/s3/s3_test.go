@@ -5756,6 +5756,23 @@ func TestSpecialObjectKeyCharacterization(t *testing.T) {
 	golden.AssertJSON(t, got)
 }
 
+func TestMultipartUnicodeLocationCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	input := map[string]any{"Bucket": "multipart-unicode-location", "Key": "test-unicode_—_file"}
+	mustInvoke(t, p, "CreateBucket", input, nil)
+	upload := mustInvoke(t, p, "CreateMultipartUpload", input, nil)
+	partInput := maps.Clone(input)
+	partInput["UploadId"], partInput["PartNumber"] = upload.Output["UploadId"], 1
+	part := mustInvoke(t, p, "UploadPart", partInput, []byte("upload-part-1"))
+	complete := maps.Clone(input)
+	complete["UploadId"], complete["MultipartUpload"] = upload.Output["UploadId"], map[string]any{"Parts": []any{completedPart(1, part)}}
+	response := mustInvoke(t, p, "CompleteMultipartUpload", complete, nil)
+	if response.Output["Location"] != "http://multipart-unicode-location.s3.amazonaws.com/test-unicode_%E2%80%94_file" {
+		t.Fatalf("multipart Unicode location = %#v", response.Output)
+	}
+	golden.AssertJSON(t, response.Output)
+}
+
 func TestListObjectVersionsPagination(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-list"}, nil)

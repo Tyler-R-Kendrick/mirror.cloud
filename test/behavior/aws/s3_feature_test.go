@@ -1879,6 +1879,24 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if response, body := request(http.MethodPut, "/kms-validation-bdd/enabled", enabledARN); response.StatusCode != http.StatusOK {
 			t.Fatalf("enabled key %d %s", response.StatusCode, body)
 		}
+		copyRequest, _ := http.NewRequest(http.MethodPut, ts.URL+"/kms-validation-bdd/copied", nil)
+		copyRequest.Header.Set("Authorization", auth)
+		copyRequest.Header.Set("x-amz-copy-source", "/kms-validation-bdd/enabled")
+		copyRequest.Header.Set("x-amz-server-side-encryption", "aws:kms")
+		copyRequest.Header.Set("x-amz-server-side-encryption-aws-kms-key-id", enabledARN)
+		copyRequest.Header.Set("x-amz-server-side-encryption-bucket-key-enabled", "true")
+		copied, err := http.DefaultClient.Do(copyRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		copyBody, _ := io.ReadAll(copied.Body)
+		copied.Body.Close()
+		if copied.StatusCode != http.StatusOK || copied.Header.Get("x-amz-server-side-encryption") != "aws:kms" || copied.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != enabledARN || copied.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" || !bytes.Contains(copyBody, []byte("<CopyObjectResult>")) {
+			t.Fatalf("kms copy %d %#v %s", copied.StatusCode, copied.Header, copyBody)
+		}
+		if response, body := request(http.MethodGet, "/kms-validation-bdd/copied", ""); response.StatusCode != http.StatusOK || string(body) != "body" || response.Header.Get("x-amz-server-side-encryption") != "aws:kms" || response.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != enabledARN || response.Header.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+			t.Fatalf("stored kms copy %d %#v %s", response.StatusCode, response.Header, body)
+		}
 		if response, body := request(http.MethodPut, "/kms-validation-bdd/missing", "arn:aws:kms:us-east-1:000000000000:key/missing"); response.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>KMS.NotFoundException</Code>")) {
 			t.Fatalf("missing key %d %s", response.StatusCode, body)
 		}

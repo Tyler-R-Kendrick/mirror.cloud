@@ -20,7 +20,7 @@ func FuzzTableLifecycle(f *testing.F) {
 		call := func(operation string, input map[string]any) (*spi.Response, error) {
 			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
 		}
-		table := map[string]any{"TableName": name, "Tags": []any{map[string]any{"Key": "fuzz", "Value": name}}}
+		table := map[string]any{"TableName": name, "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "Tags": []any{map[string]any{"Key": "fuzz", "Value": name}}}
 		_, created := call("CreateTable", table)
 		_, duplicate := call("CreateTable", table)
 		arn := "arn:aws:dynamodb:us-east-1:000000000000:table/" + name

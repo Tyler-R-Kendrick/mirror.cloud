@@ -123,6 +123,22 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusOK || string(body) != "abc123" || res.Header.Get("Cache-Control") != "no-cache" || res.Header.Get("Content-Language") != "de" || res.Header.Get("Content-Disposition") != `attachment; filename="foo.jpg"` || res.Header.Get("Content-Type") != "binary/octet-stream" || res.Header.Get("x-amz-server-side-encryption") != "AES256" {
 			t.Fatalf("get UTF-8 object %d %#v %q", res.StatusCode, res.Header, body)
 		}
+		unicodeDisposition := `attachment; filename="test_—_file%E2%80%94_é_2.pdf"`
+		request, _ = http.NewRequest(http.MethodPut, ts.URL+"/utf8-metadata-bdd/unicode-system", nil)
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("Cache-Control", "ÄMÄZÕÑ S3")
+		request.Header.Set("Content-Language", "de")
+		request.Header.Set("Content-Disposition", unicodeDisposition)
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		res = do(http.MethodGet, "/utf8-metadata-bdd/unicode-system", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("Cache-Control") != "ÄMÄZÕÑ S3" || res.Header.Get("Content-Language") != "de" || res.Header.Get("Content-Disposition") != unicodeDisposition {
+			t.Fatalf("Unicode system metadata %d %#v", res.StatusCode, res.Header)
+		}
 	})
 
 	t.Run("Given a bucket in another Region When accessed Then S3 resolves it and reports its Region", func(t *testing.T) {

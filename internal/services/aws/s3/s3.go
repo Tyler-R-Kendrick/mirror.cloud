@@ -1694,6 +1694,10 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 			value = str(req.Input[override.query])
 		}
 		if value != "" {
+			if strings.IndexFunc(value, func(r rune) bool { return r > unicode.MaxLatin1 }) >= 0 {
+				_ = rc.Close()
+				return nil, &spi.Fault{Code: "InvalidArgument", Message: "Header value cannot be represented using ISO-8859-1.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": override.query, "ArgumentValue": value}}
+			}
 			h.Set(override.header, value)
 		}
 	}

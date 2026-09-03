@@ -2999,6 +2999,10 @@ func TestGetObjectResponseHeaderOverrides(t *testing.T) {
 	if ranged.Status != http.StatusPartialContent || ranged.Headers.Get("Content-Type") != "text/csv" || string(readStream(t, ranged)) != "bo" {
 		t.Fatalf("ranged override = %d %v", ranged.Status, ranged.Headers)
 	}
+	_, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "response-overrides", "Key": "object", "response-cache-control": "non-ascii-%E2%80%94_—_é_"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Message != "Header value cannot be represented using ISO-8859-1." || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "response-cache-control" || fault.Fields["ArgumentValue"] != "non-ascii-%E2%80%94_—_é_" {
+		t.Fatalf("Unicode override fault = %#v", fault)
+	}
 	stored := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "response-overrides", "Key": "object"}, nil)
 	readStream(t, stored)
 	if stored.Headers.Get("Cache-Control") != "stored" || stored.Headers.Get("Content-Type") != "application/json" || stored.Headers.Get("Expires") != "Thu, 22 Oct 2026 07:28:00 GMT" {

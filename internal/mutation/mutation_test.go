@@ -3131,6 +3131,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestUserMetadataRFC2047Characterization",
 		},
 		{
+			name: "s3-object-metadata-ignore-query-user-metadata",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `for key, values := range req.HTTP.URL.Query() {`,
+			new:  `for key, values := range map[string][]string{} {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestObjectMetadata",
+		},
+		{
 			name: "s3-object-metadata-ignore-http-user-metadata",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `if name, ok := strings.CutPrefix(strings.ToLower(key), "x-amz-meta-"); ok && len(values) > 0 {`,

@@ -3911,7 +3911,7 @@ func TestExpectedBucketOwnerAndDeleteBoundary(t *testing.T) {
 		t.Fatalf("matching owner: %v", err)
 	}
 	errors := map[string]any{}
-	for _, expected := range []string{"12345678901", "12345678901x"} {
+	for _, expected := range []string{"12345678901", "12345678901x", "0000", "0000000000020", "abcd", "aa000000000$"} {
 		_, err := invoke(t, p, "HeadBucket", map[string]any{"Bucket": "bucket", "ExpectedBucketOwner": expected}, nil)
 		fault := asFault(t, err)
 		if fault.Code != "InvalidBucketOwnerAWSAccountID" || fault.HTTPStatus != http.StatusBadRequest {

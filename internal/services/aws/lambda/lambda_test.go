@@ -66,6 +66,32 @@ func TestInvokeAcceptsRawArrayPayload(t *testing.T) {
 	}
 }
 
+func TestInvokeReceivesFunctionEnvironment(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	src := "import os\ndef lambda_handler(event, context):\n    return {'name': os.environ['AWS_LAMBDA_FUNCTION_NAME'], 'bucket': os.environ['BUCKET_NAME']}\n"
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+		"FunctionName": "s3-reader", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
+		"Code":        map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(src))},
+		"Environment": map[string]any{"Variables": map[string]any{"BUCKET_NAME": "objects"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Invoke", Input: map[string]any{"FunctionName": "s3-reader"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := string(response.Output["Payload"].(json.RawMessage))
+	if !strings.Contains(payload, `"name": "s3-reader"`) || !strings.Contains(payload, `"bucket": "objects"`) {
+		t.Fatalf("payload %s", payload)
+	}
+}
+
 func TestBootedServerLambdaPythonInvoke(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 not installed")

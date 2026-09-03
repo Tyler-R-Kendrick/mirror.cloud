@@ -1,0 +1,6 @@
+{
+  "create": "success",
+  "delete": "success",
+  "duplicateCreate": "ResourceInUseException",
+  "missingDelete": "ResourceNotFoundException"
+}

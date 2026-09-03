@@ -26,6 +26,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -40,6 +41,35 @@ type failBlobs struct {
 
 type failAfterReader struct {
 	io.Reader
+}
+
+func TestConcurrentDynamoDBTableCreatesHaveOneWinner(t *testing.T) {
+	p := dynamodb.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTable", Input: map[string]any{"TableName": "T"}})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	winners := 0
+	for err := range errs {
+		if err == nil {
+			winners++
+		} else if fault, ok := err.(*spi.Fault); !ok || fault.Code != "ResourceInUseException" {
+			t.Fatalf("unexpected create fault %v", err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("create winners %d", winners)
+	}
 }
 
 func (r failAfterReader) Read(p []byte) (int, error) {

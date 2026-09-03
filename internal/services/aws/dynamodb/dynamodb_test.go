@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -54,6 +55,24 @@ func TestTableLifecycleFaults(t *testing.T) {
 	if fault, ok := call("DeleteTable").(*spi.Fault); !ok || fault.Code != "ResourceNotFoundException" {
 		t.Fatalf("missing delete fault %#v", fault)
 	}
+}
+
+func TestTableLifecycleCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string) string {
+		t.Helper()
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: map[string]any{"TableName": "T"}})
+		if err == nil {
+			return "success"
+		}
+		return err.(*spi.Fault).Code
+	}
+	golden.AssertJSON(t, map[string]any{
+		"create": call("CreateTable"), "duplicateCreate": call("CreateTable"),
+		"delete": call("DeleteTable"), "missingDelete": call("DeleteTable"),
+	})
 }
 
 func TestQueryKeyConditionNotUnfilteredScan(t *testing.T) {

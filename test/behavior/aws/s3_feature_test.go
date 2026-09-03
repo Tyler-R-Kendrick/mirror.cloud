@@ -208,6 +208,37 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a public object When read without credentials Then its body is returned", func(t *testing.T) {
+		res := do(http.MethodPut, "/anonymous-read-bdd", nil, "")
+		res.Body.Close()
+		request := func(method, path, acl string, body io.Reader) *http.Response {
+			t.Helper()
+			req, _ := http.NewRequest(method, ts.URL+path, body)
+			req.Header.Set("Authorization", auth)
+			if acl != "" {
+				req.Header.Set("x-amz-acl", acl)
+			}
+			response, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return response
+		}
+		res = request(http.MethodPut, "/anonymous-read-bdd?acl", "public-read", nil)
+		res.Body.Close()
+		res = request(http.MethodPut, "/anonymous-read-bdd/object", "public-read", strings.NewReader("body data"))
+		res.Body.Close()
+		res, err = http.Get(ts.URL + "/anonymous-read-bdd/object")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(body) != "body data" {
+			t.Fatalf("anonymous public read %d %q", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given a bucket in another Region When accessed Then S3 resolves it and reports its Region", func(t *testing.T) {
 		configuration := []byte(`<CreateBucketConfiguration><LocationConstraint>us-west-2</LocationConstraint></CreateBucketConfiguration>`)
 		res := do(http.MethodPut, "/cross-region-bdd", configuration, "")

@@ -139,6 +139,19 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given an unrepresentable response override When reading an object Then InvalidArgument is returned", func(t *testing.T) {
+		res := do(http.MethodPut, "/unicode-override-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/unicode-override-bdd/key", []byte("body"), "")
+		res.Body.Close()
+		res = do(http.MethodGet, "/unicode-override-bdd/key?response-cache-control=non-ascii-%E2%80%94", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(body, []byte("Header value cannot be represented using ISO-8859-1.")) || !bytes.Contains(body, []byte("<ArgumentName>response-cache-control</ArgumentName>")) {
+			t.Fatalf("Unicode response override %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given a UTF-8 key and system metadata When put and fetched Then the object round trips", func(t *testing.T) {
 		res := do(http.MethodPut, "/utf8-metadata-bdd", nil, "")
 		res.Body.Close()

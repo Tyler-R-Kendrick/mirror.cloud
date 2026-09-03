@@ -3035,6 +3035,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestObjectMetadata",
 		},
 		{
+			name: "s3-object-metadata-store-language-as-disposition",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `{"contentLanguage", "ContentLanguage", "Content-Language"},`,
+			new:  `{"contentDisposition", "ContentLanguage", "Content-Language"},`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestObjectMetadata",
+		},
+		{
+			name: "s3-object-metadata-return-language-as-disposition",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `{"contentLanguage", "Content-Language"},`,
+			new:  `{"contentLanguage", "Content-Disposition"},`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestObjectMetadata",
+		},
+		{
 			name: "s3-object-metadata-ignore-input-user-metadata",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `for key, value := range asMap(req.Input["Metadata"]) {`,

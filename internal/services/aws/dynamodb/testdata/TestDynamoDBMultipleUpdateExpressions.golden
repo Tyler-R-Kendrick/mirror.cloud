@@ -1,0 +1,32 @@
+{
+  "item": {
+    "attr1": {
+      "S": "value1"
+    },
+    "attr2": {
+      "S": "value2"
+    },
+    "data": {
+      "S": "original"
+    },
+    "id": {
+      "S": "1"
+    }
+  },
+  "response": {
+    "Attributes": {
+      "attr1": {
+        "S": "value1"
+      },
+      "attr2": {
+        "S": "value2"
+      },
+      "data": {
+        "S": "original"
+      },
+      "id": {
+        "S": "1"
+      }
+    }
+  }
+}

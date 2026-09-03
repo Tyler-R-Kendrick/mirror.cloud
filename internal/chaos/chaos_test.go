@@ -72,6 +72,40 @@ func TestConcurrentDynamoDBTableCreatesHaveOneWinner(t *testing.T) {
 	}
 }
 
+func TestConcurrentDynamoDBTTLExpirationCountsOnce(t *testing.T) {
+	p := dynamodb.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
+	call("UpdateTimeToLive", map[string]any{"TableName": "T", "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}})
+	call("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "expired"}, "ttl": map[string]any{"N": "-1"}}})
+	counts := make(chan int, 32)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			counts <- call("ExpireItems", nil).Output["ExpiredItems"].(int)
+		}()
+	}
+	wg.Wait()
+	close(counts)
+	total := 0
+	for count := range counts {
+		total += count
+	}
+	if total != 1 {
+		t.Fatalf("concurrent expiration count %d", total)
+	}
+}
+
 func (r failAfterReader) Read(p []byte) (int, error) {
 	n, err := r.Reader.Read(p)
 	if err == io.EOF {

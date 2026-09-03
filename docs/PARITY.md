@@ -521,8 +521,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 |---|---:|
 | Requested test forms wired | 7 / 7 (100%) |
 | DynamoDB operations routed to emulation | 62 / 62 (100%) |
-| LocalStack DynamoDB test functions explicitly traced | 6 / 56 (10.7%) |
-| LocalStack DynamoDB test functions not yet traced | 50 / 56 (89.3%) |
+| LocalStack DynamoDB test functions explicitly traced | 7 / 56 (12.5%) |
+| LocalStack DynamoDB test functions not yet traced | 49 / 56 (87.5%) |
 
 The pinned inventory is the 56 direct test functions in `tests/aws/services/dynamodb/test_dynamodb.py`; parametrized cases are not expanded.
 
@@ -534,3 +534,4 @@ The pinned inventory is the 56 direct test functions in `tests/aws/services/dyna
 | `test_dynamodb.py::TestDynamoDB::test_list_tags_of_resource` | CreateTable now returns the table ARN and persists creation tags; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, fuzz, and semantic mutation checks cover create/list/update/remove/delete tag lifecycle | Mapped; race-pending |
 | `test_dynamodb.py::TestDynamoDB::test_non_ascii_chars` | Atomic and AWS SDK round trips preserve checkmark, pound, and cent characters exactly; the Verify-style data snapshot, fuzzed valid UTF-8 values, and payload-drop mutant guard JSON persistence | Mapped; race-pending |
 | `test_dynamodb.py::TestDynamoDB::test_large_data_download` | Atomic and raw HTTP BDD scans persist and return twenty 10,000-byte string items with exact Count and ScannedCount; the data snapshot and count mutant guard collection behavior | Mapped; race-pending |
+| `test_dynamodb.py::TestDynamoDB::test_time_to_live_deletion` | LocalStack's `DELETE /_aws/dynamodb/expired` extension now sweeps enabled TTL attributes across hash and range-key tables, preserves future/disabled/malformed items, emits one result count under concurrent sweeps, and is covered by atomic, Verify-style snapshot, SDK/control contract, raw HTTP BDD, native fuzz, chaos/race, and mutation checks | Mapped; focused race-clean |

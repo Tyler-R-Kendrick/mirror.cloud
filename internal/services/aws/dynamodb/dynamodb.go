@@ -198,6 +198,52 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		out := map[string]any{"TimeToLiveStatus": status, "AttributeName": spec["AttributeName"]}
 		return &spi.Response{Output: map[string]any{"TimeToLiveDescription": out}}, nil
+	case "ExpireItems":
+		tables, _, err := p.col(req, "tables").List(ctx, "", "", 0)
+		if err != nil {
+			return nil, err
+		}
+		expired := 0
+		for _, tableRecord := range tables {
+			table := tableRecord.Key
+			rawTTL, ok, err := p.col(req, "ttl").Get(ctx, table)
+			if err != nil {
+				return nil, err
+			}
+			var ttl map[string]any
+			if !ok || json.Unmarshal(rawTTL, &ttl) != nil || !truthy(ttl["Enabled"]) || str(ttl["AttributeName"]) == "" {
+				continue
+			}
+			items, _, err := p.col(req, "items:"+table).List(ctx, "", "", 0)
+			if err != nil {
+				return nil, err
+			}
+			definition := p.tableDef(ctx, req, table)
+			for _, itemRecord := range items {
+				var item map[string]any
+				_ = json.Unmarshal(itemRecord.Value, &item)
+				expires, err := strconv.ParseInt(str(asMap(item[str(ttl["AttributeName"])])["N"]), 10, 64)
+				if err != nil || expires > p.deps.Clock.Now().Unix() {
+					continue
+				}
+				deleted := false
+				if err := p.col(req, "items:"+table).Txn(ctx, func(tx spi.Tx) error {
+					if _, ok, err := tx.Get(itemRecord.Key); err != nil || !ok {
+						return err
+					}
+					deleted = true
+					return tx.Delete(itemRecord.Key)
+				}); err != nil {
+					return nil, err
+				}
+				if !deleted {
+					continue
+				}
+				expired++
+				p.emitStream(ctx, req, table, "REMOVE", p.tableKey(definition, item), item)
+			}
+		}
+		return &spi.Response{Output: map[string]any{"ExpiredItems": expired}}, nil
 	case "UpdateContinuousBackups":
 		spec := asMap(req.Input["PointInTimeRecoverySpecification"])
 		b, _ := json.Marshal(spec)

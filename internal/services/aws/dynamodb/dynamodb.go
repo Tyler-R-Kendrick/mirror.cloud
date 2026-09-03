@@ -792,6 +792,9 @@ func (p *Pack) returnValues(req *spi.Request, old, neu map[string]any, touched [
 	default:
 		attrs = map[string]any{}
 	}
+	if len(attrs) == 0 {
+		return &spi.Response{Output: map[string]any{}}
+	}
 	return &spi.Response{Output: map[string]any{"Attributes": attrs}}
 }
 

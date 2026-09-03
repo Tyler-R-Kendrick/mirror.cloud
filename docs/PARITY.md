@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
-| LocalStack S3 test functions explicitly traced | 244 / 463 (52.7%) |
-| LocalStack S3 test functions not yet traced | 219 / 463 (47.3%) |
+| LocalStack S3 test functions explicitly traced | 253 / 463 (54.6%) |
+| LocalStack S3 test functions not yet traced | 210 / 463 (45.4%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -100,6 +100,15 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3.py::TestS3::test_s3_copy_object_with_checksum` | `TestCopyObjectChecksums`, SDK/raw HTTP contracts, fuzz, concurrent chaos, snapshot, and checksum mutants verify all supported algorithms can be calculated for in-place replacement and inherited by a later copy | Mapped and race-clean |
 | `test_s3.py::TestS3::test_s3_copy_object_with_default_checksum` | Copy-checksum atomic, SDK/HTTP, fuzz, chaos, snapshot, and mutation coverage verify an omitted checksum algorithm inherits the source checksum through both in-place and different-key copies | Mapped and race-clean |
 | `test_s3.py::TestS3::test_s3_copy_object_wrong_format` | `TestCopyObjectSourceVersions`, AWS SDK and raw HTTP contracts, dedicated fuzz seeds, and a semantic format mutant verify a copy source without a bucket/key separator returns exact 400 `InvalidArgument` before writing | Mapped and green |
+| `test_s3.py::TestS3::test_s3_multipart_upload_acls` | `TestBucketAndObjectACLConfigurations`, AWS SDK/raw HTTP contracts, ACL fuzz, concurrent ACL chaos, characterization snapshot, and mutations verify private/default and public-read-write ACLs are fixed at multipart initiation and materialized on completion | Mapped and race-clean |
+| `test_s3.py::TestS3::test_s3_bucket_acl` | Bucket/object ACL atomic and characterization tests, AWS SDK/raw HTTP contracts, fuzz, concurrent chaos, snapshots, and semantic mutants verify private/public canned ACLs, grant headers, and full access-control-policy replacement | Mapped and race-clean |
+| `test_s3.py::TestS3::test_s3_bucket_acl_exceptions` | `TestBucketAndObjectACLConfigurations`, SDK/HTTP contracts, ACL fuzz, snapshots, and mutations cover every pinned invalid canned ACL, grant syntax/URI/ID, policy owner/grantee/permission, empty request, and conflicting ACL representation without replacing valid state | Mapped and green |
+| `test_s3.py::TestS3::test_s3_object_acl` | Object ACL atomic, SDK, raw HTTP, fuzz, concurrent chaos, snapshot, and mutation coverage verify defaults plus canned, grant-header, and access-control-policy replacement independently from the bucket ACL | Mapped and race-clean |
+| `test_s3.py::TestS3::test_s3_object_acl_exceptions` | Atomic object-create and object-ACL rejection cases, SDK/HTTP contracts, fuzz, snapshots, and mutations cover the pinned malformed forms and prove invalid create-time ACLs leave no object behind | Mapped and green |
+| `test_s3.py::TestS3::test_s3_object_expires` | `TestObjectMetadata`, AWS SDK/raw HTTP contracts, system-metadata fuzz, concurrent metadata chaos, characterization snapshot, and mapping mutants verify future and past RFC 1123 `Expires` values round-trip through HEAD and GET without expiring the object | Mapped and race-clean |
+| `test_s3.py::TestS3::test_upload_file_with_xml_preamble` | Binary-safe PutObject/GetObject atomic, SDK/raw HTTP, fuzz, chaos, snapshot, and body-read mutation coverage verify XML-looking bytes are stored and returned as opaque object content rather than parsed as an S3 control document | Mapped and race-clean |
+| `test_s3.py::TestS3::test_bucket_availability` | Named bucket-configuration atomic tests, SDK/raw HTTP contracts, snapshots, fuzz, chaos, and missing-bucket mutants verify lifecycle and replication reads both return exact `NoSuchBucket` rather than configuration-specific absence faults | Mapped and green |
+| `test_s3.py::TestS3::test_different_location_constraint` | `TestCreateBucketLocationConstraints`, cross-region atomic coverage, AWS SDK/raw HTTP contracts, exhaustive fuzz seeds, concurrent chaos, snapshots, and mutations verify east defaults, exact regional matching, all mismatches, null constraints, and missing-bucket location reads | Mapped and race-clean |
 | `test_s3_preconditions.py::test_s3_copy_object_preconditions` | `TestCopySourcePreconditionsCharacterization`, AWS SDK contract, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_modified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_unmodified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
@@ -292,4 +301,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 244/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 253/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

@@ -2889,6 +2889,8 @@ func TestUserMetadataRFC2047Characterization(t *testing.T) {
 			"Bad-Q":        "=?UTF-8?Q?bad=4A=ZZ_value?=",
 			"Raw-Unicode":  "ÄMÄZÕÑ S3",
 			"Safe":         safe,
+			"TEST_META_1":  "foo",
+			"__meta_2":     "bar",
 		},
 	}, []byte("body"))
 
@@ -2904,12 +2906,14 @@ func TestUserMetadataRFC2047Characterization(t *testing.T) {
 			"badQ":        response.Headers.Get("x-amz-meta-bad-q"),
 			"rawUnicode":  response.Headers.Get("x-amz-meta-raw-unicode"),
 			"safe":        response.Headers.Get("x-amz-meta-safe"),
+			"testMeta1":   response.Headers.Get("x-amz-meta-test_meta_1"),
+			"meta2":       response.Headers.Get("x-amz-meta-__meta_2"),
 		}
 	}
 	get := read("GetObject", "source")
 	head := read("HeadObject", "source")
 	for name, got := range map[string]map[string]any{"get": get, "head": head} {
-		if got["fakeEncoded"] != "actually-ascii" || got["asciiB64"] != "abc" || got["badB64"] != "=?UTF-8?B?77+977+977+9?=" || got["badQ"] != "badJ=ZZ value" || got["safe"] != safe {
+		if got["fakeEncoded"] != "actually-ascii" || got["asciiB64"] != "abc" || got["badB64"] != "=?UTF-8?B?77+977+977+9?=" || got["badQ"] != "badJ=ZZ value" || got["safe"] != safe || got["testMeta1"] != "foo" || got["meta2"] != "bar" {
 			t.Fatalf("%s decoded metadata = %#v", name, got)
 		}
 		if got["nonASCII"] != "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=" || got["rawUnicode"] != got["nonASCII"] || got["binary"] != "=?UTF-8?B?AAECAw==?=" {

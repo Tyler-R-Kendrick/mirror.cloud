@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
-| LocalStack S3 test functions explicitly traced | 439 / 463 (94.8%) |
-| LocalStack S3 test functions not yet traced | 24 / 463 (5.2%) |
+| LocalStack S3 test functions explicitly traced | 447 / 463 (96.5%) |
+| LocalStack S3 test functions not yet traced | 16 / 463 (3.5%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -295,6 +295,14 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3.py::TestS3PresignedPost::test_post_object_policy_validation_size` | Content-length-range parsing validates numeric bounds and rejects bodies outside the inclusive policy interval before persistence | Mapped and green |
 | `test_s3.py::TestS3PresignedPost::test_presigned_post_with_different_user_credentials` | POST signature verification derives the per-caller IAM/STS secret and verifies temporary session tokens before using the account-scoped bucket | Mapped and green |
 | `test_s3.py::TestS3PresignedPost::test_post_object_policy_casing` | Form and policy field names are normalized case-insensitively while caller metadata key casing follows S3 normalization | Mapped and green |
+| `test_s3.py::TestS3SSECEncryption::test_put_object_lifecycle_with_sse_c` | Lifecycle matching and SSE-C metadata are independent: protected writes still receive the configured expiration header while reads require the customer key | Mapped and green |
+| `test_s3.py::TestS3SSECEncryption::test_put_object_validation_sse_c` | SSE-C atomic, SDK/raw HTTP, fuzz, chaos, snapshot, and mutation coverage validates AES256, base64 key material, key MD5, field completeness, and exact mismatch faults before storage | Mapped and race-clean |
+| `test_s3.py::TestS3SSECEncryption::test_object_retrieval_sse_c` | GetObject and HeadObject require the matching customer key tuple, return only algorithm and key-MD5 metadata, and never persist the raw key | Mapped and race-clean |
+| `test_s3.py::TestS3SSECEncryption::test_copy_object_with_sse_c` | CopyObject independently validates source decryption and destination encryption customer-key fields and persists only the destination key MD5 | Mapped and race-clean |
+| `test_s3.py::TestS3SSECEncryption::test_multipart_upload_sse_c` | Multipart initiation captures customer-key MD5, every part requires the matching tuple, completion preserves it, and final reads enforce it | Mapped and race-clean |
+| `test_s3.py::TestS3SSECEncryption::test_multipart_upload_sse_c_validation` | Multipart and part-copy validation rejects missing, changed, or malformed customer-key parameters without storing a part; fuzz, chaos, snapshots, and mutants pin the faults | Mapped and race-clean |
+| `test_s3.py::TestS3SSECEncryption::test_sse_c_with_versioning` | Customer-key requirements and MD5 metadata are isolated per object version, including current and explicit-version reads | Mapped and green |
+| `test_s3.py::TestS3SSECEncryption::test_put_object_default_checksum_with_sse_c` | SSE-C uses the shared checksum path, so computed/default checksum metadata remains available only after successful customer-key validation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_preconditions` | `TestCopySourcePreconditionsCharacterization`, AWS SDK contract, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_modified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_unmodified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |

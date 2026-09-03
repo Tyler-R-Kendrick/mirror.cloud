@@ -737,6 +737,13 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	if body := w.Body.String(); err != nil || !strings.Contains(body, "<Buckets><Bucket><BucketRegion>us-west-2</BucketRegion><CreationDate>date</CreationDate><Name>one</Name></Bucket></Buckets>") || strings.Contains(body, "<member>") {
 		t.Fatalf("bucket list response %v %s", err, body)
 	}
+	w = httptest.NewRecorder()
+	err = codec.Encode(svc, &model.Operation{Name: "GetObjectAttributes"}, w, &spi.Response{Output: map[string]any{
+		"ObjectSize": 4, "StorageClass": "STANDARD", "ObjectParts": map[string]any{"TotalPartsCount": 1, "Parts": []any{map[string]any{"PartNumber": 1}}}, "Checksum": map[string]any{"ChecksumCRC32": "sum"}, "ETag": "etag",
+	}})
+	if body, want := w.Body.String(), "<?xml version=\"1.0\" encoding=\"UTF-8\"?><GetObjectAttributesResponse><ETag>etag</ETag><Checksum><ChecksumCRC32>sum</ChecksumCRC32></Checksum><ObjectParts><PartsCount>1</PartsCount><Part><PartNumber>1</PartNumber></Part></ObjectParts><StorageClass>STANDARD</StorageClass><ObjectSize>4</ObjectSize></GetObjectAttributesResponse>"; err != nil || body != want {
+		t.Fatalf("object attributes response %v %s", err, body)
+	}
 	for _, operation := range []string{"ListObjects", "ListObjectsV2"} {
 		w = httptest.NewRecorder()
 		err := codec.Encode(svc, &model.Operation{Name: operation}, w, &spi.Response{Output: map[string]any{

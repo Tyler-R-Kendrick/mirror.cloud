@@ -1660,13 +1660,14 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	case "ListObjects", "ListObjectsV2":
 		writeFlattened(resp.Output, &b, [][2]string{{"Contents", "Contents"}, {"CommonPrefixes", "CommonPrefixes"}})
 	case "GetObjectAttributes":
-		top := make(map[string]any, len(resp.Output)-1)
-		for key, value := range resp.Output {
-			if key != "ObjectParts" {
-				top[key] = value
+		writeFields := func(keys ...string) {
+			for _, key := range keys {
+				if value, ok := resp.Output[key]; ok {
+					write(map[string]any{key: value}, &b)
+				}
 			}
 		}
-		write(top, &b)
+		writeFields("ETag", "Checksum")
 		if parts, ok := resp.Output["ObjectParts"].(map[string]any); ok {
 			b.WriteString("<ObjectParts>")
 			encoded := make(map[string]any, len(parts))
@@ -1680,6 +1681,7 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 			writeFlattened(encoded, &b, [][2]string{{"Parts", "Part"}})
 			b.WriteString("</ObjectParts>")
 		}
+		writeFields("StorageClass", "ObjectSize")
 	case "GetObjectTagging", "GetBucketTagging":
 		b.WriteString("<TagSet>")
 		for _, item := range resp.Output["TagSet"].([]any) {

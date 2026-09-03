@@ -2467,8 +2467,8 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		head := do(http.MethodHead, "/upload-part-copy-bdd/source", nil, "")
 		modified, err := http.ParseTime(head.Header.Get("Last-Modified"))
 		head.Body.Close()
-		if err != nil {
-			t.Fatal(err)
+		if err != nil || !strings.HasSuffix(head.Header.Get("Last-Modified"), " GMT") {
+			t.Fatalf("Last-Modified = %q: %v", head.Header.Get("Last-Modified"), err)
 		}
 		_ = deps.Clock.Advance(2 * time.Second)
 		defer deps.Clock.Advance(-2 * time.Second)

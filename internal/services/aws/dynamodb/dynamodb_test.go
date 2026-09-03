@@ -143,6 +143,86 @@ func TestDynamoDBTTLCharacterization(t *testing.T) {
 	})
 }
 
+func TestDynamoDBTTLExpiration(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	must := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	for _, table := range []map[string]any{
+		{"TableName": "hash", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}},
+		{"TableName": "range", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}, map[string]any{"AttributeName": "range", "KeyType": "RANGE"}}},
+		{"TableName": "disabled", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}},
+	} {
+		must("CreateTable", table)
+	}
+	for _, table := range []string{"hash", "range"} {
+		must("UpdateTimeToLive", map[string]any{"TableName": table, "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}})
+	}
+	must("UpdateTimeToLive", map[string]any{"TableName": "disabled", "TimeToLiveSpecification": map[string]any{"Enabled": false, "AttributeName": "ttl"}})
+	past, future := strconv.FormatInt(deps.Clock.Now().Unix()-10, 10), strconv.FormatInt(deps.Clock.Now().Unix()+120, 10)
+	must("PutItem", map[string]any{"TableName": "hash", "Item": map[string]any{"id": map[string]any{"S": "expired"}, "ttl": map[string]any{"N": past}}})
+	must("PutItem", map[string]any{"TableName": "hash", "Item": map[string]any{"id": map[string]any{"S": "future"}, "ttl": map[string]any{"N": future}}})
+	must("PutItem", map[string]any{"TableName": "range", "Item": map[string]any{"id": map[string]any{"S": "expired"}, "range": map[string]any{"S": "one"}, "ttl": map[string]any{"N": past}}})
+	must("PutItem", map[string]any{"TableName": "range", "Item": map[string]any{"id": map[string]any{"S": "future"}, "range": map[string]any{"S": "two"}, "ttl": map[string]any{"N": future}}})
+	must("PutItem", map[string]any{"TableName": "disabled", "Item": map[string]any{"id": map[string]any{"S": "expired"}, "ttl": map[string]any{"N": past}}})
+	if got := must("ExpireItems", nil).Output["ExpiredItems"]; got != 2 {
+		t.Fatalf("expired count %v", got)
+	}
+	for _, tc := range []struct {
+		table string
+		key   map[string]any
+		found bool
+	}{
+		{"hash", map[string]any{"id": map[string]any{"S": "expired"}}, false},
+		{"hash", map[string]any{"id": map[string]any{"S": "future"}}, true},
+		{"range", map[string]any{"id": map[string]any{"S": "expired"}, "range": map[string]any{"S": "one"}}, false},
+		{"range", map[string]any{"id": map[string]any{"S": "future"}, "range": map[string]any{"S": "two"}}, true},
+		{"disabled", map[string]any{"id": map[string]any{"S": "expired"}}, true},
+	} {
+		found := must("GetItem", map[string]any{"TableName": tc.table, "Key": tc.key}).Output["Item"] != nil
+		if found != tc.found {
+			t.Fatalf("%s %#v found=%t", tc.table, tc.key, found)
+		}
+	}
+}
+
+func TestDynamoDBTTLExpirationCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	must := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	must("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
+	must("UpdateTimeToLive", map[string]any{"TableName": "T", "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}})
+	for _, item := range []map[string]any{
+		{"id": map[string]any{"S": "expired"}, "ttl": map[string]any{"N": "-1"}},
+		{"id": map[string]any{"S": "future"}, "ttl": map[string]any{"N": "9999999999"}},
+		{"id": map[string]any{"S": "invalid"}, "ttl": map[string]any{"S": "yesterday"}},
+		{"id": map[string]any{"S": "unset"}},
+	} {
+		must("PutItem", map[string]any{"TableName": "T", "Item": item})
+	}
+	golden.AssertJSON(t, map[string]any{
+		"expiration": must("ExpireItems", nil).Output,
+		"expired":    must("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "expired"}}}).Output,
+		"remaining":  must("Scan", map[string]any{"TableName": "T"}).Output,
+	})
+}
+
 func TestQueryKeyConditionNotUnfilteredScan(t *testing.T) {
 	p := &Pack{deps: spitest.Deps(t)}
 	ctx := context.Background()

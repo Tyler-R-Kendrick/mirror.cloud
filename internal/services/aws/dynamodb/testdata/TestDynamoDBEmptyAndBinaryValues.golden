@@ -1,0 +1,51 @@
+{
+  "batch1": {
+    "PK": {
+      "S": "batch-1"
+    },
+    "SK": {
+      "S": "item"
+    },
+    "data": {
+      "B": "dGVzdC0x"
+    }
+  },
+  "batch2": {
+    "PK": {
+      "S": "batch-2"
+    },
+    "SK": {
+      "S": "item"
+    },
+    "data": {
+      "B": "dGVzdCDAIN0="
+    }
+  },
+  "batchResponse": {
+    "UnprocessedItems": {}
+  },
+  "binary": {
+    "PK": {
+      "S": "binary"
+    },
+    "SK": {
+      "S": "item"
+    },
+    "data": {
+      "B": "kA=="
+    }
+  },
+  "binaryResponse": {},
+  "empty": {
+    "PK": {
+      "S": "empty"
+    },
+    "SK": {
+      "S": "item"
+    },
+    "data": {
+      "S": ""
+    }
+  },
+  "emptyResponse": {}
+}

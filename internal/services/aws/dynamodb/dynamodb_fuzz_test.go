@@ -2,6 +2,7 @@ package dynamodb
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"strings"
 	"testing"
@@ -44,6 +45,31 @@ func FuzzTableLifecycle(f *testing.F) {
 		tags := asSlice(listed.Output["Tags"])
 		if created != nil || duplicate == nil || tagsErr != nil || len(tags) != 1 || str(asMap(tags[0])["Value"]) != name || firstPut != nil || firstReturn.Output["Attributes"] != nil || putErr != nil || secondReturn.Output["Attributes"] == nil || getErr != nil || str(asMap(asMap(got.Output["Item"])["data"])["S"]) != value || invalidProjection == nil || ttlEnable != nil || expiredPut != nil || expirationErr != nil || expiration.Output["ExpiredItems"] != 1 || expiredGet != nil || expiredItem.Output["Item"] != nil || deleted != nil || missing == nil || missingQuery == nil || missingTransaction == nil || ttlDescribe == nil || ttlUpdate == nil {
 			t.Fatal("table lifecycle was not create/tag/conflict/delete/missing")
+		}
+	})
+}
+
+func FuzzDynamoDBBinaryValues(f *testing.F) {
+	f.Add([]byte{0x90})
+	f.Add([]byte("test \xc0 \xed"))
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		if len(raw) > 1024 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+		call := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		_, _ = call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
+		encoded := base64.StdEncoding.EncodeToString(raw)
+		_, putErr := call("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "one"}, "data": map[string]any{"B": encoded}}})
+		batch, batchErr := call("BatchWriteItem", map[string]any{"RequestItems": map[string]any{"T": []any{map[string]any{"PutRequest": map[string]any{"Item": map[string]any{"id": map[string]any{"S": "two"}, "data": map[string]any{"B": encoded}}}}}}})
+		one, oneErr := call("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "one"}}})
+		two, twoErr := call("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "two"}}})
+		if putErr != nil || batchErr != nil || oneErr != nil || twoErr != nil || len(asMap(batch.Output["UnprocessedItems"])) != 0 || str(asMap(asMap(one.Output["Item"])["data"])["B"]) != encoded || str(asMap(asMap(two.Output["Item"])["data"])["B"]) != encoded {
+			t.Fatal("binary values did not round trip")
 		}
 	})
 }

@@ -8587,6 +8587,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestDynamoDBPutItemReturnValues",
 		},
 		{
+			name: "dynamodb-drop-created-table-class",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
+			old:  `rec["TableClassSummary"] = map[string]any{"TableClass": class}`,
+			new:  `delete(rec, "TableClassSummary")`,
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestDynamoDBTableClass",
+		},
+		{
+			name: "dynamodb-drop-updated-table-class",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
+			old:  `m["TableClassSummary"] = map[string]any{"TableClass": class}`,
+			new:  `delete(m, "TableClassSummary")`,
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestDynamoDBTableClass",
+		},
+		{
 			name: "dynamodb-batch-write-missing-table",
 			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
 			old:  "case \"BatchWriteItem\":\n\t\tif ri, ok := req.Input[\"RequestItems\"].(map[string]any); ok {\n\t\t\tfor tbl, spec := range ri {\n\t\t\t\tif err := requireTable(tbl); err != nil {",

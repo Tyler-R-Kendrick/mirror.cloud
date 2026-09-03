@@ -81,6 +81,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		tags := rec["Tags"]
 		delete(rec, "Tags")
 		rec["TableArn"] = arn
+		if class := str(rec["TableClass"]); class != "" {
+			rec["TableClassSummary"] = map[string]any{"TableClass": class}
+			delete(rec, "TableClass")
+		}
 		p.ensureStream(req, rec, table)
 		b, _ = json.Marshal(rec)
 		if err := p.col(req, "tables").Txn(ctx, func(tx spi.Tx) error {
@@ -96,7 +100,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if len(asSlice(tags)) > 0 {
 			_, _ = p.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "TagResource", Input: map[string]any{"ResourceArn": arn, "Tags": tags}})
 		}
-		return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{"TableName": table, "TableArn": arn, "TableStatus": "ACTIVE", "LatestStreamArn": rec["LatestStreamArn"]}}}, nil
+		description := map[string]any{"TableName": table, "TableArn": arn, "TableStatus": "ACTIVE", "LatestStreamArn": rec["LatestStreamArn"]}
+		if summary := rec["TableClassSummary"]; summary != nil {
+			description["TableClassSummary"] = summary
+		}
+		return &spi.Response{Output: map[string]any{"TableDescription": description}}, nil
 	case "DeleteTable":
 		if err := p.col(req, "tables").Txn(ctx, func(tx spi.Tx) error {
 			if _, ok, err := tx.Get(table); err != nil {
@@ -509,6 +517,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if spec := req.Input["StreamSpecification"]; spec != nil {
 			m["StreamSpecification"] = spec
 			p.ensureStream(req, m, table)
+		}
+		if class := str(req.Input["TableClass"]); class != "" {
+			m["TableClassSummary"] = map[string]any{"TableClass": class}
 		}
 		nb, _ := json.Marshal(m)
 		_ = p.col(req, "tables").Put(ctx, table, nb)

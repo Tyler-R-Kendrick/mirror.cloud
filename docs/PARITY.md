@@ -521,8 +521,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 |---|---:|
 | Requested test forms wired | 7 / 7 (100%) |
 | DynamoDB operations routed to emulation | 62 / 62 (100%) |
-| LocalStack DynamoDB test functions explicitly traced | 18 / 56 (32.1%) |
-| LocalStack DynamoDB test functions not yet traced | 38 / 56 (67.9%) |
+| LocalStack DynamoDB test functions explicitly traced | 19 / 56 (33.9%) |
+| LocalStack DynamoDB test functions not yet traced | 37 / 56 (66.1%) |
 
 The pinned inventory is the 56 direct test functions in `tests/aws/services/dynamodb/test_dynamodb.py`; parametrized cases are not expanded.
 
@@ -546,3 +546,4 @@ The pinned inventory is the 56 direct test functions in `tests/aws/services/dyna
 | `test_dynamodb.py::TestDynamoDB::test_return_values_in_put_item` | PutItem now omits the `Attributes` member for an empty `ALL_OLD` result and returns the complete previous item on replacement; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, and semantic mutation checks pin both branches | Mapped; race-pending |
 | `test_dynamodb.py::TestDynamoDB::test_empty_and_binary_values` | PutItem preserves empty strings and arbitrary binary attributes, including non-UTF-8 bytes represented by DynamoDB's base64 wire encoding; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, and native fuzz checks cover exact round trips | Mapped; race-pending |
 | `test_dynamodb.py::TestDynamoDB::test_batch_write_binary` | BatchWriteItem preserves binary values with decodable and non-decodable byte sequences, returns an empty UnprocessedItems map, and is pinned by atomic/snapshot, SDK, BDD, fuzz, and semantic mutation coverage | Mapped; race-pending |
+| `test_dynamodb.py::TestDynamoDB::test_dynamodb_create_table_with_class` | CreateTable translates `TableClass` into a persisted `TableClassSummary`, while UpdateTable changes the summary observed by subsequent DescribeTable calls; atomic, Verify-style snapshot, SDK contract, raw HTTP BDD, native fuzz, and two semantic mutants cover the lifecycle | Mapped; race-pending |

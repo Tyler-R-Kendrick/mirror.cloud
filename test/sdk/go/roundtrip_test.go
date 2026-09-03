@@ -1873,7 +1873,7 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		t.Fatalf("replicated version body=%q output=%#v", replicaBody, replicaGet)
 	}
 	put, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{
-		Bucket: aws.String("sdk"), Key: aws.String("k"), Body: bytes.NewReader([]byte("hello-sdk")), ChecksumAlgorithm: s3types.ChecksumAlgorithmCrc32, Tagging: aws.String("stage=original"), ContentType: aws.String("text/plain"), CacheControl: aws.String("max-age=60"), Metadata: map[string]string{"owner": "mirror"}, WebsiteRedirectLocation: aws.String("/old"),
+		Bucket: aws.String("sdk"), Key: aws.String("k"), Body: bytes.NewReader([]byte("hello-sdk")), ChecksumAlgorithm: s3types.ChecksumAlgorithmCrc32, Tagging: aws.String("stage=original"), ContentType: aws.String("text/plain"), CacheControl: aws.String("no-cache"), ContentLanguage: aws.String("de"), ContentDisposition: aws.String(`attachment; filename="foo.jpg"`), Metadata: map[string]string{"owner": "mirror"}, WebsiteRedirectLocation: aws.String("/old"),
 	})
 	if err != nil {
 		t.Fatalf("put: %v", err)
@@ -1890,8 +1890,21 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if string(body) != "hello-sdk" {
 		t.Fatalf("s3 body %q", body)
 	}
-	if aws.ToString(got.ContentType) != "text/plain" || aws.ToString(got.CacheControl) != "max-age=60" || got.Metadata["owner"] != "mirror" || aws.ToString(got.WebsiteRedirectLocation) != "/old" {
+	if aws.ToString(got.ContentType) != "text/plain" || aws.ToString(got.CacheControl) != "no-cache" || aws.ToString(got.ContentLanguage) != "de" || aws.ToString(got.ContentDisposition) != `attachment; filename="foo.jpg"` || got.Metadata["owner"] != "mirror" || aws.ToString(got.WebsiteRedirectLocation) != "/old" {
 		t.Fatalf("s3 metadata %#v", got)
+	}
+	utf8Put, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("Ā0Ä"), Body: strings.NewReader("abc123"), ChecksumAlgorithm: s3types.ChecksumAlgorithmCrc32})
+	if err != nil || utf8Put.ServerSideEncryption != s3types.ServerSideEncryptionAes256 || aws.ToString(utf8Put.ChecksumCRC32) == "" {
+		t.Fatalf("put utf8 key: %#v %v", utf8Put, err)
+	}
+	utf8Get, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("Ā0Ä"), ChecksumMode: s3types.ChecksumModeEnabled})
+	if err != nil {
+		t.Fatalf("get utf8 key: %v", err)
+	}
+	utf8Body, _ := io.ReadAll(utf8Get.Body)
+	_ = utf8Get.Body.Close()
+	if string(utf8Body) != "abc123" || utf8Get.ServerSideEncryption != s3types.ServerSideEncryptionAes256 || aws.ToString(utf8Get.ChecksumCRC32) != aws.ToString(utf8Put.ChecksumCRC32) {
+		t.Fatalf("stored utf8 key: body=%q output=%#v", utf8Body, utf8Get)
 	}
 	listETag := aws.String(`"wrong", ` + aws.ToString(got.ETag))
 	if _, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("k"), IfMatch: listETag}); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") || !strings.Contains(err.Error(), "At least one of the pre-conditions you specified did not hold") {

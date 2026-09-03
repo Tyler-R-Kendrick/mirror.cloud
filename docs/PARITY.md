@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
-| LocalStack S3 test functions explicitly traced | 280 / 463 (60.5%) |
-| LocalStack S3 test functions not yet traced | 183 / 463 (39.5%) |
+| LocalStack S3 test functions explicitly traced | 291 / 463 (62.9%) |
+| LocalStack S3 test functions not yet traced | 172 / 463 (37.1%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -136,6 +136,17 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3.py::TestS3::test_s3_request_payer_exceptions` | Request-payment atomic/SDK/HTTP coverage, fuzz, chaos, snapshot, and mutations verify invalid payer values preserve prior state and missing buckets return exact `NoSuchBucket` faults | Mapped and race-clean |
 | `test_s3.py::TestS3::test_bucket_exists` | Bucket CORS and ACL atomic, SDK/raw HTTP, fuzz, chaos, snapshot, and mutation coverage verify configured reads succeed while the same ACL read on an absent bucket returns `NoSuchBucket` | Mapped and race-clean |
 | `test_s3.py::TestS3::test_s3_uppercase_key_names` | Special-key characterization, case-sensitive list-prefix atomic coverage, SDK/raw HTTP contracts, fuzz, chaos, snapshots, and mutations verify object keys preserve case and differently cased reads return `NoSuchKey` | Mapped and race-clean |
+| `test_s3.py::TestS3::test_s3_download_object_with_lambda` | `TestS3ObjectLifecycle` boots S3 and Lambda together, injects the endpoint through the function environment, invokes a Python handler, and verifies its anonymous S3 download body; Lambda environment unit and mutation checks pin the subprocess boundary | Mapped and green |
+| `test_s3.py::TestS3::test_s3_invalid_content_md5` | PutObject and UploadPart checksum atomic/SDK/HTTP tests, exhaustive invalid-digest fuzz seeds, concurrent chaos, snapshots, and mutations verify malformed versus mismatched MD5 faults, calculated fields, success, and no invalid write | Mapped and race-clean |
+| `test_s3.py::TestS3::test_s3_upload_download_gzip` | Object-metadata atomic, SDK/raw HTTP, fuzz, chaos, snapshot, and mutation coverage verifies gzip bytes remain opaque while `Content-Encoding: gzip` round-trips and the caller can decompress the original payload | Mapped and race-clean |
+| `test_s3.py::TestS3::test_multipart_overwrite_key` | Multipart atomic, SDK/HTTP, fuzz, concurrent chaos, snapshots, and mutations verify completing an upload atomically replaces an existing key with the assembled body and multipart ETag | Mapped and race-clean |
+| `test_s3.py::TestS3::test_multipart_copy_object_etag` | Multipart/copy characterization, SDK/raw HTTP contracts, fuzz, chaos, snapshots, and ETag mutants verify ordinary and in-place copies of multipart objects receive the single-object ETag rather than retaining the source composite ETag | Mapped and race-clean |
+| `test_s3.py::TestS3::test_get_object_part` | `TestMultipartPartReads`, AWS SDK/raw HTTP contracts, fuzz, chaos, snapshots, and five semantic mutants verify GET/HEAD part selection, counts and ranges, missing parts, range exclusivity, and single-part fallback | Mapped and race-clean |
+| `test_s3.py::TestS3::test_get_object_part_checksum` | Multipart part-read and aggregate-checksum atomic/SDK coverage, fuzz, chaos, snapshots, and mutations verify COMPOSITE and FULL_OBJECT part responses expose the selected part checksum and count | Mapped and race-clean |
+| `test_s3.py::TestS3::test_set_external_hostname` | Multipart location characterization now carries `AdvertiseURL` through the edge request and verifies a configured scheme, host, port, base path, bucket, and key; a semantic mutant prevents fallback to the AWS hostname | Mapped and green |
+| `test_s3.py::TestS3::test_s3_hostname_with_subdomain` | S3 edge-demultiplexing atomic/HTTP tests, virtual-host fuzz, concurrent chaos, snapshots, and mutations verify non-S3 subdomains do not turn a base ListBuckets request into bucket addressing | Mapped and race-clean |
+| `test_s3.py::TestS3::test_s3_lambda_integration` | Lambda environment/function-name tests and the cross-service BDD prove handler-to-S3 endpoint access; presigned URL atomic/SDK/HTTP/fuzz/chaos/snapshot/mutation coverage verifies the returned S3 URL can authorize the subsequent object write | Mapped and green |
+| `test_s3.py::TestS3::test_s3_uppercase_bucket_name` | `TestCreateBucketValidatesGlobalNames`, SDK/raw HTTP contracts, bucket-name fuzz, concurrent creation chaos, snapshot, and mutation coverage verify uppercase names fail with exact `InvalidBucketName` before reserving state | Mapped and race-clean |
 | `test_s3_preconditions.py::test_s3_copy_object_preconditions` | `TestCopySourcePreconditionsCharacterization`, AWS SDK contract, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_modified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_unmodified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |

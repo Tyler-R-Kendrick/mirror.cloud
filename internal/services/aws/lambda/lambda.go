@@ -83,6 +83,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			"Runtime":      str(req.Input["Runtime"]),
 			"Handler":      str(req.Input["Handler"]),
 			"Code":         req.Input["Code"],
+			"Environment":  req.Input["Environment"],
 		}
 		b, _ := json.Marshal(rec)
 		_ = p.col(req).Put(ctx, name, b)
@@ -356,7 +357,7 @@ func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			payload = []byte("{}")
 		}
 	}
-	out, err := runHandler(str(rec["Runtime"]), str(rec["Handler"]), rec["Code"], payload)
+	out, err := runHandler(name, str(rec["Runtime"]), str(rec["Handler"]), rec["Code"], rec["Environment"], payload)
 	if invocationType == "Event" {
 		return &spi.Response{Status: http.StatusAccepted, Output: map[string]any{"StatusCode": http.StatusAccepted}}, nil
 	}
@@ -366,7 +367,7 @@ func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	return &spi.Response{Output: map[string]any{"StatusCode": 200, "Payload": json.RawMessage(out)}}, nil
 }
 
-func runHandler(runtime, handler string, code any, payload []byte) ([]byte, error) {
+func runHandler(name, runtime, handler string, code, environment any, payload []byte) ([]byte, error) {
 	dir, err := os.MkdirTemp("", "mirror-lambda-*")
 	if err != nil {
 		return nil, err
@@ -376,6 +377,14 @@ func runHandler(runtime, handler string, code any, payload []byte) ([]byte, erro
 		return nil, err
 	}
 	rt := strings.ToLower(runtime)
+	env := append(os.Environ(), "AWS_LAMBDA_FUNCTION_NAME="+name)
+	if configuration, ok := environment.(map[string]any); ok {
+		if variables, ok := configuration["Variables"].(map[string]any); ok {
+			for key, value := range variables {
+				env = append(env, key+"="+str(value))
+			}
+		}
+	}
 	switch {
 	case strings.Contains(rt, "python"):
 		bin, err := exec.LookPath("python3")
@@ -386,6 +395,7 @@ func runHandler(runtime, handler string, code any, payload []byte) ([]byte, erro
 		script := "import json,sys,importlib; m=importlib.import_module('" + mod + "'); ev=json.load(sys.stdin); print(json.dumps(getattr(m,'" + fn + "')(ev,None)))"
 		cmd := exec.Command(bin, "-c", script)
 		cmd.Dir = dir
+		cmd.Env = env
 		cmd.Stdin = bytes.NewReader(payload)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -401,6 +411,7 @@ func runHandler(runtime, handler string, code any, payload []byte) ([]byte, erro
 		script := "const m=require('./" + mod + "'); let d=''; process.stdin.on('data',c=>d+=c); process.stdin.on('end',()=>{Promise.resolve(m." + fn + "(JSON.parse(d||'{}'))).then(r=>process.stdout.write(JSON.stringify(r)))})"
 		cmd := exec.Command(bin, "-e", script)
 		cmd.Dir = dir
+		cmd.Env = env
 		cmd.Stdin = bytes.NewReader(payload)
 		out, err := cmd.CombinedOutput()
 		if err != nil {

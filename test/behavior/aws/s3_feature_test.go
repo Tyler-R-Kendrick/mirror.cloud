@@ -126,6 +126,19 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a GET request body When reading an object Then the body is ignored", func(t *testing.T) {
+		res := do(http.MethodPut, "/get-body-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/get-body-bdd/key", []byte("stored"), "")
+		res.Body.Close()
+		res = do(http.MethodGet, "/get-body-bdd/key", []byte("ignored"), "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(body) != "stored" {
+			t.Fatalf("GET body handling %d %q", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given a UTF-8 key and system metadata When put and fetched Then the object round trips", func(t *testing.T) {
 		res := do(http.MethodPut, "/utf8-metadata-bdd", nil, "")
 		res.Body.Close()

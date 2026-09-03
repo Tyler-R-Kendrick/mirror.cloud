@@ -521,8 +521,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 |---|---:|
 | Requested test forms wired | 7 / 7 (100%) |
 | DynamoDB operations routed to emulation | 62 / 62 (100%) |
-| LocalStack DynamoDB test functions explicitly traced | 16 / 56 (28.6%) |
-| LocalStack DynamoDB test functions not yet traced | 40 / 56 (71.4%) |
+| LocalStack DynamoDB test functions explicitly traced | 18 / 56 (32.1%) |
+| LocalStack DynamoDB test functions not yet traced | 38 / 56 (67.9%) |
 
 The pinned inventory is the 56 direct test functions in `tests/aws/services/dynamodb/test_dynamodb.py`; parametrized cases are not expanded.
 
@@ -544,3 +544,5 @@ The pinned inventory is the 56 direct test functions in `tests/aws/services/dyna
 | `test_dynamodb.py::TestDynamoDB::test_valid_local_secondary_index` | The shared GSI/LSI resolver queries an `ALL` local-secondary-index projection with HASH/RANGE keys and preserves the complete item; atomic and Verify-style snapshot coverage extends the existing SDK, raw HTTP, fuzz, and mutation index checks | Mapped; race-pending |
 | `test_dynamodb.py::TestDynamoDB::test_more_than_20_global_secondary_indexes` | CreateTable and DescribeTable preserve all 25 LocalStack-only GSI definitions; atomic and Verify-style snapshot coverage pins the exact count while the shared index contract/fuzz/mutation layer covers lookup behavior | Mapped; race-pending |
 | `test_dynamodb.py::TestDynamoDB::test_return_values_in_put_item` | PutItem now omits the `Attributes` member for an empty `ALL_OLD` result and returns the complete previous item on replacement; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, and semantic mutation checks pin both branches | Mapped; race-pending |
+| `test_dynamodb.py::TestDynamoDB::test_empty_and_binary_values` | PutItem preserves empty strings and arbitrary binary attributes, including non-UTF-8 bytes represented by DynamoDB's base64 wire encoding; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, and native fuzz checks cover exact round trips | Mapped; race-pending |
+| `test_dynamodb.py::TestDynamoDB::test_batch_write_binary` | BatchWriteItem preserves binary values with decodable and non-decodable byte sequences, returns an empty UnprocessedItems map, and is pinned by atomic/snapshot, SDK, BDD, fuzz, and semantic mutation coverage | Mapped; race-pending |

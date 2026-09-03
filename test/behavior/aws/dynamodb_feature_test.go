@@ -156,4 +156,20 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 			t.Fatalf("transaction missing table %d %s", status, body)
 		}
 	})
+
+	t.Run("Given projected indexes When selecting all attributes Then projection rules are enforced", func(t *testing.T) {
+		create := `{"TableName":"Indexes","KeySchema":[{"AttributeName":"id","KeyType":"HASH"}],"GlobalSecondaryIndexes":[{"IndexName":"keys","KeySchema":[{"AttributeName":"fieldA","KeyType":"HASH"}],"Projection":{"ProjectionType":"KEYS_ONLY"}},{"IndexName":"all","KeySchema":[{"AttributeName":"fieldB","KeyType":"HASH"}],"Projection":{"ProjectionType":"ALL"}}]}`
+		if status, body := call("CreateTable", create); status != http.StatusOK {
+			t.Fatalf("create indexes %d %s", status, body)
+		}
+		if status, body := call("PutItem", `{"TableName":"Indexes","Item":{"id":{"S":"1"},"fieldA":{"S":"a"},"fieldB":{"S":"b"},"data":{"S":"value"}}}`); status != http.StatusOK {
+			t.Fatalf("put indexed item %d %s", status, body)
+		}
+		if status, body := call("Query", `{"TableName":"Indexes","IndexName":"keys","KeyConditionExpression":"fieldA = :v","ExpressionAttributeValues":{":v":{"S":"a"}},"Select":"ALL_ATTRIBUTES"}`); status != http.StatusBadRequest || !bytes.Contains(body, []byte("ValidationException")) {
+			t.Fatalf("invalid projection %d %s", status, body)
+		}
+		if status, body := call("Query", `{"TableName":"Indexes","IndexName":"all","KeyConditionExpression":"fieldB = :v","ExpressionAttributeValues":{":v":{"S":"b"}},"Select":"ALL_ATTRIBUTES"}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"data":{"S":"value"}`)) {
+			t.Fatalf("all projection %d %s", status, body)
+		}
+	})
 }

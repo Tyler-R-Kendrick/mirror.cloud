@@ -240,6 +240,50 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given anonymous public objects When batch deleted Then both objects are removed", func(t *testing.T) {
+		res := do(http.MethodPut, "/anonymous-delete-bdd", nil, "")
+		res.Body.Close()
+		acl, _ := http.NewRequest(http.MethodPut, ts.URL+"/anonymous-delete-bdd?acl", nil)
+		acl.Header.Set("Authorization", auth)
+		acl.Header.Set("x-amz-acl", "public-read-write")
+		res, err = http.DefaultClient.Do(acl)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		for _, key := range []string{"first", "second"} {
+			put, _ := http.NewRequest(http.MethodPut, ts.URL+"/anonymous-delete-bdd/"+key, strings.NewReader(key))
+			put.Header.Set("x-amz-acl", "public-read-write")
+			res, err = http.DefaultClient.Do(put)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("anonymous put %s: %d", key, res.StatusCode)
+			}
+		}
+		body := []byte(`<Delete><Object><Key>first</Key></Object><Object><Key>second</Key></Object></Delete>`)
+		digest := md5.Sum(body)
+		request, _ := http.NewRequest(http.MethodPost, ts.URL+"/anonymous-delete-bdd?delete", bytes.NewReader(body))
+		request.Header.Set("Content-MD5", base64.StdEncoding.EncodeToString(digest[:]))
+		res, err = http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deleted, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || bytes.Count(deleted, []byte("<Deleted>")) != 2 {
+			t.Fatalf("anonymous delete %d %s", res.StatusCode, deleted)
+		}
+		res = do(http.MethodGet, "/anonymous-delete-bdd", nil, "")
+		listed, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || bytes.Contains(listed, []byte("<Contents>")) {
+			t.Fatalf("remaining objects %d %s", res.StatusCode, listed)
+		}
+	})
+
 	t.Run("Given a Lambda with S3 endpoint variables When invoked Then it downloads the object", func(t *testing.T) {
 		res := do(http.MethodPut, "/lambda-read-bdd", nil, "")
 		res.Body.Close()

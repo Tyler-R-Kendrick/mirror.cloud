@@ -218,4 +218,16 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 			t.Fatalf("get binary value %d %s", status, body)
 		}
 	})
+
+	t.Run("Given a table class When creating and updating a table Then the class summary persists", func(t *testing.T) {
+		if status, body := call("CreateTable", `{"TableName":"TableClass","KeySchema":[{"AttributeName":"id","KeyType":"HASH"}],"TableClass":"STANDARD"}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"TableClassSummary":{"TableClass":"STANDARD"}`)) {
+			t.Fatalf("create table class %d %s", status, body)
+		}
+		if status, body := call("UpdateTable", `{"TableName":"TableClass","TableClass":"STANDARD_INFREQUENT_ACCESS"}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"TableClassSummary":{"TableClass":"STANDARD_INFREQUENT_ACCESS"}`)) {
+			t.Fatalf("update table class %d %s", status, body)
+		}
+		if status, body := call("DescribeTable", `{"TableName":"TableClass"}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"TableClassSummary":{"TableClass":"STANDARD_INFREQUENT_ACCESS"}`)) {
+			t.Fatalf("describe table class %d %s", status, body)
+		}
+	})
 }

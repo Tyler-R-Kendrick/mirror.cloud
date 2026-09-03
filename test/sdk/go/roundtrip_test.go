@@ -3148,6 +3148,17 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if data, ok := indexed.Items[0]["data"].(*ddbtypes.AttributeValueMemberS); !ok || data.Value != "value" {
 		t.Fatalf("indexed data %#v", indexed.Items)
 	}
+	if _, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("Returns"), BillingMode: ddbtypes.BillingModePayPerRequest, KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: ddbtypes.KeyTypeHash}}, AttributeDefinitions: []ddbtypes.AttributeDefinition{{AttributeName: aws.String("id"), AttributeType: ddbtypes.ScalarAttributeTypeS}}}); err != nil {
+		t.Fatalf("create returns table: %v", err)
+	}
+	firstPut, err := ddb.PutItem(context.Background(), &dynamodb.PutItemInput{TableName: aws.String("Returns"), Item: map[string]ddbtypes.AttributeValue{"id": &ddbtypes.AttributeValueMemberS{Value: "1"}, "data": &ddbtypes.AttributeValueMemberS{Value: "foobar"}}, ReturnValues: ddbtypes.ReturnValueAllOld})
+	if err != nil || len(firstPut.Attributes) != 0 {
+		t.Fatalf("first all-old: %#v %v", firstPut, err)
+	}
+	secondPut, err := ddb.PutItem(context.Background(), &dynamodb.PutItemInput{TableName: aws.String("Returns"), Item: map[string]ddbtypes.AttributeValue{"id": &ddbtypes.AttributeValueMemberS{Value: "1"}, "data": &ddbtypes.AttributeValueMemberS{Value: "barfoo"}}, ReturnValues: ddbtypes.ReturnValueAllOld})
+	if err != nil || len(secondPut.Attributes) != 2 {
+		t.Fatalf("replacement all-old: %#v %v", secondPut, err)
+	}
 	if ttl, err := ddb.DescribeTimeToLive(context.Background(), &dynamodb.DescribeTimeToLiveInput{TableName: aws.String("T")}); err != nil || ttl.TimeToLiveDescription == nil || ttl.TimeToLiveDescription.TimeToLiveStatus != ddbtypes.TimeToLiveStatusDisabled {
 		t.Fatalf("default ttl: %#v %v", ttl, err)
 	}

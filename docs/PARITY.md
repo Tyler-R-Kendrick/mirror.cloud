@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
-| LocalStack S3 test functions explicitly traced | 206 / 463 (44.5%) |
-| LocalStack S3 test functions not yet traced | 257 / 463 (55.5%) |
+| LocalStack S3 test functions explicitly traced | 216 / 463 (46.7%) |
+| LocalStack S3 test functions not yet traced | 247 / 463 (53.3%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -62,6 +62,16 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3.py::TestS3::test_get_object_attributes` | `TestGetObjectAttributesContract`, AWS SDK and raw HTTP contracts, characterization snapshot, fuzz, concurrent chaos, and extensive semantic mutation coverage verify flat and multipart ETag, size, class, checksum, and paginated part metadata | Mapped and race-clean |
 | `test_s3.py::TestS3::test_get_object_attributes_with_space` | `TestGetObjectAttributesVersionedCharacterization`, raw HTTP BDD, fuzz, snapshot, and semantic mutation coverage verify comma-separated attribute lists are identical with and without RFC 9110 optional whitespace | Mapped and race-clean |
 | `test_s3.py::TestS3::test_get_object_attributes_versioned` | Versioned characterization and AWS SDK contracts plus snapshot and mutation coverage verify current-version attributes, current delete-marker `NoSuchKey`, and explicit historical-version ETag, size, and storage class | Mapped and green |
+| `test_s3.py::TestS3::test_multipart_and_list_parts` | Multipart atomic tests, characterization snapshots, AWS SDK and raw HTTP contracts, fuzz, concurrent chaos, and semantic mutations verify empty and populated part/upload listings, completion cleanup, and checksum-enabled head/get metadata | Mapped and race-clean |
+| `test_s3.py::TestS3::test_multipart_no_such_upload` | `TestMultipartOperationsRejectMissingUpload`, `TestNoSuchUploadCharacterization`, SDK/HTTP contracts, fuzz, concurrent chaos, snapshot, and mutations verify exact `NoSuchUpload` faults for upload, complete, and abort | Mapped and race-clean |
+| `test_s3.py::TestS3::test_multipart_complete_multipart_too_small` | Multipart manifest and completion-fault characterization, SDK/HTTP contracts, fuzz, concurrent chaos, snapshot, and mutations verify missing-part manifests and non-final parts below 5 MiB | Mapped and race-clean |
+| `test_s3.py::TestS3::test_multipart_complete_multipart_wrong_part` | Multipart completion-fault characterization plus SDK/HTTP, fuzz, chaos, snapshot, and mutation coverage verify both wrong part numbers and mismatched ETags return exact `InvalidPart` faults | Mapped and race-clean |
+| `test_s3.py::TestS3::test_put_and_get_object_with_hash_prefix` | `TestSpecialObjectKeyCharacterization`, AWS SDK contract, raw HTTP BDD, fuzz seed, and snapshot coverage verify `#key-with-hash-prefix` is encoded as path data rather than discarded as a URL fragment | Mapped and green |
+| `test_s3.py::TestS3::test_invalid_range_error` | `TestObjectByteRanges`, AWS SDK and raw HTTP contracts, characterization coverage, fuzz, concurrent chaos, and mutations verify exact 416 `InvalidRange`, requested range, actual size, and `Content-Range` | Mapped and race-clean |
+| `test_s3.py::TestS3::test_range_key_not_exists` | Object-read atomic, SDK/HTTP, fuzz, chaos, and mutation coverage verify existence is resolved before range evaluation and returns `NoSuchKey` rather than `InvalidRange` | Mapped and race-clean |
+| `test_s3.py::TestS3::test_create_bucket_via_host_name` | Virtual-host edge routing, `TestCreateBucketLocationConstraints`, SDK and raw HTTP contracts, fuzz, concurrent chaos, snapshots, and mutation coverage verify virtual-host creation, Location response, lookup, and deletion | Mapped and race-clean |
+| `test_s3.py::TestS3::test_create_bucket_with_eu_location_constraint` | `TestCreateBucketLocationConstraints`, `TestListBucketsPaginationAndFilters`, SDK/HTTP contracts, fuzz, concurrent chaos, snapshots, and mutations verify `EU` aliases `eu-west-1` while preserving the configured location response | Mapped and race-clean |
+| `test_s3.py::TestS3::test_create_bucket_with_eu_location_constraint_raises` | Location-constraint atomic, SDK/HTTP, fuzz, snapshot, and mutation coverage verify `EU` is rejected outside the matching `eu-west-1` request region | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_preconditions` | `TestCopySourcePreconditionsCharacterization`, AWS SDK contract, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_modified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_unmodified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
@@ -254,4 +264,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 206/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 216/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

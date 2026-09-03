@@ -7323,6 +7323,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestGetObjectAttributesContract",
 		},
 		{
+			name: "s3-object-attributes-read-current-delete-marker",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  "if truthy(meta[\"deleteMarker\"]) {\n\t\treturn nil, deleteMarkerReadFault(meta, str(req.Input[\"VersionId\"]) != \"\")\n\t}\n\trequested := map[string]bool{}",
+			new:  "if false {\n\t\treturn nil, deleteMarkerReadFault(meta, str(req.Input[\"VersionId\"]) != \"\")\n\t}\n\trequested := map[string]bool{}",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestGetObjectAttributesVersionedCharacterization",
+		},
+		{
+			name: "s3-object-attributes-preserve-list-whitespace",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `requested[strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(attr), "_", ""))] = true`,
+			new:  `requested[strings.ToUpper(strings.ReplaceAll(attr, "_", ""))] = true`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestGetObjectAttributesVersionedCharacterization",
+		},
+		{
 			name: "s3-object-attributes-hide-standard-class",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `if requested["STORAGECLASS"] {`,

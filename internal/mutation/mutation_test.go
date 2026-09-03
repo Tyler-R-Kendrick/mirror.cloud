@@ -16979,6 +16979,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestInvokeAcceptsRawArrayPayload",
 		},
 		{
+			name: "lambda-drop-function-name-environment",
+			file: filepath.Join("internal", "services", "aws", "lambda", "lambda.go"),
+			old:  `env := append(os.Environ(), "AWS_LAMBDA_FUNCTION_NAME="+name)`,
+			new:  `env := os.Environ()`,
+			pkg:  "./internal/services/aws/lambda",
+			run:  "TestInvokeReceivesFunctionEnvironment",
+		},
+		{
+			name: "lambda-drop-configured-environment",
+			file: filepath.Join("internal", "services", "aws", "lambda", "lambda.go"),
+			old:  `if configuration, ok := environment.(map[string]any); ok {`,
+			new:  `if configuration, ok := environment.(map[string]any); false && ok {`,
+			pkg:  "./internal/services/aws/lambda",
+			run:  "TestInvokeReceivesFunctionEnvironment",
+		},
+		{
 			name: "pipes-ignore-updated-state",
 			file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
 			old:  `rec["CurrentState"] = state`,

@@ -57,9 +57,11 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	table := str(req.Input["TableName"])
 	requireTable := func(name string) error {
-		if _, ok, err := p.col(req, "tables").Get(ctx, name); err != nil {
+		_, ok, err := p.col(req, "tables").Get(ctx, name)
+		if err != nil {
 			return err
-		} else if !ok {
+		}
+		if !ok {
 			return &spi.Fault{Code: "ResourceNotFoundException", Message: "Requested resource not found", HTTPStatus: 400, Fault: "client"}
 		}
 		return nil

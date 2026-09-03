@@ -76,6 +76,21 @@ func TestTableLifecycleCharacterization(t *testing.T) {
 	})
 }
 
+func TestDynamoDBTTLMissingTableFaults(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	for _, operation := range []string{"DescribeTimeToLive", "UpdateTimeToLive"} {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: map[string]any{
+			"TableName": "missing", "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"},
+		}})
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "ResourceNotFoundException" || fault.HTTPStatus != 400 {
+			t.Fatalf("%s fault %#v", operation, fault)
+		}
+	}
+}
+
 func TestQueryKeyConditionNotUnfilteredScan(t *testing.T) {
 	p := &Pack{deps: spitest.Deps(t)}
 	ctx := context.Background()

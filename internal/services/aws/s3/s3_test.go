@@ -5721,6 +5721,41 @@ func TestListObjectsV2SafeContinuationTokens(t *testing.T) {
 	}
 }
 
+func TestSpecialObjectKeyCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	for _, bucket := range []string{"special-keys", "special-key-copies"} {
+		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+	}
+	keys := []string{"/foo", "bar", "/bar/foo/", "file%2Fname", "test@key/", "test%123", "test%percent", "test key/", "test key//", "test%123/", "a/%F0%9F%98%80/", "a/", "t/", "u/", "test+key", "test%40key/", "test%40key"}
+	got := map[string]any{"objects": map[string]any{}, "copies": map[string]any{}, "missing": map[string]any{}}
+	objects, copies, missing := got["objects"].(map[string]any), got["copies"].(map[string]any), got["missing"].(map[string]any)
+	for i, key := range keys {
+		body := []byte(fmt.Sprintf("body-%d", i))
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "special-keys", "Key": key}, body)
+		objects[key] = string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "special-keys", "Key": key}, nil)))
+	}
+	for _, key := range []string{"file%2Fname", "test@key/", "test key/", "test key//", "a/%F0%9F%98%80/", "test+key"} {
+		mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "special-key-copies", "Key": key, "CopySource": url.QueryEscape("special-keys/" + key)}, nil)
+		copies[key] = string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "special-key-copies", "Key": key}, nil)))
+	}
+	for _, key := range []string{"foo", "//foo", "/bar"} {
+		_, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "special-keys", "Key": key}, nil)
+		missing[key] = asFault(t, err).Code
+	}
+	listed := mustInvoke(t, p, "ListObjectsV2", map[string]any{"Bucket": "special-keys"}, nil).Output["Contents"]
+	var listedKeys []string
+	for _, row := range asSliceForTest(listed) {
+		listedKeys = append(listedKeys, asMapForTest(row)["Key"].(string))
+	}
+	wantKeys := append([]string(nil), keys...)
+	sort.Strings(wantKeys)
+	got["listed"] = listedKeys
+	if !reflect.DeepEqual(listedKeys, wantKeys) || objects["test@key/"] == objects["test%40key/"] || copies["test+key"] == nil {
+		t.Fatalf("special object keys = %#v", got)
+	}
+	golden.AssertJSON(t, got)
+}
+
 func TestListObjectVersionsPagination(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "version-list"}, nil)

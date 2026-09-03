@@ -507,6 +507,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestExplicitKMSKeyValidation",
 		},
 		{
+			name: "s3-accept-unrepresentable-response-override",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if strings.IndexFunc(value, func(r rune) bool { return r > unicode.MaxLatin1 }) >= 0 {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestGetObjectResponseHeaderOverrides",
+		},
+		{
 			name: "s3-ignore-response-cache-control",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `{"ResponseCacheControl", "response-cache-control", "Cache-Control"}`,

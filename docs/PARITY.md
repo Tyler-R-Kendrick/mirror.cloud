@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
-| LocalStack S3 test functions explicitly traced | 367 / 463 (79.3%) |
-| LocalStack S3 test functions not yet traced | 96 / 463 (20.7%) |
+| LocalStack S3 test functions explicitly traced | 384 / 463 (82.9%) |
+| LocalStack S3 test functions not yet traced | 79 / 463 (17.1%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -223,6 +223,23 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3.py::TestS3PresignedUrl::test_pre_signed_url_if_none_match` | Shared presigned query-header binding feeds the existing write-precondition implementation; the raw HTTP behavior check proves first-write success and second-write 412 without mutation | Mapped and focused green |
 | `test_s3.py::TestS3PresignedUrl::test_pre_signed_url_if_match` | Shared query binding plus atomic, fuzz, chaos, snapshot, and mutation coverage verifies mismatched destination ETags return exact 412 faults | Mapped and focused green |
 | `test_s3.py::TestS3PresignedUrl::test_pre_signed_url_validation_works_on_internal_account` | LocalStack's private resource account is implementation-specific. Mirror verifies its own deterministic temporary credentials and token namespace rather than accepting that reserved credential | LocalStack internal-account detail; not applicable |
+| `test_s3.py::TestS3DeepArchive::test_storage_class_deep_archive` | Storage-class atomic, SDK/raw HTTP, fuzz, chaos, snapshot, and mutation coverage verifies small and multipart-sized `DEEP_ARCHIVE` objects retain their class in listings and HEAD responses | Mapped and race-clean |
+| `test_s3.py::TestS3DeepArchive::test_s3_get_deep_archive_object_restore` | `TestArchiveRestoreCharacterization` verifies exact pre-restore `InvalidObjectState`, restore statuses and headers, subsequent GET/copy access, and version-specific restore isolation | Mapped and race-clean |
+| `test_s3.py::TestS3StaticWebsiteHosting::test_s3_static_website_index` | Static-hosting characterization, raw HTTP behavior, fuzz, chaos, snapshots, and mutants verify root index lookup, body, content type, and ETag | Mapped and race-clean |
+| `test_s3.py::TestS3StaticWebsiteHosting::test_s3_static_website_hosting` | Website coverage verifies direct objects, directory indexes, custom errors, redirects, content types, ETags, and conditional 304 responses through website virtual hosts | Mapped and race-clean |
+| `test_s3.py::TestS3StaticWebsiteHosting::test_website_hosting_no_such_website` | Missing bucket and unconfigured website endpoint tests return LocalStack-compatible HTML 404 responses while the control-plane get returns `NoSuchWebsiteConfiguration` | Mapped and green |
+| `test_s3.py::TestS3StaticWebsiteHosting::test_website_hosting_http_methods` | Website behavior and characterization tests accept GET/HEAD semantics and return the exact HTML 405 response for unsupported methods | Mapped and green |
+| `test_s3.py::TestS3StaticWebsiteHosting::test_website_hosting_index_lookup` | Root, trailing-slash, and slashless-directory characterization verifies index resolution and the required directory redirect | Mapped and green |
+| `test_s3.py::TestS3StaticWebsiteHosting::test_website_hosting_404` | Website tests cover custom error documents, missing error documents, redirecting error objects, and the default `NoSuchKey` HTML response | Mapped and green |
+| `test_s3.py::TestS3StaticWebsiteHosting::test_object_website_redirect_location` | PutObject metadata and website endpoint coverage verify stored object redirects, absolute `Location`, and subsequent target retrieval | Mapped and green |
+| `test_s3.py::TestS3StaticWebsiteHosting::test_routing_rules_conditions` | Ordered routing-rule tests cover key-prefix, HTTP-error, and combined conditions without redirecting existing objects that fail the full condition | Mapped and green |
+| `test_s3.py::TestS3StaticWebsiteHosting::test_routing_rules_redirects` | Routing characterization covers host, protocol, status, replace-key, and replace-prefix redirect fields with query preservation | Mapped and green |
+| `test_s3.py::TestS3StaticWebsiteHosting::test_routing_rules_empty_replace_prefix` | Configuration validation and live routing tests preserve an explicitly empty replacement prefix and redirect to the remaining key suffix | Mapped and green |
+| `test_s3.py::TestS3StaticWebsiteHosting::test_routing_rules_order` | The website rule walker applies the first matching rule in submitted order; snapshot and mutation coverage pin that precedence | Mapped and green |
+| `test_s3.py::TestS3StaticWebsiteHosting::test_validate_website_configuration` | Bucket-website atomic, SDK/raw HTTP, fuzz, chaos, snapshot, and mutation coverage validates suffixes, protocols, rule counts, condition shape, and mutually exclusive redirect replacements without replacing prior state | Mapped and race-clean |
+| `test_s3.py::TestS3StaticWebsiteHosting::test_crud_website_configuration` | Put/Get/Delete website atomic, SDK/raw HTTP, snapshot, fuzz, chaos, and mutation coverage verifies exact round trips and idempotent deletion | Mapped and race-clean |
+| `test_s3.py::TestS3StaticWebsiteHosting::test_website_hosting_redirect_all` | Redirect-all characterization verifies configured host/protocol, original path and query preservation, and the website redirect response | Mapped and green |
+| `test_s3.py::TestS3Routing::test_access_favicon_via_aws_endpoints` | The edge demultiplexer and path/virtual-host behavior checks route `favicon.ico` as an ordinary S3 key across global and regional AWS endpoint host forms | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_preconditions` | `TestCopySourcePreconditionsCharacterization`, AWS SDK contract, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_modified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_unmodified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |

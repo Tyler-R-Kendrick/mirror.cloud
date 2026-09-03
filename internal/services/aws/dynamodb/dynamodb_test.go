@@ -185,7 +185,6 @@ func TestDynamoDBTagLifecycle(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	arn := "arn:aws:dynamodb:us-east-1:000000000000:table/T"
 	must := func(operation string, input map[string]any) *spi.Response {
 		t.Helper()
 		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
@@ -194,15 +193,52 @@ func TestDynamoDBTagLifecycle(t *testing.T) {
 		}
 		return response
 	}
-	must("TagResource", map[string]any{"ResourceArn": arn, "Tags": []any{
+	created := must("CreateTable", map[string]any{"TableName": "T", "Tags": []any{
 		map[string]any{"Key": "env", "Value": "dev"}, map[string]any{"Key": "team", "Value": "platform"},
 	}})
+	arn := str(asMap(created.Output["TableDescription"])["TableArn"])
+	if arn != "arn:aws:dynamodb:us-east-1:000000000000:table/T" {
+		t.Fatalf("table arn %q", arn)
+	}
+	if tags := must("ListTagsOfResource", map[string]any{"ResourceArn": arn}).Output["Tags"].([]any); len(tags) != 2 || str(asMap(tags[0])["Value"]) != "dev" || str(asMap(tags[1])["Value"]) != "platform" {
+		t.Fatalf("creation tags %#v", tags)
+	}
 	must("TagResource", map[string]any{"ResourceArn": arn, "Tags": []any{map[string]any{"Key": "env", "Value": "prod"}}})
 	must("UntagResource", map[string]any{"ResourceArn": arn, "TagKeys": []any{"team"}})
 	tags := must("ListTagsOfResource", map[string]any{"ResourceArn": arn}).Output["Tags"].([]any)
 	if len(tags) != 1 || str(asMap(tags[0])["Key"]) != "env" || str(asMap(tags[0])["Value"]) != "prod" {
 		t.Fatalf("tags %#v", tags)
 	}
+	must("DeleteTable", map[string]any{"TableName": "T"})
+	if tags := must("ListTagsOfResource", map[string]any{"ResourceArn": arn}).Output["Tags"].([]any); len(tags) != 0 {
+		t.Fatalf("deleted table tags %#v", tags)
+	}
+}
+
+func TestDynamoDBTagCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	must := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	created := must("CreateTable", map[string]any{"TableName": "T", "Tags": []any{map[string]any{"Key": "Name", "Value": "test"}, map[string]any{"Key": "env", "Value": "dev"}}})
+	arn := str(asMap(created.Output["TableDescription"])["TableArn"])
+	initial := must("ListTagsOfResource", map[string]any{"ResourceArn": arn}).Output["Tags"]
+	must("TagResource", map[string]any{"ResourceArn": arn, "Tags": []any{map[string]any{"Key": "env", "Value": "prod"}, map[string]any{"Key": "team", "Value": "storage"}}})
+	updated := must("ListTagsOfResource", map[string]any{"ResourceArn": arn}).Output["Tags"]
+	must("UntagResource", map[string]any{"ResourceArn": arn, "TagKeys": []any{"Name", "team"}})
+	remaining := must("ListTagsOfResource", map[string]any{"ResourceArn": arn}).Output["Tags"]
+	must("DeleteTable", map[string]any{"TableName": "T"})
+	golden.AssertJSON(t, map[string]any{
+		"tableArn": arn, "initial": initial, "updated": updated, "remaining": remaining,
+		"afterDelete": must("ListTagsOfResource", map[string]any{"ResourceArn": arn}).Output["Tags"],
+	})
 }
 
 func TestDynamoDBExtendedOperations(t *testing.T) {

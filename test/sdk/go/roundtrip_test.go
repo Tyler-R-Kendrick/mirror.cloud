@@ -2756,6 +2756,77 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.ListParts(context.Background(), &s3.ListPartsInput{Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: aws.String("missing")}); err == nil || !strings.Contains(err.Error(), "The specified upload does not exist. The upload ID may be invalid, or the upload may have been aborted or completed.") {
 		t.Fatalf("list parts missing upload: %v", err)
 	}
+	smallCopySource, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("small-copy-source"), Body: strings.NewReader("0123456789")})
+	if err != nil {
+		t.Fatalf("put small copy source: %v", err)
+	}
+	smallCopyHead, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String("small-copy-source")})
+	if err != nil {
+		t.Fatalf("head small copy source: %v", err)
+	}
+	newCopyUpload := func(key string) *string {
+		t.Helper()
+		created, err := s3c.CreateMultipartUpload(context.Background(), &s3.CreateMultipartUploadInput{Bucket: aws.String("sdk"), Key: aws.String(key)})
+		if err != nil {
+			t.Fatalf("create copy upload %s: %v", key, err)
+		}
+		return created.UploadId
+	}
+	for _, tc := range []struct {
+		name, copyRange, wantError string
+	}{
+		{name: "no-range"},
+		{name: "small-range", copyRange: "bytes=0-8"},
+		{name: "malformed-range", copyRange: "0-8", wantError: "InvalidArgument"},
+		{name: "past-end", copyRange: "bytes=0-100", wantError: "Range specified is not valid for source object of size: 10"},
+		{name: "after-object", copyRange: "bytes=100-200", wantError: "The specified copy range is invalid for the source object size"},
+	} {
+		uploadID := newCopyUpload("copy-range-" + tc.name)
+		input := &s3.UploadPartCopyInput{Bucket: aws.String("sdk"), Key: aws.String("copy-range-" + tc.name), UploadId: uploadID, PartNumber: aws.Int32(1), CopySource: aws.String("sdk/small-copy-source")}
+		if tc.copyRange != "" {
+			input.CopySourceRange = aws.String(tc.copyRange)
+		}
+		_, err := s3c.UploadPartCopy(context.Background(), input)
+		if tc.wantError == "" && err != nil || tc.wantError != "" && (err == nil || !strings.Contains(err.Error(), tc.wantError)) {
+			t.Fatalf("upload part copy %s: %v", tc.name, err)
+		}
+	}
+	for _, tc := range []struct {
+		name, wantError string
+		configure       func(*s3.UploadPartCopyInput)
+	}{
+		{name: "if-match", configure: func(in *s3.UploadPartCopyInput) { in.CopySourceIfMatch = smallCopySource.ETag }},
+		{name: "if-none-match", configure: func(in *s3.UploadPartCopyInput) { in.CopySourceIfNoneMatch = aws.String(`"not-matching"`) }},
+		{name: "if-unmodified-since", configure: func(in *s3.UploadPartCopyInput) {
+			in.CopySourceIfUnmodifiedSince = aws.Time(smallCopyHead.LastModified.Add(time.Second))
+		}},
+		{name: "if-modified-since", configure: func(in *s3.UploadPartCopyInput) {
+			in.CopySourceIfModifiedSince = aws.Time(smallCopyHead.LastModified.Add(-time.Second))
+		}},
+		{name: "future-if-modified-since", configure: func(in *s3.UploadPartCopyInput) {
+			in.CopySourceIfModifiedSince = aws.Time(time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))
+		}},
+		{name: "failed-if-match", wantError: "StatusCode: 412", configure: func(in *s3.UploadPartCopyInput) { in.CopySourceIfMatch = aws.String(`"not-matching"`) }},
+		{name: "failed-if-none-match", wantError: "StatusCode: 412", configure: func(in *s3.UploadPartCopyInput) { in.CopySourceIfNoneMatch = smallCopySource.ETag }},
+		{name: "failed-if-unmodified-since", wantError: "StatusCode: 412", configure: func(in *s3.UploadPartCopyInput) {
+			in.CopySourceIfUnmodifiedSince = aws.Time(smallCopyHead.LastModified.Add(-time.Second))
+		}},
+		{name: "match-overrides-unmodified", configure: func(in *s3.UploadPartCopyInput) {
+			in.CopySourceIfMatch, in.CopySourceIfUnmodifiedSince = smallCopySource.ETag, aws.Time(smallCopyHead.LastModified.Add(-time.Second))
+		}},
+		{name: "failed-none-match-and-unmodified", wantError: "StatusCode: 412", configure: func(in *s3.UploadPartCopyInput) {
+			in.CopySourceIfNoneMatch, in.CopySourceIfUnmodifiedSince = aws.String(`"not-matching"`), aws.Time(smallCopyHead.LastModified.Add(-time.Second))
+		}},
+		{name: "failed-if-modified-since", wantError: "StatusCode: 412", configure: func(in *s3.UploadPartCopyInput) { in.CopySourceIfModifiedSince = smallCopyHead.LastModified }},
+	} {
+		uploadID := newCopyUpload("copy-condition-" + tc.name)
+		input := &s3.UploadPartCopyInput{Bucket: aws.String("sdk"), Key: aws.String("copy-condition-" + tc.name), UploadId: uploadID, PartNumber: aws.Int32(1), CopySource: aws.String("sdk/small-copy-source")}
+		tc.configure(input)
+		_, err := s3c.UploadPartCopy(context.Background(), input)
+		if tc.wantError == "" && err != nil || tc.wantError != "" && (err == nil || !strings.Contains(err.Error(), tc.wantError)) {
+			t.Fatalf("upload part copy condition %s: %v", tc.name, err)
+		}
+	}
 	if _, err := s3c.UploadPartCopy(context.Background(), &s3.UploadPartCopyInput{
 		Bucket: aws.String("sdk"), Key: aws.String("range-copy"), UploadId: upload.UploadId, PartNumber: aws.Int32(1), CopySource: aws.String("sdk/large"), ExpectedSourceBucketOwner: aws.String("999999999999"),
 	}); err == nil || !strings.Contains(err.Error(), "AccessDenied") {

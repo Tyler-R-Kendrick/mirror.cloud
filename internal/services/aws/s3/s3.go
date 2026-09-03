@@ -1861,13 +1861,19 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		return nil, err
 	}
 	unsupportedPrecondition := ""
-	for _, condition := range []struct{ input, header string }{{"IfMatch", "If-Match"}, {"IfMatchSize", "x-amz-if-match-size"}, {"IfMatchLastModifiedTime", "x-amz-if-match-last-modified-time"}} {
+	for _, condition := range []struct{ input, header string }{{"IfMatchSize", "x-amz-if-match-size"}, {"IfMatchLastModifiedTime", "x-amz-if-match-last-modified-time"}} {
 		if requestCondition(req, condition.input, condition.header) != "" {
 			unsupportedPrecondition = condition.header
 		}
 	}
 	if unsupportedPrecondition != "" {
 		return nil, &spi.Fault{Code: "NotImplemented", Message: "A header you provided implies functionality that is not implemented", HTTPStatus: http.StatusNotImplemented, Fault: "server", Fields: map[string]any{"Header": unsupportedPrecondition}}
+	}
+	if match := requestCondition(req, "IfMatch", "If-Match"); match != "" {
+		current, exists := p.objectMetadata(ctx, req, b, key, "")
+		if !exists || truthy(current["deleteMarker"]) || !etagMatches(match, str(current["etag"])) {
+			return nil, preconditionFailed("If-Match")
+		}
 	}
 	wantVer := str(req.Input["VersionId"])
 	versioningStatus := p.versioningStatus(ctx, req, b)

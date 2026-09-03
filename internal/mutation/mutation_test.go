@@ -7168,7 +7168,15 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  `if unsupportedPrecondition != "" {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestDeleteObjectDirectoryPreconditionsAreNotImplemented",
+			run:  "TestDeleteObjectPreconditionsCharacterization",
+		},
+		{
+			name: "s3-delete-ignore-if-match",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if !exists || truthy(current["deleteMarker"]) || !etagMatches(match, str(current["etag"])) {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestDeleteObjectPreconditionsCharacterization",
 		},
 		{
 			name: "s3-use-first-delete-directory-precondition",

@@ -1149,12 +1149,20 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
-	t.Run("Given DeleteObject preconditions When deleting Then S3 returns LocalStack NotImplemented faults", func(t *testing.T) {
+	t.Run("Given DeleteObject preconditions When deleting Then S3 enforces If-Match and rejects directory-only fields", func(t *testing.T) {
 		res := do(http.MethodPut, "/delete-precondition-bdd", nil, "")
 		res.Body.Close()
 		res = do(http.MethodPut, "/delete-precondition-bdd/key", []byte("body"), "")
+		etag := res.Header.Get("ETag")
 		res.Body.Close()
-		for _, condition := range []struct{ header, value string }{{"If-Match", `"841a2d689ad86bd1611447453c22c6fc"`}, {"x-amz-if-match-size", "4"}, {"x-amz-if-match-last-modified-time", "Sun, 06 Nov 1994 08:49:37 GMT"}} {
+		for _, condition := range []struct {
+			header, value, code, field, detail string
+			status                             int
+		}{
+			{"If-Match", `"wrong"`, "PreconditionFailed", "Condition", "If-Match", http.StatusPreconditionFailed},
+			{"x-amz-if-match-size", "4", "NotImplemented", "Header", "x-amz-if-match-size", http.StatusNotImplemented},
+			{"x-amz-if-match-last-modified-time", "Sun, 06 Nov 1994 08:49:37 GMT", "NotImplemented", "Header", "x-amz-if-match-last-modified-time", http.StatusNotImplemented},
+		} {
 			request, err := http.NewRequest(http.MethodDelete, ts.URL+"/delete-precondition-bdd/key", nil)
 			if err != nil {
 				t.Fatal(err)
@@ -1167,7 +1175,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			}
 			body, _ := io.ReadAll(response.Body)
 			response.Body.Close()
-			if response.StatusCode != http.StatusNotImplemented || !bytes.Contains(body, []byte("<Code>NotImplemented</Code>")) || !bytes.Contains(body, []byte("<Message>A header you provided implies functionality that is not implemented</Message>")) || !bytes.Contains(body, []byte("<Header>"+condition.header+"</Header>")) {
+			if response.StatusCode != condition.status || !bytes.Contains(body, []byte("<Code>"+condition.code+"</Code>")) || !bytes.Contains(body, []byte("<"+condition.field+">"+condition.detail+"</"+condition.field+">")) {
 				t.Fatalf("%s delete precondition fault %d %s", condition.header, response.StatusCode, body)
 			}
 		}
@@ -1176,6 +1184,17 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusOK || string(body) != "body" {
 			t.Fatalf("object after rejected deletes = %d %q", res.StatusCode, body)
+		}
+		request, _ := http.NewRequest(http.MethodDelete, ts.URL+"/delete-precondition-bdd/key", nil)
+		request.Header.Set("Authorization", auth)
+		request.Header.Set("If-Match", etag)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusNoContent {
+			t.Fatalf("matching conditional delete = %d", response.StatusCode)
 		}
 	})
 

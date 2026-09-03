@@ -4614,34 +4614,49 @@ func TestSuspendedVersioningReplacesNullVersion(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"suspended": suspendedVersions, "deleted": listed, "restoredBody": restoredBody})
 }
 
-func TestDeleteObjectDirectoryPreconditionsAreNotImplemented(t *testing.T) {
+func TestDeleteObjectPreconditionsCharacterization(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
-	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("body"))
-
-	var faults []any
+	put := mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("body"))
+	faults := map[string]any{}
 	for _, tc := range []struct {
-		name, header, value string
+		name   string
+		input  map[string]any
+		code   string
+		status int
+		field  string
+		value  any
 	}{
-		{"etag", "If-Match", `"841a2d689ad86bd1611447453c22c6fc"`},
-		{"size", "x-amz-if-match-size", "4"},
-		{"modified", "x-amz-if-match-last-modified-time", "Sun, 06 Nov 1994 08:49:37 GMT"},
+		{"etag", map[string]any{"IfMatch": `"wrong"`}, "PreconditionFailed", http.StatusPreconditionFailed, "Condition", "If-Match"},
+		{"size", map[string]any{"IfMatchSize": "10"}, "NotImplemented", http.StatusNotImplemented, "Header", "x-amz-if-match-size"},
+		{"modified", map[string]any{"IfMatchLastModifiedTime": "Sun, 06 Nov 1994 08:49:37 GMT"}, "NotImplemented", http.StatusNotImplemented, "Header", "x-amz-if-match-last-modified-time"},
+		{"all", map[string]any{"IfMatch": `"wrong"`, "IfMatchSize": "10", "IfMatchLastModifiedTime": "Sun, 06 Nov 1994 08:49:37 GMT"}, "NotImplemented", http.StatusNotImplemented, "Header", "x-amz-if-match-last-modified-time"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			httpRequest := httptest.NewRequest(http.MethodDelete, "http://127.0.0.1/bucket/key", nil)
-			httpRequest.Header.Set(tc.header, tc.value)
-			_, err := p.Invoke(context.Background(), &spi.Request{Identity: ident(), Operation: "DeleteObject", Input: map[string]any{"Bucket": "bucket", "Key": "key"}, HTTP: httpRequest})
+			tc.input["Bucket"], tc.input["Key"] = "bucket", "key"
+			_, err := invoke(t, p, "DeleteObject", tc.input, nil)
 			fault := asFault(t, err)
-			if fault.Code != "NotImplemented" || fault.Message != "A header you provided implies functionality that is not implemented" || fault.HTTPStatus != http.StatusNotImplemented || fault.Fields["Header"] != tc.header {
+			if fault.Code != tc.code || fault.HTTPStatus != tc.status || fault.Fields[tc.field] != tc.value {
 				t.Fatalf("fault = %#v", fault)
 			}
-			faults = append(faults, map[string]any{"name": tc.name, "code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "header": fault.Fields["Header"]})
+			faults[tc.name] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "fields": fault.Fields}
 			if body := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "key"}, nil))); body != "body" {
 				t.Fatalf("object changed after rejected delete: %q", body)
 			}
 		})
 	}
-	golden.AssertJSON(t, faults)
+	matched := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "IfMatch": put.Headers.Get("ETag")}, nil)
+	if matched.Status != http.StatusNoContent {
+		t.Fatalf("matching delete = %#v", matched)
+	}
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "key"}, []byte("body"))
+	wildcard := mustInvoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "IfMatch": "*"}, nil)
+	_, err := invoke(t, p, "DeleteObject", map[string]any{"Bucket": "bucket", "Key": "key", "IfMatch": "*"}, nil)
+	missing := asFault(t, err)
+	if wildcard.Status != http.StatusNoContent || missing.Code != "PreconditionFailed" || missing.HTTPStatus != http.StatusPreconditionFailed {
+		t.Fatalf("wildcard deletes = %#v, %#v", wildcard, missing)
+	}
+	golden.AssertJSON(t, map[string]any{"faults": faults, "matchedStatus": matched.Status, "wildcardStatus": wildcard.Status, "missing": map[string]any{"code": missing.Code, "message": missing.Message, "status": missing.HTTPStatus, "fields": missing.Fields}})
 }
 
 func TestDeleteObjectMissingKeyVersionIsIdempotent(t *testing.T) {

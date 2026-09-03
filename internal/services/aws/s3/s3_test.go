@@ -2889,6 +2889,8 @@ func TestUserMetadataRFC2047Characterization(t *testing.T) {
 			"Bad-Q":        "=?UTF-8?Q?bad=4A=ZZ_value?=",
 			"Raw-Unicode":  "ÄMÄZÕÑ S3",
 			"Safe":         safe,
+			"TEST_META_1":  "foo",
+			"__meta_2":     "bar",
 		},
 	}, []byte("body"))
 
@@ -2904,12 +2906,14 @@ func TestUserMetadataRFC2047Characterization(t *testing.T) {
 			"badQ":        response.Headers.Get("x-amz-meta-bad-q"),
 			"rawUnicode":  response.Headers.Get("x-amz-meta-raw-unicode"),
 			"safe":        response.Headers.Get("x-amz-meta-safe"),
+			"testMeta1":   response.Headers.Get("x-amz-meta-test_meta_1"),
+			"meta2":       response.Headers.Get("x-amz-meta-__meta_2"),
 		}
 	}
 	get := read("GetObject", "source")
 	head := read("HeadObject", "source")
 	for name, got := range map[string]map[string]any{"get": get, "head": head} {
-		if got["fakeEncoded"] != "actually-ascii" || got["asciiB64"] != "abc" || got["badB64"] != "=?UTF-8?B?77+977+977+9?=" || got["badQ"] != "badJ=ZZ value" || got["safe"] != safe {
+		if got["fakeEncoded"] != "actually-ascii" || got["asciiB64"] != "abc" || got["badB64"] != "=?UTF-8?B?77+977+977+9?=" || got["badQ"] != "badJ=ZZ value" || got["safe"] != safe || got["testMeta1"] != "foo" || got["meta2"] != "bar" {
 			t.Fatalf("%s decoded metadata = %#v", name, got)
 		}
 		if got["nonASCII"] != "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=" || got["rawUnicode"] != got["nonASCII"] || got["binary"] != "=?UTF-8?B?AAECAw==?=" {
@@ -2931,6 +2935,22 @@ func TestUserMetadataRFC2047Characterization(t *testing.T) {
 		t.Fatalf("replacement metadata = %v", replaced.Headers)
 	}
 	golden.AssertJSON(t, map[string]any{"get": get, "head": head, "copy": copyMetadata, "replace": replaced.Headers.Get("x-amz-meta-fake-encoded")})
+}
+
+func TestUnicodeSystemMetadataCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "unicode-system-metadata"}, nil)
+	disposition := `attachment; filename="test_—_file%E2%80%94_é_2.pdf"`
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "unicode-system-metadata", "Key": "test", "ContentLanguage": "de", "ContentDisposition": disposition, "CacheControl": "ÄMÄZÕÑ S3"}, nil)
+	got := map[string]any{}
+	for _, operation := range []string{"GetObject", "HeadObject"} {
+		response := mustInvoke(t, p, operation, map[string]any{"Bucket": "unicode-system-metadata", "Key": "test"}, nil)
+		if response.Headers.Get("Content-Language") != "de" || response.Headers.Get("Content-Disposition") != disposition || response.Headers.Get("Cache-Control") != "ÄMÄZÕÑ S3" {
+			t.Fatalf("%s metadata = %v", operation, response.Headers)
+		}
+		got[operation] = map[string]any{"cacheControl": response.Headers.Get("Cache-Control"), "contentDisposition": response.Headers.Get("Content-Disposition"), "contentLanguage": response.Headers.Get("Content-Language")}
+	}
+	golden.AssertJSON(t, got)
 }
 
 func TestGetObjectResponseHeaderOverrides(t *testing.T) {

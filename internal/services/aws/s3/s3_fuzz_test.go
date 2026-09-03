@@ -2979,6 +2979,7 @@ func FuzzGetObjectResponseOverrides(f *testing.F) {
 
 func FuzzObjectSystemMetadata(f *testing.F) {
 	f.Add("no-cache", "de", `attachment; filename="foo.jpg"`, "abc123")
+	f.Add("ÄMÄZÕÑ S3", "de", `attachment; filename="test_—_file%E2%80%94_é_2.pdf"`, "")
 	f.Fuzz(func(t *testing.T, cacheControl, language, disposition, body string) {
 		if len(cacheControl) > 256 || len(language) > 256 || len(disposition) > 256 || len(body) > 4096 || !utf8.ValidString(cacheControl) || !utf8.ValidString(language) || !utf8.ValidString(disposition) || !utf8.ValidString(body) || strings.IndexFunc(cacheControl+language+disposition, func(r rune) bool { return r < ' ' || r == 0x7f }) >= 0 {
 			t.Skip()
@@ -2994,11 +2995,13 @@ func FuzzObjectSystemMetadata(f *testing.F) {
 }
 
 func FuzzUserMetadataRFC2047(f *testing.F) {
-	for _, value := range []string{"S3", "—_é_2?.pdf", "\x00\x01\x02\x03", "�������"} {
-		f.Add(value)
+	for _, seed := range []struct{ key, value string }{{"value", "S3"}, {"TEST_META_1", "—_é_2?.pdf"}, {"__meta_2", "\x00\x01\x02\x03"}, {"value", "�������"}} {
+		f.Add(seed.key, seed.value)
 	}
-	f.Fuzz(func(t *testing.T, suffix string) {
-		if len(suffix) > 256 || !utf8.ValidString(suffix) {
+	f.Fuzz(func(t *testing.T, key, suffix string) {
+		if key == "" || len(key) > 64 || len(suffix) > 256 || !utf8.ValidString(suffix) || strings.IndexFunc(key, func(r rune) bool {
+			return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-')
+		}) >= 0 {
 			t.Skip()
 		}
 		value := "Ä" + suffix
@@ -3006,10 +3009,10 @@ func FuzzUserMetadataRFC2047(f *testing.F) {
 		p := s3.New(deps)
 		mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "rfc2047-fuzz"}, nil)
 		mustInvoke(t, p, "PutObject", map[string]any{
-			"Bucket": "rfc2047-fuzz", "Key": "object", "Metadata": map[string]any{"value": mime.BEncoding.Encode("UTF-8", value)},
+			"Bucket": "rfc2047-fuzz", "Key": "object", "Metadata": map[string]any{key: mime.BEncoding.Encode("UTF-8", value)},
 		}, []byte("body"))
 		response := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "rfc2047-fuzz", "Key": "object"}, nil)
-		wire := response.Headers.Get("x-amz-meta-value")
+		wire := response.Headers.Get("x-amz-meta-" + strings.ToLower(key))
 		decoded, err := new(mime.WordDecoder).DecodeHeader(wire)
 		if err != nil || decoded != value {
 			t.Fatalf("metadata %q decoded to %q from %q: %v", value, decoded, wire, err)

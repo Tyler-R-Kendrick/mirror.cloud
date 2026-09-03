@@ -971,6 +971,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestCopyObjectChecksums",
 		},
 		{
+			name: "s3-copy-drop-kms-encryption",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  "response, err := p.putObject(ctx, req, \"\", \"\", nil, nil)\n\tif err == nil && copyChecksum {",
+			new:  "delete(req.Input, \"ServerSideEncryption\")\n\tdelete(req.Input, \"SSEKMSKeyId\")\n\tdelete(req.Input, \"BucketKeyEnabled\")\n\tresponse, err := p.putObject(ctx, req, \"\", \"\", nil, nil)\n\tif err == nil && copyChecksum {",
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestCopyObjectKMSEncryptionCharacterization",
+		},
+		{
 			name: "s3-copy-drop-last-modified",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `if req.Operation == "CopyObject" {`,

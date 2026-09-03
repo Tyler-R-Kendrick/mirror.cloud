@@ -5862,16 +5862,13 @@ func applyCopySourceRange(body []byte, value string) ([]byte, error) {
 	start, startErr := strconv.Atoi(startRaw)
 	end, endErr := strconv.Atoi(endRaw)
 	if !ok || !found || startErr != nil || endErr != nil || start < 0 || end < start {
-		return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: 400, Fault: "client"}
-	}
-	if len(body) <= 5<<20 {
-		return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: 400, Fault: "client"}
+		return nil, &spi.Fault{Code: "InvalidArgument", Message: "The x-amz-copy-source-range value must be of the form bytes=first-last where first and last are the zero-based offsets of the first and last bytes to copy", HTTPStatus: 400, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-copy-source-range", "ArgumentValue": value}}
 	}
 	if start >= len(body) {
-		return nil, &spi.Fault{Code: "InvalidRange", HTTPStatus: 416, Fault: "client"}
+		return nil, &spi.Fault{Code: "InvalidRequest", Message: "The specified copy range is invalid for the source object size", HTTPStatus: 400, Fault: "client"}
 	}
 	if end >= len(body) {
-		end = len(body) - 1
+		return nil, &spi.Fault{Code: "InvalidArgument", Message: fmt.Sprintf("Range specified is not valid for source object of size: %d", len(body)), HTTPStatus: 400, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-copy-source-range", "ArgumentValue": value}}
 	}
 	return body[start : end+1], nil
 }

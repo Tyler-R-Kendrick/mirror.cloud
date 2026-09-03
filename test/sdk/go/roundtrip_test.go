@@ -1944,6 +1944,15 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || rfc2047.Metadata["non-ascii"] != "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=" || rfc2047.Metadata["fake-encoded"] != "actually-ascii" {
 		t.Fatalf("rfc2047 metadata: %#v %v", rfc2047, err)
 	}
+	unicodeDisposition := `attachment; filename="test_—_file%E2%80%94_é_2.pdf"`
+	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String("unicode-system-metadata"), Body: strings.NewReader(""), CacheControl: aws.String("ÄMÄZÕÑ S3"), ContentLanguage: aws.String("de"), ContentDisposition: aws.String(unicodeDisposition)}); err != nil {
+		t.Fatalf("put unicode system metadata: %v", err)
+	}
+	unicodeMetadata, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("sdk"), Key: aws.String("unicode-system-metadata")})
+	if err != nil || aws.ToString(unicodeMetadata.CacheControl) != "ÄMÄZÕÑ S3" || aws.ToString(unicodeMetadata.ContentLanguage) != "de" || aws.ToString(unicodeMetadata.ContentDisposition) != unicodeDisposition {
+		t.Fatalf("unicode system metadata: %#v %v", unicodeMetadata, err)
+	}
+	_ = unicodeMetadata.Body.Close()
 	customerKey := []byte("0123456789abcdef0123456789abcdef")
 	customerKeyDigest := md5.Sum(customerKey)
 	customerKey64, customerKeyMD5 := base64.StdEncoding.EncodeToString(customerKey), base64.StdEncoding.EncodeToString(customerKeyDigest[:])

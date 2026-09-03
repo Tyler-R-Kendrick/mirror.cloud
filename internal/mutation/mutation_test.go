@@ -8475,6 +8475,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestDynamoDBTagLifecycle",
 		},
 		{
+			name: "dynamodb-allow-duplicate-table-create",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
+			old:  `} else if ok {`,
+			new:  `} else if false {`,
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestTableLifecycleFaults",
+		},
+		{
+			name: "dynamodb-allow-missing-table-delete",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
+			old:  `} else if !ok {`,
+			new:  `} else if false {`,
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestTableLifecycleFaults",
+		},
+		{
 			name: "dynamodb-untag-all-tags",
 			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
 			old:  `if !drop[str(asMap(tag)["Key"])] {`,

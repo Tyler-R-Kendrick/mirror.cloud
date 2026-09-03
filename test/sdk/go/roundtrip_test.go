@@ -931,6 +931,24 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 		o.BaseEndpoint = aws.String(ts.URL)
 		o.UsePathStyle = true
 	})
+	for operation, err := range map[string]error{
+		"GetObject": func() error {
+			_, err := s3c.GetObject(context.Background(), &s3.GetObjectInput{Bucket: aws.String("does-not-exist"), Key: aws.String("foobar")})
+			return err
+		}(),
+		"DeleteBucket": func() error {
+			_, err := s3c.DeleteBucket(context.Background(), &s3.DeleteBucketInput{Bucket: aws.String("does-not-exist")})
+			return err
+		}(),
+		"GetBucketNotificationConfiguration": func() error {
+			_, err := s3c.GetBucketNotificationConfiguration(context.Background(), &s3.GetBucketNotificationConfigurationInput{Bucket: aws.String("does-not-exist")})
+			return err
+		}(),
+	} {
+		if err == nil || !strings.Contains(err.Error(), "NoSuchBucket") || !strings.Contains(err.Error(), "StatusCode: 404") {
+			t.Fatalf("%s missing bucket: %v", operation, err)
+		}
+	}
 	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String("sdk-list-pagination")}); err != nil {
 		t.Fatal(err)
 	}

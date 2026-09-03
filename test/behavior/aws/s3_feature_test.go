@@ -172,6 +172,21 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a missing bucket When accessed Then each operation returns NoSuchBucket", func(t *testing.T) {
+		for _, request := range []struct{ method, path string }{
+			{http.MethodGet, "/does-not-exist/foobar"},
+			{http.MethodDelete, "/does-not-exist"},
+			{http.MethodGet, "/does-not-exist?notification"},
+		} {
+			res := do(request.method, request.path, nil, "")
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchBucket</Code>")) || !bytes.Contains(body, []byte("<BucketName>does-not-exist</BucketName>")) {
+				t.Fatalf("%s %s missing bucket: %d %s", request.method, request.path, res.StatusCode, body)
+			}
+		}
+	})
+
 	t.Run("Given a bucket in another Region When accessed Then S3 resolves it and reports its Region", func(t *testing.T) {
 		configuration := []byte(`<CreateBucketConfiguration><LocationConstraint>us-west-2</LocationConstraint></CreateBucketConfiguration>`)
 		res := do(http.MethodPut, "/cross-region-bdd", configuration, "")

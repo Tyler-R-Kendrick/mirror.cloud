@@ -4025,6 +4025,8 @@ func TestExpectedBucketOwnerAcrossBucketScopedOperations(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "bucket"}, nil)
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "k"}, []byte("id,name\n1,Ada\n"))
+	policy := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*"}]}`
+	mustInvoke(t, p, "PutBucketPolicy", map[string]any{"Bucket": "bucket", "Policy": policy}, nil)
 	uploadID := mustInvoke(t, p, "CreateMultipartUpload", map[string]any{"Bucket": "bucket", "Key": "multipart"}, nil).Output["UploadId"].(string)
 	tests := []struct {
 		operation string
@@ -4032,6 +4034,9 @@ func TestExpectedBucketOwnerAcrossBucketScopedOperations(t *testing.T) {
 		body      []byte
 	}{
 		{"PutBucketVersioning", map[string]any{"Bucket": "bucket", "Status": "Enabled"}, nil},
+		{"GetBucketPolicy", map[string]any{"Bucket": "bucket"}, nil},
+		{"PutBucketPolicy", map[string]any{"Bucket": "bucket", "Policy": `{}`}, nil},
+		{"DeleteBucketPolicy", map[string]any{"Bucket": "bucket"}, nil},
 		{"CopyObject", map[string]any{"Bucket": "bucket", "Key": "copy", "CopySource": "missing/k"}, nil},
 		{"DeleteObjects", map[string]any{"Bucket": "bucket", "Objects": []any{}}, nil},
 		{"UploadPart", map[string]any{"Bucket": "bucket", "Key": "multipart", "UploadId": uploadID, "PartNumber": 1}, []byte("part")},
@@ -4062,6 +4067,9 @@ func TestExpectedBucketOwnerAcrossBucketScopedOperations(t *testing.T) {
 	}
 	if versioning := mustInvoke(t, p, "GetBucketVersioning", map[string]any{"Bucket": "bucket"}, nil).Output; len(versioning) != 0 {
 		t.Fatalf("rejected versioning persisted: %#v", versioning)
+	}
+	if got := mustInvoke(t, p, "GetBucketPolicy", map[string]any{"Bucket": "bucket"}, nil).Output["Policy"]; got != policy {
+		t.Fatalf("rejected policy operations changed policy: %q", got)
 	}
 	if _, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "copy"}, nil); asFault(t, err).Code != "NoSuchKey" {
 		t.Fatalf("rejected copy persisted: %v", err)

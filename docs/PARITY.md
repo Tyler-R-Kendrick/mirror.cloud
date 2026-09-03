@@ -521,8 +521,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 |---|---:|
 | Requested test forms wired | 7 / 7 (100%) |
 | DynamoDB operations routed to emulation | 62 / 62 (100%) |
-| LocalStack DynamoDB test functions explicitly traced | 3 / 56 (5.4%) |
-| LocalStack DynamoDB test functions not yet traced | 53 / 56 (94.6%) |
+| LocalStack DynamoDB test functions explicitly traced | 4 / 56 (7.1%) |
+| LocalStack DynamoDB test functions not yet traced | 52 / 56 (92.9%) |
 
 The pinned inventory is the 56 direct test functions in `tests/aws/services/dynamodb/test_dynamodb.py`; parametrized cases are not expanded.
 
@@ -531,3 +531,4 @@ The pinned inventory is the 56 direct test functions in `tests/aws/services/dyna
 | `test_dynamodb.py::TestDynamoDB::test_create_duplicate_table` | `TestTableLifecycleFaults`, Verify-style characterization snapshot, AWS SDK contract, raw HTTP BDD, fuzz, concurrent chaos, and semantic mutation coverage verify one atomic winner and exact `ResourceInUseException` faults | Mapped and race-pending |
 | `test_dynamodb.py::TestDynamoDB::test_table_crud` | Atomic, snapshot, SDK contract, HTTP BDD, fuzz, chaos, and mutation coverage verify create/list/describe/delete plus exact `ResourceNotFoundException` on repeated delete; detailed table-description parity remains to be traced separately | Partially mapped; race-pending |
 | `test_dynamodb.py::TestDynamoDB::test_time_to_live` | Atomic, Verify-style characterization snapshot, AWS SDK contract, raw HTTP BDD, fuzz, and semantic mutation coverage verify missing-table faults plus disabled, enabled, and deletion-reset state | Mapped; race-pending |
+| `test_dynamodb.py::TestDynamoDB::test_list_tags_of_resource` | CreateTable now returns the table ARN and persists creation tags; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, fuzz, and semantic mutation checks cover create/list/update/remove/delete tag lifecycle | Mapped; race-pending |

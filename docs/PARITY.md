@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
-| LocalStack S3 test functions explicitly traced | 309 / 463 (66.7%) |
-| LocalStack S3 test functions not yet traced | 154 / 463 (33.3%) |
+| LocalStack S3 test functions explicitly traced | 318 / 463 (68.7%) |
+| LocalStack S3 test functions not yet traced | 145 / 463 (31.3%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -165,6 +165,15 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3.py::TestS3::test_s3_get_object_header_overrides` | `TestGetObjectResponseHeaderOverrides`, SDK/raw HTTP contracts, fuzz, chaos, snapshot, and six semantic mapping mutants verify all signed response header overrides, including RFC 1123 expiry | Mapped and race-clean |
 | `test_s3.py::TestS3::test_virtual_host_proxying_headers` | This LocalStack-only test checks its internal proxy's `Server`/`Date` header deduplication, an implementation detail Mirror does not reproduce because requests are not internally re-proxied | LocalStack infrastructure-specific; not applicable |
 | `test_s3.py::TestS3::test_s3_sse_validate_kms_key` | Explicit KMS key validation, cross-region key/bucket atomic tests, SDK/HTTP contracts, fuzz, concurrent chaos, snapshots, and mutations verify enabled, missing, disabled, and wrong-region keys across PutObject and multipart initiation | Mapped and race-clean |
+| `test_s3.py::TestS3::test_s3_sse_validate_kms_key_state` | `TestExplicitKMSKeyValidation`, its golden snapshot, KMS fuzz seeds, chaos, and semantic mutants verify enabled reads/writes, disabled reads/writes, pending deletion, and pending import states | Mapped and race-clean |
+| `test_s3.py::TestS3::test_complete_multipart_parts_order` | `TestCompleteMultipartUploadManifest`, SDK/raw HTTP contracts, characterization snapshots, fuzz, chaos, and exact fault mutants verify reversed manifests fail with `InvalidPartOrder`, ordered manifests succeed, and noncontiguous ascending part numbers remain legal | Mapped and race-clean |
+| `test_s3.py::TestS3::test_put_object_storage_class` | `TestStorageClassValidation`, archive retrieval characterizations, SDK/raw HTTP contracts, fuzz, chaos, snapshots, and mutations verify every pinned class plus `InvalidObjectState` for archival objects awaiting restore | Mapped and race-clean |
+| `test_s3.py::TestS3::test_put_object_storage_class_outposts` | Shared storage-class validation atomically rejects `OUTPOSTS` for PutObject and CreateMultipartUpload without creating an object or upload; SDK/HTTP, fuzz, snapshot, and mutation coverage pins the exact fault | Mapped and race-clean |
+| `test_s3.py::TestS3::test_response_structure` | REST XML atomic tests and raw HTTP BDD coverage verify S3 roots, namespace, list member placement, upload-part empty-body headers, delete-tagging 204 headers, copy results, and stable list ordering | Mapped and green |
+| `test_s3.py::TestS3::test_response_structure_get_bucket_location` | `TestCreateBucketLocationConstraints`, REST XML atomic tests, SDK/raw HTTP contracts, fuzz, chaos, snapshots, and mutations verify the exact empty, `EU`, and regional `LocationConstraint` documents | Mapped and race-clean |
+| `test_s3.py::TestS3::test_response_structure_get_obj_attrs` | The shared REST XML encoder now emits AWS schema order (`ETag`, `Checksum`, `ObjectParts`, `StorageClass`, `ObjectSize`); exact atomic, raw HTTP BDD, snapshot, and semantic mutation checks prevent map-order regressions | Mapped and green |
+| `test_s3.py::TestS3::test_get_obj_attrs_multi_headers_behavior` | `TestGetObjectAttributesContract` characterizes repeated `x-amz-object-attributes` fields through `Header.Values`; raw HTTP attribute coverage and a semantic mutant verify every field is parsed rather than only the first | Mapped and green |
+| `test_s3.py::TestS3::test_s3_timestamp_precision` | List-bucket/list-object golden snapshots and raw HTTP BDD checks pin millisecond ISO-8601 XML timestamps plus RFC 1123 `Last-Modified` values ending in `GMT`; fuzz and timestamp mutants cover list paths | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_preconditions` | `TestCopySourcePreconditionsCharacterization`, AWS SDK contract, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_modified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_unmodified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
@@ -357,4 +366,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 253/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 318/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

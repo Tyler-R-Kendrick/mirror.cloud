@@ -14,6 +14,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
@@ -2392,6 +2393,56 @@ func TestConcurrentPutsAndGetsSameKey(t *testing.T) {
 		t.Fatal("missing body after concurrent puts")
 	}
 	_ = got.Stream.Close()
+}
+
+func TestConcurrentSpecialKeyCopies(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: io.NopCloser(strings.NewReader(body))})
+	}
+	for _, bucket := range []string{"special-key-chaos", "special-key-copy-chaos"} {
+		if _, err := call("CreateBucket", map[string]any{"Bucket": bucket}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key, body := fmt.Sprintf("key %d+%%2F/😀", i), fmt.Sprintf("body-%d", i)
+			if _, err := call("PutObject", map[string]any{"Bucket": "special-key-chaos", "Key": key}, body); err != nil {
+				errs <- err
+				return
+			}
+			destination := fmt.Sprintf("copy-%d", i)
+			if _, err := call("CopyObject", map[string]any{"Bucket": "special-key-copy-chaos", "Key": destination, "CopySource": url.QueryEscape("special-key-chaos/" + key)}, ""); err != nil {
+				errs <- err
+				return
+			}
+			response, err := call("GetObject", map[string]any{"Bucket": "special-key-copy-chaos", "Key": destination}, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			got, _ := io.ReadAll(response.Stream)
+			if string(got) != body {
+				errs <- fmt.Errorf("copy %d body = %q", i, got)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
 }
 
 func TestConcurrentArchiveRestoresConverge(t *testing.T) {

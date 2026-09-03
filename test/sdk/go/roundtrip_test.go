@@ -2527,6 +2527,63 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String(ifMatchBucket), Key: aws.String("key"), IfMatch: ifMatchSecond.ETag}); err == nil || !strings.Contains(err.Error(), "StatusCode: 404") || !strings.Contains(err.Error(), "NoSuchKey") {
 		t.Fatalf("delete-marker If-Match put: %v", err)
 	}
+	copyBucket := "sdk-copy-write-versioned"
+	if _, err := s3c.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String(copyBucket)}); err != nil {
+		t.Fatalf("create copy write bucket: %v", err)
+	}
+	if _, err := s3c.PutBucketVersioning(context.Background(), &s3.PutBucketVersioningInput{Bucket: aws.String(copyBucket), VersioningConfiguration: &s3types.VersioningConfiguration{Status: s3types.BucketVersioningStatusEnabled}}); err != nil {
+		t.Fatalf("enable copy write versioning: %v", err)
+	}
+	copySource, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String(copyBucket), Key: aws.String("source"), Body: strings.NewReader("source")})
+	if err != nil {
+		t.Fatalf("seed copy write source: %v", err)
+	}
+	copyInput := &s3.CopyObjectInput{Bucket: aws.String(copyBucket), Key: aws.String("destination"), CopySource: aws.String(copyBucket + "/source"), IfNoneMatch: aws.String("*")}
+	if _, err := s3c.CopyObject(context.Background(), copyInput); err != nil {
+		t.Fatalf("first If-None-Match copy: %v", err)
+	}
+	if _, err := s3c.CopyObject(context.Background(), copyInput); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") {
+		t.Fatalf("existing If-None-Match copy: %v", err)
+	}
+	if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String(copyBucket), Key: aws.String("destination")}); err != nil {
+		t.Fatalf("delete copy destination: %v", err)
+	}
+	afterDelete, err := s3c.CopyObject(context.Background(), copyInput)
+	if err != nil {
+		t.Fatalf("delete-marker If-None-Match copy: %v", err)
+	}
+	copyInput.IfNoneMatch, copyInput.IfMatch = nil, aws.String(`"wrong"`)
+	if _, err := s3c.CopyObject(context.Background(), copyInput); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") {
+		t.Fatalf("wrong If-Match copy: %v", err)
+	}
+	copyInput.IfMatch = afterDelete.CopyObjectResult.ETag
+	matched, err := s3c.CopyObject(context.Background(), copyInput)
+	if err != nil {
+		t.Fatalf("matching If-Match copy: %v", err)
+	}
+	if _, err := s3c.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String(copyBucket), Key: aws.String("destination")}); err != nil {
+		t.Fatalf("delete matched copy destination: %v", err)
+	}
+	copyInput.IfMatch = matched.CopyObjectResult.ETag
+	if _, err := s3c.CopyObject(context.Background(), copyInput); err == nil || !strings.Contains(err.Error(), "StatusCode: 404") || !strings.Contains(err.Error(), "NoSuchKey") {
+		t.Fatalf("delete-marker If-Match copy: %v", err)
+	}
+	current, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String(copyBucket), Key: aws.String("destination"), Body: strings.NewReader("current")})
+	if err != nil {
+		t.Fatalf("seed current copy destination: %v", err)
+	}
+	copyInput.IfMatch = current.ETag
+	if _, err := s3c.CopyObject(context.Background(), copyInput); err != nil {
+		t.Fatalf("current If-Match copy: %v", err)
+	}
+	inPlace := &s3.CopyObjectInput{Bucket: aws.String(copyBucket), Key: aws.String("source"), CopySource: aws.String(copyBucket + "/source"), IfNoneMatch: aws.String("*"), StorageClass: s3types.StorageClassStandard}
+	if _, err := s3c.CopyObject(context.Background(), inPlace); err == nil || !strings.Contains(err.Error(), "StatusCode: 412") {
+		t.Fatalf("in-place If-None-Match copy: %v", err)
+	}
+	inPlace.IfNoneMatch, inPlace.IfMatch = nil, copySource.ETag
+	if _, err := s3c.CopyObject(context.Background(), inPlace); err != nil {
+		t.Fatalf("in-place If-Match copy: %v", err)
+	}
 	for _, operation := range []string{"PutObject", "CopyObject"} {
 		key := "write-if-match-list-" + operation
 		seed, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("sdk"), Key: aws.String(key), Body: strings.NewReader("old")})

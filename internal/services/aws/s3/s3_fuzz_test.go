@@ -2979,6 +2979,7 @@ func FuzzGetObjectResponseOverrides(f *testing.F) {
 
 func FuzzObjectSystemMetadata(f *testing.F) {
 	f.Add("no-cache", "de", `attachment; filename="foo.jpg"`, "abc123")
+	f.Add("ÄMÄZÕÑ S3", "de", `attachment; filename="test_—_file%E2%80%94_é_2.pdf"`, "")
 	f.Fuzz(func(t *testing.T, cacheControl, language, disposition, body string) {
 		if len(cacheControl) > 256 || len(language) > 256 || len(disposition) > 256 || len(body) > 4096 || !utf8.ValidString(cacheControl) || !utf8.ValidString(language) || !utf8.ValidString(disposition) || !utf8.ValidString(body) || strings.IndexFunc(cacheControl+language+disposition, func(r rune) bool { return r < ' ' || r == 0x7f }) >= 0 {
 			t.Skip()

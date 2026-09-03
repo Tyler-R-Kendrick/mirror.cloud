@@ -3067,6 +3067,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestObjectMetadata",
 		},
 		{
+			name: "s3-object-metadata-rewrite-underscore-keys",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `user[strings.ToLower(key)] = metadataValue`,
+			new:  `user[strings.ReplaceAll(strings.ToLower(key), "_", "-")] = metadataValue`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestUserMetadataRFC2047Characterization",
+		},
+		{
 			name: "s3-object-metadata-ignore-http-user-metadata",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `if name, ok := strings.CutPrefix(strings.ToLower(key), "x-amz-meta-"); ok && len(values) > 0 {`,

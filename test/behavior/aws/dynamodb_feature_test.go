@@ -2,6 +2,7 @@ package behavior
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -64,6 +65,27 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 			if status != http.StatusBadRequest || !bytes.Contains(body, []byte("ResourceNotFoundException")) {
 				t.Fatalf("%s %d %s", action, status, body)
 			}
+		}
+	})
+
+	t.Run("Given tags at table creation When tags change Then listing reflects the lifecycle", func(t *testing.T) {
+		status, body := call("CreateTable", `{"TableName":"Tags","Tags":[{"Key":"Name","Value":"test"}]}`)
+		var created map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &created) != nil {
+			t.Fatalf("create tagged table %d %s", status, body)
+		}
+		arn := created["TableDescription"].(map[string]any)["TableArn"].(string)
+		if status, body = call("TagResource", `{"ResourceArn":"`+arn+`","Tags":[{"Key":"env","Value":"test"}]}`); status != http.StatusOK {
+			t.Fatalf("tag %d %s", status, body)
+		}
+		if status, body = call("ListTagsOfResource", `{"ResourceArn":"`+arn+`"}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"Name"`)) || !bytes.Contains(body, []byte(`"env"`)) {
+			t.Fatalf("list tags %d %s", status, body)
+		}
+		if status, body = call("UntagResource", `{"ResourceArn":"`+arn+`","TagKeys":["Name"]}`); status != http.StatusOK {
+			t.Fatalf("untag %d %s", status, body)
+		}
+		if status, body = call("ListTagsOfResource", `{"ResourceArn":"`+arn+`"}`); status != http.StatusOK || bytes.Contains(body, []byte(`"Name"`)) || !bytes.Contains(body, []byte(`"env"`)) {
+			t.Fatalf("list remaining tags %d %s", status, body)
 		}
 	})
 }

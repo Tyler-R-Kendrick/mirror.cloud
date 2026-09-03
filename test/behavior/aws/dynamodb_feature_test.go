@@ -202,4 +202,20 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 			t.Fatalf("replacement all-old %d %s", status, body)
 		}
 	})
+
+	t.Run("Given empty and binary values When writing single and batch items Then bytes round trip", func(t *testing.T) {
+		if status, body := call("CreateTable", `{"TableName":"BinaryValues","KeySchema":[{"AttributeName":"PK","KeyType":"HASH"},{"AttributeName":"SK","KeyType":"RANGE"}]}`); status != http.StatusOK {
+			t.Fatalf("create binary table %d %s", status, body)
+		}
+		if status, body := call("PutItem", `{"TableName":"BinaryValues","Item":{"PK":{"S":"empty"},"SK":{"S":"item"},"data":{"S":""}}}`); status != http.StatusOK || !bytes.Equal(bytes.TrimSpace(body), []byte("{}")) {
+			t.Fatalf("put empty value %d %s", status, body)
+		}
+		batch := `{"RequestItems":{"BinaryValues":[{"PutRequest":{"Item":{"PK":{"S":"binary"},"SK":{"S":"one"},"data":{"B":"kA=="}}}},{"PutRequest":{"Item":{"PK":{"S":"binary"},"SK":{"S":"two"},"data":{"B":"dGVzdCDAIN0="}}}}]}}`
+		if status, body := call("BatchWriteItem", batch); status != http.StatusOK || !bytes.Contains(body, []byte(`"UnprocessedItems":{}`)) {
+			t.Fatalf("batch binary values %d %s", status, body)
+		}
+		if status, body := call("GetItem", `{"TableName":"BinaryValues","Key":{"PK":{"S":"binary"},"SK":{"S":"two"}}}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"B":"dGVzdCDAIN0="`)) {
+			t.Fatalf("get binary value %d %s", status, body)
+		}
+	})
 }

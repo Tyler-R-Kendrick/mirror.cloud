@@ -555,6 +555,30 @@ func TestDynamoDBPutItemReturnValues(t *testing.T) {
 	})
 }
 
+func TestDynamoDBEmptyAndBinaryValues(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	must := func(operation string, input map[string]any) *spi.Response {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	must("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "PK", "KeyType": "HASH"}, map[string]any{"AttributeName": "SK", "KeyType": "RANGE"}}})
+	empty := must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"PK": map[string]any{"S": "empty"}, "SK": map[string]any{"S": "item"}, "data": map[string]any{"S": ""}}})
+	binary := must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"PK": map[string]any{"S": "binary"}, "SK": map[string]any{"S": "item"}, "data": map[string]any{"B": "kA=="}}})
+	batch := must("BatchWriteItem", map[string]any{"RequestItems": map[string]any{"T": []any{
+		map[string]any{"PutRequest": map[string]any{"Item": map[string]any{"PK": map[string]any{"S": "batch-1"}, "SK": map[string]any{"S": "item"}, "data": map[string]any{"B": "dGVzdC0x"}}}},
+		map[string]any{"PutRequest": map[string]any{"Item": map[string]any{"PK": map[string]any{"S": "batch-2"}, "SK": map[string]any{"S": "item"}, "data": map[string]any{"B": "dGVzdCDAIN0="}}}},
+	}}})
+	get := func(pk string) any {
+		return must("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"PK": map[string]any{"S": pk}, "SK": map[string]any{"S": "item"}}}).Output["Item"]
+	}
+	golden.AssertJSON(t, map[string]any{"emptyResponse": empty.Output, "binaryResponse": binary.Output, "batchResponse": batch.Output, "empty": get("empty"), "binary": get("binary"), "batch1": get("batch-1"), "batch2": get("batch-2")})
+}
+
 func TestDynamoDBExtendedOperations(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

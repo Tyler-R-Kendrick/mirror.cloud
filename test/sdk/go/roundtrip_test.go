@@ -3159,6 +3159,28 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || len(secondPut.Attributes) != 2 {
 		t.Fatalf("replacement all-old: %#v %v", secondPut, err)
 	}
+	if _, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("BinaryValues"), BillingMode: ddbtypes.BillingModePayPerRequest, KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("PK"), KeyType: ddbtypes.KeyTypeHash}, {AttributeName: aws.String("SK"), KeyType: ddbtypes.KeyTypeRange}}, AttributeDefinitions: []ddbtypes.AttributeDefinition{{AttributeName: aws.String("PK"), AttributeType: ddbtypes.ScalarAttributeTypeS}, {AttributeName: aws.String("SK"), AttributeType: ddbtypes.ScalarAttributeTypeS}}}); err != nil {
+		t.Fatalf("create binary table: %v", err)
+	}
+	if _, err := ddb.PutItem(context.Background(), &dynamodb.PutItemInput{TableName: aws.String("BinaryValues"), Item: map[string]ddbtypes.AttributeValue{"PK": &ddbtypes.AttributeValueMemberS{Value: "empty"}, "SK": &ddbtypes.AttributeValueMemberS{Value: "item"}, "data": &ddbtypes.AttributeValueMemberS{Value: ""}}}); err != nil {
+		t.Fatalf("put empty value: %v", err)
+	}
+	if _, err := ddb.PutItem(context.Background(), &dynamodb.PutItemInput{TableName: aws.String("BinaryValues"), Item: map[string]ddbtypes.AttributeValue{"PK": &ddbtypes.AttributeValueMemberS{Value: "binary"}, "SK": &ddbtypes.AttributeValueMemberS{Value: "single"}, "data": &ddbtypes.AttributeValueMemberB{Value: []byte{0x90}}}}); err != nil {
+		t.Fatalf("put binary value: %v", err)
+	}
+	if _, err := ddb.BatchWriteItem(context.Background(), &dynamodb.BatchWriteItemInput{RequestItems: map[string][]ddbtypes.WriteRequest{"BinaryValues": {{PutRequest: &ddbtypes.PutRequest{Item: map[string]ddbtypes.AttributeValue{"PK": &ddbtypes.AttributeValueMemberS{Value: "binary"}, "SK": &ddbtypes.AttributeValueMemberS{Value: "batch"}, "data": &ddbtypes.AttributeValueMemberB{Value: []byte{'t', 'e', 's', 't', ' ', 0xc0, ' ', 0xed}}}}}}}}); err != nil {
+		t.Fatalf("batch binary value: %v", err)
+	}
+	for sk, want := range map[string][]byte{"single": {0x90}, "batch": {'t', 'e', 's', 't', ' ', 0xc0, ' ', 0xed}} {
+		got, err := ddb.GetItem(context.Background(), &dynamodb.GetItemInput{TableName: aws.String("BinaryValues"), Key: map[string]ddbtypes.AttributeValue{"PK": &ddbtypes.AttributeValueMemberS{Value: "binary"}, "SK": &ddbtypes.AttributeValueMemberS{Value: sk}}})
+		if err != nil {
+			t.Fatalf("get binary %s: %v", sk, err)
+		}
+		value, ok := got.Item["data"].(*ddbtypes.AttributeValueMemberB)
+		if !ok || !bytes.Equal(value.Value, want) {
+			t.Fatalf("get binary %s: %#v", sk, got)
+		}
+	}
 	if ttl, err := ddb.DescribeTimeToLive(context.Background(), &dynamodb.DescribeTimeToLiveInput{TableName: aws.String("T")}); err != nil || ttl.TimeToLiveDescription == nil || ttl.TimeToLiveDescription.TimeToLiveStatus != ddbtypes.TimeToLiveStatusDisabled {
 		t.Fatalf("default ttl: %#v %v", ttl, err)
 	}

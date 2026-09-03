@@ -114,6 +114,18 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given presigned query metadata When putting an object Then metadata is persisted", func(t *testing.T) {
+		res := do(http.MethodPut, "/presigned-metadata-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/presigned-metadata-bdd/key?x-amz-meta-owner=presigned", []byte("body"), "")
+		res.Body.Close()
+		res = do(http.MethodHead, "/presigned-metadata-bdd/key", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-meta-owner") != "presigned" {
+			t.Fatalf("presigned metadata %d %#v", res.StatusCode, res.Header)
+		}
+	})
+
 	t.Run("Given a UTF-8 key and system metadata When put and fetched Then the object round trips", func(t *testing.T) {
 		res := do(http.MethodPut, "/utf8-metadata-bdd", nil, "")
 		res.Body.Close()

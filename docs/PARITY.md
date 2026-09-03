@@ -511,4 +511,22 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 324/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+All 463 pinned S3 test functions are explicitly traced. That completes this source-level S3 inventory; it does not claim total AWS parity, and rows marked skipped, LocalStack-only, or intentionally unsupported retain those limits.
+
+## DynamoDB baseline
+
+Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited on 2026-09-03.
+
+| Measure | Current evidence |
+|---|---:|
+| Requested test forms wired | 7 / 7 (100%) |
+| DynamoDB operations routed to emulation | 62 / 62 (100%) |
+| LocalStack DynamoDB test functions explicitly traced | 2 / 56 (3.6%) |
+| LocalStack DynamoDB test functions not yet traced | 54 / 56 (96.4%) |
+
+The pinned inventory is the 56 direct test functions in `tests/aws/services/dynamodb/test_dynamodb.py`; parametrized cases are not expanded.
+
+| LocalStack test | Mirror evidence | Result |
+|---|---|---|
+| `test_dynamodb.py::TestDynamoDB::test_create_duplicate_table` | `TestTableLifecycleFaults`, Verify-style characterization snapshot, AWS SDK contract, raw HTTP BDD, fuzz, concurrent chaos, and semantic mutation coverage verify one atomic winner and exact `ResourceInUseException` faults | Mapped and race-pending |
+| `test_dynamodb.py::TestDynamoDB::test_table_crud` | Atomic, snapshot, SDK contract, HTTP BDD, fuzz, chaos, and mutation coverage verify create/list/describe/delete plus exact `ResourceNotFoundException` on repeated delete; detailed table-description parity remains to be traced separately | Partially mapped; race-pending |

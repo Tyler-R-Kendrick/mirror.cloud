@@ -2654,7 +2654,12 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	}
 	resp.Headers.Set("ETag", etag)
 	location := (&url.URL{Scheme: "http", Host: bucket + ".s3.amazonaws.com", Path: "/" + key}).String()
-	if req.HTTP != nil {
+	advertise, _ := url.Parse(req.AdvertiseURL)
+	if advertise != nil && advertise.Scheme != "" && advertise.Host != "" {
+		advertise.Path = strings.TrimRight(advertise.Path, "/") + "/" + bucket + "/" + key
+		advertise.RawQuery, advertise.Fragment = "", ""
+		location = advertise.String()
+	} else if req.HTTP != nil {
 		scheme, path := req.HTTP.URL.Scheme, "/"+bucket+"/"+key
 		if scheme == "" {
 			scheme = "http"

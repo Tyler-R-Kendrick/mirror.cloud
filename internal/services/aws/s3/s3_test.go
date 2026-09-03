@@ -5793,6 +5793,17 @@ func TestMultipartUnicodeLocationCharacterization(t *testing.T) {
 	if response.Output["Location"] != "http://multipart-unicode-location.s3.amazonaws.com/test-unicode_%E2%80%94_file" {
 		t.Fatalf("multipart Unicode location = %#v", response.Output)
 	}
+	advertisedInput := map[string]any{"Bucket": input["Bucket"], "Key": "custom-host"}
+	advertisedUpload := mustInvoke(t, p, "CreateMultipartUpload", advertisedInput, nil)
+	advertisedPart := maps.Clone(advertisedInput)
+	advertisedPart["UploadId"], advertisedPart["PartNumber"] = advertisedUpload.Output["UploadId"], 1
+	part = mustInvoke(t, p, "UploadPart", advertisedPart, []byte("body"))
+	advertisedInput["UploadId"] = advertisedUpload.Output["UploadId"]
+	advertisedInput["MultipartUpload"] = map[string]any{"Parts": []any{completedPart(1, part)}}
+	advertised, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "aws.s3", Operation: "CompleteMultipartUpload", Input: advertisedInput, Identity: ident(), AdvertiseURL: "https://foobar:4566/base/"})
+	if err != nil || advertised.Output["Location"] != "https://foobar:4566/base/multipart-unicode-location/custom-host" {
+		t.Fatalf("advertised multipart location = %#v, %v", advertised, err)
+	}
 	golden.AssertJSON(t, response.Output)
 }
 

@@ -126,6 +126,32 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given presigned query headers When putting an object Then conditions and attributes are honored", func(t *testing.T) {
+		res := do(http.MethodPut, "/presigned-headers-bdd", nil, "")
+		res.Body.Close()
+		query := url.Values{
+			"If-None-Match":                               {"*"},
+			"x-amz-server-side-encryption":                {"aws:kms"},
+			"x-amz-server-side-encryption-aws-kms-key-id": {"arn:aws:kms:us-east-1:000000000000:key/kms-bdd"},
+			"x-amz-storage-class":                         {"DEEP_ARCHIVE"},
+		}.Encode()
+		res = do(http.MethodPut, "/presigned-headers-bdd/key?"+query, []byte("body"), "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("first presigned header put %d", res.StatusCode)
+		}
+		res = do(http.MethodPut, "/presigned-headers-bdd/key?"+query, []byte("changed"), "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusPreconditionFailed {
+			t.Fatalf("second presigned header put %d", res.StatusCode)
+		}
+		res = do(http.MethodHead, "/presigned-headers-bdd/key", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-storage-class") != "DEEP_ARCHIVE" || res.Header.Get("x-amz-server-side-encryption") != "aws:kms" || res.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != "arn:aws:kms:us-east-1:000000000000:key/kms-bdd" {
+			t.Fatalf("presigned query headers %d %#v", res.StatusCode, res.Header)
+		}
+	})
+
 	t.Run("Given a GET request body When reading an object Then the body is ignored", func(t *testing.T) {
 		res := do(http.MethodPut, "/get-body-bdd", nil, "")
 		res.Body.Close()

@@ -8595,6 +8595,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestDynamoDBItemFaults",
 		},
 		{
+			name: "dynamodb-drop-batch-write-payload",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
+			old:  "old := p.loadItem(ctx, req, tbl, key)\n\t\t\t\t\t\tb, _ := json.Marshal(item)",
+			new:  "old := p.loadItem(ctx, req, tbl, key)\n\t\t\t\t\t\tb, _ := json.Marshal(map[string]any{})",
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestDynamoDBEmptyAndBinaryValues",
+		},
+		{
 			name: "dynamodb-accept-missing-item-key",
 			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
 			old:  `if name != "" && len(asMap(item[name])) == 0 {`,

@@ -8555,6 +8555,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestDynamoDBItemFaults",
 		},
 		{
+			name: "dynamodb-query-accept-missing-index",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
+			old:  `if len(index) == 0 {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestDynamoDBQueryIndexProjection",
+		},
+		{
+			name: "dynamodb-query-ignore-index-projection",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
+			old:  `if str(req.Input["Select"]) == "ALL_ATTRIBUTES" && str(asMap(index["Projection"])["ProjectionType"]) != "ALL" {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestDynamoDBQueryIndexProjection",
+		},
+		{
 			name: "dynamodb-batch-write-missing-table",
 			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
 			old:  "case \"BatchWriteItem\":\n\t\tif ri, ok := req.Input[\"RequestItems\"].(map[string]any); ok {\n\t\t\tfor tbl, spec := range ri {\n\t\t\t\tif err := requireTable(tbl); err != nil {",

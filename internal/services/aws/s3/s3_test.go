@@ -2933,6 +2933,22 @@ func TestUserMetadataRFC2047Characterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"get": get, "head": head, "copy": copyMetadata, "replace": replaced.Headers.Get("x-amz-meta-fake-encoded")})
 }
 
+func TestUnicodeSystemMetadataCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "unicode-system-metadata"}, nil)
+	disposition := `attachment; filename="test_—_file%E2%80%94_é_2.pdf"`
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "unicode-system-metadata", "Key": "test", "ContentLanguage": "de", "ContentDisposition": disposition, "CacheControl": "ÄMÄZÕÑ S3"}, nil)
+	got := map[string]any{}
+	for _, operation := range []string{"GetObject", "HeadObject"} {
+		response := mustInvoke(t, p, operation, map[string]any{"Bucket": "unicode-system-metadata", "Key": "test"}, nil)
+		if response.Headers.Get("Content-Language") != "de" || response.Headers.Get("Content-Disposition") != disposition || response.Headers.Get("Cache-Control") != "ÄMÄZÕÑ S3" {
+			t.Fatalf("%s metadata = %v", operation, response.Headers)
+		}
+		got[operation] = map[string]any{"cacheControl": response.Headers.Get("Cache-Control"), "contentDisposition": response.Headers.Get("Content-Disposition"), "contentLanguage": response.Headers.Get("Content-Language")}
+	}
+	golden.AssertJSON(t, got)
+}
+
 func TestGetObjectResponseHeaderOverrides(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "response-overrides"}, nil)

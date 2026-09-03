@@ -896,7 +896,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		for name, conditions := range map[string]struct{ match, noneMatch, header, detail string }{
 			"combined":      {`"etag"`, "*", "If-Match,If-None-Match", "Multiple conditional request headers present in the request"},
 			"if-none-match": {"", `"etag"`, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
-			"if-match-star": {"*", "", "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+			"if-match-star": {"*", "", "If-Match", "We don't accept the provided value of If-Match header for this API"},
 		} {
 			request, err := http.NewRequest(http.MethodPost, ts.URL+"/completion-precondition-bdd/object?uploadId="+url.QueryEscape(created.UploadID), strings.NewReader(manifest))
 			if err != nil {
@@ -931,7 +931,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 			for name, conditions := range map[string]struct{ match, noneMatch, header, detail string }{
 				"combined":      {`"etag"`, "*", "If-Match,If-None-Match", "Multiple conditional request headers present in the request"},
 				"if-none-match": {"", `"etag"`, "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
-				"if-match-star": {"*", "", "If-None-Match", "We don't accept the provided value of If-None-Match header for this API"},
+				"if-match-star": {"*", "", "If-Match", "We don't accept the provided value of If-Match header for this API"},
 			} {
 				res = do(http.MethodPut, "/write-precondition-bdd/destination", []byte("old"), "")
 				res.Body.Close()
@@ -2192,6 +2192,68 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		})
 		if ordered.StatusCode != http.StatusOK {
 			t.Fatalf("ordered copy %d", ordered.StatusCode)
+		}
+	})
+
+	t.Run("Given versioned copy destinations When conditionally copying Then current versions and delete markers govern writes", func(t *testing.T) {
+		res := do(http.MethodPut, "/copy-write-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/copy-write-bdd?versioning", []byte(`<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>`), "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/copy-write-bdd/source", []byte("source"), "")
+		sourceETag := res.Header.Get("ETag")
+		res.Body.Close()
+		copyObject := func(key string, headers map[string]string) (*http.Response, []byte) {
+			t.Helper()
+			req, _ := http.NewRequest(http.MethodPut, ts.URL+"/copy-write-bdd/"+key, nil)
+			req.Header.Set("Authorization", auth)
+			req.Header.Set("x-amz-copy-source", "/copy-write-bdd/source")
+			for name, value := range headers {
+				req.Header.Set(name, value)
+			}
+			response, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response, body
+		}
+		if copied, _ := copyObject("destination", map[string]string{"If-None-Match": "*"}); copied.StatusCode != http.StatusOK {
+			t.Fatalf("first If-None-Match copy %d", copied.StatusCode)
+		}
+		if copied, _ := copyObject("destination", map[string]string{"If-None-Match": "*"}); copied.StatusCode != http.StatusPreconditionFailed {
+			t.Fatalf("existing If-None-Match copy %d", copied.StatusCode)
+		}
+		res = do(http.MethodDelete, "/copy-write-bdd/destination", nil, "")
+		res.Body.Close()
+		if copied, _ := copyObject("destination", map[string]string{"If-None-Match": "*"}); copied.StatusCode != http.StatusOK {
+			t.Fatalf("delete-marker If-None-Match copy %d", copied.StatusCode)
+		}
+		if copied, _ := copyObject("destination", map[string]string{"If-Match": `"wrong"`}); copied.StatusCode != http.StatusPreconditionFailed {
+			t.Fatalf("wrong If-Match copy %d", copied.StatusCode)
+		}
+		if copied, _ := copyObject("destination", map[string]string{"If-Match": sourceETag}); copied.StatusCode != http.StatusOK {
+			t.Fatalf("matching If-Match copy %d", copied.StatusCode)
+		}
+		res = do(http.MethodDelete, "/copy-write-bdd/destination", nil, "")
+		res.Body.Close()
+		if copied, body := copyObject("destination", map[string]string{"If-Match": sourceETag}); copied.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("<Code>NoSuchKey</Code>")) {
+			t.Fatalf("delete-marker If-Match copy %d %s", copied.StatusCode, body)
+		}
+		res = do(http.MethodPut, "/copy-write-bdd/destination", []byte("current"), "")
+		currentETag := res.Header.Get("ETag")
+		res.Body.Close()
+		if copied, _ := copyObject("destination", map[string]string{"If-Match": currentETag}); copied.StatusCode != http.StatusOK {
+			t.Fatalf("current If-Match copy %d", copied.StatusCode)
+		}
+		storage := map[string]string{"If-None-Match": "*", "x-amz-storage-class": "STANDARD"}
+		if copied, _ := copyObject("source", storage); copied.StatusCode != http.StatusPreconditionFailed {
+			t.Fatalf("in-place If-None-Match copy %d", copied.StatusCode)
+		}
+		storage["If-Match"], storage["If-None-Match"] = sourceETag, ""
+		if copied, _ := copyObject("source", storage); copied.StatusCode != http.StatusOK {
+			t.Fatalf("in-place If-Match copy %d", copied.StatusCode)
 		}
 	})
 

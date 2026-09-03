@@ -11,8 +11,8 @@
   "if-match-star": {
     "code": "NotImplemented",
     "fields": {
-      "Header": "If-None-Match",
-      "additionalMessage": "We don't accept the provided value of If-None-Match header for this API"
+      "Header": "If-Match",
+      "additionalMessage": "We don't accept the provided value of If-Match header for this API"
     },
     "message": "A header you provided implies functionality that is not implemented",
     "status": 501

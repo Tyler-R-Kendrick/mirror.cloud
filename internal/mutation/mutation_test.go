@@ -933,7 +933,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-skip-copy-source-unescape",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `path, err = url.QueryUnescape(path)`,
+			old:  `path, err = unescape(path)`,
 			new:  `path, err = path, error(nil)`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestCopyObjectSourceVersions",
@@ -941,8 +941,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-copy-source-preserve-form-plus",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `path, err = url.QueryUnescape(path)`,
-			new:  `path, err = url.PathUnescape(path)`,
+			old:  `if !strings.Contains(path, "/") && strings.Contains(strings.ToLower(path), "%2f") {`,
+			new:  `if false {`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestSpecialObjectKeyCharacterization",
 		},

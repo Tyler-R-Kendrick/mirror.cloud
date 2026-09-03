@@ -5687,7 +5687,11 @@ func parseCopySource(req *spi.Request) (bucket, key, version string, err error) 
 		source = req.HTTP.Header.Get("x-amz-copy-source")
 	}
 	path, query, _ := strings.Cut(strings.TrimPrefix(source, "/"), "?")
-	path, err = url.QueryUnescape(path)
+	unescape := url.PathUnescape
+	if !strings.Contains(path, "/") && strings.Contains(strings.ToLower(path), "%2f") {
+		unescape = url.QueryUnescape
+	}
+	path, err = unescape(path)
 	if err != nil {
 		return "", "", "", &spi.Fault{Code: "InvalidArgument", HTTPStatus: 400, Fault: "client"}
 	}
@@ -5698,7 +5702,7 @@ func parseCopySource(req *spi.Request) (bucket, key, version string, err error) 
 	for _, field := range strings.Split(query, "&") {
 		name, value, found := strings.Cut(field, "=")
 		if found && name == "versionId" {
-			version, err = url.QueryUnescape(value)
+			version, err = url.PathUnescape(value)
 			if err != nil || version == "" {
 				return "", "", "", &spi.Fault{Code: "InvalidArgument", HTTPStatus: 400, Fault: "client"}
 			}

@@ -2318,6 +2318,10 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if source.StatusCode != http.StatusOK {
 			t.Fatalf("put source %d", source.StatusCode)
 		}
+		invalid, invalidBody := request("invalid", map[string]string{"x-amz-copy-source": "wrongformat"})
+		if invalid.StatusCode != http.StatusBadRequest || !bytes.Contains(invalidBody, []byte("<Code>InvalidArgument</Code>")) {
+			t.Fatalf("invalid copy source %d %s", invalid.StatusCode, invalidBody)
+		}
 		copySource := "/copy-conditions/source"
 		listed, listedBody := request("listed", map[string]string{"x-amz-copy-source": copySource, "x-amz-copy-source-if-match": `"wrong", ` + source.Header.Get("ETag")})
 		if listed.StatusCode != http.StatusPreconditionFailed || !bytes.Contains(listedBody, []byte("At least one of the pre-conditions you specified did not hold")) || !bytes.Contains(listedBody, []byte("x-amz-copy-source-If-Match")) {

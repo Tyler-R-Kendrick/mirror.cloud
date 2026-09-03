@@ -2432,6 +2432,9 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if aws.ToString(versionCopy.CopySourceVersionId) != aws.ToString(put.VersionId) {
 		t.Fatalf("copy source version %q want %q", aws.ToString(versionCopy.CopySourceVersionId), aws.ToString(put.VersionId))
 	}
+	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("wrong-copy-source"), CopySource: aws.String("wrongformat")}); err == nil || !strings.Contains(err.Error(), "InvalidArgument") {
+		t.Fatalf("wrong copy source format: %v", err)
+	}
 	if _, err := s3c.CopyObject(context.Background(), &s3.CopyObjectInput{Bucket: aws.String("sdk"), Key: aws.String("bad-metadata-directive"), CopySource: aws.String("sdk/k"), MetadataDirective: s3types.MetadataDirective("INVALID")}); err == nil || !strings.Contains(err.Error(), "InvalidArgument") {
 		t.Fatalf("invalid metadata directive: %v", err)
 	}

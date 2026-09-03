@@ -1379,6 +1379,7 @@ func TestConcurrentCompleteMultipartPreconditionFaultsRemainModeled(t *testing.T
 				input["IfNoneMatch"] = `"etag"`
 			case 2:
 				input["IfMatch"] = "*"
+				header, detail = "If-Match", "We don't accept the provided value of If-Match header for this API"
 			}
 			_, err := call("CompleteMultipartUpload", input, "")
 			var fault *spi.Fault
@@ -1437,6 +1438,7 @@ func TestConcurrentWritePreconditionFaultsNeverMutateObject(t *testing.T) {
 				input["IfNoneMatch"] = `"etag"`
 			case 2:
 				input["IfMatch"] = "*"
+				header, detail = "If-Match", "We don't accept the provided value of If-Match header for this API"
 			}
 			_, err := call(operation, input, "new")
 			var fault *spi.Fault

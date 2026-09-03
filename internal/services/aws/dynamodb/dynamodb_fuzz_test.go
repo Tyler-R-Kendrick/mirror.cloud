@@ -26,7 +26,9 @@ func FuzzTableLifecycle(f *testing.F) {
 		arn := "arn:aws:dynamodb:us-east-1:000000000000:table/" + name
 		listed, tagsErr := call("ListTagsOfResource", map[string]any{"ResourceArn": arn})
 		value := strings.ToValidUTF8(string(raw), "�")
-		_, putErr := call("PutItem", map[string]any{"TableName": name, "Item": map[string]any{"id": map[string]any{"S": "item"}, "data": map[string]any{"S": value}}})
+		item := map[string]any{"id": map[string]any{"S": "item"}, "data": map[string]any{"S": value}}
+		firstReturn, firstPut := call("PutItem", map[string]any{"TableName": name, "Item": item, "ReturnValues": "ALL_OLD"})
+		secondReturn, putErr := call("PutItem", map[string]any{"TableName": name, "Item": item, "ReturnValues": "ALL_OLD"})
 		got, getErr := call("GetItem", map[string]any{"TableName": name, "Key": map[string]any{"id": map[string]any{"S": "item"}}})
 		_, invalidProjection := call("Query", map[string]any{"TableName": name, "IndexName": "keys", "Select": "ALL_ATTRIBUTES"})
 		_, ttlEnable := call("UpdateTimeToLive", map[string]any{"TableName": name, "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}})
@@ -40,7 +42,7 @@ func FuzzTableLifecycle(f *testing.F) {
 		_, ttlDescribe := call("DescribeTimeToLive", table)
 		_, ttlUpdate := call("UpdateTimeToLive", table)
 		tags := asSlice(listed.Output["Tags"])
-		if created != nil || duplicate == nil || tagsErr != nil || len(tags) != 1 || str(asMap(tags[0])["Value"]) != name || putErr != nil || getErr != nil || str(asMap(asMap(got.Output["Item"])["data"])["S"]) != value || invalidProjection == nil || ttlEnable != nil || expiredPut != nil || expirationErr != nil || expiration.Output["ExpiredItems"] != 1 || expiredGet != nil || expiredItem.Output["Item"] != nil || deleted != nil || missing == nil || missingQuery == nil || missingTransaction == nil || ttlDescribe == nil || ttlUpdate == nil {
+		if created != nil || duplicate == nil || tagsErr != nil || len(tags) != 1 || str(asMap(tags[0])["Value"]) != name || firstPut != nil || firstReturn.Output["Attributes"] != nil || putErr != nil || secondReturn.Output["Attributes"] == nil || getErr != nil || str(asMap(asMap(got.Output["Item"])["data"])["S"]) != value || invalidProjection == nil || ttlEnable != nil || expiredPut != nil || expirationErr != nil || expiration.Output["ExpiredItems"] != 1 || expiredGet != nil || expiredItem.Output["Item"] != nil || deleted != nil || missing == nil || missingQuery == nil || missingTransaction == nil || ttlDescribe == nil || ttlUpdate == nil {
 			t.Fatal("table lifecycle was not create/tag/conflict/delete/missing")
 		}
 	})

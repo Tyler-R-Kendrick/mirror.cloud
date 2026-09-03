@@ -2921,6 +2921,18 @@ func FuzzObjectServerSideEncryption(f *testing.F) {
 		} else if get.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "" {
 			t.Fatalf("non-KMS bucket key header=%v", get.Headers)
 		}
+		copyInput := map[string]any{"Bucket": "encryption-fuzz", "Key": "copied", "CopySource": "encryption-fuzz/object", "ServerSideEncryption": algorithm, "BucketKeyEnabled": bucketKey}
+		if key, ok := input["SSEKMSKeyId"]; ok {
+			copyInput["SSEKMSKeyId"] = key
+		}
+		copied := mustInvoke(t, p, "CopyObject", copyInput, nil)
+		copiedGet := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "encryption-fuzz", "Key": "copied"}, nil)
+		if copied.Headers.Get("x-amz-server-side-encryption") != algorithm || copiedGet.Headers.Get("x-amz-server-side-encryption") != algorithm || string(readStream(t, copiedGet)) != body {
+			t.Fatalf("copied encryption response=%v stored=%v", copied.Headers, copiedGet.Headers)
+		}
+		if algorithm == "aws:kms" && bucketKey && copiedGet.Headers.Get("x-amz-server-side-encryption-bucket-key-enabled") != "true" {
+			t.Fatalf("copied kms bucket key headers=%v", copiedGet.Headers)
+		}
 	})
 }
 

@@ -3087,15 +3087,33 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := ddb.UpdateTimeToLive(context.Background(), &dynamodb.UpdateTimeToLiveInput{TableName: aws.String("missing"), TimeToLiveSpecification: &ddbtypes.TimeToLiveSpecification{Enabled: aws.Bool(true), AttributeName: aws.String("ttl")}}); err == nil || !strings.Contains(err.Error(), "ResourceNotFoundException") {
 		t.Fatalf("missing table ttl update: %v", err)
 	}
-	if _, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{
+	createdTable, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{
 		TableName: aws.String("T"),
 		KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: ddbtypes.KeyTypeHash}},
 		AttributeDefinitions: []ddbtypes.AttributeDefinition{
 			{AttributeName: aws.String("id"), AttributeType: ddbtypes.ScalarAttributeTypeS},
 		},
 		BillingMode: ddbtypes.BillingModePayPerRequest,
-	}); err != nil {
+		Tags:        []ddbtypes.Tag{{Key: aws.String("Name"), Value: aws.String("test")}},
+	})
+	if err != nil {
 		t.Fatalf("create table: %v", err)
+	}
+	arn := aws.ToString(createdTable.TableDescription.TableArn)
+	if arn != "arn:aws:dynamodb:us-east-1:000000000000:table/T" {
+		t.Fatalf("table arn %q", arn)
+	}
+	if tags, err := ddb.ListTagsOfResource(context.Background(), &dynamodb.ListTagsOfResourceInput{ResourceArn: &arn}); err != nil || len(tags.Tags) != 1 || aws.ToString(tags.Tags[0].Key) != "Name" {
+		t.Fatalf("creation tags: %#v %v", tags, err)
+	}
+	if _, err := ddb.TagResource(context.Background(), &dynamodb.TagResourceInput{ResourceArn: &arn, Tags: []ddbtypes.Tag{{Key: aws.String("env"), Value: aws.String("test")}}}); err != nil {
+		t.Fatalf("tag table: %v", err)
+	}
+	if _, err := ddb.UntagResource(context.Background(), &dynamodb.UntagResourceInput{ResourceArn: &arn, TagKeys: []string{"Name"}}); err != nil {
+		t.Fatalf("untag table: %v", err)
+	}
+	if tags, err := ddb.ListTagsOfResource(context.Background(), &dynamodb.ListTagsOfResourceInput{ResourceArn: &arn}); err != nil || len(tags.Tags) != 1 || aws.ToString(tags.Tags[0].Key) != "env" {
+		t.Fatalf("remaining tags: %#v %v", tags, err)
 	}
 	if ttl, err := ddb.DescribeTimeToLive(context.Background(), &dynamodb.DescribeTimeToLiveInput{TableName: aws.String("T")}); err != nil || ttl.TimeToLiveDescription == nil || ttl.TimeToLiveDescription.TimeToLiveStatus != ddbtypes.TimeToLiveStatusDisabled {
 		t.Fatalf("default ttl: %#v %v", ttl, err)

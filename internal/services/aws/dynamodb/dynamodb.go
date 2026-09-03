@@ -61,6 +61,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		b, _ := json.Marshal(req.Input)
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
+		arn := "arn:aws:dynamodb:" + req.Identity.Region + ":" + req.Identity.Account + ":table/" + table
+		tags := rec["Tags"]
+		delete(rec, "Tags")
+		rec["TableArn"] = arn
 		p.ensureStream(req, rec, table)
 		b, _ = json.Marshal(rec)
 		if err := p.col(req, "tables").Txn(ctx, func(tx spi.Tx) error {
@@ -73,7 +77,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}); err != nil {
 			return nil, err
 		}
-		return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{"TableName": table, "TableStatus": "ACTIVE", "LatestStreamArn": rec["LatestStreamArn"]}}}, nil
+		if len(asSlice(tags)) > 0 {
+			_, _ = p.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "TagResource", Input: map[string]any{"ResourceArn": arn, "Tags": tags}})
+		}
+		return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{"TableName": table, "TableArn": arn, "TableStatus": "ACTIVE", "LatestStreamArn": rec["LatestStreamArn"]}}}, nil
 	case "DeleteTable":
 		if err := p.col(req, "tables").Txn(ctx, func(tx spi.Tx) error {
 			if _, ok, err := tx.Get(table); err != nil {
@@ -86,6 +93,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, err
 		}
 		_ = p.col(req, "ttl").Delete(ctx, table)
+		_ = p.col(req, "tags").Delete(ctx, "arn:aws:dynamodb:"+req.Identity.Region+":"+req.Identity.Account+":table/"+table)
 		return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{"TableName": table, "TableStatus": "DELETING"}}}, nil
 	case "DescribeTable":
 		b, ok, _ := p.col(req, "tables").Get(ctx, table)

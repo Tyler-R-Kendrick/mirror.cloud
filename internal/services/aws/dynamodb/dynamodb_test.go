@@ -33,6 +33,29 @@ func TestTablePutGet(t *testing.T) {
 	}
 }
 
+func TestTableLifecycleFaults(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string) error {
+		t.Helper()
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: map[string]any{"TableName": "T"}})
+		return err
+	}
+	if err := call("CreateTable"); err != nil {
+		t.Fatal(err)
+	}
+	if fault, ok := call("CreateTable").(*spi.Fault); !ok || fault.Code != "ResourceInUseException" {
+		t.Fatalf("duplicate create fault %#v", fault)
+	}
+	if err := call("DeleteTable"); err != nil {
+		t.Fatal(err)
+	}
+	if fault, ok := call("DeleteTable").(*spi.Fault); !ok || fault.Code != "ResourceNotFoundException" {
+		t.Fatalf("missing delete fault %#v", fault)
+	}
+}
+
 func TestQueryKeyConditionNotUnfilteredScan(t *testing.T) {
 	p := &Pack{deps: spitest.Deps(t)}
 	ctx := context.Background()

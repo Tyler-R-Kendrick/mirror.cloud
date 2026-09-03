@@ -28,12 +28,16 @@ func FuzzTableLifecycle(f *testing.F) {
 		value := strings.ToValidUTF8(string(raw), "�")
 		_, putErr := call("PutItem", map[string]any{"TableName": name, "Item": map[string]any{"id": map[string]any{"S": "item"}, "data": map[string]any{"S": value}}})
 		got, getErr := call("GetItem", map[string]any{"TableName": name, "Key": map[string]any{"id": map[string]any{"S": "item"}}})
+		_, ttlEnable := call("UpdateTimeToLive", map[string]any{"TableName": name, "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}})
+		_, expiredPut := call("PutItem", map[string]any{"TableName": name, "Item": map[string]any{"id": map[string]any{"S": "expired"}, "ttl": map[string]any{"N": "-1"}}})
+		expiration, expirationErr := call("ExpireItems", nil)
+		expiredItem, expiredGet := call("GetItem", map[string]any{"TableName": name, "Key": map[string]any{"id": map[string]any{"S": "expired"}}})
 		_, deleted := call("DeleteTable", table)
 		_, missing := call("DeleteTable", table)
 		_, ttlDescribe := call("DescribeTimeToLive", table)
 		_, ttlUpdate := call("UpdateTimeToLive", table)
 		tags := asSlice(listed.Output["Tags"])
-		if created != nil || duplicate == nil || tagsErr != nil || len(tags) != 1 || str(asMap(tags[0])["Value"]) != name || putErr != nil || getErr != nil || str(asMap(asMap(got.Output["Item"])["data"])["S"]) != value || deleted != nil || missing == nil || ttlDescribe == nil || ttlUpdate == nil {
+		if created != nil || duplicate == nil || tagsErr != nil || len(tags) != 1 || str(asMap(tags[0])["Value"]) != name || putErr != nil || getErr != nil || str(asMap(asMap(got.Output["Item"])["data"])["S"]) != value || ttlEnable != nil || expiredPut != nil || expirationErr != nil || expiration.Output["ExpiredItems"] != 1 || expiredGet != nil || expiredItem.Output["Item"] != nil || deleted != nil || missing == nil || ttlDescribe == nil || ttlUpdate == nil {
 			t.Fatal("table lifecycle was not create/tag/conflict/delete/missing")
 		}
 	})

@@ -22,7 +22,8 @@ func FuzzTableLifecycle(f *testing.F) {
 		}
 		created, duplicate := call("CreateTable"), call("CreateTable")
 		deleted, missing := call("DeleteTable"), call("DeleteTable")
-		if created != nil || duplicate == nil || deleted != nil || missing == nil {
+		ttlDescribe, ttlUpdate := call("DescribeTimeToLive"), call("UpdateTimeToLive")
+		if created != nil || duplicate == nil || deleted != nil || missing == nil || ttlDescribe == nil || ttlUpdate == nil {
 			t.Fatal("table lifecycle was not create/conflict/delete/missing")
 		}
 	})

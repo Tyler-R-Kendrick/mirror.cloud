@@ -91,6 +91,33 @@ func TestDynamoDBTTLMissingTableFaults(t *testing.T) {
 	}
 }
 
+func TestDynamoDBTTLCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			fault := err.(*spi.Fault)
+			return map[string]any{"code": fault.Code, "message": fault.Message}
+		}
+		return response.Output
+	}
+	missing := map[string]any{"TableName": "missing", "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}}
+	created := map[string]any{"TableName": "T"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTable", Input: created}); err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"missingDescribe": call("DescribeTimeToLive", missing),
+		"missingUpdate":   call("UpdateTimeToLive", missing),
+		"default":         call("DescribeTimeToLive", created),
+		"enable":          call("UpdateTimeToLive", map[string]any{"TableName": "T", "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}}),
+		"enabled":         call("DescribeTimeToLive", created),
+	})
+}
+
 func TestQueryKeyConditionNotUnfilteredScan(t *testing.T) {
 	p := &Pack{deps: spitest.Deps(t)}
 	ctx := context.Background()

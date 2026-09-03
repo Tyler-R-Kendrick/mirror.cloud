@@ -1936,12 +1936,12 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}
 	if _, err := s3c.PutObject(context.Background(), &s3.PutObjectInput{
 		Bucket: aws.String("sdk"), Key: aws.String("rfc2047"), Body: bytes.NewReader([]byte("metadata")),
-		Metadata: map[string]string{"non-ascii": "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=", "fake-encoded": "=?UTF-8?Q?actually-ascii?="},
+		Metadata: map[string]string{"non-ascii": "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=", "fake-encoded": "=?UTF-8?Q?actually-ascii?=", "TEST_META_1": "foo", "__meta_2": "bar"},
 	}); err != nil {
 		t.Fatalf("put rfc2047 metadata: %v", err)
 	}
 	rfc2047, err := s3c.HeadObject(context.Background(), &s3.HeadObjectInput{Bucket: aws.String("sdk"), Key: aws.String("rfc2047")})
-	if err != nil || rfc2047.Metadata["non-ascii"] != "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=" || rfc2047.Metadata["fake-encoded"] != "actually-ascii" {
+	if err != nil || rfc2047.Metadata["non-ascii"] != "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=" || rfc2047.Metadata["fake-encoded"] != "actually-ascii" || rfc2047.Metadata["test_meta_1"] != "foo" || rfc2047.Metadata["__meta_2"] != "bar" {
 		t.Fatalf("rfc2047 metadata: %#v %v", rfc2047, err)
 	}
 	unicodeDisposition := `attachment; filename="test_—_file%E2%80%94_é_2.pdf"`

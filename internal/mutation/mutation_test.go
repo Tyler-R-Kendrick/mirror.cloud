@@ -3051,6 +3051,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestObjectMetadata",
 		},
 		{
+			name: "s3-object-metadata-rfc2047-encode-system-values",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `headers.Set(field.header, value)`,
+			new:  `headers.Set(field.header, encodeRFC2047Header(value))`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestUnicodeSystemMetadataCharacterization",
+		},
+		{
 			name: "s3-object-metadata-ignore-input-user-metadata",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `for key, value := range asMap(req.Input["Metadata"]) {`,

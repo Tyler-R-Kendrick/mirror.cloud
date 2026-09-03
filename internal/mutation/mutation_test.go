@@ -939,6 +939,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestCopyObjectSourceVersions",
 		},
 		{
+			name: "s3-copy-source-accept-wrong-format",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if len(parts) != 2 || parts[0] == "" || parts[1] == "" {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestCopyObjectSourceVersions",
+		},
+		{
 			name: "s3-copy-source-preserve-form-plus",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `if !strings.Contains(path, "/") && strings.Contains(strings.ToLower(path), "%2f") {`,

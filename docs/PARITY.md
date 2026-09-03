@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
-| LocalStack S3 test functions explicitly traced | 384 / 463 (82.9%) |
-| LocalStack S3 test functions not yet traced | 79 / 463 (17.1%) |
+| LocalStack S3 test functions explicitly traced | 410 / 463 (88.6%) |
+| LocalStack S3 test functions not yet traced | 53 / 463 (11.4%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -240,6 +240,32 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3.py::TestS3StaticWebsiteHosting::test_crud_website_configuration` | Put/Get/Delete website atomic, SDK/raw HTTP, snapshot, fuzz, chaos, and mutation coverage verifies exact round trips and idempotent deletion | Mapped and race-clean |
 | `test_s3.py::TestS3StaticWebsiteHosting::test_website_hosting_redirect_all` | Redirect-all characterization verifies configured host/protocol, original path and query preservation, and the website redirect response | Mapped and green |
 | `test_s3.py::TestS3Routing::test_access_favicon_via_aws_endpoints` | The edge demultiplexer and path/virtual-host behavior checks route `favicon.ico` as an ordinary S3 key across global and regional AWS endpoint host forms | Mapped and green |
+| `test_s3.py::TestS3BucketLifecycle::test_delete_bucket_lifecycle_configuration` | Lifecycle atomic, SDK/raw HTTP, snapshot, fuzz, chaos, and mutation coverage verifies the initial and post-delete `NoSuchLifecycleConfiguration` faults plus idempotent deletion | Mapped and race-clean |
+| `test_s3.py::TestS3BucketLifecycle::test_delete_lifecycle_configuration_on_bucket_deletion` | Bucket teardown removes its scoped lifecycle document, so recreating the same global name begins without a configuration | Mapped and green |
+| `test_s3.py::TestS3BucketLifecycle::test_put_bucket_lifecycle_conf_exc` | Validation coverage rejects missing IDs, filters, or noncurrent fields, mixed filter operands, non-midnight dates, duplicate tag keys, and incompatible delete-marker expiration without replacing prior state | Mapped and race-clean |
+| `test_s3.py::TestS3BucketLifecycle::test_bucket_lifecycle_configuration_date` | REST XML and SDK round-trip coverage preserves midnight UTC expiration dates in the configured rule | Mapped and green |
+| `test_s3.py::TestS3BucketLifecycle::test_bucket_lifecycle_configuration_object_expiry` | Lifecycle expiration characterization verifies matching current objects expose the selected rule ID and midnight-based expiry on PUT, HEAD, and GET | Mapped and race-clean |
+| `test_s3.py::TestS3BucketLifecycle::test_bucket_lifecycle_configuration_object_expiry_versioned` | Versioned lifecycle tests expose expiration only for an implicit current read and omit it for noncurrent or explicitly versioned requests | Mapped and green |
+| `test_s3.py::TestS3BucketLifecycle::test_object_expiry_after_bucket_lifecycle_configuration` | Expiration headers are resolved from current configuration at write/read time for objects created before and after the rule | Mapped and green |
+| `test_s3.py::TestS3BucketLifecycle::test_bucket_lifecycle_multiple_rules` | The lifecycle matcher uses submitted rule order, selecting the first matching prefix and omitting expiration when none matches | Mapped and green |
+| `test_s3.py::TestS3BucketLifecycle::test_bucket_lifecycle_object_size_rules` | Object-size greater-than and less-than filters are evaluated against stored bytes with strict boundaries; fuzz and mutation coverage pin both predicates | Mapped and green |
+| `test_s3.py::TestS3BucketLifecycle::test_bucket_lifecycle_tag_rules` | Tag and combined-tag filters use the persisted object tag set across PUT and GET expiration metadata, including nonmatching and untagged objects | Mapped and race-clean |
+| `test_s3.py::TestS3BucketLifecycle::test_lifecycle_expired_object_delete_marker` | The supported delete-marker-only expiration rule round-trips while ordinary object reads correctly omit an expiration date | Mapped and green |
+| `test_s3.py::TestS3BucketLifecycle::test_s3_transition_default_minimum_object_size` | Put/Get SDK/raw HTTP coverage verifies both allowed transition-minimum values, the default, exact response headers, invalid-value faults, and state preservation | Mapped and race-clean |
+| `test_s3.py::TestS3ObjectLockRetention::test_s3_object_retention_exc` | Object-lock boundary tests reject missing lock enablement, missing versions, malformed modes/dates, shortened governance without bypass, and protected deletes with exact faults | Mapped and race-clean |
+| `test_s3.py::TestS3ObjectLockRetention::test_s3_object_retention` | Put/Get retention atomic, SDK/raw HTTP, snapshot, fuzz, chaos, and mutation coverage verifies governance dates, bypass behavior, and version-scoped persistence | Mapped and race-clean |
+| `test_s3.py::TestS3ObjectLockRetention::test_s3_copy_object_retention_lock` | CopyObject retains explicitly supplied lock mode/date and applies destination default retention without inheriting unrelated source lock state | Mapped and green |
+| `test_s3.py::TestS3ObjectLockRetention::test_bucket_config_default_retention` | Bucket lock configuration applies day- or year-based default retention to PutObject, CopyObject, and completion using the write-time clock | Mapped and race-clean |
+| `test_s3.py::TestS3ObjectLockRetention::test_object_lock_delete_markers` | Versioned delete-marker creation remains allowed while permanent deletion of protected object versions is rejected | Mapped and green |
+| `test_s3.py::TestS3ObjectLockRetention::test_object_lock_extend_duration` | Governance retention may be extended normally but shortening it requires the bypass header; existing state survives rejected updates | Mapped and green |
+| `test_s3.py::TestS3ObjectLockRetention::test_s3_object_retention_compliance_mode` | Compliance retention cannot be shortened or bypass-deleted before expiry, while extension and post-expiry deletion follow the shared clock | Mapped and race-clean |
+| `test_s3.py::TestS3ObjectLockRetention::test_s3_object_lock_mode_validation` | Lock configuration validation accepts only enabled object lock with exactly one valid default mode and one positive day/year duration | Mapped and green |
+| `test_s3.py::TestS3ObjectLockLegalHold::test_put_get_object_legal_hold` | Legal-hold atomic, SDK/raw HTTP, snapshot, fuzz, chaos, and mutation coverage round-trips ON/OFF per object version | Mapped and race-clean |
+| `test_s3.py::TestS3ObjectLockLegalHold::test_put_object_with_legal_hold` | PutObject captures an explicit legal hold atomically with the new version and returns it from the lock APIs | Mapped and green |
+| `test_s3.py::TestS3ObjectLockLegalHold::test_put_object_legal_hold_exc` | Missing lock configuration, invalid status, absent object, and missing version cases return exact lock-specific faults without creating state | Mapped and green |
+| `test_s3.py::TestS3ObjectLockLegalHold::test_delete_locked_object` | Permanent version deletion is blocked while the legal hold is ON and succeeds after the same version is set OFF | Mapped and race-clean |
+| `test_s3.py::TestS3ObjectLockLegalHold::test_s3_legal_hold_lock_versioned` | Legal holds are isolated by version while current reads resolve the latest version's state | Mapped and green |
+| `test_s3.py::TestS3ObjectLockLegalHold::test_s3_copy_object_legal_hold` | CopyObject accepts destination legal-hold headers and persists them independently of the source version | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_preconditions` | `TestCopySourcePreconditionsCharacterization`, AWS SDK contract, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_modified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_unmodified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |

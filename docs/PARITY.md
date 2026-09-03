@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
-| LocalStack S3 test functions explicitly traced | 200 / 463 (43.2%) |
-| LocalStack S3 test functions not yet traced | 263 / 463 (56.8%) |
+| LocalStack S3 test functions explicitly traced | 206 / 463 (44.5%) |
+| LocalStack S3 test functions not yet traced | 257 / 463 (55.5%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -56,6 +56,12 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3.py::TestS3::test_copy_object_special_character` | Atomic characterization, AWS SDK contract, raw HTTP BDD, fuzz, concurrent chaos, snapshot, and mutation coverage verify encoded source paths copy percent literals, spaces, `@`, repeated slashes, Unicode, and literal plus keys | Mapped and race-clean |
 | `test_s3.py::TestS3::test_copy_object_special_character_plus_for_space` | The shared `parseCopySource` now applies form decoding; exact unit, SDK, raw HTTP, fuzz, concurrent chaos, snapshot, and semantic mutation checks verify `+` denotes space while `%2B` remains a literal plus | Mapped and race-clean |
 | `test_s3.py::TestS3::test_url_encoded_key` | Atomic characterization and SDK/HTTP contracts verify `test@key/`, `test%40key/`, and `test%40key` remain separate keys with distinct bodies | Mapped and green |
+| `test_s3.py::TestS3::test_get_object_no_such_bucket` | `TestMissingBucketFaultCharacterization`, AWS SDK contract, raw HTTP BDD, fuzz, concurrent chaos, snapshot, and shared `NoSuchBucket` mutation coverage verify the exact code, message, 404 status, and `BucketName` field | Mapped and race-clean |
+| `test_s3.py::TestS3::test_delete_bucket_no_such_bucket` | The shared missing-bucket characterization, SDK contract, raw HTTP BDD, fuzz, concurrent chaos, snapshot, and mutation coverage verify deletion returns the same exact `NoSuchBucket` fault | Mapped and race-clean |
+| `test_s3.py::TestS3::test_get_bucket_notification_configuration_no_such_bucket` | The shared missing-bucket characterization, SDK contract, raw HTTP BDD, fuzz, concurrent chaos, snapshot, and mutation coverage verify notification reads do not silently return an empty configuration for an absent bucket | Mapped and race-clean |
+| `test_s3.py::TestS3::test_get_object_attributes` | `TestGetObjectAttributesContract`, AWS SDK and raw HTTP contracts, characterization snapshot, fuzz, concurrent chaos, and extensive semantic mutation coverage verify flat and multipart ETag, size, class, checksum, and paginated part metadata | Mapped and race-clean |
+| `test_s3.py::TestS3::test_get_object_attributes_with_space` | `TestGetObjectAttributesVersionedCharacterization`, raw HTTP BDD, fuzz, snapshot, and semantic mutation coverage verify comma-separated attribute lists are identical with and without RFC 9110 optional whitespace | Mapped and race-clean |
+| `test_s3.py::TestS3::test_get_object_attributes_versioned` | Versioned characterization and AWS SDK contracts plus snapshot and mutation coverage verify current-version attributes, current delete-marker `NoSuchKey`, and explicit historical-version ETag, size, and storage class | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_preconditions` | `TestCopySourcePreconditionsCharacterization`, AWS SDK contract, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_modified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_unmodified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
@@ -248,4 +254,4 @@ These fixes are verified against pinned LocalStack implementation paths but do n
 | `get_failed_precondition_copy_source` exact ETag comparison | PR #229 |
 | `get_failed_upload_part_copy_source_preconditions` exact ETag comparison | PR #229 |
 
-Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 200/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.
+Operation support is complete at the routing layer. Behavioral parity is not complete or yet quantifiable beyond the explicit 206/463 lower bound; each remaining test function must be mapped, reproduced when divergent, and covered before the parity audit can reach 100%.

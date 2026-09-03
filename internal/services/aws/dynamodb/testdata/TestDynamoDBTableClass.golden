@@ -1,0 +1,14 @@
+{
+  "created": {
+    "TableClass": "STANDARD"
+  },
+  "describedInfrequent": {
+    "TableClass": "STANDARD_INFREQUENT_ACCESS"
+  },
+  "describedStandard": {
+    "TableClass": "STANDARD"
+  },
+  "updated": {
+    "TableClass": "STANDARD_INFREQUENT_ACCESS"
+  }
+}

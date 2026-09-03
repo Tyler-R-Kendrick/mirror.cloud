@@ -579,6 +579,24 @@ func TestDynamoDBEmptyAndBinaryValues(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"emptyResponse": empty.Output, "binaryResponse": binary.Output, "batchResponse": batch.Output, "empty": get("empty"), "binary": get("binary"), "batch1": get("batch-1"), "batch2": get("batch-2")})
 }
 
+func TestDynamoDBTableClass(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	must := func(operation string, input map[string]any) map[string]any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+	created := must("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "TableClass": "STANDARD"})
+	describedStandard := must("DescribeTable", map[string]any{"TableName": "T"})
+	updated := must("UpdateTable", map[string]any{"TableName": "T", "TableClass": "STANDARD_INFREQUENT_ACCESS"})
+	describedInfrequent := must("DescribeTable", map[string]any{"TableName": "T"})
+	golden.AssertJSON(t, map[string]any{"created": asMap(created["TableDescription"])["TableClassSummary"], "describedStandard": asMap(describedStandard["Table"])["TableClassSummary"], "updated": asMap(updated["TableDescription"])["TableClassSummary"], "describedInfrequent": asMap(describedInfrequent["Table"])["TableClassSummary"]})
+}
+
 func TestDynamoDBExtendedOperations(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

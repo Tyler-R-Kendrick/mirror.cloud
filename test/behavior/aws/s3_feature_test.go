@@ -1990,6 +1990,8 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		req.Header.Set("Authorization", auth)
 		req.Header.Set("x-amz-meta-non-ascii", "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=")
 		req.Header.Set("x-amz-meta-fake-encoded", "=?UTF-8?Q?actually-ascii?=")
+		req.Header.Set("x-amz-meta-TEST_META_1", "foo")
+		req.Header.Set("x-amz-meta-__meta_2", "bar")
 		res, err = http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -2000,7 +2002,7 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 		res = do(http.MethodHead, "/rfc2047-bdd/object", nil, "")
 		res.Body.Close()
-		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-meta-non-ascii") != "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=" || res.Header.Get("x-amz-meta-fake-encoded") != "actually-ascii" {
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-meta-non-ascii") != "=?UTF-8?Q?=C3=84M=C3=84Z=C3=95=C3=91_S3?=" || res.Header.Get("x-amz-meta-fake-encoded") != "actually-ascii" || res.Header.Get("x-amz-meta-test_meta_1") != "foo" || res.Header.Get("x-amz-meta-__meta_2") != "bar" {
 			t.Fatalf("head metadata %d %v", res.StatusCode, res.Header)
 		}
 

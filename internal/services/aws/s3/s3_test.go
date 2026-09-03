@@ -400,6 +400,20 @@ func TestCreateBucketTags(t *testing.T) {
 	})
 }
 
+func TestMissingBucketFaultCharacterization(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	got := map[string]any{}
+	for _, operation := range []string{"GetObject", "DeleteBucket", "GetBucketNotificationConfiguration"} {
+		_, err := invoke(t, p, operation, map[string]any{"Bucket": "does-not-exist", "Key": "foobar"}, nil)
+		fault := asFault(t, err)
+		if fault.Code != "NoSuchBucket" || fault.Message != "The specified bucket does not exist" || fault.HTTPStatus != http.StatusNotFound || fault.Fields["BucketName"] != "does-not-exist" {
+			t.Fatalf("%s missing bucket = %#v", operation, fault)
+		}
+		got[operation] = map[string]any{"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus, "bucketName": fault.Fields["BucketName"]}
+	}
+	golden.AssertJSON(t, got)
+}
+
 func TestBucketNotificationConfiguration(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := s3.New(deps)

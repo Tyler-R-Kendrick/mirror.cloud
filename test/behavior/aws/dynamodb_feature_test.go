@@ -3,9 +3,11 @@ package behavior
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
@@ -86,6 +88,23 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 		}
 		if status, body = call("ListTagsOfResource", `{"ResourceArn":"`+arn+`"}`); status != http.StatusOK || bytes.Contains(body, []byte(`"Name"`)) || !bytes.Contains(body, []byte(`"env"`)) {
 			t.Fatalf("list remaining tags %d %s", status, body)
+		}
+	})
+
+	t.Run("Given a large table When scanning Then every item crosses the HTTP boundary", func(t *testing.T) {
+		if status, body := call("CreateTable", `{"TableName":"Large","KeySchema":[{"AttributeName":"id","KeyType":"HASH"}]}`); status != http.StatusOK {
+			t.Fatalf("create large table %d %s", status, body)
+		}
+		for i := 0; i < 20; i++ {
+			payload := fmt.Sprintf(`{"TableName":"Large","Item":{"id":{"S":"id%d"},"data":{"S":%q}}}`, i, strings.Repeat("foobar123 ", 1000))
+			if status, body := call("PutItem", payload); status != http.StatusOK {
+				t.Fatalf("put large item %d %s", status, body)
+			}
+		}
+		status, body := call("Scan", `{"TableName":"Large"}`)
+		var scan map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &scan) != nil || scan["Count"] != float64(20) || scan["ScannedCount"] != float64(20) || len(body) < 200000 {
+			t.Fatalf("large scan %d bytes=%d %s", status, len(body), body[:min(len(body), 200)])
 		}
 	})
 }

@@ -3,6 +3,7 @@ package dynamodb
 import (
 	"context"
 	"encoding/hex"
+	"strings"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -24,12 +25,15 @@ func FuzzTableLifecycle(f *testing.F) {
 		_, duplicate := call("CreateTable", table)
 		arn := "arn:aws:dynamodb:us-east-1:000000000000:table/" + name
 		listed, tagsErr := call("ListTagsOfResource", map[string]any{"ResourceArn": arn})
+		value := strings.ToValidUTF8(string(raw), "�")
+		_, putErr := call("PutItem", map[string]any{"TableName": name, "Item": map[string]any{"id": map[string]any{"S": "item"}, "data": map[string]any{"S": value}}})
+		got, getErr := call("GetItem", map[string]any{"TableName": name, "Key": map[string]any{"id": map[string]any{"S": "item"}}})
 		_, deleted := call("DeleteTable", table)
 		_, missing := call("DeleteTable", table)
 		_, ttlDescribe := call("DescribeTimeToLive", table)
 		_, ttlUpdate := call("UpdateTimeToLive", table)
 		tags := asSlice(listed.Output["Tags"])
-		if created != nil || duplicate == nil || tagsErr != nil || len(tags) != 1 || str(asMap(tags[0])["Value"]) != name || deleted != nil || missing == nil || ttlDescribe == nil || ttlUpdate == nil {
+		if created != nil || duplicate == nil || tagsErr != nil || len(tags) != 1 || str(asMap(tags[0])["Value"]) != name || putErr != nil || getErr != nil || str(asMap(asMap(got.Output["Item"])["data"])["S"]) != value || deleted != nil || missing == nil || ttlDescribe == nil || ttlUpdate == nil {
 			t.Fatal("table lifecycle was not create/tag/conflict/delete/missing")
 		}
 	})

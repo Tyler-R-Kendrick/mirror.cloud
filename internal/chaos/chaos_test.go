@@ -4297,7 +4297,7 @@ func TestConcurrentUserMetadataRFC2047(t *testing.T) {
 			defer wg.Done()
 			key := fmt.Sprintf("key-%d", i)
 			value := fmt.Sprintf("Ä-%d", i)
-			if _, err := call("PutObject", map[string]any{"Bucket": "rfc2047-chaos", "Key": key, "Metadata": map[string]any{"value": value}}, "body"); err != nil {
+			if _, err := call("PutObject", map[string]any{"Bucket": "rfc2047-chaos", "Key": key, "CacheControl": "no-cache", "ContentLanguage": "de", "ContentDisposition": `attachment; filename="foo.jpg"`, "Metadata": map[string]any{"value": value}}, "body"); err != nil {
 				errs <- err
 				return
 			}
@@ -4307,7 +4307,7 @@ func TestConcurrentUserMetadataRFC2047(t *testing.T) {
 				errs <- err
 				return
 			}
-			if got := response.Headers.Get("x-amz-meta-value"); got != want {
+			if got := response.Headers.Get("x-amz-meta-value"); got != want || response.Headers.Get("Cache-Control") != "no-cache" || response.Headers.Get("Content-Language") != "de" || response.Headers.Get("Content-Disposition") != `attachment; filename="foo.jpg"` {
 				errs <- fmt.Errorf("metadata %d: %q", i, got)
 			}
 		}()

@@ -12,6 +12,11 @@
     "contentType": "text/plain",
     "owner": "mirror"
   },
+  "pinned": {
+    "cacheControl": "no-cache",
+    "contentDisposition": "attachment; filename=\"foo.jpg\"",
+    "contentLanguage": "de"
+  },
   "replaced": {
     "cacheControl": "",
     "contentType": "application/json",

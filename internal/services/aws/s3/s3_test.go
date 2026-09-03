@@ -2860,11 +2860,17 @@ func TestObjectMetadata(t *testing.T) {
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "default"}, []byte("body"))
 	defaultHead := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "default"}, nil)
 	assert("default", defaultHead, "binary/octet-stream", "")
+	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "pinned-system-metadata", "CacheControl": "no-cache", "ContentLanguage": "de", "ContentDisposition": `attachment; filename="foo.jpg"`}, []byte("abc123"))
+	pinned := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "pinned-system-metadata"}, nil)
+	if body := string(readStream(t, pinned)); body != "abc123" || pinned.Headers.Get("Cache-Control") != "no-cache" || pinned.Headers.Get("Content-Language") != "de" || pinned.Headers.Get("Content-Disposition") != `attachment; filename="foo.jpg"` {
+		t.Fatalf("pinned system metadata body=%q headers=%v", body, pinned.Headers)
+	}
 	golden.AssertJSON(t, map[string]any{
 		"get":      map[string]any{"contentType": get.Headers.Get("Content-Type"), "cacheControl": get.Headers.Get("Cache-Control"), "owner": get.Headers.Get("x-amz-meta-owner"), "redirect": get.Headers.Get("x-amz-website-redirect-location")},
 		"head":     map[string]any{"contentType": head.Headers.Get("Content-Type"), "owner": head.Headers.Get("x-amz-meta-owner")},
 		"replaced": map[string]any{"contentType": replaced.Headers.Get("Content-Type"), "cacheControl": replaced.Headers.Get("Cache-Control"), "owner": replaced.Headers.Get("x-amz-meta-owner")},
 		"default":  map[string]any{"contentType": defaultHead.Headers.Get("Content-Type")},
+		"pinned":   map[string]any{"cacheControl": pinned.Headers.Get("Cache-Control"), "contentDisposition": pinned.Headers.Get("Content-Disposition"), "contentLanguage": pinned.Headers.Get("Content-Language")},
 	})
 }
 
@@ -3825,7 +3831,7 @@ func TestObjectKeyLengthValidation(t *testing.T) {
 	p := s3.New(spitest.Deps(t))
 	mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": "keys"}, nil)
 	valid := map[string]any{}
-	for name, key := range map[string]string{"ascii": strings.Repeat("a", 1024), "utf8": strings.Repeat("é", 512)} {
+	for name, key := range map[string]string{"ascii": strings.Repeat("a", 1024), "pinned_utf8": "Ā0Ä", "utf8": strings.Repeat("é", 512)} {
 		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "keys", "Key": key}, []byte(name))
 		if got := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "keys", "Key": key}, nil); string(readStream(t, got)) != name {
 			t.Fatalf("%s boundary key was not stored", name)

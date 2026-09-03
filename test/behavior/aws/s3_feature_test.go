@@ -3400,6 +3400,33 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		if res.StatusCode != http.StatusNoContent {
 			t.Fatalf("put policy %d", res.StatusCode)
 		}
+		withOwner := func(method, owner string, payload []byte) (int, []byte) {
+			t.Helper()
+			request, _ := http.NewRequest(method, ts.URL+"/policy-bdd?policy", bytes.NewReader(payload))
+			request.Header.Set("Authorization", auth)
+			request.Header.Set("x-amz-expected-bucket-owner", owner)
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			responseBody, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			return response.StatusCode, responseBody
+		}
+		if status, body := withOwner(http.MethodGet, "000000000000", nil); status != http.StatusOK || !bytes.Equal(body, policy) {
+			t.Fatalf("matching policy owner %d %s", status, body)
+		}
+		for _, request := range []struct {
+			method string
+			body   []byte
+		}{{http.MethodGet, nil}, {http.MethodPut, []byte(`{}`)}, {http.MethodDelete, nil}} {
+			if status, body := withOwner(request.method, "999999999999", request.body); status != http.StatusForbidden || !bytes.Contains(body, []byte("<Code>AccessDenied</Code>")) {
+				t.Fatalf("%s mismatched policy owner %d %s", request.method, status, body)
+			}
+		}
+		if status, body := withOwner(http.MethodGet, "invalid", nil); status != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidBucketOwnerAWSAccountID</Code>")) {
+			t.Fatalf("invalid policy owner %d %s", status, body)
+		}
 		res = do(http.MethodGet, "/policy-bdd?policy", nil, "")
 		body, _ = io.ReadAll(res.Body)
 		res.Body.Close()

@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
-| LocalStack S3 test functions explicitly traced | 410 / 463 (88.6%) |
-| LocalStack S3 test functions not yet traced | 53 / 463 (11.4%) |
+| LocalStack S3 test functions explicitly traced | 439 / 463 (94.8%) |
+| LocalStack S3 test functions not yet traced | 24 / 463 (5.2%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -266,6 +266,35 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3.py::TestS3ObjectLockLegalHold::test_delete_locked_object` | Permanent version deletion is blocked while the legal hold is ON and succeeds after the same version is set OFF | Mapped and race-clean |
 | `test_s3.py::TestS3ObjectLockLegalHold::test_s3_legal_hold_lock_versioned` | Legal holds are isolated by version while current reads resolve the latest version's state | Mapped and green |
 | `test_s3.py::TestS3ObjectLockLegalHold::test_s3_copy_object_legal_hold` | CopyObject accepts destination legal-hold headers and persists them independently of the source version | Mapped and green |
+| `test_s3.py::TestS3::test_create_bucket_with_existing_name` | Global bucket-name atomic, SDK/raw HTTP, fuzz, concurrent chaos, snapshot, and mutation coverage verifies same-owner us-east-1 idempotency and rejects conflicting ownership or regions | Mapped and race-clean |
+| `test_s3.py::TestS3::test_s3_get_object_headers` | Object metadata and wire-response coverage verifies ETag, last-modified, content length/type, language, disposition, encoding, expiry, storage class, encryption, version, and user metadata headers | Mapped and race-clean |
+| `test_s3.py::TestS3::test_s3_inventory_report_crud` | Named inventory-configuration atomic, SDK/raw HTTP, fuzz, chaos, snapshot, and mutation coverage verifies create, get, sorted list, update, and delete | Mapped and race-clean |
+| `test_s3.py::TestS3::test_s3_put_inventory_report_exceptions` | Inventory validation rejects mismatched IDs, malformed destinations, unsupported format/schedule/version scope, and invalid optional fields without replacing prior state | Mapped and green |
+| `test_s3.py::TestS3BucketLogging::test_put_bucket_logging` | Bucket logging atomic, SDK/raw HTTP, fuzz, chaos, snapshot, and mutation coverage verifies enable, exact round trip, empty-prefix default, disable, and missing-bucket faults | Mapped and race-clean |
+| `test_s3.py::TestS3BucketLogging::test_put_bucket_logging_accept_wrong_grants` | Like the pinned LocalStack provider, Mirror preserves supplied target grants without validating or enforcing their grantee details | Mapped and green |
+| `test_s3.py::TestS3BucketLogging::test_put_bucket_logging_wrong_target` | Logging validation rejects absent or cross-account target buckets with `InvalidTargetBucketForLogging` while retaining the prior configuration | Mapped and green |
+| `test_s3.py::TestS3BucketLogging::test_put_bucket_logging_cross_locations` | Source and target bucket resolution requires the same account and region; cross-region configurations fail before persistence | Mapped and green |
+| `test_s3.py::TestS3BucketReplication::test_replication_config_without_filter` | Replication validation requires source and destination versioning, verifies destination existence, accepts an empty filter, and round-trips the resulting rule | Mapped and race-clean |
+| `test_s3.py::TestS3BucketReplication::test_replication_config` | Replication atomic, SDK/raw HTTP, fuzz, chaos, snapshot, and mutation coverage verifies missing configuration, version guards, legacy prefixes, filters, destination ARNs, generated IDs, empty-rule rejection, and idempotent deletion | Mapped and race-clean |
+| `test_s3.py::TestS3PresignedPost::test_post_object_with_files` | Browser multipart parsing accepts a file part, substitutes `${filename}`, writes its bytes, and returns the configured success status | Mapped and green |
+| `test_s3.py::TestS3PresignedPost::test_post_request_expires` | POST policy and object-metadata coverage separately enforce policy expiration and validate/persist an HTTP-date object `Expires` field | Mapped and green |
+| `test_s3.py::TestS3PresignedPost::test_post_request_malformed_policy` | Policy validation rejects malformed base64/JSON and invalid condition shapes before object storage; fuzz and mutation checks cover the parser boundary | Mapped and green |
+| `test_s3.py::TestS3PresignedPost::test_post_request_missing_signature` | Optional verification rejects incomplete SigV2 and SigV4 POST signature groups with exact signature faults | Mapped and green |
+| `test_s3.py::TestS3PresignedPost::test_post_request_missing_fields` | Multipart POST validation rejects missing key or file fields and incompatible signature field groups without creating an object | Mapped and green |
+| `test_s3.py::TestS3PresignedPost::test_s3_presigned_post_success_action_status_201_response` | Success status 201 returns the AWS `PostResponse` XML with absolute location, bucket, key, and ETag; 200 and 204 return empty success bodies | Mapped and green |
+| `test_s3.py::TestS3PresignedPost::test_s3_presigned_post_success_action_redirect` | Valid success redirects return the absolute caller location with bucket, key, and ETag query values while invalid redirects fail safely | Mapped and green |
+| `test_s3.py::TestS3PresignedPost::test_post_object_with_tags` | POST tagging parses the XML tag set through shared tag validation and persists it on the created object; fuzz and mutation checks cover malformed and duplicate tags | Mapped and race-clean |
+| `test_s3.py::TestS3PresignedPost::test_post_object_with_metadata` | Supported system fields and user metadata flow through the shared PutObject path and round-trip from HEAD/GET | Mapped and green |
+| `test_s3.py::TestS3PresignedPost::test_post_object_with_unicode_metadata` | POST preserves already encoded metadata form values while subsequent object responses RFC-2047 encode raw Unicode and controls | Mapped and green |
+| `test_s3.py::TestS3PresignedPost::test_post_object_with_storage_class` | The form storage-class field uses shared validation and persists the selected class in object metadata and listings | Mapped and green |
+| `test_s3.py::TestS3PresignedPost::test_post_object_with_wrong_content_type` | Trust-boundary parsing requires multipart form data with a valid boundary and rejects unrelated content types before reading fields | Mapped and green |
+| `test_s3.py::TestS3PresignedPost::test_post_object_default_checksum` | POST checksum coverage validates explicit values, computes an omitted selected checksum, persists it, and returns it from checksum-enabled reads | Mapped and race-clean |
+| `test_s3.py::TestS3PresignedPost::test_post_object_with_file_as_string` | Multipart parsing treats a named ordinary field and a file part distinctly and accepts the SDK's supported string-file request shape | Mapped and green |
+| `test_s3.py::TestS3PresignedPost::test_post_object_policy_conditions_validation_eq` | Policy equality conditions cover object fields, metadata, encryption, checksums, redirects, and exact failure without storage | Mapped and race-clean |
+| `test_s3.py::TestS3PresignedPost::test_post_object_policy_conditions_validation_starts_with` | Prefix conditions validate scalar fields and metadata with case-insensitive form lookup while rejecting unsupported condition forms | Mapped and green |
+| `test_s3.py::TestS3PresignedPost::test_post_object_policy_validation_size` | Content-length-range parsing validates numeric bounds and rejects bodies outside the inclusive policy interval before persistence | Mapped and green |
+| `test_s3.py::TestS3PresignedPost::test_presigned_post_with_different_user_credentials` | POST signature verification derives the per-caller IAM/STS secret and verifies temporary session tokens before using the account-scoped bucket | Mapped and green |
+| `test_s3.py::TestS3PresignedPost::test_post_object_policy_casing` | Form and policy field names are normalized case-insensitively while caller metadata key casing follows S3 normalization | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_preconditions` | `TestCopySourcePreconditionsCharacterization`, AWS SDK contract, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_modified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_unmodified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |

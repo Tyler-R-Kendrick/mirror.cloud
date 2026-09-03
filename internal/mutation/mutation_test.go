@@ -573,8 +573,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-skip-response-overrides",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  "if value != \"\" {\n\t\t\th.Set(override.header, value)\n\t\t}",
-			new:  "if false {\n\t\t\th.Set(override.header, value)\n\t\t}",
+			old:  `h.Set(override.header, value)`,
+			new:  `h.Set("Ignored-"+override.header, value)`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestGetObjectResponseHeaderOverrides",
 		},
@@ -597,8 +597,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "s3-skip-http-rfc2047-metadata-decode",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-			old:  `user[name] = decodeRFC2047Header(strings.Join(values, ","))`,
-			new:  `user[name] = strings.Join(values, ",")`,
+			old:  "if name, ok := strings.CutPrefix(strings.ToLower(key), \"x-amz-meta-\"); ok && len(values) > 0 {\n\t\t\t\tuser[name] = decodeRFC2047Header(strings.Join(values, \",\"))\n\t\t\t}",
+			new:  "if name, ok := strings.CutPrefix(strings.ToLower(key), \"x-amz-meta-\"); ok && len(values) > 0 {\n\t\t\t\tuser[name] = strings.Join(values, \",\")\n\t\t\t}",
 			pkg:  "./test/behavior/aws",
 			run:  "TestS3ObjectLifecycle/Given_RFC_2047_user_metadata",
 		},
@@ -3145,6 +3145,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  `for key, values := range map[string][]string{} {`,
 			pkg:  "./internal/services/aws/s3",
 			run:  "TestObjectMetadata",
+		},
+		{
+			name: "s3-ignore-presigned-query-headers",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `if !strings.EqualFold(header, "Expires") {`,
+			new:  `if false {`,
+			pkg:  "./test/behavior/aws",
+			run:  "TestS3ObjectLifecycle",
 		},
 		{
 			name: "s3-object-metadata-ignore-http-user-metadata",

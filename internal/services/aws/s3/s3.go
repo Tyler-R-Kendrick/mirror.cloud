@@ -5670,7 +5670,12 @@ func requestCondition(req *spi.Request, input, header string) string {
 		return value
 	}
 	if req.HTTP != nil {
-		return req.HTTP.Header.Get(header)
+		if value := req.HTTP.Header.Get(header); value != "" {
+			return value
+		}
+		if !strings.EqualFold(header, "Expires") {
+			return req.HTTP.URL.Query().Get(header)
+		}
 	}
 	return ""
 }

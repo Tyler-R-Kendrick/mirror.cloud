@@ -20,7 +20,7 @@ func FuzzTableLifecycle(f *testing.F) {
 		call := func(operation string, input map[string]any) (*spi.Response, error) {
 			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
 		}
-		table := map[string]any{"TableName": name, "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "Tags": []any{map[string]any{"Key": "fuzz", "Value": name}}}
+		table := map[string]any{"TableName": name, "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "GlobalSecondaryIndexes": []any{map[string]any{"IndexName": "keys", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "Projection": map[string]any{"ProjectionType": "KEYS_ONLY"}}}, "Tags": []any{map[string]any{"Key": "fuzz", "Value": name}}}
 		_, created := call("CreateTable", table)
 		_, duplicate := call("CreateTable", table)
 		arn := "arn:aws:dynamodb:us-east-1:000000000000:table/" + name
@@ -28,6 +28,7 @@ func FuzzTableLifecycle(f *testing.F) {
 		value := strings.ToValidUTF8(string(raw), "�")
 		_, putErr := call("PutItem", map[string]any{"TableName": name, "Item": map[string]any{"id": map[string]any{"S": "item"}, "data": map[string]any{"S": value}}})
 		got, getErr := call("GetItem", map[string]any{"TableName": name, "Key": map[string]any{"id": map[string]any{"S": "item"}}})
+		_, invalidProjection := call("Query", map[string]any{"TableName": name, "IndexName": "keys", "Select": "ALL_ATTRIBUTES"})
 		_, ttlEnable := call("UpdateTimeToLive", map[string]any{"TableName": name, "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}})
 		_, expiredPut := call("PutItem", map[string]any{"TableName": name, "Item": map[string]any{"id": map[string]any{"S": "expired"}, "ttl": map[string]any{"N": "-1"}}})
 		expiration, expirationErr := call("ExpireItems", nil)
@@ -39,7 +40,7 @@ func FuzzTableLifecycle(f *testing.F) {
 		_, ttlDescribe := call("DescribeTimeToLive", table)
 		_, ttlUpdate := call("UpdateTimeToLive", table)
 		tags := asSlice(listed.Output["Tags"])
-		if created != nil || duplicate == nil || tagsErr != nil || len(tags) != 1 || str(asMap(tags[0])["Value"]) != name || putErr != nil || getErr != nil || str(asMap(asMap(got.Output["Item"])["data"])["S"]) != value || ttlEnable != nil || expiredPut != nil || expirationErr != nil || expiration.Output["ExpiredItems"] != 1 || expiredGet != nil || expiredItem.Output["Item"] != nil || deleted != nil || missing == nil || missingQuery == nil || missingTransaction == nil || ttlDescribe == nil || ttlUpdate == nil {
+		if created != nil || duplicate == nil || tagsErr != nil || len(tags) != 1 || str(asMap(tags[0])["Value"]) != name || putErr != nil || getErr != nil || str(asMap(asMap(got.Output["Item"])["data"])["S"]) != value || invalidProjection == nil || ttlEnable != nil || expiredPut != nil || expirationErr != nil || expiration.Output["ExpiredItems"] != 1 || expiredGet != nil || expiredItem.Output["Item"] != nil || deleted != nil || missing == nil || missingQuery == nil || missingTransaction == nil || ttlDescribe == nil || ttlUpdate == nil {
 			t.Fatal("table lifecycle was not create/tag/conflict/delete/missing")
 		}
 	})

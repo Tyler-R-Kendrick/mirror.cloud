@@ -426,6 +426,58 @@ func TestDynamoDBItemFaultCharacterization(t *testing.T) {
 	})
 }
 
+func TestDynamoDBQueryIndexProjection(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	indexes := []any{
+		map[string]any{"IndexName": "keys", "KeySchema": []any{map[string]any{"AttributeName": "fieldA", "KeyType": "HASH"}}, "Projection": map[string]any{"ProjectionType": "KEYS_ONLY"}},
+		map[string]any{"IndexName": "all", "KeySchema": []any{map[string]any{"AttributeName": "fieldB", "KeyType": "HASH"}}, "Projection": map[string]any{"ProjectionType": "ALL"}},
+	}
+	if _, err := call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "GlobalSecondaryIndexes": indexes}); err != nil {
+		t.Fatal(err)
+	}
+	item := map[string]any{"id": map[string]any{"S": "1"}, "fieldA": map[string]any{"S": "a"}, "fieldB": map[string]any{"S": "b"}, "data": map[string]any{"S": "value"}}
+	if _, err := call("PutItem", map[string]any{"TableName": "T", "Item": item}); err != nil {
+		t.Fatal(err)
+	}
+	query := func(index, field, value, selectType string) (*spi.Response, error) {
+		return call("Query", map[string]any{"TableName": "T", "IndexName": index, "KeyConditionExpression": field + " = :v", "ExpressionAttributeValues": map[string]any{":v": map[string]any{"S": value}}, "Select": selectType})
+	}
+	if _, err := query("keys", "fieldA", "a", "ALL_ATTRIBUTES"); err == nil || err.(*spi.Fault).Code != "ValidationException" {
+		t.Fatalf("keys-only all-attributes fault %#v", err)
+	}
+	if _, err := query("missing", "fieldA", "a", "ALL_PROJECTED_ATTRIBUTES"); err == nil || err.(*spi.Fault).Code != "ValidationException" {
+		t.Fatalf("missing index fault %#v", err)
+	}
+	response, err := query("all", "fieldB", "b", "ALL_ATTRIBUTES")
+	if err != nil || len(asSlice(response.Output["Items"])) != 1 || str(asMap(asMap(asSlice(response.Output["Items"])[0])["data"])["S"]) != "value" {
+		t.Fatalf("all projection %#v %v", response, err)
+	}
+}
+
+func TestDynamoDBQueryIndexCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			fault := err.(*spi.Fault)
+			return map[string]any{"code": fault.Code, "message": fault.Message}
+		}
+		return response.Output
+	}
+	call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "GlobalSecondaryIndexes": []any{map[string]any{"IndexName": "keys", "KeySchema": []any{map[string]any{"AttributeName": "field", "KeyType": "HASH"}}, "Projection": map[string]any{"ProjectionType": "KEYS_ONLY"}}}})
+	golden.AssertJSON(t, map[string]any{
+		"allAttributes": call("Query", map[string]any{"TableName": "T", "IndexName": "keys", "Select": "ALL_ATTRIBUTES"}),
+		"missingIndex":  call("Query", map[string]any{"TableName": "T", "IndexName": "missing"}),
+	})
+}
+
 func TestDynamoDBExtendedOperations(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

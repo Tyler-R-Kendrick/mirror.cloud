@@ -19,6 +19,7 @@ func FuzzApplyUpdate(f *testing.F) {
 	f.Add("SET a = :x")
 	f.Add("REMOVE a")
 	f.Add("SET a = if_not_exists(a, :x)")
+	f.Add("SET a = :x, b = :x")
 	f.Fuzz(func(t *testing.T, expression string) {
 		item := map[string]any{"a": map[string]any{"N": "1"}}
 		_, _ = ApplyUpdate(expression, item, nil, map[string]any{":x": map[string]any{"N": "2"}})

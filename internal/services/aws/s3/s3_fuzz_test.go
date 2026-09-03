@@ -2455,10 +2455,10 @@ func FuzzSuspendedNullVersionReplacement(f *testing.F) {
 }
 
 func FuzzDeleteObjectDirectoryPreconditions(f *testing.F) {
-	f.Add(uint8(1), "etag")
-	f.Add(uint8(2), "4")
-	f.Add(uint8(4), "Sun, 06 Nov 1994 08:49:37 GMT")
-	f.Add(uint8(7), "combined")
+	f.Add(uint8(0), "etag")
+	f.Add(uint8(1), "4")
+	f.Add(uint8(3), "Sun, 06 Nov 1994 08:49:37 GMT")
+	f.Add(uint8(6), "combined")
 	f.Fuzz(func(t *testing.T, selected uint8, value string) {
 		if len(value) > 1024 {
 			t.Skip()
@@ -2475,12 +2475,23 @@ func FuzzDeleteObjectDirectoryPreconditions(f *testing.F) {
 		for index, header := range []string{"If-Match", "x-amz-if-match-size", "x-amz-if-match-last-modified-time"} {
 			if selected&(1<<index) != 0 {
 				request.Header.Set(header, value)
-				expected = header
+				if index > 0 {
+					expected = header
+				}
 			}
 		}
 		_, err := p.Invoke(context.Background(), &spi.Request{Identity: ident(), Operation: "DeleteObject", Input: map[string]any{"Bucket": "delete-precondition-fuzz", "Key": "key"}, HTTP: request})
+		if expected == "" && (value == "*" || strings.Trim(strings.TrimSpace(value), `"`) == "841a2d689ad86bd1611447453c22c6fc") {
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := invoke(t, p, "HeadObject", map[string]any{"Bucket": "delete-precondition-fuzz", "Key": "key"}, nil); err == nil {
+				t.Fatal("matching conditional delete left object")
+			}
+			return
+		}
 		fault := asFault(t, err)
-		if fault.Code != "NotImplemented" || fault.Fields["Header"] != expected {
+		if expected == "" && (fault.Code != "PreconditionFailed" || fault.Fields["Condition"] != "If-Match") || expected != "" && (fault.Code != "NotImplemented" || fault.Fields["Header"] != expected) {
 			t.Fatalf("selected=%d fault=%#v", selected, fault)
 		}
 		mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "delete-precondition-fuzz", "Key": "key"}, nil)

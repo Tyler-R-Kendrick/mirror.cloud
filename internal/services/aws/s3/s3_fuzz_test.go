@@ -3562,6 +3562,26 @@ func FuzzCopySourcePreconditions(f *testing.F) {
 	})
 }
 
+func FuzzCopySourceEncoding(f *testing.F) {
+	for _, key := range []string{"file%2Fname", "test@key/", "test key/", "test+key", "a/%F0%9F%98%80/", "a/😀/"} {
+		f.Add(key, "body")
+	}
+	f.Fuzz(func(t *testing.T, key, body string) {
+		if key == "" || len(key) > 256 || len(body) > 4096 || !utf8.ValidString(key+body) || strings.ContainsRune(key, 0) {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		for _, bucket := range []string{"copy-source-fuzz", "copy-source-fuzz-destination"} {
+			mustInvoke(t, p, "CreateBucket", map[string]any{"Bucket": bucket}, nil)
+		}
+		mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "copy-source-fuzz", "Key": key}, []byte(body))
+		mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "copy-source-fuzz-destination", "Key": "copy", "CopySource": url.QueryEscape("copy-source-fuzz/" + key)}, nil)
+		if got := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "copy-source-fuzz-destination", "Key": "copy"}, nil))); got != body {
+			t.Fatalf("copy %q body = %q, want %q", key, got, body)
+		}
+	})
+}
+
 func FuzzUploadPartCopyRangeBounds(f *testing.F) {
 	f.Add([]byte("0123456789"), uint16(0), uint16(8), uint8(0))
 	f.Add([]byte("x"), uint16(4), uint16(9), uint8(1))

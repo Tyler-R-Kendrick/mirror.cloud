@@ -3579,7 +3579,7 @@ func FuzzCopySourcePreconditions(f *testing.F) {
 }
 
 func FuzzCopySourceEncoding(f *testing.F) {
-	for _, key := range []string{"file%2Fname", "test@key/", "test key/", "test+key", "a/%F0%9F%98%80/", "a/😀/"} {
+	for _, key := range []string{"#key-with-hash-prefix", "file%2Fname", "test@key/", "test key/", "test+key", "a/%F0%9F%98%80/", "a/😀/"} {
 		f.Add(key, "body")
 	}
 	f.Fuzz(func(t *testing.T, key, body string) {

@@ -1694,6 +1694,10 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 			value = str(req.Input[override.query])
 		}
 		if value != "" {
+			if strings.IndexFunc(value, func(r rune) bool { return r > unicode.MaxLatin1 }) >= 0 {
+				_ = rc.Close()
+				return nil, &spi.Fault{Code: "InvalidArgument", Message: "Header value cannot be represented using ISO-8859-1.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": override.query, "ArgumentValue": value}}
+			}
 			h.Set(override.header, value)
 		}
 	}
@@ -4625,6 +4629,11 @@ func requestObjectMetadata(req *spi.Request) map[string]any {
 		user[strings.ToLower(key)] = metadataValue
 	}
 	if req.HTTP != nil {
+		for key, values := range req.HTTP.URL.Query() {
+			if name, ok := strings.CutPrefix(strings.ToLower(key), "x-amz-meta-"); ok {
+				user[name] = decodeRFC2047Header(strings.Join(values, ","))
+			}
+		}
 		for key, values := range req.HTTP.Header {
 			if name, ok := strings.CutPrefix(strings.ToLower(key), "x-amz-meta-"); ok && len(values) > 0 {
 				user[name] = decodeRFC2047Header(strings.Join(values, ","))
@@ -5661,7 +5670,12 @@ func requestCondition(req *spi.Request, input, header string) string {
 		return value
 	}
 	if req.HTTP != nil {
-		return req.HTTP.Header.Get(header)
+		if value := req.HTTP.Header.Get(header); value != "" {
+			return value
+		}
+		if !strings.EqualFold(header, "Expires") {
+			return req.HTTP.URL.Query().Get(header)
+		}
 	}
 	return ""
 }

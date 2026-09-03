@@ -2874,6 +2874,12 @@ func TestObjectMetadata(t *testing.T) {
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "default"}, []byte("body"))
 	defaultHead := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "default"}, nil)
 	assert("default", defaultHead, "binary/octet-stream", "")
+	queryRequest := httptest.NewRequest(http.MethodPut, "https://bucket.s3.us-east-1.amazonaws.com/query?x-amz-meta-owner=presigned", strings.NewReader("query"))
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: ident(), Operation: "PutObject", Input: map[string]any{"Bucket": "bucket", "Key": "query"}, Body: queryRequest.Body, HTTP: queryRequest}); err != nil {
+		t.Fatal(err)
+	}
+	queryHead := mustInvoke(t, p, "HeadObject", map[string]any{"Bucket": "bucket", "Key": "query"}, nil)
+	assert("query", queryHead, "binary/octet-stream", "presigned")
 	mustInvoke(t, p, "PutObject", map[string]any{"Bucket": "bucket", "Key": "pinned-system-metadata", "CacheControl": "no-cache", "ContentLanguage": "de", "ContentDisposition": `attachment; filename="foo.jpg"`}, []byte("abc123"))
 	pinned := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "bucket", "Key": "pinned-system-metadata"}, nil)
 	if body := string(readStream(t, pinned)); body != "abc123" || pinned.Headers.Get("Cache-Control") != "no-cache" || pinned.Headers.Get("Content-Language") != "de" || pinned.Headers.Get("Content-Disposition") != `attachment; filename="foo.jpg"` {
@@ -2884,6 +2890,7 @@ func TestObjectMetadata(t *testing.T) {
 		"head":     map[string]any{"contentType": head.Headers.Get("Content-Type"), "owner": head.Headers.Get("x-amz-meta-owner")},
 		"replaced": map[string]any{"contentType": replaced.Headers.Get("Content-Type"), "cacheControl": replaced.Headers.Get("Cache-Control"), "owner": replaced.Headers.Get("x-amz-meta-owner")},
 		"default":  map[string]any{"contentType": defaultHead.Headers.Get("Content-Type")},
+		"query":    map[string]any{"contentType": queryHead.Headers.Get("Content-Type"), "owner": queryHead.Headers.Get("x-amz-meta-owner")},
 		"pinned":   map[string]any{"cacheControl": pinned.Headers.Get("Cache-Control"), "contentDisposition": pinned.Headers.Get("Content-Disposition"), "contentLanguage": pinned.Headers.Get("Content-Language")},
 	})
 }
@@ -2991,6 +2998,10 @@ func TestGetObjectResponseHeaderOverrides(t *testing.T) {
 	ranged := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "response-overrides", "Key": "object", "Range": "bytes=0-1", "response-content-type": "text/csv"}, nil)
 	if ranged.Status != http.StatusPartialContent || ranged.Headers.Get("Content-Type") != "text/csv" || string(readStream(t, ranged)) != "bo" {
 		t.Fatalf("ranged override = %d %v", ranged.Status, ranged.Headers)
+	}
+	_, err := invoke(t, p, "GetObject", map[string]any{"Bucket": "response-overrides", "Key": "object", "response-cache-control": "non-ascii-%E2%80%94_—_é_"}, nil)
+	if fault := asFault(t, err); fault.Code != "InvalidArgument" || fault.Message != "Header value cannot be represented using ISO-8859-1." || fault.HTTPStatus != http.StatusBadRequest || fault.Fields["ArgumentName"] != "response-cache-control" || fault.Fields["ArgumentValue"] != "non-ascii-%E2%80%94_—_é_" {
+		t.Fatalf("Unicode override fault = %#v", fault)
 	}
 	stored := mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "response-overrides", "Key": "object"}, nil)
 	readStream(t, stored)

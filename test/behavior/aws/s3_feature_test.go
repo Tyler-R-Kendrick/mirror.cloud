@@ -114,6 +114,70 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given presigned query metadata When putting an object Then metadata is persisted", func(t *testing.T) {
+		res := do(http.MethodPut, "/presigned-metadata-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/presigned-metadata-bdd/key?x-amz-meta-owner=presigned", []byte("body"), "")
+		res.Body.Close()
+		res = do(http.MethodHead, "/presigned-metadata-bdd/key", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-meta-owner") != "presigned" {
+			t.Fatalf("presigned metadata %d %#v", res.StatusCode, res.Header)
+		}
+	})
+
+	t.Run("Given presigned query headers When putting an object Then conditions and attributes are honored", func(t *testing.T) {
+		res := do(http.MethodPut, "/presigned-headers-bdd", nil, "")
+		res.Body.Close()
+		query := url.Values{
+			"If-None-Match":                               {"*"},
+			"x-amz-server-side-encryption":                {"aws:kms"},
+			"x-amz-server-side-encryption-aws-kms-key-id": {"arn:aws:kms:us-east-1:000000000000:key/kms-bdd"},
+			"x-amz-storage-class":                         {"DEEP_ARCHIVE"},
+		}.Encode()
+		res = do(http.MethodPut, "/presigned-headers-bdd/key?"+query, []byte("body"), "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("first presigned header put %d", res.StatusCode)
+		}
+		res = do(http.MethodPut, "/presigned-headers-bdd/key?"+query, []byte("changed"), "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusPreconditionFailed {
+			t.Fatalf("second presigned header put %d", res.StatusCode)
+		}
+		res = do(http.MethodHead, "/presigned-headers-bdd/key", nil, "")
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || res.Header.Get("x-amz-storage-class") != "DEEP_ARCHIVE" || res.Header.Get("x-amz-server-side-encryption") != "aws:kms" || res.Header.Get("x-amz-server-side-encryption-aws-kms-key-id") != "arn:aws:kms:us-east-1:000000000000:key/kms-bdd" {
+			t.Fatalf("presigned query headers %d %#v", res.StatusCode, res.Header)
+		}
+	})
+
+	t.Run("Given a GET request body When reading an object Then the body is ignored", func(t *testing.T) {
+		res := do(http.MethodPut, "/get-body-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/get-body-bdd/key", []byte("stored"), "")
+		res.Body.Close()
+		res = do(http.MethodGet, "/get-body-bdd/key", []byte("ignored"), "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || string(body) != "stored" {
+			t.Fatalf("GET body handling %d %q", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given an unrepresentable response override When reading an object Then InvalidArgument is returned", func(t *testing.T) {
+		res := do(http.MethodPut, "/unicode-override-bdd", nil, "")
+		res.Body.Close()
+		res = do(http.MethodPut, "/unicode-override-bdd/key", []byte("body"), "")
+		res.Body.Close()
+		res = do(http.MethodGet, "/unicode-override-bdd/key?response-cache-control=non-ascii-%E2%80%94", nil, "")
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest || !bytes.Contains(body, []byte("<Code>InvalidArgument</Code>")) || !bytes.Contains(body, []byte("Header value cannot be represented using ISO-8859-1.")) || !bytes.Contains(body, []byte("<ArgumentName>response-cache-control</ArgumentName>")) {
+			t.Fatalf("Unicode response override %d %s", res.StatusCode, body)
+		}
+	})
+
 	t.Run("Given a UTF-8 key and system metadata When put and fetched Then the object round trips", func(t *testing.T) {
 		res := do(http.MethodPut, "/utf8-metadata-bdd", nil, "")
 		res.Body.Close()

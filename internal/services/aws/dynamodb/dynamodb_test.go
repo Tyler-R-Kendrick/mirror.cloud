@@ -532,6 +532,29 @@ func TestDynamoDBSecondaryIndexes(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"localItems": query.Output["Items"], "globalIndexCount": len(asSlice(described["GlobalSecondaryIndexes"]))})
 }
 
+func TestDynamoDBPutItemReturnValues(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	must := func(operation string, input map[string]any) map[string]any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+	must("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
+	item1 := map[string]any{"id": map[string]any{"S": "1"}, "data": map[string]any{"S": "foobar"}}
+	item2 := map[string]any{"id": map[string]any{"S": "1"}, "data": map[string]any{"S": "barfoo"}}
+	golden.AssertJSON(t, map[string]any{
+		"firstAllOld":   must("PutItem", map[string]any{"TableName": "T", "Item": item1, "ReturnValues": "ALL_OLD"}),
+		"sameAllOld":    must("PutItem", map[string]any{"TableName": "T", "Item": item1, "ReturnValues": "ALL_OLD"}),
+		"changedAllOld": must("PutItem", map[string]any{"TableName": "T", "Item": item2, "ReturnValues": "ALL_OLD"}),
+		"default":       must("PutItem", map[string]any{"TableName": "T", "Item": item1}),
+		"defaultAgain":  must("PutItem", map[string]any{"TableName": "T", "Item": item1}),
+	})
+}
+
 func TestDynamoDBExtendedOperations(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

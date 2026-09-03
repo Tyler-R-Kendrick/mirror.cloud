@@ -499,6 +499,39 @@ func TestDynamoDBMultipleUpdateExpressions(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"response": updated.Output, "item": item})
 }
 
+func TestDynamoDBSecondaryIndexes(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	must := func(operation string, input map[string]any) *spi.Response {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	must("CreateTable", map[string]any{
+		"TableName": "LSI", "KeySchema": []any{map[string]any{"AttributeName": "PK", "KeyType": "HASH"}, map[string]any{"AttributeName": "SK", "KeyType": "RANGE"}},
+		"LocalSecondaryIndexes": []any{map[string]any{"IndexName": "LSI1", "KeySchema": []any{map[string]any{"AttributeName": "PK", "KeyType": "HASH"}, map[string]any{"AttributeName": "LSI1SK", "KeyType": "RANGE"}}, "Projection": map[string]any{"ProjectionType": "ALL"}}},
+	})
+	item := map[string]any{"PK": map[string]any{"S": "test one"}, "SK": map[string]any{"S": "hello"}, "LSI1SK": map[string]any{"N": "123"}, "data": map[string]any{"S": "value"}}
+	must("PutItem", map[string]any{"TableName": "LSI", "Item": item})
+	query := must("Query", map[string]any{"TableName": "LSI", "IndexName": "LSI1", "KeyConditionExpression": "PK = :v", "ExpressionAttributeValues": map[string]any{":v": map[string]any{"S": "test one"}}, "Select": "ALL_ATTRIBUTES"})
+	if len(asSlice(query.Output["Items"])) != 1 {
+		t.Fatalf("local index query %#v", query.Output)
+	}
+	indexes := make([]any, 25)
+	for i := range indexes {
+		indexes[i] = map[string]any{"IndexName": "gsi_" + strconv.Itoa(i), "KeySchema": []any{map[string]any{"AttributeName": "a" + strconv.Itoa(i), "KeyType": "HASH"}}, "Projection": map[string]any{"ProjectionType": "ALL"}}
+	}
+	must("CreateTable", map[string]any{"TableName": "Many", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "GlobalSecondaryIndexes": indexes})
+	described := asMap(must("DescribeTable", map[string]any{"TableName": "Many"}).Output["Table"])
+	if len(asSlice(described["GlobalSecondaryIndexes"])) != 25 {
+		t.Fatalf("global indexes %#v", described["GlobalSecondaryIndexes"])
+	}
+	golden.AssertJSON(t, map[string]any{"localItems": query.Output["Items"], "globalIndexCount": len(asSlice(described["GlobalSecondaryIndexes"]))})
+}
+
 func TestDynamoDBExtendedOperations(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

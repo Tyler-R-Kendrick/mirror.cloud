@@ -3121,6 +3121,22 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if ttl, err := ddb.UpdateTimeToLive(context.Background(), &dynamodb.UpdateTimeToLiveInput{TableName: aws.String("T"), TimeToLiveSpecification: &ddbtypes.TimeToLiveSpecification{Enabled: aws.Bool(true), AttributeName: aws.String("ttl")}}); err != nil || ttl.TimeToLiveSpecification == nil || !aws.ToBool(ttl.TimeToLiveSpecification.Enabled) {
 		t.Fatalf("enable ttl: %#v %v", ttl, err)
 	}
+	if _, err := ddb.PutItem(context.Background(), &dynamodb.PutItemInput{TableName: aws.String("T"), Item: map[string]ddbtypes.AttributeValue{"id": &ddbtypes.AttributeValueMemberS{Value: "expired"}, "ttl": &ddbtypes.AttributeValueMemberN{Value: "-1"}}}); err != nil {
+		t.Fatalf("put expired item: %v", err)
+	}
+	expireRequest, _ := http.NewRequest(http.MethodDelete, ts.URL+"/_aws/dynamodb/expired", nil)
+	expireResponse, err := http.DefaultClient.Do(expireRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expireBody, _ := io.ReadAll(expireResponse.Body)
+	_ = expireResponse.Body.Close()
+	if expireResponse.StatusCode != http.StatusOK || !bytes.Contains(expireBody, []byte(`"ExpiredItems":1`)) {
+		t.Fatalf("expire ttl items: %d %s", expireResponse.StatusCode, expireBody)
+	}
+	if expired, err := ddb.GetItem(context.Background(), &dynamodb.GetItemInput{TableName: aws.String("T"), Key: map[string]ddbtypes.AttributeValue{"id": &ddbtypes.AttributeValueMemberS{Value: "expired"}}}); err != nil || len(expired.Item) != 0 {
+		t.Fatalf("expired item remains: %#v %v", expired, err)
+	}
 	if _, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{
 		TableName:            aws.String("T"),
 		KeySchema:            []ddbtypes.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: ddbtypes.KeyTypeHash}},

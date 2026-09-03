@@ -107,4 +107,35 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 			t.Fatalf("large scan %d bytes=%d %s", status, len(body), body[:min(len(body), 200)])
 		}
 	})
+
+	t.Run("Given expired TTL items When sweeping Then only expired items are deleted", func(t *testing.T) {
+		for _, step := range []struct{ action, payload string }{
+			{"CreateTable", `{"TableName":"Expire","KeySchema":[{"AttributeName":"id","KeyType":"HASH"}]}`},
+			{"UpdateTimeToLive", `{"TableName":"Expire","TimeToLiveSpecification":{"Enabled":true,"AttributeName":"ttl"}}`},
+			{"PutItem", `{"TableName":"Expire","Item":{"id":{"S":"expired"},"ttl":{"N":"-1"}}}`},
+		} {
+			if status, body := call(step.action, step.payload); status != http.StatusOK {
+				t.Fatalf("%s %d %s", step.action, status, body)
+			}
+		}
+		if status, body := call("PutItem", `{"TableName":"Expire","Item":{"id":{"S":"future"},"ttl":{"N":"9999999999"}}}`); status != http.StatusOK {
+			t.Fatalf("put future %d %s", status, body)
+		}
+		req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/_aws/dynamodb/expired", nil)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(res.Body)
+		_ = res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(`"ExpiredItems":1`)) {
+			t.Fatalf("expiration %d %s", res.StatusCode, body)
+		}
+		if status, body := call("GetItem", `{"TableName":"Expire","Key":{"id":{"S":"expired"}}}`); status != http.StatusOK || bytes.Contains(body, []byte(`"Item"`)) {
+			t.Fatalf("expired item %d %s", status, body)
+		}
+		if status, body := call("GetItem", `{"TableName":"Expire","Key":{"id":{"S":"future"}}}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"Item"`)) {
+			t.Fatalf("future item %d %s", status, body)
+		}
+	})
 }

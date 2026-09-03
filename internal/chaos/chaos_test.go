@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -2431,6 +2432,54 @@ func TestConcurrentSpecialKeyCopies(t *testing.T) {
 			got, _ := io.ReadAll(response.Stream)
 			if string(got) != body {
 				errs <- fmt.Errorf("copy %d body = %q", i, got)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestConcurrentUnicodeMultipartLocations(t *testing.T) {
+	p := s3.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any, body string) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input, Body: io.NopCloser(strings.NewReader(body))})
+	}
+	if _, err := call("CreateBucket", map[string]any{"Bucket": "multipart-location-chaos"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for i := range cap(errs) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			input := map[string]any{"Bucket": "multipart-location-chaos", "Key": fmt.Sprintf("test-unicode_—_file-%d", i)}
+			upload, err := call("CreateMultipartUpload", input, "")
+			if err != nil {
+				errs <- err
+				return
+			}
+			partInput := maps.Clone(input)
+			partInput["UploadId"], partInput["PartNumber"] = upload.Output["UploadId"], 1
+			part, err := call("UploadPart", partInput, "body")
+			if err != nil {
+				errs <- err
+				return
+			}
+			complete := maps.Clone(input)
+			complete["UploadId"], complete["MultipartUpload"] = upload.Output["UploadId"], map[string]any{"Parts": []any{map[string]any{"PartNumber": 1, "ETag": part.Headers.Get("ETag")}}}
+			response, err := call("CompleteMultipartUpload", complete, "")
+			if err != nil || !strings.Contains(response.Output["Location"].(string), "test-unicode_%E2%80%94_file-") {
+				errs <- fmt.Errorf("complete %d: %#v %v", i, response, err)
 				return
 			}
 			errs <- nil

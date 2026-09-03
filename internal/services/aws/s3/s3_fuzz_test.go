@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"maps"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -3578,6 +3579,31 @@ func FuzzCopySourceEncoding(f *testing.F) {
 		mustInvoke(t, p, "CopyObject", map[string]any{"Bucket": "copy-source-fuzz-destination", "Key": "copy", "CopySource": url.QueryEscape("copy-source-fuzz/" + key)}, nil)
 		if got := string(readStream(t, mustInvoke(t, p, "GetObject", map[string]any{"Bucket": "copy-source-fuzz-destination", "Key": "copy"}, nil))); got != body {
 			t.Fatalf("copy %q body = %q, want %q", key, got, body)
+		}
+	})
+}
+
+func FuzzMultipartObjectLocation(f *testing.F) {
+	for _, key := range []string{"object", "test-unicode_—_file", "test key/", "a/😀/"} {
+		f.Add(key, "body")
+	}
+	f.Fuzz(func(t *testing.T, key, body string) {
+		if key == "" || len(key) > 256 || len(body) > 4096 || !utf8.ValidString(key+body) || strings.ContainsRune(key, 0) {
+			t.Skip()
+		}
+		p := s3.New(spitest.Deps(t))
+		input := map[string]any{"Bucket": "multipart-location-fuzz", "Key": key}
+		mustInvoke(t, p, "CreateBucket", input, nil)
+		upload := mustInvoke(t, p, "CreateMultipartUpload", input, nil)
+		partInput := maps.Clone(input)
+		partInput["UploadId"], partInput["PartNumber"] = upload.Output["UploadId"], 1
+		part := mustInvoke(t, p, "UploadPart", partInput, []byte(body))
+		complete := maps.Clone(input)
+		complete["UploadId"], complete["MultipartUpload"] = upload.Output["UploadId"], map[string]any{"Parts": []any{completedPart(1, part)}}
+		location := mustInvoke(t, p, "CompleteMultipartUpload", complete, nil).Output["Location"].(string)
+		parsed, err := url.Parse(location)
+		if err != nil || parsed.Host != "multipart-location-fuzz.s3.amazonaws.com" || parsed.Path != "/"+key {
+			t.Fatalf("multipart location for %q = %q: %v", key, location, err)
 		}
 	})
 }

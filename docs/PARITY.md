@@ -12,8 +12,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | S3 operations routed to emulation | 115 / 115 (100%) |
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
-| LocalStack S3 test functions explicitly traced | 269 / 463 (58.1%) |
-| LocalStack S3 test functions not yet traced | 194 / 463 (41.9%) |
+| LocalStack S3 test functions explicitly traced | 280 / 463 (60.5%) |
+| LocalStack S3 test functions not yet traced | 183 / 463 (39.5%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 
@@ -125,6 +125,17 @@ The traceability percentage is intentionally a lower bound. Historical Mirror te
 | `test_s3.py::TestS3::test_put_object_chunked_content_encoding` | `TestS3AWSChunkedContentEncodingCharacterization`, SDK contract, fuzz, concurrent chaos, snapshot, and three semantic mutants verify `aws-chunked` is stripped while sibling encodings such as gzip are preserved | Mapped and race-clean |
 | `test_s3.py::TestS3::test_virtual_host_proxy_does_not_decode_gzip` | Virtual-host routing plus object-metadata atomic, SDK/raw HTTP, fuzz, chaos, snapshot, and mutation coverage verify gzip bytes remain opaque storage while the gzip content-encoding metadata is returned unchanged | Mapped and race-clean |
 | `test_s3.py::TestS3::test_put_object_with_md5_and_chunk_signature` | Signed-streaming characterization and SDK contracts combine chunk deframing with normal PutObject Content-MD5 validation; fuzz, concurrent chaos, snapshots, and mutations pin decoded-payload storage and checksum enforcement | Mapped and race-clean |
+| `test_s3.py::TestS3::test_delete_object_tagging` | `TestTagValidationAndBucketSemantics`, versioned-tag characterization, AWS SDK/raw HTTP contracts, fuzz, concurrent chaos, snapshots, and mutations verify deleting tags leaves object bytes and metadata intact | Mapped and race-clean |
+| `test_s3.py::TestS3::test_delete_non_existing_keys_quiet` | `TestDeleteObjectsVersionAndQuietSemantics`, SDK/raw HTTP contracts, fuzz, chaos, snapshots, and mutations verify quiet deletion executes existing and absent keys while omitting successful `Deleted` entries | Mapped and race-clean |
+| `test_s3.py::TestS3::test_delete_non_existing_keys` | Multi-delete atomic, SDK, HTTP BDD, fuzz, chaos, snapshot, and mutation coverage verify existing and absent unversioned keys are all reported as deleted without errors | Mapped and race-clean |
+| `test_s3.py::TestS3::test_delete_keys_in_versioned_bucket` | `TestDeleteObjectsVersionAndQuietSemantics`, version-list atomic/SDK/HTTP coverage, fuzz, chaos, snapshots, and mutations verify marker creation, explicit version removal, retained markers, and final marker deletion | Mapped and race-clean |
+| `test_s3.py::TestS3::test_delete_non_existing_keys_in_non_existing_bucket` | Missing-bucket characterization, SDK/raw HTTP contracts, fuzz, concurrent chaos, snapshot, and shared `NoSuchBucket` mutants verify bulk deletion fails before evaluating object identifiers | Mapped and race-clean |
+| `test_s3.py::TestS3::test_delete_objects_encoding` | Special-key and multi-delete atomic tests plus SDK/raw HTTP contracts, fuzz, chaos, snapshots, and mutations verify percent literals and encoded Unicode keys are decoded exactly once and removed by their literal names | Mapped and race-clean |
+| `test_s3.py::TestS3::test_put_object_acl_on_delete_marker` | `TestObjectACLDeleteMarkerCharacterization`, SDK/raw HTTP contracts, snapshots, concurrent chaos, and six semantic mutants verify current and explicit delete-marker ACL reads/writes return the operation-specific exact faults and marker headers | Mapped and race-clean |
+| `test_s3.py::TestS3::test_s3_request_payer` | `TestBucketRequestPayment`, AWS SDK/raw HTTP contracts, `FuzzBucketRequestPayment`, concurrent chaos, characterization snapshot, and mutations verify the default and both valid payer states round-trip | Mapped and race-clean |
+| `test_s3.py::TestS3::test_s3_request_payer_exceptions` | Request-payment atomic/SDK/HTTP coverage, fuzz, chaos, snapshot, and mutations verify invalid payer values preserve prior state and missing buckets return exact `NoSuchBucket` faults | Mapped and race-clean |
+| `test_s3.py::TestS3::test_bucket_exists` | Bucket CORS and ACL atomic, SDK/raw HTTP, fuzz, chaos, snapshot, and mutation coverage verify configured reads succeed while the same ACL read on an absent bucket returns `NoSuchBucket` | Mapped and race-clean |
+| `test_s3.py::TestS3::test_s3_uppercase_key_names` | Special-key characterization, case-sensitive list-prefix atomic coverage, SDK/raw HTTP contracts, fuzz, chaos, snapshots, and mutations verify object keys preserve case and differently cased reads return `NoSuchKey` | Mapped and race-clean |
 | `test_s3_preconditions.py::test_s3_copy_object_preconditions` | `TestCopySourcePreconditionsCharacterization`, AWS SDK contract, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_modified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |
 | `test_s3_preconditions.py::test_s3_copy_object_if_source_unmodified_since_versioned` | Versioned characterization and contract boundary checks, HTTP BDD, fuzz, chaos, mutation | Mapped and green |

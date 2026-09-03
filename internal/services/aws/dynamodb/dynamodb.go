@@ -226,8 +226,18 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				if err != nil || expires > p.deps.Clock.Now().Unix() {
 					continue
 				}
-				if err := p.col(req, "items:"+table).Delete(ctx, itemRecord.Key); err != nil {
+				deleted := false
+				if err := p.col(req, "items:"+table).Txn(ctx, func(tx spi.Tx) error {
+					if _, ok, err := tx.Get(itemRecord.Key); err != nil || !ok {
+						return err
+					}
+					deleted = true
+					return tx.Delete(itemRecord.Key)
+				}); err != nil {
 					return nil, err
+				}
+				if !deleted {
+					continue
 				}
 				expired++
 				p.emitStream(ctx, req, table, "REMOVE", p.tableKey(definition, item), item)

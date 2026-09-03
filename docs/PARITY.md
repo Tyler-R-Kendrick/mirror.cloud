@@ -521,8 +521,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 |---|---:|
 | Requested test forms wired | 7 / 7 (100%) |
 | DynamoDB operations routed to emulation | 62 / 62 (100%) |
-| LocalStack DynamoDB test functions explicitly traced | 7 / 56 (12.5%) |
-| LocalStack DynamoDB test functions not yet traced | 49 / 56 (87.5%) |
+| LocalStack DynamoDB test functions explicitly traced | 10 / 56 (17.9%) |
+| LocalStack DynamoDB test functions not yet traced | 46 / 56 (82.1%) |
 
 The pinned inventory is the 56 direct test functions in `tests/aws/services/dynamodb/test_dynamodb.py`; parametrized cases are not expanded.
 
@@ -535,3 +535,6 @@ The pinned inventory is the 56 direct test functions in `tests/aws/services/dyna
 | `test_dynamodb.py::TestDynamoDB::test_non_ascii_chars` | Atomic and AWS SDK round trips preserve checkmark, pound, and cent characters exactly; the Verify-style data snapshot, fuzzed valid UTF-8 values, and payload-drop mutant guard JSON persistence | Mapped; race-pending |
 | `test_dynamodb.py::TestDynamoDB::test_large_data_download` | Atomic and raw HTTP BDD scans persist and return twenty 10,000-byte string items with exact Count and ScannedCount; the data snapshot and count mutant guard collection behavior | Mapped; race-pending |
 | `test_dynamodb.py::TestDynamoDB::test_time_to_live_deletion` | LocalStack's `DELETE /_aws/dynamodb/expired` extension now sweeps enabled TTL attributes across hash and range-key tables, preserves future/disabled/malformed items, emits one result count under concurrent sweeps, and is covered by atomic, Verify-style snapshot, SDK/control contract, raw HTTP BDD, native fuzz, chaos/race, and mutation checks | Mapped; focused race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_query_on_deleted_resource` | Shared single-table item-operation validation now returns modeled `ResourceNotFoundException` before query evaluation; atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, and mutation checks cover the deleted-table boundary | Mapped; race-pending |
+| `test_dynamodb.py::TestDynamoDB::test_batch_write_not_matching_schema` | PutItem and BatchWriteItem share key-schema validation for every HASH/RANGE attribute and return `ValidationException` when an item omits a key; atomic, snapshot, SDK, BDD, and mutation checks pin the behavior | Mapped; race-pending |
+| `test_dynamodb.py::TestDynamoDB::test_batch_write_not_existing_table` | Batch write and transact write now validate every target table before applying requests and return `ResourceNotFoundException`; atomic, snapshot, SDK, BDD, fuzz, and mutation checks cover the missing-table path | Mapped; race-pending |

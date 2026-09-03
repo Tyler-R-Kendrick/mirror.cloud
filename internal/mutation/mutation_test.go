@@ -1099,6 +1099,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestRESTXMLEncodeAndFaultContracts",
 		},
 		{
+			name: "restxml-reorder-object-attribute-fields",
+			file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
+			old:  `writeFields("ETag", "Checksum")`,
+			new:  `writeFields("Checksum", "ETag")`,
+			pkg:  "./internal/proto/aws/restxml",
+			run:  "TestRESTXMLEncodeAndFaultContracts",
+		},
+		{
 			name: "s3-ignore-copy-source-version",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  "if version != \"\" {\n\t\tcollection, metaKey = \"versions\", metaKey+\"/\"+version",

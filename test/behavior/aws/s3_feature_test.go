@@ -24,6 +24,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sts"
 )
@@ -31,7 +32,7 @@ import (
 func TestS3ObjectLifecycle(t *testing.T) {
 	deps := spitest.Deps(t)
 	cfg := config.Default()
-	cfg.Services = []string{"aws.s3"}
+	cfg.Services = []string{"aws.s3", "aws.lambda"}
 	reg, err := registry.New(deps, cfg.Services, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -236,6 +237,40 @@ func TestS3ObjectLifecycle(t *testing.T) {
 		res.Body.Close()
 		if res.StatusCode != http.StatusOK || string(body) != "body data" {
 			t.Fatalf("anonymous public read %d %q", res.StatusCode, body)
+		}
+	})
+
+	t.Run("Given a Lambda with S3 endpoint variables When invoked Then it downloads the object", func(t *testing.T) {
+		res := do(http.MethodPut, "/lambda-read-bdd", nil, "")
+		res.Body.Close()
+		put, _ := http.NewRequest(http.MethodPut, ts.URL+"/lambda-read-bdd/object", strings.NewReader("lambda body"))
+		put.Header.Set("Authorization", auth)
+		put.Header.Set("x-amz-acl", "public-read")
+		res, err = http.DefaultClient.Do(put)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		source := "import os, urllib.request\ndef lambda_handler(event, context):\n    return {'name': os.environ['AWS_LAMBDA_FUNCTION_NAME'], 'body': urllib.request.urlopen(os.environ['AWS_ENDPOINT_URL'] + '/lambda-read-bdd/object').read().decode()}\n"
+		createBody := `{"FunctionName":"s3-reader","Runtime":"python3.12","Handler":"lambda_function.lambda_handler","Code":{"ZipFile":"` + base64.StdEncoding.EncodeToString([]byte(source)) + `"},"Environment":{"Variables":{"AWS_ENDPOINT_URL":"` + ts.URL + `"}}}`
+		create, _ := http.NewRequest(http.MethodPost, ts.URL+"/2015-03-31/functions", strings.NewReader(createBody))
+		create.Header.Set("Content-Type", "application/json")
+		create.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/lambda/aws4_request, SignedHeaders=host, Signature=00")
+		res, err = http.DefaultClient.Do(create)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		invoke, _ := http.NewRequest(http.MethodPost, ts.URL+"/2015-03-31/functions/s3-reader/invocations", strings.NewReader(`{}`))
+		invoke.Header = create.Header.Clone()
+		res, err = http.DefaultClient.Do(invoke)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK || !bytes.Contains(payload, []byte(`"name":"s3-reader"`)) || !bytes.Contains(payload, []byte(`"body":"lambda body"`)) {
+			t.Fatalf("lambda S3 read %d %s", res.StatusCode, payload)
 		}
 	})
 

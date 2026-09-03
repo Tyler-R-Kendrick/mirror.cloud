@@ -13,7 +13,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Whole-repository statement coverage | 83.9% |
 | S3 statement coverage | 89.9% |
 | LocalStack S3 test functions explicitly traced | 170 / 463 (36.7%) |
-| LocalStack S3 test functions not yet traced | 304 / 463 (65.7%) |
+| LocalStack S3 test functions not yet traced | 293 / 463 (63.3%) |
 
 The traceability percentage is intentionally a lower bound. Historical Mirror tests and implementations do not count until a pinned LocalStack test function has an explicit evidence row below. Parametrized cases are not expanded in the denominator, so this measures direct test-function review rather than pytest case count.
 

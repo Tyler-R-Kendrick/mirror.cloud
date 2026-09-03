@@ -39,6 +39,7 @@ type Request struct {
 	// must prefer Input and treat this as an escape hatch.
 	HTTP                 *http.Request
 	S3ValidateSignatures bool
+	AdvertiseURL         string
 }
 
 // Response is one operation result. Exactly one of Output or Stream is set

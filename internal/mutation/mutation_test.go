@@ -1408,7 +1408,15 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  `return &spi.Fault{Code: "NoSuchBucket", Message: "The specified bucket does not exist", HTTPStatus: 404, Fault: "client", Fields: map[string]any{"BucketName": b}}`,
 			new:  `return &spi.Fault{Code: "NoSuchBucket", Message: "The specified bucket does not exist", HTTPStatus: 404, Fault: "client"}`,
 			pkg:  "./internal/services/aws/s3",
-			run:  "TestObjectLockConfigurationParity",
+			run:  "TestMissingBucketFaultCharacterization",
+		},
+		{
+			name: "s3-truncate-no-such-bucket-message",
+			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
+			old:  `return &spi.Fault{Code: "NoSuchBucket", Message: "The specified bucket does not exist", HTTPStatus: 404, Fault: "client", Fields: map[string]any{"BucketName": b}}`,
+			new:  `return &spi.Fault{Code: "NoSuchBucket", Message: "The bucket does not exist", HTTPStatus: 404, Fault: "client", Fields: map[string]any{"BucketName": b}}`,
+			pkg:  "./internal/services/aws/s3",
+			run:  "TestMissingBucketFaultCharacterization",
 		},
 		{
 			name: "s3-allow-object-lock-config-without-versioning",

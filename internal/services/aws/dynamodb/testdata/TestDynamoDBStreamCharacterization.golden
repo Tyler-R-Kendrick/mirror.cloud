@@ -1,0 +1,76 @@
+{
+  "description": {
+    "keySchema": [
+      {
+        "AttributeName": "Username",
+        "KeyType": "HASH"
+      }
+    ],
+    "streamLabel": "7c589129",
+    "streamViewType": "KEYS_ONLY"
+  },
+  "exclusiveShards": [],
+  "iteratorFormat": true,
+  "records": [
+    {
+      "eventName": "INSERT",
+      "keys": {
+        "Username": {
+          "S": "Fred"
+        }
+      },
+      "size": 12,
+      "view": "KEYS_ONLY"
+    },
+    {
+      "eventName": "MODIFY",
+      "keys": {
+        "Username": {
+          "S": "Fred"
+        }
+      },
+      "size": 12,
+      "view": "KEYS_ONLY"
+    },
+    {
+      "eventName": "REMOVE",
+      "keys": {
+        "Username": {
+          "S": "Fred"
+        }
+      },
+      "size": 12,
+      "view": "KEYS_ONLY"
+    },
+    {
+      "eventName": "INSERT",
+      "keys": {
+        "Username": {
+          "S": "Alice"
+        }
+      },
+      "size": 13,
+      "view": "KEYS_ONLY"
+    },
+    {
+      "eventName": "MODIFY",
+      "keys": {
+        "Username": {
+          "S": "Alice"
+        }
+      },
+      "size": 13,
+      "view": "KEYS_ONLY"
+    },
+    {
+      "eventName": "REMOVE",
+      "keys": {
+        "Username": {
+          "S": "Alice"
+        }
+      },
+      "size": 13,
+      "view": "KEYS_ONLY"
+    }
+  ]
+}

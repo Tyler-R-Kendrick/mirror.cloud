@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -42,6 +43,51 @@ func TestDynamoDBStreamPublishesRecords(t *testing.T) {
 	if published != 1 {
 		t.Fatalf("published %d stream records", published)
 	}
+}
+
+func TestDynamoDBStreamCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	must := func(operation string, input map[string]any) map[string]any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	created := must("CreateTable", map[string]any{
+		"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "Username", "KeyType": "HASH"}}, "StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "KEYS_ONLY"},
+	})
+	arn := str(asMap(created["TableDescription"])["LatestStreamArn"])
+	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"Username": map[string]any{"S": "Fred"}}})
+	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"Username": map[string]any{"S": "Fred"}}})
+	update := map[string]any{"TableName": "T", "Key": map[string]any{"Username": map[string]any{"S": "Fred"}}, "UpdateExpression": "SET S = :r", "ExpressionAttributeValues": map[string]any{":r": map[string]any{"S": "Fred_Modified"}}}
+	must("UpdateItem", update)
+	must("UpdateItem", update)
+	must("DeleteItem", map[string]any{"TableName": "T", "Key": map[string]any{"Username": map[string]any{"S": "Fred"}}})
+	must("ExecuteStatement", map[string]any{"Statement": "INSERT INTO T VALUE {'Username': 'Alice'}"})
+	must("ExecuteStatement", map[string]any{"Statement": "UPDATE T SET partiql=1 WHERE Username='Alice'"})
+	must("ExecuteStatement", map[string]any{"Statement": "DELETE FROM T WHERE Username='Alice'"})
+	described := must("DescribeStream", map[string]any{"StreamArn": arn})
+	shard := str(asMap(asSlice(asMap(described["StreamDescription"])["Shards"])[0])["ShardId"])
+	excluded := must("DescribeStream", map[string]any{"StreamArn": arn, "ExclusiveStartShardId": shard})
+	latest := str(must("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": shard, "ShardIteratorType": "LATEST"})["ShardIterator"])
+	at := str(must("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": shard, "ShardIteratorType": "AT_SEQUENCE_NUMBER", "SequenceNumber": "1"})["ShardIterator"])
+	trim := str(must("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": shard, "ShardIteratorType": "TRIM_HORIZON"})["ShardIterator"])
+	records := asSlice(must("GetRecords", map[string]any{"ShardIterator": trim})["Records"])
+	summaries := make([]any, 0, len(records))
+	for _, raw := range records {
+		record := asMap(raw)
+		dynamodb := asMap(record["dynamodb"])
+		summaries = append(summaries, map[string]any{"eventName": record["eventName"], "keys": dynamodb["Keys"], "size": dynamodb["SizeBytes"], "view": dynamodb["StreamViewType"]})
+	}
+	golden.AssertJSON(t, map[string]any{
+		"description":     map[string]any{"keySchema": asMap(described["StreamDescription"])["KeySchema"], "streamLabel": asMap(described["StreamDescription"])["StreamLabel"], "streamViewType": asMap(described["StreamDescription"])["StreamViewType"]},
+		"exclusiveShards": asMap(excluded["StreamDescription"])["Shards"],
+		"iteratorFormat":  strings.HasPrefix(latest, arn+"|") && strings.Count(latest, "|") == 2 && strings.HasPrefix(at, arn+"|1|") && strings.Count(at, "|") == 2,
+		"records":         summaries,
+	})
 }
 
 func TestBootedServerDynamoDBStreams(t *testing.T) {

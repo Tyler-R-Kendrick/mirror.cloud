@@ -3,6 +3,7 @@ package dynamodb
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -14,13 +15,22 @@ func (p *Pack) partiql(ctx context.Context, req *spi.Request) (*spi.Response, er
 		var resps []any
 		for _, s := range stmts {
 			sm := asMap(s)
-			sub := &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Operation: "ExecuteStatement", Input: map[string]any{"Statement": sm["Statement"], "Parameters": sm["Parameters"]}}
+			input := map[string]any{"Statement": sm["Statement"]}
+			if parameters, ok := sm["Parameters"]; ok {
+				input["Parameters"] = parameters
+			}
+			sub := &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Operation: "ExecuteStatement", Input: input}
 			out, err := p.partiql(ctx, sub)
+			response := map[string]any{"TableName": partiqlTable(str(sm["Statement"]))}
 			if err != nil {
-				resps = append(resps, map[string]any{"Error": map[string]any{"Code": "ValidationException", "Message": err.Error()}})
+				response["Error"] = map[string]any{"Code": "ValidationException", "Message": err.Error()}
+				resps = append(resps, response)
 				continue
 			}
-			resps = append(resps, out.Output)
+			for key, value := range out.Output {
+				response[key] = value
+			}
+			resps = append(resps, response)
 		}
 		return &spi.Response{Output: map[string]any{"Responses": resps}}, nil
 	}
@@ -29,9 +39,25 @@ func (p *Pack) partiql(ctx context.Context, req *spi.Request) (*spi.Response, er
 		if len(stmts) == 0 {
 			stmts = asSlice(req.Input["Statements"])
 		}
-		req.Input["Statements"] = stmts
-		req.Operation = "BatchExecuteStatement"
-		return p.partiql(ctx, req)
+		responses := []any{}
+		for _, statement := range stmts {
+			sm := asMap(statement)
+			input := map[string]any{"Statement": sm["Statement"]}
+			if parameters, ok := sm["Parameters"]; ok {
+				input["Parameters"] = parameters
+			}
+			out, err := p.partiql(ctx, &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Operation: "ExecuteStatement", Input: input})
+			if err != nil {
+				return nil, err
+			}
+			if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(str(sm["Statement"]))), "SELECT") {
+				responses = append(responses, out.Output)
+			}
+		}
+		return &spi.Response{Output: map[string]any{"Responses": responses}}, nil
+	}
+	if parameters, ok := req.Input["Parameters"]; ok && len(asSlice(parameters)) == 0 {
+		return nil, &spi.Fault{Code: "ValidationException", Message: "1 validation error detected: Value '[]' at 'parameters' failed to satisfy constraint: Member must have length greater than or equal to 1", HTTPStatus: 400, Fault: "client"}
 	}
 	st := strings.TrimSpace(str(req.Input["Statement"]))
 	up := strings.ToUpper(st)
@@ -48,6 +74,12 @@ func (p *Pack) partiql(ctx context.Context, req *spi.Request) (*spi.Response, er
 			return nil, &spi.Fault{Code: "ValidationException", Message: "DELETE", HTTPStatus: 400, Fault: "client"}
 		}
 		return p.Invoke(ctx, &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Operation: "DeleteItem", Input: map[string]any{"TableName": table, "Key": key}})
+	case strings.HasPrefix(up, "UPDATE"):
+		table, key, update, values := parsePartiqlUpdate(st)
+		if table == "" || len(key) == 0 || update == "" {
+			return nil, &spi.Fault{Code: "ValidationException", Message: "UPDATE", HTTPStatus: 400, Fault: "client"}
+		}
+		return p.Invoke(ctx, &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Operation: "UpdateItem", Input: map[string]any{"TableName": table, "Key": key, "UpdateExpression": update, "ExpressionAttributeValues": values}})
 	default:
 		table, key := parseWhereKey(st)
 		if table == "" {
@@ -56,8 +88,55 @@ func (p *Pack) partiql(ctx context.Context, req *spi.Request) (*spi.Response, er
 		if len(key) > 0 {
 			return p.Invoke(ctx, &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Operation: "GetItem", Input: map[string]any{"TableName": table, "Key": key}})
 		}
-		return p.Invoke(ctx, &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Operation: "Scan", Input: map[string]any{"TableName": table}})
+		return p.Invoke(ctx, &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Operation: "Scan", Input: map[string]any{"TableName": table, "FilterExpression": partiqlMissingFilter(st)}})
 	}
+}
+
+func partiqlTable(statement string) string {
+	if table, _ := parseWhereKey(statement); table != "" {
+		return table
+	}
+	table, _ := parseInsert(statement)
+	return table
+}
+
+func parsePartiqlUpdate(statement string) (string, map[string]any, string, map[string]any) {
+	table, key := parseWhereKey(statement)
+	upper := strings.ToUpper(statement)
+	set, where := strings.Index(upper, " SET "), strings.Index(upper, " WHERE ")
+	if set < 0 || where < set {
+		return table, key, "", nil
+	}
+	var clauses []string
+	values := map[string]any{}
+	// ponytail: scalar assignments only; replace with a PartiQL parser when nested expressions are supported.
+	for index, assignment := range strings.Split(statement[set+5:where], ",") {
+		name, raw, ok := strings.Cut(assignment, "=")
+		value := parsePartiqlMap(`{"value":` + strings.TrimSpace(raw) + `}`)
+		if !ok || strings.TrimSpace(name) == "" || value == nil {
+			return table, key, "", nil
+		}
+		token := ":v" + strconv.Itoa(index)
+		clauses = append(clauses, strings.TrimSpace(name)+" = "+token)
+		values[token] = value["value"]
+	}
+	return table, key, "SET " + strings.Join(clauses, ", "), values
+}
+
+func partiqlMissingFilter(statement string) string {
+	upper := strings.ToUpper(statement)
+	where := strings.Index(upper, " WHERE ")
+	if where < 0 {
+		return ""
+	}
+	condition := strings.TrimSpace(statement[where+7:])
+	upperCondition := strings.ToUpper(condition)
+	for suffix, function := range map[string]string{" IS NOT MISSING": "attribute_exists", " IS MISSING": "attribute_not_exists"} {
+		if strings.HasSuffix(upperCondition, suffix) {
+			return function + "(" + strings.TrimSpace(condition[:len(condition)-len(suffix)]) + ")"
+		}
+	}
+	return ""
 }
 
 func parseInsert(st string) (string, map[string]any) {
@@ -81,14 +160,17 @@ func parseInsert(st string) (string, map[string]any) {
 
 func parseWhereKey(st string) (string, map[string]any) {
 	up := strings.ToUpper(st)
-	from := strings.Index(up, "FROM ")
-	if from < 0 {
-		from = strings.Index(up, "INTO ")
+	start := -1
+	for _, keyword := range []string{"FROM ", "INTO ", "UPDATE "} {
+		if start = strings.Index(up, keyword); start >= 0 {
+			start += len(keyword)
+			break
+		}
 	}
-	if from < 0 {
+	if start < 0 {
 		return "", nil
 	}
-	rest := strings.TrimSpace(st[from+5:])
+	rest := strings.TrimSpace(st[start:])
 	name := strings.Fields(rest)[0]
 	wi := strings.Index(up, "WHERE")
 	if wi < 0 {

@@ -1,0 +1,92 @@
+{
+  "batchGet": {
+    "Responses": {
+      "T": [
+        {
+          "id": {
+            "S": "Fred"
+          },
+          "name": {
+            "S": "Fred"
+          }
+        }
+      ]
+    },
+    "UnprocessedKeys": {}
+  },
+  "changed": {
+    "UnprocessedItems": {}
+  },
+  "overwrite": {
+    "UnprocessedItems": {}
+  },
+  "stream": [
+    {
+      "eventName": "INSERT",
+      "keys": {
+        "id": {
+          "S": "Fred"
+        }
+      },
+      "newImage": {
+        "id": {
+          "S": "Fred"
+        }
+      },
+      "oldImage": null,
+      "size": 12
+    },
+    {
+      "eventName": "INSERT",
+      "keys": {
+        "id": {
+          "S": "NewKey"
+        }
+      },
+      "newImage": {
+        "id": {
+          "S": "NewKey"
+        }
+      },
+      "oldImage": null,
+      "size": 16
+    },
+    {
+      "eventName": "REMOVE",
+      "keys": {
+        "id": {
+          "S": "NewKey"
+        }
+      },
+      "newImage": null,
+      "oldImage": {
+        "id": {
+          "S": "NewKey"
+        }
+      },
+      "size": 16
+    },
+    {
+      "eventName": "MODIFY",
+      "keys": {
+        "id": {
+          "S": "Fred"
+        }
+      },
+      "newImage": {
+        "id": {
+          "S": "Fred"
+        },
+        "name": {
+          "S": "Fred"
+        }
+      },
+      "oldImage": {
+        "id": {
+          "S": "Fred"
+        }
+      },
+      "size": 26
+    }
+  ]
+}

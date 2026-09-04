@@ -579,6 +579,43 @@ func TestDynamoDBEmptyAndBinaryValues(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"emptyResponse": empty.Output, "binaryResponse": binary.Output, "batchResponse": batch.Output, "empty": get("empty"), "binary": get("binary"), "batch1": get("batch-1"), "batch2": get("batch-2")})
 }
 
+func TestDynamoDBBatchCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	must := func(operation string, input map[string]any) *spi.Response {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	created := asMap(must("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_AND_OLD_IMAGES"}}).Output["TableDescription"])
+	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "Fred"}}})
+	overwrite := must("BatchWriteItem", map[string]any{"RequestItems": map[string]any{"T": []any{
+		map[string]any{"PutRequest": map[string]any{"Item": map[string]any{"id": map[string]any{"S": "Fred"}}}},
+		map[string]any{"PutRequest": map[string]any{"Item": map[string]any{"id": map[string]any{"S": "NewKey"}}}},
+	}}}).Output
+	changed := must("BatchWriteItem", map[string]any{"RequestItems": map[string]any{"T": []any{
+		map[string]any{"DeleteRequest": map[string]any{"Key": map[string]any{"id": map[string]any{"S": "NewKey"}}}},
+		map[string]any{"PutRequest": map[string]any{"Item": map[string]any{"id": map[string]any{"S": "Fred"}, "name": map[string]any{"S": "Fred"}}}},
+	}}}).Output
+	batchGet := must("BatchGetItem", map[string]any{"RequestItems": map[string]any{"T": map[string]any{"Keys": []any{
+		map[string]any{"id": map[string]any{"S": "Fred"}},
+		map[string]any{"id": map[string]any{"S": "missing"}},
+	}}}}).Output
+	arn := str(created["LatestStreamArn"])
+	iterator := must("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": "shardId-000000000000", "ShardIteratorType": "TRIM_HORIZON"}).Output["ShardIterator"]
+	records := asSlice(must("GetRecords", map[string]any{"ShardIterator": iterator}).Output["Records"])
+	stream := make([]any, 0, len(records))
+	for _, raw := range records {
+		record := asMap(raw)
+		dynamodb := asMap(record["dynamodb"])
+		stream = append(stream, map[string]any{"eventName": record["eventName"], "keys": dynamodb["Keys"], "newImage": dynamodb["NewImage"], "oldImage": dynamodb["OldImage"], "size": dynamodb["SizeBytes"]})
+	}
+	golden.AssertJSON(t, map[string]any{"overwrite": overwrite, "changed": changed, "batchGet": batchGet, "stream": stream})
+}
+
 func TestDynamoDBTableClass(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

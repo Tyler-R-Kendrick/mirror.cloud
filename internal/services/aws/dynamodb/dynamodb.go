@@ -212,12 +212,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			} else if ok {
 				_ = json.Unmarshal(raw, &old)
 			}
+			if err := p.checkCond(req, old); err != nil {
+				return err
+			}
 			item = cloneMap(old)
 			if item == nil {
 				item = cloneMap(asMap(req.Input["Key"]))
-			}
-			if err := p.checkCond(req, item); err != nil {
-				return err
 			}
 			if ue := str(req.Input["UpdateExpression"]); ue != "" {
 				var err error
@@ -480,38 +480,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"UnprocessedItems": map[string]any{}}}, nil
 	case "TransactGetItems":
-		ri := map[string]any{}
-		items, _ := req.Input["TransactItems"].([]any)
-		for _, it := range items {
-			g := asMap(asMap(it)["Get"])
-			tbl := str(g["TableName"])
-			if tbl == "" {
-				continue
-			}
-			slot := asMap(ri[tbl])
-			keys, _ := slot["Keys"].([]any)
-			keys = append(keys, g["Key"])
-			slot["Keys"] = keys
-			ri[tbl] = slot
-		}
-		return p.Invoke(ctx, &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Operation: "BatchGetItem", Input: map[string]any{"RequestItems": ri}})
+		return p.transactGetItems(ctx, req)
 	case "TransactWriteItems":
-		ri := map[string]any{}
-		items, _ := req.Input["TransactItems"].([]any)
-		for _, it := range items {
-			m := asMap(it)
-			if put := asMap(m["Put"]); len(put) > 0 {
-				tbl := str(put["TableName"])
-				reqs, _ := ri[tbl].([]any)
-				ri[tbl] = append(reqs, map[string]any{"PutRequest": map[string]any{"Item": put["Item"]}})
-			}
-			if del := asMap(m["Delete"]); len(del) > 0 {
-				tbl := str(del["TableName"])
-				reqs, _ := ri[tbl].([]any)
-				ri[tbl] = append(reqs, map[string]any{"DeleteRequest": map[string]any{"Key": del["Key"]}})
-			}
-		}
-		return p.Invoke(ctx, &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Operation: "BatchWriteItem", Input: map[string]any{"RequestItems": ri}})
+		return p.transactWriteItems(ctx, req)
 	case "UpdateTable":
 		b, ok, _ := p.col(req, "tables").Get(ctx, table)
 		m := map[string]any{"TableName": table}
@@ -632,7 +603,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 }
 
 func (p *Pack) validateItemKey(ctx context.Context, req *spi.Request, table string, item map[string]any) error {
-	for _, key := range asSlice(p.tableDef(ctx, req, table)["KeySchema"]) {
+	return validateItemKeyDefinition(p.tableDef(ctx, req, table), item)
+}
+
+func validateItemKeyDefinition(definition, item map[string]any) error {
+	for _, key := range asSlice(definition["KeySchema"]) {
 		name := str(asMap(key)["AttributeName"])
 		if name != "" && len(asMap(item[name])) == 0 {
 			return &spi.Fault{Code: "ValidationException", Message: "One or more parameter values were invalid: Missing the key " + name + " in the item", HTTPStatus: 400, Fault: "client"}
@@ -784,21 +759,29 @@ func (p *Pack) loadItem(ctx context.Context, req *spi.Request, table, key string
 }
 
 func (p *Pack) checkCond(req *spi.Request, item map[string]any) error {
-	cond := str(req.Input["ConditionExpression"])
-	if cond == "" {
-		return nil
-	}
-	if item == nil {
-		item = map[string]any{}
-	}
-	ok, err := expr.EvalBool(cond, item, asMap(req.Input["ExpressionAttributeNames"]), asMap(req.Input["ExpressionAttributeValues"]))
+	ok, err := conditionOK(req.Input, item)
 	if err != nil {
 		return &spi.Fault{Code: "ValidationException", Message: err.Error(), HTTPStatus: 400, Fault: "client"}
 	}
 	if !ok {
-		return &spi.Fault{Code: "ConditionalCheckFailedException", Message: "The conditional request failed", HTTPStatus: 400, Fault: "client", Fields: map[string]any{"Item": item}}
+		fields := map[string]any{}
+		if str(req.Input["ReturnValuesOnConditionCheckFailure"]) == "ALL_OLD" && item != nil {
+			fields["Item"] = item
+		}
+		return &spi.Fault{Code: "ConditionalCheckFailedException", Message: "The conditional request failed", HTTPStatus: 400, Fault: "client", Fields: fields}
 	}
 	return nil
+}
+
+func conditionOK(input, item map[string]any) (bool, error) {
+	cond := str(input["ConditionExpression"])
+	if cond == "" {
+		return true, nil
+	}
+	if item == nil {
+		item = map[string]any{}
+	}
+	return expr.EvalBool(cond, item, asMap(input["ExpressionAttributeNames"]), asMap(input["ExpressionAttributeValues"]))
 }
 
 func (p *Pack) returnValues(req *spi.Request, old, neu map[string]any, touched []string) *spi.Response {
@@ -921,16 +904,20 @@ func (p *Pack) itemKeyFrom(ctx context.Context, req *spi.Request, table string, 
 	if ok {
 		var td map[string]any
 		_ = json.Unmarshal(b, &td)
-		if ks, ok := td["KeySchema"].([]any); ok && len(ks) > 0 {
-			km := map[string]any{}
-			for _, e := range ks {
-				name := str(asMap(e)["AttributeName"])
-				if name != "" {
-					km[name] = attrs[name]
-				}
+		return itemKeyFromDefinition(td, attrs)
+	}
+	return itemKey(attrs)
+}
+
+func itemKeyFromDefinition(definition, attrs map[string]any) string {
+	if keys := asSlice(definition["KeySchema"]); len(keys) > 0 {
+		item := map[string]any{}
+		for _, key := range keys {
+			if name := str(asMap(key)["AttributeName"]); name != "" {
+				item[name] = attrs[name]
 			}
-			return itemKey(km)
 		}
+		return itemKey(item)
 	}
 	return itemKey(attrs)
 }

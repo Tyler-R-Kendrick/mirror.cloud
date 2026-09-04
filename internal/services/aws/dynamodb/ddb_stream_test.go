@@ -82,11 +82,30 @@ func TestDynamoDBStreamCharacterization(t *testing.T) {
 		dynamodb := asMap(record["dynamodb"])
 		summaries = append(summaries, map[string]any{"eventName": record["eventName"], "keys": dynamodb["Keys"], "size": dynamodb["SizeBytes"], "view": dynamodb["StreamViewType"]})
 	}
+	updated := must("CreateTable", map[string]any{
+		"TableName": "U", "KeySchema": []any{map[string]any{"AttributeName": "pk", "KeyType": "HASH"}}, "StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_AND_OLD_IMAGES"},
+	})
+	updateARN := str(asMap(updated["TableDescription"])["LatestStreamArn"])
+	values := map[string]any{":v1": map[string]any{"S": "value1"}, ":v2": map[string]any{"S": "value2"}}
+	updateInput := map[string]any{"TableName": "U", "Key": map[string]any{"pk": map[string]any{"S": "my-item-id"}}, "UpdateExpression": "SET attr1 = :v1, attr2 = :v2", "ExpressionAttributeValues": values}
+	must("UpdateItem", updateInput)
+	must("UpdateItem", updateInput)
+	updateInput["ExpressionAttributeValues"] = map[string]any{":v1": map[string]any{"S": "value2"}, ":v2": map[string]any{"S": "value3"}}
+	must("UpdateItem", updateInput)
+	updateIterator := str(must("GetShardIterator", map[string]any{"StreamArn": updateARN, "ShardId": "shardId-000000000000", "ShardIteratorType": "TRIM_HORIZON"})["ShardIterator"])
+	updateRecords := asSlice(must("GetRecords", map[string]any{"ShardIterator": updateIterator})["Records"])
+	updateSummaries := make([]any, 0, len(updateRecords))
+	for _, raw := range updateRecords {
+		record := asMap(raw)
+		dynamodb := asMap(record["dynamodb"])
+		updateSummaries = append(updateSummaries, map[string]any{"eventName": record["eventName"], "keys": dynamodb["Keys"], "newImage": dynamodb["NewImage"], "oldImage": dynamodb["OldImage"], "sequenceNumber": dynamodb["SequenceNumber"], "size": dynamodb["SizeBytes"]})
+	}
 	golden.AssertJSON(t, map[string]any{
 		"description":     map[string]any{"keySchema": asMap(described["StreamDescription"])["KeySchema"], "streamLabel": asMap(described["StreamDescription"])["StreamLabel"], "streamViewType": asMap(described["StreamDescription"])["StreamViewType"]},
 		"exclusiveShards": asMap(excluded["StreamDescription"])["Shards"],
 		"iteratorFormat":  strings.HasPrefix(latest, arn+"|") && strings.Count(latest, "|") == 2 && strings.HasPrefix(at, arn+"|1|") && strings.Count(at, "|") == 2,
 		"records":         summaries,
+		"updateRecords":   updateSummaries,
 	})
 }
 

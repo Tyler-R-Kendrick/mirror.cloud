@@ -5636,6 +5636,35 @@ var mutants = []mutant{
 		run:  "TestDeleteWhereRemovesEveryMatch",
 	},
 	{
+		// A check that stops reading derive expressions passes `workspaces`
+		// and every future bundle that spells the same lookup that way -- the
+		// spelling that reads as more deliberate is the one it would stop
+		// covering.
+		name: "bir-addressing-check-ignores-derive",
+		file: filepath.Join("internal", "bir", "validate.go"),
+		old: `		members := r.ID.InputMembers
+		if r.ID.Derive != "" {
+			members = append(append([]string{}, members...), inputRefs(r.ID.Derive)...)
+		}`,
+		new: `		members := r.ID.InputMembers
+		if r.ID.Derive != "" {
+			continue
+		}`,
+		pkg: "./internal/bir",
+		run: "TestAddressingCheckReadsDeriveExpressions",
+	},
+	{
+		// An exemption that needs no reason is one that can be added to make
+		// the check quiet, which is the only way this check fails: not by
+		// missing a defect, but by being switched off one operation at a time.
+		name: "bir-addressing-exemption-needs-no-reason",
+		file: filepath.Join("internal", "bir", "validate.go"),
+		old:  `		if strings.TrimSpace(why) == "" {`,
+		new:  `		if false {`,
+		pkg:  "./internal/bir",
+		run:  "TestAnExemptionNeedsAReason",
+	},
+	{
 		// A batch that writes only its last element succeeds and answers as
 		// though it had written all of them: N accounts go in, one row comes
 		// out, and nothing in the response says so.

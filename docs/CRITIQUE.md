@@ -676,6 +676,45 @@ generated models are adopted. The bundle has no shared endpoint prefix today
 and the specifications have two, and that ambiguity should arrive as a failing
 test rather than be absorbed by a gate that already excuses it.
 
+### A global replace retargeted a mutant nobody was looking at
+
+This one is a process failure and cost a CI cycle, so it is worth writing down
+plainly.
+
+Retargeting the two mutants whose code this change moved, I rewrote them with
+a string replace on `run: "TestDemuxTargetsAndPaths"` -- a field two entries
+shared. The intended one was `demux-ignore-the-host-label`. The other was
+`edge-ignore-dynamodb-stream-target`, which had nothing to do with this change
+and was silently pointed at a test that does not exercise DynamoDB Streams
+routing. It survived, and CI said so fifty-four minutes later.
+
+Two things went wrong, and only one of them is the sed.
+
+The edit was unsafe: a blind replace on a field shared across a sixteen-thousand
+line table, anchored on nothing that identifies the entry. Anchoring on the
+mutant's `name` costs one more line and cannot do this.
+
+The larger one is that I ran a *filter* of the mutation suite rather than the
+suite. `-run 'TestMutantsAreKilled/(demux|specboot|smithy|restjson-ignore)'`
+covers exactly the mutants I was thinking about, which is precisely the set
+that cannot contain a mutant I broke by accident. The gate caught the defect on
+its first honest run; I had simply not given it one.
+
+There is no cheap structural check to add here. `TestMutantNeedlesExist`
+already proves each `old` matches one site, and it did: the needle was
+untouched. Whether a named test actually kills a mutant is only answerable by
+running it. So the rule is about the method, not a new gate: **when a change
+retargets mutants, the whole mutation suite is the verification, not a filter
+of it.**
+
+**And it is now slow enough to matter.** That run took 3246 seconds against a
+3600-second timeout -- ninety percent of the budget, on a step that used to
+take about twenty-five minutes. This stack added twenty-four mutants and CI now
+has very little headroom before the gate starts failing for time rather than
+for defects. That is a real problem and the fix is not to delete mutants: the
+harness rebuilds and re-runs a whole package per mutant, and mutants sharing a
+package could share one build.
+
 ### Reviewing the exemptions found the same rot in three places
 
 Self-reviewing this stack before merge turned up one mistake made three times, which is worth more than any of the three instances.

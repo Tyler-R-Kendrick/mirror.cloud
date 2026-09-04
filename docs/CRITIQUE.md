@@ -702,10 +702,20 @@ developer who had synced served a different model from one who had not, and
 where a spec-derived ID differed from the catalog's -- `aws.models.lex` against
 `aws.lex-models`, `aws.api.sagemaker` against `aws.sagemaker` -- the bundle
 carried *both*, as two services sharing one endpoint. I only saw it because
-syncing specs locally made twelve phantom services appear. `internal/generated`
-is that same ingestion, committed and checked by CI to follow byte-for-byte
-from the pinned lock, so the second ingestion is deleted: the served model is
-now a property of the repository rather than of the machine.
+syncing specs locally made twelve phantom services appear.
+
+It is not a latent inconsistency either. On the tree before this change, a
+checkout that has run `make specs-sync` fails five test packages that pass on
+one that has not -- appsync, cloudcontrol, ecs, timestream and the bundled HTTP
+gate. CI never saw it because the job that syncs specs is not the job that runs
+the tests, so the suite was green on a machine state no contributor who had
+followed the README would be in.
+
+`internal/generated` is that same ingestion, committed and checked by CI to
+follow byte-for-byte from the pinned lock, so the second ingestion is deleted:
+the served model is now a property of the repository rather than of the
+machine, and the suite passes identically with `specs/aws/` present and
+absent.
 
 **The credential scope carries the signing name, not the endpoint prefix.**
 They differ for seventy-seven upstream models: Lex Model Building signs as

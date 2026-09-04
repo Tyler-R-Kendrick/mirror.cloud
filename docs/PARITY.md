@@ -515,14 +515,14 @@ All 463 pinned S3 test functions are explicitly traced. That completes this sour
 
 ## DynamoDB baseline
 
-Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited on 2026-09-03.
+Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited on 2026-09-04.
 
 | Measure | Current evidence |
 |---|---:|
 | Requested test forms wired | 7 / 7 (100%) |
 | DynamoDB operations routed to emulation | 62 / 62 (100%) |
-| LocalStack DynamoDB test functions explicitly traced | 28 / 56 (50.0%) |
-| LocalStack DynamoDB test functions not yet traced | 28 / 56 (50.0%) |
+| LocalStack DynamoDB test functions explicitly traced | 36 / 56 (64.3%) |
+| LocalStack DynamoDB test functions not yet traced | 20 / 56 (35.7%) |
 
 The pinned inventory is the 56 direct test functions in `tests/aws/services/dynamodb/test_dynamodb.py`; parametrized cases are not expanded.
 
@@ -556,3 +556,11 @@ The pinned inventory is the 56 direct test functions in `tests/aws/services/dyna
 | `test_dynamodb.py::TestDynamoDB::test_dynamodb_stream_records_with_update_item` | Repeating an identical two-clause UpdateItem emits no duplicate record, while the first and changed updates emit exact INSERT/MODIFY records with monotonic sequences, keys, old/new images, and sizes; atomic Verify-style snapshot, SDK, BDD, fuzz, concurrent chaos, and mutation coverage pin the behavior | Mapped; full race-clean |
 | `test_dynamodb.py::TestDynamoDB::test_dynamodb_streams_describe_with_exclusive_start_shard_id` | DescribeStream includes KeySchema and StreamLabel and excludes the single local shard when it is supplied as ExclusiveStartShardId; atomic snapshot, SDK, BDD, and semantic mutation coverage pin the response | Mapped; full race-clean |
 | `test_dynamodb.py::TestDynamoDB::test_dynamodb_streams_shard_iterator_format` | ShardIterator and NextShardIterator retain the raw stream ARN, numeric offset, and opaque token in three pipe-delimited fields instead of base64 encoding the ARN; atomic snapshot, SDK, BDD, fuzz, and mutation coverage pin the format | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_transaction_write_items` | TransactWriteItems atomically applies ConditionCheck, Put, Update, and Delete actions across table names and ARNs with an empty success response; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos, and semantic mutation coverage pin the behavior | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_transaction_write_canceled` | A failed condition returns the exact TransactionCanceledException message and ordered cancellation reasons while rolling back every write across tables; atomic snapshot, SDK, BDD, fuzz, chaos, and mutation checks cover the fault and rollback | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_transaction_write_binary_data` | Transactional Put preserves arbitrary binary attributes through direct and AWS SDK reads; atomic snapshot, SDK contract, BDD, and 10,000-case native fuzz coverage pin the base64 wire value | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_transact_get_items` | TransactGetItems accepts table names and ARNs and returns one ordered response per request, including projected items and empty objects for missing items; atomic snapshot, SDK, BDD, fuzz, and mutation coverage pin order and shape | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_dynamodb_idempotent_writing` | ClientRequestToken deduplicates semantically identical item maps independent of field insertion order for ten minutes, rejects changed payloads, and permits reuse after expiry; atomic snapshot, SDK, BDD, fuzz, concurrent token chaos, and mutation coverage pin the lifecycle | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_return_values_on_conditions_check_failure` | Conditional item writes include the complete old item only when ReturnValuesOnConditionCheckFailure is ALL_OLD and omit it otherwise; atomic snapshot, SDK, BDD, spine, and mutation coverage pin both branches | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_transact_write_items_streaming` | Successful transaction Put, Update, and Delete actions emit exact INSERT, MODIFY, and REMOVE stream records while identical overwrites and idempotent replays emit none; atomic Verify-style snapshot, SDK, BDD, fuzz, chaos, and mutation coverage pin records and images | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_transact_write_items_streaming_for_different_tables` | One transaction commits writes across stream-enabled and stream-disabled tables while emitting a record only for the enabled table; atomic snapshot, SDK, BDD, concurrent chaos, and mutation coverage pin cross-collection atomicity and stream routing | Mapped; full race-clean |

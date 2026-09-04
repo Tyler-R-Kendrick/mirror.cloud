@@ -148,6 +148,7 @@ func request(base string, svc *model.Service, op model.Operation, shared map[str
 	// localhost Host falls through to S3's path-style routing and the answer
 	// is a 501 about an S3 operation. An SDK sends the regional endpoint, so
 	// this does too.
+	//
 	// DocumentDB and Neptune declare `rds` as their endpoint prefix -- they
 	// are forks of the RDS API and their specifications say so -- and a host
 	// built from that prefix is genuinely ambiguous. Real clients reach them
@@ -178,13 +179,13 @@ func TestEveryBundleAnswersOverHTTP(t *testing.T) {
 	if len(ids) == 0 {
 		t.Fatal("no bundles")
 	}
-	// A bundle the runtime serves in a protocol the specification disagrees
-	// with -- a different protocol, or a different X-Amz-Target prefix --
-	// cannot be called the way an SDK would -- the request this test
-	// builds from the model is the request that does not reach it, which is
-	// the defect rather than a fault of the test. Those are counted by the
-	// ratchet (`routing_mismatches`, currently 48) and excluded here, so this
-	// gate is a real one today and widens by itself as they are fixed.
+	// A bundle the runtime routes differently from what the specification says
+	// -- a different protocol, a different X-Amz-Target prefix, or both --
+	// cannot be called the way an SDK would. The request this test builds from
+	// the model is precisely the request that does not reach it, which is the
+	// defect rather than a fault of the test. Those bundles are counted by the
+	// ratchet's `routing_mismatches` and excluded here, so this gate is a real
+	// one today and widens by itself as they are fixed.
 	shared := map[string]int{}
 	for _, id := range ids {
 		if m, err := generated.Model(id); err == nil {

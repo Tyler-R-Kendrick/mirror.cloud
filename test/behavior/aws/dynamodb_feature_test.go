@@ -263,6 +263,33 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given transaction items When writing and reading Then commits are atomic", func(t *testing.T) {
+		status, body := call("CreateTable", `{"TableName":"TxnBDD","KeySchema":[{"AttributeName":"id","KeyType":"HASH"}]}`)
+		var created map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &created) != nil {
+			t.Fatalf("create transaction table %d %s", status, body)
+		}
+		arn := created["TableDescription"].(map[string]any)["TableArn"].(string)
+		write := `{"ClientRequestToken":"bdd-token","TransactItems":[{"ConditionCheck":{"TableName":"TxnBDD","Key":{"id":{"S":"missing"}},"ConditionExpression":"attribute_not_exists(id)"}},{"Put":{"TableName":"TxnBDD","Item":{"id":{"S":"binary"},"data":{"B":"kA=="}}}},{"Update":{"TableName":"` + arn + `","Key":{"id":{"S":"updated"}},"UpdateExpression":"SET value = :v","ExpressionAttributeValues":{":v":{"S":"yes"}}}}]}`
+		if status, body := call("TransactWriteItems", write); status != http.StatusOK {
+			t.Fatalf("write transaction %d %s", status, body)
+		}
+		if status, body := call("TransactWriteItems", write); status != http.StatusOK {
+			t.Fatalf("replay transaction %d %s", status, body)
+		}
+		get := `{"TransactItems":[{"Get":{"TableName":"` + arn + `","Key":{"id":{"S":"binary"}},"ProjectionExpression":"id, data"}},{"Get":{"TableName":"TxnBDD","Key":{"id":{"S":"updated"}}}}]}`
+		if status, body := call("TransactGetItems", get); status != http.StatusOK || !bytes.Contains(body, []byte(`"B":"kA=="`)) || !bytes.Contains(body, []byte(`"value":{"S":"yes"}`)) {
+			t.Fatalf("get transaction %d %s", status, body)
+		}
+		cancel := `{"TransactItems":[{"ConditionCheck":{"TableName":"TxnBDD","Key":{"id":{"S":"binary"}},"ConditionExpression":"attribute_not_exists(id)","ReturnValuesOnConditionCheckFailure":"ALL_OLD"}},{"Put":{"TableName":"TxnBDD","Item":{"id":{"S":"blocked"}}}}]}`
+		if status, body := call("TransactWriteItems", cancel); status != http.StatusBadRequest || !bytes.Contains(body, []byte("TransactionCanceledException")) || !bytes.Contains(body, []byte(`"B":"kA=="`)) {
+			t.Fatalf("cancel transaction %d %s", status, body)
+		}
+		if status, body := call("GetItem", `{"TableName":"TxnBDD","Key":{"id":{"S":"blocked"}}}`); status != http.StatusOK || bytes.Contains(body, []byte(`"Item"`)) {
+			t.Fatalf("transaction rollback %d %s", status, body)
+		}
+	})
+
 	t.Run("Given a DynamoDB stream When reading its shard Then metadata records and iterators match AWS", func(t *testing.T) {
 		create := `{"TableName":"StreamBDD","KeySchema":[{"AttributeName":"id","KeyType":"HASH"}],"StreamSpecification":{"StreamEnabled":true,"StreamViewType":"NEW_IMAGE"}}`
 		status, body := call("CreateTable", create)

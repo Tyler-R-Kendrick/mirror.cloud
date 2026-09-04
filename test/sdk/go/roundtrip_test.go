@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -3266,6 +3267,41 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	binaryStreamValue, ok := streamRecords.Records[0].Dynamodb.NewImage["data"].(*ddbstreamtypes.AttributeValueMemberB)
 	if !ok || !bytes.Equal(binaryStreamValue.Value, []byte{0x90}) {
 		t.Fatalf("binary stream value: %#v", streamRecords.Records[0])
+	}
+	txnTable, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("TxnSDK"), BillingMode: ddbtypes.BillingModePayPerRequest, KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: ddbtypes.KeyTypeHash}}, AttributeDefinitions: []ddbtypes.AttributeDefinition{{AttributeName: aws.String("id"), AttributeType: ddbtypes.ScalarAttributeTypeS}}})
+	if err != nil {
+		t.Fatalf("create transaction table: %v", err)
+	}
+	txnARN := txnTable.TableDescription.TableArn
+	transaction, err := ddb.TransactWriteItems(context.Background(), &dynamodb.TransactWriteItemsInput{ClientRequestToken: aws.String("sdk-token"), TransactItems: []ddbtypes.TransactWriteItem{
+		{ConditionCheck: &ddbtypes.ConditionCheck{TableName: aws.String("TxnSDK"), Key: map[string]ddbtypes.AttributeValue{"id": &ddbtypes.AttributeValueMemberS{Value: "missing"}}, ConditionExpression: aws.String("attribute_not_exists(id)")}},
+		{Put: &ddbtypes.Put{TableName: aws.String("TxnSDK"), Item: map[string]ddbtypes.AttributeValue{"id": &ddbtypes.AttributeValueMemberS{Value: "binary"}, "data": &ddbtypes.AttributeValueMemberB{Value: []byte{0x90}}}}},
+		{Update: &ddbtypes.Update{TableName: txnARN, Key: map[string]ddbtypes.AttributeValue{"id": &ddbtypes.AttributeValueMemberS{Value: "updated"}}, UpdateExpression: aws.String("SET value = :v"), ExpressionAttributeValues: map[string]ddbtypes.AttributeValue{":v": &ddbtypes.AttributeValueMemberS{Value: "yes"}}}},
+	}})
+	if err != nil || transaction == nil {
+		t.Fatalf("transaction write: %#v %v", transaction, err)
+	}
+	if _, err := ddb.TransactWriteItems(context.Background(), &dynamodb.TransactWriteItemsInput{ClientRequestToken: aws.String("sdk-token"), TransactItems: []ddbtypes.TransactWriteItem{
+		{ConditionCheck: &ddbtypes.ConditionCheck{TableName: aws.String("TxnSDK"), Key: map[string]ddbtypes.AttributeValue{"id": &ddbtypes.AttributeValueMemberS{Value: "missing"}}, ConditionExpression: aws.String("attribute_not_exists(id)")}},
+		{Put: &ddbtypes.Put{TableName: aws.String("TxnSDK"), Item: map[string]ddbtypes.AttributeValue{"id": &ddbtypes.AttributeValueMemberS{Value: "binary"}, "data": &ddbtypes.AttributeValueMemberB{Value: []byte{0x90}}}}},
+		{Update: &ddbtypes.Update{TableName: txnARN, Key: map[string]ddbtypes.AttributeValue{"id": &ddbtypes.AttributeValueMemberS{Value: "updated"}}, UpdateExpression: aws.String("SET value = :v"), ExpressionAttributeValues: map[string]ddbtypes.AttributeValue{":v": &ddbtypes.AttributeValueMemberS{Value: "yes"}}}},
+	}}); err != nil {
+		t.Fatalf("idempotent transaction replay: %v", err)
+	}
+	transactionGet, err := ddb.TransactGetItems(context.Background(), &dynamodb.TransactGetItemsInput{TransactItems: []ddbtypes.TransactGetItem{
+		{Get: &ddbtypes.Get{TableName: aws.String("TxnSDK"), Key: map[string]ddbtypes.AttributeValue{"id": &ddbtypes.AttributeValueMemberS{Value: "binary"}}}},
+		{Get: &ddbtypes.Get{TableName: txnARN, Key: map[string]ddbtypes.AttributeValue{"id": &ddbtypes.AttributeValueMemberS{Value: "updated"}}, ProjectionExpression: aws.String("id, value")}},
+	}})
+	if err != nil || len(transactionGet.Responses) != 2 || !bytes.Equal(transactionGet.Responses[0].Item["data"].(*ddbtypes.AttributeValueMemberB).Value, []byte{0x90}) {
+		t.Fatalf("transaction get: %#v %v", transactionGet, err)
+	}
+	_, err = ddb.TransactWriteItems(context.Background(), &dynamodb.TransactWriteItemsInput{TransactItems: []ddbtypes.TransactWriteItem{
+		{ConditionCheck: &ddbtypes.ConditionCheck{TableName: aws.String("TxnSDK"), Key: map[string]ddbtypes.AttributeValue{"id": &ddbtypes.AttributeValueMemberS{Value: "binary"}}, ConditionExpression: aws.String("attribute_not_exists(id)"), ReturnValuesOnConditionCheckFailure: ddbtypes.ReturnValuesOnConditionCheckFailureAllOld}},
+		{Delete: &ddbtypes.Delete{TableName: aws.String("TxnSDK"), Key: map[string]ddbtypes.AttributeValue{"id": &ddbtypes.AttributeValueMemberS{Value: "updated"}}}},
+	}})
+	var canceled *ddbtypes.TransactionCanceledException
+	if !errors.As(err, &canceled) || len(canceled.CancellationReasons) != 2 || canceled.CancellationReasons[0].Code == nil || *canceled.CancellationReasons[0].Code != "ConditionalCheckFailed" || len(canceled.CancellationReasons[0].Item) != 2 {
+		t.Fatalf("transaction cancellation: %#v %v", canceled, err)
 	}
 	if ttl, err := ddb.DescribeTimeToLive(context.Background(), &dynamodb.DescribeTimeToLiveInput{TableName: aws.String("T")}); err != nil || ttl.TimeToLiveDescription == nil || ttl.TimeToLiveDescription.TimeToLiveStatus != ddbtypes.TimeToLiveStatusDisabled {
 		t.Fatalf("default ttl: %#v %v", ttl, err)

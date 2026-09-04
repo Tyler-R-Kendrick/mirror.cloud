@@ -597,6 +597,50 @@ func TestDynamoDBTableClass(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"created": asMap(created["TableDescription"])["TableClassSummary"], "describedStandard": asMap(describedStandard["Table"])["TableClassSummary"], "updated": asMap(updated["TableDescription"])["TableClassSummary"], "describedInfrequent": asMap(describedInfrequent["Table"])["TableClassSummary"]})
 }
 
+func TestDynamoDBPartiQLCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	must := func(operation string, input map[string]any) map[string]any {
+		response, err := call(operation, input)
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	must("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "Username", "KeyType": "HASH"}}})
+	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"Username": map[string]any{"S": "user02"}}})
+	batch := must("BatchExecuteStatement", map[string]any{"Statements": []any{
+		map[string]any{"Statement": "INSERT INTO T VALUE {'Username': 'user01', 'FirstName': 'Alice'}"},
+		map[string]any{"Statement": "UPDATE T SET Age=20 WHERE Username='user02'"},
+	}})
+	transaction := must("ExecuteTransaction", map[string]any{"TransactStatements": []any{
+		map[string]any{"Statement": "INSERT INTO T VALUE {'Username': 'user03'}"},
+		map[string]any{"Statement": "INSERT INTO T VALUE {'Username': 'user04'}"},
+	}})
+	notMissing := must("ExecuteStatement", map[string]any{"Statement": "SELECT * FROM T WHERE FirstName IS NOT MISSING"})
+	missing := must("ExecuteStatement", map[string]any{"Statement": "SELECT * FROM T WHERE FirstName IS MISSING"})
+	_, emptyErr := call("ExecuteStatement", map[string]any{"Statement": "SELECT * FROM T", "Parameters": []any{}})
+	fault, ok := emptyErr.(*spi.Fault)
+	if !ok {
+		t.Fatalf("empty parameters fault: %v", emptyErr)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"batch":       batch,
+		"transaction": transaction,
+		"user01":      must("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"Username": map[string]any{"S": "user01"}}})["Item"],
+		"user02":      must("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"Username": map[string]any{"S": "user02"}}})["Item"],
+		"notMissing":  notMissing,
+		"missing":     missing,
+		"emptyParameters": map[string]any{
+			"code": fault.Code, "message": fault.Message, "status": fault.HTTPStatus,
+		},
+	})
+}
+
 func TestDynamoDBExtendedOperations(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

@@ -56,9 +56,9 @@ func TestDynamoDBTransactionCharacterization(t *testing.T) {
 	canceled := canceledErr.(*spi.Fault)
 	blocked := must("GetItem", map[string]any{"TableName": "Plain", "Key": map[string]any{"id": map[string]any{"S": "blocked"}}}).Output
 
-	idempotent := map[string]any{"ClientRequestToken": "dedupe-token", "TransactItems": []any{map[string]any{"Put": map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "idem"}}}}}}
+	idempotent := map[string]any{"ClientRequestToken": "dedupe-token", "TransactItems": []any{map[string]any{"Put": map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "idem"}, "name": map[string]any{"S": "same"}}}}}}
 	must("TransactWriteItems", idempotent)
-	must("TransactWriteItems", idempotent)
+	must("TransactWriteItems", map[string]any{"ClientRequestToken": "dedupe-token", "TransactItems": []any{map[string]any{"Put": map[string]any{"TableName": "T", "Item": map[string]any{"name": map[string]any{"S": "same"}, "id": map[string]any{"S": "idem"}}}}}})
 	mismatch := cloneMap(idempotent)
 	mismatch["TransactItems"] = []any{map[string]any{"Put": map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "different"}}}}}
 	_, mismatchErr := call("TransactWriteItems", mismatch)

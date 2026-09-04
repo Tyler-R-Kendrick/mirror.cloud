@@ -153,6 +153,9 @@
       "newImage": {
         "id": {
           "S": "idem"
+        },
+        "name": {
+          "S": "same"
         }
       },
       "oldImage": null

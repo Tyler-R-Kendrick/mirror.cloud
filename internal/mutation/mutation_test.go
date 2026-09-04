@@ -8919,7 +8919,7 @@ var mutants = []mutant{
 		old:  `if strings.HasPrefix(target, "DynamoDBStreams_") {`,
 		new:  `if false {`,
 		pkg:  "./internal/edge",
-		run:  "TestTheHostWinsOverTheCredentialScope",
+		run:  "TestDemuxTargetsAndPaths",
 	},
 	{
 		name: "edge-disable-services-diagnostic",

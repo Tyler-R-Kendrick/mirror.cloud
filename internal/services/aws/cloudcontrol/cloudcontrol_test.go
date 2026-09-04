@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apigatewayv2"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cloudformation"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/rds"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -42,7 +42,15 @@ func TestReadsAPIGatewayV2AndRDSResources(t *testing.T) {
 	deps := spitest.Deps(t)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	api, err := apigatewayv2.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateApi", Input: map[string]any{"Name": "api", "ProtocolType": "HTTP"}})
+	// API Gateway v2 is served from its behavior bundle now. cloudcontrol
+	// reads the ag2 collection out of the store rather than calling the
+	// service, so what matters here is that the record lands in the same
+	// place -- which is why the bundle keeps the pack's collection name.
+	ag2, err := bundled.New("aws.apigatewayv2", deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	api, err := ag2.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateApi", Input: map[string]any{"Name": "api", "ProtocolType": "HTTP"}})
 	if err != nil {
 		t.Fatal(err)
 	}

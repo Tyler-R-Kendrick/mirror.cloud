@@ -1,12 +1,54 @@
-package check_test
+package check
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 
 	behaviors "github.com/tyler-r-kendrick/mirror.cloud/behavior"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/generated"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cloudcontrol"
 )
+
+// backingCollections reads CloudControl's type-name-to-collection map out of
+// its source.
+//
+// Reading source rather than calling the function is deliberate. Exporting it
+// for a test would add Go to a service pack, and the ratchet in this package
+// says that surface may only shrink -- correctly, since the whole point is
+// that packs are being deleted. A check that has to grow the thing it guards
+// in order to guard it is the wrong check.
+func backingCollections(t *testing.T) map[string]string {
+	t.Helper()
+	root := findMod(t)
+	src, err := os.ReadFile(filepath.Join(root,
+		"internal", "services", "aws", "cloudcontrol", "cloudcontrol.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(src)
+	start := strings.Index(body, "func backingCollection(")
+	if start < 0 {
+		t.Fatal("cloudcontrol no longer has a backingCollection map; if it now " +
+			"calls the services it reports on, delete this test with a cheer")
+	}
+	end := strings.Index(body[start:], "\n}\n")
+	if end < 0 {
+		t.Fatal("cannot find the end of backingCollection")
+	}
+	out := map[string]string{}
+	for _, m := range caseReturn.FindAllStringSubmatch(body[start:start+end], -1) {
+		out[m[1]] = m[2]
+	}
+	if len(out) == 0 {
+		t.Fatal("backingCollection maps nothing; the coupling this guards is gone " +
+			"or has changed shape")
+	}
+	return out
+}
+
+var caseReturn = regexp.MustCompile(`case "([^"]+)":\s*\n\s*return "([^"]+)"`)
 
 // CloudControl does not call the services it reports on. It reads their store
 // collections directly, by name -- `backingCollection` maps a CloudFormation
@@ -35,7 +77,7 @@ func TestBackingCollectionsExistInTheBundlesThatOwnThem(t *testing.T) {
 	for _, want := range []struct{ typeName, service string }{
 		{"AWS::ApiGatewayV2::Api", "aws.apigatewayv2"},
 	} {
-		collection := cloudcontrol.BackingCollection(want.typeName)
+		collection := backingCollections(t)[want.typeName]
 		if collection == "" {
 			t.Errorf("%s: CloudControl no longer reads a collection for this type",
 				want.typeName)
@@ -77,20 +119,24 @@ func TestBackingCollectionsExistInTheBundlesThatOwnThem(t *testing.T) {
 // literal names. Pinning them means an extraction that changes one has to
 // change this too, which is the moment to notice.
 func TestBackingCollectionsArePinned(t *testing.T) {
-	for typeName, want := range map[string]string{
+	got := backingCollections(t)
+	want := map[string]string{
 		"AWS::ApiGatewayV2::Api": "ag2",
 		"AWS::RDS::DBInstance":   "dbinst",
 		"AWS::RDS::DBCluster":    "dbcluster",
-	} {
-		if got := cloudcontrol.BackingCollection(typeName); got != want {
-			t.Errorf("cloudcontrol.BackingCollection(%q) = %q, want %q\n\tIf the owning "+
+	}
+	for typeName, collection := range want {
+		if got[typeName] != collection {
+			t.Errorf("backingCollection maps %q to %q, want %q\n\tIf the owning "+
 				"service moved its records, this map has to move with them.",
-				typeName, got, want)
+				typeName, got[typeName], collection)
 		}
 	}
-	// An unknown type reads nothing, rather than falling back to some
-	// collection that happens to exist.
-	if got := cloudcontrol.BackingCollection("AWS::Nonesuch::Thing"); got != "" {
-		t.Errorf("an unmapped type reads %q", got)
+	for typeName := range got {
+		if _, known := want[typeName]; !known {
+			t.Errorf("CloudControl now reads a collection for %q, which nothing "+
+				"here pins. Add it, so the owning service cannot rename out from "+
+				"under it.", typeName)
+		}
 	}
 }

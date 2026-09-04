@@ -93,13 +93,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	}
 }
 
-// BackingCollection is exported because it is a cross-service contract rather
-// than an implementation detail: CloudControl does not call the services it
-// reports on, it reads their store collections directly, by name. Nothing else
-// declares that dependency, so the check that keeps it honest lives outside
-// this package and needs to see the map.
-func BackingCollection(typeName string) string { return backingCollection(typeName) }
-
 func backingCollection(typeName string) string {
 	switch typeName {
 	case "AWS::ApiGatewayV2::Api":

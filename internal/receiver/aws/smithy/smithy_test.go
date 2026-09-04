@@ -52,3 +52,62 @@ func TestDetect(t *testing.T) {
 		t.Fatal("detect")
 	}
 }
+
+// TestIngestRecordsTheSigningName covers the name a client puts in its SigV4
+// credential scope. For seventy-seven upstream models it is not the endpoint
+// prefix -- Lex Model Building signs as `lex` and is reached at `models.lex`
+// -- so a server that knows only the prefix cannot recognise the request.
+//
+// It is recorded as an alias rather than replacing the prefix, because both
+// are real: the host carries one and the Authorization header the other.
+func TestIngestRecordsTheSigningName(t *testing.T) {
+	model_ := func(prefix, signing string) string {
+		sig := ""
+		if signing != "" {
+			sig = `"aws.auth#sigv4": {"name": "` + signing + `"},`
+		}
+		return `{
+		  "smithy": "2.0",
+		  "shapes": {
+		    "com.example#Demo": {
+		      "type": "service",
+		      "operations": [],
+		      "traits": {
+		        "aws.protocols#restJson1": {},
+		        ` + sig + `
+		        "aws.api#service": {"endpointPrefix": "` + prefix + `", "sdkId": "Demo"}
+		      }
+		    }
+		  }
+		}`
+	}
+	ingest := func(t *testing.T, doc string) model.Service {
+		t.Helper()
+		svcs, err := (Receiver{}).Ingest(context.Background(), model.SourceRef{Path: "demo.json"}, []byte(doc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(svcs) != 1 {
+			t.Fatalf("%d services", len(svcs))
+		}
+		return svcs[0]
+	}
+
+	svc := ingest(t, model_("models.lex", "lex"))
+	if len(svc.Aliases) != 1 || svc.Aliases[0] != "lex" {
+		t.Fatalf("a signing name that differs from the endpoint prefix was not "+
+			"recorded: prefix %q aliases %v", svc.EndpointPrefix, svc.Aliases)
+	}
+	if svc.EndpointPrefix != "models.lex" {
+		t.Fatalf("the signing name replaced the endpoint prefix: %q", svc.EndpointPrefix)
+	}
+
+	// A signing name equal to the prefix says nothing, and an alias that
+	// repeats the prefix is noise a reader has to rule out.
+	if svc := ingest(t, model_("demo", "demo")); len(svc.Aliases) != 0 {
+		t.Errorf("a signing name equal to the endpoint prefix was recorded: %v", svc.Aliases)
+	}
+	if svc := ingest(t, model_("demo", "")); len(svc.Aliases) != 0 {
+		t.Errorf("a service with no sigv4 trait got aliases: %v", svc.Aliases)
+	}
+}

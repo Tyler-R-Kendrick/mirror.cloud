@@ -124,6 +124,12 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 		if prefix == "" {
 			prefix = awsSvc.EndpointPrefix
 		}
+		// The SigV4 signing name is what a client puts in the credential
+		// scope, and for seventy-seven upstream models it is not the endpoint
+		// prefix: Lex Model Building signs as `lex` and is reached at
+		// `models.lex`, ECR signs as `ecr` and is reached at `api.ecr`. A
+		// server that knows only the prefix cannot recognise the request.
+		aliases := signingAliases(s.Traits, prefix)
 		target := localName(id)
 		ver := s.Version
 		svcID := awsServiceID(prefix, awsSvc.SdkID, id)
@@ -135,6 +141,7 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 			TargetPrefix:   target,
 			QueryVersion:   ver,
 			XMLNamespace:   xmlns,
+			Aliases:        aliases,
 			Shapes:         map[string]model.Shape{},
 			Source:         src,
 		}
@@ -420,3 +427,28 @@ func namespace(id string) string {
 }
 
 var _ receiver.Receiver = Receiver{}
+
+// signingAliases reports the other names a client may address this service by.
+// Today that is the SigV4 signing name when it differs from the endpoint
+// prefix; the field is a list because a service can carry more than one name
+// and because the same question will be asked of other providers.
+func signingAliases(traits json.RawMessage, prefix string) []string {
+	var t map[string]json.RawMessage
+	if err := json.Unmarshal(traits, &t); err != nil {
+		return nil
+	}
+	raw, ok := t["aws.auth#sigv4"]
+	if !ok {
+		return nil
+	}
+	var sig struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &sig); err != nil || sig.Name == "" {
+		return nil
+	}
+	if strings.EqualFold(sig.Name, prefix) {
+		return nil
+	}
+	return []string{strings.ToLower(sig.Name)}
+}

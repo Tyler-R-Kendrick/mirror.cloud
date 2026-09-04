@@ -676,6 +676,73 @@ generated models are adopted. The bundle has no shared endpoint prefix today
 and the specifications have two, and that ambiguity should arrive as a failing
 test rather than be absorbed by a gate that already excuses it.
 
+### The fifty-three are zero, and what closing them turned up
+
+The runtime boots from the generated models now. `routing_mismatches` reads
+zero, and `TestEveryBundleAnswersOverHTTP` -- which excluded fifty-three
+bundles because the request built from the model was precisely the request that
+could not reach them -- exercises eighty-seven of the ninety-seven over real
+HTTP. The remaining ten are the test's own limit: every operation they serve
+requires an input member, so no call can be built from the model alone.
+
+The change itself is small. `adoptGenerated` replaces each service's protocol,
+target prefix, endpoint prefix and shapes with the generated model's, keyed by
+the served ID through a four-entry table for the services whose wire name and
+served name differ (`aws.monitoring` is CloudWatch, `aws.elasticloadbalancing`
+is ELBv2). Operations are *unioned*, not replaced: a pack may serve an
+operation the specification does not carry, and dropping it would answer 501
+rather than fail.
+
+Four things came out of it that are worth more than the fix.
+
+**The bundle depended on whether the machine had run `specs-sync`.** specboot
+walked `specs/` at boot and ingested whatever it found, falling back to the
+catalog when the directory was absent -- and `specs/aws/` is gitignored. So a
+developer who had synced served a different model from one who had not, and
+where a spec-derived ID differed from the catalog's -- `aws.models.lex` against
+`aws.lex-models`, `aws.api.sagemaker` against `aws.sagemaker` -- the bundle
+carried *both*, as two services sharing one endpoint. I only saw it because
+syncing specs locally made twelve phantom services appear. `internal/generated`
+is that same ingestion, committed and checked by CI to follow byte-for-byte
+from the pinned lock, so the second ingestion is deleted: the served model is
+now a property of the repository rather than of the machine.
+
+**The credential scope carries the signing name, not the endpoint prefix.**
+They differ for seventy-seven upstream models: Lex Model Building signs as
+`lex` and is reached at `models.lex`, ECR signs as `ecr` and is reached at
+`api.ecr`. Matching only the prefix left those unaddressable by the header
+every SDK sends, and `aws.lex-models` answered "unknown service" to its own
+booted test. `model.Service.Aliases` -- a field declared as "alternate endpoint
+prefixes / host matches" and never once populated or read -- is now filled by
+the receiver with the signing name and consulted by the demux.
+
+**One service was vendored against the wrong API version.**
+`specs/aws-dirs.json` mapped `aws.lex-models` to `lex-models-v2` while the pack
+implements V1: different protocol, different target prefix, barely overlapping
+operations. Adopting the specification is what surfaced it, because before
+this the pack was served by a catalog entry that described V1 and nothing
+compared the two. The alias points at `lex-model-building-service` now and the
+model is regenerated.
+
+**Five endpoints are shared, and the older service was swallowing the newer.**
+API Gateway's HTTP APIs, both SES versions, both Kinesis Analytics versions,
+Elasticsearch against OpenSearch, and DocumentDB and Neptune against RDS. In
+every pair the older service's own name *is* the shared prefix, so preferring
+the namesake made the successor unreachable -- `aws.apigatewayv2` answered as
+`aws.apigateway.GetRestApis`. What separates them is the request: AWS
+distinguishes them by path or by target and the model describes both, so the
+service that *claims* the request wins. Two cannot be separated that way at
+all: DocumentDB and Neptune are forks of the RDS API with the same action names
+on the same endpoint, reachable only at a hostname the specification does not
+record. They are named in a list the test fails if an entry stops being needed
+-- which is how RDS itself came off it.
+
+The gate written in the previous change to fail here did fail here, and that
+was the point. What it did *not* catch was `apigatewayv2`, because it read
+`catalog.Bundle()` rather than the bundle the runtime boots -- the same mistake
+as the one that hid the original disagreement, made by me, two changes after
+writing it down. It reads `specboot.Bundle()` now.
+
 ### Reviewing the exemptions found the same rot in three places
 
 Self-reviewing this stack before merge turned up one mistake made three times, which is worth more than any of the three instances.

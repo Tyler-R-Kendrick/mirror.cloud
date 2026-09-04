@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/aws/httpuri"
 )
 
 // resolveByModel finds the service a request is addressed to using the two
@@ -25,10 +26,10 @@ import (
 // transcribed, so a service added to a specification is addressable without
 // anyone writing a branch for it.
 func (s *Server) resolveByModel(r *http.Request) *model.Service {
-	if svc := s.serviceByLabel(hostLabel(r.Host)); svc != nil {
+	if svc := s.serviceByLabel(r, hostLabel(r.Host)); svc != nil {
 		return svc
 	}
-	return s.serviceByLabel(credentialScopeService(r.Header.Get("Authorization")))
+	return s.serviceByLabel(r, credentialScopeService(r.Header.Get("Authorization")))
 }
 
 // clientSpellings are labels a client may use that no specification records.
@@ -79,42 +80,110 @@ func credentialScopeService(authorization string) string {
 	return strings.ToLower(parts[3])
 }
 
-// serviceByLabel maps one label to a service. A service's own short name wins
-// over an endpoint prefix, because that is how the ambiguous prefixes are told
-// apart: DocumentDB and Neptune are forks of the RDS API and their
-// specifications name `rds` as the endpoint prefix for all three, but a client
-// reaches DocumentDB at `docdb.<region>.amazonaws.com`.
+// serviceByLabel maps one label to a service, using the request to settle the
+// cases where several services answer to the same label.
 //
-// A service named by the label therefore wins outright: `rds` reaches
-// `aws.rds` even though three services declare that prefix. Where none of them
-// is named by the label -- `email`, which both SES versions declare -- the
-// answer is the alphabetically first service ID, so it does not depend on the
-// order the bundle lists services in. Where that is the wrong service, the fix
-// is a specification that distinguishes them, not a branch here.
-func (s *Server) serviceByLabel(label string) *model.Service {
+// Five labels are shared once the models come from the specifications, and all
+// five are the same shape: a service and its successor sit on one endpoint.
+// API Gateway's HTTP APIs really are reached at `apigateway.<region>`, both SES
+// versions at `email`, and DocumentDB and Neptune at `rds`, because they are
+// forks of the RDS API. In every one of those pairs the older service's own
+// name *is* the shared prefix, so preferring the namesake makes the successor
+// unreachable -- which is how `aws.apigatewayv2` answered as
+// `aws.apigateway.GetRestApis`.
+//
+// What tells them apart is the request. AWS distinguishes them by path
+// (`/v2/apis` against `/restapis`) or by target, and the model describes both,
+// so the service that *claims* the request wins. Only when none of them claims
+// it, or several do, does this fall back to the namesake and then to the
+// alphabetically first ID -- deterministic rather than dependent on the order
+// the bundle lists services in.
+func (s *Server) serviceByLabel(r *http.Request, label string) *model.Service {
 	if label == "" {
 		return nil
 	}
-	var byPrefix []*model.Service
 	if id, ok := clientSpellings[label]; ok {
 		if svc := s.bundle.ServiceByID(id); svc != nil {
 			return svc
 		}
 	}
+	var candidates []*model.Service
 	for i := range s.bundle.Services {
 		svc := &s.bundle.Services[i]
+		if shortName(svc.ID) == label || answersTo(svc, label) {
+			candidates = append(candidates, svc)
+		}
+	}
+	switch len(candidates) {
+	case 0:
+		return nil
+	case 1:
+		return candidates[0]
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].ID < candidates[j].ID })
+	var claimed []*model.Service
+	for _, svc := range candidates {
+		if r != nil && claims(svc, r) {
+			claimed = append(claimed, svc)
+		}
+	}
+	if len(claimed) == 1 {
+		return claimed[0]
+	}
+	for _, svc := range candidates {
 		if shortName(svc.ID) == label {
 			return svc
 		}
-		if svc.EndpointPrefix != "" && strings.EqualFold(svc.EndpointPrefix, label) {
-			byPrefix = append(byPrefix, svc)
+	}
+	return candidates[0]
+}
+
+// claims reports whether a service's model describes the request: an
+// X-Amz-Target under its prefix, an Action it declares, or a path one of its
+// operations is bound to. It is only consulted to separate services sharing an
+// endpoint, so a service that claims nothing costs nothing.
+func claims(svc *model.Service, r *http.Request) bool {
+	if target := r.Header.Get("X-Amz-Target"); target != "" {
+		if svc.TargetPrefix != "" && strings.HasPrefix(target, svc.TargetPrefix+".") {
+			return true
+		}
+		name := target
+		if i := strings.LastIndex(target, "."); i >= 0 {
+			name = target[i+1:]
+		}
+		return svc.OperationByName(name) != nil
+	}
+	action := r.URL.Query().Get("Action")
+	if action == "" && r.Form != nil {
+		action = r.Form.Get("Action")
+	}
+	if action != "" {
+		return svc.OperationByName(action) != nil
+	}
+	_, _, ok := httpuri.Match(svc, r)
+	return ok
+}
+
+// answersTo reports whether a service is addressed by this label under one of
+// the names its model carries: the endpoint prefix, or one of the aliases the
+// receiver records.
+//
+// The alias that matters today is the SigV4 signing name, which is what a
+// client writes into the credential scope and which differs from the endpoint
+// prefix for seventy-seven upstream models. Lex Model Building signs as `lex`
+// and is reached at `models.lex`; ECR signs as `ecr` and is reached at
+// `api.ecr`. Matching only the prefix leaves those services unaddressable by
+// the header every SDK sends.
+func answersTo(svc *model.Service, label string) bool {
+	if svc.EndpointPrefix != "" && strings.EqualFold(svc.EndpointPrefix, label) {
+		return true
+	}
+	for _, alias := range svc.Aliases {
+		if strings.EqualFold(alias, label) {
+			return true
 		}
 	}
-	if len(byPrefix) == 0 {
-		return nil
-	}
-	sort.Slice(byPrefix, func(i, j int) bool { return byPrefix[i].ID < byPrefix[j].ID })
-	return byPrefix[0]
+	return false
 }
 
 // shortName drops the provider from a service ID: `aws.guardduty` is reached

@@ -217,7 +217,7 @@ func FuzzDynamoDBTransactions(f *testing.F) {
 		got, getErr := call("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "item"}}})
 		item := asMap(got.Output["Item"])
 		if cancel {
-			if firstErr == nil || replayErr == nil || getErr != nil || item != nil {
+			if firstErr == nil || replayErr == nil || getErr != nil || got.Output["Item"] != nil {
 				t.Fatal("canceled transaction committed")
 			}
 		} else if firstErr != nil || replayErr != nil || getErr != nil || str(asMap(item["data"])["B"]) != encoded {

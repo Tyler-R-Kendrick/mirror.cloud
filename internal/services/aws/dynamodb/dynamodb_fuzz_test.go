@@ -187,3 +187,41 @@ func FuzzDynamoDBStreamRecords(f *testing.F) {
 		}
 	})
 }
+
+func FuzzDynamoDBTransactions(f *testing.F) {
+	f.Add([]byte{0x90}, false)
+	f.Add([]byte("transaction"), true)
+	f.Fuzz(func(t *testing.T, raw []byte, cancel bool) {
+		if len(raw) > 1024 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+		call := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		_, _ = call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
+		_, _ = call("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "lock"}}})
+		guard := "missing"
+		if cancel {
+			guard = "lock"
+		}
+		encoded := base64.StdEncoding.EncodeToString(raw)
+		input := map[string]any{"ClientRequestToken": "fuzz-token", "TransactItems": []any{
+			map[string]any{"ConditionCheck": map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": guard}}, "ConditionExpression": "attribute_not_exists(id)"}},
+			map[string]any{"Put": map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "item"}, "data": map[string]any{"B": encoded}}}},
+		}}
+		_, firstErr := call("TransactWriteItems", input)
+		_, replayErr := call("TransactWriteItems", input)
+		got, getErr := call("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "item"}}})
+		item := asMap(got.Output["Item"])
+		if cancel {
+			if firstErr == nil || replayErr == nil || getErr != nil || item != nil {
+				t.Fatal("canceled transaction committed")
+			}
+		} else if firstErr != nil || replayErr != nil || getErr != nil || str(asMap(item["data"])["B"]) != encoded {
+			t.Fatal("transaction or idempotent replay changed binary data")
+		}
+	})
+}

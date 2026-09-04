@@ -182,6 +182,58 @@ func TestConcurrentDynamoDBNoOpUpdatesEmitOneStreamRecord(t *testing.T) {
 	}
 }
 
+func TestConcurrentDynamoDBTransactionTokenChoosesOnePayload(t *testing.T) {
+	p := dynamodb.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	created, err := call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "KEYS_ONLY"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := "a"
+			if index%2 == 1 {
+				key = "b"
+			}
+			_, err := call("TransactWriteItems", map[string]any{"ClientRequestToken": "shared", "TransactItems": []any{map[string]any{"Put": map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": key}}}}}})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	successes, mismatches := 0, 0
+	for err := range errs {
+		if err == nil {
+			successes++
+		} else if fault, ok := err.(*spi.Fault); ok && fault.Code == "IdempotentParameterMismatchException" {
+			mismatches++
+		} else {
+			t.Fatalf("unexpected transaction fault %v", err)
+		}
+	}
+	items, err := call("Scan", map[string]any{"TableName": "T"})
+	if err != nil || successes != 16 || mismatches != 16 || items.Output["Count"] != 1 {
+		t.Fatalf("concurrent transaction arbitration: successes=%d mismatches=%d items=%#v err=%v", successes, mismatches, items, err)
+	}
+	arn := created.Output["TableDescription"].(map[string]any)["LatestStreamArn"]
+	iterator, err := call("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": "shardId-000000000000", "ShardIteratorType": "TRIM_HORIZON"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := call("GetRecords", map[string]any{"ShardIterator": iterator.Output["ShardIterator"]})
+	if err != nil || len(records.Output["Records"].([]any)) != 1 {
+		t.Fatalf("concurrent transaction stream records: %#v %v", records, err)
+	}
+}
+
 func (r failAfterReader) Read(p []byte) (int, error) {
 	n, err := r.Reader.Read(p)
 	if err == io.EOF {

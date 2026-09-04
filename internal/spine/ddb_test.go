@@ -269,7 +269,7 @@ func TestBootedServerDynamoDBSection48(t *testing.T) {
 		t.Fatalf("scan filter %v", sc)
 	}
 
-	code, fail := call("UpdateItem", `{"TableName":"T","Key":{"id":{"S":"a"}},"ConditionExpression":"n > :n","UpdateExpression":"SET extra = :e","ExpressionAttributeValues":{":n":{"N":"50"},":e":{"S":"no"}}}`)
+	code, fail := call("UpdateItem", `{"TableName":"T","Key":{"id":{"S":"a"}},"ConditionExpression":"n > :n","UpdateExpression":"SET extra = :e","ExpressionAttributeValues":{":n":{"N":"50"},":e":{"S":"no"}},"ReturnValuesOnConditionCheckFailure":"ALL_OLD"}`)
 	if code != 400 {
 		t.Fatalf("cond status %d %v", code, fail)
 	}

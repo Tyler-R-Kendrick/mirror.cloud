@@ -186,9 +186,8 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv("BatchGetItem", map[string]any{"RequestItems": map[string]any{"T": map[string]any{"Keys": []any{map[string]any{"id": map[string]any{"S": "2"}}}}}})
 		inv("TransactWriteItems", map[string]any{"TransactItems": []any{map[string]any{"Put": map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "3"}}}}}})
 		tg := inv("TransactGetItems", map[string]any{"TransactItems": []any{map[string]any{"Get": map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "3"}}}}}})
-		resp, _ := tg.Output["Responses"].(map[string]any)
-		items, _ := resp["T"].([]any)
-		if len(items) == 0 {
+		responses := asSlice(tg.Output["Responses"])
+		if len(responses) != 1 || asMap(asMap(responses[0])["Item"])["id"] == nil {
 			t.Fatalf("transact get empty %v", tg.Output)
 		}
 		q := inv("Query", map[string]any{

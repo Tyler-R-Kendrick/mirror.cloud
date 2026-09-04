@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/aws/awsjson"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/aws/httpuri"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -30,12 +31,14 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	if svc.ID == "aws.es" {
 		return opensearchOp(svc, r), nil
 	}
-	for i := range svc.Operations {
-		op := &svc.Operations[i]
-		if op.HTTP.Method == r.Method {
-			return op, nil
-		}
+	if op, _, ok := httpuri.Match(svc, r); ok {
+		return op, nil
 	}
+	// Nothing in the model claims this path. A restJson1 service is not
+	// addressed by X-Amz-Target by any SDK, but the project's own recordings
+	// and pack tests call these services RPC-style, and an unknown target is
+	// still a better answer than an arbitrary operation that happens to share
+	// the request's HTTP method.
 	return awsjson.New10().Route(svc, r)
 }
 
@@ -325,6 +328,18 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 	for k, vs := range r.URL.Query() {
 		if _, ok := in[k]; !ok {
 			in[k] = vs[0]
+		}
+	}
+	// A REST operation carries part of its input in the path: DeleteDetector
+	// is `DELETE /detector/{DetectorId}` and nothing else names the detector.
+	// Without this the input arrives empty and the operation addresses the
+	// zero value. The pattern is re-matched here rather than carried over from
+	// Route so that decoding a request stays independent of how it was routed.
+	if op.HTTP.URI != "" {
+		if bound, ok := httpuri.Parse(op.HTTP.URI).Match(r.URL.EscapedPath(), r.URL.Query()); ok {
+			for k, v := range bound {
+				in[k] = v
+			}
 		}
 	}
 	return &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}, nil

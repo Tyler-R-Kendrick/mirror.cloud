@@ -582,6 +582,47 @@ It is a ratchet and not a failing test because fixing fifty-three services is an
 
 It also found two genuine bundle defects on the way: `servicecatalog.DescribeProduct` and `wafv2.GetRuleGroup` read an optional `input.Id` unguarded in their key expressions, so a legal request answered a 500. Both fixed here.
 
+### The router could not have been wrong, because it was never reached
+
+The first of the two supporting defects is fixed here, and fixing it turned up
+why it had survived. `restjson.Route`'s generic case returned the first
+operation whose HTTP method equalled the request's -- but *no service in the
+booted catalog carries a URI to route on*. Every `HTTP.URI` in it is empty, so
+the four services that speak restJson1 all have hand-written routers and the
+generic loop is unreachable code. It was not a latent bug that happened not to
+fire; it was a loop that had never once executed.
+
+That is why the defect and the fifty-three mismatches are one thing seen twice.
+A service cannot be served over REST without URI patterns, the catalog has
+none, and so every service that speaks REST was declared to speak JSON-RPC
+instead -- which is exactly what `routing_mismatches` counts. The generated
+models do carry the patterns: GuardDuty's ninety operations all have one, and
+seven hundred and ninety-six shapes besides.
+
+`internal/proto/aws/httpuri` implements the pattern language -- literal
+segments, `{Label}`, `{Label+}`, and the `?key=value` entries a pattern can
+require -- and ranks candidates when more than one matches, most-constrained
+first, with the operation name breaking ties so the answer does not depend on
+the order the model lists operations in. `restjson` routes through it and,
+just as importantly, *decodes* through it: `DELETE /detector/{DetectorId}`
+carries no body, and an input built from body and query alone named no
+detector at all.
+
+Two things are worth recording about how this was checked. The unit tests are
+written against real specifications rather than synthetic services, and the
+strongest of them is a property: instantiate every operation's own URI and
+require the router to return that operation. Across five services it holds for
+every operation with nothing excused -- which also says the specifications are
+unambiguous, and would say so loudly if one stopped being. And the one existing
+test that had to change is the tell: `TestRESTJSONActionAndModeledRoutes`
+asserted that `GET /anything` routes to an operation whose only qualification
+is being a GET. It was pinning the defect. A test can encode a bug as firmly as
+code can.
+
+What is not fixed here: the demux's service branches still sit inside
+`if action != ""`, and the runtime still boots from the hand-authored catalog.
+The ratchet still reads fifty-three.
+
 ### Reviewing the exemptions found the same rot in three places
 
 Self-reviewing this stack before merge turned up one mistake made three times, which is worth more than any of the three instances.

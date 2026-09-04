@@ -8675,6 +8675,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "FuzzDynamoDBStreamRecords",
 		},
 		{
+			name: "dynamodb-stream-zero-flag-size",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "ddb_stream.go"),
+			old:  "case \"BOOL\", \"NULL\":\n\t\t\treturn 1",
+			new:  "case \"BOOL\", \"NULL\":\n\t\t\treturn 0",
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestDynamoDBStreamAttributeSizes",
+		},
+		{
 			name: "dynamodb-drop-created-table-class",
 			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
 			old:  `rec["TableClassSummary"] = map[string]any{"TableClass": class}`,

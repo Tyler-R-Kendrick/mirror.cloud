@@ -45,6 +45,33 @@ func TestDynamoDBStreamPublishesRecords(t *testing.T) {
 	}
 }
 
+func TestDynamoDBStreamAttributeSizes(t *testing.T) {
+	tests := []struct {
+		name string
+		attr map[string]any
+		want int
+	}{
+		{"string", map[string]any{"S": "abc"}, 3},
+		{"number", map[string]any{"N": "-12.5"}, 5},
+		{"binary", map[string]any{"B": "kA=="}, 1},
+		{"bool", map[string]any{"BOOL": true}, 1},
+		{"null", map[string]any{"NULL": true}, 1},
+		{"string set", map[string]any{"SS": []any{"a", "bc"}}, 3},
+		{"number set", map[string]any{"NS": []any{"1", "22"}}, 3},
+		{"binary set", map[string]any{"BS": []any{"kA==", "dGVzdA=="}}, 5},
+		{"list", map[string]any{"L": []any{map[string]any{"S": "ab"}, map[string]any{"N": "1"}}}, 3},
+		{"map", map[string]any{"M": map[string]any{"foo": map[string]any{"S": "x"}}}, 4},
+		{"unknown", map[string]any{"X": "ignored"}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := streamAttributeSize(tt.attr); got != tt.want {
+				t.Fatalf("streamAttributeSize(%v) = %d, want %d", tt.attr, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDynamoDBStreamCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

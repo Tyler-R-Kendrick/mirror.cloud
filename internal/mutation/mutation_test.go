@@ -203,10 +203,18 @@ var mutants = []mutant{
 	{
 		name: "s3-hide-delete-marker-version",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `if version := str(meta["versionId"]); version != "" {`,
-		new:  `if version := str(meta["versionId"]); false {`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestCopyObjectSourceVersions",
+		old: `	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
+	h.Set("Last-Modified", str(meta["mtime"]))
+	if version := str(meta["versionId"]); version != "" {
+		h.Set("x-amz-version-id", version)
+	}`,
+		new: `	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
+	h.Set("Last-Modified", str(meta["mtime"]))
+	if version := str(meta["versionId"]); false {
+		h.Set("x-amz-version-id", version)
+	}`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestCopyObjectSourceVersions",
 	},
 	{
 		name: "s3-hide-delete-marker-time",
@@ -315,8 +323,8 @@ var mutants = []mutant{
 	{
 		name: "restxml-drop-multi-delete-checksum-body",
 		file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
-		old:  `if op.Name == "DeleteObjects" {`,
-		new:  `if false {`,
+		old:  `			if op.Name == "DeleteObjects" {`,
+		new:  `			if false {`,
 		pkg:  "./internal/proto/aws/restxml",
 		run:  "TestDecodeDeleteObjectsXML",
 	},
@@ -1051,8 +1059,8 @@ var mutants = []mutant{
 	{
 		name: "s3-list-parts-accept-large-limit",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `marker < 0 || maxParts < 0 || maxParts > 1000`,
-		new:  `marker < 0 || maxParts < 0`,
+		old:  `	if marker < 0 || maxParts < 0 || maxParts > 1000 {`,
+		new:  `	if marker < 0 || maxParts < 0 {`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestListPartsAndMultipartUploads",
 	},
@@ -1299,8 +1307,8 @@ var mutants = []mutant{
 	{
 		name: "s3-complete-accept-invalid-part-number",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `if number < 1 || number > 10000 {`,
-		new:  `if false {`,
+		old:  `		if number < 1 || number > 10000 {`,
+		new:  `		if false {`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestMultipartPartNumberBounds",
 	},
@@ -1323,10 +1331,18 @@ var mutants = []mutant{
 	{
 		name: "s3-hide-versioned-head-version-id",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `if version := str(meta["versionId"]); version != "" {`,
-		new:  `if version := str(meta["versionId"]); false {`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestCopyObjectSourceVersions",
+		old: `	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
+	h.Set("Last-Modified", str(meta["mtime"]))
+	if version := str(meta["versionId"]); version != "" {
+		h.Set("x-amz-version-id", version)
+	}`,
+		new: `	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
+	h.Set("Last-Modified", str(meta["mtime"]))
+	if version := str(meta["versionId"]); false {
+		h.Set("x-amz-version-id", version)
+	}`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestCopyObjectSourceVersions",
 	},
 	{
 		name: "s3-forget-versioned-object-tags",
@@ -1347,10 +1363,20 @@ var mutants = []mutant{
 	{
 		name: "s3-hide-get-object-tag-count",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "tags := p.storedTags(ctx, req, b, key, wantVer)\n\tif count := len(tags); count > 0 {",
-		new:  "tags := p.storedTags(ctx, req, b, key, wantVer)\n\tif count := len(tags); false {",
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestVersionedObjectTaggingCharacterization",
+		old: `		h.Set("x-amz-version-id", vid)
+	}
+	tags := p.storedTags(ctx, req, b, key, wantVer)
+	if count := len(tags); count > 0 {
+		h.Set("x-amz-tagging-count", strconv.Itoa(count))
+	}`,
+		new: `		h.Set("x-amz-version-id", vid)
+	}
+	tags := p.storedTags(ctx, req, b, key, wantVer)
+	if count := len(tags); false {
+		h.Set("x-amz-tagging-count", strconv.Itoa(count))
+	}`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestVersionedObjectTaggingCharacterization",
 	},
 	{
 		name: "s3-hide-head-object-tag-count",
@@ -1771,8 +1797,8 @@ var mutants = []mutant{
 	{
 		name: "s3-drop-version-website-redirect",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `"objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation`,
-		new:  `"objectMetadata": objectMetadata, "websiteRedirectLocation": ""`,
+		old:  `		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "versionOrder": versionOrder, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation, "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled, "sseCustomerKeyMD5": sseCustomerKeyMD5}`,
+		new:  `		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "versionOrder": versionOrder, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": "", "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled, "sseCustomerKeyMD5": sseCustomerKeyMD5}`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestObjectMetadata",
 	},
@@ -1955,10 +1981,16 @@ var mutants = []mutant{
 	{
 		name: "s3-archive-restore-standard-object",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "storageClass := archiveStorageClass(meta)\n\tif storageClass == \"\" {",
-		new:  "storageClass := archiveStorageClass(meta)\n\tif false {",
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestArchiveRestoreCharacterization",
+		old: `	}
+	storageClass := archiveStorageClass(meta)
+	if storageClass == "" {
+		return nil, &spi.Fault{Code: "InvalidObjectState", HTTPStatus: http.StatusForbidden, Fault: "client", Fields: map[string]any{"StorageClass": str(meta["storageClass"])}}`,
+		new: `	}
+	storageClass := archiveStorageClass(meta)
+	if false {
+		return nil, &spi.Fault{Code: "InvalidObjectState", HTTPStatus: http.StatusForbidden, Fault: "client", Fields: map[string]any{"StorageClass": str(meta["storageClass"])}}`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestArchiveRestoreCharacterization",
 	},
 	{
 		name: "s3-archive-restore-missing-object",
@@ -2011,10 +2043,20 @@ var mutants = []mutant{
 	{
 		name: "s3-archive-hide-get-restore-header",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "if restore, ok := p.restoreState(ctx, req, b, key, meta); ok {\n\t\th.Set(\"x-amz-restore\", restore)\n\t}\n\th.Set(\"Content-Length\", strconv.FormatInt(info.Size, 10))",
-		new:  "if restore, ok := \"\", false; ok {\n\t\th.Set(\"x-amz-restore\", restore)\n\t}\n\th.Set(\"Content-Length\", strconv.FormatInt(info.Size, 10))",
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestArchiveRestoreCharacterization",
+		old: `	}
+	if restore, ok := p.restoreState(ctx, req, b, key, meta); ok {
+		h.Set("x-amz-restore", restore)
+	}
+	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
+	mtime := str(meta["mtime"])`,
+		new: `	}
+	if restore, ok := "", false; ok {
+		h.Set("x-amz-restore", restore)
+	}
+	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
+	mtime := str(meta["mtime"])`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestArchiveRestoreCharacterization",
 	},
 	{
 		name: "s3-archive-hide-head-restore-header",
@@ -2115,10 +2157,22 @@ var mutants = []mutant{
 	{
 		name: "s3-object-key-skip-put-validation",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `if err := validateObjectKey(key); err != nil {`,
-		new:  `if err := validateObjectKey(key); false {`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestObjectKeyLengthValidation",
+		old: `	if err != nil {
+		return nil, err
+	}
+	if err := validateObjectKey(key); err != nil {
+		return nil, err
+	}
+	if err := p.checkWritePreconditions(ctx, req, b, key); err != nil {`,
+		new: `	if err != nil {
+		return nil, err
+	}
+	if err := validateObjectKey(key); false {
+		return nil, err
+	}
+	if err := p.checkWritePreconditions(ctx, req, b, key); err != nil {`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestObjectKeyLengthValidation",
 	},
 	{
 		name: "s3-object-key-skip-copy-validation",
@@ -2579,8 +2633,8 @@ var mutants = []mutant{
 	{
 		name: "s3-bucket-location-header-ignore-tls",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `if req.HTTP.TLS != nil {`,
-		new:  `if false {`,
+		old:  `			if req.HTTP.TLS != nil {`,
+		new:  `			if false {`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestCreateBucketLocationConstraints",
 	},
@@ -2819,18 +2873,26 @@ var mutants = []mutant{
 	{
 		name: "s3-bucket-name-drop-message",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `Code: "InvalidBucketName", Message: "The specified bucket is not valid."`,
-		new:  `Code: "InvalidBucketName"`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestCreateBucketValidatesGlobalNames",
+		old: `	if !accountRegional && !validBucketName(b) {
+		return nil, &spi.Fault{Code: "InvalidBucketName", Message: "The specified bucket is not valid.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"BucketName": b}}
+	}`,
+		new: `	if !accountRegional && !validBucketName(b) {
+		return nil, &spi.Fault{Code: "InvalidBucketName", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"BucketName": b}}
+	}`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestCreateBucketValidatesGlobalNames",
 	},
 	{
 		name: "s3-bucket-name-drop-field",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `Fields: map[string]any{"BucketName": b}`,
-		new:  `Fields: map[string]any{}`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestCreateBucketValidatesGlobalNames",
+		old: `	if !accountRegional && !validBucketName(b) {
+		return nil, &spi.Fault{Code: "InvalidBucketName", Message: "The specified bucket is not valid.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"BucketName": b}}
+	}`,
+		new: `	if !accountRegional && !validBucketName(b) {
+		return nil, &spi.Fault{Code: "InvalidBucketName", Message: "The specified bucket is not valid.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{}}
+	}`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestCreateBucketValidatesGlobalNames",
 	},
 	{
 		name: "restxml-skip-create-bucket-config",
@@ -3067,10 +3129,20 @@ var mutants = []mutant{
 	{
 		name: "s3-copy-current-delete-marker",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "if !exists {\n\t\treturn nil, &spi.Fault{Code: \"NoSuchKey\", HTTPStatus: 404, Fault: \"client\"}\n\t}\n\tif truthy(meta[\"deleteMarker\"]) {",
-		new:  "if !exists {\n\t\treturn nil, &spi.Fault{Code: \"NoSuchKey\", HTTPStatus: 404, Fault: \"client\"}\n\t}\n\tif false {",
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestCopyObjectSourceVersions",
+		old: `	meta, exists := p.objectMetadata(ctx, req, b, key, wantVer)
+	if !exists {
+		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
+	}
+	if truthy(meta["deleteMarker"]) {
+		return nil, deleteMarkerReadFault(meta, wantVer != "")`,
+		new: `	meta, exists := p.objectMetadata(ctx, req, b, key, wantVer)
+	if !exists {
+		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
+	}
+	if false {
+		return nil, deleteMarkerReadFault(meta, wantVer != "")`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestCopyObjectSourceVersions",
 	},
 	{
 		name: "s3-hide-copy-source-version-header",
@@ -3139,10 +3211,14 @@ var mutants = []mutant{
 	{
 		name: "s3-accept-empty-complete-manifest",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `if len(parts) == 0 {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestCompleteMultipartUploadManifest",
+		old: `	parts := asSlice(asMap(req.Input["MultipartUpload"])["Parts"])
+	if len(parts) == 0 {
+		return nil, &spi.Fault{Code: "InvalidPart", HTTPStatus: 400, Fault: "client"}`,
+		new: `	parts := asSlice(asMap(req.Input["MultipartUpload"])["Parts"])
+	if false {
+		return nil, &spi.Fault{Code: "InvalidPart", HTTPStatus: 400, Fault: "client"}`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestCompleteMultipartUploadManifest",
 	},
 	{
 		name: "s3-ignore-completed-part-number",
@@ -3219,10 +3295,16 @@ var mutants = []mutant{
 	{
 		name: "s3-copy-multipart-etag-from-body-md5",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta["mtime"]))`,
-		new:  "checkCopySourcePreconditions(req, `\"`+source.info.MD5+`\"`, str(source.meta[\"mtime\"]))",
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestMultipartETagForm",
+		old: `		return nil, err
+	}
+	defer source.body.Close()
+	if err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta["mtime"])); err != nil {
+		return nil, err
+	}
+	_, bucketEncrypted, _ := p.col(req, "bktcfg").Get(ctx, source.bucket+"/encryption")`,
+		new: "\t\treturn nil, err\n\t}\n\tdefer source.body.Close()\n\tif err := checkCopySourcePreconditions(req, `\"`+source.info.MD5+`\"`, str(source.meta[\"mtime\"])); err != nil {\n\t\treturn nil, err\n\t}\n\t_, bucketEncrypted, _ := p.col(req, \"bktcfg\").Get(ctx, source.bucket+\"/encryption\")",
+		pkg: "./internal/services/aws/s3",
+		run: "TestMultipartETagForm",
 	},
 	{
 		name: "s3-ignore-completed-object-size",
@@ -3395,10 +3477,14 @@ var mutants = []mutant{
 	{
 		name: "s3-read-wrong-multipart-part",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `if asInt(part["number"]) == number {`,
-		new:  `if asInt(part["number"]) == number-1 {`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestMultipartPartReads",
+		old: `		partSize := int64(asInt(part["size"]))
+		if asInt(part["number"]) == number {
+			return start, partSize, len(parts), true, nil`,
+		new: `		partSize := int64(asInt(part["size"]))
+		if asInt(part["number"]) == number-1 {
+			return start, partSize, len(parts), true, nil`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestMultipartPartReads",
 	},
 	{
 		name: "s3-grow-multipart-part-read",
@@ -3675,10 +3761,14 @@ var mutants = []mutant{
 	{
 		name: "s3-ignore-explicit-write-checksums",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `if value := requestCondition(req, checksum.input, checksum.header); value != "" {`,
-		new:  `if value := requestCondition(req, checksum.input, checksum.header); false {`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestWriteChecksumValidation",
+		old: `	for _, checksum := range checksums {
+		if value := requestCondition(req, checksum.input, checksum.header); value != "" {
+			if checksum.algorithm != selected.algorithm {`,
+		new: `	for _, checksum := range checksums {
+		if value := requestCondition(req, checksum.input, checksum.header); false {
+			if checksum.algorithm != selected.algorithm {`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestWriteChecksumValidation",
 	},
 	{
 		name: "s3-accept-write-checksum-mismatch",
@@ -3795,18 +3885,26 @@ var mutants = []mutant{
 	{
 		name: "s3-hide-put-checksum-response",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `for header, value := range provided {`,
-		new:  `for header, value := range map[string]string{} {`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestWriteChecksumValidation",
+		old: `	}
+	for header, value := range provided {
+		h.Set(header, value)`,
+		new: `	}
+	for header, value := range map[string]string{} {
+		h.Set(header, value)`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestWriteChecksumValidation",
 	},
 	{
 		name: "s3-hide-get-checksum-mode",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestWriteChecksumValidation",
+		old: `	setObjectEncryptionHeaders(h, meta)
+	if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
+		setChecksumHeaders(h, meta)`,
+		new: `	setObjectEncryptionHeaders(h, meta)
+	if false {
+		setChecksumHeaders(h, meta)`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestWriteChecksumValidation",
 	},
 	{
 		name: "s3-hide-head-checksum-mode",
@@ -4195,10 +4293,18 @@ var mutants = []mutant{
 	{
 		name: "states-accept-invalid-test-state-retry-count",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if !valid || count < 0 || count != math.Trunc(count) {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStatesLifecycleAndWalkerUnits",
+		old: `			if value, exists := inputValue(configuration, "retrierRetryCount", "RetrierRetryCount"); exists {
+				count, valid := exactNumber(value)
+				if !valid || count < 0 || count != math.Trunc(count) {
+					return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+				}`,
+		new: `			if value, exists := inputValue(configuration, "retrierRetryCount", "RetrierRetryCount"); exists {
+				count, valid := exactNumber(value)
+				if false {
+					return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
+				}`,
+		pkg: "./internal/services/aws/states",
+		run: "TestStatesLifecycleAndWalkerUnits",
 	},
 	{
 		name: "states-accept-test-state-context-without-mock",
@@ -4323,8 +4429,8 @@ var mutants = []mutant{
 	{
 		name: "states-ignore-test-state-error-source",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `"errorCausedByState", "ErrorCausedByState"`,
-		new:  `"missingErrorSource", "MissingErrorSource"`,
+		old:  `			if value, exists := inputValue(configuration, "errorCausedByState", "ErrorCausedByState"); exists {`,
+		new:  `			if value, exists := inputValue(configuration, "missingErrorSource", "MissingErrorSource"); exists {`,
 		pkg:  "./internal/services/aws/states",
 		run:  "TestStatesLifecycleAndWalkerUnits",
 	},
@@ -4635,10 +4741,14 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-reject-api-gateway-resource",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `case "AWS::ApiGateway::RestApi":`,
-		new:  `case "AWS::ApiGateway::RestApiMutated":`,
-		pkg:  "./internal/services/aws/cloudformation",
-		run:  "TestCloudFormationProvisionedResourceLifecycle",
+		old: `		return arn, nil
+	case "AWS::ApiGateway::RestApi":
+		n := str(props["Name"])`,
+		new: `		return arn, nil
+	case "AWS::ApiGateway::RestApiMutated":
+		n := str(props["Name"])`,
+		pkg: "./internal/services/aws/cloudformation",
+		run: "TestCloudFormationProvisionedResourceLifecycle",
 	},
 	{
 		name: "cloudformation-treat-queue-url-as-bucket",
@@ -4715,10 +4825,14 @@ var mutants = []mutant{
 	{
 		name: "states-accept-invalid-encryption",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if encryption != nil && !validEncryptionConfiguration(encryption) {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStatesRequestValidation",
+		old: `		}
+		if encryption != nil && !validEncryptionConfiguration(encryption) {
+			return nil, &spi.Fault{Code: "InvalidEncryptionConfiguration", HTTPStatus: 400, Fault: "client"}`,
+		new: `		}
+		if false {
+			return nil, &spi.Fault{Code: "InvalidEncryptionConfiguration", HTTPStatus: 400, Fault: "client"}`,
+		pkg: "./internal/services/aws/states",
+		run: "TestStatesRequestValidation",
 	},
 	{
 		name: "states-ignore-tag-limit",
@@ -5411,10 +5525,14 @@ var mutants = []mutant{
 	{
 		name: "states-ignore-assign-variable-limit",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if err != nil || len(encoded) > 256*1024 {`,
-		new:  `if err != nil || len(encoded) > math.MaxInt {`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestVariableAssignmentLimits",
+		old: `	encoded, err := json.Marshal(assignments)
+	if err != nil || len(encoded) > 256*1024 {
+		return false`,
+		new: `	encoded, err := json.Marshal(assignments)
+	if err != nil || len(encoded) > math.MaxInt {
+		return false`,
+		pkg: "./internal/services/aws/states",
+		run: "TestVariableAssignmentLimits",
 	},
 	{
 		name: "states-ignore-execution-variable-limit",
@@ -5845,10 +5963,14 @@ var mutants = []mutant{
 	{
 		name: "states-drop-flattened-array-source",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `flattened.sources = append(flattened.sources, nestedSource)`,
-		new:  `flattened.sources = append(flattened.sources, "")`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestDistributedMapS3ItemReader",
+		old: `				for range values {
+					flattened.sources = append(flattened.sources, nestedSource)
+				}`,
+		new: `				for range values {
+					flattened.sources = append(flattened.sources, "")
+				}`,
+		pkg: "./internal/services/aws/states",
+		run: "TestDistributedMapS3ItemReader",
 	},
 	{
 		name: "states-drop-flattened-object-source",
@@ -6005,8 +6127,8 @@ var mutants = []mutant{
 	{
 		name: "states-hide-map-reader-source",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `"Index": float64(index), "Value": item, "Source": itemSource}`,
-		new:  `"Index": float64(index), "Value": item, "Source": "STATE_DATA"}`,
+		old:  `						itemDetails := map[string]any{"Index": float64(index), "Value": item, "Source": itemSource}`,
+		new:  `						itemDetails := map[string]any{"Index": float64(index), "Value": item, "Source": "STATE_DATA"}`,
 		pkg:  "./internal/services/aws/states",
 		run:  "TestDistributedMapS3ItemReader",
 	},
@@ -6061,10 +6183,14 @@ var mutants = []mutant{
 	{
 		name: "states-keep-extra-csv-map-field",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `for index, header := range headers {`,
-		new:  `for index, header := range record {`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestDistributedMapS3ItemReader",
+		old: `		configuredHeaders := make([]any, len(headers))
+		for index, header := range headers {
+			header = strings.TrimSpace(header)`,
+		new: `		configuredHeaders := make([]any, len(headers))
+		for index, header := range record {
+			header = strings.TrimSpace(header)`,
+		pkg: "./internal/services/aws/states",
+		run: "TestDistributedMapS3ItemReader",
 	},
 	{
 		name: "states-ignore-parquet-map-reader",
@@ -6101,10 +6227,14 @@ var mutants = []mutant{
 	{
 		name: "states-ignore-map-batch-limit-path",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `value = jsonPath(data, path, variables...)`,
-		new:  `value = 1.0`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestDistributedMapItemBatcher",
+		old: `	} else if hasPath {
+		value = jsonPath(data, path, variables...)
+	}`,
+		new: `	} else if hasPath {
+		value = 1.0
+	}`,
+		pkg: "./internal/services/aws/states",
+		run: "TestDistributedMapItemBatcher",
 	},
 	{
 		name: "states-drop-map-batch-input",
@@ -6181,18 +6311,26 @@ var mutants = []mutant{
 	{
 		name: "states-ignore-null-result-path",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if raw == nil {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStatesLifecycleAndWalkerUnits",
+		old: `	}
+	if raw == nil {
+		return input, true`,
+		new: `	}
+	if false {
+		return input, true`,
+		pkg: "./internal/services/aws/states",
+		run: "TestStatesLifecycleAndWalkerUnits",
 	},
 	{
 		name: "states-reject-root-result-path",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if !exists || raw == "$" {`,
-		new:  `if !exists {`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStatesLifecycleAndWalkerUnits",
+		old: `	raw, exists := state["ResultPath"]
+	if !exists || raw == "$" {
+		return result, true`,
+		new: `	raw, exists := state["ResultPath"]
+	if !exists {
+		return result, true`,
+		pkg: "./internal/services/aws/states",
+		run: "TestStatesLifecycleAndWalkerUnits",
 	},
 	{
 		name: "states-ignore-map-item-selector",
@@ -6205,8 +6343,8 @@ var mutants = []mutant{
 	{
 		name: "states-shift-map-item-index",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `"Index": float64(index), "Value": item, "Source": itemSource}`,
-		new:  `"Index": float64(index + 1), "Value": item, "Source": itemSource}`,
+		old:  `						itemDetails := map[string]any{"Index": float64(index), "Value": item, "Source": itemSource}`,
+		new:  `						itemDetails := map[string]any{"Index": float64(index + 1), "Value": item, "Source": itemSource}`,
 		pkg:  "./internal/services/aws/states",
 		run:  "TestStatesLifecycleAndWalkerUnits",
 	},
@@ -6373,18 +6511,26 @@ var mutants = []mutant{
 	{
 		name: "states-accept-invalid-wait-timestamp-path",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if !valid || !validJSONPath(reference, true) {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStatesWaitValidation",
+		old: `				reference, valid := value.(string)
+				if !valid || !validJSONPath(reference, true) {
+					add("SCHEMA_VALIDATION_FAILED", "TimestampPath must be a reference path.", "/States/"+name+"/TimestampPath")`,
+		new: `				reference, valid := value.(string)
+				if false {
+					add("SCHEMA_VALIDATION_FAILED", "TimestampPath must be a reference path.", "/States/"+name+"/TimestampPath")`,
+		pkg: "./internal/services/aws/states",
+		run: "TestStatesWaitValidation",
 	},
 	{
 		name: "states-accept-non-string-fail-detail",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if _, valid := value.(string); !valid {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStatesFailValidation",
+		old: `				if value, exists := state[field]; exists {
+					if _, valid := value.(string); !valid {
+						add("SCHEMA_VALIDATION_FAILED", field+" must be a string.", "/States/"+name+"/"+field)`,
+		new: `				if value, exists := state[field]; exists {
+					if false {
+						add("SCHEMA_VALIDATION_FAILED", field+" must be a string.", "/States/"+name+"/"+field)`,
+		pkg: "./internal/services/aws/states",
+		run: "TestStatesFailValidation",
 	},
 	{
 		name: "states-accept-invalid-fail-path",
@@ -6397,8 +6543,8 @@ var mutants = []mutant{
 	{
 		name: "states-accept-invalid-fail-reference-path",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `return validJSONPath(path, true)`,
-		new:  `return true`,
+		old:  `	return validJSONPath(path, true) && (len(path) == 1 || path[1] == '.' || path[1] == '[')`,
+		new:  `	return true && (len(path) == 1 || path[1] == '.' || path[1] == '[')`,
 		pkg:  "./internal/services/aws/states",
 		run:  "TestStatesReferencePathValidation",
 	},
@@ -6493,10 +6639,14 @@ var mutants = []mutant{
 	{
 		name: "states-accept-invalid-parameters",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if _, valid := value.(map[string]any); !valid {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStatesDataFlowValidation",
+		old: `			if value, exists := owner["Assign"]; exists {
+				if _, valid := value.(map[string]any); !valid {
+					add("SCHEMA_VALIDATION_FAILED", "Assign must be an object.", path+"/Assign")`,
+		new: `			if value, exists := owner["Assign"]; exists {
+				if false {
+					add("SCHEMA_VALIDATION_FAILED", "Assign must be an object.", path+"/Assign")`,
+		pkg: "./internal/services/aws/states",
+		run: "TestStatesDataFlowValidation",
 	},
 	{
 		name: "states-accept-invalid-result-selector",
@@ -6525,10 +6675,14 @@ var mutants = []mutant{
 	{
 		name: "states-accept-non-string-machine-comment",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if _, valid := comment.(string); !valid {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStatesStructuralMetadataValidation",
+		old: `	if comment, exists := machine["Comment"]; exists {
+		if _, valid := comment.(string); !valid {
+			add("SCHEMA_VALIDATION_FAILED", "Comment must be a string.", "/Comment")`,
+		new: `	if comment, exists := machine["Comment"]; exists {
+		if false {
+			add("SCHEMA_VALIDATION_FAILED", "Comment must be a string.", "/Comment")`,
+		pkg: "./internal/services/aws/states",
+		run: "TestStatesStructuralMetadataValidation",
 	},
 	{
 		name: "states-accept-invalid-asl-version",
@@ -6581,10 +6735,14 @@ var mutants = []mutant{
 	{
 		name: "states-skip-activity-retry",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if delay, retry := retryTask(st, failure.name, pend.Retries, p.deps.Rand); retry {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStatesLifecycleAndWalkerUnits",
+		old: `		}
+		if delay, retry := retryTask(st, failure.name, pend.Retries, p.deps.Rand); retry {
+			if persistRetry(delay) {`,
+		new: `		}
+		if false {
+			if persistRetry(delay) {`,
+		pkg: "./internal/services/aws/states",
+		run: "TestStatesLifecycleAndWalkerUnits",
 	},
 	{
 		name: "states-reuse-activity-task-token",
@@ -6597,8 +6755,8 @@ var mutants = []mutant{
 	{
 		name: "states-drop-activity-state-input",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `StateInput: rawInput, Retries: retries[cur]`,
-		new:  `StateInput: nil, Retries: retries[cur]`,
+		old:  `						Token: tok, ActivityARN: res, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Variables: variables, Deadline: first(req.Input, "_executionDeadline"),`,
+		new:  `						Token: tok, ActivityARN: res, StateName: cur, Input: payload, StateInput: nil, Retries: retries[cur], Variables: variables, Deadline: first(req.Input, "_executionDeadline"),`,
 		pkg:  "./internal/services/aws/states",
 		run:  "TestStatesLifecycleAndWalkerUnits",
 	},
@@ -6997,8 +7155,8 @@ var mutants = []mutant{
 	{
 		name: "states-accept-invalid-result-writer-option",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if !valid || !slices.Contains(allowed, configured) {`,
-		new:  `if (!valid || !slices.Contains(allowed, configured)) && false {`,
+		old:  `							if !valid || !slices.Contains(allowed, configured) {`,
+		new:  `							if (!valid || !slices.Contains(allowed, configured)) && false {`,
 		pkg:  "./internal/services/aws/states",
 		run:  "TestStatesMapValidation",
 	},
@@ -7037,10 +7195,14 @@ var mutants = []mutant{
 	{
 		name: "states-allow-inline-map-label",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if mode != "DISTRIBUTED" {`,
-		new:  `if mode != "DISTRIBUTED" && false {`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStatesMapValidation",
+		old: `				}
+				if mode != "DISTRIBUTED" {
+					for _, field := range []string{"ItemBatcher", "ItemReader", "ResultWriter", "ToleratedFailureCount", "ToleratedFailureCountPath", "ToleratedFailurePercentage", "ToleratedFailurePercentagePath"} {`,
+		new: `				}
+				if mode != "DISTRIBUTED" && false {
+					for _, field := range []string{"ItemBatcher", "ItemReader", "ResultWriter", "ToleratedFailureCount", "ToleratedFailureCountPath", "ToleratedFailurePercentage", "ToleratedFailurePercentagePath"} {`,
+		pkg: "./internal/services/aws/states",
+		run: "TestStatesMapValidation",
 	},
 	{
 		name: "states-allow-duplicate-map-label",
@@ -7141,10 +7303,14 @@ var mutants = []mutant{
 	{
 		name: "states-shift-json-path-index",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `next = append(next, array[index])`,
-		new:  `next = append(next, array[max(0, index-1)])`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStatesLifecycleAndWalkerUnits",
+		old: `					if index >= 0 && index < len(array) {
+						next = append(next, array[index])
+					}`,
+		new: `					if index >= 0 && index < len(array) {
+						next = append(next, array[max(0, index-1)])
+					}`,
+		pkg: "./internal/services/aws/states",
+		run: "TestStatesLifecycleAndWalkerUnits",
 	},
 	{
 		name: "states-reject-empty-json-path-result",
@@ -7165,10 +7331,14 @@ var mutants = []mutant{
 	{
 		name: "states-reject-json-path-array-union",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if len(parts) > 0 {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStatesDataFlowValidation|TestStatesLifecycleAndWalkerUnits",
+		old: `		}
+		if len(parts) > 0 {
+			parts = append(parts, member[start:])`,
+		new: `		}
+		if false {
+			parts = append(parts, member[start:])`,
+		pkg: "./internal/services/aws/states",
+		run: "TestStatesDataFlowValidation|TestStatesLifecycleAndWalkerUnits",
 	},
 	{
 		name: "states-truncate-json-path-array-union",
@@ -7325,10 +7495,14 @@ var mutants = []mutant{
 	{
 		name: "states-reject-json-path-filter-path-operand",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if rightPath, pathOperand := filterPath(rawRight); pathOperand {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStatesDataFlowValidation|TestStatesLifecycleAndWalkerUnits",
+		old: `		rule := map[string]any{"Variable": left, "CollectionOperator": operator}
+		if rightPath, pathOperand := filterPath(rawRight); pathOperand {
+			rule["CollectionPath"] = rightPath`,
+		new: `		rule := map[string]any{"Variable": left, "CollectionOperator": operator}
+		if false {
+			rule["CollectionPath"] = rightPath`,
+		pkg: "./internal/services/aws/states",
+		run: "TestStatesDataFlowValidation|TestStatesLifecycleAndWalkerUnits",
 	},
 	{
 		name: "states-equalize-json-path-filter-path-comparison",
@@ -7629,16 +7803,28 @@ var mutants = []mutant{
 	{
 		name: "states-keep-json-path-length-wrapper",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `value = nodes[0]`,
-		new:  `value = nodes`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStatesLifecycleAndWalkerUnits",
+		old: `		if token.kind == 'l' || token.kind == 'n' || token.kind == 'j' {
+			value := any(nodes)
+			if len(nodes) == 1 {
+				value = nodes[0]
+			}
+			arguments, valid := resolveArguments(token.arguments)
+			if !valid {`,
+		new: `		if token.kind == 'l' || token.kind == 'n' || token.kind == 'j' {
+			value := any(nodes)
+			if len(nodes) == 1 {
+				value = nodes
+			}
+			arguments, valid := resolveArguments(token.arguments)
+			if !valid {`,
+		pkg: "./internal/services/aws/states",
+		run: "TestStatesLifecycleAndWalkerUnits",
 	},
 	{
 		name: "states-accept-json-path-length-non-array",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if length < 0 {`,
-		new:  `if false {`,
+		old:  `				if length < 0 {`,
+		new:  `				if false {`,
 		pkg:  "./internal/services/aws/states",
 		run:  "TestStatesLifecycleAndWalkerUnits",
 	},
@@ -8063,10 +8249,14 @@ var mutants = []mutant{
 	{
 		name: "states-reject-negative-json-path-index",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if index < 0 {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStatesLifecycleAndWalkerUnits",
+		old: `						index = token.start
+						if index < 0 {
+							index += len(array)`,
+		new: `						index = token.start
+						if false {
+							index += len(array)`,
+		pkg: "./internal/services/aws/states",
+		run: "TestStatesLifecycleAndWalkerUnits",
 	},
 	{
 		name: "states-reject-negative-json-path-slice",
@@ -8103,10 +8293,14 @@ var mutants = []mutant{
 	{
 		name: "states-preserve-null-path-input",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `return map[string]any{}, true`,
-		new:  `return input, true`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStatesLifecycleAndWalkerUnits",
+		old: `	if raw == nil {
+		return map[string]any{}, true
+	}`,
+		new: `	if raw == nil {
+		return input, true
+	}`,
+		pkg: "./internal/services/aws/states",
+		run: "TestStatesLifecycleAndWalkerUnits",
 	},
 	{
 		name: "states-extract-task-payload-early",
@@ -8263,16 +8457,28 @@ var mutants = []mutant{
 	{
 		name: "states-stop-express-execution",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if first(rec, "type") == "EXPRESS" {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/states",
-		run:  "TestStateListsAndHistoryPagination",
+		old: `		}
+		var rec map[string]any
+		_ = json.Unmarshal(b, &rec)
+		if first(rec, "type") == "EXPRESS" {
+			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
+		}
+		if value, exists := inputValue(req.Input, "error", "Error"); exists {`,
+		new: `		}
+		var rec map[string]any
+		_ = json.Unmarshal(b, &rec)
+		if false {
+			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
+		}
+		if value, exists := inputValue(req.Input, "error", "Error"); exists {`,
+		pkg: "./internal/services/aws/states",
+		run: "TestStateListsAndHistoryPagination",
 	},
 	{
 		name: "states-skip-stop-error-validation",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if !validErrorCause(req.Input) {`,
-		new:  `if false {`,
+		old:  `		if !validErrorCause(req.Input) {`,
+		new:  `		if false {`,
 		pkg:  "./internal/services/aws/states",
 		run:  "TestStartExecutionAdmission",
 	},
@@ -8455,8 +8661,8 @@ var mutants = []mutant{
 	{
 		name: "states-describe-base-for-version",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if versionNumber(arn) > 0 {`,
-		new:  `if false {`,
+		old:  `		if versionNumber(arn) > 0 {`,
+		new:  `		if false {`,
 		pkg:  "./internal/services/aws/states",
 		run:  "TestStateMachineControlPlaneParity",
 	},
@@ -8735,10 +8941,14 @@ var mutants = []mutant{
 	{
 		name: "firehose-skip-gzip-default-extension",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `if recordExtension == "" {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseS3ObjectNameFormat",
+		old: `			data = compressed.Bytes()
+			if recordExtension == "" {
+				recordExtension = ".gz"`,
+		new: `			data = compressed.Bytes()
+			if false {
+				recordExtension = ".gz"`,
+		pkg: "./internal/services/aws/firehose",
+		run: "TestFirehoseS3ObjectNameFormat",
 	},
 	{
 		name: "firehose-accept-unsupported-compression",
@@ -8951,10 +9161,14 @@ var mutants = []mutant{
 	{
 		name: "firehose-hide-more-list-results",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `more = true`,
-		new:  `more = false`,
-		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseListDeliveryStreamsPagination",
+		old: `			if len(names) == limit {
+				more = true
+				break`,
+		new: `			if len(names) == limit {
+				more = false
+				break`,
+		pkg: "./internal/services/aws/firehose",
+		run: "TestFirehoseListDeliveryStreamsPagination",
 	},
 	{
 		name: "firehose-accept-invalid-list-limit",
@@ -8975,10 +9189,14 @@ var mutants = []mutant{
 	{
 		name: "firehose-replace-tags-instead-of-merge",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `tags := loadTags(b)`,
-		new:  `tags := map[string]string{}`,
-		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseTagsMergeRemoveAndPaginate",
+		old: `			}
+			tags := loadTags(b)
+			maps.Copy(tags, updates)`,
+		new: `			}
+			tags := map[string]string{}
+			maps.Copy(tags, updates)`,
+		pkg: "./internal/services/aws/firehose",
+		run: "TestFirehoseTagsMergeRemoveAndPaginate",
 	},
 	{
 		name: "firehose-ignore-tag-limit",
@@ -9103,10 +9321,16 @@ var mutants = []mutant{
 	{
 		name: "firehose-accept-unknown-create-stream-type",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  "default:\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidArgumentException\", HTTPStatus: 400, Fault: \"client\"}",
-		new:  "default:\n\t\t\tstreamType = \"DirectPut\"",
-		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseEncryptionState",
+		old: `			}
+		default:
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}`,
+		new: `			}
+		default:
+			streamType = "DirectPut"
+		}`,
+		pkg: "./internal/services/aws/firehose",
+		run: "TestFirehoseEncryptionState",
 	},
 	{
 		name: "firehose-allow-kinesis-source-on-direct-put",
@@ -9263,10 +9487,14 @@ var mutants = []mutant{
 	{
 		name: "firehose-drop-msk-source",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `if mskSource != nil {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseMSKSourceConfiguration",
+		old: `		}
+		if mskSource != nil {
+			rec["MSKSourceConfiguration"] = maps.Clone(mskSource)`,
+		new: `		}
+		if false {
+			rec["MSKSourceConfiguration"] = maps.Clone(mskSource)`,
+		pkg: "./internal/services/aws/firehose",
+		run: "TestFirehoseMSKSourceConfiguration",
 	},
 	{
 		name: "firehose-omit-msk-source-description",
@@ -9541,10 +9769,14 @@ var mutants = []mutant{
 	{
 		name: "firehose-skip-http-gzip",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `if encoding == "GZIP" {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseHTTPEndpointDestination",
+		old: `	encoding := first(requestConfiguration, "ContentEncoding")
+	if encoding == "GZIP" {
+		var compressed bytes.Buffer`,
+		new: `	encoding := first(requestConfiguration, "ContentEncoding")
+	if false {
+		var compressed bytes.Buffer`,
+		pkg: "./internal/services/aws/firehose",
+		run: "TestFirehoseHTTPEndpointDestination",
 	},
 	{
 		name: "firehose-follow-http-redirect",
@@ -9646,10 +9878,14 @@ var mutants = []mutant{
 	{
 		name: "firehose-ignore-http-buffer-size",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `if total >= sizeLimit {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseHTTPEndpointDestination",
+		old: `		total += size
+		if total >= sizeLimit {
+			next = now`,
+		new: `		total += size
+		if false {
+			next = now`,
+		pkg: "./internal/services/aws/firehose",
+		run: "TestFirehoseHTTPEndpointDestination",
 	},
 	{
 		name: "firehose-reverse-http-buffer-order",
@@ -9744,8 +9980,8 @@ var mutants = []mutant{
 	{
 		name: "firehose-drop-http-processing-failure-envelope",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)`,
-		new:  `p.logDeliveryError(ctx, req, destination, stream, failure.message, now)`,
+		old:  `				p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)`,
+		new:  `				p.logDeliveryError(ctx, req, destination, stream, failure.message, now)`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseHTTPEndpointDestination",
 	},
@@ -9810,8 +10046,8 @@ var mutants = []mutant{
 	{
 		name: "firehose-stringify-splunk-failure-attempts",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `"attemptsMade": attempts,`,
-		new:  `"attemptsMade": strconv.Itoa(attempts),`,
+		old:  `			"attemptsMade": attempts, "arrivalTimestamp": arrival.UnixMilli(), "errorCode": code, "errorMessage": message,`,
+		new:  `			"attemptsMade": strconv.Itoa(attempts), "arrivalTimestamp": arrival.UnixMilli(), "errorCode": code, "errorMessage": message,`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseSplunkFailureBackup",
 	},
@@ -9875,10 +10111,14 @@ var mutants = []mutant{
 	{
 		name: "firehose-skip-redshift-source-backup",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[index], data[index], now)`,
-		new:  `p.deliverS3Configuration(ctx, req, nil, stream, version, recIDs[index], data[index], now)`,
-		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseRedshiftDestination",
+		old: `		if backupEnabled {
+			p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[index], data[index], now)
+		}`,
+		new: `		if backupEnabled {
+			p.deliverS3Configuration(ctx, req, nil, stream, version, recIDs[index], data[index], now)
+		}`,
+		pkg: "./internal/services/aws/firehose",
+		run: "TestFirehoseRedshiftDestination",
 	},
 	{
 		name: "firehose-skip-redshift-staging",
@@ -10109,10 +10349,18 @@ var mutants = []mutant{
 	{
 		name: "firehose-skip-snowflake-all-data-backup",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old: `if first(destination, "S3BackupMode") == "AllData" {
-			p.deliverS3Configuration(ctx, req, s3, stream, version, recIDs[index], data[index], now)`,
-		new: `if false {
-			p.deliverS3Configuration(ctx, req, s3, stream, version, recIDs[index], data[index], now)`,
+		old: `	var validRaw, rows [][]byte
+	for index := range data {
+		if first(destination, "S3BackupMode") == "AllData" {
+			p.deliverS3Configuration(ctx, req, s3, stream, version, recIDs[index], data[index], now)
+		}
+		processed, failures := p.processData(ctx, req, destination, stream, recIDs[index], data[index], now)`,
+		new: `	var validRaw, rows [][]byte
+	for index := range data {
+		if false {
+			p.deliverS3Configuration(ctx, req, s3, stream, version, recIDs[index], data[index], now)
+		}
+		processed, failures := p.processData(ctx, req, destination, stream, recIDs[index], data[index], now)`,
 		pkg: "./internal/services/aws/firehose",
 		run: "TestFirehoseSnowflakeDestination",
 	},
@@ -10341,18 +10589,74 @@ var mutants = []mutant{
 	{
 		name: "firehose-accept-malformed-buffering-hints",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `if !ok || hasInterval != hasSize {`,
-		new:  `if hasInterval != hasSize {`,
-		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseBufferingHints",
+		old: `			return err
+		}
+	}
+	if raw, exists := destination["BufferingHints"]; exists {
+		hints, ok := raw.(map[string]any)
+		_, hasInterval := hints["IntervalInSeconds"]
+		_, hasSize := hints["SizeInMBs"]
+		if !ok || hasInterval != hasSize {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if hasInterval {
+			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			if _, valid := inputInteger(hints["SizeInMBs"], 1, 64); !valid {`,
+		new: `			return err
+		}
+	}
+	if raw, exists := destination["BufferingHints"]; exists {
+		hints, ok := raw.(map[string]any)
+		_, hasInterval := hints["IntervalInSeconds"]
+		_, hasSize := hints["SizeInMBs"]
+		if hasInterval != hasSize {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if hasInterval {
+			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			if _, valid := inputInteger(hints["SizeInMBs"], 1, 64); !valid {`,
+		pkg: "./internal/services/aws/firehose",
+		run: "TestFirehoseBufferingHints",
 	},
 	{
 		name: "firehose-accept-unpaired-buffering-hints",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `if !ok || hasInterval != hasSize {`,
-		new:  `if !ok {`,
-		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseBufferingHints",
+		old: `			return err
+		}
+	}
+	if raw, exists := destination["BufferingHints"]; exists {
+		hints, ok := raw.(map[string]any)
+		_, hasInterval := hints["IntervalInSeconds"]
+		_, hasSize := hints["SizeInMBs"]
+		if !ok || hasInterval != hasSize {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if hasInterval {
+			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			if _, valid := inputInteger(hints["SizeInMBs"], 1, 64); !valid {`,
+		new: `			return err
+		}
+	}
+	if raw, exists := destination["BufferingHints"]; exists {
+		hints, ok := raw.(map[string]any)
+		_, hasInterval := hints["IntervalInSeconds"]
+		_, hasSize := hints["SizeInMBs"]
+		if !ok {
+			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if hasInterval {
+			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+			}
+			if _, valid := inputInteger(hints["SizeInMBs"], 1, 64); !valid {`,
+		pkg: "./internal/services/aws/firehose",
+		run: "TestFirehoseBufferingHints",
 	},
 	{
 		name: "firehose-accept-invalid-buffer-interval",
@@ -10437,8 +10741,8 @@ var mutants = []mutant{
 	{
 		name: "firehose-accept-long-destination-kms-arn",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `len(arn) > 512 ||`,
-		new:  `false ||`,
+		old:  `			if !ok || len(arn) > 512 || !firehoseDestinationKMSARN.MatchString(arn) || !strings.Contains(arn, ":kms:"+region+":") {`,
+		new:  `			if !ok || false || !firehoseDestinationKMSARN.MatchString(arn) || !strings.Contains(arn, ":kms:"+region+":") {`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseDestinationEncryption",
 	},
@@ -10485,10 +10789,14 @@ var mutants = []mutant{
 	{
 		name: "s3-drop-default-list-object-storage-class",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `if storageClass == "" {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestListObjectsV2Prefix",
+		old: `	storageClass := archiveStorageClass(meta)
+	if storageClass == "" {
+		return nil, &spi.Fault{Code: "InvalidObjectState", HTTPStatus: http.StatusForbidden, Fault: "client", Fields: map[string]any{"StorageClass": str(meta["storageClass"])}}`,
+		new: `	storageClass := archiveStorageClass(meta)
+	if false {
+		return nil, &spi.Fault{Code: "InvalidObjectState", HTTPStatus: http.StatusForbidden, Fault: "client", Fields: map[string]any{"StorageClass": str(meta["storageClass"])}}`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestListObjectsV2Prefix",
 	},
 	{
 		name: "s3-drop-list-object-modified-time",
@@ -10669,10 +10977,14 @@ var mutants = []mutant{
 	{
 		name: "firehose-dont-update-destination-timestamp",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `rec["LastUpdateTimestamp"] = float64(p.deps.Clock.Now().UnixNano()) / float64(time.Second)`,
-		new:  `rec["LastUpdateTimestamp"] = rec["CreateTimestamp"]`,
-		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseLifecycleMetadataAndValidation",
+		old: `			rec["VersionId"] = strconv.Itoa(version + 1)
+			rec["LastUpdateTimestamp"] = float64(p.deps.Clock.Now().UnixNano()) / float64(time.Second)
+			nb, _ := json.Marshal(rec)`,
+		new: `			rec["VersionId"] = strconv.Itoa(version + 1)
+			rec["LastUpdateTimestamp"] = rec["CreateTimestamp"]
+			nb, _ := json.Marshal(rec)`,
+		pkg: "./internal/services/aws/firehose",
+		run: "TestFirehoseLifecycleMetadataAndValidation",
 	},
 	{
 		name: "firehose-dont-update-encryption-timestamp",
@@ -10685,10 +10997,14 @@ var mutants = []mutant{
 	{
 		name: "firehose-delete-missing-stream",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `if _, ok, _ := p.col(req, "fh").Get(ctx, name); !ok {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseLifecycleMetadataAndValidation",
+		old: `	case "DeleteDeliveryStream":
+		if _, ok, _ := p.col(req, "fh").Get(ctx, name); !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}`,
+		new: `	case "DeleteDeliveryStream":
+		if false {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}`,
+		pkg: "./internal/services/aws/firehose",
+		run: "TestFirehoseLifecycleMetadataAndValidation",
 	},
 	{
 		name: "firehose-ignore-describe-limit-validation",
@@ -10813,24 +11129,24 @@ var mutants = []mutant{
 	{
 		name: "firehose-wrong-default-s3-backup-mode",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `configuration["S3BackupMode"] = "Disabled"`,
-		new:  `configuration["S3BackupMode"] = "Enabled"`,
+		old:  `					configuration["S3BackupMode"] = "Disabled"`,
+		new:  `					configuration["S3BackupMode"] = "Enabled"`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseDestinationDescriptionDefaults",
 	},
 	{
 		name: "firehose-omit-s3-backup-description",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `configuration["S3BackupDescription"] = backup`,
-		new:  `configuration["S3BackupDescription"] = map[string]any{}`,
+		old:  `					configuration["S3BackupDescription"] = backup`,
+		new:  `					configuration["S3BackupDescription"] = map[string]any{}`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseS3Backup",
 	},
 	{
 		name: "firehose-leak-s3-backup-configuration",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `delete(configuration, "S3BackupConfiguration")`,
-		new:  `delete(configuration, "mutated")`,
+		old:  `					delete(configuration, "S3BackupConfiguration")`,
+		new:  `					delete(configuration, "mutated")`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseS3Backup",
 	},
@@ -10845,10 +11161,22 @@ var mutants = []mutant{
 	{
 		name: "firehose-enable-s3-backup-without-configuration",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `if mode == "Enabled" && !backupExists {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseS3Backup",
+		old: `		}
+	}
+	backupRaw, backupExists := destination["S3BackupConfiguration"]
+	if mode == "Enabled" && !backupExists {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if backupExists {`,
+		new: `		}
+	}
+	backupRaw, backupExists := destination["S3BackupConfiguration"]
+	if false {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	if backupExists {`,
+		pkg: "./internal/services/aws/firehose",
+		run: "TestFirehoseS3Backup",
 	},
 	{
 		name: "firehose-skip-s3-backup-validation",
@@ -10965,10 +11293,22 @@ var mutants = []mutant{
 	{
 		name: "firehose-allow-external-decompression-put",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `if requiresCloudWatchLogsSource(stream) && req.SourceService != "aws.logs" {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseDecompressionProcessing",
+		old: `		if !directPutStream(stream) {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if requiresCloudWatchLogsSource(stream) && req.SourceService != "aws.logs" {
+			return nil, invalidSource(req, name)
+		}
+		decoded, valid := recordData(req.Input["Record"])`,
+		new: `		if !directPutStream(stream) {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if false {
+			return nil, invalidSource(req, name)
+		}
+		decoded, valid := recordData(req.Input["Record"])`,
+		pkg: "./internal/services/aws/firehose",
+		run: "TestFirehoseDecompressionProcessing",
 	},
 	{
 		name: "firehose-allow-external-decompression-batch",
@@ -10981,10 +11321,22 @@ var mutants = []mutant{
 	{
 		name: "firehose-reject-cloudwatch-decompression-source",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `req.SourceService != "aws.logs"`,
-		new:  `req.SourceService == "aws.logs"`,
-		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseDecompressionProcessing",
+		old: `		if !directPutStream(stream) {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if requiresCloudWatchLogsSource(stream) && req.SourceService != "aws.logs" {
+			return nil, invalidSource(req, name)
+		}
+		decoded, valid := recordData(req.Input["Record"])`,
+		new: `		if !directPutStream(stream) {
+			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+		}
+		if requiresCloudWatchLogsSource(stream) && req.SourceService == "aws.logs" {
+			return nil, invalidSource(req, name)
+		}
+		decoded, valid := recordData(req.Input["Record"])`,
+		pkg: "./internal/services/aws/firehose",
+		run: "TestFirehoseDecompressionProcessing",
 	},
 	{
 		name: "firehose-ignore-decompression-source-requirement",
@@ -11389,10 +11741,18 @@ var mutants = []mutant{
 	{
 		name: "firehose-use-wrong-decompression-error-code",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `code: "Decompression.Failed"`,
-		new:  `code: "mutated"`,
-		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseDecompressionProcessing",
+		old: `				reader, err := gzip.NewReader(bytes.NewReader(record.data))
+				if err != nil {
+					failures = append(failures, &processingFailure{typeName: "decompression-failed", code: "Decompression.Failed", message: err.Error(), attempts: 1, recID: record.recID, data: record.raw})
+					continue
+				}`,
+		new: `				reader, err := gzip.NewReader(bytes.NewReader(record.data))
+				if err != nil {
+					failures = append(failures, &processingFailure{typeName: "decompression-failed", code: "mutated", message: err.Error(), attempts: 1, recID: record.recID, data: record.raw})
+					continue
+				}`,
+		pkg: "./internal/services/aws/firehose",
+		run: "TestFirehoseDecompressionProcessing",
 	},
 	{
 		name: "firehose-skip-s3-object-delivery",
@@ -11445,10 +11805,14 @@ var mutants = []mutant{
 	{
 		name: "firehose-skip-cloudwatch-error-log",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `p.logDeliveryError(ctx, req, configuration, stream, failure.message, now)`,
-		new:  `p.logDeliveryError(ctx, req, map[string]any{}, stream, failure.message, now)`,
-		pkg:  "./internal/services/aws/firehose",
-		run:  "TestFirehoseLambdaProcessing",
+		old: `	for _, failure := range failures {
+		p.logDeliveryError(ctx, req, configuration, stream, failure.message, now)
+		p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)`,
+		new: `	for _, failure := range failures {
+		p.logDeliveryError(ctx, req, map[string]any{}, stream, failure.message, now)
+		p.deliverProcessingFailure(ctx, req, bucket, errorPrefix, kmsARN, stream, version, now, failure)`,
+		pkg: "./internal/services/aws/firehose",
+		run: "TestFirehoseLambdaProcessing",
 	},
 	{
 		name: "firehose-use-wrong-cloudwatch-log-group",
@@ -11501,8 +11865,8 @@ var mutants = []mutant{
 	{
 		name: "firehose-accept-invalid-dynamic-enabled",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `enabled, ok = value.(bool)`,
-		new:  `enabled, ok = false, true`,
+		old:  `			enabled, ok = value.(bool)`,
+		new:  `			enabled, ok = false, true`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseLambdaDynamicPartitioning",
 	},
@@ -12085,10 +12449,14 @@ var mutants = []mutant{
 	{
 		name: "store-reverse-scope-order",
 		file: filepath.Join("internal", "store", "store.go"),
-		old:  "sort.Strings(keys)",
-		new:  "sort.Sort(sort.Reverse(sort.StringSlice(keys)))",
-		pkg:  "./internal/store",
-		run:  "TestScopesAreEnumeratedDeterministically",
+		old: `	}
+	sort.Strings(keys)
+	out := make([]spi.Identity, 0, len(keys))`,
+		new: `	}
+	sort.Sort(sort.Reverse(sort.StringSlice(keys)))
+	out := make([]spi.Identity, 0, len(keys))`,
+		pkg: "./internal/store",
+		run: "TestScopesAreEnumeratedDeterministically",
 	},
 	{
 		name: "scheduler-run-disabled-schedule",
@@ -12277,10 +12645,18 @@ var mutants = []mutant{
 	{
 		name: "pipes-acknowledge-failed-enrichment",
 		file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
-		old:  "\t\tif err != nil {\n\t\t\treturn nil, true, false\n\t\t}",
-		new:  "\t\tif err != nil {\n\t\t\treturn nil, true, true\n\t\t}",
-		pkg:  "./internal/services/aws/pipes",
-		run:  "TestPipesLambdaEnrichment",
+		old: `		response, err := p.invokeLambdaPayload(ctx, identity, arn, payload)
+		if err != nil {
+			return nil, true, false
+		}
+		raw = response`,
+		new: `		response, err := p.invokeLambdaPayload(ctx, identity, arn, payload)
+		if err != nil {
+			return nil, true, true
+		}
+		raw = response`,
+		pkg: "./internal/services/aws/pipes",
+		run: "TestPipesLambdaEnrichment",
 	},
 	{
 		name: "kinesis-drop-source-wake-signal",
@@ -12373,12 +12749,16 @@ var mutants = []mutant{
 	{
 		name: "firehose-skip-opensearch-vpc-validation",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old: `if err := validateVPCConfiguration(destination["VpcConfiguration"]); err != nil {
+		old: `	}
+	if err := validateVPCConfiguration(destination["VpcConfiguration"]); err != nil {
 		return err
-	}`,
-		new: `if false {
+	}
+	if raw := destination["ProcessingConfiguration"]; raw != nil {`,
+		new: `	}
+	if false {
 		return nil
-	}`,
+	}
+	if raw := destination["ProcessingConfiguration"]; raw != nil {`,
 		pkg: "./internal/services/aws/firehose",
 		run: "TestFirehoseAmazonOpenSearchServiceDestination",
 	},
@@ -12523,10 +12903,14 @@ var mutants = []mutant{
 	{
 		name: "pipes-drop-stream-dead-letter",
 		file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
-		old:  `if arn == "" {`,
-		new:  `if arn != "" {`,
-		pkg:  "./internal/services/aws/pipes",
-		run:  "TestPipesKinesisRetryAgeAndDeadLetterPolicy",
+		old: `	arn := stringValue(config["Arn"])
+	if arn == "" {
+		return true`,
+		new: `	arn := stringValue(config["Arn"])
+	if arn != "" {
+		return true`,
+		pkg: "./internal/services/aws/pipes",
+		run: "TestPipesKinesisRetryAgeAndDeadLetterPolicy",
 	},
 	{
 		name: "pipes-accept-excessive-stream-retries",
@@ -12563,8 +12947,8 @@ var mutants = []mutant{
 	{
 		name: "pipes-ignore-dynamodb-stream-source",
 		file: filepath.Join("internal", "services", "aws", "pipes", "pipes.go"),
-		old:  `case strings.Contains(source, ":dynamodb:") && strings.Contains(source, "/stream/"):`,
-		new:  `case false && strings.Contains(source, "/stream/"):`,
+		old:  `			case strings.Contains(source, ":dynamodb:") && strings.Contains(source, "/stream/"):`,
+		new:  `			case false && strings.Contains(source, "/stream/"):`,
 		pkg:  "./internal/services/aws/pipes",
 		run:  "TestPipesDynamoDBStreamDeliveryAndCheckpoint",
 	},
@@ -12763,10 +13147,14 @@ var mutants = []mutant{
 	{
 		name: "events-accept-non-object-connection-body",
 		file: filepath.Join("internal", "services", "aws", "eventhttp", "eventhttp.go"),
-		old:  `if json.Unmarshal(body, &object) != nil || object == nil {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/events",
-		run:  "TestInvokeAPIDestinationBasicAuth",
+		old: `	var object map[string]any
+	if json.Unmarshal(body, &object) != nil || object == nil {
+		return nil, &spi.Fault{Code: "TargetInvocationFailed", Message: "Connection body parameters require a JSON object payload.", HTTPStatus: 400, Fault: "client"}`,
+		new: `	var object map[string]any
+	if false {
+		return nil, &spi.Fault{Code: "TargetInvocationFailed", Message: "Connection body parameters require a JSON object payload.", HTTPStatus: 400, Fault: "client"}`,
+		pkg: "./internal/services/aws/events",
+		run: "TestInvokeAPIDestinationBasicAuth",
 	},
 	{
 		name: "events-allow-oversized-connection-body",
@@ -13003,10 +13391,14 @@ var mutants = []mutant{
 	{
 		name: "events-retry-permanent-target",
 		file: filepath.Join("internal", "services", "aws", "events", "events.go"),
-		old:  `if !TargetErrorRetryable(deliveryErr) {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/events",
-		run:  "TestPutEventsRetriesAndDeadLettersTargets",
+		old: `	}
+	if !TargetErrorRetryable(deliveryErr) {
+		p.deadLetter(ctx, identity, rec, target, payload, 0, "", deliveryErr)`,
+		new: `	}
+	if false {
+		p.deadLetter(ctx, identity, rec, target, payload, 0, "", deliveryErr)`,
+		pkg: "./internal/services/aws/events",
+		run: "TestPutEventsRetriesAndDeadLettersTargets",
 	},
 	{
 		name: "events-skip-target-dead-letter",
@@ -13099,10 +13491,28 @@ var mutants = []mutant{
 	{
 		name: "s3-skip-object-encryption-validation",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "serverSideEncryption, sseKMSKeyID, bucketKeyEnabled, err = p.objectEncryption(ctx, req, b)\n\t\tif err != nil {",
-		new:  "serverSideEncryption, sseKMSKeyID, bucketKeyEnabled, err = p.objectEncryption(ctx, req, b)\n\t\tif false && err != nil {",
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestObjectServerSideEncryption",
+		old: `		}
+	}
+	serverSideEncryption, sseKMSKeyID, bucketKeyEnabled := "", "", false
+	if sseCustomerKeyMD5 == "" {
+		serverSideEncryption, sseKMSKeyID, bucketKeyEnabled, err = p.objectEncryption(ctx, req, b)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var body []byte`,
+		new: `		}
+	}
+	serverSideEncryption, sseKMSKeyID, bucketKeyEnabled := "", "", false
+	if sseCustomerKeyMD5 == "" {
+		serverSideEncryption, sseKMSKeyID, bucketKeyEnabled, err = p.objectEncryption(ctx, req, b)
+		if false && err != nil {
+			return nil, err
+		}
+	}
+	var body []byte`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestObjectServerSideEncryption",
 	},
 	{
 		name: "s3-default-object-encryption-kms",
@@ -13203,8 +13613,8 @@ var mutants = []mutant{
 	{
 		name: "s3-drop-version-customer-encryption",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `"sseCustomerKeyMD5": sseCustomerKeyMD5}`,
-		new:  `"sseCustomerKeyMD5": ""}`,
+		old:  `		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "versionOrder": versionOrder, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation, "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled, "sseCustomerKeyMD5": sseCustomerKeyMD5}`,
+		new:  `		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "versionOrder": versionOrder, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation, "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled, "sseCustomerKeyMD5": ""}`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestObjectSSECustomerKey",
 	},
@@ -13291,8 +13701,8 @@ var mutants = []mutant{
 	{
 		name: "s3-drop-completed-customer-encryption-state",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `"sseCustomerKeyMD5": u.sseCustomerKeyMD5, "bucketKeyEnabled": u.bucketKeyEnabled`,
-		new:  `"sseCustomerKeyMD5": "", "bucketKeyEnabled": u.bucketKeyEnabled`,
+		old:  `	encryption := map[string]any{"serverSideEncryption": u.serverSideEncryption, "ssekmsKeyId": u.sseKMSKeyID, "sseCustomerKeyMD5": u.sseCustomerKeyMD5, "bucketKeyEnabled": u.bucketKeyEnabled}`,
+		new:  `	encryption := map[string]any{"serverSideEncryption": u.serverSideEncryption, "ssekmsKeyId": u.sseKMSKeyID, "sseCustomerKeyMD5": "", "bucketKeyEnabled": u.bucketKeyEnabled}`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestMultipartSSECustomerKey",
 	},
@@ -13776,8 +14186,8 @@ var mutants = []mutant{
 	{
 		name: "s3-cors-drop-bucket-scoped-missing-error",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `if req.Operation == "GetBucketCors" {`,
-		new:  `if false {`,
+		old:  `		if req.Operation == "GetBucketCors" {`,
+		new:  `		if false {`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestBucketCors",
 	},
@@ -13832,10 +14242,14 @@ var mutants = []mutant{
 	{
 		name: "s3-website-accept-redirect-protocol",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `if protocol := str(redirect["Protocol"]); protocol != "" && protocol != "http" && protocol != "https" {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestBucketWebsite",
+		old: `		}
+		if protocol := str(redirect["Protocol"]); protocol != "" && protocol != "http" && protocol != "https" {
+			return &spi.Fault{Code: "InvalidRequest", Message: "Invalid protocol, protocol can be http or https. If not defined the protocol will be selected automatically.", HTTPStatus: http.StatusBadRequest, Fault: "client"}`,
+		new: `		}
+		if false {
+			return &spi.Fault{Code: "InvalidRequest", Message: "Invalid protocol, protocol can be http or https. If not defined the protocol will be selected automatically.", HTTPStatus: http.StatusBadRequest, Fault: "client"}`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestBucketWebsite",
 	},
 	{
 		name: "s3-website-accept-missing-index",
@@ -13904,8 +14318,8 @@ var mutants = []mutant{
 	{
 		name: "s3-website-drop-bucket-scoped-missing-error",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `if req.Operation == "GetBucketWebsite" {`,
-		new:  `if false {`,
+		old:  `		if req.Operation == "GetBucketWebsite" {`,
+		new:  `		if false {`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestBucketWebsite",
 	},
@@ -14080,8 +14494,8 @@ var mutants = []mutant{
 	{
 		name: "s3-notifications-drop-acl-event",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `p.notify(ctx, req, b, str(req.Input["Key"]), "ObjectAcl:Put", objectMeta)`,
-		new:  ``,
+		old:  `				p.notify(ctx, req, b, str(req.Input["Key"]), "ObjectAcl:Put", objectMeta)`,
+		new:  `				`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestBucketNotificationRestoreAndACLEvents",
 	},
@@ -14168,8 +14582,8 @@ var mutants = []mutant{
 	{
 		name: "s3-lifecycle-round-days-down",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `AddDate(0, 0, days+1)`,
-		new:  `AddDate(0, 0, days)`,
+		old:  `			expires = time.Date(lastModified.Year(), lastModified.Month(), lastModified.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, days+1)`,
+		new:  `			expires = time.Date(lastModified.Year(), lastModified.Month(), lastModified.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, days)`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestBucketLifecycleExpirationHeaders",
 	},
@@ -14424,10 +14838,14 @@ var mutants = []mutant{
 	{
 		name: "s3-bucket-encryption-accept-invalid-algorithm",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `if algorithm != "AES256" && algorithm != "aws:fsx" && algorithm != "aws:backup" && algorithm != "aws:kms" && algorithm != "aws:kms:dsse" {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestBucketEncryptionConfiguration",
+		old: `	algorithm := str(defaults["SSEAlgorithm"])
+	if algorithm != "AES256" && algorithm != "aws:fsx" && algorithm != "aws:backup" && algorithm != "aws:kms" && algorithm != "aws:kms:dsse" {
+		return nil, malformed()`,
+		new: `	algorithm := str(defaults["SSEAlgorithm"])
+	if false {
+		return nil, malformed()`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestBucketEncryptionConfiguration",
 	},
 	{
 		name: "s3-bucket-encryption-accept-nonkms-key",
@@ -14528,10 +14946,14 @@ var mutants = []mutant{
 	{
 		name: "s3-skip-stored-kms-validation",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `if keyID := str(meta["ssekmsKeyId"]); keyID != "" {`,
-		new:  `if false {`,
-		pkg:  "./internal/services/aws/s3",
-		run:  "TestExplicitKMSKeyValidation",
+		old: `	}
+	if keyID := str(meta["ssekmsKeyId"]); keyID != "" {
+		if err := p.validateKMSKey(ctx, req, keyID); err != nil {`,
+		new: `	}
+	if false {
+		if err := p.validateKMSKey(ctx, req, keyID); err != nil {`,
+		pkg: "./internal/services/aws/s3",
+		run: "TestExplicitKMSKeyValidation",
 	},
 	{
 		name: "s3-accept-cross-region-kms-key",
@@ -15208,18 +15630,30 @@ var mutants = []mutant{
 	{
 		name: "identity-ignore-authorization-v4-signed-headers",
 		file: filepath.Join("internal", "identity", "s3_signature.go"),
-		old:  `canonicalHeaders, ok := signedHeaderValues(r, strings.Split(signedHeaders, ";"))`,
-		new:  `canonicalHeaders, ok := "", true`,
-		pkg:  "./internal/identity",
-		run:  "TestVerifyS3AuthorizationV4AWSExample",
+		old: `	}
+	canonicalHeaders, ok := signedHeaderValues(r, strings.Split(signedHeaders, ";"))
+	if !ok {`,
+		new: `	}
+	canonicalHeaders, ok := "", true
+	if !ok {`,
+		pkg: "./internal/identity",
+		run: "TestVerifyS3AuthorizationV4AWSExample",
 	},
 	{
 		name: "identity-ignore-authorization-v4-payload",
 		file: filepath.Join("internal", "identity", "s3_signature.go"),
-		old:  `if !s3PayloadHashMatches(r, payloadHash) {`,
-		new:  `if false {`,
-		pkg:  "./internal/identity",
-		run:  "TestVerifyS3AuthorizationV4AWSExample",
+		old: `		return signatureFault()
+	}
+	if !s3PayloadHashMatches(r, payloadHash) {
+		return signatureFault()
+	}`,
+		new: `		return signatureFault()
+	}
+	if false {
+		return signatureFault()
+	}`,
+		pkg: "./internal/identity",
+		run: "TestVerifyS3AuthorizationV4AWSExample",
 	},
 	{
 		name: "identity-accept-bad-streaming-v4-signature",
@@ -15606,17 +16040,36 @@ func TestMutantNeedlesExist(t *testing.T) {
 			body = string(raw)
 			bodies[m.file] = body
 		}
-		// Absence is the failure. A needle matching more than once is a
-		// separate weakness -- the suite rewrites the first match, so such a
-		// mutant proves something other than what it names -- and several
-		// predate this test. Tightening to exactly one is worth doing, but as
-		// its own change: retargeting a needle means re-running that mutant to
-		// show it is still killed, and doing it for a handful here would bury
-		// the fix this test exists for.
-		if !strings.Contains(body, m.old) {
+		// A needle must match exactly once, and the two ways it can fail are
+		// different failures.
+		//
+		// Absence means the code moved and the mutant proves nothing. That is
+		// loud: the suite says so.
+		//
+		// More than one match is the quiet one. The suite rewrites the *first*
+		// match, so such a mutant tests whichever occurrence happens to come
+		// first in the file, which is not the one its name and its test
+		// describe -- and a refactor that reorders the file silently repoints
+		// it with nothing failing. `s3-archive-expire-one-day-early` was
+		// exactly that: two matches, the first in the lifecycle header rather
+		// than the archive restore its test exercises, so it defended nothing
+		// while looking like coverage.
+		//
+		// The fix for a non-unique needle is to widen it with surrounding
+		// lines until it names one site, extending `new` by the same context
+		// so the mutation stays byte-identical.
+		switch strings.Count(body, m.old) {
+		case 1:
+		case 0:
 			t.Errorf("%s: needle not found in %s: %q\n\tThe code moved and this "+
 				"mutant no longer proves anything. Retarget it at whatever now "+
 				"carries the behavior it was written to defend.", m.name, m.file, m.old)
+		default:
+			t.Errorf("%s: needle matches %d sites in %s: %q\n\tThe suite rewrites "+
+				"the first one, which is not necessarily the one this mutant "+
+				"names. Widen the needle with surrounding lines until it matches "+
+				"once, extending `new` by the same context.",
+				m.name, strings.Count(body, m.old), m.file, m.old)
 		}
 	}
 }

@@ -3184,6 +3184,20 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 			t.Fatalf("get binary %s: %#v", sk, got)
 		}
 	}
+	batchWrite, err := ddb.BatchWriteItem(context.Background(), &dynamodb.BatchWriteItemInput{RequestItems: map[string][]ddbtypes.WriteRequest{"BinaryValues": {
+		{DeleteRequest: &ddbtypes.DeleteRequest{Key: map[string]ddbtypes.AttributeValue{"PK": &ddbtypes.AttributeValueMemberS{Value: "binary"}, "SK": &ddbtypes.AttributeValueMemberS{Value: "single"}}}},
+		{PutRequest: &ddbtypes.PutRequest{Item: map[string]ddbtypes.AttributeValue{"PK": &ddbtypes.AttributeValueMemberS{Value: "binary"}, "SK": &ddbtypes.AttributeValueMemberS{Value: "new"}, "data": &ddbtypes.AttributeValueMemberB{Value: []byte{0x90}}}}},
+	}}})
+	if err != nil || len(batchWrite.UnprocessedItems) != 0 {
+		t.Fatalf("batch delete and put: %#v %v", batchWrite, err)
+	}
+	batchGet, err := ddb.BatchGetItem(context.Background(), &dynamodb.BatchGetItemInput{RequestItems: map[string]ddbtypes.KeysAndAttributes{"BinaryValues": {Keys: []map[string]ddbtypes.AttributeValue{
+		{"PK": &ddbtypes.AttributeValueMemberS{Value: "binary"}, "SK": &ddbtypes.AttributeValueMemberS{Value: "new"}},
+		{"PK": &ddbtypes.AttributeValueMemberS{Value: "binary"}, "SK": &ddbtypes.AttributeValueMemberS{Value: "missing"}},
+	}}}})
+	if err != nil || len(batchGet.UnprocessedKeys) != 0 || len(batchGet.Responses["BinaryValues"]) != 1 {
+		t.Fatalf("batch get existing and missing: %#v %v", batchGet, err)
+	}
 	createdClass, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("TableClass"), BillingMode: ddbtypes.BillingModePayPerRequest, KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: ddbtypes.KeyTypeHash}}, AttributeDefinitions: []ddbtypes.AttributeDefinition{{AttributeName: aws.String("id"), AttributeType: ddbtypes.ScalarAttributeTypeS}}, TableClass: ddbtypes.TableClassStandard})
 	if err != nil || createdClass.TableDescription == nil || createdClass.TableDescription.TableClassSummary == nil || createdClass.TableDescription.TableClassSummary.TableClass != ddbtypes.TableClassStandard {
 		t.Fatalf("create table class: %#v %v", createdClass, err)

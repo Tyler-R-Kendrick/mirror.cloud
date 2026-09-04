@@ -223,6 +223,17 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 		if status, body := call("GetItem", `{"TableName":"BinaryValues","Key":{"PK":{"S":"binary"},"SK":{"S":"two"}}}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"B":"dGVzdCDAIN0="`)) {
 			t.Fatalf("get binary value %d %s", status, body)
 		}
+		get := `{"RequestItems":{"BinaryValues":{"Keys":[{"PK":{"S":"binary"},"SK":{"S":"one"}},{"PK":{"S":"missing"},"SK":{"S":"item"}}]}}}`
+		if status, body := call("BatchGetItem", get); status != http.StatusOK || !bytes.Contains(body, []byte(`"B":"kA=="`)) || !bytes.Contains(body, []byte(`"UnprocessedKeys":{}`)) {
+			t.Fatalf("batch get values %d %s", status, body)
+		}
+		change := `{"RequestItems":{"BinaryValues":[{"DeleteRequest":{"Key":{"PK":{"S":"binary"},"SK":{"S":"one"}}}},{"PutRequest":{"Item":{"PK":{"S":"binary"},"SK":{"S":"three"}}}}]}}`
+		if status, body := call("BatchWriteItem", change); status != http.StatusOK || !bytes.Contains(body, []byte(`"UnprocessedItems":{}`)) {
+			t.Fatalf("batch delete and put %d %s", status, body)
+		}
+		if status, body := call("GetItem", `{"TableName":"BinaryValues","Key":{"PK":{"S":"binary"},"SK":{"S":"one"}}}`); status != http.StatusOK || bytes.Contains(body, []byte(`"Item"`)) {
+			t.Fatalf("batch delete %d %s", status, body)
+		}
 	})
 
 	t.Run("Given a table class When creating and updating a table Then the class summary persists", func(t *testing.T) {

@@ -5518,6 +5518,50 @@ var mutants = []mutant{
 		run:  "TestDeleteWhereRemovesEveryMatch",
 	},
 	{
+		// A batch that writes only its last element succeeds and answers as
+		// though it had written all of them: N accounts go in, one row comes
+		// out, and nothing in the response says so.
+		name: "engine-for-each-writes-only-the-last-element",
+		file: filepath.Join("internal", "engine", "eval.go"),
+		old: `	for _, e := range list {
+		ev.binds["item"] = e
+		if err := ev.writeOne(ctx, path, w, create); err != nil {
+			return err
+		}
+	}`,
+		new: `	for _, e := range list {
+		ev.binds["item"] = e
+	}
+	if len(list) > 0 {
+		if err := ev.writeOne(ctx, path, w, create); err != nil {
+			return err
+		}
+	}`,
+		pkg: "./internal/engine",
+		run: "TestForEachWritesOneRecordPerElement",
+	},
+	{
+		// A per-member exemption that swallows the whole step turns every
+		// superseded recording back into what it was: an id excused at the
+		// cost of every real assertion beside it.
+		name: "equivalence-superseded-member-exempts-the-step",
+		file: filepath.Join("internal", "equivalence", "equivalence.go"),
+		old: `			for _, d := range u.compare(i, "", want.Output, got.Output) {
+				if _, exempt := step.SupersededMembers[d.Path]; exempt {
+					continue
+				}
+				diffs = append(diffs, d)
+			}`,
+		new: `			for _, d := range u.compare(i, "", want.Output, got.Output) {
+				if len(step.SupersededMembers) > 0 {
+					continue
+				}
+				diffs = append(diffs, d)
+			}`,
+		pkg: "./internal/equivalence",
+		run: "TestSupersededMemberExemptsOnlyThatMember",
+	},
+	{
 		// A write that stops copying the request stores only what the bundle
 		// spells out. Nothing fails to load and nothing faults -- a later read
 		// just answers a smaller record, which is exactly how the pack idiom
@@ -5590,6 +5634,19 @@ var mutants = []mutant{
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 		old:  `"JobName":       "jobName",`,
 		new:  `"JobName":       "JobName",`,
+		pkg:  "./internal/services/aws/states",
+		run:  "TestStatesSyncServiceIntegrations",
+	},
+	{
+		// The same move for CodeBuild, which the extraction retired rather than
+		// relocated. The pack accepted ProjectName among four spellings and is
+		// served from its model now, which declares only projectName -- so the
+		// discrepancy the needle defends did not go away with the pack, it
+		// moved into the integration that introduces it.
+		name: "states-drop-codebuild-pascal-case",
+		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+		old:  `"ProjectName": "projectName",`,
+		new:  `"ProjectName": "ProjectName",`,
 		pkg:  "./internal/services/aws/states",
 		run:  "TestStatesSyncServiceIntegrations",
 	},

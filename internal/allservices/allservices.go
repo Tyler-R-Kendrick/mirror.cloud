@@ -19,7 +19,6 @@ import (
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/acm"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apigateway"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/apigatewayv2"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/appsync"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/athena"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/autoscaling"
@@ -41,7 +40,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/firehose"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/glue"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/guardduty"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iam"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iot"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kafka"

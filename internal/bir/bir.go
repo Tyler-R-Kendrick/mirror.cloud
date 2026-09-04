@@ -383,6 +383,23 @@ type WriteEffect struct {
 	// say "keep what the caller sent, but the id and the status are mine",
 	// which is what every one of those packs does.
 	Spread string `yaml:"spread,omitempty"`
+	// ForEach runs this write once per element of the list it evaluates to,
+	// with the element bound to `item` for `key` and every record member --
+	// the same name a delete's `where` and a list's `filter` bind, because it
+	// means the same thing: the candidate currently under consideration.
+	//
+	// A batch operation writes N records from one request. GuardDuty's
+	// CreateMembers takes `AccountDetails` and stores a member per entry;
+	// SecurityHub's BatchImportFindings takes `Findings`; the tagging API
+	// takes `ResourceARNList`. Six of the remaining services have an
+	// operation of this shape and none of them could be expressed: a bundle
+	// can name a list but had no way to write once per element of it.
+	//
+	// `key` is required alongside it. Without one every element resolves the
+	// same key and the last write wins, which is a silent single-row
+	// overwrite -- the exact failure shape this project keeps finding in the
+	// packs -- so the loader refuses it rather than the engine producing it.
+	ForEach string `yaml:"for_each,omitempty"`
 	// State is the lifecycle state a created record starts in, when that is
 	// not the chart's initial state. An SQS message sent with a delay is born
 	// invisible and becomes visible when its deadline passes.

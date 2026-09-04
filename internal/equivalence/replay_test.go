@@ -137,6 +137,52 @@ func TestReplayCatchesReusedIdentifier(t *testing.T) {
 	}
 }
 
+// TestSupersededMemberExemptsOnlyThatMember is what makes the narrow form
+// worth having. A pack that answers a member its response shape does not
+// declare diverges on that member and matches on every other, and the
+// whole-step exemption drops the body entirely to excuse it -- so a bundle
+// that also got the status wrong would pass.
+//
+// Three recordings had reached that point between them, and the members they
+// were excusing were ids the caller had already supplied while the members
+// being thrown away were the ones that said what the service did.
+func TestSupersededMemberExemptsOnlyThatMember(t *testing.T) {
+	acct := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	step := equivalence.Step{
+		Operation: "Get", Input: map[string]any{}, Identity: acct,
+		SupersededMembers: map[string]string{
+			"Id": "the response shape does not declare it",
+		},
+	}
+	trace := &equivalence.Trace{
+		Steps: []equivalence.Step{step},
+		Outcomes: []equivalence.Outcome{
+			{Output: map[string]any{"Id": "aaaaaaaa", "Status": "ENABLED"}},
+		},
+	}
+	// The candidate drops Id, which is exempt, and gets Status wrong, which
+	// is not.
+	diffs, err := equivalence.Replay(context.Background(), &wrongStatus{}, trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("%d diffs, want exactly the Status one: %v", len(diffs), diffs)
+	}
+	if diffs[0].Path != "Status" {
+		t.Errorf("diff on %q, want Status: the exemption covered the wrong member",
+			diffs[0].Path)
+	}
+}
+
+type wrongStatus struct{}
+
+func (*wrongStatus) ServiceID() string    { return "aws.shield" }
+func (*wrongStatus) Operations() []string { return []string{"Get"} }
+func (*wrongStatus) Invoke(context.Context, *spi.Request) (*spi.Response, error) {
+	return &spi.Response{Output: map[string]any{"Status": "DISABLED"}}, nil
+}
+
 type wrongFault struct{}
 
 func (*wrongFault) ServiceID() string    { return "aws.shield" }

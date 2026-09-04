@@ -5594,6 +5594,19 @@ var mutants = []mutant{
 		run:  "TestStatesSyncServiceIntegrations",
 	},
 	{
+		// The same move for CodeBuild, which the extraction retired rather than
+		// relocated. The pack accepted ProjectName among four spellings and is
+		// served from its model now, which declares only projectName -- so the
+		// discrepancy the needle defends did not go away with the pack, it
+		// moved into the integration that introduces it.
+		name: "states-drop-codebuild-pascal-case",
+		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
+		old:  `"ProjectName": "projectName",`,
+		new:  `"ProjectName": "ProjectName",`,
+		pkg:  "./internal/services/aws/states",
+		run:  "TestStatesSyncServiceIntegrations",
+	},
+	{
 		name: "states-ignore-task-credentials",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 		old:  `copy.Identity = identity`,

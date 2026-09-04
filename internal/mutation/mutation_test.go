@@ -5654,12 +5654,41 @@ var mutants = []mutant{
 		run: "TestAddressingCheckReadsDeriveExpressions",
 	},
 	{
+		// An exemption that is never checked for use rots into a lie: it reads
+		// as a documented defect while the operation is clean, and it survives
+		// the very fix it was written to excuse.
+		name: "bir-addressing-stale-exemption-unreported",
+		file: filepath.Join("internal", "bir", "validate.go"),
+		old: `		if excused[res] {
+			continue
+		}`,
+		new: `		if true {
+			continue
+		}`,
+		pkg: "./internal/bir",
+		run: "TestAnExemptionThatExcusesNothingIsRefused",
+	},
+	{
+		// The same rot on the recording side: a superseded_members entry that
+		// excuses nothing still reads as a documented divergence.
+		name: "equivalence-stale-member-exemption-unreported",
+		file: filepath.Join("internal", "equivalence", "equivalence.go"),
+		old: `				if used[path] {
+					continue
+				}`,
+		new: `				if true {
+					continue
+				}`,
+		pkg: "./internal/equivalence",
+		run: "TestSupersededMemberThatExcusesNothingIsReported",
+	},
+	{
 		// An exemption that needs no reason is one that can be added to make
 		// the check quiet, which is the only way this check fails: not by
 		// missing a defect, but by being switched off one operation at a time.
 		name: "bir-addressing-exemption-needs-no-reason",
 		file: filepath.Join("internal", "bir", "validate.go"),
-		old:  `		if strings.TrimSpace(why) == "" {`,
+		old:  `		if strings.TrimSpace(op.Addressing[res]) == "" {`,
 		new:  `		if false {`,
 		pkg:  "./internal/bir",
 		run:  "TestAnExemptionNeedsAReason",
@@ -5695,12 +5724,14 @@ var mutants = []mutant{
 		file: filepath.Join("internal", "equivalence", "equivalence.go"),
 		old: `			for _, d := range u.compare(i, "", want.Output, got.Output) {
 				if _, exempt := step.SupersededMembers[d.Path]; exempt {
+					used[d.Path] = true
 					continue
 				}
 				diffs = append(diffs, d)
 			}`,
 		new: `			for _, d := range u.compare(i, "", want.Output, got.Output) {
 				if len(step.SupersededMembers) > 0 {
+					used[d.Path] = true
 					continue
 				}
 				diffs = append(diffs, d)

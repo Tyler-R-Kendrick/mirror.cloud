@@ -96,10 +96,7 @@ func baselineAtBase(t *testing.T, root string) (Metrics, string, bool) {
 		if err := json.Unmarshal([]byte(blob), &present); err != nil {
 			t.Fatalf("parse %s at %s: %v", ratchetFile, base, err)
 		}
-		if _, ok := present["protocol_mismatches"]; !ok {
-			m.ProtocolMismatches = -1 // sentinel: not comparable
-			m.ProtocolMismatchServices = nil
-		}
+		ClearAbsent(&m, present)
 		return m, ref, true
 	}
 	return Metrics{}, "", false

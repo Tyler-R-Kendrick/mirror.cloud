@@ -576,8 +576,20 @@ The one suite that could have caught it is the SDK contract suite, which uses th
 
 **Two further defects the same probe found.** The generic REST router matches on HTTP method alone: `restjson.Route` returns the first operation whose `HTTP.Method` equals the request's, ignoring the path and the target, so `GET /detector` resolves to `DescribeOrganizationConfiguration`. And the demux's hundred and thirty per-service branches all sit inside `if action != ""`, which only query-protocol requests satisfy, so a REST request reaches none of them and falls through to S3. Four services (lambda, apigateway, eks, opensearch) have hand-written routers, which is why they work and why nobody noticed.
 
-**What is landed here, and what is not.** The disagreement is now measured and ratcheted: `protocol_mismatches` in `ratchet.json`, with the service list beside it so a fix and a regression cannot cancel out. A new generic gate, `TestEveryBundleAnswersOverHTTP`, builds a request for every bundle *from the specification* and requires a modeled answer through the real edge -- the coverage each pack's booted test used to carry, in a form that cannot be lost by deleting a pack, and that widens by itself as mismatches are fixed.
+**What is landed here, and what is not.** The disagreement is now measured and ratcheted: `routing_mismatches` in `ratchet.json`, with the service list beside it so a fix and a regression cannot cancel out. A new generic gate, `TestEveryBundleAnswersOverHTTP`, builds a request for every bundle *from the specification* and requires a modeled answer through the real edge -- the coverage each pack's booted test used to carry, in a form that cannot be lost by deleting a pack, and that widens by itself as mismatches are fixed.
 
 It is a ratchet and not a failing test because fixing fifty-three services is an edge change -- booting from the generated models, and making REST routing match on the URI -- not a bundle change. That is the next piece of work, and it is now the largest one outstanding.
 
 It also found two genuine bundle defects on the way: `servicecatalog.DescribeProduct` and `wafv2.GetRuleGroup` read an optional `input.Id` unguarded in their key expressions, so a legal request answered a 500. Both fixed here.
+
+### Reviewing the exemptions found the same rot in three places
+
+Self-reviewing this stack before merge turned up one mistake made three times, which is worth more than any of the three instances.
+
+Every gate added here has an escape hatch, because every one of them is guarding behavior that some bundle transcribes on purpose: `addressing:` excuses a resource keyed by a member its operation does not declare, `superseded_members` excuses an output member the pack answered and the shape does not declare. In both, I required the exemption to carry a reason -- and in neither did I require it to *excuse anything*.
+
+An exemption that excuses nothing is worse than a missing one. It reads as a documented divergence while the step or the operation is in fact clean, and it survives the member being renamed, the operation gaining an explicit key, or the bundle simply being fixed. Every later reader believes it, and the number of documented holes in the gate drifts upward without any of them being real. That is the same failure as the mispointed mutation needle: something that looks like coverage and is not.
+
+Both now report an exemption that matched nothing, and both have a test for it. The third instance was the ratchet's own guard, which special-cased one metric name so a newly-added metric could start above zero; the next metric would have hit the same wall and needed its own special case. It is driven off the metric list now.
+
+The lesson to carry forward is narrow and checkable: **an exemption mechanism needs three properties, not one.** It must name something that exists, it must say why, and it must be reported when it stops applying. I built the first two twice and the third zero times, and only noticed by reading the diff back with the question "how does this rot?".

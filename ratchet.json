@@ -63,8 +63,8 @@
     "aws/xray",
     "gcp/gcs"
   ],
-  "protocol_mismatches": 53,
-  "protocol_mismatch_services": [
+  "routing_mismatches": 53,
+  "routing_mismatch_services": [
     "aws.access-analyzer",
     "aws.account",
     "aws.amplify",

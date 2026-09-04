@@ -363,12 +363,12 @@ func checkAddressing(s *Service, svc *model.Service, modelOp model.Operation, op
 			}
 		}
 	}
-	for res, why := range op.Addressing {
+	for _, res := range sortedKeys(op.Addressing) {
 		if _, ok := s.Resources[res]; !ok {
 			*problems = append(*problems, fmt.Errorf("%s: %s.addressing: unknown resource %q",
 				s.ServiceID, where, res))
 		}
-		if strings.TrimSpace(why) == "" {
+		if strings.TrimSpace(op.Addressing[res]) == "" {
 			*problems = append(*problems, fmt.Errorf(
 				"%s: %s.addressing.%s: no reason; an exemption records a transcribed "+
 					"defect, so it has to say which one", s.ServiceID, where, res))
@@ -390,11 +390,15 @@ func checkAddressing(s *Service, svc *model.Service, modelOp model.Operation, op
 	}
 	for i, eff := range op.Effects {
 		at := fmt.Sprintf("effects[%d]", i)
-		for kind, w := range map[string]*WriteEffect{
-			"create": eff.Create, "put": eff.Put, "patch": eff.Patch,
-		} {
-			if w != nil {
-				note(w.Resource, w.Key, at+"."+kind)
+		// Ordered rather than ranged over a map: exactly one of the three is
+		// set, so the order cannot matter today, and a message whose text
+		// depends on map iteration is a thing to have to discover later.
+		for _, kw := range []struct {
+			kind string
+			w    *WriteEffect
+		}{{"create", eff.Create}, {"put", eff.Put}, {"patch", eff.Patch}} {
+			if kw.w != nil {
+				note(kw.w.Resource, kw.w.Key, at+"."+kw.kind)
 			}
 		}
 		if d := eff.Delete; d != nil && d.Where == "" {
@@ -402,8 +406,15 @@ func checkAddressing(s *Service, svc *model.Service, modelOp model.Operation, op
 		}
 	}
 
+	// An exemption that excuses nothing is reported too. A resource that gains
+	// an explicit key, or stops being addressed by this operation at all,
+	// leaves behind an entry that reads as a documented defect while defending
+	// nothing -- and the next reader believes it.
+	excused := map[string]bool{}
+
 	for _, res := range sortedKeys(implicit) {
 		if _, exempt := op.Addressing[res]; exempt {
+			excused[res] = true
 			continue
 		}
 		r := s.Resources[res]
@@ -439,6 +450,19 @@ func checkAddressing(s *Service, svc *model.Service, modelOp model.Operation, op
 				s.ServiceID, where, implicit[res], res,
 				strings.Join(members, ", "), modelOp.Input, res))
 		}
+	}
+
+	for _, res := range sortedKeys(op.Addressing) {
+		if excused[res] {
+			continue
+		}
+		if _, known := s.Resources[res]; !known {
+			continue // already reported as an unknown resource
+		}
+		*problems = append(*problems, fmt.Errorf(
+			"%s: %s.addressing.%s: excuses nothing; this operation does not "+
+				"address %q by a member it fails to declare. Drop the entry.",
+			s.ServiceID, where, res, res))
 	}
 }
 

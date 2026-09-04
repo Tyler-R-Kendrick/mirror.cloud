@@ -77,11 +77,11 @@ func reachable(ir *bir.Service, svc *model.Service) (model.Operation, bool) {
 	return best, found
 }
 
-// shared counts how many services claim each endpoint prefix, so the ones that
-// collide can be addressed by name instead.
-var shared = map[string]int{}
-
-func request(base string, svc *model.Service, op model.Operation) (*http.Request, error) {
+// request builds the call an SDK would make. `shared` counts how many services
+// claim each endpoint prefix, so the ones that collide can be addressed by
+// name instead; it is passed rather than kept in a package variable, which
+// would be empty for any test that did not populate it first.
+func request(base string, svc *model.Service, op model.Operation, shared map[string]int) (*http.Request, error) {
 	uri := op.HTTP.URI
 	if uri == "" {
 		uri = "/"
@@ -183,8 +183,9 @@ func TestEveryBundleAnswersOverHTTP(t *testing.T) {
 	// cannot be called the way an SDK would -- the request this test
 	// builds from the model is the request that does not reach it, which is
 	// the defect rather than a fault of the test. Those are counted by the
-	// ratchet (`protocol_mismatches`, currently 48) and excluded here, so this
+	// ratchet (`routing_mismatches`, currently 48) and excluded here, so this
 	// gate is a real one today and widens by itself as they are fixed.
+	shared := map[string]int{}
 	for _, id := range ids {
 		if m, err := generated.Model(id); err == nil {
 			shared[m.EndpointPrefix]++
@@ -231,7 +232,7 @@ func TestEveryBundleAnswersOverHTTP(t *testing.T) {
 			ts := httptest.NewServer(rt.Handler())
 			defer ts.Close()
 
-			req, err := request(ts.URL, svc, op)
+			req, err := request(ts.URL, svc, op, shared)
 			if err != nil {
 				skipped++
 				t.Skipf("%s: %v", op.Name, err)

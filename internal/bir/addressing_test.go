@@ -178,6 +178,39 @@ operations:
 	}
 }
 
+// TestAnExemptionThatExcusesNothingIsRefused is the other half of keeping the
+// escape hatch honest. An entry left behind after the operation gained an
+// explicit key, or stopped addressing the resource at all, reads as a
+// documented defect while defending nothing.
+func TestAnExemptionThatExcusesNothingIsRefused(t *testing.T) {
+	err := load(t, "aws.dms", `schema: bir/1
+service: aws.dms
+provenance: authored
+resources:
+  dmsendpoint:
+    collection: dmsep
+    id:
+      input_members: [EndpointIdentifier]
+    record:
+      EndpointIdentifier: id
+operations:
+  DeleteEndpoint:
+    addressing:
+      dmsendpoint: "stale: this delete names its key explicitly now"
+    effects:
+      - delete:
+          resource: dmsendpoint
+          missing: ignore
+          key: "string(input.EndpointArn)"
+`)
+	if err == nil {
+		t.Fatal("an exemption excusing nothing loaded")
+	}
+	if !strings.Contains(err.Error(), "excuses nothing") {
+		t.Fatalf("the complaint does not say the exemption is stale: %v", err)
+	}
+}
+
 // TestTheTranscribedDefectsStayExempt pins the two bundles that carry this
 // defect on purpose. If either stopped being exempt the recording would still
 // pass -- the behavior is unchanged either way -- so what this defends is the

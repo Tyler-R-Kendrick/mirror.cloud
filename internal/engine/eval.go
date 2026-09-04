@@ -475,9 +475,6 @@ func (ev *eval) runEffects(ctx context.Context, op bir.Operation) error {
 	return nil
 }
 
-// write creates or updates a record. On create, an ID is generated when the
-// resource declares a generator — randomness is an effect, so the value comes
-// from the deterministic Rand and never from an expression.
 // write runs a create, put or patch: once, or once per element when the effect
 // declares a for_each.
 func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, create bool) error {
@@ -532,9 +529,12 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 	return nil
 }
 
-// writeOne stores one record. Everything it reads from the effect is the same
-// whether the write runs once or per element; what differs is only whether
-// `item` is bound around it.
+// writeOne creates or updates one record. On create, an ID is generated when
+// the resource declares a generator — randomness is an effect, so the value
+// comes from the deterministic Rand and never from an expression.
+//
+// Everything it reads from the effect is the same whether the write runs once
+// or per element; what differs is only whether `item` is bound around it.
 func (ev *eval) writeOne(ctx context.Context, path string, w bir.WriteEffect, create bool) error {
 	res, ok := ev.e.ir.Resources[w.Resource]
 	if !ok {

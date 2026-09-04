@@ -521,8 +521,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 |---|---:|
 | Requested test forms wired | 7 / 7 (100%) |
 | DynamoDB operations routed to emulation | 62 / 62 (100%) |
-| LocalStack DynamoDB test functions explicitly traced | 19 / 56 (33.9%) |
-| LocalStack DynamoDB test functions not yet traced | 37 / 56 (66.1%) |
+| LocalStack DynamoDB test functions explicitly traced | 23 / 56 (41.1%) |
+| LocalStack DynamoDB test functions not yet traced | 33 / 56 (58.9%) |
 
 The pinned inventory is the 56 direct test functions in `tests/aws/services/dynamodb/test_dynamodb.py`; parametrized cases are not expanded.
 
@@ -547,3 +547,7 @@ The pinned inventory is the 56 direct test functions in `tests/aws/services/dyna
 | `test_dynamodb.py::TestDynamoDB::test_empty_and_binary_values` | PutItem preserves empty strings and arbitrary binary attributes, including non-UTF-8 bytes represented by DynamoDB's base64 wire encoding; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, and native fuzz checks cover exact round trips | Mapped; race-pending |
 | `test_dynamodb.py::TestDynamoDB::test_batch_write_binary` | BatchWriteItem preserves binary values with decodable and non-decodable byte sequences, returns an empty UnprocessedItems map, and is pinned by atomic/snapshot, SDK, BDD, fuzz, and semantic mutation coverage | Mapped; race-pending |
 | `test_dynamodb.py::TestDynamoDB::test_dynamodb_create_table_with_class` | CreateTable translates `TableClass` into a persisted `TableClassSummary`, while UpdateTable changes the summary observed by subsequent DescribeTable calls; atomic, Verify-style snapshot, SDK contract, raw HTTP BDD, native fuzz, and two semantic mutants cover the lifecycle | Mapped; race-pending |
+| `test_dynamodb.py::TestDynamoDB::test_dynamodb_execute_transaction` | ExecuteTransaction applies successful PartiQL writes while omitting write-only response entries; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz seeds, concurrent chaos, and semantic mutation coverage pin the behavior | Mapped; race-pending |
+| `test_dynamodb.py::TestDynamoDB::test_dynamodb_batch_execute_statement` | BatchExecuteStatement supports scalar UPDATE statements through the shared UpdateItem path and returns a `TableName` for every statement response; the same seven test layers cover persisted numeric updates and response shape | Mapped; race-pending |
+| `test_dynamodb.py::TestDynamoDB::test_dynamodb_execute_statement_empy_parameter` | An explicitly empty ExecuteStatement `Parameters` list returns the exact AWS `ValidationException` code, status, and constraint message across atomic, snapshot, SDK, BDD, fuzz, and mutation checks | Mapped; race-pending |
+| `test_dynamodb.py::TestDynamoDB::test_dynamodb_partiql_missing` | PartiQL `IS MISSING` and `IS NOT MISSING` predicates translate to the existing expression evaluator and return complementary item sets through atomic, snapshot, SDK, BDD, fuzz, and mutation coverage | Mapped; race-pending |

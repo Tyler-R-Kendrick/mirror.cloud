@@ -230,4 +230,30 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 			t.Fatalf("describe table class %d %s", status, body)
 		}
 	})
+
+	t.Run("Given PartiQL statements When batching transactions and missing predicates Then AWS responses are preserved", func(t *testing.T) {
+		if status, body := call("CreateTable", `{"TableName":"PartiQL","KeySchema":[{"AttributeName":"Username","KeyType":"HASH"}]}`); status != http.StatusOK {
+			t.Fatalf("create PartiQL table %d %s", status, body)
+		}
+		if status, body := call("PutItem", `{"TableName":"PartiQL","Item":{"Username":{"S":"user02"}}}`); status != http.StatusOK {
+			t.Fatalf("put PartiQL item %d %s", status, body)
+		}
+		batch := `{"Statements":[{"Statement":"INSERT INTO PartiQL VALUE {'Username': 'user01', 'FirstName': 'Alice'}"},{"Statement":"UPDATE PartiQL SET Age=20 WHERE Username='user02'"}]}`
+		if status, body := call("BatchExecuteStatement", batch); status != http.StatusOK || bytes.Count(body, []byte(`"TableName":"PartiQL"`)) != 2 {
+			t.Fatalf("batch PartiQL %d %s", status, body)
+		}
+		transaction := `{"TransactStatements":[{"Statement":"INSERT INTO PartiQL VALUE {'Username': 'user03'}"},{"Statement":"INSERT INTO PartiQL VALUE {'Username': 'user04'}"}]}`
+		if status, body := call("ExecuteTransaction", transaction); status != http.StatusOK || !bytes.Contains(body, []byte(`"Responses":[]`)) {
+			t.Fatalf("transaction PartiQL %d %s", status, body)
+		}
+		if status, body := call("ExecuteStatement", `{"Statement":"SELECT * FROM PartiQL WHERE FirstName IS NOT MISSING"}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"FirstName":{"S":"Alice"}`)) || bytes.Contains(body, []byte(`"user02"`)) {
+			t.Fatalf("PartiQL not missing %d %s", status, body)
+		}
+		if status, body := call("ExecuteStatement", `{"Statement":"SELECT * FROM PartiQL WHERE FirstName IS MISSING"}`); status != http.StatusOK || bytes.Contains(body, []byte(`"user01"`)) || !bytes.Contains(body, []byte(`"user02"`)) {
+			t.Fatalf("PartiQL missing %d %s", status, body)
+		}
+		if status, body := call("ExecuteStatement", `{"Statement":"SELECT * FROM PartiQL","Parameters":[]}`); status != http.StatusBadRequest || !bytes.Contains(body, []byte("Member must have length greater than or equal to 1")) {
+			t.Fatalf("PartiQL empty parameters %d %s", status, body)
+		}
+	})
 }

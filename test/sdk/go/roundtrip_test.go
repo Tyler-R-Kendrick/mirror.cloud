@@ -3193,6 +3193,41 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || describedClass.Table == nil || describedClass.Table.TableClassSummary == nil || describedClass.Table.TableClassSummary.TableClass != ddbtypes.TableClassStandardInfrequentAccess {
 		t.Fatalf("describe table class: %#v %v", describedClass, err)
 	}
+	if _, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("PartiQL"), BillingMode: ddbtypes.BillingModePayPerRequest, KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("Username"), KeyType: ddbtypes.KeyTypeHash}}, AttributeDefinitions: []ddbtypes.AttributeDefinition{{AttributeName: aws.String("Username"), AttributeType: ddbtypes.ScalarAttributeTypeS}}}); err != nil {
+		t.Fatalf("create PartiQL table: %v", err)
+	}
+	if _, err := ddb.PutItem(context.Background(), &dynamodb.PutItemInput{TableName: aws.String("PartiQL"), Item: map[string]ddbtypes.AttributeValue{"Username": &ddbtypes.AttributeValueMemberS{Value: "user02"}}}); err != nil {
+		t.Fatalf("put PartiQL item: %v", err)
+	}
+	batchPartiQL, err := ddb.BatchExecuteStatement(context.Background(), &dynamodb.BatchExecuteStatementInput{Statements: []ddbtypes.BatchStatementRequest{
+		{Statement: aws.String("INSERT INTO PartiQL VALUE {'Username': 'user01', 'FirstName': 'Alice'}")},
+		{Statement: aws.String("UPDATE PartiQL SET Age=20 WHERE Username='user02'")},
+	}})
+	if err != nil || len(batchPartiQL.Responses) != 2 || aws.ToString(batchPartiQL.Responses[0].TableName) != "PartiQL" || aws.ToString(batchPartiQL.Responses[1].TableName) != "PartiQL" {
+		t.Fatalf("batch PartiQL: %#v %v", batchPartiQL, err)
+	}
+	updatedPartiQL, err := ddb.GetItem(context.Background(), &dynamodb.GetItemInput{TableName: aws.String("PartiQL"), Key: map[string]ddbtypes.AttributeValue{"Username": &ddbtypes.AttributeValueMemberS{Value: "user02"}}})
+	if err != nil {
+		t.Fatalf("get updated PartiQL item: %v", err)
+	}
+	age, ok := updatedPartiQL.Item["Age"].(*ddbtypes.AttributeValueMemberN)
+	if !ok || age.Value != "20" {
+		t.Fatalf("updated PartiQL item: %#v %v", updatedPartiQL, err)
+	}
+	transactionPartiQL, err := ddb.ExecuteTransaction(context.Background(), &dynamodb.ExecuteTransactionInput{TransactStatements: []ddbtypes.ParameterizedStatement{
+		{Statement: aws.String("INSERT INTO PartiQL VALUE {'Username': 'user03'}")},
+		{Statement: aws.String("INSERT INTO PartiQL VALUE {'Username': 'user04'}")},
+	}})
+	if err != nil || len(transactionPartiQL.Responses) != 0 {
+		t.Fatalf("transaction PartiQL: %#v %v", transactionPartiQL, err)
+	}
+	notMissingPartiQL, err := ddb.ExecuteStatement(context.Background(), &dynamodb.ExecuteStatementInput{Statement: aws.String("SELECT * FROM PartiQL WHERE FirstName IS NOT MISSING")})
+	if err != nil || len(notMissingPartiQL.Items) != 1 {
+		t.Fatalf("PartiQL not missing: %#v %v", notMissingPartiQL, err)
+	}
+	if _, err := ddb.ExecuteStatement(context.Background(), &dynamodb.ExecuteStatementInput{Statement: aws.String("SELECT * FROM PartiQL"), Parameters: []ddbtypes.AttributeValue{}}); err == nil || !strings.Contains(err.Error(), "Member must have length greater than or equal to 1") {
+		t.Fatalf("PartiQL empty parameters: %v", err)
+	}
 	if ttl, err := ddb.DescribeTimeToLive(context.Background(), &dynamodb.DescribeTimeToLiveInput{TableName: aws.String("T")}); err != nil || ttl.TimeToLiveDescription == nil || ttl.TimeToLiveDescription.TimeToLiveStatus != ddbtypes.TimeToLiveStatusDisabled {
 		t.Fatalf("default ttl: %#v %v", ttl, err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -92,6 +93,47 @@ func FuzzDynamoDBTableClass(f *testing.F) {
 		described, describeErr := call("DescribeTable", map[string]any{"TableName": "T"})
 		if createErr != nil || updateErr != nil || describeErr != nil || str(asMap(asMap(updated.Output["TableDescription"])["TableClassSummary"])["TableClass"]) != class || str(asMap(asMap(described.Output["Table"])["TableClassSummary"])["TableClass"]) != class {
 			t.Fatal("table class did not persist")
+		}
+	})
+}
+
+func FuzzDynamoDBPartiQL(f *testing.F) {
+	f.Add(int64(20), true)
+	f.Fuzz(func(t *testing.T, age int64, hasName bool) {
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+		call := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		_, _ = call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "Username", "KeyType": "HASH"}}})
+		item := map[string]any{"Username": map[string]any{"S": "user"}}
+		if hasName {
+			item["FirstName"] = map[string]any{"S": "Alice"}
+		}
+		_, _ = call("PutItem", map[string]any{"TableName": "T", "Item": item})
+		value := strconv.FormatInt(age, 10)
+		batch, batchErr := call("BatchExecuteStatement", map[string]any{"Statements": []any{map[string]any{"Statement": "UPDATE T SET Age=" + value + " WHERE Username='user'"}}})
+		got, getErr := call("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"Username": map[string]any{"S": "user"}}})
+		present, presentErr := call("ExecuteStatement", map[string]any{"Statement": "SELECT * FROM T WHERE FirstName IS NOT MISSING"})
+		missing, missingErr := call("ExecuteStatement", map[string]any{"Statement": "SELECT * FROM T WHERE FirstName IS MISSING"})
+		_, emptyErr := call("ExecuteStatement", map[string]any{"Statement": "SELECT * FROM T", "Parameters": []any{}})
+		var responses, presentItems, missingItems []any
+		ageValue := ""
+		if batch != nil {
+			responses = asSlice(batch.Output["Responses"])
+		}
+		if got != nil {
+			ageValue = str(asMap(asMap(got.Output["Item"])["Age"])["N"])
+		}
+		if present != nil {
+			presentItems = asSlice(present.Output["Items"])
+		}
+		if missing != nil {
+			missingItems = asSlice(missing.Output["Items"])
+		}
+		if batchErr != nil || getErr != nil || presentErr != nil || missingErr != nil || emptyErr == nil || len(responses) != 1 || str(asMap(responses[0])["TableName"]) != "T" || ageValue != value || (len(presentItems) == 1) != hasName || (len(missingItems) == 1) == hasName {
+			t.Fatal("PartiQL update, missing predicate, or validation changed")
 		}
 	})
 }

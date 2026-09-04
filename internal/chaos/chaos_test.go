@@ -106,6 +106,40 @@ func TestConcurrentDynamoDBTTLExpirationCountsOnce(t *testing.T) {
 	}
 }
 
+func TestConcurrentDynamoDBPartiQLTransactions(t *testing.T) {
+	p := dynamodb.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "Username", "KeyType": "HASH"}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			user := "user-" + strconv.Itoa(index)
+			_, err := call("ExecuteTransaction", map[string]any{"TransactStatements": []any{map[string]any{"Statement": "INSERT INTO T VALUE {'Username': '" + user + "'}"}}})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := call("Scan", map[string]any{"TableName": "T"})
+	if err != nil || items.Output["Count"] != 32 {
+		t.Fatalf("concurrent PartiQL transactions: %#v %v", items, err)
+	}
+}
+
 func (r failAfterReader) Read(p []byte) (int, error) {
 	n, err := r.Reader.Read(p)
 	if err == io.EOF {

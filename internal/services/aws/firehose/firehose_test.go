@@ -4352,6 +4352,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		path    string
 		header  http.Header
 		payload map[string]any
+		body    []byte
 	}
 	captured := make(chan capturedRequest, 8)
 	releaseBlocked := make(chan struct{}, 2)
@@ -4373,10 +4374,14 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 			_ = reader.Close()
 		}
 		payload := map[string]any{}
-		if err := json.Unmarshal(body, &payload); err != nil {
-			t.Error(err)
+		if len(body) >= 1024*1024 {
+			captured <- capturedRequest{path: request.URL.RequestURI(), header: request.Header.Clone(), body: body}
+		} else {
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Error(err)
+			}
+			captured <- capturedRequest{path: request.URL.RequestURI(), header: request.Header.Clone(), payload: payload}
 		}
-		captured <- capturedRequest{path: request.URL.RequestURI(), header: request.Header.Clone(), payload: payload}
 		if request.URL.Path == "/blocked" {
 			<-releaseBlocked
 		}
@@ -4393,7 +4398,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 			writer.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		requestID := first(payload, "requestId")
+		requestID := request.Header.Get("X-Amz-Firehose-Request-Id")
 		if request.URL.Path == "/failure" {
 			requestID = "wrong-request"
 		}
@@ -4929,6 +4934,9 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	case bufferedRequest = <-captured:
 	case <-time.After(2 * time.Second):
 		t.Fatal("size-threshold HTTP buffer did not flush")
+	}
+	if err := json.Unmarshal(bufferedRequest.body, &bufferedRequest.payload); err != nil {
+		t.Fatal(err)
 	}
 	bufferedRecords = bufferedRequest.payload["records"].([]any)
 	if first(bufferedRequest.payload, "requestId") != sizeFirst.Output["RecordId"] || len(bufferedRecords) != 2 || first(bufferedRecords[0].(map[string]any), "data") != base64.StdEncoding.EncodeToString(largeA) || first(bufferedRecords[1].(map[string]any), "data") != base64.StdEncoding.EncodeToString(largeB) {

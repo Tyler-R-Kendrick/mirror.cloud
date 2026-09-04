@@ -463,17 +463,20 @@ func TestPipesDynamoDBPartialBatchCheckpoint(t *testing.T) {
 	checkpoint := deps.Store.Scope(id.Account, id.Region).Collection("pipecheckpoint")
 	position := func() string {
 		raw, _, _ := checkpoint.Get(context.Background(), "partial-dynamodb")
-		decoded, _ := base64.StdEncoding.DecodeString(string(raw))
-		return string(decoded)
+		parts := strings.SplitN(string(raw), "|", 3)
+		if len(parts) != 3 {
+			return ""
+		}
+		return parts[1]
 	}
 	invoke(t, p, id, "StartPipe", map[string]any{"Name": "partial-dynamodb"})
-	eventually(t, func() bool { return position() == "Partial|2" })
+	eventually(t, func() bool { return position() == "2" })
 	invoke(t, p, id, "StopPipe", map[string]any{"Name": "partial-dynamodb"})
 
 	success := "def lambda_handler(event, context):\n    return {}\n"
 	invoke(t, function, id, "UpdateFunctionCode", map[string]any{"FunctionName": "ddb-partial", "ZipFile": lambdaCode(success)["ZipFile"]})
 	invoke(t, p, id, "StartPipe", map[string]any{"Name": "partial-dynamodb"})
-	eventually(t, func() bool { return position() == "Partial|3" })
+	eventually(t, func() bool { return position() == "3" })
 }
 
 func TestPipesStepFunctionsTarget(t *testing.T) {

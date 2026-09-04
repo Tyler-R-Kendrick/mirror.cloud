@@ -69,7 +69,16 @@ func FuzzDynamoDBBinaryValues(f *testing.F) {
 		batch, batchErr := call("BatchWriteItem", map[string]any{"RequestItems": map[string]any{"T": []any{map[string]any{"PutRequest": map[string]any{"Item": map[string]any{"id": map[string]any{"S": "two"}, "data": map[string]any{"B": encoded}}}}}}})
 		one, oneErr := call("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "one"}}})
 		two, twoErr := call("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "two"}}})
-		if putErr != nil || batchErr != nil || oneErr != nil || twoErr != nil || len(asMap(batch.Output["UnprocessedItems"])) != 0 || str(asMap(asMap(one.Output["Item"])["data"])["B"]) != encoded || str(asMap(asMap(two.Output["Item"])["data"])["B"]) != encoded {
+		gotBatch, getBatchErr := call("BatchGetItem", map[string]any{"RequestItems": map[string]any{"T": map[string]any{"Keys": []any{
+			map[string]any{"id": map[string]any{"S": "one"}}, map[string]any{"id": map[string]any{"S": "two"}}, map[string]any{"id": map[string]any{"S": "missing"}},
+		}}}})
+		changed, changeErr := call("BatchWriteItem", map[string]any{"RequestItems": map[string]any{"T": []any{
+			map[string]any{"DeleteRequest": map[string]any{"Key": map[string]any{"id": map[string]any{"S": "one"}}}},
+			map[string]any{"PutRequest": map[string]any{"Item": map[string]any{"id": map[string]any{"S": "three"}, "data": map[string]any{"B": encoded}}}},
+		}}})
+		deleted, deletedErr := call("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "one"}}})
+		three, threeErr := call("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "three"}}})
+		if putErr != nil || batchErr != nil || oneErr != nil || twoErr != nil || getBatchErr != nil || changeErr != nil || deletedErr != nil || threeErr != nil || len(asMap(batch.Output["UnprocessedItems"])) != 0 || len(asMap(changed.Output["UnprocessedItems"])) != 0 || len(asSlice(asMap(gotBatch.Output["Responses"])["T"])) != 2 || len(asMap(gotBatch.Output["UnprocessedKeys"])) != 0 || deleted.Output["Item"] != nil || str(asMap(asMap(one.Output["Item"])["data"])["B"]) != encoded || str(asMap(asMap(two.Output["Item"])["data"])["B"]) != encoded || str(asMap(asMap(three.Output["Item"])["data"])["B"]) != encoded {
 			t.Fatal("binary values did not round trip")
 		}
 	})

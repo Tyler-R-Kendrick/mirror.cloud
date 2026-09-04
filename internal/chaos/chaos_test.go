@@ -234,6 +234,44 @@ func TestConcurrentDynamoDBTransactionTokenChoosesOnePayload(t *testing.T) {
 	}
 }
 
+func TestConcurrentDynamoDBBatchWritesRemainReadable(t *testing.T) {
+	p := dynamodb.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := strconv.Itoa(index)
+			_, err := call("BatchWriteItem", map[string]any{"RequestItems": map[string]any{"T": []any{map[string]any{"PutRequest": map[string]any{"Item": map[string]any{"id": map[string]any{"S": key}}}}}}})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	keys := make([]any, 32)
+	for index := range keys {
+		keys[index] = map[string]any{"id": map[string]any{"S": strconv.Itoa(index)}}
+	}
+	response, err := call("BatchGetItem", map[string]any{"RequestItems": map[string]any{"T": map[string]any{"Keys": keys}}})
+	if err != nil || len(response.Output["Responses"].(map[string]any)["T"].([]any)) != 32 || len(response.Output["UnprocessedKeys"].(map[string]any)) != 0 {
+		t.Fatalf("concurrent batch result: %#v %v", response, err)
+	}
+}
+
 func (r failAfterReader) Read(p []byte) (int, error) {
 	n, err := r.Reader.Read(p)
 	if err == io.EOF {

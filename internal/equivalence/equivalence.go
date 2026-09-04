@@ -35,6 +35,17 @@ type Step struct {
 	// compared. The step still runs, so the state it produces is real and
 	// every later step is still gated.
 	Superseded bool
+	// SupersededMembers names individual output paths that are not compared,
+	// leaving the rest of the step's body gated.
+	//
+	// Superseding a whole step to excuse one member is most of what the
+	// recordings were doing: a pack that answers an ARN or an id its response
+	// shape does not declare diverges on that member and matches on every
+	// other, and dropping the whole body to excuse it discards the assertions
+	// that mattered -- a status, a stored value, an update that moved. Three
+	// recordings had reached that point, costing twelve steps of coverage
+	// between them, which is more hole than the reason justified.
+	SupersededMembers map[string]string
 }
 
 // Outcome is what a handler did with one step.
@@ -127,7 +138,12 @@ func Replay(ctx context.Context, h spi.Handler, t *Trace) ([]Diff, error) {
 				// call ran, so the state behind the remaining steps is real.
 				continue
 			}
-			diffs = append(diffs, u.compare(i, "", want.Output, got.Output)...)
+			for _, d := range u.compare(i, "", want.Output, got.Output) {
+				if _, exempt := step.SupersededMembers[d.Path]; exempt {
+					continue
+				}
+				diffs = append(diffs, d)
+			}
 		}
 	}
 	return diffs, nil

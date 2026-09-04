@@ -55,6 +55,12 @@ type StepEntry struct {
 	// individually-justified hole, which is the most a two-tier oracle can
 	// offer: equivalence gates the migration, evidence gates the truth.
 	Superseded string `json:"superseded,omitempty"`
+	// SupersededMembers states, per output path, why that one member is not
+	// compared. It is the narrow form of Superseded and the one to reach for
+	// first: a pack that answers a member its response shape does not declare
+	// diverges on that member alone, and excusing the whole step to excuse it
+	// throws away every other assertion in the body.
+	SupersededMembers map[string]string `json:"superseded_members,omitempty"`
 }
 
 // FaultEntry is the comparable part of a fault. The message is deliberately
@@ -96,7 +102,8 @@ func (f *File) Trace() *Trace {
 	for _, e := range f.Steps {
 		t.Steps = append(t.Steps, Step{
 			Operation: e.Operation, Input: e.Input, Identity: e.Identity,
-			Superseded: e.Superseded != "",
+			Superseded:        e.Superseded != "",
+			SupersededMembers: e.SupersededMembers,
 		})
 		out := Outcome{Output: e.Output}
 		if e.Fault != nil {
@@ -174,7 +181,23 @@ func (f *File) Superseded() map[int]string {
 		if e.Superseded != "" {
 			out[i] = e.Superseded
 		}
+		// A per-member exemption is a hole in the gate too, a smaller one, and
+		// it is reported the same way for the same reason: the only defence
+		// against a recording quietly accumulating them is having to read them
+		// on every run.
+		for _, path := range sortedKeys(e.SupersededMembers) {
+			out[i] = strings.TrimSpace(out[i] + "\n  " + path + ": " + e.SupersededMembers[path])
+		}
 	}
+	return out
+}
+
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
 	return out
 }
 

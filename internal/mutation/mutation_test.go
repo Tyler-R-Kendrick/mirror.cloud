@@ -5547,6 +5547,27 @@ var mutants = []mutant{
 		run: "TestDeclaredMembersWinOverTheSpread",
 	},
 	{
+		// A per-member exemption that swallows the whole step turns every
+		// superseded recording back into what it was: an id excused at the
+		// cost of every real assertion beside it.
+		name: "equivalence-superseded-member-exempts-the-step",
+		file: filepath.Join("internal", "equivalence", "equivalence.go"),
+		old: `			for _, d := range u.compare(i, "", want.Output, got.Output) {
+				if _, exempt := step.SupersededMembers[d.Path]; exempt {
+					continue
+				}
+				diffs = append(diffs, d)
+			}`,
+		new: `			for _, d := range u.compare(i, "", want.Output, got.Output) {
+				if len(step.SupersededMembers) > 0 {
+					continue
+				}
+				diffs = append(diffs, d)
+			}`,
+		pkg: "./internal/equivalence",
+		run: "TestSupersededMemberExemptsOnlyThatMember",
+	},
+	{
 		// Taking the last id any read resolved, rather than the one resolved
 		// for this effect's own resource, addresses a child by its parent's
 		// key: every user in a service lands under its server's id. The write

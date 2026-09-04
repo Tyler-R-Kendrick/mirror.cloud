@@ -28,12 +28,12 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 	}
 	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
 	defer ts.Close()
-	call := func(action, payload string) (int, []byte) {
+	request := func(target, authorization, action, payload string) (int, []byte) {
 		t.Helper()
 		req, _ := http.NewRequest(http.MethodPost, ts.URL, bytes.NewBufferString(payload))
-		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/dynamodb/aws4_request, SignedHeaders=host, Signature=00")
+		req.Header.Set("Authorization", authorization)
 		req.Header.Set("Content-Type", "application/x-amz-json-1.0")
-		req.Header.Set("X-Amz-Target", "DynamoDB_20120810."+action)
+		req.Header.Set("X-Amz-Target", target+"."+action)
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -41,6 +41,12 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 		defer res.Body.Close()
 		body, _ := io.ReadAll(res.Body)
 		return res.StatusCode, body
+	}
+	call := func(action, payload string) (int, []byte) {
+		return request("DynamoDB_20120810", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/dynamodb/aws4_request, SignedHeaders=host, Signature=00", action, payload)
+	}
+	streamCall := func(action, payload string) (int, []byte) {
+		return request("DynamoDBStreams_20120810", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/streams/aws4_request, SignedHeaders=host, Signature=00", action, payload)
 	}
 
 	t.Run("Given an existing table When creating it again Then ResourceInUse is returned", func(t *testing.T) {
@@ -254,6 +260,41 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 		}
 		if status, body := call("ExecuteStatement", `{"Statement":"SELECT * FROM PartiQL","Parameters":[]}`); status != http.StatusBadRequest || !bytes.Contains(body, []byte("Member must have length greater than or equal to 1")) {
 			t.Fatalf("PartiQL empty parameters %d %s", status, body)
+		}
+	})
+
+	t.Run("Given a DynamoDB stream When reading its shard Then metadata records and iterators match AWS", func(t *testing.T) {
+		create := `{"TableName":"StreamBDD","KeySchema":[{"AttributeName":"id","KeyType":"HASH"}],"StreamSpecification":{"StreamEnabled":true,"StreamViewType":"NEW_IMAGE"}}`
+		status, body := call("CreateTable", create)
+		var created map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &created) != nil {
+			t.Fatalf("create stream table %d %s", status, body)
+		}
+		arn := created["TableDescription"].(map[string]any)["LatestStreamArn"].(string)
+		item := `{"TableName":"StreamBDD","Item":{"id":{"S":"one"},"data":{"B":"kA=="}}}`
+		if status, body := call("PutItem", item); status != http.StatusOK {
+			t.Fatalf("put stream item %d %s", status, body)
+		}
+		if status, body := call("PutItem", item); status != http.StatusOK {
+			t.Fatalf("repeat stream item %d %s", status, body)
+		}
+		status, body = streamCall("DescribeStream", `{"StreamArn":"`+arn+`"}`)
+		var described map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &described) != nil || !bytes.Contains(body, []byte(`"StreamViewType":"NEW_IMAGE"`)) {
+			t.Fatalf("describe stream %d %s", status, body)
+		}
+		shard := described["StreamDescription"].(map[string]any)["Shards"].([]any)[0].(map[string]any)["ShardId"].(string)
+		if status, body := streamCall("DescribeStream", `{"StreamArn":"`+arn+`","ExclusiveStartShardId":"`+shard+`"}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"Shards":[]`)) {
+			t.Fatalf("exclusive stream shard %d %s", status, body)
+		}
+		status, body = streamCall("GetShardIterator", `{"StreamArn":"`+arn+`","ShardId":"`+shard+`","ShardIteratorType":"TRIM_HORIZON"}`)
+		var iterator map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &iterator) != nil || !strings.HasPrefix(iterator["ShardIterator"].(string), arn+"|") {
+			t.Fatalf("stream iterator %d %s", status, body)
+		}
+		payload := `{"ShardIterator":` + fmt.Sprintf("%q", iterator["ShardIterator"]) + `}`
+		if status, body := streamCall("GetRecords", payload); status != http.StatusOK || bytes.Count(body, []byte(`"eventName":"INSERT"`)) != 1 || !bytes.Contains(body, []byte(`"SizeBytes":15`)) || !bytes.Contains(body, []byte(`"B":"kA=="`)) {
+			t.Fatalf("stream records %d %s", status, body)
 		}
 	})
 }

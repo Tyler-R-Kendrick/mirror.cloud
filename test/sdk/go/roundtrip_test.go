@@ -28,6 +28,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodbstreams"
+	ddbstreamtypes "github.com/aws/aws-sdk-go-v2/service/dynamodbstreams/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
@@ -3227,6 +3229,43 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}
 	if _, err := ddb.ExecuteStatement(context.Background(), &dynamodb.ExecuteStatementInput{Statement: aws.String("SELECT * FROM PartiQL"), Parameters: []ddbtypes.AttributeValue{}}); err == nil || !strings.Contains(err.Error(), "Member must have length greater than or equal to 1") {
 		t.Fatalf("PartiQL empty parameters: %v", err)
+	}
+	createdStream, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{
+		TableName: aws.String("StreamSDK"), BillingMode: ddbtypes.BillingModePayPerRequest,
+		KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: ddbtypes.KeyTypeHash}}, AttributeDefinitions: []ddbtypes.AttributeDefinition{{AttributeName: aws.String("id"), AttributeType: ddbtypes.ScalarAttributeTypeS}},
+		StreamSpecification: &ddbtypes.StreamSpecification{StreamEnabled: aws.Bool(true), StreamViewType: ddbtypes.StreamViewTypeNewAndOldImages},
+	})
+	if err != nil || createdStream.TableDescription == nil || createdStream.TableDescription.LatestStreamArn == nil {
+		t.Fatalf("create stream table: %#v %v", createdStream, err)
+	}
+	streamItem := map[string]ddbtypes.AttributeValue{"id": &ddbtypes.AttributeValueMemberS{Value: "one"}, "data": &ddbtypes.AttributeValueMemberB{Value: []byte{0x90}}}
+	if _, err := ddb.PutItem(context.Background(), &dynamodb.PutItemInput{TableName: aws.String("StreamSDK"), Item: streamItem}); err != nil {
+		t.Fatalf("put stream item: %v", err)
+	}
+	if _, err := ddb.PutItem(context.Background(), &dynamodb.PutItemInput{TableName: aws.String("StreamSDK"), Item: streamItem}); err != nil {
+		t.Fatalf("repeat stream item: %v", err)
+	}
+	streams := dynamodbstreams.NewFromConfig(awscfg, func(options *dynamodbstreams.Options) { options.BaseEndpoint = aws.String(ts.URL) })
+	describedStream, err := streams.DescribeStream(context.Background(), &dynamodbstreams.DescribeStreamInput{StreamArn: createdStream.TableDescription.LatestStreamArn})
+	if err != nil || describedStream.StreamDescription == nil || describedStream.StreamDescription.StreamViewType != ddbstreamtypes.StreamViewTypeNewAndOldImages || len(describedStream.StreamDescription.KeySchema) != 1 || len(describedStream.StreamDescription.Shards) != 1 {
+		t.Fatalf("describe stream: %#v %v", describedStream, err)
+	}
+	shardID := describedStream.StreamDescription.Shards[0].ShardId
+	excludedStream, err := streams.DescribeStream(context.Background(), &dynamodbstreams.DescribeStreamInput{StreamArn: createdStream.TableDescription.LatestStreamArn, ExclusiveStartShardId: shardID})
+	if err != nil || len(excludedStream.StreamDescription.Shards) != 0 {
+		t.Fatalf("exclusive stream shard: %#v %v", excludedStream, err)
+	}
+	iterator, err := streams.GetShardIterator(context.Background(), &dynamodbstreams.GetShardIteratorInput{StreamArn: createdStream.TableDescription.LatestStreamArn, ShardId: shardID, ShardIteratorType: ddbstreamtypes.ShardIteratorTypeTrimHorizon})
+	if err != nil || iterator.ShardIterator == nil || !strings.HasPrefix(aws.ToString(iterator.ShardIterator), aws.ToString(createdStream.TableDescription.LatestStreamArn)+"|") {
+		t.Fatalf("stream iterator: %#v %v", iterator, err)
+	}
+	streamRecords, err := streams.GetRecords(context.Background(), &dynamodbstreams.GetRecordsInput{ShardIterator: iterator.ShardIterator})
+	if err != nil || len(streamRecords.Records) != 1 || streamRecords.Records[0].Dynamodb == nil || aws.ToInt64(streamRecords.Records[0].Dynamodb.SizeBytes) != 15 {
+		t.Fatalf("stream records: %#v %v", streamRecords, err)
+	}
+	binaryStreamValue, ok := streamRecords.Records[0].Dynamodb.NewImage["data"].(*ddbstreamtypes.AttributeValueMemberB)
+	if !ok || !bytes.Equal(binaryStreamValue.Value, []byte{0x90}) {
+		t.Fatalf("binary stream value: %#v", streamRecords.Records[0])
 	}
 	if ttl, err := ddb.DescribeTimeToLive(context.Background(), &dynamodb.DescribeTimeToLiveInput{TableName: aws.String("T")}); err != nil || ttl.TimeToLiveDescription == nil || ttl.TimeToLiveDescription.TimeToLiveStatus != ddbtypes.TimeToLiveStatusDisabled {
 		t.Fatalf("default ttl: %#v %v", ttl, err)

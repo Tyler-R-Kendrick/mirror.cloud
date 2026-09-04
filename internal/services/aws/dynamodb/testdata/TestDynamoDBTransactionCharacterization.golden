@@ -1,0 +1,190 @@
+{
+  "canceled": {
+    "blocked": {},
+    "code": "TransactionCanceledException",
+    "message": "Transaction cancelled, please refer cancellation reasons for specific reasons [ConditionalCheckFailed, None]",
+    "reasons": [
+      {
+        "Code": "ConditionalCheckFailed",
+        "Item": {
+          "binaryData": {
+            "B": "Zm9vYmFy"
+          },
+          "id": {
+            "S": "test2"
+          }
+        },
+        "Message": "The conditional request failed"
+      },
+      {
+        "Code": "None"
+      }
+    ]
+  },
+  "conditionalFailure": {
+    "code": "ConditionalCheckFailedException",
+    "item": {
+      "id": {
+        "S": "conditional"
+      },
+      "price": {
+        "N": "650"
+      },
+      "product": {
+        "S": "sporting goods"
+      }
+    },
+    "message": "The conditional request failed"
+  },
+  "conditionalWithoutReturn": {
+    "code": "ConditionalCheckFailedException",
+    "item": null
+  },
+  "createdByConditionalUpdate": {
+    "id": {
+      "S": "created-by-update"
+    },
+    "value": {
+      "S": "created"
+    }
+  },
+  "gets": {
+    "Responses": [
+      {
+        "Item": {
+          "binaryData": {
+            "B": "Zm9vYmFy"
+          },
+          "id": {
+            "S": "test2"
+          }
+        }
+      },
+      {
+        "Item": {
+          "attr2": {
+            "S": "value2"
+          },
+          "id": {
+            "S": "test3"
+          }
+        }
+      },
+      {}
+    ]
+  },
+  "idempotencyMismatch": {
+    "code": "IdempotentParameterMismatchException",
+    "message": "A client request token was reused with different parameters"
+  },
+  "stream": [
+    {
+      "eventName": "INSERT",
+      "keys": {
+        "id": {
+          "S": "doomed"
+        }
+      },
+      "newImage": {
+        "id": {
+          "S": "doomed"
+        }
+      },
+      "oldImage": null
+    },
+    {
+      "eventName": "INSERT",
+      "keys": {
+        "id": {
+          "S": "test2"
+        }
+      },
+      "newImage": {
+        "binaryData": {
+          "B": "Zm9vYmFy"
+        },
+        "id": {
+          "S": "test2"
+        }
+      },
+      "oldImage": null
+    },
+    {
+      "eventName": "INSERT",
+      "keys": {
+        "id": {
+          "S": "test3"
+        }
+      },
+      "newImage": {
+        "attr1": {
+          "S": "value1"
+        },
+        "attr2": {
+          "S": "value2"
+        },
+        "id": {
+          "S": "test3"
+        }
+      },
+      "oldImage": null
+    },
+    {
+      "eventName": "REMOVE",
+      "keys": {
+        "id": {
+          "S": "doomed"
+        }
+      },
+      "newImage": null,
+      "oldImage": {
+        "id": {
+          "S": "doomed"
+        }
+      }
+    },
+    {
+      "eventName": "INSERT",
+      "keys": {
+        "id": {
+          "S": "idem"
+        }
+      },
+      "newImage": {
+        "id": {
+          "S": "idem"
+        }
+      },
+      "oldImage": null
+    },
+    {
+      "eventName": "INSERT",
+      "keys": {
+        "id": {
+          "S": "different"
+        }
+      },
+      "newImage": {
+        "id": {
+          "S": "different"
+        }
+      },
+      "oldImage": null
+    },
+    {
+      "eventName": "INSERT",
+      "keys": {
+        "id": {
+          "S": "multi"
+        }
+      },
+      "newImage": {
+        "id": {
+          "S": "multi"
+        }
+      },
+      "oldImage": null
+    }
+  ],
+  "success": {}
+}

@@ -834,8 +834,8 @@ func (p *Pack) tableKey(td, item map[string]any) map[string]any {
 	ks, _ := td["KeySchema"].([]any)
 	for _, e := range ks {
 		name := str(asMap(e)["AttributeName"])
-		if name != "" {
-			out[name] = item[name]
+		if value, ok := item[name]; name != "" && ok {
+			out[name] = value
 		}
 	}
 	if len(out) == 0 {

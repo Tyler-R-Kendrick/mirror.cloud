@@ -478,9 +478,10 @@ func (ev *eval) runEffects(ctx context.Context, op bir.Operation) error {
 // write creates or updates a record. On create, an ID is generated when the
 // resource declares a generator — randomness is an effect, so the value comes
 // from the deterministic Rand and never from an expression.
+// write runs a create, put or patch: once, or once per element when the effect
+// declares a for_each.
 func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, create bool) error {
-	res, ok := ev.e.ir.Resources[w.Resource]
-	if !ok {
+	if _, ok := ev.e.ir.Resources[w.Resource]; !ok {
 		return fmt.Errorf("engine: %s: unknown resource %q", path, w.Resource)
 	}
 	if w.When != "" {
@@ -491,6 +492,53 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 		if !ok {
 			return nil
 		}
+	}
+	if w.ForEach == "" {
+		return ev.writeOne(ctx, path, w, create)
+	}
+
+	elems, err := ev.eval(path + ".for_each")
+	if err != nil {
+		return err
+	}
+	// A batch that names nothing writes nothing. An absent member and an empty
+	// list are the same request as far as the store is concerned, so neither
+	// is an error -- the operation's own requires are where a bundle says a
+	// list may not be empty.
+	if elems == nil {
+		return nil
+	}
+	list, ok := elems.([]any)
+	if !ok {
+		return fmt.Errorf("engine: %s.for_each: expected a list, got %T", path, elems)
+	}
+	// `item` is bound for the element and unbound afterwards, the same
+	// contract a delete's `where` and a list's `filter` have, so a bundle
+	// reads the same in all three places.
+	prev, had := ev.binds["item"]
+	defer func() {
+		if had {
+			ev.binds["item"] = prev
+		} else {
+			delete(ev.binds, "item")
+		}
+	}()
+	for _, e := range list {
+		ev.binds["item"] = e
+		if err := ev.writeOne(ctx, path, w, create); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeOne stores one record. Everything it reads from the effect is the same
+// whether the write runs once or per element; what differs is only whether
+// `item` is bound around it.
+func (ev *eval) writeOne(ctx context.Context, path string, w bir.WriteEffect, create bool) error {
+	res, ok := ev.e.ir.Resources[w.Resource]
+	if !ok {
+		return fmt.Errorf("engine: %s: unknown resource %q", path, w.Resource)
 	}
 
 	// The identity first: record expressions may name `id`, and a generated ID

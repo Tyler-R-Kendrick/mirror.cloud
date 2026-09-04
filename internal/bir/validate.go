@@ -491,14 +491,28 @@ func validateEffect(s *Service, where string, eff Effect, compile, perItem func(
 	}
 	write := func(kind string, e *WriteEffect) {
 		res(e.Resource, kind)
+		// A write that runs per element evaluates its key and its record with
+		// the element bound, so those compile in the wider scope. The list
+		// itself is evaluated once, before any element exists, so it does not.
+		body := compile
+		if e.ForEach != "" {
+			body = perItem
+			compile(where+"."+kind+".for_each", e.ForEach)
+			if e.Key == "" {
+				*problems = append(*problems, fmt.Errorf(
+					"%s: %s.%s: for_each without a key; every element would "+
+						"resolve the same key and the last write would win",
+					s.ServiceID, where, kind))
+			}
+		}
 		// A write may address a record by an explicit key, exactly as a delete
 		// may. Leaving this uncompiled made the field silently unusable: the
 		// bundle loaded, and the engine then failed at request time asking for
 		// an expression nobody had written.
-		compile(where+"."+kind+".key", e.Key)
+		body(where+"."+kind+".key", e.Key)
 		compile(where+"."+kind+".when", e.When)
 		compile(where+"."+kind+".state", e.State)
-		compileAny(where+"."+kind+".record", e.Record, compile)
+		compileAny(where+"."+kind+".record", e.Record, body)
 		// `input` is the only thing a write may spread, and saying so here is
 		// what keeps it that way: a bundle that spread a read binding would be
 		// copying a record the engine never checked against an input shape,

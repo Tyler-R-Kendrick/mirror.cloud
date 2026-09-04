@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -51,6 +52,9 @@ func (p *Pack) emitStream(ctx context.Context, req *spi.Request, table, event st
 	if !ok {
 		return
 	}
+	if event == "MODIFY" && reflect.DeepEqual(item, old) {
+		return
+	}
 	view := str(asMap(td["StreamSpecification"])["StreamViewType"])
 	if view == "" {
 		view = "NEW_AND_OLD_IMAGES"
@@ -64,7 +68,6 @@ func (p *Pack) emitStream(ctx context.Context, req *spi.Request, table, event st
 		"ApproximateCreationDateTime": float64(p.deps.Clock.Now().UnixMilli()) / 1000,
 		"Keys":                        keys,
 		"SequenceNumber":              fmt.Sprintf("%015d", seq),
-		"SizeBytes":                   0,
 		"StreamViewType":              view,
 	}
 	switch view {
@@ -85,6 +88,14 @@ func (p *Pack) emitStream(ctx context.Context, req *spi.Request, table, event st
 			ddb["OldImage"] = old
 		}
 	}
+	size := streamItemSize(keys)
+	if image := asMap(ddb["NewImage"]); image != nil {
+		size += streamItemSize(image)
+	}
+	if image := asMap(ddb["OldImage"]); image != nil {
+		size += streamItemSize(image)
+	}
+	ddb["SizeBytes"] = size
 	rec := map[string]any{
 		"eventID":      p.deps.Rand.Hex(16),
 		"eventName":    event,
@@ -149,17 +160,24 @@ func (p *Pack) describeStream(ctx context.Context, req *spi.Request) (*spi.Respo
 	if truthy(spec["StreamEnabled"]) {
 		status = "ENABLED"
 	}
+	const shardID = "shardId-000000000000"
+	shards := []any{map[string]any{
+		"ShardId": shardID,
+		"SequenceNumberRange": map[string]any{
+			"StartingSequenceNumber": "000000000000001",
+		},
+	}}
+	if first(req.Input, "ExclusiveStartShardId") == shardID {
+		shards = []any{}
+	}
 	return &spi.Response{Output: map[string]any{"StreamDescription": map[string]any{
 		"StreamArn":      arn,
+		"StreamLabel":    td["LatestStreamLabel"],
 		"StreamStatus":   status,
 		"StreamViewType": view,
 		"TableName":      table,
-		"Shards": []any{map[string]any{
-			"ShardId": "shardId-000000000000",
-			"SequenceNumberRange": map[string]any{
-				"StartingSequenceNumber": "000000000000001",
-			},
-		}},
+		"KeySchema":      td["KeySchema"],
+		"Shards":         shards,
 	}}}, nil
 }
 
@@ -183,20 +201,17 @@ func (p *Pack) getShardIterator(ctx context.Context, req *spi.Request) (*spi.Res
 	default: // TRIM_HORIZON
 		seq = 1
 	}
-	it := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s|%d", table, seq)))
+	it := fmt.Sprintf("%s|%d|%s", arn, seq, p.deps.Rand.Hex(8))
 	return &spi.Response{Output: map[string]any{"ShardIterator": it}}, nil
 }
 
 func (p *Pack) getStreamRecords(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	raw, err := base64.StdEncoding.DecodeString(str(req.Input["ShardIterator"]))
-	if err != nil {
+	parts := strings.SplitN(str(req.Input["ShardIterator"]), "|", 3)
+	if len(parts) != 3 {
 		return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 	}
-	parts := strings.SplitN(string(raw), "|", 2)
-	if len(parts) != 2 {
-		return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
-	}
-	table := parts[0]
+	arn := parts[0]
+	table := tableFromStreamARN(arn)
 	start, _ := strconv.Atoi(parts[1])
 	limit := asInt(req.Input["Limit"])
 	if limit <= 0 {
@@ -218,6 +233,50 @@ func (p *Pack) getStreamRecords(ctx context.Context, req *spi.Request) (*spi.Res
 			break
 		}
 	}
-	it := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s|%d", table, next)))
+	it := fmt.Sprintf("%s|%d|%s", arn, next, parts[2])
 	return &spi.Response{Output: map[string]any{"Records": recs, "NextShardIterator": it}}, nil
+}
+
+func streamItemSize(item map[string]any) int {
+	size := 0
+	for name, raw := range item {
+		size += len(name) + streamAttributeSize(asMap(raw))
+	}
+	return size
+}
+
+func streamAttributeSize(attribute map[string]any) int {
+	for kind, raw := range attribute {
+		switch kind {
+		case "S", "N":
+			return len(str(raw))
+		case "B":
+			decoded, _ := base64.StdEncoding.DecodeString(str(raw))
+			return len(decoded)
+		case "BOOL", "NULL":
+			return 1
+		case "SS", "NS":
+			size := 0
+			for _, value := range asSlice(raw) {
+				size += len(str(value))
+			}
+			return size
+		case "BS":
+			size := 0
+			for _, value := range asSlice(raw) {
+				decoded, _ := base64.StdEncoding.DecodeString(str(value))
+				size += len(decoded)
+			}
+			return size
+		case "L":
+			size := 0
+			for _, value := range asSlice(raw) {
+				size += streamAttributeSize(asMap(value))
+			}
+			return size
+		case "M":
+			return streamItemSize(asMap(raw))
+		}
+	}
+	return 0
 }

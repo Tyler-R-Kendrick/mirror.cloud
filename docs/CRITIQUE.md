@@ -557,3 +557,39 @@ Two things about the result are worth recording.
 **The derive spelling nearly escaped it.** The first version compared `input_members` only, and passed `workspaces` — which expresses the identical lookup as a CEL `derive`. A check that covers the blunt spelling and not the deliberate-looking one is worse than none, because the spelling it misses is the one an author reaches for when they are being careful. The mutation suite now carries a needle for exactly that: remove the derive branch and `workspaces` loads again.
 
 The exemption is the part most likely to rot. It records a transcribed defect, so it requires a reason, it must name a resource that exists, and a test pins all nine entries — if one loses its reason the suite says so. None of that stops someone adding a tenth; what it does is make adding one an act with a sentence attached to it.
+
+### Half the services are served in a protocol they do not speak
+
+The audit question was whether test coverage is high across every kind of test. It is broad -- mutation, snapshot, contract, chaos, fuzz, BDD, unit, plus the equivalence recordings -- and it missed the largest defect in the tree, in a way worth writing down because the mechanism generalises.
+
+**The finding.** A behavior bundle is *validated* against `internal/generated`, the vendored specification, and *served* through the booted catalog. Nothing compared the two. `aws.guardduty` is validated as `restJson1` with ninety operations and served as `awsJson1_1` with twenty. Fifty-three of ninety-seven bundles disagree with their specification on the protocol, the `X-Amz-Target` prefix, or both -- twenty-eight of the target prefixes are plain typos, `AmazonDMS20160101` against the spec's `AmazonDMSv20160101`, `AWSBackup` against `CryoControllerUserManager`.
+
+The consequence is not subtle: a real SDK calling GuardDuty sends `GET /detector`, the edge routes that to S3 by its path-style fallback, and the answer is a 501 about `aws.s3.ListObjectsV2`. **No SDK can reach those services.**
+
+`docs/BEHAVIOR_IR.md` states the invariant this violates -- "B-IR never redefines wire shapes ... the loader fails otherwise" -- and it holds, for the shapes a bundle projects. It does not hold for the protocol those shapes travel in, because the loader and the edge read different descriptions of the same service. The v2 plan's P0 was "reconnect spec ingestion end-to-end"; it was done for validation and not for serving, and nothing said so.
+
+**Why every suite missed it.** Each hand-written pack carried a `TestBootedServer<Service>` test, which is exactly the right shape of test: a real request through the edge, the codec, the signature path and the runtime. But those tests were written against the transport the demux happened to accept rather than the one the service speaks. GuardDuty's called `POST /` with `X-Amz-Target: AWSGuardDuty.CreateDetector` -- a JSON-RPC envelope for a REST service, with a target prefix matching neither the catalog's nor the spec's. It passed. It had to: it was written by reading the same catalog the edge reads.
+
+That is the general lesson. A test written from the implementation's own description of itself cannot detect that the description is wrong. Every one of these suites was written that way, which is why breadth did not help: mutation, chaos and fuzz all perturb behavior *inside* a boundary that was drawn in the wrong place, and the equivalence recordings replay against `bundled.New(...).Invoke` directly, so they never touch the edge at all.
+
+The one suite that could have caught it is the SDK contract suite, which uses the real `aws-sdk-go-v2` -- and it covers a handful of services, all of which happen to agree.
+
+**Two further defects the same probe found.** The generic REST router matches on HTTP method alone: `restjson.Route` returns the first operation whose `HTTP.Method` equals the request's, ignoring the path and the target, so `GET /detector` resolves to `DescribeOrganizationConfiguration`. And the demux's hundred and thirty per-service branches all sit inside `if action != ""`, which only query-protocol requests satisfy, so a REST request reaches none of them and falls through to S3. Four services (lambda, apigateway, eks, opensearch) have hand-written routers, which is why they work and why nobody noticed.
+
+**What is landed here, and what is not.** The disagreement is now measured and ratcheted: `routing_mismatches` in `ratchet.json`, with the service list beside it so a fix and a regression cannot cancel out. A new generic gate, `TestEveryBundleAnswersOverHTTP`, builds a request for every bundle *from the specification* and requires a modeled answer through the real edge -- the coverage each pack's booted test used to carry, in a form that cannot be lost by deleting a pack, and that widens by itself as mismatches are fixed.
+
+It is a ratchet and not a failing test because fixing fifty-three services is an edge change -- booting from the generated models, and making REST routing match on the URI -- not a bundle change. That is the next piece of work, and it is now the largest one outstanding.
+
+It also found two genuine bundle defects on the way: `servicecatalog.DescribeProduct` and `wafv2.GetRuleGroup` read an optional `input.Id` unguarded in their key expressions, so a legal request answered a 500. Both fixed here.
+
+### Reviewing the exemptions found the same rot in three places
+
+Self-reviewing this stack before merge turned up one mistake made three times, which is worth more than any of the three instances.
+
+Every gate added here has an escape hatch, because every one of them is guarding behavior that some bundle transcribes on purpose: `addressing:` excuses a resource keyed by a member its operation does not declare, `superseded_members` excuses an output member the pack answered and the shape does not declare. In both, I required the exemption to carry a reason -- and in neither did I require it to *excuse anything*.
+
+An exemption that excuses nothing is worse than a missing one. It reads as a documented divergence while the step or the operation is in fact clean, and it survives the member being renamed, the operation gaining an explicit key, or the bundle simply being fixed. Every later reader believes it, and the number of documented holes in the gate drifts upward without any of them being real. That is the same failure as the mispointed mutation needle: something that looks like coverage and is not.
+
+Both now report an exemption that matched nothing, and both have a test for it. The third instance was the ratchet's own guard, which special-cased one metric name so a newly-added metric could start above zero; the next metric would have hit the same wall and needed its own special case. It is driven off the metric list now.
+
+The lesson to carry forward is narrow and checkable: **an exemption mechanism needs three properties, not one.** It must name something that exists, it must say why, and it must be reported when it stops applying. I built the first two twice and the third zero times, and only noticed by reading the diff back with the question "how does this rot?".

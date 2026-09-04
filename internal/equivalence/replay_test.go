@@ -175,6 +175,38 @@ func TestSupersededMemberExemptsOnlyThatMember(t *testing.T) {
 	}
 }
 
+// TestSupersededMemberThatExcusesNothingIsReported keeps the exemption from
+// rotting into a lie. A member that is renamed, or a bundle that is fixed so
+// it no longer diverges, leaves an exemption behind that reads as a documented
+// divergence while the step is in fact clean -- and every later reader of the
+// recording believes it.
+func TestSupersededMemberThatExcusesNothingIsReported(t *testing.T) {
+	acct := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	trace := &equivalence.Trace{
+		Steps: []equivalence.Step{{
+			Operation: "Get", Input: map[string]any{}, Identity: acct,
+			SupersededMembers: map[string]string{
+				"Status":  "the response shape does not declare it",
+				"Renamed": "stale: this member no longer exists",
+			},
+		}},
+		Outcomes: []equivalence.Outcome{
+			{Output: map[string]any{"Status": "ENABLED"}},
+		},
+	}
+	diffs, err := equivalence.Replay(context.Background(), &wrongStatus{}, trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("%d diffs, want exactly the stale exemption: %v", len(diffs), diffs)
+	}
+	if diffs[0].Path != "Renamed" {
+		t.Errorf("reported %q; Status diverges and is excused, Renamed excuses "+
+			"nothing and is the one to report", diffs[0].Path)
+	}
+}
+
 type wrongStatus struct{}
 
 func (*wrongStatus) ServiceID() string    { return "aws.shield" }

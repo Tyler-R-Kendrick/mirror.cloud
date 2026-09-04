@@ -39,6 +39,28 @@ type Metrics struct {
 	// PackDirs is the sorted allowlist of pack directories, relative to
 	// internal/services. A directory absent here is a new hand-written pack.
 	PackDirs []string `json:"pack_dirs"`
+
+	// RoutingMismatches counts behavior bundles the runtime would route
+	// differently from what the vendored specification says -- a different
+	// protocol, a different X-Amz-Target prefix, or both.
+	//
+	// This is not a style metric like the others; it is a live defect with a
+	// number attached. A bundle is validated against the generated model --
+	// aws.guardduty is restJson1 with ninety operations -- and served through
+	// the booted catalog, which describes it as awsJson1_1 with twenty. The
+	// consequence is that no real SDK can reach those services: it sends
+	// `GET /detector` and the edge answers only `POST /` with an X-Amz-Target.
+	//
+	// It is a ratchet rather than a failing test because fifty-three services
+	// are in this state and fixing them is an edge change, not a bundle
+	// change. What the ratchet buys is that the number cannot grow while that
+	// work is outstanding, and that a service leaving the list cannot silently
+	// rejoin it.
+	RoutingMismatches int `json:"routing_mismatches"`
+	// RoutingMismatchServices is the sorted list behind that count. A service
+	// absent here that mismatches is a new one, which is the case worth
+	// failing on: the count alone would let a fix and a regression cancel.
+	RoutingMismatchServices []string `json:"routing_mismatch_services"`
 }
 
 const (
@@ -124,6 +146,11 @@ func Measure(root string) (Metrics, error) {
 	}
 	sort.Strings(m.PackDirs)
 	m.Packs = len(m.PackDirs)
+
+	// The one metric that is not a count of source text: how many bundles the
+	// runtime serves in a protocol the specification disagrees with.
+	served, spec := ServedAndSpecRouting()
+	m.RoutingMismatches, m.RoutingMismatchServices = MeasureRouting(served, spec)
 	return m, nil
 }
 
@@ -162,8 +189,17 @@ func (r Regression) String() string {
 
 // Compare reports every counted metric where current exceeds baseline, plus
 // any pack directory that is not in the baseline allowlist.
-func Compare(baseline, current Metrics) (regressions []Regression, newPacks []string) {
-	pairs := []struct {
+// NotComparable marks a metric absent from the baseline being compared
+// against, which happens exactly once per metric: on the commit that adds it.
+const NotComparable = -1
+
+// comparable pairs every ratcheted metric with its name, so both Compare and
+// the baseline guard work from one list rather than each carrying its own.
+func comparable(baseline, current Metrics) []struct {
+	name string
+	b, c int
+} {
+	return []struct {
 		name string
 		b, c int
 	}{
@@ -173,8 +209,59 @@ func Compare(baseline, current Metrics) (regressions []Regression, newPacks []st
 		{"services_loc", baseline.ServicesLOC, current.ServicesLOC},
 		{"fault_sites", baseline.FaultSites, current.FaultSites},
 		{"register_sites", baseline.RegisterSites, current.RegisterSites},
+		{"routing_mismatches", baseline.RoutingMismatches, current.RoutingMismatches},
 	}
-	for _, p := range pairs {
+}
+
+// MetricNames lists the ratcheted metrics by their JSON key. The baseline
+// guard uses it to tell a metric this commit *introduces* from one it raised:
+// a metric absent from the base's ratchet.json has nothing to have regressed
+// from, and treating its first value as a regression would mean the only
+// metrics that can ever be added are the ones that start at zero -- exactly
+// the ones not worth adding.
+func MetricNames() []string {
+	var out []string
+	for _, p := range comparable(Metrics{}, Metrics{}) {
+		out = append(out, p.name)
+	}
+	return out
+}
+
+// ClearAbsent marks every metric the base's ratchet.json did not carry as
+// NotComparable, so Compare skips it. Driven by the raw JSON keys rather than
+// by a per-metric special case, so adding a metric needs no change here.
+func ClearAbsent(m *Metrics, present map[string]json.RawMessage) {
+	for _, name := range MetricNames() {
+		if _, ok := present[name]; ok {
+			continue
+		}
+		switch name {
+		case "packs":
+			m.Packs = NotComparable
+		case "case_labels":
+			m.CaseLabels = NotComparable
+		case "services_files":
+			m.ServicesFiles = NotComparable
+		case "services_loc":
+			m.ServicesLOC = NotComparable
+		case "fault_sites":
+			m.FaultSites = NotComparable
+		case "register_sites":
+			m.RegisterSites = NotComparable
+		case "routing_mismatches":
+			m.RoutingMismatches, m.RoutingMismatchServices = NotComparable, nil
+		}
+	}
+}
+
+func Compare(baseline, current Metrics) (regressions []Regression, newPacks []string) {
+	for _, p := range comparable(baseline, current) {
+		// A baseline of NotComparable marks a metric the base's ratchet.json
+		// did not carry, so this commit introduces it and there is nothing
+		// to compare against.
+		if p.b == NotComparable {
+			continue
+		}
 		if p.c > p.b {
 			regressions = append(regressions, Regression{Metric: p.name, Baseline: p.b, Current: p.c})
 		}
@@ -188,7 +275,39 @@ func Compare(baseline, current Metrics) (regressions []Regression, newPacks []st
 			newPacks = append(newPacks, d)
 		}
 	}
+	if baseline.RoutingMismatches == NotComparable {
+		return regressions, newPacks
+	}
+	known := make(map[string]bool, len(baseline.RoutingMismatchServices))
+	for _, id := range baseline.RoutingMismatchServices {
+		known[id] = true
+	}
+	for _, id := range current.RoutingMismatchServices {
+		if !known[id] {
+			regressions = append(regressions, Regression{
+				Metric:   "routing_mismatch/" + id,
+				Baseline: 0, Current: 1,
+			})
+		}
+	}
 	return regressions, newPacks
+}
+
+// MeasureRouting compares, for every behavior bundle, how the runtime would
+// route a request to it against how the vendored specification says it should
+// be routed. It is separate from Measure because it reads the built packages
+// rather than the source tree.
+func MeasureRouting(served map[string]string, spec map[string]string) (int, []string) {
+	var differ []string
+	for id, got := range served {
+		want, ok := spec[id]
+		if !ok || got == want {
+			continue
+		}
+		differ = append(differ, id)
+	}
+	sort.Strings(differ)
+	return len(differ), differ
 }
 
 func itoa(n int) string {

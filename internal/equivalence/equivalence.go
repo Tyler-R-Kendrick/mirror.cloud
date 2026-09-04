@@ -77,6 +77,15 @@ func Record(ctx context.Context, h spi.Handler, steps []Step) (*Trace, error) {
 	return t, nil
 }
 
+func sortedPaths(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Diff is one behavioral divergence between the reference and the candidate.
 type Diff struct {
 	Step int
@@ -138,11 +147,28 @@ func Replay(ctx context.Context, h spi.Handler, t *Trace) ([]Diff, error) {
 				// call ran, so the state behind the remaining steps is real.
 				continue
 			}
+			used := map[string]bool{}
 			for _, d := range u.compare(i, "", want.Output, got.Output) {
 				if _, exempt := step.SupersededMembers[d.Path]; exempt {
+					used[d.Path] = true
 					continue
 				}
 				diffs = append(diffs, d)
+			}
+			// An exemption that excuses nothing is a hole in the reporting
+			// rather than in the gate: it reads as a documented divergence
+			// while the step is in fact clean, and it survives the member
+			// being renamed or the bundle being fixed. Either way the
+			// recording is now saying something untrue about itself, so it
+			// is reported like any other divergence.
+			for _, path := range sortedPaths(step.SupersededMembers) {
+				if used[path] {
+					continue
+				}
+				diffs = append(diffs, Diff{Step: i, Path: path,
+					Want: "a divergence to excuse", Got: "none",
+					Note: "superseded_members excuses this member and it does " +
+						"not diverge; drop the exemption"})
 			}
 		}
 	}

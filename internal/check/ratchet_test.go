@@ -86,6 +86,17 @@ func baselineAtBase(t *testing.T, root string) (Metrics, string, bool) {
 		if err := json.Unmarshal([]byte(blob), &m); err != nil {
 			t.Fatalf("parse %s at %s: %v", ratchetFile, base, err)
 		}
+		// A metric the base did not carry is being introduced by this commit,
+		// and its first value cannot be a regression: there is nothing to have
+		// regressed from. Without this, adding a metric that measures an
+		// existing defect is unmergeable, which would mean the only metrics
+		// that can ever be added are ones that start at zero -- exactly the
+		// ones not worth adding.
+		var present map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(blob), &present); err != nil {
+			t.Fatalf("parse %s at %s: %v", ratchetFile, base, err)
+		}
+		ClearAbsent(&m, present)
 		return m, ref, true
 	}
 	return Metrics{}, "", false

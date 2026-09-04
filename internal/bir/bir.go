@@ -239,6 +239,23 @@ type Operation struct {
 	Batch   *BatchSpec        `yaml:"batch,omitempty"`
 	Output  map[string]string `yaml:"output,omitempty"`
 
+	// Addressing exempts named resources from the check that an operation
+	// which resolves a resource's key from the request declares at least one
+	// of the members that resource is addressed by. The value is the reason,
+	// and it is required: the exemption exists to record a transcribed defect,
+	// not to silence the check.
+	//
+	// Two packs turned out to address a resource by a member the operation
+	// does not declare. `workspaces` looked for a WorkspaceId that
+	// StopWorkspaces does not carry, and `dms` for a ReplicationTaskIdentifier
+	// that StartReplicationTask does not carry. In both the wrong lookup
+	// yields an empty key rather than an error, so the write lands on a single
+	// phantom row shared by every such call in the account, every call
+	// succeeds, and only a later describe shows nothing moved. Bundles that
+	// transcribe those defects must keep doing so -- hence the exemption --
+	// but a bundle that does it by accident should not load.
+	Addressing map[string]string `yaml:"addressing,omitempty"`
+
 	Provenance Provenance `yaml:"provenance,omitempty"`
 }
 

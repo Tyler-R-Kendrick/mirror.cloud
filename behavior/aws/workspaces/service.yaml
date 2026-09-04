@@ -57,6 +57,12 @@ operations:
   # Each of these writes whether or not the workspace exists, creating a bare
   # record when it does not.
   StopWorkspaces:
+    addressing:
+      workspace: >
+        StopWorkspacesRequest carries StopWorkspaceRequests; the derive
+        looks for WorkspaceId or WorkspaceIds and finds neither, so this
+        write lands on the same phantom row. Transcribed, not corrected --
+        see the quirk on this operation.
     effects:
       - put:
           resource: workspace
@@ -64,6 +70,14 @@ operations:
             State: "'STOPPED'"
 
   StartWorkspaces:
+    addressing:
+      workspace: >
+        StartWorkspacesRequest carries StartWorkspaceRequests, a list of
+        request objects. The derive looks for WorkspaceId or WorkspaceIds,
+        neither of which this operation declares, so the key resolves
+        empty and every start in the account writes to one shared phantom
+        row. Transcribed, not corrected -- see the quirk on
+        StopWorkspaces.
     effects:
       - put:
           resource: workspace
@@ -71,6 +85,10 @@ operations:
             State: "'AVAILABLE'"
 
   RebootWorkspaces:
+    addressing:
+      workspace: >
+        RebootWorkspacesRequest carries RebootWorkspaceRequests; same
+        empty key, same phantom row.
     effects:
       - put:
           resource: workspace
@@ -85,6 +103,11 @@ operations:
             State: "string(input.WorkspaceState)"
 
   TerminateWorkspaces:
+    addressing:
+      workspace: >
+        TerminateWorkspacesRequest carries TerminateWorkspaceRequests; the
+        empty key means this delete removes the phantom row, so nothing a
+        caller created is ever terminated.
     effects:
       - delete: { resource: workspace, missing: ignore }
 

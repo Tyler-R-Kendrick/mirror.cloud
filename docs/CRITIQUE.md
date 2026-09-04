@@ -543,3 +543,17 @@ The fix is mechanical and provably safe. For each non-unique needle, widen `old`
 The gate now requires exactly one match, and says which of the two failures happened: absence means the code moved, and more than one match means the needle names a site the harness will not pick. Both messages say what to do about it.
 
 One thing this exposed about the harness's data: three needles are Go-level string concatenations rather than single literals, because the code they match contains backticks. A tool that reads the table by parsing literals sees only the first fragment of those, which is how the widening pass produced one false positive — it "found" a duplicate that existed only in the truncated prefix. The gate caught it immediately, which is the point of running it, but it is worth recording that the mutants table is Go source and not a data file, and anything that rewrites it mechanically has to cope with that.
+
+### The addressing check, built at last
+
+`workspaces` and `dms` were recorded as instances of a class, with a note that the gate which would catch the next one "is cheap and does not exist yet" and "wants its own change." It has now been two batches and three write-ups without that change, which is long enough for a recorded finding to have quietly become a recorded intention.
+
+It exists now. The loader compares the members a resource is addressed by — `id.input_members`, and the `input.X` references inside an `id.derive` — against the members the operation's input shape declares, and refuses a bundle that shares none. Only implicit addressing is checked: an effect with its own `key:` has said how it resolves, and that expression is compiled and scoped like any other.
+
+Two things about the result are worth recording.
+
+**It found exactly the nine operations already known, and nothing else.** Five in `dms`, four in `workspaces`, across ninety-seven bundles — no false positives to argue about and no third instance hiding. That is a smaller yield than hoped and a good sign for the check: the class is real, it is rare, and the two instances were both found by extraction rather than by review, which is what made the gate worth building for the ones not yet extracted.
+
+**The derive spelling nearly escaped it.** The first version compared `input_members` only, and passed `workspaces` — which expresses the identical lookup as a CEL `derive`. A check that covers the blunt spelling and not the deliberate-looking one is worse than none, because the spelling it misses is the one an author reaches for when they are being careful. The mutation suite now carries a needle for exactly that: remove the derive branch and `workspaces` loads again.
+
+The exemption is the part most likely to rot. It records a transcribed defect, so it requires a reason, it must name a resource that exists, and a test pins all nine entries — if one loses its reason the suite says so. None of that stops someone adding a tenth; what it does is make adding one an act with a sentence attached to it.

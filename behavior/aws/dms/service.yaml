@@ -61,6 +61,11 @@ operations:
   # Answers a two-member instance built from the request rather than from the
   # record it removed, so the answer is the same whether or not one existed.
   DeleteReplicationInstance:
+    addressing:
+      instance: >
+        DeleteReplicationInstanceMessage declares only
+        ReplicationInstanceArn, so this delete removes the empty-keyed row
+        rather than the instance the caller named.
     effects:
       - delete: { resource: instance, missing: ignore }
     output:
@@ -86,6 +91,11 @@ operations:
 
 
   DeleteEndpoint:
+    addressing:
+      dmsendpoint: >
+        DeleteEndpointMessage declares only EndpointArn, so this delete
+        removes the empty-keyed row rather than the endpoint the caller
+        named.
     effects:
       - delete: { resource: dmsendpoint, missing: ignore }
     output:
@@ -120,6 +130,13 @@ operations:
   # Start and stop write whether or not the task exists, creating a bare record
   # when it does not, and answer the record they wrote.
   StartReplicationTask:
+    addressing:
+      task: >
+        StartReplicationTaskMessage declares ReplicationTaskArn and
+        nothing else that names the task. The pack looked for
+        ReplicationTaskIdentifier, so the key resolves empty and the write
+        lands on a shared phantom row. Transcribed, not corrected -- see
+        the quirk on this operation.
     effects:
       - put:
           resource: task
@@ -129,6 +146,11 @@ operations:
       ReplicationTask: rec
 
   StopReplicationTask:
+    addressing:
+      task: >
+        Same as StartReplicationTask: StopReplicationTaskMessage declares
+        only ReplicationTaskArn, so this write lands on the same phantom
+        row.
     effects:
       - put:
           resource: task
@@ -138,6 +160,11 @@ operations:
       ReplicationTask: rec
 
   DeleteReplicationTask:
+    addressing:
+      task: >
+        DeleteReplicationTaskMessage declares only ReplicationTaskArn, so
+        this delete removes the phantom row rather than the task the
+        caller named.
     effects:
       - delete: { resource: task, missing: ignore }
     output:

@@ -2,6 +2,7 @@ package bir
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -162,6 +163,7 @@ func Validate(s *Service, svc *model.Service) error {
 				s.ServiceID, where))
 			continue
 		}
+		checkAddressing(s, svc, modelOp, op, where, &problems)
 
 		// An operation expression sees: its read bindings and their _found
 		// companions, its let bindings, its select binding, the results of
@@ -333,6 +335,126 @@ func Validate(s *Service, svc *model.Service) error {
 	s.Compiled = compiled
 	return nil
 }
+
+// checkAddressing reports an operation that resolves a resource's key from the
+// request while declaring none of the members that resource is addressed by.
+//
+// This is the shape two extracted packs turned out to have. `workspaces`
+// looked for a WorkspaceId that StopWorkspaces does not declare; `dms` for a
+// ReplicationTaskIdentifier that StartReplicationTask does not declare. In
+// both, the wrong lookup yields an empty key rather than an error, so every
+// such call in the account writes to one shared phantom row, every call
+// succeeds, and only a later describe shows that nothing moved. Nothing in the
+// old arrangement could have caught it: a hand-written pack has no declaration
+// of what it is allowed to read.
+//
+// A bundle now does have one, so the two can be compared. Only implicit
+// addressing is checked -- an explicit `key:` expression is the bundle saying
+// how it resolves the key, and is compiled and scoped like any other.
+//
+// Transcribed defects keep their behavior by naming the resource in the
+// operation's `addressing:` map with the reason, which is required.
+func checkAddressing(s *Service, svc *model.Service, modelOp model.Operation, op Operation, where string, problems *Errors) {
+	declared := map[string]bool{}
+	if modelOp.Input != "" {
+		if shape, ok := svc.Shapes[modelOp.Input]; ok {
+			for m := range shape.Members {
+				declared[m] = true
+			}
+		}
+	}
+	for res, why := range op.Addressing {
+		if _, ok := s.Resources[res]; !ok {
+			*problems = append(*problems, fmt.Errorf("%s: %s.addressing: unknown resource %q",
+				s.ServiceID, where, res))
+		}
+		if strings.TrimSpace(why) == "" {
+			*problems = append(*problems, fmt.Errorf(
+				"%s: %s.addressing.%s: no reason; an exemption records a transcribed "+
+					"defect, so it has to say which one", s.ServiceID, where, res))
+		}
+	}
+
+	// Every resource this operation addresses without saying how.
+	implicit := map[string]string{}
+	note := func(resource, key, at string) {
+		if key != "" || resource == "" {
+			return // an explicit key expression says how it resolves
+		}
+		if _, seen := implicit[resource]; !seen {
+			implicit[resource] = at
+		}
+	}
+	for _, b := range sortedKeys(op.Reads) {
+		note(op.Reads[b].Resource, op.Reads[b].Key, "reads."+b)
+	}
+	for i, eff := range op.Effects {
+		at := fmt.Sprintf("effects[%d]", i)
+		for kind, w := range map[string]*WriteEffect{
+			"create": eff.Create, "put": eff.Put, "patch": eff.Patch,
+		} {
+			if w != nil {
+				note(w.Resource, w.Key, at+"."+kind)
+			}
+		}
+		if d := eff.Delete; d != nil && d.Where == "" {
+			note(d.Resource, d.Key, at+".delete")
+		}
+	}
+
+	for _, res := range sortedKeys(implicit) {
+		if _, exempt := op.Addressing[res]; exempt {
+			continue
+		}
+		r := s.Resources[res]
+		// A resource with no addressing members is not addressed from the
+		// request at all: it is a singleton, or its key is generated.
+		if r.Singleton != "" || r.ID.Generate != nil {
+			continue
+		}
+		// A derive expression is the bundle saying how it resolves the key,
+		// but it resolves it *from the request* just the same, so the members
+		// it reads are checked exactly as input_members are. `workspaces`
+		// spells its lookup as a derive and has the identical defect.
+		members := r.ID.InputMembers
+		if r.ID.Derive != "" {
+			members = append(append([]string{}, members...), inputRefs(r.ID.Derive)...)
+		}
+		if len(members) == 0 || len(declared) == 0 {
+			continue
+		}
+		found := false
+		for _, m := range members {
+			if declared[m] {
+				found = true
+				break
+			}
+		}
+		if !found {
+			*problems = append(*problems, fmt.Errorf(
+				"%s: %s.%s: addresses %q by %s, and %s declares none of them; "+
+					"the key would resolve empty and every such call would write to "+
+					"one shared row. Give the effect an explicit `key:`, or record "+
+					"the transcribed defect under `addressing: { %s: \"why\" }`.",
+				s.ServiceID, where, implicit[res], res,
+				strings.Join(members, ", "), modelOp.Input, res))
+		}
+	}
+}
+
+// inputRefs lists the request members an expression reads: the `X` of every
+// `input.X`. It is a textual scan rather than an AST walk because that is all
+// the check needs -- the question is which members the expression could
+// possibly name, and naming one it cannot read is already a load error.
+func inputRefs(expr string) []string {
+	var out []string
+	for _, m := range inputRefRE.FindAllStringSubmatch(expr, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
+var inputRefRE = regexp.MustCompile(`\binput\.([A-Za-z_][A-Za-z0-9_]*)`)
 
 // checkOutputMember reports an output member that the operation's output shape
 // does not declare. This is what stops a bundle inventing a member name that

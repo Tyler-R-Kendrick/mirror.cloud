@@ -140,6 +140,48 @@ func TestConcurrentDynamoDBPartiQLTransactions(t *testing.T) {
 	}
 }
 
+func TestConcurrentDynamoDBNoOpUpdatesEmitOneStreamRecord(t *testing.T) {
+	p := dynamodb.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	created, err := call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_AND_OLD_IMAGES"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "one"}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := call("UpdateItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "one"}}, "UpdateExpression": "SET value = :v", "ExpressionAttributeValues": map[string]any{":v": map[string]any{"N": "2"}}})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	arn := created.Output["TableDescription"].(map[string]any)["LatestStreamArn"]
+	iterator, err := call("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": "shardId-000000000000", "ShardIteratorType": "TRIM_HORIZON"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := call("GetRecords", map[string]any{"ShardIterator": iterator.Output["ShardIterator"]})
+	if err != nil || len(records.Output["Records"].([]any)) != 2 {
+		t.Fatalf("duplicate no-op stream records: %#v %v", records, err)
+	}
+}
+
 func (r failAfterReader) Read(p []byte) (int, error) {
 	n, err := r.Reader.Read(p)
 	if err == io.EOF {

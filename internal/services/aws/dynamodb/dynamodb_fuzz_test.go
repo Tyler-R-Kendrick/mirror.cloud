@@ -137,3 +137,53 @@ func FuzzDynamoDBPartiQL(f *testing.F) {
 		}
 	})
 }
+
+func FuzzDynamoDBStreamRecords(f *testing.F) {
+	f.Add([]byte{0x90}, false)
+	f.Fuzz(func(t *testing.T, raw []byte, keysOnly bool) {
+		if len(raw) > 1024 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+		call := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		view := "NEW_IMAGE"
+		if keysOnly {
+			view = "KEYS_ONLY"
+		}
+		created, createErr := call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": view}})
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		item := map[string]any{"id": map[string]any{"S": "one"}, "data": map[string]any{"B": base64.StdEncoding.EncodeToString(raw)}}
+		_, firstErr := call("PutItem", map[string]any{"TableName": "T", "Item": item})
+		_, duplicateErr := call("PutItem", map[string]any{"TableName": "T", "Item": item})
+		arn := str(asMap(created.Output["TableDescription"])["LatestStreamArn"])
+		iterator, iteratorErr := call("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": "shardId-000000000000", "ShardIteratorType": "TRIM_HORIZON"})
+		if iteratorErr != nil {
+			t.Fatal(iteratorErr)
+		}
+		stream, recordsErr := call("GetRecords", map[string]any{"ShardIterator": iterator.Output["ShardIterator"]})
+		if recordsErr != nil {
+			t.Fatal(recordsErr)
+		}
+		records := asSlice(stream.Output["Records"])
+		if firstErr != nil || duplicateErr != nil || len(records) != 1 {
+			t.Fatalf("stream writes: %#v %v %v", stream, firstErr, duplicateErr)
+		}
+		dynamodb := asMap(asMap(records[0])["dynamodb"])
+		wantSize := 5
+		if !keysOnly {
+			wantSize += 9 + len(raw)
+			if str(asMap(asMap(dynamodb["NewImage"])["data"])["B"]) != base64.StdEncoding.EncodeToString(raw) {
+				t.Fatal("binary stream value changed")
+			}
+		}
+		if asInt(dynamodb["SizeBytes"]) != wantSize || dynamodb["StreamViewType"] != view || !strings.HasPrefix(str(stream.Output["NextShardIterator"]), arn+"|") {
+			t.Fatalf("stream record metadata: %#v", dynamodb)
+		}
+	})
+}

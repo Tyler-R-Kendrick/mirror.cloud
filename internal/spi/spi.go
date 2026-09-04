@@ -125,7 +125,11 @@ type Store interface {
 // Scope is one account+region namespace.
 type Scope interface {
 	Collection(name string) Collection
+	Txn(ctx context.Context, fn func(ScopeTx) error) error
 }
+
+// ScopeTx is an atomic mutation spanning collections in one account and region.
+type ScopeTx interface{ Collection(name string) Tx }
 
 // Collection is a named key-value collection inside a Scope.
 type Collection interface {

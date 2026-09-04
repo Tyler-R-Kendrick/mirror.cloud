@@ -52,7 +52,7 @@ func (p *Pack) emitStream(ctx context.Context, req *spi.Request, table, event st
 	if !ok {
 		return
 	}
-	if event == "MODIFY" && reflect.DeepEqual(item, old) {
+	if event == "REMOVE" && old == nil || event == "MODIFY" && reflect.DeepEqual(item, old) {
 		return
 	}
 	view := str(asMap(td["StreamSpecification"])["StreamViewType"])

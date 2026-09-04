@@ -141,13 +141,22 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if err := p.validateItemKey(ctx, req, table, item); err != nil {
 			return nil, err
 		}
-		if err := p.checkCond(req, item); err != nil {
+		key := p.itemKeyFrom(ctx, req, table, item)
+		b, _ := json.Marshal(item)
+		var old map[string]any
+		if err := p.col(req, "items:"+table).Txn(ctx, func(tx spi.Tx) error {
+			if raw, ok, err := tx.Get(key); err != nil {
+				return err
+			} else if ok {
+				_ = json.Unmarshal(raw, &old)
+			}
+			if err := p.checkCond(req, old); err != nil {
+				return err
+			}
+			return tx.Put(key, b)
+		}); err != nil {
 			return nil, err
 		}
-		key := p.itemKeyFrom(ctx, req, table, item)
-		old := p.loadItem(ctx, req, table, key)
-		b, _ := json.Marshal(item)
-		_ = p.col(req, "items:"+table).Put(ctx, key, b)
 		ev := "INSERT"
 		if old != nil {
 			ev = "MODIFY"
@@ -164,11 +173,20 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"Item": item}}, nil
 	case "DeleteItem":
 		key := p.itemKeyFrom(ctx, req, table, asMap(req.Input["Key"]))
-		old := p.loadItem(ctx, req, table, key)
-		if err := p.checkCond(req, old); err != nil {
+		var old map[string]any
+		if err := p.col(req, "items:"+table).Txn(ctx, func(tx spi.Tx) error {
+			if raw, ok, err := tx.Get(key); err != nil {
+				return err
+			} else if ok {
+				_ = json.Unmarshal(raw, &old)
+			}
+			if err := p.checkCond(req, old); err != nil {
+				return err
+			}
+			return tx.Delete(key)
+		}); err != nil {
 			return nil, err
 		}
-		_ = p.col(req, "items:"+table).Delete(ctx, key)
 		p.emitStream(ctx, req, table, "REMOVE", asMap(req.Input["Key"]), old)
 		return p.returnValues(req, old, nil, nil), nil
 	case "Scan":
@@ -186,24 +204,33 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.listItems(ctx, req, table, str(req.Input["KeyConditionExpression"]), str(req.Input["FilterExpression"]))
 	case "UpdateItem":
 		key := p.itemKeyFrom(ctx, req, table, asMap(req.Input["Key"]))
-		old := p.loadItem(ctx, req, table, key)
-		item := cloneMap(old)
-		if item == nil {
-			item = cloneMap(asMap(req.Input["Key"]))
-		}
-		if err := p.checkCond(req, item); err != nil {
+		var old, item map[string]any
+		var touched []string
+		if err := p.col(req, "items:"+table).Txn(ctx, func(tx spi.Tx) error {
+			if raw, ok, err := tx.Get(key); err != nil {
+				return err
+			} else if ok {
+				_ = json.Unmarshal(raw, &old)
+			}
+			item = cloneMap(old)
+			if item == nil {
+				item = cloneMap(asMap(req.Input["Key"]))
+			}
+			if err := p.checkCond(req, item); err != nil {
+				return err
+			}
+			if ue := str(req.Input["UpdateExpression"]); ue != "" {
+				var err error
+				touched, err = expr.ApplyUpdate(ue, item, asMap(req.Input["ExpressionAttributeNames"]), asMap(req.Input["ExpressionAttributeValues"]))
+				if err != nil {
+					return &spi.Fault{Code: "ValidationException", Message: err.Error(), HTTPStatus: 400, Fault: "client"}
+				}
+			}
+			raw, _ := json.Marshal(item)
+			return tx.Put(key, raw)
+		}); err != nil {
 			return nil, err
 		}
-		var touched []string
-		if ue := str(req.Input["UpdateExpression"]); ue != "" {
-			var err error
-			touched, err = expr.ApplyUpdate(ue, item, asMap(req.Input["ExpressionAttributeNames"]), asMap(req.Input["ExpressionAttributeValues"]))
-			if err != nil {
-				return nil, &spi.Fault{Code: "ValidationException", Message: err.Error(), HTTPStatus: 400, Fault: "client"}
-			}
-		}
-		raw, _ := json.Marshal(item)
-		_ = p.col(req, "items:"+table).Put(ctx, key, raw)
 		ev := "INSERT"
 		if old != nil {
 			ev = "MODIFY"

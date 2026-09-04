@@ -39,6 +39,28 @@ type Metrics struct {
 	// PackDirs is the sorted allowlist of pack directories, relative to
 	// internal/services. A directory absent here is a new hand-written pack.
 	PackDirs []string `json:"pack_dirs"`
+
+	// ProtocolMismatches counts behavior bundles the runtime would route
+	// differently from what the vendored specification says -- a different
+	// protocol, a different X-Amz-Target prefix, or both.
+	//
+	// This is not a style metric like the others; it is a live defect with a
+	// number attached. A bundle is validated against the generated model --
+	// aws.guardduty is restJson1 with ninety operations -- and served through
+	// the booted catalog, which describes it as awsJson1_1 with twenty. The
+	// consequence is that no real SDK can reach those services: it sends
+	// `GET /detector` and the edge answers only `POST /` with an X-Amz-Target.
+	//
+	// It is a ratchet rather than a failing test because forty-eight services
+	// are in this state and fixing them is an edge change, not a bundle
+	// change. What the ratchet buys is that the number cannot grow while that
+	// work is outstanding, and that a service leaving the list cannot silently
+	// rejoin it.
+	ProtocolMismatches int `json:"protocol_mismatches"`
+	// ProtocolMismatchServices is the sorted list behind that count. A service
+	// absent here that mismatches is a new one, which is the case worth
+	// failing on: the count alone would let a fix and a regression cancel.
+	ProtocolMismatchServices []string `json:"protocol_mismatch_services"`
 }
 
 const (
@@ -124,6 +146,11 @@ func Measure(root string) (Metrics, error) {
 	}
 	sort.Strings(m.PackDirs)
 	m.Packs = len(m.PackDirs)
+
+	// The one metric that is not a count of source text: how many bundles the
+	// runtime serves in a protocol the specification disagrees with.
+	served, spec := ServedAndSpecRouting()
+	m.ProtocolMismatches, m.ProtocolMismatchServices = MeasureRouting(served, spec)
 	return m, nil
 }
 
@@ -173,8 +200,14 @@ func Compare(baseline, current Metrics) (regressions []Regression, newPacks []st
 		{"services_loc", baseline.ServicesLOC, current.ServicesLOC},
 		{"fault_sites", baseline.FaultSites, current.FaultSites},
 		{"register_sites", baseline.RegisterSites, current.RegisterSites},
+		{"protocol_mismatches", baseline.ProtocolMismatches, current.ProtocolMismatches},
 	}
 	for _, p := range pairs {
+		// A baseline of -1 marks a metric the previous ratchet did not carry,
+		// so this commit introduces it and there is nothing to compare.
+		if p.b < 0 {
+			continue
+		}
 		if p.c > p.b {
 			regressions = append(regressions, Regression{Metric: p.name, Baseline: p.b, Current: p.c})
 		}
@@ -188,7 +221,39 @@ func Compare(baseline, current Metrics) (regressions []Regression, newPacks []st
 			newPacks = append(newPacks, d)
 		}
 	}
+	if baseline.ProtocolMismatches < 0 {
+		return regressions, newPacks
+	}
+	known := make(map[string]bool, len(baseline.ProtocolMismatchServices))
+	for _, id := range baseline.ProtocolMismatchServices {
+		known[id] = true
+	}
+	for _, id := range current.ProtocolMismatchServices {
+		if !known[id] {
+			regressions = append(regressions, Regression{
+				Metric:   "protocol_mismatch/" + id,
+				Baseline: 0, Current: 1,
+			})
+		}
+	}
 	return regressions, newPacks
+}
+
+// MeasureRouting compares, for every behavior bundle, how the runtime would
+// route a request to it against how the vendored specification says it should
+// be routed. It is separate from Measure because it reads the built packages
+// rather than the source tree.
+func MeasureRouting(served map[string]string, spec map[string]string) (int, []string) {
+	var differ []string
+	for id, got := range served {
+		want, ok := spec[id]
+		if !ok || got == want {
+			continue
+		}
+		differ = append(differ, id)
+	}
+	sort.Strings(differ)
+	return len(differ), differ
 }
 
 func itoa(n int) string {

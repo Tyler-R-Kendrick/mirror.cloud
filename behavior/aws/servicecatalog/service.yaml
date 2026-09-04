@@ -61,7 +61,10 @@ operations:
 
   DescribeProduct:
     reads:
-      p: { resource: product, key: "string(input.Id)" }
+      # Id is optional on DescribeProduct -- a caller may name the product
+      # by Name instead -- so the key has to tolerate its absence. Reading
+      # it unguarded made a legal request answer a 500.
+      p: { resource: product, key: "'Id' in input ? string(input.Id) : ''" }
     require:
       - { cond: p_found, error: NotFound }
     output:

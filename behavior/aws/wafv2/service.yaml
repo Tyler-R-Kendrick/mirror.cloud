@@ -155,7 +155,9 @@ operations:
 
   GetRuleGroup:
     reads:
-      g: { resource: rulegroup, key: "string(input.Id)" }
+      # Id is optional on GetRuleGroup, so the key has to tolerate its
+      # absence: reading it unguarded made a legal request answer a 500.
+      g: { resource: rulegroup, key: "'Id' in input ? string(input.Id) : ''" }
     require:
       - { cond: g_found, error: NonexistentItem }
       - cond: >

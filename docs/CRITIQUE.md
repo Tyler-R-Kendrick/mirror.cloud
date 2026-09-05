@@ -623,6 +623,98 @@ What is not fixed here: the demux's service branches still sit inside
 `if action != ""`, and the runtime still boots from the hand-authored catalog.
 The ratchet still reads fifty-three.
 
+### A hundred and forty-eight of a hundred and fifty-two services answered as S3
+
+The second supporting defect is fixed here, and measuring it first was worth
+more than fixing it. The claim in the section above was that the demux's
+per-service branches all sit inside `if action != ""`, which only a
+query-protocol request satisfies. What that costs was not stated, so it was
+measured: build for every service in the bundle the request an SDK actually
+makes -- the service's regional host, the service's name in the SigV4
+credential scope, no `Action` and no `X-Amz-Target` -- and ask the demux which
+service it is for.
+
+**One hundred and forty-eight of one hundred and fifty-two resolved to
+`aws.s3`.** The chain is skipped, and the path-style S3 fallback at the bottom
+takes everything. Not a subset, not the REST ones: nearly all of them.
+
+The branches were also substring guesses -- `looksLike(r, "es")` is true of any
+host containing those two letters -- and there were about a hundred and thirty
+of them, which is a hand-maintained dispatch table of exactly the kind this
+project exists to stop writing.
+
+Both facts have the same fix. Every AWS request states its service twice, in
+the endpoint host and in the credential scope, and the model already carries
+`EndpointPrefix` for every service. `resolveByModel` matches a whole label
+against the model rather than a substring against a branch, and the chain is
+deleted: three hundred and eighty-one lines of `edge.go`, gone, with the gate
+above passing for all one hundred and fifty-two services and the whole suite
+green. Two labels survived as an explicit table -- `opensearch` and
+`directoryservice`, which are marketing names no specification records -- and a
+test fails if either stops being load-bearing.
+
+Two things this turned up that the fix alone would have hidden:
+
+**The demux was parsing the request form as a side effect.** S3's
+`SelectObjectContent` and Route 53's health-check writes read `r.Form`, which
+existed only because the demux happened to populate it on the way past.
+Returning earlier broke both. It is hoisted above every return now, but the
+shape of the bug is worth naming: a routing function that decides *and* mutates
+cannot be reordered safely, and nothing declared the dependency.
+
+**Two of the six mutants written for the new resolver survived.** Both were
+honest. The host-label branch was unexercised because host and credential scope
+agree for every service in today's bundle, so nothing noticed it being ignored
+-- and the host is precisely the mechanism that will tell DocumentDB from RDS
+once the generated models land, where three services share the `rds` prefix.
+The tie-break for a shared prefix was unobservable because the bundle has no
+shared prefix yet. A surviving mutant is not a harness problem to route around;
+each named a property no test stated, and both now have one.
+
+`TestSharedEndpointPrefixesAreNamed` is deliberately written to fail when the
+generated models are adopted. The bundle has no shared endpoint prefix today
+and the specifications have two, and that ambiguity should arrive as a failing
+test rather than be absorbed by a gate that already excuses it.
+
+### A global replace retargeted a mutant nobody was looking at
+
+This one is a process failure and cost a CI cycle, so it is worth writing down
+plainly.
+
+Retargeting the two mutants whose code this change moved, I rewrote them with
+a string replace on `run: "TestDemuxTargetsAndPaths"` -- a field two entries
+shared. The intended one was `demux-ignore-the-host-label`. The other was
+`edge-ignore-dynamodb-stream-target`, which had nothing to do with this change
+and was silently pointed at a test that does not exercise DynamoDB Streams
+routing. It survived, and CI said so fifty-four minutes later.
+
+Two things went wrong, and only one of them is the sed.
+
+The edit was unsafe: a blind replace on a field shared across a sixteen-thousand
+line table, anchored on nothing that identifies the entry. Anchoring on the
+mutant's `name` costs one more line and cannot do this.
+
+The larger one is that I ran a *filter* of the mutation suite rather than the
+suite. `-run 'TestMutantsAreKilled/(demux|specboot|smithy|restjson-ignore)'`
+covers exactly the mutants I was thinking about, which is precisely the set
+that cannot contain a mutant I broke by accident. The gate caught the defect on
+its first honest run; I had simply not given it one.
+
+There is no cheap structural check to add here. `TestMutantNeedlesExist`
+already proves each `old` matches one site, and it did: the needle was
+untouched. Whether a named test actually kills a mutant is only answerable by
+running it. So the rule is about the method, not a new gate: **when a change
+retargets mutants, the whole mutation suite is the verification, not a filter
+of it.**
+
+**And it is now slow enough to matter.** That run took 3246 seconds against a
+3600-second timeout -- ninety percent of the budget, on a step that used to
+take about twenty-five minutes. This stack added twenty-four mutants and CI now
+has very little headroom before the gate starts failing for time rather than
+for defects. That is a real problem and the fix is not to delete mutants: the
+harness rebuilds and re-runs a whole package per mutant, and mutants sharing a
+package could share one build.
+
 ### Reviewing the exemptions found the same rot in three places
 
 Self-reviewing this stack before merge turned up one mistake made three times, which is worth more than any of the three instances.

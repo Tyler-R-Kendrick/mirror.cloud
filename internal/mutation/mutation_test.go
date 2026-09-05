@@ -8903,10 +8903,13 @@ var mutants = []mutant{
 		run:  "TestDiffFilteringAndEmission",
 	},
 	{
+		// Retargeted when the demux stopped naming s3control in a branch of
+		// its own. The behavior defended is the same: a label must match a
+		// whole endpoint prefix, so `s3-control` is not swallowed by `s3`.
 		name: "edge-route-s3-control-to-s3",
-		file: filepath.Join("internal", "edge", "edge.go"),
-		old:  `return s.bundle.ServiceByID("aws.s3control")`,
-		new:  `return s.bundle.ServiceByID("aws.s3")`,
+		file: filepath.Join("internal", "edge", "resolve.go"),
+		old:  `strings.EqualFold(svc.EndpointPrefix, label)`,
+		new:  `strings.HasPrefix(label, svc.EndpointPrefix)`,
 		pkg:  "./internal/edge",
 		run:  "TestDemuxQueryServiceAliases",
 	},
@@ -12297,6 +12300,46 @@ var mutants = []mutant{
 		new:  `	if false {`,
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSONDecodeEncodeAndFault",
+	},
+	{
+		name: "demux-ignore-the-host-label",
+		file: filepath.Join("internal", "edge", "resolve.go"),
+		old:  "\tif svc := s.serviceByLabel(hostLabel(r.Host)); svc != nil {",
+		new:  "\tif svc := s.serviceByLabel(hostLabel(r.Host)); false {",
+		pkg:  "./internal/edge",
+		run:  "TestTheHostWinsOverTheCredentialScope",
+	},
+	{
+		name: "demux-ignore-the-credential-scope",
+		file: filepath.Join("internal", "edge", "resolve.go"),
+		old:  "\treturn s.serviceByLabel(credentialScopeService(r.Header.Get(\"Authorization\")))",
+		new:  "\treturn nil",
+		pkg:  "./internal/edge",
+		run:  "TestEveryServiceIsReachableTheWayAnSDKAddressesIt",
+	},
+	{
+		name: "demux-prefer-an-endpoint-prefix-over-the-service-name",
+		file: filepath.Join("internal", "edge", "resolve.go"),
+		old:  "\t\tif shortName(svc.ID) == label {",
+		new:  "\t\tif false {",
+		pkg:  "./internal/edge",
+		run:  "TestDemuxQueryServiceAliases",
+	},
+	{
+		name: "demux-resolve-a-shared-prefix-by-bundle-order",
+		file: filepath.Join("internal", "edge", "resolve.go"),
+		old:  "\tsort.Slice(byPrefix, func(i, j int) bool { return byPrefix[i].ID < byPrefix[j].ID })",
+		new:  "\tsort.Slice(byPrefix, func(i, j int) bool { return byPrefix[i].ID > byPrefix[j].ID })",
+		pkg:  "./internal/edge",
+		run:  "TestASharedPrefixResolvesTheSameWayEveryTime",
+	},
+	{
+		name: "demux-skip-parsing-the-form",
+		file: filepath.Join("internal", "edge", "edge.go"),
+		old:  "\t\t_ = r.ParseForm()",
+		new:  "\t\t_ = error(nil)",
+		pkg:  "./internal/services/aws/s3",
+		run:  "TestBootedServerS3SelectSQL",
 	},
 	{
 		name: "sns-deliver-unconfirmed-subscription",

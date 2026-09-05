@@ -656,9 +656,9 @@
       "serviceId": "aws.lex-models",
       "source": "https://github.com/aws/api-models-aws",
       "ref": "66407b3109cc41cc2a21b0d9f9fb5b18a1dec935",
-      "path": "aws/lex-models-v2/service/2020-08-07/lex-models-v2-2020-08-07.json",
-      "sha256": "d774b22393ca0dfffab855835b0f3891cf9f51fe7b697052fdd8fe823cfbd18b",
-      "ingested": "2026-08-28T18:51:00Z"
+      "path": "aws/lex-model-building-service/service/2017-04-19/lex-model-building-service-2017-04-19.json",
+      "sha256": "827feeac8c99c6da059d777a441ea86e9ad6cf6de4c2e98de1af751a168d691c",
+      "ingested": "2026-09-04T21:44:39Z"
     },
     {
       "serviceId": "aws.lightsail",

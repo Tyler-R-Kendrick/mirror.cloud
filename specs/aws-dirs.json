@@ -21,7 +21,7 @@
     "aws.iotwireless": "iot-wireless",
     "aws.keyspaces": "keyspaces",
     "aws.kinesisanalyticsv2": "kinesis-analytics-v2",
-    "aws.lex-models": "lex-models-v2",
+    "aws.lex-models": "lex-model-building-service",
     "aws.memorydb": "memorydb",
     "aws.neptune": "neptune",
     "aws.resourcegroupstaggingapi": "resource-groups-tagging-api",

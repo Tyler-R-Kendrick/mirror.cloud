@@ -179,31 +179,25 @@ func TestEveryBundleAnswersOverHTTP(t *testing.T) {
 	if len(ids) == 0 {
 		t.Fatal("no bundles")
 	}
-	// A bundle the runtime routes differently from what the specification says
-	// -- a different protocol, a different X-Amz-Target prefix, or both --
-	// cannot be called the way an SDK would. The request this test builds from
-	// the model is precisely the request that does not reach it, which is the
-	// defect rather than a fault of the test. Those bundles are counted by the
-	// ratchet's `routing_mismatches` and excluded here, so this gate is a real
-	// one today and widens by itself as they are fixed.
+	// This used to exclude the fifty-three bundles the runtime routed
+	// differently from what the specification said, because the request built
+	// from the model was precisely the request that did not reach them. The
+	// runtime boots from the generated models now, `routing_mismatches` is
+	// zero, and the ratchet forbids it rising, so there is nothing left to
+	// exclude and the exclusion is gone: a gate that can quietly re-narrow
+	// itself is worse than one that fails.
 	shared := map[string]int{}
 	for _, id := range ids {
 		if m, err := generated.Model(id); err == nil {
 			shared[m.EndpointPrefix]++
 		}
 	}
-	served, spec := check.ServedAndSpecRouting()
-	_, mismatched := check.MeasureRouting(served, spec)
-	skip := map[string]bool{}
-	for _, id := range mismatched {
-		skip[id] = true
+	if n, differ := check.MeasureRouting(check.ServedAndSpecRouting()); n != 0 {
+		t.Fatalf("%d bundles are routed differently from what the specification "+
+			"says, so the request this test builds cannot reach them: %v", n, differ)
 	}
 	skipped := 0
 	for _, id := range ids {
-		if skip[id] {
-			skipped++
-			continue
-		}
 		t.Run(id, func(t *testing.T) {
 			svc, err := generated.Model(id)
 			if err != nil {
@@ -257,6 +251,6 @@ func TestEveryBundleAnswersOverHTTP(t *testing.T) {
 			}
 		})
 	}
-	t.Logf("%d bundles, %d skipped (protocol mismatch, or no operation "+
-		"reachable from the model alone)", len(ids), skipped)
+	t.Logf("%d bundles, %d skipped (no operation reachable from the model "+
+		"alone, or a templated URI)", len(ids), skipped)
 }

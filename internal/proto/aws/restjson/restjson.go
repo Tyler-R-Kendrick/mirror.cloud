@@ -31,6 +31,20 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	if svc.ID == "aws.es" {
 		return opensearchOp(svc, r), nil
 	}
+	// An X-Amz-Target names an operation outright, and an explicit statement
+	// beats one inferred from a path. No SDK sends it for a restJson1 service,
+	// but this project's own recordings and pack tests do, and some services
+	// carry a pack-defined operation bound to "/" -- AppSync's GraphQL
+	// endpoint -- which a POST to the root would otherwise always match.
+	if target := r.Header.Get("X-Amz-Target"); target != "" {
+		name := target
+		if i := strings.LastIndex(target, "."); i >= 0 {
+			name = target[i+1:]
+		}
+		if op := svc.OperationByName(name); op != nil {
+			return op, nil
+		}
+	}
 	if op, _, ok := httpuri.Match(svc, r); ok {
 		return op, nil
 	}

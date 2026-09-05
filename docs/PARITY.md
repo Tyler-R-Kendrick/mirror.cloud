@@ -515,14 +515,14 @@ All 463 pinned S3 test functions are explicitly traced. That completes this sour
 
 ## DynamoDB baseline
 
-Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited on 2026-09-04.
+Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited on 2026-09-05.
 
 | Measure | Current evidence |
 |---|---:|
 | Requested test forms wired | 7 / 7 (100%) |
 | DynamoDB operations routed to emulation | 62 / 62 (100%) |
-| LocalStack DynamoDB test functions explicitly traced | 36 / 56 (64.3%) |
-| LocalStack DynamoDB test functions not yet traced | 20 / 56 (35.7%) |
+| LocalStack DynamoDB test functions explicitly traced | 39 / 56 (69.6%) |
+| LocalStack DynamoDB test functions not yet traced | 17 / 56 (30.4%) |
 
 The pinned inventory is the 56 direct test functions in `tests/aws/services/dynamodb/test_dynamodb.py`; parametrized cases are not expanded.
 
@@ -564,3 +564,6 @@ The pinned inventory is the 56 direct test functions in `tests/aws/services/dyna
 | `test_dynamodb.py::TestDynamoDB::test_return_values_on_conditions_check_failure` | Conditional item writes include the complete old item only when ReturnValuesOnConditionCheckFailure is ALL_OLD and omit it otherwise; atomic snapshot, SDK, BDD, spine, and mutation coverage pin both branches | Mapped; full race-clean |
 | `test_dynamodb.py::TestDynamoDB::test_transact_write_items_streaming` | Successful transaction Put, Update, and Delete actions emit exact INSERT, MODIFY, and REMOVE stream records while identical overwrites and idempotent replays emit none; atomic Verify-style snapshot, SDK, BDD, fuzz, chaos, and mutation coverage pin records and images | Mapped; full race-clean |
 | `test_dynamodb.py::TestDynamoDB::test_transact_write_items_streaming_for_different_tables` | One transaction commits writes across stream-enabled and stream-disabled tables while emitting a record only for the enabled table; atomic snapshot, SDK, BDD, concurrent chaos, and mutation coverage pin cross-collection atomicity and stream routing | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_batch_write_items` | BatchWriteItem applies ordered DeleteRequest and PutRequest entries and returns an empty UnprocessedItems map; atomic Verify-style snapshot, AWS SDK contract, raw HTTP BDD, 10,000-case fuzz, concurrent chaos, and semantic mutation coverage pin the behavior | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_batch_write_items_streaming` | Batch writes emit exact INSERT, REMOVE, and MODIFY records while identical overwrites emit none; the four-record LocalStack sequence is pinned by atomic snapshot, SDK, BDD, fuzz, chaos, and mutation coverage | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_dynamodb_get_batch_items` | BatchGetItem returns the requested table with an empty item list when no key exists, omits missing items beside existing ones, and returns an empty UnprocessedKeys map; atomic snapshot, SDK, BDD, fuzz, chaos, and mutation coverage pin the response | Mapped; full race-clean |

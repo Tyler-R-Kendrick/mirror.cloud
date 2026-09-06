@@ -242,6 +242,47 @@ func TestConcurrentDynamoDBKinesisDestinationKeepsEveryRecord(t *testing.T) {
 	}
 }
 
+func TestConcurrentDynamoDBGlobalTableKeepsEveryItem(t *testing.T) {
+	p := dynamodb.New(spitest.Deps(t))
+	ctx := context.Background()
+	call := func(region, operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: "000000000000", Region: region}, Operation: operation, Input: input})
+	}
+	if _, err := call("ap-south-1", "CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("ap-south-1", "UpdateTable", map[string]any{"TableName": "T", "ReplicaUpdates": []any{map[string]any{"Create": map[string]any{"RegionName": "us-east-1"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			region := "ap-south-1"
+			if index%2 == 1 {
+				region = "us-east-1"
+			}
+			_, err := call(region, "PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"N": strconv.Itoa(index)}}})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, region := range []string{"ap-south-1", "us-east-1"} {
+		response, err := call(region, "Scan", map[string]any{"TableName": "T"})
+		if err != nil || len(response.Output["Items"].([]any)) != 32 {
+			t.Fatalf("%s replicated items: %#v %v", region, response, err)
+		}
+	}
+}
+
 func TestConcurrentDynamoDBTransactionTokenChoosesOnePayload(t *testing.T) {
 	p := dynamodb.New(spitest.Deps(t))
 	ctx := context.Background()

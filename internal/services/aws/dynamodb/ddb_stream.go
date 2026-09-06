@@ -42,6 +42,28 @@ func (p *Pack) ensureStream(req *spi.Request, rec map[string]any, table string) 
 }
 
 func (p *Pack) emitStream(ctx context.Context, req *spi.Request, table, event string, item, old map[string]any) {
+	for _, identity := range p.globalTableIdentities(ctx, req, table) {
+		regional := *req
+		regional.Identity = identity
+		regionalReq := &regional
+		if identity.Region != req.Identity.Region {
+			attributes := item
+			if event == "REMOVE" && old != nil {
+				attributes = old
+			}
+			key := p.itemKeyFrom(ctx, regionalReq, table, attributes)
+			if event == "REMOVE" {
+				_ = p.col(regionalReq, "items:"+table).Delete(ctx, key)
+			} else {
+				encoded, _ := json.Marshal(item)
+				_ = p.col(regionalReq, "items:"+table).Put(ctx, key, encoded)
+			}
+		}
+		p.emitRegionalStream(ctx, regionalReq, table, event, item, old)
+	}
+}
+
+func (p *Pack) emitRegionalStream(ctx context.Context, req *spi.Request, table, event string, item, old map[string]any) {
 	td := p.tableDef(ctx, req, table)
 	destinations := p.activeKinesisDestinations(ctx, req, table)
 	streamEnabled := truthy(asMap(td["StreamSpecification"])["StreamEnabled"])

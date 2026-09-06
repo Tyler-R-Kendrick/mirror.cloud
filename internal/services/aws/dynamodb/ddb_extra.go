@@ -220,7 +220,16 @@ func (p *Pack) globalTable(ctx context.Context, req *spi.Request) (*spi.Response
 	case "CreateGlobalTable":
 		rec := map[string]any{"GlobalTableName": name, "ReplicationGroup": req.Input["ReplicationGroup"], "GlobalTableStatus": "ACTIVE"}
 		b, _ := json.Marshal(rec)
-		_ = col.Put(ctx, name, b)
+		if err := col.Txn(ctx, func(tx spi.Tx) error {
+			if _, ok, err := tx.Get(name); err != nil {
+				return err
+			} else if ok {
+				return &spi.Fault{Code: "GlobalTableAlreadyExistsException", Message: "Global Table already exists: " + name, HTTPStatus: 400, Fault: "client"}
+			}
+			return tx.Put(name, b)
+		}); err != nil {
+			return nil, err
+		}
 		return &spi.Response{Output: map[string]any{"GlobalTableDescription": rec}}, nil
 	case "DescribeGlobalTable":
 		b, ok, _ := col.Get(ctx, name)
@@ -241,15 +250,28 @@ func (p *Pack) globalTable(ctx context.Context, req *spi.Request) (*spi.Response
 		return &spi.Response{Output: map[string]any{"GlobalTables": out}}, nil
 	case "UpdateGlobalTable":
 		b, ok, _ := col.Get(ctx, name)
-		rec := map[string]any{"GlobalTableName": name, "GlobalTableStatus": "ACTIVE"}
-		if ok {
-			_ = json.Unmarshal(b, &rec)
+		if !ok {
+			return nil, &spi.Fault{Code: "GlobalTableNotFoundException", Message: "Global Table not found: " + name, HTTPStatus: 400, Fault: "client"}
 		}
+		rec := map[string]any{}
+		_ = json.Unmarshal(b, &rec)
 		reps := asSlice(rec["ReplicationGroup"])
 		for _, a := range asSlice(req.Input["ReplicaUpdates"]) {
 			um := asMap(a)
 			if cr := asMap(um["Create"]); str(cr["RegionName"]) != "" {
-				reps = append(reps, map[string]any{"RegionName": cr["RegionName"]})
+				if !hasReplica(reps, str(cr["RegionName"])) {
+					reps = append(reps, map[string]any{"RegionName": cr["RegionName"]})
+				}
+			}
+			if del := asMap(um["Delete"]); str(del["RegionName"]) != "" {
+				region := str(del["RegionName"])
+				kept := make([]any, 0, len(reps))
+				for _, replica := range reps {
+					if str(asMap(replica)["RegionName"]) != region {
+						kept = append(kept, replica)
+					}
+				}
+				reps = kept
 			}
 		}
 		rec["ReplicationGroup"] = reps
@@ -270,6 +292,150 @@ func (p *Pack) globalTable(ctx context.Context, req *spi.Request) (*spi.Response
 		return &spi.Response{Output: rec}, nil
 	}
 	return nil, spi.NotImplemented("aws.dynamodb", req.Operation, "emulate")
+}
+
+func (p *Pack) updateTableReplicas(ctx context.Context, req *spi.Request, table string, definition map[string]any) (bool, error) {
+	state := map[string]any{"SourceRegion": req.Identity.Region, "ReplicationGroup": []any{}}
+	if encoded, ok, _ := p.col(req, "ddbglobal").Get(ctx, table); ok {
+		_ = json.Unmarshal(encoded, &state)
+	}
+	replicas := asSlice(state["ReplicationGroup"])
+	deletedCurrent := false
+	for _, raw := range asSlice(req.Input["ReplicaUpdates"]) {
+		update := asMap(raw)
+		if create := asMap(update["Create"]); str(create["RegionName"]) != "" {
+			region := str(create["RegionName"])
+			if region == str(state["SourceRegion"]) || hasReplica(replicas, region) {
+				return false, &spi.Fault{Code: "ValidationException", Message: "Update global table operation failed because one or more replicas already existed", HTTPStatus: 400, Fault: "client"}
+			}
+			target := regionalRequest(req, region)
+			if _, exists, _ := p.col(target, "tables").Get(ctx, table); exists {
+				return false, &spi.Fault{Code: "ResourceInUseException", Message: "Table already exists: " + table, HTTPStatus: 400, Fault: "client"}
+			}
+			clone := cloneMap(definition)
+			clone["TableArn"] = "arn:aws:dynamodb:" + region + ":" + req.Identity.Account + ":table/" + table
+			clone["TableId"] = p.deps.Rand.Derive("dynamodb:table:" + req.Identity.Account + ":" + region + ":" + table).UUID()
+			delete(clone, "LatestStreamArn")
+			delete(clone, "LatestStreamLabel")
+			p.ensureStream(target, clone, table)
+			encoded, _ := json.Marshal(clone)
+			if err := p.col(target, "tables").Put(ctx, table, encoded); err != nil {
+				return false, err
+			}
+			items, _, err := p.col(req, "items:"+table).List(ctx, "", "", 0)
+			if err != nil {
+				return false, err
+			}
+			for _, item := range items {
+				if err := p.col(target, "items:"+table).Put(ctx, item.Key, item.Value); err != nil {
+					return false, err
+				}
+			}
+			replica := cloneMap(create)
+			replica["ReplicaStatus"] = "ACTIVE"
+			replicas = append(replicas, replica)
+		}
+		if remove := asMap(update["Delete"]); str(remove["RegionName"]) != "" {
+			region := str(remove["RegionName"])
+			if !hasReplica(replicas, region) {
+				return false, &spi.Fault{Code: "ValidationException", Message: "Update global table operation failed because one or more replicas were not part of the global table", HTTPStatus: 400, Fault: "client"}
+			}
+			replicas = withoutReplica(replicas, region)
+			target := regionalRequest(req, region)
+			_ = p.col(target, "tables").Delete(ctx, table)
+			_ = p.col(target, "ddbglobal").Delete(ctx, table)
+			clearCollection(ctx, p.col(target, "items:"+table))
+			clearCollection(ctx, p.col(target, "ddbstream:"+table))
+			deletedCurrent = region == req.Identity.Region
+		}
+	}
+	state["ReplicationGroup"] = replicas
+	regions := []string{str(state["SourceRegion"])}
+	for _, replica := range replicas {
+		regions = append(regions, str(asMap(replica)["RegionName"]))
+	}
+	for _, region := range regions {
+		target := regionalRequest(req, region)
+		stored := p.tableDef(ctx, target, table)
+		if len(stored) == 0 {
+			continue
+		}
+		if len(replicas) == 0 {
+			delete(stored, "Replicas")
+			_ = p.col(target, "ddbglobal").Delete(ctx, table)
+		} else {
+			stored["Replicas"] = replicas
+			encoded, _ := json.Marshal(state)
+			_ = p.col(target, "ddbglobal").Put(ctx, table, encoded)
+		}
+		encoded, _ := json.Marshal(stored)
+		_ = p.col(target, "tables").Put(ctx, table, encoded)
+		if region == req.Identity.Region {
+			for key := range definition {
+				delete(definition, key)
+			}
+			for key, value := range stored {
+				definition[key] = value
+			}
+		}
+	}
+	return deletedCurrent, nil
+}
+
+func (p *Pack) globalTableIdentities(ctx context.Context, req *spi.Request, table string) []spi.Identity {
+	encoded, ok, _ := p.col(req, "ddbglobal").Get(ctx, table)
+	if !ok {
+		return []spi.Identity{req.Identity}
+	}
+	var state map[string]any
+	_ = json.Unmarshal(encoded, &state)
+	regions := []string{str(state["SourceRegion"])}
+	for _, replica := range asSlice(state["ReplicationGroup"]) {
+		regions = append(regions, str(asMap(replica)["RegionName"]))
+	}
+	identities := make([]spi.Identity, 0, len(regions))
+	seen := map[string]bool{}
+	for _, region := range regions {
+		if region != "" && !seen[region] {
+			identity := req.Identity
+			identity.Region = region
+			identities = append(identities, identity)
+			seen[region] = true
+		}
+	}
+	return identities
+}
+
+func regionalRequest(req *spi.Request, region string) *spi.Request {
+	clone := *req
+	clone.Identity.Region = region
+	return &clone
+}
+
+func hasReplica(replicas []any, region string) bool {
+	for _, replica := range replicas {
+		if str(asMap(replica)["RegionName"]) == region {
+			return true
+		}
+	}
+	return false
+}
+
+func withoutReplica(replicas []any, region string) []any {
+	kept := make([]any, 0, len(replicas))
+	for _, replica := range replicas {
+		if str(asMap(replica)["RegionName"]) != region {
+			kept = append(kept, replica)
+		}
+	}
+	return kept
+}
+
+func clearCollection(ctx context.Context, collection spi.Collection) {
+	entries, _, _ := collection.List(ctx, "", "", 0)
+	for _, entry := range entries {
+		_ = collection.Delete(ctx, entry.Key)
+	}
 }
 
 func (p *Pack) insights(ctx context.Context, req *spi.Request) (*spi.Response, error) {

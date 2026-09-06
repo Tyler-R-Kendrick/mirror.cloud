@@ -502,6 +502,15 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		m := map[string]any{}
 		_ = json.Unmarshal(b, &m)
+		if req.Input["ReplicaUpdates"] != nil {
+			deletedCurrent, err := p.updateTableReplicas(ctx, req, table, m)
+			if err != nil {
+				return nil, err
+			}
+			if deletedCurrent {
+				return &spi.Response{Output: map[string]any{"TableDescription": tableDescription(m, "UPDATING")}}, nil
+			}
+		}
 		if gsi := req.Input["GlobalSecondaryIndexUpdates"]; gsi != nil {
 			indexes, _ := m["GlobalSecondaryIndexes"].([]any)
 			if ups, ok := gsi.([]any); ok {

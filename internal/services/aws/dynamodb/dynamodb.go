@@ -68,7 +68,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return nil
 	}
 	switch req.Operation {
-	case "PutItem", "GetItem", "DeleteItem", "UpdateItem", "Query", "Scan":
+	case "PutItem", "GetItem", "DeleteItem", "UpdateItem", "Query", "Scan",
+		"UpdateContinuousBackups", "DescribeContinuousBackups",
+		"UpdateContributorInsights", "DescribeContributorInsights":
 		if err := requireTable(table); err != nil {
 			return nil, err
 		}
@@ -316,28 +318,44 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"ExpiredItems": expired}}, nil
 	case "UpdateContinuousBackups":
 		spec := asMap(req.Input["PointInTimeRecoverySpecification"])
-		b, _ := json.Marshal(spec)
-		_ = p.col(req, "pitr").Put(ctx, table, b)
-		st := "DISABLED"
-		if truthy(spec["PointInTimeRecoveryEnabled"]) {
-			st = "ENABLED"
+		enabled := truthy(spec["PointInTimeRecoveryEnabled"])
+		status := "DISABLED"
+		recovery := map[string]any{"PointInTimeRecoveryStatus": status}
+		if enabled {
+			status = "ENABLED"
+			now := p.deps.Clock.Now().Unix()
+			earliest := now
+			if previous, ok, _ := p.col(req, "pitr").Get(ctx, table); ok {
+				var description map[string]any
+				_ = json.Unmarshal(previous, &description)
+				if str(description["PointInTimeRecoveryStatus"]) == "ENABLED" {
+					earliest = int64(asInt(description["EarliestRestorableDateTime"]))
+				}
+			}
+			recovery = map[string]any{
+				"PointInTimeRecoveryStatus":  status,
+				"EarliestRestorableDateTime": earliest,
+				"LatestRestorableDateTime":   now,
+				"RecoveryPeriodInDays":       35,
+			}
 		}
+		b, _ := json.Marshal(recovery)
+		_ = p.col(req, "pitr").Put(ctx, table, b)
 		return &spi.Response{Output: map[string]any{"ContinuousBackupsDescription": map[string]any{
 			"ContinuousBackupsStatus":        "ENABLED",
-			"PointInTimeRecoveryDescription": map[string]any{"PointInTimeRecoveryStatus": st},
+			"PointInTimeRecoveryDescription": recovery,
 		}}}, nil
 	case "DescribeContinuousBackups":
-		st := "DISABLED"
+		recovery := map[string]any{"PointInTimeRecoveryStatus": "DISABLED"}
 		if b, ok, _ := p.col(req, "pitr").Get(ctx, table); ok {
-			var spec map[string]any
-			_ = json.Unmarshal(b, &spec)
-			if truthy(spec["PointInTimeRecoveryEnabled"]) {
-				st = "ENABLED"
+			_ = json.Unmarshal(b, &recovery)
+			if str(recovery["PointInTimeRecoveryStatus"]) == "ENABLED" {
+				recovery["LatestRestorableDateTime"] = p.deps.Clock.Now().Unix()
 			}
 		}
 		return &spi.Response{Output: map[string]any{"ContinuousBackupsDescription": map[string]any{
 			"ContinuousBackupsStatus":        "ENABLED",
-			"PointInTimeRecoveryDescription": map[string]any{"PointInTimeRecoveryStatus": st},
+			"PointInTimeRecoveryDescription": recovery,
 		}}}, nil
 	case "DescribeEndpoints":
 		addr := "http://127.0.0.1:4566"
@@ -752,6 +770,8 @@ func asInt(v any) int {
 		return int(n)
 	case int:
 		return n
+	case int64:
+		return int(n)
 	case string:
 		i, _ := strconv.Atoi(n)
 		return i

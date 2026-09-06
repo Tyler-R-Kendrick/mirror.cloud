@@ -775,6 +775,55 @@ func TestDynamoDBDefaultSSECharacterization(t *testing.T) {
 	})
 }
 
+func TestDynamoDBBackupsAndContributorInsights(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	must := func(operation string, input map[string]any) map[string]any {
+		response, err := call(operation, input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+	must("CreateTable", map[string]any{"TableName": "T"})
+	disabled := asMap(asMap(must("DescribeContinuousBackups", map[string]any{"TableName": "T"})["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
+	if disabled["PointInTimeRecoveryStatus"] != "DISABLED" {
+		t.Fatalf("default continuous backups %#v", disabled)
+	}
+	enabled := asMap(asMap(must("UpdateContinuousBackups", map[string]any{"TableName": "T", "PointInTimeRecoverySpecification": map[string]any{"PointInTimeRecoveryEnabled": true}})["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
+	earliest := asInt(enabled["EarliestRestorableDateTime"])
+	if enabled["PointInTimeRecoveryStatus"] != "ENABLED" || asInt(enabled["LatestRestorableDateTime"]) != earliest || asInt(enabled["RecoveryPeriodInDays"]) != 35 {
+		t.Fatalf("enabled continuous backups %#v", enabled)
+	}
+	if err := deps.Clock.Advance(time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	reenabled := asMap(asMap(must("UpdateContinuousBackups", map[string]any{"TableName": "T", "PointInTimeRecoverySpecification": map[string]any{"PointInTimeRecoveryEnabled": true}})["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
+	if asInt(reenabled["EarliestRestorableDateTime"]) != earliest || asInt(reenabled["LatestRestorableDateTime"]) <= earliest {
+		t.Fatalf("continuous backup window %#v", reenabled)
+	}
+	described := asMap(asMap(must("DescribeContinuousBackups", map[string]any{"TableName": "T"})["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
+	if described["PointInTimeRecoveryStatus"] != "ENABLED" || asInt(described["EarliestRestorableDateTime"]) != earliest || asInt(described["RecoveryPeriodInDays"]) != 35 {
+		t.Fatalf("described continuous backups %#v", described)
+	}
+	insights := must("DescribeContributorInsights", map[string]any{"TableName": "T"})
+	if insights["TableName"] != "T" || insights["ContributorInsightsStatus"] != "DISABLED" {
+		t.Fatalf("default contributor insights %#v", insights)
+	}
+	for _, operation := range []string{"DescribeContinuousBackups", "UpdateContinuousBackups", "DescribeContributorInsights", "UpdateContributorInsights"} {
+		if _, err := call(operation, map[string]any{"TableName": "missing"}); err == nil {
+			t.Fatalf("%s accepted a missing table", operation)
+		} else if fault, ok := err.(*spi.Fault); !ok || fault.Code != "ResourceNotFoundException" {
+			t.Fatalf("%s missing table fault %v", operation, err)
+		}
+	}
+}
+
 func TestDynamoDBTableClass(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

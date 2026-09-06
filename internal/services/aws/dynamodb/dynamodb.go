@@ -77,10 +77,19 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		b, _ := json.Marshal(req.Input)
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
+		if str(rec["BillingMode"]) == "PAY_PER_REQUEST" && len(asMap(rec["ProvisionedThroughput"])) > 0 {
+			return nil, &spi.Fault{Code: "ValidationException", Message: "One or more parameter values were invalid: Neither ReadCapacityUnits nor WriteCapacityUnits can be specified when BillingMode is PAY_PER_REQUEST", HTTPStatus: 400, Fault: "client"}
+		}
 		arn := "arn:aws:dynamodb:" + req.Identity.Region + ":" + req.Identity.Account + ":table/" + table
 		tags := rec["Tags"]
 		delete(rec, "Tags")
 		rec["TableArn"] = arn
+		rec["TableId"] = p.deps.Rand.Derive("dynamodb:table:" + req.Identity.Account + ":" + req.Identity.Region + ":" + table).UUID()
+		rec["CreationDateTime"] = p.deps.Clock.Now().Unix()
+		rec["DeletionProtectionEnabled"] = false
+		rec["ItemCount"] = 0
+		rec["TableSizeBytes"] = 0
+		p.prepareTableMetadata(req, rec)
 		if class := str(rec["TableClass"]); class != "" {
 			rec["TableClassSummary"] = map[string]any{"TableClass": class}
 			delete(rec, "TableClass")
@@ -100,10 +109,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if len(asSlice(tags)) > 0 {
 			_, _ = p.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "TagResource", Input: map[string]any{"ResourceArn": arn, "Tags": tags}})
 		}
-		description := map[string]any{"TableName": table, "TableArn": arn, "TableStatus": "ACTIVE", "LatestStreamArn": rec["LatestStreamArn"]}
-		if summary := rec["TableClassSummary"]; summary != nil {
-			description["TableClassSummary"] = summary
-		}
+		description := tableDescription(rec, "CREATING")
 		return &spi.Response{Output: map[string]any{"TableDescription": description}}, nil
 	case "DeleteTable":
 		if err := p.col(req, "tables").Txn(ctx, func(tx spi.Tx) error {
@@ -126,9 +132,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		var m map[string]any
 		_ = json.Unmarshal(b, &m)
-		m["TableStatus"] = "ACTIVE"
-		m["TableName"] = table
-		return &spi.Response{Output: map[string]any{"Table": m}}, nil
+		return &spi.Response{Output: map[string]any{"Table": tableDescription(m, "ACTIVE")}}, nil
 	case "ListTables":
 		kvs, _, _ := p.col(req, "tables").List(ctx, "", "", 0)
 		var names []any
@@ -485,12 +489,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.transactWriteItems(ctx, req)
 	case "UpdateTable":
 		b, ok, _ := p.col(req, "tables").Get(ctx, table)
-		m := map[string]any{"TableName": table}
-		if ok {
-			_ = json.Unmarshal(b, &m)
+		if !ok {
+			return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Requested resource not found", HTTPStatus: 400, Fault: "client"}
 		}
+		m := map[string]any{}
+		_ = json.Unmarshal(b, &m)
 		if gsi := req.Input["GlobalSecondaryIndexUpdates"]; gsi != nil {
-			m["GlobalSecondaryIndexUpdates"] = gsi
 			indexes, _ := m["GlobalSecondaryIndexes"].([]any)
 			if ups, ok := gsi.([]any); ok {
 				for _, u := range ups {
@@ -519,9 +523,15 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if class := str(req.Input["TableClass"]); class != "" {
 			m["TableClassSummary"] = map[string]any{"TableClass": class}
 		}
+		for _, key := range []string{"AttributeDefinitions", "BillingMode", "ProvisionedThroughput", "WarmThroughput"} {
+			if value := req.Input[key]; value != nil {
+				m[key] = value
+			}
+		}
+		p.prepareTableMetadata(req, m)
 		nb, _ := json.Marshal(m)
 		_ = p.col(req, "tables").Put(ctx, table, nb)
-		return &spi.Response{Output: map[string]any{"TableDescription": m}}, nil
+		return &spi.Response{Output: map[string]any{"TableDescription": tableDescription(m, "UPDATING")}}, nil
 	case "TagResource":
 		arn := str(req.Input["ResourceArn"])
 		var tags []any
@@ -746,6 +756,64 @@ func cloneMap(m map[string]any) map[string]any {
 	var o map[string]any
 	_ = json.Unmarshal(b, &o)
 	return o
+}
+
+func (p *Pack) prepareTableMetadata(req *spi.Request, table map[string]any) {
+	billing := str(table["BillingMode"])
+	if billing == "" {
+		billing = str(asMap(table["BillingModeSummary"])["BillingMode"])
+	}
+	if billing == "PAY_PER_REQUEST" {
+		table["BillingModeSummary"] = map[string]any{"BillingMode": billing}
+	}
+	delete(table, "BillingMode")
+	throughput := cloneMap(asMap(table["ProvisionedThroughput"]))
+	if billing == "PAY_PER_REQUEST" {
+		throughput = map[string]any{"ReadCapacityUnits": 0, "WriteCapacityUnits": 0}
+	}
+	if len(throughput) > 0 {
+		throughput["NumberOfDecreasesToday"] = 0
+		table["ProvisionedThroughput"] = throughput
+	}
+	arn := str(table["TableArn"])
+	for _, raw := range asSlice(table["GlobalSecondaryIndexes"]) {
+		index := asMap(raw)
+		index["IndexArn"] = arn + "/index/" + str(index["IndexName"])
+		index["IndexSizeBytes"] = 0
+		index["ItemCount"] = 0
+		indexThroughput := cloneMap(asMap(index["ProvisionedThroughput"]))
+		if billing == "PAY_PER_REQUEST" {
+			indexThroughput = map[string]any{"ReadCapacityUnits": 0, "WriteCapacityUnits": 0}
+		}
+		if len(indexThroughput) > 0 {
+			indexThroughput["NumberOfDecreasesToday"] = 0
+			index["ProvisionedThroughput"] = indexThroughput
+		}
+	}
+	if spec := asMap(table["SSESpecification"]); spec["Enabled"] == true {
+		if key := str(spec["KMSMasterKeyId"]); key != "" {
+			if !strings.HasPrefix(key, "arn:") {
+				key = "arn:aws:kms:" + req.Identity.Region + ":" + req.Identity.Account + ":key/" + key
+			}
+			table["SSEDescription"] = map[string]any{"Status": "ENABLED", "SSEType": "KMS", "KMSMasterKeyArn": key}
+			delete(table, "SSESpecification")
+		}
+	}
+}
+
+func tableDescription(table map[string]any, status string) map[string]any {
+	description := cloneMap(table)
+	description["TableStatus"] = status
+	if warm := asMap(description["WarmThroughput"]); len(warm) > 0 {
+		warm["Status"] = "ACTIVE"
+		if status != "ACTIVE" {
+			warm["Status"] = "UPDATING"
+		}
+	}
+	for _, raw := range asSlice(description["GlobalSecondaryIndexes"]) {
+		asMap(raw)["IndexStatus"] = status
+	}
+	return description
 }
 
 func (p *Pack) loadItem(ctx context.Context, req *spi.Request, table, key string) map[string]any {

@@ -616,6 +616,52 @@ func TestDynamoDBBatchCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"overwrite": overwrite, "changed": changed, "batchGet": batchGet, "stream": stream})
 }
 
+func TestDynamoDBTableMetadata(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateTable", map[string]any{"TableName": "Invalid", "BillingMode": "PAY_PER_REQUEST", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}}); err == nil || err.Error() != "ValidationException: One or more parameter values were invalid: Neither ReadCapacityUnits nor WriteCapacityUnits can be specified when BillingMode is PAY_PER_REQUEST" {
+		t.Fatalf("pay-per-request throughput fault %v", err)
+	}
+	explicit, err := call("CreateTable", map[string]any{"TableName": "Encrypted", "SSESpecification": map[string]any{"Enabled": true, "SSEType": "KMS", "KMSMasterKeyId": "key-id"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sse := asMap(asMap(explicit.Output["TableDescription"])["SSEDescription"])
+	if sse["Status"] != "ENABLED" || sse["SSEType"] != "KMS" || sse["KMSMasterKeyArn"] != "arn:aws:kms:us-east-1:000000000000:key/key-id" {
+		t.Fatalf("explicit SSE description %#v", sse)
+	}
+	created, err := call("CreateTable", map[string]any{
+		"TableName": "Metadata", "BillingMode": "PAY_PER_REQUEST",
+		"KeySchema":              []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}},
+		"GlobalSecondaryIndexes": []any{map[string]any{"IndexName": "by-value", "KeySchema": []any{map[string]any{"AttributeName": "value", "KeyType": "HASH"}}, "Projection": map[string]any{"ProjectionType": "ALL"}}},
+		"WarmThroughput":         map[string]any{"ReadUnitsPerSecond": 1000, "WriteUnitsPerSecond": 1200},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	createdTable := asMap(created.Output["TableDescription"])
+	createdIndex := asMap(asSlice(createdTable["GlobalSecondaryIndexes"])[0])
+	if str(asMap(createdTable["BillingModeSummary"])["BillingMode"]) != "PAY_PER_REQUEST" || createdTable["TableStatus"] != "CREATING" || asInt(asMap(createdTable["ProvisionedThroughput"])["ReadCapacityUnits"]) != 0 || createdIndex["IndexStatus"] != "CREATING" || asInt(asMap(createdIndex["ProvisionedThroughput"])["WriteCapacityUnits"]) != 0 || asMap(createdTable["WarmThroughput"])["Status"] != "UPDATING" {
+		t.Fatalf("create metadata %#v", createdTable)
+	}
+	described, err := call("DescribeTable", map[string]any{"TableName": "Metadata"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	describedTable := asMap(described.Output["Table"])
+	if describedTable["TableStatus"] != "ACTIVE" || asMap(describedTable["WarmThroughput"])["Status"] != "ACTIVE" || asMap(asSlice(describedTable["GlobalSecondaryIndexes"])[0])["IndexStatus"] != "ACTIVE" {
+		t.Fatalf("describe metadata %#v", describedTable)
+	}
+	provisioned, err := call("CreateTable", map[string]any{"TableName": "Provisioned", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}, "GlobalSecondaryIndexes": []any{map[string]any{"IndexName": "by-value", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 1, "WriteCapacityUnits": 1}}}})
+	if err != nil || asInt(asMap(asSlice(asMap(provisioned.Output["TableDescription"])["GlobalSecondaryIndexes"])[0])["ProvisionedThroughput"].(map[string]any)["ReadCapacityUnits"]) != 1 {
+		t.Fatalf("provisioned GSI %#v %v", provisioned, err)
+	}
+}
+
 func TestDynamoDBTableClass(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

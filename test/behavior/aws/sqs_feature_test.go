@@ -281,4 +281,24 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("empty batch %d %s", status, body)
 		}
 	})
+	t.Run("Given an oversized message When sending Then InvalidParameterValue is returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-oversized"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-oversized", "MessageBody": strings.Repeat("a", (1<<20)-7), "MessageAttributes": map[string]any{"k": map[string]any{"DataType": "String", "StringValue": "x"}}})
+		status, body := call("SendMessage", string(payload))
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte(`"__type":"InvalidParameterValue"`)) || !bytes.Contains(body, []byte("Message must be shorter than 1048576 bytes")) {
+			t.Fatalf("oversized %d %s", status, body)
+		}
+	})
+	t.Run("Given a reduced maximum message size When sending Then the new limit applies", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-maximum","Attributes":{"MaximumMessageSize":"1024"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-maximum", "MessageBody": strings.Repeat("a", 1017), "MessageAttributes": map[string]any{"k": map[string]any{"DataType": "String", "StringValue": "x"}}})
+		status, body := call("SendMessage", string(payload))
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("Message must be shorter than 1024 bytes")) {
+			t.Fatalf("reduced maximum %d %s", status, body)
+		}
+	})
 }

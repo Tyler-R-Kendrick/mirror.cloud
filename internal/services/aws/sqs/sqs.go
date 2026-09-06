@@ -309,6 +309,13 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	sum := md5.Sum([]byte(body))
 	md5hex := hex.EncodeToString(sum[:])
 	attrs := p.queueAttrs(ctx, req, name)
+	maximum := 1 << 20
+	if configured := asInt(attrs["MaximumMessageSize"]); configured > 0 {
+		maximum = configured
+	}
+	if messageSize(body, req.Input["MessageAttributes"]) > maximum {
+		return nil, &spi.Fault{Code: "InvalidParameterValue", Message: fmt.Sprintf("One or more parameters are invalid. Reason: Message must be shorter than %d bytes.", maximum), HTTPStatus: 400, Fault: "client"}
+	}
 	now := p.deps.Clock.Now()
 	group := str(req.Input["MessageGroupId"])
 	dedup := str(req.Input["MessageDeduplicationId"])
@@ -358,6 +365,22 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 		_ = p.deps.Bus.Publish(ctx, "sqs", raw)
 	}
 	return &spi.Response{Output: map[string]any{"MessageId": id, "MD5OfMessageBody": md5hex}}, nil
+}
+
+func messageSize(body string, attrs any) int {
+	size := len([]byte(body))
+	for name, raw := range asMap(attrs) {
+		attribute := asMap(raw)
+		size += len(name) + len(str(attribute["DataType"])) + len(str(attribute["StringValue"])) + len(str(attribute["BinaryValue"]))
+		for _, value := range []any{attribute["StringListValues"], attribute["BinaryListValues"]} {
+			if values, ok := value.([]any); ok {
+				for _, item := range values {
+					size += len(str(item))
+				}
+			}
+		}
+	}
+	return size
 }
 
 func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, error) {

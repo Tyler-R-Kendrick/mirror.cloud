@@ -519,6 +519,38 @@ func TestSendMessageBatchEmptyCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
+func TestSendOversizedMessageCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "oversized"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "oversized", "MessageBody": strings.Repeat("a", (1<<20)-7), "MessageAttributes": map[string]any{"k": map[string]any{"DataType": "String", "StringValue": "x"}}}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("oversized message fault %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
+}
+
+func TestSendMessageUpdatedMaximumSizeCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	ctx := context.Background()
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "maximum", "Attributes": map[string]any{"MaximumMessageSize": "1024"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "maximum", "MessageBody": strings.Repeat("a", 1024)}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "maximum", "MessageBody": strings.Repeat("a", 1017), "MessageAttributes": map[string]any{"k": map[string]any{"DataType": "String", "StringValue": "x"}}}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("updated maximum fault %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
+}
+
 func TestListQueuesPrefixAndPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -1247,6 +1279,32 @@ func FuzzSendMessageBatchEntryCount(f *testing.F) {
 			fault, ok := err.(*spi.Fault)
 			if !ok || fault.Code != "AWS.SimpleQueueService.EmptyBatchRequest" {
 				t.Fatalf("empty batch error %#v", err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func FuzzMessageSizeBoundary(f *testing.F) {
+	f.Add(uint8(1))
+	f.Add(uint8(56))
+	f.Add(uint8(63))
+	f.Fuzz(func(t *testing.T, raw uint8) {
+		bodyLength := int(raw%64) + 1
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "size", "Attributes": map[string]any{"MaximumMessageSize": "64"}}}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "size", "MessageBody": strings.Repeat("a", bodyLength), "MessageAttributes": map[string]any{"k": map[string]any{"DataType": "String", "StringValue": "x"}}}})
+		if bodyLength+8 > 64 {
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidParameterValue" {
+				t.Fatalf("size=%d error %#v", bodyLength, err)
 			}
 			return
 		}

@@ -3,6 +3,7 @@ package sqs
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -305,4 +306,53 @@ func TestFIFODedupDLQLongPoll(t *testing.T) {
 	if len(msgs) != 0 {
 		t.Fatalf("long poll msgs %v", resp.Output)
 	}
+}
+
+func FuzzListQueuesPagination(f *testing.F) {
+	f.Add([]byte{0, 1, 2, 3}, uint8(2))
+	f.Add([]byte("queues"), uint8(10))
+	f.Fuzz(func(t *testing.T, raw []byte, pageSize uint8) {
+		if len(raw) > 64 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		call := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		want := 0
+		for index, value := range raw {
+			prefix := "other-"
+			if value%2 == 0 {
+				prefix = "wanted-"
+				want++
+			}
+			_, _ = call("CreateQueue", map[string]any{"QueueName": fmt.Sprintf("%s%02x-%d", prefix, value, index)})
+		}
+		max := int(pageSize%10) + 1
+		seen := map[string]bool{}
+		next := ""
+		for {
+			response, err := call("ListQueues", map[string]any{"QueueNamePrefix": "wanted-", "MaxResults": max, "NextToken": next})
+			if err != nil {
+				t.Fatal(err)
+			}
+			urls, _ := response.Output["QueueUrls"].([]any)
+			for _, rawURL := range urls {
+				url := str(rawURL)
+				if seen[url] || !strings.Contains(url, "/wanted-") {
+					t.Fatalf("invalid queue page %#v", response.Output)
+				}
+				seen[url] = true
+			}
+			next = str(response.Output["NextToken"])
+			if next == "" {
+				break
+			}
+		}
+		if len(seen) != want {
+			t.Fatalf("listed %d queues want %d", len(seen), want)
+		}
+	})
 }

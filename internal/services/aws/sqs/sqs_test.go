@@ -253,6 +253,46 @@ func TestReceiveMessageWaitTimeValidation(t *testing.T) {
 	}
 }
 
+func TestReceiveMessageWaitTimeCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "wait-time"}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := call("SendMessage", map[string]any{"QueueName": "wait-time", "MessageBody": "message"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result := map[string]any{}
+	for _, value := range []int{-1, 21} {
+		_, err := call("ReceiveMessage", map[string]any{"QueueName": "wait-time", "WaitTimeSeconds": value})
+		fault, ok := err.(*spi.Fault)
+		if !ok {
+			t.Fatalf("wait=%d fault %#v", value, err)
+		}
+		result[fmt.Sprintf("wait%d", value)] = map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault}
+	}
+	for _, tc := range []struct {
+		name  string
+		input map[string]any
+	}{
+		{"default", map[string]any{"QueueName": "wait-time"}},
+		{"explicit", map[string]any{"QueueName": "wait-time", "WaitTimeSeconds": 0}},
+	} {
+		response, err := call("ReceiveMessage", tc.input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result[tc.name] = response.Output
+	}
+	golden.AssertJSON(t, result)
+}
+
 func TestListQueuesPrefixAndPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

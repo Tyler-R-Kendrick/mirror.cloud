@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -137,6 +138,35 @@ func TestListQueuesPrefixAndPagination(t *testing.T) {
 	if missing := call("ListQueues", map[string]any{"QueueNamePrefix": "missing"}).Output; missing["QueueUrls"] != nil {
 		t.Fatalf("empty prefix %#v", missing)
 	}
+}
+
+func TestListQueuesCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+	for _, name := range []string{"a-0", "a-1", "a-2", "b-0"} {
+		call("CreateQueue", map[string]any{"QueueName": name})
+	}
+	first := call("ListQueues", map[string]any{"QueueNamePrefix": "a-", "MaxResults": 2})
+	second := call("ListQueues", map[string]any{"QueueNamePrefix": "a-", "MaxResults": 2, "NextToken": first["NextToken"]})
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListQueues", Input: map[string]any{"NextToken": "not-base64"}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("invalid token fault %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"all": call("ListQueues", nil), "prefix": call("ListQueues", map[string]any{"QueueNamePrefix": "a-"}),
+		"first": first, "second": second, "empty": call("ListQueues", map[string]any{"QueueNamePrefix": "missing"}),
+		"invalidToken": map[string]any{"code": fault.Code, "message": fault.Message},
+	})
 }
 
 func TestQueueScopedOperationsRejectMissingQueue(t *testing.T) {

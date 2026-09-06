@@ -1,0 +1,61 @@
+package behavior
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
+)
+
+func TestSQSQueueListing(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	call := func(action, payload string) (int, []byte) {
+		t.Helper()
+		request, _ := http.NewRequest(http.MethodPost, server.URL, strings.NewReader(payload))
+		request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=00")
+		request.Header.Set("Content-Type", "application/x-amz-json-1.0")
+		request.Header.Set("X-Amz-Target", "AmazonSQS."+action)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, _ := io.ReadAll(response.Body)
+		return response.StatusCode, body
+	}
+	t.Run("Given prefixed queues When listing pages Then only matching queues are returned", func(t *testing.T) {
+		for _, name := range []string{"bdd-a-0", "bdd-a-1", "bdd-b-0"} {
+			if status, body := call("CreateQueue", `{"QueueName":"`+name+`"}`); status != http.StatusOK {
+				t.Fatalf("create %s: %d %s", name, status, body)
+			}
+		}
+		status, body := call("ListQueues", `{"QueueNamePrefix":"bdd-a-","MaxResults":1}`)
+		var first map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &first) != nil || len(first["QueueUrls"].([]any)) != 1 || first["NextToken"] == nil || bytes.Contains(body, []byte("bdd-b-0")) {
+			t.Fatalf("first page %d %s", status, body)
+		}
+		token, _ := json.Marshal(first["NextToken"])
+		status, body = call("ListQueues", `{"QueueNamePrefix":"bdd-a-","MaxResults":10,"NextToken":`+string(token)+`}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte("bdd-a-1")) || bytes.Contains(body, []byte("NextToken")) {
+			t.Fatalf("second page %d %s", status, body)
+		}
+		if status, body := call("ListQueues", `{"QueueNamePrefix":"missing"}`); status != http.StatusOK || bytes.Contains(body, []byte("QueueUrls")) {
+			t.Fatalf("empty list %d %s", status, body)
+		}
+	})
+}

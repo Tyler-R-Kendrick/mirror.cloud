@@ -366,6 +366,65 @@ func TestConcurrentDynamoDBDefaultSSEUsesOneKMSKey(t *testing.T) {
 	}
 }
 
+func TestConcurrentDynamoDBBackupsRemainConsistent(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := dynamodb.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateTable", map[string]any{"TableName": "T"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("UpdateContinuousBackups", map[string]any{"TableName": "T", "PointInTimeRecoverySpecification": map[string]any{"PointInTimeRecoveryEnabled": true}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := deps.Clock.Advance(time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			operation := "DescribeContributorInsights"
+			input := map[string]any{"TableName": "T"}
+			if index%2 == 0 {
+				operation = "UpdateContinuousBackups"
+				input["PointInTimeRecoverySpecification"] = map[string]any{"PointInTimeRecoveryEnabled": true}
+			}
+			response, err := call(operation, input)
+			if err == nil && operation == "DescribeContributorInsights" && response.Output["ContributorInsightsStatus"] != "DISABLED" {
+				err = errors.New("contributor insights were not disabled")
+			}
+			if err == nil && operation == "UpdateContinuousBackups" {
+				recovery := response.Output["ContinuousBackupsDescription"].(map[string]any)["PointInTimeRecoveryDescription"].(map[string]any)
+				if recovery["PointInTimeRecoveryStatus"] != "ENABLED" || recovery["EarliestRestorableDateTime"] != int64(0) || recovery["LatestRestorableDateTime"] != int64(3600) {
+					err = fmt.Errorf("inconsistent recovery window %#v", recovery)
+				}
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	described, err := call("DescribeContinuousBackups", map[string]any{"TableName": "T"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery := described.Output["ContinuousBackupsDescription"].(map[string]any)["PointInTimeRecoveryDescription"].(map[string]any)
+	if recovery["PointInTimeRecoveryStatus"] != "ENABLED" || recovery["EarliestRestorableDateTime"] != float64(0) || recovery["LatestRestorableDateTime"] != int64(3600) || recovery["RecoveryPeriodInDays"] != float64(35) {
+		t.Fatalf("stored recovery window %#v", recovery)
+	}
+}
+
 func (r failAfterReader) Read(p []byte) (int, error) {
 	n, err := r.Reader.Read(p)
 	if err == io.EOF {

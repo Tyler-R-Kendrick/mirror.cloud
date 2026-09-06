@@ -1,0 +1,47 @@
+{
+  "firstItem": {
+    "data": {
+      "B": "kA=="
+    },
+    "id": {
+      "S": "id1"
+    },
+    "version": {
+      "N": "1"
+    }
+  },
+  "firstStream": {
+    "data": {
+      "B": "kA=="
+    },
+    "id": {
+      "S": "id1"
+    },
+    "version": {
+      "N": "1"
+    }
+  },
+  "recordEventName": "MODIFY",
+  "updatedItem": {
+    "data": {
+      "B": "kA=="
+    },
+    "id": {
+      "S": "id1"
+    },
+    "version": {
+      "N": "2"
+    }
+  },
+  "updatedStream": {
+    "data": {
+      "B": "kA=="
+    },
+    "id": {
+      "S": "id1"
+    },
+    "version": {
+      "N": "2"
+    }
+  }
+}

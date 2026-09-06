@@ -136,6 +136,37 @@ func TestDynamoDBStreamCharacterization(t *testing.T) {
 	})
 }
 
+func TestDynamoDBDataEncodingCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	must := func(operation string, input map[string]any) map[string]any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	created := must("CreateTable", map[string]any{
+		"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_AND_OLD_IMAGES"},
+	})
+	arn := str(asMap(created["TableDescription"])["LatestStreamArn"])
+	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "id1"}, "version": map[string]any{"N": "1"}, "data": map[string]any{"B": "kA=="}}})
+	firstItem := must("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "id1"}}})["Item"]
+	iterator := must("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": "shardId-000000000000", "ShardIteratorType": "AT_SEQUENCE_NUMBER", "SequenceNumber": "1"})["ShardIterator"]
+	firstRecords := asSlice(must("GetRecords", map[string]any{"ShardIterator": iterator})["Records"])
+	must("UpdateItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "id1"}}, "UpdateExpression": "SET version=:v", "ExpressionAttributeValues": map[string]any{":v": map[string]any{"N": "2"}}})
+	updatedItem := must("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "id1"}}})["Item"]
+	updatedRecords := asSlice(must("GetRecords", map[string]any{"ShardIterator": iterator})["Records"])
+	golden.AssertJSON(t, map[string]any{
+		"firstItem":       firstItem,
+		"firstStream":     asMap(asMap(firstRecords[0])["dynamodb"])["NewImage"],
+		"updatedItem":     updatedItem,
+		"updatedStream":   asMap(asMap(updatedRecords[1])["dynamodb"])["NewImage"],
+		"recordEventName": asMap(updatedRecords[1])["eventName"],
+	})
+}
+
 func TestBootedServerDynamoDBStreams(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []string{"aws.dynamodb"}

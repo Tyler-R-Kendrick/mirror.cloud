@@ -73,4 +73,20 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("metadata %d %s", status, body)
 		}
 	})
+	t.Run("Given a deleted queue When recreating immediately Then the deletion window is enforced", func(t *testing.T) {
+		status, body := call("CreateQueue", `{"QueueName":"bdd-deleted"}`)
+		var created map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &created) != nil {
+			t.Fatalf("create %d %s", status, body)
+		}
+		queueURL, _ := json.Marshal(created["QueueUrl"])
+		if status, body = call("DeleteQueue", `{"QueueUrl":`+string(queueURL)+`}`); status != http.StatusOK {
+			t.Fatalf("delete %d %s", status, body)
+		}
+		status, body = call("CreateQueue", `{"QueueName":"bdd-deleted"}`)
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("QueueDeletedRecently")) ||
+			!bytes.Contains(body, []byte("You must wait 60 seconds after deleting a queue before you can create another with the same name.")) {
+			t.Fatalf("recreate %d %s", status, body)
+		}
+	})
 }

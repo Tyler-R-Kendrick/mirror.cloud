@@ -604,6 +604,49 @@ func TestConcurrentSQSEmptyReceivesOmitMessages(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSReceiveWaitTimeLimitsAreStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "wait-time"}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 63)
+	var wg sync.WaitGroup
+	for index := range 63 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			wait := []int{-1, 0, 21}[index%3]
+			response, err := call("ReceiveMessage", map[string]any{"QueueName": "wait-time", "WaitTimeSeconds": wait})
+			if wait == 0 {
+				if err == nil && response.Output["Messages"] == nil {
+					errs <- nil
+					return
+				}
+				errs <- fmt.Errorf("wait=0 response %#v error %v", response, err)
+				return
+			}
+			fault, _ := err.(*spi.Fault)
+			if fault == nil || fault.Code != "InvalidParameterValue" {
+				errs <- fmt.Errorf("wait=%d fault %#v", wait, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestConcurrentDynamoDBTransactionTokenChoosesOnePayload(t *testing.T) {
 	p := dynamodb.New(spitest.Deps(t))
 	ctx := context.Background()

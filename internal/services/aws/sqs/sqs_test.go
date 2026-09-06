@@ -199,6 +199,16 @@ func TestQueueCannotBeRecreatedUntilDeleteWindowExpires(t *testing.T) {
 	if _, err := call("DeleteQueue", map[string]any{"QueueName": name}); err != nil {
 		t.Fatal(err)
 	}
+	for _, collection := range []string{"qattrs", "qtags"} {
+		if _, ok, err := p.col(&spi.Request{Identity: id}, collection).Get(ctx, name); err != nil || ok {
+			t.Fatalf("%s survived delete: found=%v err=%v", collection, ok, err)
+		}
+	}
+	for _, collection := range []string{"msgs:" + name, "dedup:" + name} {
+		if records, _, err := p.col(&spi.Request{Identity: id}, collection).List(ctx, "", "", 0); err != nil || len(records) != 0 {
+			t.Fatalf("%s survived delete: records=%d err=%v", collection, len(records), err)
+		}
+	}
 	_, err = call("CreateQueue", map[string]any{"QueueName": name})
 	fault, ok := err.(*spi.Fault)
 	if !ok || fault.Code != "AWS.SimpleQueueService.QueueDeletedRecently" || fault.Message != "You must wait 60 seconds after deleting a queue before you can create another with the same name." {

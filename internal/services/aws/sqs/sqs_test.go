@@ -1035,3 +1035,43 @@ func FuzzReceiveMessageWaitTime(f *testing.F) {
 		}
 	})
 }
+
+func FuzzMessagesRemainQueueScoped(f *testing.F) {
+	f.Add(false, []byte("message"))
+	f.Add(true, []byte("other"))
+	f.Fuzz(func(t *testing.T, second bool, body []byte) {
+		if len(body) == 0 || len(body) > 1024 || !utf8.Valid(body) {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		call := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		for _, name := range []string{"queue-0", "queue-1"} {
+			if _, err := call("CreateQueue", map[string]any{"QueueName": name}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		target, other := "queue-0", "queue-1"
+		if second {
+			target, other = other, target
+		}
+		if _, err := call("SendMessage", map[string]any{"QueueName": target, "MessageBody": string(body)}); err != nil {
+			t.Fatal(err)
+		}
+		empty, err := call("ReceiveMessage", map[string]any{"QueueName": other})
+		if err != nil || empty.Output["Messages"] != nil {
+			t.Fatalf("other=%s response %#v error %v", other, empty, err)
+		}
+		received, err := call("ReceiveMessage", map[string]any{"QueueName": target})
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages, _ := received.Output["Messages"].([]any)
+		if len(messages) != 1 || messages[0].(map[string]any)["Body"] != string(body) {
+			t.Fatalf("target=%s response %#v", target, received.Output)
+		}
+	})
+}

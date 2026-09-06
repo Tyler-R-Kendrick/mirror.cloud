@@ -521,8 +521,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 |---|---:|
 | Requested test forms wired | 7 / 7 (100%) |
 | DynamoDB operations routed to emulation | 62 / 62 (100%) |
-| LocalStack DynamoDB test functions explicitly traced | 39 / 56 (69.6%) |
-| LocalStack DynamoDB test functions not yet traced | 17 / 56 (30.4%) |
+| LocalStack DynamoDB test functions explicitly traced | 43 / 56 (76.8%) |
+| LocalStack DynamoDB test functions not yet traced | 13 / 56 (23.2%) |
 
 The pinned inventory is the 56 direct test functions in `tests/aws/services/dynamodb/test_dynamodb.py`; parametrized cases are not expanded.
 
@@ -567,3 +567,7 @@ The pinned inventory is the 56 direct test functions in `tests/aws/services/dyna
 | `test_dynamodb.py::TestDynamoDB::test_batch_write_items` | BatchWriteItem applies ordered DeleteRequest and PutRequest entries and returns an empty UnprocessedItems map; atomic Verify-style snapshot, AWS SDK contract, raw HTTP BDD, 10,000-case fuzz, concurrent chaos, and semantic mutation coverage pin the behavior | Mapped; full race-clean |
 | `test_dynamodb.py::TestDynamoDB::test_batch_write_items_streaming` | Batch writes emit exact INSERT, REMOVE, and MODIFY records while identical overwrites emit none; the four-record LocalStack sequence is pinned by atomic snapshot, SDK, BDD, fuzz, chaos, and mutation coverage | Mapped; full race-clean |
 | `test_dynamodb.py::TestDynamoDB::test_dynamodb_get_batch_items` | BatchGetItem returns the requested table with an empty item list when no key exists, omits missing items beside existing ones, and returns an empty UnprocessedKeys map; atomic snapshot, SDK, BDD, fuzz, chaos, and mutation coverage pin the response | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_table_warm_throughput` | CreateTable preserves requested warm read/write capacity with UPDATING status and DescribeTable reports the same capacity as ACTIVE; atomic, Verify-style snapshot, AWS SDK, raw HTTP BDD, 10,000-case fuzz, concurrent chaos, and semantic mutation coverage pin the lifecycle | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_dynamodb_pay_per_request` | CreateTable rejects ProvisionedThroughput with PAY_PER_REQUEST using the exact pinned ValidationException message, while valid on-demand tables and GSIs expose zero provisioned units and BillingModeSummary; every requested test form pins both paths | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_dynamodb_create_table_with_sse_specification` | Explicit KMS server-side encryption resolves a key ID to the account-and-region KMS ARN and returns ENABLED KMS SSEDescription; atomic, snapshot, SDK, BDD, fuzz, chaos, and mutation coverage pin the response | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_gsi_with_billing_mode` | PAY_PER_REQUEST and PROVISIONED global secondary indexes preserve their respective zero or requested throughput, index ARN, and create/describe status transitions; atomic, snapshot, SDK, BDD, fuzz, chaos, and mutation coverage pin both parametrized cases | Mapped; full race-clean |

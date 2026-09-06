@@ -248,6 +248,28 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given billing encryption indexes and warm capacity When creating tables Then metadata matches AWS", func(t *testing.T) {
+		invalid := `{"TableName":"InvalidBilling","BillingMode":"PAY_PER_REQUEST","ProvisionedThroughput":{"ReadCapacityUnits":5,"WriteCapacityUnits":5}}`
+		if status, body := call("CreateTable", invalid); status != http.StatusBadRequest || !bytes.Contains(body, []byte("Neither ReadCapacityUnits nor WriteCapacityUnits can be specified when BillingMode is PAY_PER_REQUEST")) {
+			t.Fatalf("invalid billing metadata %d %s", status, body)
+		}
+		encrypted := `{"TableName":"EncryptedMetadata","SSESpecification":{"Enabled":true,"SSEType":"KMS","KMSMasterKeyId":"key-id"}}`
+		if status, body := call("CreateTable", encrypted); status != http.StatusOK || !bytes.Contains(body, []byte(`"SSEDescription":{"KMSMasterKeyArn":"arn:aws:kms:us-east-1:000000000000:key/key-id","SSEType":"KMS","Status":"ENABLED"}`)) {
+			t.Fatalf("encrypted metadata %d %s", status, body)
+		}
+		onDemand := `{"TableName":"MetadataBDD","BillingMode":"PAY_PER_REQUEST","KeySchema":[{"AttributeName":"id","KeyType":"HASH"}],"GlobalSecondaryIndexes":[{"IndexName":"by-value","KeySchema":[{"AttributeName":"value","KeyType":"HASH"}],"Projection":{"ProjectionType":"ALL"}}],"WarmThroughput":{"ReadUnitsPerSecond":1000,"WriteUnitsPerSecond":1200}}`
+		if status, body := call("CreateTable", onDemand); status != http.StatusOK || !bytes.Contains(body, []byte(`"BillingModeSummary":{"BillingMode":"PAY_PER_REQUEST"}`)) || !bytes.Contains(body, []byte(`"IndexStatus":"CREATING"`)) || !bytes.Contains(body, []byte(`"Status":"UPDATING"`)) {
+			t.Fatalf("create on-demand metadata %d %s", status, body)
+		}
+		if status, body := call("DescribeTable", `{"TableName":"MetadataBDD"}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"IndexStatus":"ACTIVE"`)) || !bytes.Contains(body, []byte(`"Status":"ACTIVE"`)) {
+			t.Fatalf("describe on-demand metadata %d %s", status, body)
+		}
+		provisioned := `{"TableName":"ProvisionedMetadataBDD","ProvisionedThroughput":{"ReadCapacityUnits":5,"WriteCapacityUnits":5},"GlobalSecondaryIndexes":[{"IndexName":"by-value","ProvisionedThroughput":{"ReadCapacityUnits":1,"WriteCapacityUnits":1}}]}`
+		if status, body := call("CreateTable", provisioned); status != http.StatusOK || !bytes.Contains(body, []byte(`"ProvisionedThroughput":{"NumberOfDecreasesToday":0,"ReadCapacityUnits":1,"WriteCapacityUnits":1}`)) {
+			t.Fatalf("provisioned metadata %d %s", status, body)
+		}
+	})
+
 	t.Run("Given PartiQL statements When batching transactions and missing predicates Then AWS responses are preserved", func(t *testing.T) {
 		if status, body := call("CreateTable", `{"TableName":"PartiQL","KeySchema":[{"AttributeName":"Username","KeyType":"HASH"}]}`); status != http.StatusOK {
 			t.Fatalf("create PartiQL table %d %s", status, body)

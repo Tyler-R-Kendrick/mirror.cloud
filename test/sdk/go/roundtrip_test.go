@@ -3110,6 +3110,18 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if tags, err := ddb.ListTagsOfResource(context.Background(), &dynamodb.ListTagsOfResourceInput{ResourceArn: &arn}); err != nil || len(tags.Tags) != 1 || aws.ToString(tags.Tags[0].Key) != "Name" {
 		t.Fatalf("creation tags: %#v %v", tags, err)
 	}
+	continuous, err := ddb.UpdateContinuousBackups(context.Background(), &dynamodb.UpdateContinuousBackupsInput{TableName: aws.String("T"), PointInTimeRecoverySpecification: &ddbtypes.PointInTimeRecoverySpecification{PointInTimeRecoveryEnabled: aws.Bool(true)}})
+	if err != nil || continuous.ContinuousBackupsDescription == nil || continuous.ContinuousBackupsDescription.PointInTimeRecoveryDescription == nil || continuous.ContinuousBackupsDescription.PointInTimeRecoveryDescription.PointInTimeRecoveryStatus != ddbtypes.PointInTimeRecoveryStatusEnabled {
+		t.Fatalf("enable continuous backups: %#v %v", continuous, err)
+	}
+	describedBackups, err := ddb.DescribeContinuousBackups(context.Background(), &dynamodb.DescribeContinuousBackupsInput{TableName: aws.String("T")})
+	if err != nil || describedBackups.ContinuousBackupsDescription == nil || describedBackups.ContinuousBackupsDescription.PointInTimeRecoveryDescription == nil || describedBackups.ContinuousBackupsDescription.PointInTimeRecoveryDescription.EarliestRestorableDateTime == nil || describedBackups.ContinuousBackupsDescription.PointInTimeRecoveryDescription.LatestRestorableDateTime == nil {
+		t.Fatalf("describe continuous backups: %#v %v", describedBackups, err)
+	}
+	insights, err := ddb.DescribeContributorInsights(context.Background(), &dynamodb.DescribeContributorInsightsInput{TableName: aws.String("T")})
+	if err != nil || aws.ToString(insights.TableName) != "T" || insights.ContributorInsightsStatus != ddbtypes.ContributorInsightsStatusDisabled {
+		t.Fatalf("default contributor insights: %#v %v", insights, err)
+	}
 	if _, err := ddb.TagResource(context.Background(), &dynamodb.TagResourceInput{ResourceArn: &arn, Tags: []ddbtypes.Tag{{Key: aws.String("env"), Value: aws.String("test")}}}); err != nil {
 		t.Fatalf("tag table: %v", err)
 	}

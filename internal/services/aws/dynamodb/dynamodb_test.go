@@ -626,6 +626,11 @@ func TestDynamoDBTableMetadata(t *testing.T) {
 	if _, err := call("CreateTable", map[string]any{"TableName": "Invalid", "BillingMode": "PAY_PER_REQUEST", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}}); err == nil || err.Error() != "ValidationException: One or more parameter values were invalid: Neither ReadCapacityUnits nor WriteCapacityUnits can be specified when BillingMode is PAY_PER_REQUEST" {
 		t.Fatalf("pay-per-request throughput fault %v", err)
 	}
+	if _, err := call("UpdateTable", map[string]any{"TableName": "Missing", "BillingMode": "PAY_PER_REQUEST"}); err == nil {
+		t.Fatal("missing table update succeeded")
+	} else if fault, ok := err.(*spi.Fault); !ok || fault.Code != "ResourceNotFoundException" {
+		t.Fatalf("missing table update fault %v", err)
+	}
 	explicit, err := call("CreateTable", map[string]any{"TableName": "Encrypted", "SSESpecification": map[string]any{"Enabled": true, "SSEType": "KMS", "KMSMasterKeyId": "key-id"}})
 	if err != nil {
 		t.Fatal(err)

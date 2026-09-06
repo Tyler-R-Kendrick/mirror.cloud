@@ -784,3 +784,27 @@ func FuzzReceiveMessageMaxNumber(f *testing.F) {
 		}
 	})
 }
+
+func FuzzEmptyReceiveOmitsMessages(f *testing.F) {
+	f.Add(uint8(0))
+	f.Add(uint8(9))
+	f.Add(uint8(255))
+	f.Fuzz(func(t *testing.T, raw uint8) {
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		call := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		if _, err := call("CreateQueue", map[string]any{"QueueName": "empty"}); err != nil {
+			t.Fatal(err)
+		}
+		response, err := call("ReceiveMessage", map[string]any{"QueueName": "empty", "MaxNumberOfMessages": int(raw)%10 + 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := response.Output["Messages"]; ok {
+			t.Fatalf("empty receive %#v", response.Output)
+		}
+	})
+}

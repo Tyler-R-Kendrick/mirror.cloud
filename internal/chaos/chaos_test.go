@@ -27,6 +27,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -318,6 +319,50 @@ func TestConcurrentDynamoDBTableMetadataUpdatesRemainWhole(t *testing.T) {
 	write := int(warm["WriteUnitsPerSecond"].(float64))
 	if write != read+1000 || warm["Status"] != "ACTIVE" || table["SSEDescription"] == nil || table["BillingModeSummary"] == nil || len(table["GlobalSecondaryIndexes"].([]any)) != 1 {
 		t.Fatalf("torn table metadata %#v", table)
+	}
+}
+
+func TestConcurrentDynamoDBDefaultSSEUsesOneKMSKey(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := dynamodb.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	arns := make(chan string, 32)
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTable", Input: map[string]any{"TableName": "T" + strconv.Itoa(index), "SSESpecification": map[string]any{"Enabled": true}}})
+			if err == nil {
+				arns <- response.Output["TableDescription"].(map[string]any)["SSEDescription"].(map[string]any)["KMSMasterKeyArn"].(string)
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(arns)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	shared := ""
+	for arn := range arns {
+		if shared == "" {
+			shared = arn
+		} else if arn != shared {
+			t.Fatalf("multiple default KMS keys: %q and %q", shared, arn)
+		}
+	}
+	listed, err := kms.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "ListKeys", Input: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Output["Keys"].([]any)) != 1 {
+		t.Fatalf("default KMS keys %#v", listed)
 	}
 }
 

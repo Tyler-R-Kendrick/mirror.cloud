@@ -2,6 +2,7 @@ package behavior
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,13 +17,14 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 )
 
 func TestDynamoDBTableLifecycle(t *testing.T) {
 	deps := spitest.Deps(t)
 	cfg := config.Default()
-	cfg.Services = []string{"aws.dynamodb", "aws.kms"}
+	cfg.Services = []string{"aws.dynamodb", "aws.kinesis", "aws.kms"}
 	reg, err := registry.New(deps, cfg.Services, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -48,6 +50,9 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 	}
 	streamCall := func(action, payload string) (int, []byte) {
 		return request("DynamoDBStreams_20120810", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/streams/aws4_request, SignedHeaders=host, Signature=00", action, payload)
+	}
+	kinesisCall := func(action, payload string) (int, []byte) {
+		return request("Kinesis_20131202", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/kinesis/aws4_request, SignedHeaders=host, Signature=00", action, payload)
 	}
 
 	t.Run("Given an existing table When creating it again Then ResourceInUse is returned", func(t *testing.T) {
@@ -410,6 +415,50 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 		payload := `{"ShardIterator":` + fmt.Sprintf("%q", iterator["ShardIterator"]) + `}`
 		if status, body := streamCall("GetRecords", payload); status != http.StatusOK || bytes.Count(body, []byte(`"eventName":"INSERT"`)) != 1 || !bytes.Contains(body, []byte(`"SizeBytes":15`)) || !bytes.Contains(body, []byte(`"B":"kA=="`)) {
 			t.Fatalf("stream records %d %s", status, body)
+		}
+	})
+
+	t.Run("Given a Kinesis destination When items change Then DynamoDB events reach the stream", func(t *testing.T) {
+		if status, body := kinesisCall("CreateStream", `{"StreamName":"ddb-bdd"}`); status != http.StatusOK {
+			t.Fatalf("create kinesis stream %d %s", status, body)
+		}
+		if status, body := call("CreateTable", `{"TableName":"KinesisBDD","KeySchema":[{"AttributeName":"id","KeyType":"HASH"}]}`); status != http.StatusOK {
+			t.Fatalf("create destination table %d %s", status, body)
+		}
+		arn := "arn:aws:kinesis:us-east-1:000000000000:stream/ddb-bdd"
+		if status, body := call("EnableKinesisStreamingDestination", `{"TableName":"KinesisBDD","StreamArn":"`+arn+`"}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"DestinationStatus":"ENABLING"`)) {
+			t.Fatalf("enable destination %d %s", status, body)
+		}
+		for _, step := range []struct{ action, payload string }{
+			{"PutItem", `{"TableName":"KinesisBDD","Item":{"id":{"S":"one"},"data":{"B":"kA=="}}}`},
+			{"UpdateItem", `{"TableName":"KinesisBDD","Key":{"id":{"S":"one"}},"UpdateExpression":"SET data = :value","ExpressionAttributeValues":{":value":{"S":"updated"}}}`},
+			{"DeleteItem", `{"TableName":"KinesisBDD","Key":{"id":{"S":"one"}}}`},
+		} {
+			if status, body := call(step.action, step.payload); status != http.StatusOK {
+				t.Fatalf("%s %d %s", step.action, status, body)
+			}
+		}
+		status, body := kinesisCall("GetShardIterator", `{"StreamName":"ddb-bdd","ShardId":"shardId-000000000000","ShardIteratorType":"TRIM_HORIZON"}`)
+		var iterator map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &iterator) != nil {
+			t.Fatalf("destination iterator %d %s", status, body)
+		}
+		status, body = kinesisCall("GetRecords", `{"ShardIterator":`+fmt.Sprintf("%q", iterator["ShardIterator"])+`}`)
+		var output map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &output) != nil || len(output["Records"].([]any)) != 3 {
+			t.Fatalf("destination records %d %s", status, body)
+		}
+		for i, event := range []string{"INSERT", "MODIFY", "REMOVE"} {
+			data, _ := base64.StdEncoding.DecodeString(output["Records"].([]any)[i].(map[string]any)["Data"].(string))
+			if !bytes.Contains(data, []byte(`"eventName":"`+event+`"`)) || !bytes.Contains(data, []byte(`"tableName":"KinesisBDD"`)) {
+				t.Fatalf("destination event %d: %s", i, data)
+			}
+		}
+		if status, body := call("DisableKinesisStreamingDestination", `{"TableName":"KinesisBDD","StreamArn":"`+arn+`"}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"DestinationStatus":"DISABLING"`)) {
+			t.Fatalf("disable destination %d %s", status, body)
+		}
+		if status, body := call("DescribeKinesisStreamingDestination", `{"TableName":"KinesisBDD"}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"DestinationStatus":"DISABLED"`)) {
+			t.Fatalf("describe disabled destination %d %s", status, body)
 		}
 	})
 }

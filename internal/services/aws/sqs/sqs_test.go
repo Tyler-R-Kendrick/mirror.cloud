@@ -306,7 +306,7 @@ func TestReceiveMessageTimestampAttributes(t *testing.T) {
 	if _, err := call("SendMessage", map[string]any{"QueueName": "timestamps", "MessageBody": "message"}); err != nil {
 		t.Fatal(err)
 	}
-	response, err := call("ReceiveMessage", map[string]any{"QueueName": "timestamps", "AttributeNames": []any{"All"}})
+	response, err := call("ReceiveMessage", map[string]any{"QueueName": "timestamps", "MessageSystemAttributeNames": []any{"All"}})
 	if err != nil {
 		t.Fatal(err)
 	}

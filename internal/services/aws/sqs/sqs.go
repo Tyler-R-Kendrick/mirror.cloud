@@ -387,7 +387,9 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 			}
 			out := make([]any, 0, len(msgs))
 			wanted := map[string]bool{}
-			for _, name := range stringList(req.Input, "AttributeNames", "AttributeName") {
+			names := stringList(req.Input, "AttributeNames", "AttributeName")
+			names = append(names, stringList(req.Input, "MessageSystemAttributeNames", "MessageSystemAttributeName")...)
+			for _, name := range names {
 				wanted[name] = true
 			}
 			for _, m := range msgs {
@@ -397,10 +399,10 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 					attributes["ApproximateReceiveCount"] = fmt.Sprintf("%v", m["receiveCount"])
 				}
 				if wanted["All"] || wanted["SentTimestamp"] {
-					attributes["SentTimestamp"] = fmt.Sprintf("%v", m["sentAt"])
+					attributes["SentTimestamp"] = strconv.FormatInt(int64(asFloat(m["sentAt"])), 10)
 				}
 				if wanted["All"] || wanted["ApproximateFirstReceiveTimestamp"] {
-					attributes["ApproximateFirstReceiveTimestamp"] = fmt.Sprintf("%v", m["firstReceiveAt"])
+					attributes["ApproximateFirstReceiveTimestamp"] = strconv.FormatInt(int64(asFloat(m["firstReceiveAt"])), 10)
 				}
 				if (wanted["All"] || wanted["AWSTraceHeader"]) && str(m["trace"]) != "" {
 					attributes["AWSTraceHeader"] = m["trace"]

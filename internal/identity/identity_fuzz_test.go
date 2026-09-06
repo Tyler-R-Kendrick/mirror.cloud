@@ -26,6 +26,33 @@ func FuzzParse(f *testing.F) {
 	})
 }
 
+func FuzzLocalhostRegion(f *testing.F) {
+	f.Add(true, "eu-west-1", "")
+	f.Add(false, "ap-southeast-2", "custom-region")
+	f.Fuzz(func(t *testing.T, header bool, fallback, override string) {
+		if len(fallback) > 64 || len(override) > 64 {
+			t.Skip()
+		}
+		request := httptest.NewRequest("POST", "/", nil)
+		credential := "test/20200101/localhost/dynamodb/aws4_request"
+		if header {
+			request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential="+credential+", SignedHeaders=host, Signature=00")
+		} else {
+			request.URL.RawQuery = "X-Amz-Credential=" + url.QueryEscape(credential)
+		}
+		if override != "" {
+			request.Header.Set("X-Mirror-Region", override)
+		}
+		want := "us-east-1"
+		if override != "" {
+			want = override
+		}
+		if got := Parse(request, "", fallback, time.Unix(0, 0)).Region; got != want {
+			t.Fatalf("localhost region %q want %q", got, want)
+		}
+	})
+}
+
 func FuzzPresignedCredentialSyntax(f *testing.F) {
 	f.Add("test/20200101/us-east-1/s3/aws4_request")
 	f.Add("test%2F20200101%2Fus-east-1%2Fs3%2Faws4_request")

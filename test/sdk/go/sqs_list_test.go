@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -219,5 +220,38 @@ func TestAWSSDKSQSReceiveWaitTimeContract(t *testing.T) {
 		if err != nil || len(response.Messages) != 1 || aws.ToString(response.Messages[0].Body) != "message" {
 			t.Fatalf("short poll %#v error %v", response, err)
 		}
+	}
+}
+
+func TestAWSSDKSQSMessageTimestampContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-timestamps")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("message")}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, MessageSystemAttributeNames: []types.MessageSystemAttributeName{types.MessageSystemAttributeNameAll}})
+	if err != nil || len(response.Messages) != 1 {
+		t.Fatalf("receive %#v error %v", response, err)
+	}
+	attributes := response.Messages[0].Attributes
+	sent, sentErr := strconv.ParseInt(attributes[string(types.MessageSystemAttributeNameSentTimestamp)], 10, 64)
+	first, firstErr := strconv.ParseInt(attributes[string(types.MessageSystemAttributeNameApproximateFirstReceiveTimestamp)], 10, 64)
+	if sentErr != nil || firstErr != nil || first < sent || first-sent > 1000 {
+		t.Fatalf("timestamp attributes %#v", attributes)
 	}
 }

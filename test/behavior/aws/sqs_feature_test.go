@@ -209,4 +209,19 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("queue-0 %d %s", status, body)
 		}
 	})
+	t.Run("Given encoded message content When round-tripping Then bytes are preserved", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-encoded"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		want := `"&quot;&quot;` + "\r"
+		payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-encoded", "MessageBody": want})
+		if status, body := call("SendMessage", string(payload)); status != http.StatusOK {
+			t.Fatalf("send %d %s", status, body)
+		}
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-encoded"}`)
+		var response map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &response) != nil || len(response["Messages"].([]any)) != 1 || response["Messages"].([]any)[0].(map[string]any)["Body"] != want {
+			t.Fatalf("encoded response %d %s", status, body)
+		}
+	})
 }

@@ -41,6 +41,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 )
@@ -913,7 +914,7 @@ func hmacSHA256Test(key []byte, value string) []byte {
 
 func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	cfg := mcfg.Default()
-	cfg.Services = []string{"aws.s3", "aws.dynamodb", "aws.sqs"}
+	cfg.Services = []string{"aws.s3", "aws.dynamodb", "aws.kms", "aws.sqs"}
 	cfg.Seed = "sdk-rt"
 	rt, err := runtime.Boot(cfg)
 	if err != nil {
@@ -3216,6 +3217,32 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	createdEncrypted, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("EncryptedMetadata"), BillingMode: ddbtypes.BillingModePayPerRequest, KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: ddbtypes.KeyTypeHash}}, AttributeDefinitions: []ddbtypes.AttributeDefinition{{AttributeName: aws.String("id"), AttributeType: ddbtypes.ScalarAttributeTypeS}}, SSESpecification: &ddbtypes.SSESpecification{Enabled: aws.Bool(true), SSEType: ddbtypes.SSETypeKms, KMSMasterKeyId: aws.String("key-id")}})
 	if err != nil || createdEncrypted.TableDescription == nil || createdEncrypted.TableDescription.SSEDescription == nil || createdEncrypted.TableDescription.SSEDescription.Status != ddbtypes.SSEStatusEnabled || aws.ToString(createdEncrypted.TableDescription.SSEDescription.KMSMasterKeyArn) != "arn:aws:kms:us-east-1:000000000000:key/key-id" {
 		t.Fatalf("explicit table encryption: %#v %v", createdEncrypted, err)
+	}
+	createdDefaultEncrypted, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("DefaultEncryptedSDK"), KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: ddbtypes.KeyTypeHash}}, AttributeDefinitions: []ddbtypes.AttributeDefinition{{AttributeName: aws.String("id"), AttributeType: ddbtypes.ScalarAttributeTypeS}}, ProvisionedThroughput: &ddbtypes.ProvisionedThroughput{ReadCapacityUnits: aws.Int64(5), WriteCapacityUnits: aws.Int64(5)}, SSESpecification: &ddbtypes.SSESpecification{Enabled: aws.Bool(true)}})
+	if err != nil || createdDefaultEncrypted.TableDescription == nil || createdDefaultEncrypted.TableDescription.SSEDescription == nil || createdDefaultEncrypted.TableDescription.SSEDescription.Status != ddbtypes.SSEStatusEnabled {
+		t.Fatalf("default table encryption: %#v %v", createdDefaultEncrypted, err)
+	}
+	defaultKeyARN := aws.ToString(createdDefaultEncrypted.TableDescription.SSEDescription.KMSMasterKeyArn)
+	kmsRequest, _ := http.NewRequest(http.MethodPost, ts.URL, strings.NewReader(`{"KeyId":`+fmt.Sprintf("%q", defaultKeyARN)+`}`))
+	kmsRequest.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/kms/aws4_request, SignedHeaders=host, Signature=00")
+	kmsRequest.Header.Set("Content-Type", "application/x-amz-json-1.1")
+	kmsRequest.Header.Set("X-Amz-Target", "TrentService.DescribeKey")
+	kmsResponse, err := http.DefaultClient.Do(kmsRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kmsBody, _ := io.ReadAll(kmsResponse.Body)
+	_ = kmsResponse.Body.Close()
+	if kmsResponse.StatusCode != http.StatusOK || !bytes.Contains(kmsBody, []byte(`"KeyManager":"AWS"`)) || !bytes.Contains(kmsBody, []byte(`"Description":"Default key that protects my DynamoDB data when no other key is defined"`)) {
+		t.Fatalf("default DynamoDB KMS key: %d %s", kmsResponse.StatusCode, kmsBody)
+	}
+	disabledEncryption, err := ddb.UpdateTable(context.Background(), &dynamodb.UpdateTableInput{TableName: aws.String("DefaultEncryptedSDK"), SSESpecification: &ddbtypes.SSESpecification{Enabled: aws.Bool(false)}})
+	if err != nil || disabledEncryption.TableDescription == nil || disabledEncryption.TableDescription.SSEDescription == nil || disabledEncryption.TableDescription.SSEDescription.Status != ddbtypes.SSEStatusUpdating {
+		t.Fatalf("disable table encryption: %#v %v", disabledEncryption, err)
+	}
+	updatedEncrypted, err := ddb.UpdateTable(context.Background(), &dynamodb.UpdateTableInput{TableName: aws.String("DefaultEncryptedSDK"), BillingMode: ddbtypes.BillingModePayPerRequest})
+	if err != nil || updatedEncrypted.TableDescription == nil || updatedEncrypted.TableDescription.SSEDescription == nil || updatedEncrypted.TableDescription.SSEDescription.Status != ddbtypes.SSEStatusEnabled || aws.ToString(updatedEncrypted.TableDescription.SSEDescription.KMSMasterKeyArn) != defaultKeyARN {
+		t.Fatalf("preserve table encryption: %#v %v", updatedEncrypted, err)
 	}
 	createdMetadata, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{
 		TableName: aws.String("MetadataSDK"), BillingMode: ddbtypes.BillingModePayPerRequest,

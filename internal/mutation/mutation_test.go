@@ -17875,6 +17875,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestMessagesRemainQueueScopedCharacterization",
 		},
 		{
+			name: "sqs-message-decode-encoded-body",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `"Body": m["body"]`,
+			new:  `"Body": strings.ReplaceAll(str(m["body"]), "&quot;", "\"")`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestEncodedMessageContentCharacterization",
+		},
+		{
 			name: "cloudcontrol-write-wrong-collection",
 			file: filepath.Join("internal", "services", "aws", "cloudcontrol", "cloudcontrol.go"),
 			old:  `p.col(req, "ccres").Put(ctx, id, b)`,

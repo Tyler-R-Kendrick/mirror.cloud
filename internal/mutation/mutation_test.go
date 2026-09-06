@@ -18109,8 +18109,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sqs-list-tags-empty-shape",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
-			old:  "len(tags) == 0",
-			new:  "false",
+			old:  "if ok {\n\t\t\t_ = json.Unmarshal(b, &tags)\n\t\t}\n\t\tif len(tags) == 0 {",
+			new:  "if ok {\n\t\t\t_ = json.Unmarshal(b, &tags)\n\t\t}\n\t\tif false {",
 			pkg:  "./internal/services/aws/sqs",
 			run:  "TestQueueTagCharacterization",
 		},

@@ -165,6 +165,10 @@ func TestCreateQueueMetadataAttributes(t *testing.T) {
 		attrs["CreatedTimestamp"] != "1577934245" || attrs["VisibilityTimeout"] != "30" {
 		t.Fatalf("attributes %#v", attrs)
 	}
+	empty, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueUrl": created.Output["QueueUrl"]}})
+	if err != nil || len(empty.Output["Attributes"].(map[string]any)) != 0 {
+		t.Fatalf("omitted attributes %#v, %v", empty, err)
+	}
 }
 
 func TestQueueMetadataCharacterization(t *testing.T) {

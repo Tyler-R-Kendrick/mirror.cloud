@@ -134,19 +134,17 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				attrs[k] = v
 			}
 		}
-		if names := stringList(req.Input, "AttributeNames", "AttributeName"); len(names) > 0 {
-			filtered := map[string]any{}
-			for _, name := range names {
-				if name == "All" {
-					filtered = attrs
-					break
-				}
-				if value, ok := attrs[name]; ok {
-					filtered[name] = value
-				}
+		filtered := map[string]any{}
+		for _, name := range stringList(req.Input, "AttributeNames", "AttributeName") {
+			if name == "All" {
+				filtered = attrs
+				break
 			}
-			attrs = filtered
+			if value, ok := attrs[name]; ok {
+				filtered[name] = value
+			}
 		}
+		attrs = filtered
 		return &spi.Response{Output: map[string]any{"Attributes": attrs}}, nil
 	case "SetQueueAttributes":
 		name := queueName(req)

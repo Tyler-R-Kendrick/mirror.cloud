@@ -30,6 +30,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -280,6 +281,58 @@ func TestConcurrentDynamoDBGlobalTableKeepsEveryItem(t *testing.T) {
 		if err != nil || len(response.Output["Items"].([]any)) != 32 {
 			t.Fatalf("%s replicated items: %#v %v", region, response, err)
 		}
+	}
+}
+
+func TestConcurrentSQSQueueListingsKeepEveryQueue(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for index := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			prefix := "other-"
+			if index%2 == 0 {
+				prefix = "wanted-"
+			}
+			_, err := call("CreateQueue", map[string]any{"QueueName": fmt.Sprintf("%s%02d", prefix, index)})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[string]bool{}
+	next := ""
+	for {
+		response, err := call("ListQueues", map[string]any{"QueueNamePrefix": "wanted-", "MaxResults": 7, "NextToken": next})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, raw := range response.Output["QueueUrls"].([]any) {
+			url := raw.(string)
+			if seen[url] {
+				t.Fatalf("duplicate queue %s", url)
+			}
+			seen[url] = true
+		}
+		next, _ = response.Output["NextToken"].(string)
+		if next == "" {
+			break
+		}
+	}
+	if len(seen) != 32 {
+		t.Fatalf("listed %d wanted queues", len(seen))
 	}
 }
 

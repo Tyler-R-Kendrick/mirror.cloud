@@ -447,4 +447,18 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("delayed receive %d %s", status, body)
 		}
 	})
+	t.Run("Given a FIFO message When receiving all attributes twice Then receive metadata mutates", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-fifo-attrs.fifo","Attributes":{"ContentBasedDeduplication":"true","VisibilityTimeout":"0"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-fifo-attrs.fifo","MessageBody":"message","MessageGroupId":"group-1","MessageDeduplicationId":"dedup-1","MessageAttributes":{"kind":{"DataType":"String","StringValue":"fifo"}}}`); status != http.StatusOK {
+			t.Fatalf("send %d %s", status, body)
+		}
+		for want := 1; want <= 2; want++ {
+			status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-fifo-attrs.fifo","AttributeNames":["All"],"MessageAttributeNames":["All"],"WaitTimeSeconds":0}`)
+			if status != http.StatusOK || !bytes.Contains(body, []byte(`"StringValue":"fifo"`)) || !bytes.Contains(body, []byte(fmt.Sprintf(`"ApproximateReceiveCount":"%d"`, want))) {
+				t.Fatalf("receive %d %d %s", want, status, body)
+			}
+		}
+	})
 }

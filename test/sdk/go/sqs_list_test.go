@@ -509,6 +509,35 @@ func TestAWSSDKSQSMessageTimestampContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSFIFOMessageAttributesContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-fifo-attrs.fifo"), Attributes: map[string]string{"ContentBasedDeduplication": "true", "VisibilityTimeout": "0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("message"), MessageGroupId: aws.String("group-1"), MessageDeduplicationId: aws.String("dedup-1"), MessageAttributes: map[string]types.MessageAttributeValue{"kind": {DataType: aws.String("String"), StringValue: aws.String("fifo")}}}); err != nil {
+		t.Fatal(err)
+	}
+	for want := int32(1); want <= 2; want++ {
+		response, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameAll}, MessageAttributeNames: []string{"All"}, WaitTimeSeconds: 0})
+		if err != nil || len(response.Messages) != 1 || aws.ToString(response.Messages[0].MessageAttributes["kind"].StringValue) != "fifo" || response.Messages[0].Attributes["ApproximateReceiveCount"] != fmt.Sprint(want) {
+			t.Fatalf("receive %d %#v error %v", want, response, err)
+		}
+	}
+}
+
 func TestAWSSDKSQSMultipleQueuesContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

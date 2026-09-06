@@ -353,6 +353,56 @@ func TestReceiveMessageTimestampsCharacterization(t *testing.T) {
 	golden.AssertJSON(t, messages[0].(map[string]any)["Attributes"])
 }
 
+func TestFIFOMessageAttributesCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response.Output
+	}
+	call("CreateQueue", map[string]any{"QueueName": "fifo-attrs.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true", "VisibilityTimeout": "0"}})
+	call("SendMessage", map[string]any{"QueueName": "fifo-attrs.fifo", "MessageBody": "message-body-1", "MessageGroupId": "group-1", "MessageDeduplicationId": "dedup-1", "MessageAttributes": map[string]any{
+		"kind": map[string]any{"DataType": "String", "StringValue": "fifo"},
+	}})
+	first := call("ReceiveMessage", map[string]any{"QueueName": "fifo-attrs.fifo", "AttributeNames": []any{"All"}, "MessageAttributeNames": []any{"All"}, "WaitTimeSeconds": 0})
+	second := call("ReceiveMessage", map[string]any{"QueueName": "fifo-attrs.fifo", "AttributeNames": []any{"All"}, "MessageAttributeNames": []any{"All"}, "WaitTimeSeconds": 0})
+	golden.AssertJSON(t, map[string]any{"first": first, "second": second})
+}
+
+func FuzzFIFOMessageAttributes(f *testing.F) {
+	f.Add("fifo")
+	f.Add("")
+	f.Fuzz(func(t *testing.T, value string) {
+		if len(value) > 1024 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-fifo-attrs.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true", "VisibilityTimeout": "0"}}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-fifo-attrs.fifo", "MessageBody": "message", "MessageGroupId": "group-1", "MessageDeduplicationId": "dedup-1", "MessageAttributes": map[string]any{"kind": map[string]any{"DataType": "String", "StringValue": value}}}}); err != nil {
+			t.Fatal(err)
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "fuzz-fifo-attrs.fifo", "MessageAttributeNames": []any{"All"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(response.Output["Messages"].([]any)) != 1 {
+			t.Fatalf("messages %#v", response.Output)
+		}
+		message := asMap(response.Output["Messages"].([]any)[0])
+		if str(asMap(asMap(message["MessageAttributes"])["kind"])["StringValue"]) != value {
+			t.Fatalf("attributes %#v", message["MessageAttributes"])
+		}
+	})
+}
+
 func TestMessagesRemainQueueScoped(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

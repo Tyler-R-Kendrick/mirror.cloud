@@ -5898,3 +5898,42 @@ func TestConcurrentSQSFIFOZeroDelayUsesQueueDelay(t *testing.T) {
 		t.Fatalf("after delay %#v error %v", after.Output, err)
 	}
 }
+
+func TestConcurrentSQSFIFOMessageAttributesAreRetained(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-fifo-attrs.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true", "VisibilityTimeout": "0"}}}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := range 8 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-fifo-attrs.fifo", "MessageBody": fmt.Sprintf("message-%d", i), "MessageGroupId": fmt.Sprintf("group-%d", i), "MessageDeduplicationId": fmt.Sprintf("dedup-%d", i), "MessageAttributes": map[string]any{"kind": map[string]any{"DataType": "String", "StringValue": fmt.Sprintf("value-%d", i)}}}})
+			if err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-fifo-attrs.fifo", "MaxNumberOfMessages": 10, "MessageAttributeNames": []any{"All"}}})
+	if err != nil || len(response.Output["Messages"].([]any)) != 8 {
+		t.Fatalf("receive %#v error %v", response.Output, err)
+	}
+	for _, raw := range response.Output["Messages"].([]any) {
+		message, _ := raw.(map[string]any)
+		messageAttributes, _ := message["MessageAttributes"].(map[string]any)
+		kind, _ := messageAttributes["kind"].(map[string]any)
+		if kind["StringValue"] == nil {
+			t.Fatalf("missing message attributes %#v", raw)
+		}
+	}
+}

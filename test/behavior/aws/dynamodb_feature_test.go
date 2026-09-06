@@ -48,6 +48,9 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 	call := func(action, payload string) (int, []byte) {
 		return request("DynamoDB_20120810", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/dynamodb/aws4_request, SignedHeaders=host, Signature=00", action, payload)
 	}
+	regionalCall := func(region, action, payload string) (int, []byte) {
+		return request("DynamoDB_20120810", "AWS4-HMAC-SHA256 Credential=test/20200101/"+region+"/dynamodb/aws4_request, SignedHeaders=host, Signature=00", action, payload)
+	}
 	streamCall := func(action, payload string) (int, []byte) {
 		return request("DynamoDBStreams_20120810", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/streams/aws4_request, SignedHeaders=host, Signature=00", action, payload)
 	}
@@ -459,6 +462,24 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 		}
 		if status, body := call("DescribeKinesisStreamingDestination", `{"TableName":"KinesisBDD"}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"DestinationStatus":"DISABLED"`)) {
 			t.Fatalf("describe disabled destination %d %s", status, body)
+		}
+	})
+
+	t.Run("Given a global table When an item is written Then every replica can read it", func(t *testing.T) {
+		if status, body := regionalCall("ap-south-1", "CreateTable", `{"TableName":"GlobalBDD","KeySchema":[{"AttributeName":"id","KeyType":"HASH"}],"StreamSpecification":{"StreamEnabled":true,"StreamViewType":"NEW_IMAGE"}}`); status != http.StatusOK {
+			t.Fatalf("create global table %d %s", status, body)
+		}
+		if status, body := regionalCall("ap-south-1", "UpdateTable", `{"TableName":"GlobalBDD","ReplicaUpdates":[{"Create":{"RegionName":"us-east-1"}}]}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"RegionName":"us-east-1"`)) {
+			t.Fatalf("create replica %d %s", status, body)
+		}
+		if status, body := regionalCall("ap-south-1", "PutItem", `{"TableName":"GlobalBDD","Item":{"id":{"S":"replicated"}}}`); status != http.StatusOK {
+			t.Fatalf("write global item %d %s", status, body)
+		}
+		if status, body := regionalCall("us-east-1", "GetItem", `{"TableName":"GlobalBDD","Key":{"id":{"S":"replicated"}}}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"S":"replicated"`)) {
+			t.Fatalf("read replica item %d %s", status, body)
+		}
+		if status, body := regionalCall("us-east-1", "ListStreams", `{"TableName":"GlobalBDD"}`); status != http.StatusOK || !bytes.Contains(body, []byte("arn:aws:dynamodb:us-east-1:")) {
+			t.Fatalf("list replica stream %d %s", status, body)
 		}
 	})
 }

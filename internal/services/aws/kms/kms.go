@@ -115,35 +115,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	}
 }
 
-// EnsureAWSManagedKey returns one shared AWS-managed key per alias and scope.
-func (p *Pack) EnsureAWSManagedKey(ctx context.Context, identity spi.Identity, alias, description string) (map[string]any, error) {
-	var key map[string]any
-	err := p.deps.Store.Scope(identity.Account, identity.Region).Txn(ctx, func(tx spi.ScopeTx) error {
-		aliases := tx.Collection("kmsalias")
-		keys := tx.Collection("kms")
-		if raw, ok, err := aliases.Get(alias); err != nil {
-			return err
-		} else if ok {
-			var record map[string]any
-			_ = json.Unmarshal(raw, &record)
-			if raw, ok, err = keys.Get(str(record["TargetKeyId"])); err != nil {
-				return err
-			} else if ok {
-				_ = json.Unmarshal(raw, &key)
-				return nil
-			}
-		}
-		key = p.newKey(identity, description, "AWS")
-		raw, _ := json.Marshal(key)
-		if err := keys.Put(str(key["KeyId"]), raw); err != nil {
-			return err
-		}
-		raw, _ = json.Marshal(map[string]any{"AliasName": alias, "TargetKeyId": key["KeyId"]})
-		return aliases.Put(alias, raw)
-	})
-	return keyMetadata(key), err
-}
-
 func (p *Pack) newKey(identity spi.Identity, description, manager string) map[string]any {
 	id := p.deps.Rand.Hex(8)
 	return map[string]any{

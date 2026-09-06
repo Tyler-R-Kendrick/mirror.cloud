@@ -4,6 +4,7 @@ package dynamodb
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"sort"
 	"strconv"
@@ -12,7 +13,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb/expr"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -821,8 +821,43 @@ func (p *Pack) prepareTableMetadata(ctx context.Context, req *spi.Request, table
 }
 
 func (p *Pack) defaultDynamoDBKey(ctx context.Context, req *spi.Request) (string, error) {
-	metadata, err := kms.New(p.deps).EnsureAWSManagedKey(ctx, req.Identity, "alias/aws/dynamodb", "Default key that protects my DynamoDB data when no other key is defined")
-	return str(metadata["Arn"]), err
+	const alias = "alias/aws/dynamodb"
+	var arn string
+	err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(tx spi.ScopeTx) error {
+		aliases := tx.Collection("kmsalias")
+		keys := tx.Collection("kms")
+		if raw, ok, err := aliases.Get(alias); err != nil {
+			return err
+		} else if ok {
+			var record map[string]any
+			_ = json.Unmarshal(raw, &record)
+			if raw, ok, err = keys.Get(str(record["TargetKeyId"])); err != nil {
+				return err
+			} else if ok {
+				_ = json.Unmarshal(raw, &record)
+				arn = str(record["Arn"])
+				return nil
+			}
+		}
+		random := p.deps.Rand.Derive("aws-managed-kms:" + req.Identity.Account + ":" + req.Identity.Region + ":" + alias)
+		id := random.Hex(8)
+		arn = "arn:aws:kms:" + req.Identity.Region + ":" + req.Identity.Account + ":key/" + id
+		key := map[string]any{
+			"AWSAccountId": req.Identity.Account, "Arn": arn, "CreationDate": p.deps.Clock.Now().Unix(),
+			"CurrentKeyMaterialId": random.UUID(), "CustomerMasterKeySpec": "SYMMETRIC_DEFAULT",
+			"Description": "Default key that protects my DynamoDB data when no other key is defined",
+			"Enabled":     true, "EncryptionAlgorithms": []any{"SYMMETRIC_DEFAULT"}, "KeyId": id, "KeyManager": "AWS",
+			"KeyMaterial": base64.StdEncoding.EncodeToString(random.Bytes(32)), "KeySpec": "SYMMETRIC_DEFAULT",
+			"KeyState": "Enabled", "KeyUsage": "ENCRYPT_DECRYPT", "MultiRegion": false, "Origin": "AWS_KMS",
+		}
+		raw, _ := json.Marshal(key)
+		if err := keys.Put(id, raw); err != nil {
+			return err
+		}
+		raw, _ = json.Marshal(map[string]any{"AliasName": alias, "TargetKeyId": id})
+		return aliases.Put(alias, raw)
+	})
+	return arn, err
 }
 
 func tableDescription(table map[string]any, status string) map[string]any {

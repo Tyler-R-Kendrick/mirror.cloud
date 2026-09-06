@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
@@ -749,7 +750,14 @@ func TestDynamoDBDefaultSSECharacterization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := deps.Clock.Advance(time.Hour); err != nil {
+		t.Fatal(err)
+	}
 	second := must("CreateTable", map[string]any{"TableName": "AlsoEncrypted", "SSESpecification": map[string]any{"Enabled": true}})
+	reusedKey, err := kms.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeKey", Input: map[string]any{"KeyId": sse["KMSMasterKeyArn"]}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	disabled := must("UpdateTable", map[string]any{"TableName": "Encrypted", "SSESpecification": map[string]any{"Enabled": false}})
 	updated := must("UpdateTable", map[string]any{"TableName": "Encrypted", "BillingMode": "PAY_PER_REQUEST"})
 	described := must("DescribeTable", map[string]any{"TableName": "Encrypted"})
@@ -758,6 +766,7 @@ func TestDynamoDBDefaultSSECharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{
 		"created":             sse,
 		"key":                 key.Output["KeyMetadata"],
+		"reusedKey":           reusedKey.Output["KeyMetadata"],
 		"reused":              asMap(asMap(second["TableDescription"])["SSEDescription"]),
 		"disabled":            asMap(asMap(disabled["TableDescription"])["SSEDescription"]),
 		"updated":             asMap(asMap(updated["TableDescription"])["SSEDescription"]),

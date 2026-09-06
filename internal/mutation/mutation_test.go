@@ -8860,7 +8860,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		},
 		{
 			name: "dynamodb-default-sse-create-key-per-table",
-			file: filepath.Join("internal", "services", "aws", "kms", "kms.go"),
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
 			old:  "} else if ok {\n\t\t\tvar record map[string]any",
 			new:  "} else if false {\n\t\t\tvar record map[string]any",
 			pkg:  "./internal/services/aws/dynamodb",
@@ -8868,9 +8868,9 @@ func TestMutantsAreKilled(t *testing.T) {
 		},
 		{
 			name: "dynamodb-default-sse-mark-key-customer-managed",
-			file: filepath.Join("internal", "services", "aws", "kms", "kms.go"),
-			old:  `key = p.newKey(identity, description, "AWS")`,
-			new:  `key = p.newKey(identity, description, "CUSTOMER")`,
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
+			old:  `"KeyManager": "AWS"`,
+			new:  `"KeyManager": "CUSTOMER"`,
 			pkg:  "./internal/services/aws/dynamodb",
 			run:  "TestDynamoDBDefaultSSECharacterization",
 		},

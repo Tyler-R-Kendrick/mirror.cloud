@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
@@ -554,6 +555,42 @@ func TestConcurrentSQSReceiveBatchLimitsAreStable(t *testing.T) {
 				}
 				errs <- nil
 				return
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestConcurrentSQSEmptyReceivesOmitMessages(t *testing.T) {
+	deps := spitest.Deps(t)
+	deps.Clock = clock.Real{}
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "empty-receive"}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := call("ReceiveMessage", map[string]any{"QueueName": "empty-receive", "WaitTimeSeconds": index % 2})
+			if err == nil {
+				if _, ok := response.Output["Messages"]; ok {
+					err = fmt.Errorf("empty receive %#v", response.Output)
+				}
 			}
 			errs <- err
 		}()

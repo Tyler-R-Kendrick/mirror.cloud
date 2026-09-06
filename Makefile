@@ -78,6 +78,7 @@ test-fuzz:
 	$(GO) test ./internal/services/aws/sqs -run '^$$' -fuzz '^FuzzQueueDeletionWindow$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/sqs -run '^$$' -fuzz '^FuzzSendReceiveMessageDigest$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/sqs -run '^$$' -fuzz '^FuzzReceiveMessageMaxNumber$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./internal/services/aws/sqs -run '^$$' -fuzz '^FuzzEmptyReceiveOmitsMessages$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/firehose -run '^$$' -fuzz '^FuzzKPLDeaggregation$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzArchiveRestore$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzStorageClassValidation$$' -fuzztime=10000x -parallel=4

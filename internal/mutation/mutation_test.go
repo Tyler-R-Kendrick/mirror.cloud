@@ -17867,6 +17867,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestAWSSDKSQSMessageTimestampContract",
 		},
 		{
+			name: "sqs-message-write-global-queue",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "raw, _ := json.Marshal(msg)\n\t_ = p.col(req, \"msgs:\"+name).Put(ctx, rh, raw)\n\tif dedup != \"\" {",
+			new:  "raw, _ := json.Marshal(msg)\n\t_ = p.col(req, \"msgs\").Put(ctx, rh, raw)\n\tif dedup != \"\" {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestMessagesRemainQueueScopedCharacterization",
+		},
+		{
 			name: "cloudcontrol-write-wrong-collection",
 			file: filepath.Join("internal", "services", "aws", "cloudcontrol", "cloudcontrol.go"),
 			old:  `p.col(req, "ccres").Put(ctx, id, b)`,

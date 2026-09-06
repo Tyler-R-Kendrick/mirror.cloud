@@ -27,6 +27,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/edge"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
@@ -180,6 +181,64 @@ func TestConcurrentDynamoDBNoOpUpdatesEmitOneStreamRecord(t *testing.T) {
 	records, err := call("GetRecords", map[string]any{"ShardIterator": iterator.Output["ShardIterator"]})
 	if err != nil || len(records.Output["Records"].([]any)) != 2 {
 		t.Fatalf("duplicate no-op stream records: %#v %v", records, err)
+	}
+}
+
+func TestConcurrentDynamoDBKinesisDestinationKeepsEveryRecord(t *testing.T) {
+	deps := spitest.Deps(t)
+	ddb := dynamodb.New(deps)
+	kin := kinesis.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(pack spi.BehaviorPack, operation string, input map[string]any) (*spi.Response, error) {
+		return pack.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call(kin, "CreateStream", map[string]any{"StreamName": "s"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call(ddb, "CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call(ddb, "EnableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": "arn:aws:kinesis:us-east-1:000000000000:stream/s"}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := call(ddb, "PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"N": strconv.Itoa(index)}}})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	iterator, err := call(kin, "GetShardIterator", map[string]any{"StreamName": "s", "ShardIteratorType": "TRIM_HORIZON"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := call(kin, "GetRecords", map[string]any{"ShardIterator": iterator.Output["ShardIterator"]})
+	if err != nil || len(records.Output["Records"].([]any)) != 32 {
+		t.Fatalf("concurrent destination records: %#v %v", records, err)
+	}
+	keys := map[string]bool{}
+	for _, raw := range records.Output["Records"].([]any) {
+		data, _ := base64.StdEncoding.DecodeString(raw.(map[string]any)["Data"].(string))
+		var event map[string]any
+		if json.Unmarshal(data, &event) != nil || event["eventName"] != "INSERT" {
+			t.Fatalf("destination event: %s", data)
+		}
+		key := event["dynamodb"].(map[string]any)["Keys"].(map[string]any)["id"].(map[string]any)["N"].(string)
+		keys[key] = true
+	}
+	if len(keys) != 32 {
+		t.Fatalf("unique destination keys: %d", len(keys))
 	}
 }
 

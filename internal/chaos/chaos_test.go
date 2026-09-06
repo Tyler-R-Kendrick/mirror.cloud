@@ -5851,3 +5851,50 @@ func TestConcurrentSQSFIFODeduplicationValidationIsStable(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestConcurrentSQSFIFOZeroDelayUsesQueueDelay(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
+		"QueueName": "chaos-delay.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true", "DelaySeconds": "2"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := range 8 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{
+				"QueueName": "chaos-delay.fifo", "MessageBody": fmt.Sprintf("message-%d", i), "MessageGroupId": fmt.Sprintf("group-%d", i), "DelaySeconds": 0,
+			}})
+			if err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	before, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-delay.fifo", "MaxNumberOfMessages": 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := before.Output["Messages"]; ok {
+		t.Fatalf("messages visible before delay %#v", before.Output)
+	}
+	if err := clk.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	after, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-delay.fifo", "MaxNumberOfMessages": 10}})
+	if err != nil || len(after.Output["Messages"].([]any)) != 8 {
+		t.Fatalf("after delay %#v error %v", after.Output, err)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
@@ -427,6 +428,23 @@ func TestSQSQueueListing(t *testing.T) {
 			if status != http.StatusBadRequest || !bytes.Contains(body, []byte(`"__type":"InvalidParameterValue"`)) || !bytes.Contains(body, []byte("MessageDeduplicationId can only include alphanumeric and punctuation characters")) {
 				t.Fatalf("deduplication id %q %d %s", value, status, body)
 			}
+		}
+	})
+	t.Run("Given a FIFO queue delay When sending with zero delay Then the queue delay is applied", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-delay-zero.fifo","Attributes":{"ContentBasedDeduplication":"true","DelaySeconds":"2"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-delay-zero.fifo","MessageBody":"message","MessageGroupId":"group-1","DelaySeconds":0}`); status != http.StatusOK {
+			t.Fatalf("send %d %s", status, body)
+		}
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-delay-zero.fifo","WaitTimeSeconds":0}`)
+		if status != http.StatusOK || bytes.Contains(body, []byte(`"Messages"`)) {
+			t.Fatalf("early receive %d %s", status, body)
+		}
+		time.Sleep(2100 * time.Millisecond)
+		status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-delay-zero.fifo","WaitTimeSeconds":0}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"Body":"message"`)) {
+			t.Fatalf("delayed receive %d %s", status, body)
 		}
 	})
 }

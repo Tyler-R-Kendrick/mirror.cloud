@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -221,6 +222,38 @@ func TestAWSSDKSQSFIFODeduplicationIDContract(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "MessageDeduplicationId can only include alphanumeric and punctuation characters") {
 			t.Fatalf("deduplication id %q error %v", value, err)
 		}
+	}
+}
+
+func TestAWSSDKSQSFIFOZeroDelayUsesQueueDelayContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-delay-zero.fifo"), Attributes: map[string]string{"ContentBasedDeduplication": "true", "DelaySeconds": "2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("message"), MessageGroupId: aws.String("group-1"), DelaySeconds: 0}); err != nil {
+		t.Fatal(err)
+	}
+	initial, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, WaitTimeSeconds: 0})
+	if err != nil || len(initial.Messages) != 0 {
+		t.Fatalf("initial %#v error %v", initial, err)
+	}
+	time.Sleep(2100 * time.Millisecond)
+	after, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, WaitTimeSeconds: 0})
+	if err != nil || len(after.Messages) != 1 || aws.ToString(after.Messages[0].Body) != "message" {
+		t.Fatalf("after %#v error %v", after, err)
 	}
 }
 

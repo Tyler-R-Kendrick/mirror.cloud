@@ -393,7 +393,7 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 		dedup = md5hex
 	}
 	delay := asInt(req.Input["DelaySeconds"])
-	if req.Input["DelaySeconds"] == nil {
+	if req.Input["DelaySeconds"] == nil || (fifo && delay == 0) {
 		delay = asInt(attrs["DelaySeconds"])
 	}
 	if delay < 0 || delay > 900 {

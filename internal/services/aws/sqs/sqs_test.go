@@ -1016,6 +1016,46 @@ func FuzzFIFODeduplicationID(f *testing.F) {
 	})
 }
 
+func FuzzFIFODelayZeroUsesQueueDelay(f *testing.F) {
+	f.Add(1)
+	f.Add(2)
+	f.Fuzz(func(t *testing.T, delay int) {
+		if delay < 1 || delay > 20 {
+			t.Skip()
+		}
+		clk := clock.NewControllable()
+		deps := spitest.Deps(t)
+		deps.Clock = clk
+		p := New(deps)
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
+			"QueueName": "fuzz-delay.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true", "DelaySeconds": strconv.Itoa(delay)},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{
+			"QueueName": "fuzz-delay.fifo", "MessageBody": "message", "MessageGroupId": "group-1", "DelaySeconds": 0,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		before, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "fuzz-delay.fifo"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := before.Output["Messages"]; ok {
+			t.Fatalf("delay %d visible early %#v", delay, before.Output)
+		}
+		if err := clk.Advance(time.Duration(delay) * time.Second); err != nil {
+			t.Fatal(err)
+		}
+		after, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "fuzz-delay.fifo"}})
+		if err != nil || len(after.Output["Messages"].([]any)) != 1 {
+			t.Fatalf("delay %d after %#v error %v", delay, after.Output, err)
+		}
+	})
+}
+
 func TestQueueTagKeysAreCaseSensitive(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -1097,6 +1137,41 @@ func TestFIFODeduplicationIDCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{
 		"empty": call(""), "tooLong": call(strings.Repeat("a", 129)), "spaces": call("group 123"),
 	})
+}
+
+func TestFIFODelayZeroUsesQueueDelayCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
+		"QueueName": "delay-zero.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true", "DelaySeconds": "2"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	sent, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{
+		"QueueName": "delay-zero.fifo", "MessageBody": "message", "MessageGroupId": "group-1", "DelaySeconds": 0,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "delay-zero.fifo", "WaitTimeSeconds": 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := initial.Output["Messages"]; ok {
+		t.Fatalf("message visible before queue delay: %#v", initial.Output)
+	}
+	if err := clk.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	after, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "delay-zero.fifo", "WaitTimeSeconds": 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, map[string]any{"sent": sent.Output, "initial": initial.Output, "after": after.Output})
 }
 
 func faultCode(err error) string {

@@ -17547,6 +17547,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFIFODeduplicationIDCharacterization",
 		},
 		{
+			name: "sqs-fifo-zero-delay-ignore-queue-delay",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if req.Input[\"DelaySeconds\"] == nil || (fifo && delay == 0) {",
+			new:  "if req.Input[\"DelaySeconds\"] == nil || (fifo && delay != 0) {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestFIFODelayZeroUsesQueueDelayCharacterization",
+		},
+		{
 			name: "sqs-list-ignore-prefix",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  `prefix := str(req.Input["QueueNamePrefix"])`,

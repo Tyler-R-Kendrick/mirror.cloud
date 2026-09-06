@@ -171,6 +171,55 @@ func TestCreateQueueMetadataAttributes(t *testing.T) {
 	}
 }
 
+func TestQueueCannotBeRecreatedUntilDeleteWindowExpires(t *testing.T) {
+	clk := clock.NewControllable()
+	if err := clk.Advance(time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC).Sub(clk.Now())); err != nil {
+		t.Fatal(err)
+	}
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	created, err := call("CreateQueue", map[string]any{"QueueName": "deleted", "Attributes": map[string]any{"DelaySeconds": "5"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("TagQueue", map[string]any{"QueueName": "deleted", "Tags": map[string]any{"old": "tag"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("SendMessage", map[string]any{"QueueName": "deleted", "MessageBody": "old"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("DeleteQueue", map[string]any{"QueueName": "deleted"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = call("CreateQueue", map[string]any{"QueueName": "deleted"})
+	fault, ok := err.(*spi.Fault)
+	if !ok || fault.Code != "AWS.SimpleQueueService.QueueDeletedRecently" || fault.Message != "You must wait 60 seconds after deleting a queue before you can create another with the same name." {
+		t.Fatalf("recently deleted fault %#v", err)
+	}
+	if err := clk.Advance(time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	recreated, err := call("CreateQueue", map[string]any{"QueueName": "deleted"})
+	if err != nil || recreated.Output["QueueUrl"] != created.Output["QueueUrl"] {
+		t.Fatalf("recreate %#v, %v", recreated, err)
+	}
+	attrs, attrErr := call("GetQueueAttributes", map[string]any{"QueueName": "deleted", "AttributeNames": []any{"All"}})
+	tags, tagErr := call("ListQueueTags", map[string]any{"QueueName": "deleted"})
+	messages, receiveErr := call("ReceiveMessage", map[string]any{"QueueName": "deleted"})
+	if attrErr != nil || tagErr != nil || receiveErr != nil {
+		t.Fatalf("recreated queue reads: %v, %v, %v", attrErr, tagErr, receiveErr)
+	}
+	if attrs.Output["Attributes"].(map[string]any)["DelaySeconds"] != nil || len(tags.Output["Tags"].(map[string]any)) != 0 || len(messages.Output["Messages"].([]any)) != 0 {
+		t.Fatalf("deleted state survived: attrs=%#v tags=%#v messages=%#v", attrs.Output, tags.Output, messages.Output)
+	}
+}
+
 func TestQueueMetadataCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	if err := deps.Clock.Advance(time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC).Sub(deps.Clock.Now())); err != nil {

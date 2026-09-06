@@ -53,6 +53,16 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	switch req.Operation {
 	case "CreateQueue":
 		name := str(req.Input["QueueName"])
+		if deleted, ok, _ := p.col(req, "qdeleted").Get(ctx, name); ok {
+			deletedAt, _ := strconv.ParseInt(string(deleted), 10, 64)
+			if p.deps.Clock.Now().Sub(time.Unix(0, deletedAt)) < time.Minute {
+				return nil, &spi.Fault{
+					Code: "AWS.SimpleQueueService.QueueDeletedRecently", Message: "You must wait 60 seconds after deleting a queue before you can create another with the same name.",
+					HTTPStatus: 400, Fault: "client",
+				}
+			}
+			_ = p.col(req, "qdeleted").Delete(ctx, name)
+		}
 		url := fmt.Sprintf("%s/%s/%s", base, req.Identity.Account, name)
 		attrs := asMap(req.Input["Attributes"])
 		if strings.HasSuffix(name, ".fifo") {
@@ -104,7 +114,16 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: out}, nil
 	case "DeleteQueue":
 		name := queueName(req)
+		_ = p.col(req, "qdeleted").Put(ctx, name, []byte(strconv.FormatInt(p.deps.Clock.Now().UnixNano(), 10)))
 		_ = p.col(req, "queues").Delete(ctx, name)
+		_ = p.col(req, "qattrs").Delete(ctx, name)
+		_ = p.col(req, "qtags").Delete(ctx, name)
+		for _, collection := range []string{"msgs:" + name, "dedup:" + name} {
+			kvs, _, _ := p.col(req, collection).List(ctx, "", "", 0)
+			for _, kv := range kvs {
+				_ = p.col(req, collection).Delete(ctx, kv.Key)
+			}
+		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "SendMessage":
 		return p.send(ctx, req)

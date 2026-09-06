@@ -705,6 +705,52 @@ func TestConcurrentSQSMessagesRemainQueueScoped(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSSendMessageBatchesRemainAtomic(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for index := range 16 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "batch", "Entries": []any{
+				map[string]any{"Id": fmt.Sprintf("%d-0", index), "MessageBody": fmt.Sprintf("message-%d-0", index)},
+				map[string]any{"Id": fmt.Sprintf("%d-1", index), "MessageBody": fmt.Sprintf("message-%d-1", index)},
+			}}})
+			errs <- err
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[string]bool{}
+	for len(seen) < 32 {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "batch", "MaxNumberOfMessages": 10}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages, _ := response.Output["Messages"].([]any)
+		if len(messages) == 0 {
+			t.Fatalf("received %d batch messages", len(seen))
+		}
+		for _, raw := range messages {
+			seen[raw.(map[string]any)["Body"].(string)] = true
+		}
+	}
+	if len(seen) != 32 {
+		t.Fatalf("received %d batch messages", len(seen))
+	}
+}
+
 func TestConcurrentDynamoDBTransactionTokenChoosesOnePayload(t *testing.T) {
 	p := dynamodb.New(spitest.Deps(t))
 	ctx := context.Background()

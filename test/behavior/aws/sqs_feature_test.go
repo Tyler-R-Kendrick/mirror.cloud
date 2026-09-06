@@ -224,4 +224,52 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("encoded response %d %s", status, body)
 		}
 	})
+	t.Run("Given a message batch When receiving Then every entry is delivered", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-batch"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("SendMessageBatch", `{"QueueUrl":"http://queue/000000000000/bdd-batch","Entries":[{"Id":"1","MessageBody":"message-0"},{"Id":"2","MessageBody":"message-1"}]}`)
+		var sent map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &sent) != nil || len(sent["Successful"].([]any)) != 2 {
+			t.Fatalf("batch %d %s", status, body)
+		}
+		if _, exists := sent["Failed"]; exists {
+			t.Fatalf("successful batch included failures %s", body)
+		}
+		seen := map[string]bool{}
+		for range 2 {
+			status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-batch"}`)
+			var received map[string]any
+			if status != http.StatusOK || json.Unmarshal(body, &received) != nil || len(received["Messages"].([]any)) != 1 {
+				t.Fatalf("receive %d %s", status, body)
+			}
+			seen[received["Messages"].([]any)[0].(map[string]any)["Body"].(string)] = true
+		}
+		if !seen["message-0"] || !seen["message-1"] {
+			t.Fatalf("batch bodies %#v", seen)
+		}
+	})
+	t.Run("Given a batch and a single send When receiving three Then all bodies are present", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-batch-mixed"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("SendMessageBatch", `{"QueueUrl":"http://queue/000000000000/bdd-batch-mixed","Entries":[{"Id":"1","MessageBody":"message-0"},{"Id":"2","MessageBody":"message-1"}]}`); status != http.StatusOK {
+			t.Fatalf("batch %d %s", status, body)
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-batch-mixed","MessageBody":"message-2"}`); status != http.StatusOK {
+			t.Fatalf("single %d %s", status, body)
+		}
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-batch-mixed","MaxNumberOfMessages":3}`)
+		var received map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &received) != nil || len(received["Messages"].([]any)) != 3 {
+			t.Fatalf("receive %d %s", status, body)
+		}
+		seen := map[string]bool{}
+		for _, raw := range received["Messages"].([]any) {
+			seen[raw.(map[string]any)["Body"].(string)] = true
+		}
+		if !seen["message-0"] || !seen["message-1"] || !seen["message-2"] {
+			t.Fatalf("mixed batch bodies %#v", seen)
+		}
+	})
 }

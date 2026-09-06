@@ -230,7 +230,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			ok = append(ok, map[string]any{"Id": m["Id"], "MessageId": resp.Output["MessageId"], "MD5OfMessageBody": resp.Output["MD5OfMessageBody"]})
 		}
-		return &spi.Response{Output: map[string]any{"Successful": ok, "Failed": failed}}, nil
+		output := map[string]any{"Successful": ok}
+		if len(failed) > 0 {
+			output["Failed"] = failed
+		}
+		return &spi.Response{Output: output}, nil
 	case "DeleteMessageBatch":
 		name := queueName(req)
 		entries, _ := req.Input["Entries"].([]any)

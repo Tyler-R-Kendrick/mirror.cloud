@@ -452,6 +452,58 @@ func TestEncodedMessageContentCharacterization(t *testing.T) {
 	golden.AssertJSON(t, response.Output)
 }
 
+func TestSendMessageBatchCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "batch"})
+	batch := call("SendMessageBatch", map[string]any{"QueueName": "batch", "Entries": []any{
+		map[string]any{"Id": "1", "MessageBody": "message-0"},
+		map[string]any{"Id": "2", "MessageBody": "message-1"},
+	}})
+	first := call("ReceiveMessage", map[string]any{"QueueName": "batch"})
+	second := call("ReceiveMessage", map[string]any{"QueueName": "batch"})
+	empty := call("ReceiveMessage", map[string]any{"QueueName": "batch"})
+	golden.AssertJSON(t, map[string]any{"batch": batch.Output, "first": first.Output, "second": second.Output, "empty": empty.Output})
+}
+
+func TestSendBatchReceiveMultipleCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "batch-mixed"})
+	call("SendMessageBatch", map[string]any{"QueueName": "batch-mixed", "Entries": []any{
+		map[string]any{"Id": "1", "MessageBody": "message-0"},
+		map[string]any{"Id": "2", "MessageBody": "message-1"},
+	}})
+	call("SendMessage", map[string]any{"QueueName": "batch-mixed", "MessageBody": "message-2"})
+	received := call("ReceiveMessage", map[string]any{"QueueName": "batch-mixed", "MaxNumberOfMessages": 3})
+	bodies := map[string]bool{}
+	for _, raw := range received.Output["Messages"].([]any) {
+		bodies[raw.(map[string]any)["Body"].(string)] = true
+	}
+	if len(bodies) != 3 || !bodies["message-0"] || !bodies["message-1"] || !bodies["message-2"] {
+		t.Fatalf("mixed batch receive %#v", received.Output)
+	}
+	golden.AssertJSON(t, received.Output)
+}
+
 func TestListQueuesPrefixAndPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -1117,6 +1169,44 @@ func FuzzMessagesRemainQueueScoped(f *testing.F) {
 		messages, _ := received.Output["Messages"].([]any)
 		if len(messages) != 1 || messages[0].(map[string]any)["Body"] != string(body) {
 			t.Fatalf("target=%s response %#v", target, received.Output)
+		}
+	})
+}
+
+func FuzzSendMessageBatchBodies(f *testing.F) {
+	f.Add([]byte("batch"))
+	f.Add([]byte{0, 1, 2})
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		if len(raw) > 64 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		call := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		if _, err := call("CreateQueue", map[string]any{"QueueName": "batch"}); err != nil {
+			t.Fatal(err)
+		}
+		bodies := []string{fmt.Sprintf("%x-0", raw), fmt.Sprintf("%x-1", raw)}
+		response, err := call("SendMessageBatch", map[string]any{"QueueName": "batch", "Entries": []any{
+			map[string]any{"Id": "0", "MessageBody": bodies[0]},
+			map[string]any{"Id": "1", "MessageBody": bodies[1]},
+		}})
+		if err != nil || len(response.Output["Successful"].([]any)) != 2 {
+			t.Fatalf("batch %#v error %v", response.Output, err)
+		}
+		received, err := call("ReceiveMessage", map[string]any{"QueueName": "batch", "MaxNumberOfMessages": 10, "VisibilityTimeout": 0})
+		if err != nil || len(received.Output["Messages"].([]any)) != 2 {
+			t.Fatalf("receive %#v error %v", received.Output, err)
+		}
+		seen := map[string]bool{}
+		for _, rawMessage := range received.Output["Messages"].([]any) {
+			seen[rawMessage.(map[string]any)["Body"].(string)] = true
+		}
+		if !seen[bodies[0]] || !seen[bodies[1]] {
+			t.Fatalf("batch bodies %#v want %#v", seen, bodies)
 		}
 	})
 }

@@ -1,0 +1,22 @@
+{
+  "Messages": [
+    {
+      "Body": "message-0",
+      "MD5OfBody": "8ab5fbd7628b8c70d0382fc34fd601af",
+      "MessageId": "7c5891299f6489f8",
+      "ReceiptHandle": "5f59f223d7974d142efbc70e360dac9bd91fc24a55cb61c9216632095f55fd84"
+    },
+    {
+      "Body": "message-1",
+      "MD5OfBody": "3d6b824fd8c1520e9a047d21fee6fb1f",
+      "MessageId": "9c8e2cb00724681e",
+      "ReceiptHandle": "33f6fc5d83b79b8e49c4f349b79ed4dd608853fb5ea222613db6ba4f3f9d4d02"
+    },
+    {
+      "Body": "message-2",
+      "MD5OfBody": "95ef155b66299d14edf7ed57c468c13b",
+      "MessageId": "83d4958a39f75457",
+      "ReceiptHandle": "100aa4e60b963dc5ea239f1a89b17f21c27ea9356fee2331658b2f769a69a34c"
+    }
+  ]
+}

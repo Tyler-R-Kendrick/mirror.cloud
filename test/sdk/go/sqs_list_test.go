@@ -53,6 +53,47 @@ func TestAWSSDKSQSListQueuesContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSSendMessageBatchContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-batch")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.SendMessageBatch(context.Background(), &sqs.SendMessageBatchInput{QueueUrl: created.QueueUrl, Entries: []types.SendMessageBatchRequestEntry{
+		{Id: aws.String("1"), MessageBody: aws.String("message-0")},
+		{Id: aws.String("2"), MessageBody: aws.String("message-1")},
+	}})
+	if err != nil || len(result.Successful) != 2 || len(result.Failed) != 0 {
+		t.Fatalf("batch %#v error %v", result, err)
+	}
+	if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("message-2")}); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	response, receiveErr := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, MaxNumberOfMessages: 3})
+	if receiveErr != nil || len(response.Messages) != 3 {
+		t.Fatalf("receive %#v error %v", response, receiveErr)
+	}
+	for _, message := range response.Messages {
+		seen[aws.ToString(message.Body)] = true
+	}
+	if !seen["message-0"] || !seen["message-1"] || !seen["message-2"] {
+		t.Fatalf("batch bodies %#v", seen)
+	}
+}
+
 func TestAWSSDKSQSQueueMetadataContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

@@ -191,4 +191,22 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("timestamp attributes %#v", attributes)
 		}
 	})
+	t.Run("Given two queues When sending to one Then the other remains empty", func(t *testing.T) {
+		for _, name := range []string{"bdd-queue-0", "bdd-queue-1"} {
+			if status, body := call("CreateQueue", fmt.Sprintf(`{"QueueName":%q}`, name)); status != http.StatusOK {
+				t.Fatalf("create %s: %d %s", name, status, body)
+			}
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-queue-0","MessageBody":"message"}`); status != http.StatusOK {
+			t.Fatalf("send %d %s", status, body)
+		}
+		if status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-queue-1"}`); status != http.StatusOK || bytes.Contains(body, []byte(`"Messages"`)) {
+			t.Fatalf("queue-1 %d %s", status, body)
+		}
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-queue-0"}`)
+		var response map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &response) != nil || len(response["Messages"].([]any)) != 1 || response["Messages"].([]any)[0].(map[string]any)["Body"] != "message" {
+			t.Fatalf("queue-0 %d %s", status, body)
+		}
+	})
 }

@@ -712,3 +712,32 @@ func FuzzSendReceiveMessageDigest(f *testing.F) {
 		}
 	})
 }
+
+func FuzzReceiveMessageMaxNumber(f *testing.F) {
+	for _, seed := range []uint8{0, 1, 10, 11, 255} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, raw uint8) {
+		max := int(raw)
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		call := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		if _, err := call("CreateQueue", map[string]any{"QueueName": "max-messages"}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := call("ReceiveMessage", map[string]any{"QueueName": "max-messages", "MaxNumberOfMessages": max})
+		if max < 1 || max > 10 {
+			fault, _ := err.(*spi.Fault)
+			if fault == nil || fault.Code != "InvalidParameterValue" {
+				t.Fatalf("max=%d fault %#v", max, err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("max=%d: %v", max, err)
+		}
+	})
+}

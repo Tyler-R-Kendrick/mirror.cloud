@@ -260,6 +260,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if len(entries) == 0 {
 			return nil, &spi.Fault{Code: "AWS.SimpleQueueService.EmptyBatchRequest", Message: "There should be at least one SendMessageBatchRequestEntry in the request.", HTTPStatus: 400, Fault: "client"}
 		}
+		if len(entries) > 10 {
+			return nil, &spi.Fault{Code: "AWS.SimpleQueueService.TooManyEntriesInBatchRequest", Message: fmt.Sprintf("Maximum number of entries per request are 10. You have sent %d.", len(entries)), HTTPStatus: 400, Fault: "client"}
+		}
 		name := queueName(req)
 		attrs := p.queueAttrs(ctx, req, name)
 		total := 0

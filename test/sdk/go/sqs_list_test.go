@@ -146,6 +146,34 @@ func TestAWSSDKSQSFIFOBatchMissingDeduplicationIDContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSTooManyBatchEntriesContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-too-many-batch")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]types.SendMessageBatchRequestEntry, 20)
+	for i := range entries {
+		entries[i] = types.SendMessageBatchRequestEntry{Id: aws.String(fmt.Sprintf("message-%d", i)), MessageBody: aws.String("message")}
+	}
+	_, err = client.SendMessageBatch(context.Background(), &sqs.SendMessageBatchInput{QueueUrl: created.QueueUrl, Entries: entries})
+	if err == nil || !strings.Contains(err.Error(), "TooManyEntriesInBatchRequest") || !strings.Contains(err.Error(), "Maximum number of entries per request are 10") {
+		t.Fatalf("too many entries error %v", err)
+	}
+}
+
 func TestAWSSDKSQSEmptyMessageBatchContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

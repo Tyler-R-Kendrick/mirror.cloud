@@ -644,6 +644,25 @@ func TestFIFOBatchMissingDeduplicationIDCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
+func TestTooManyBatchEntriesCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "too-many-batch"}}); err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]any, 20)
+	for i := range entries {
+		entries[i] = map[string]any{"Id": fmt.Sprintf("message-%d", i), "MessageBody": "message"}
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "too-many-batch", "Entries": entries}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("too many entries error %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
+}
+
 func TestSendBatchReceiveMultipleCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -1880,8 +1899,10 @@ func FuzzSendMessageBatchEntryCount(f *testing.F) {
 	f.Add(uint8(0))
 	f.Add(uint8(1))
 	f.Add(uint8(2))
+	f.Add(uint8(11))
+	f.Add(uint8(20))
 	f.Fuzz(func(t *testing.T, raw uint8) {
-		count := int(raw % 3)
+		count := int(raw % 21)
 		p := New(spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
@@ -1897,6 +1918,13 @@ func FuzzSendMessageBatchEntryCount(f *testing.F) {
 			fault, ok := err.(*spi.Fault)
 			if !ok || fault.Code != "AWS.SimpleQueueService.EmptyBatchRequest" {
 				t.Fatalf("empty batch error %#v", err)
+			}
+			return
+		}
+		if count > 10 {
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "AWS.SimpleQueueService.TooManyEntriesInBatchRequest" || !strings.Contains(fault.Message, fmt.Sprintf("You have sent %d.", count)) {
+				t.Fatalf("oversized batch count=%d error %#v", count, err)
 			}
 			return
 		}

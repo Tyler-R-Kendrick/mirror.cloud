@@ -436,6 +436,20 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("missing deduplication id %d %s", status, body)
 		}
 	})
+	t.Run("Given more than ten batch entries When sending Then the entry-count fault is returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-too-many-batch"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		entries := make([]map[string]any, 20)
+		for i := range entries {
+			entries[i] = map[string]any{"Id": fmt.Sprintf("message-%d", i), "MessageBody": "message"}
+		}
+		payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-too-many-batch", "Entries": entries})
+		status, body := call("SendMessageBatch", string(payload))
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("TooManyEntriesInBatchRequest")) || !bytes.Contains(body, []byte("Maximum number of entries per request are 10. You have sent 20.")) {
+			t.Fatalf("too many entries %d %s", status, body)
+		}
+	})
 	t.Run("Given a FIFO queue When sending invalid deduplication ids Then the validation fault is returned", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-dedup-invalid.fifo","Attributes":{"ContentBasedDeduplication":"false"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

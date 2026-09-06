@@ -17563,6 +17563,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFIFOBatchMissingDeduplicationIDCharacterization",
 		},
 		{
+			name: "sqs-batch-accept-too-many-entries",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if len(entries) > 10 {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestTooManyBatchEntriesCharacterization",
+		},
+		{
 			name: "sqs-fifo-zero-delay-ignore-queue-delay",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "if req.Input[\"DelaySeconds\"] == nil || (fifo && delay == 0) {",

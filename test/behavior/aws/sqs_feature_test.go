@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -169,6 +170,25 @@ func TestSQSQueueListing(t *testing.T) {
 			if status != http.StatusOK || json.Unmarshal(body, &response) != nil || len(response["Messages"].([]any)) != 1 || response["Messages"].([]any)[0].(map[string]any)["Body"] != "message" {
 				t.Fatalf("short poll %d %s", status, body)
 			}
+		}
+	})
+	t.Run("Given a received message When requesting all system attributes Then timestamps are numeric", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-timestamps"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-timestamps","MessageBody":"message"}`); status != http.StatusOK {
+			t.Fatalf("send %d %s", status, body)
+		}
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-timestamps","MessageSystemAttributeNames":["All"]}`)
+		var response map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &response) != nil || len(response["Messages"].([]any)) != 1 {
+			t.Fatalf("receive %d %s", status, body)
+		}
+		attributes := response["Messages"].([]any)[0].(map[string]any)["Attributes"].(map[string]any)
+		sent, sentErr := strconv.ParseInt(attributes["SentTimestamp"].(string), 10, 64)
+		first, firstErr := strconv.ParseInt(attributes["ApproximateFirstReceiveTimestamp"].(string), 10, 64)
+		if sentErr != nil || firstErr != nil || first < sent || first-sent > 1000 {
+			t.Fatalf("timestamp attributes %#v", attributes)
 		}
 	})
 }

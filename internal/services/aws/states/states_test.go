@@ -1283,8 +1283,11 @@ func TestStatesPayloadLimits(t *testing.T) {
 		t.Fatalf("oversized Task payload %#v", execution.Output)
 	}
 	messages, err := queue.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueUrl": queueURL}})
-	if err != nil || len(messages.Output["Messages"].([]any)) != 0 {
+	if err != nil {
 		t.Fatalf("oversized Task invoked SQS %#v %v", messages, err)
+	}
+	if _, ok := messages.Output["Messages"]; ok {
+		t.Fatalf("oversized Task invoked SQS %#v", messages)
 	}
 
 	table := dynamodb.New(deps)

@@ -2,9 +2,6 @@
   "default": {
     "Messages": [
       {
-        "Attributes": {
-          "ApproximateReceiveCount": "1"
-        },
         "Body": "message",
         "MD5OfBody": "78e731027d8fd50ed642340b7c9a63b3",
         "MessageId": "7c5891299f6489f8",
@@ -15,9 +12,6 @@
   "explicit": {
     "Messages": [
       {
-        "Attributes": {
-          "ApproximateReceiveCount": "1"
-        },
         "Body": "message",
         "MD5OfBody": "78e731027d8fd50ed642340b7c9a63b3",
         "MessageId": "9c8e2cb00724681e",

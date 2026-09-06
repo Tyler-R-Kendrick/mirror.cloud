@@ -17795,6 +17795,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestReceiveMessageMaxNumberCharacterization",
 		},
 		{
+			name: "sqs-empty-receive-return-messages",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if len(msgs) == 0 {\n\t\t\t\treturn &spi.Response{Output: map[string]any{}}, nil\n\t\t\t}",
+			new:  "if len(msgs) == 0 {\n\t\t\t\treturn &spi.Response{Output: map[string]any{\"Messages\": []any{}}}, nil\n\t\t\t}",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestReceiveEmptyQueueCharacterization",
+		},
+		{
+			name: "sqs-empty-receive-bypass-omission",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if len(msgs) == 0 {\n\t\t\t\treturn &spi.Response{Output: map[string]any{}}, nil\n\t\t\t}",
+			new:  "if false {\n\t\t\t\treturn &spi.Response{Output: map[string]any{}}, nil\n\t\t\t}",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestReceiveEmptyQueueCharacterization",
+		},
+		{
 			name: "cloudcontrol-write-wrong-collection",
 			file: filepath.Join("internal", "services", "aws", "cloudcontrol", "cloudcontrol.go"),
 			old:  `p.col(req, "ccres").Put(ctx, id, b)`,

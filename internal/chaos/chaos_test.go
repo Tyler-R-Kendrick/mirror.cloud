@@ -525,6 +525,48 @@ func TestConcurrentSQSEmptyMessagesAreRejected(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSReceiveBatchLimitsAreStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "max-messages"}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for index := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			max := 10
+			if index%2 == 0 {
+				max = 11
+			}
+			_, err := call("ReceiveMessage", map[string]any{"QueueName": "max-messages", "MaxNumberOfMessages": max})
+			if max == 11 {
+				fault, _ := err.(*spi.Fault)
+				if fault == nil || fault.Code != "InvalidParameterValue" {
+					errs <- fmt.Errorf("max messages fault %#v", err)
+					return
+				}
+				errs <- nil
+				return
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestConcurrentDynamoDBTransactionTokenChoosesOnePayload(t *testing.T) {
 	p := dynamodb.New(spitest.Deps(t))
 	ctx := context.Background()

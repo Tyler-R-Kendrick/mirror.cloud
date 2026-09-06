@@ -118,4 +118,14 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("empty message %d %s", status, body)
 		}
 	})
+	t.Run("Given an oversized receive batch When receiving Then the invalid parameter fault is returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-max-messages"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-max-messages","MaxNumberOfMessages":11}`)
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte(`"__type":"InvalidParameterValue"`)) ||
+			!bytes.Contains(body, []byte("Value 11 for parameter MaxNumberOfMessages is invalid. Reason: Must be between 1 and 10, if provided.")) {
+			t.Fatalf("max messages %d %s", status, body)
+		}
+	})
 }

@@ -128,4 +128,18 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("max messages %d %s", status, body)
 		}
 	})
+	t.Run("Given an empty queue When short or long polling Then messages are omitted", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-empty-receive"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		for _, input := range []string{
+			`{"QueueUrl":"http://queue/000000000000/bdd-empty-receive","MaxNumberOfMessages":1}`,
+			`{"QueueUrl":"http://queue/000000000000/bdd-empty-receive","MaxNumberOfMessages":1,"WaitTimeSeconds":1}`,
+		} {
+			status, body := call("ReceiveMessage", input)
+			if status != http.StatusOK || bytes.Contains(body, []byte(`"Messages"`)) {
+				t.Fatalf("empty receive %d %s", status, body)
+			}
+		}
+	})
 }

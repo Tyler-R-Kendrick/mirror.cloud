@@ -143,6 +143,20 @@ func TestEmptyMessageCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
+func TestReceiveMessageMaxNumberValidation(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "max-messages"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "max-messages", "MaxNumberOfMessages": 11}})
+	fault, ok := err.(*spi.Fault)
+	if !ok || fault.Code != "InvalidParameterValue" || fault.Message != "Value 11 for parameter MaxNumberOfMessages is invalid. Reason: Must be between 1 and 10, if provided." || fault.HTTPStatus != 400 {
+		t.Fatalf("max messages fault %#v", err)
+	}
+}
+
 func TestListQueuesPrefixAndPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -466,7 +480,7 @@ func TestFIFODedupDLQLongPoll(t *testing.T) {
 	if err != nil || len(queued) != 3 {
 		t.Fatalf("dedup queue size %d, %v", len(queued), err)
 	}
-	got := inv("ReceiveMessage", map[string]any{"QueueName": "q.fifo", "MaxNumberOfMessages": 11, "VisibilityTimeout": 0})
+	got := inv("ReceiveMessage", map[string]any{"QueueName": "q.fifo", "MaxNumberOfMessages": 10, "VisibilityTimeout": 0})
 	msgs, _ := got.Output["Messages"].([]any)
 	if len(msgs) != 2 {
 		t.Fatalf("fifo+dedup receive %d %v", len(msgs), got.Output)

@@ -355,12 +355,12 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 
 func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	name := queueName(req)
-	max := asInt(req.Input["MaxNumberOfMessages"])
-	if max <= 0 {
-		max = 1
-	}
-	if max > 10 {
-		max = 10
+	max := 1
+	if raw, ok := req.Input["MaxNumberOfMessages"]; ok {
+		max = asInt(raw)
+		if max < 1 || max > 10 {
+			return nil, &spi.Fault{Code: "InvalidParameterValue", Message: fmt.Sprintf("Value %d for parameter MaxNumberOfMessages is invalid. Reason: Must be between 1 and 10, if provided.", max), HTTPStatus: 400, Fault: "client"}
+		}
 	}
 	wait := time.Duration(asInt(req.Input["WaitTimeSeconds"])) * time.Second
 	attrs := p.queueAttrs(ctx, req, name)

@@ -386,7 +386,7 @@ func Bundle() *model.Bundle {
 		"ListTagsForStream", "MergeShards", "PutResourcePolicy", "RegisterStreamConsumer",
 		"RemoveTagsFromStream", "SplitShard", "StartStreamEncryption", "StopStreamEncryption",
 		"SubscribeToShard", "UpdateAccountSettings", "UpdateMaxRecordSize", "UpdateShardCount",
-		"UpdateStreamMode", "UpdateStreamWarmThroughput"}
+		"UpdateStreamMode", "UpdateStreamWarmThroughput", "TagResource", "UntagResource", "ListTagsForResource"}
 	apigw := []string{"CreateRestApi", "GetRestApi", "GetRestApis", "DeleteRestApi", "UpdateRestApi",
 		"CreateResource", "GetResource", "GetResources", "DeleteResource",
 		"PutMethod", "GetMethod", "DeleteMethod",

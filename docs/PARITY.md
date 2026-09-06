@@ -595,9 +595,9 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 |---|---:|
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
-| SQS statement coverage | 53.7% |
-| LocalStack SQS test functions explicitly traced | 3 / 222 (1.4%) |
-| LocalStack SQS test functions not yet traced | 219 / 222 (98.6%) |
+| SQS statement coverage | 57.3% |
+| LocalStack SQS test functions explicitly traced | 4 / 222 (1.8%) |
+| LocalStack SQS test functions not yet traced | 218 / 222 (98.2%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -606,3 +606,4 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_list_queues` | ListQueues applies QueueNamePrefix and omits QueueUrls when no queue matches; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin both branches | Mapped; full race-clean |
 | `test_sqs.py::TestSqsProvider::test_list_queues_pagination` | MaxResults returns lexically ordered pages and a base64 last-URL NextToken that resumes strictly after the prior page; all seven requested test forms pin token shape, continuation, final-page omission, and concurrent completeness | Mapped; full race-clean |
 | `test_sqs.py::TestSqsProvider::test_create_queue_and_get_attributes` | CreateQueue records its creation epoch; GetQueueAttributes exposes QueueArn, CreatedTimestamp, and default VisibilityTimeout while returning only requested names across JSON, Query, and AWS SDK paths; all seven requested test forms pin metadata values and isolation | Mapped; full race-clean |
+| `test_sqs.py::TestSqsProvider::test_create_queue_recently_deleted` | DeleteQueue records a 60-second tombstone and clears attributes, tags, messages, and FIFO dedup state; CreateQueue returns AWS.SimpleQueueService.QueueDeletedRecently with the AWS message before the boundary and recreates at the boundary; all seven requested test forms pin timing, protocol, cleanup, and concurrent enforcement | Mapped; full race-clean |

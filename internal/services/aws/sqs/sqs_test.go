@@ -353,6 +353,35 @@ func TestReceiveMessageTimestampsCharacterization(t *testing.T) {
 	golden.AssertJSON(t, messages[0].(map[string]any)["Attributes"])
 }
 
+func TestMessagesRemainQueueScoped(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	for _, name := range []string{"queue-0", "queue-1"} {
+		if _, err := call("CreateQueue", map[string]any{"QueueName": name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := call("SendMessage", map[string]any{"QueueName": "queue-0", "MessageBody": "message"}); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := call("ReceiveMessage", map[string]any{"QueueName": "queue-1"})
+	if err != nil || empty.Output["Messages"] != nil {
+		t.Fatalf("queue-1 %#v error %v", empty, err)
+	}
+	received, err := call("ReceiveMessage", map[string]any{"QueueName": "queue-0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, _ := received.Output["Messages"].([]any)
+	if len(messages) != 1 || messages[0].(map[string]any)["Body"] != "message" {
+		t.Fatalf("queue-0 %#v", received.Output)
+	}
+}
+
 func TestListQueuesPrefixAndPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

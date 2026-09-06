@@ -172,6 +172,29 @@ func TestReceiveMessageMaxNumberCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
+func TestReceiveEmptyQueueOmitsMessages(t *testing.T) {
+	deps := spitest.Deps(t)
+	deps.Clock = clock.Real{}
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "empty"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []map[string]any{
+		{"QueueName": "empty", "MaxNumberOfMessages": 1},
+		{"QueueName": "empty", "MaxNumberOfMessages": 1, "WaitTimeSeconds": 1},
+	} {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := response.Output["Messages"]; ok {
+			t.Fatalf("empty receive %#v", response.Output)
+		}
+	}
+}
+
 func TestListQueuesPrefixAndPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -445,7 +468,7 @@ func TestSendValidationAndDelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := invoke("ReceiveMessage", map[string]any{"QueueName": "delayed"})
-	if len(before.Output["Messages"].([]any)) != 0 {
+	if _, ok := before.Output["Messages"]; ok {
 		t.Fatalf("delayed message visible early %#v", before.Output)
 	}
 	_ = clk.Advance(10 * time.Second)

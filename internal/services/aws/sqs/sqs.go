@@ -375,6 +375,9 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 		now := p.deps.Clock.Now()
 		msgs := p.visible(ctx, req, name, now, max)
 		if len(msgs) > 0 || wait == 0 || !now.Before(deadline) {
+			if len(msgs) == 0 {
+				return &spi.Response{Output: map[string]any{}}, nil
+			}
 			out := make([]any, 0, len(msgs))
 			for _, m := range msgs {
 				p.afterReceive(ctx, req, name, m, vis)
@@ -397,7 +400,7 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 		select {
 		case <-p.deps.Clock.After(d):
 		case <-ctx.Done():
-			return &spi.Response{Output: map[string]any{"Messages": []any{}}}, nil
+			return &spi.Response{Output: map[string]any{}}, nil
 		}
 	}
 }

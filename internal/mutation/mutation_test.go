@@ -18131,6 +18131,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestCreateQueueTagsCharacterization",
 		},
 		{
+			name: "sqs-create-queue-skips-existing-check",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if existing, ok, _ := p.col(req, "queues").Get(ctx, name); ok {`,
+			new:  `if existing, ok, _ := p.col(req, "queues").Get(ctx, name); false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestCreateQueueIdempotencyAndAttributeValidation",
+		},
+		{
+			name: "sqs-create-standard-accepts-fifo-attrs",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if !strings.HasSuffix(name, ".fifo") {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestCreateQueueIdempotencyAndAttributeValidation",
+		},
+		{
 			name: "sqs-disable-message-delay",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "now.Add(time.Duration(delay) * time.Second).UnixNano()",

@@ -1000,6 +1000,41 @@ func TestQueueTagKeysAreCaseSensitive(t *testing.T) {
 	golden.AssertJSON(t, response.Output)
 }
 
+func TestCreateQueueIdempotencyAndAttributeValidation(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(input map[string]any) (map[string]any, error) {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: input})
+		if err != nil {
+			if fault, ok := err.(*spi.Fault); ok {
+				return map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus}, nil
+			}
+		}
+		if err != nil {
+			return nil, err
+		}
+		return response.Output, nil
+	}
+	first, err := call(map[string]any{"QueueName": "idempotent", "Attributes": map[string]any{"VisibilityTimeout": "69"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := call(map[string]any{"QueueName": "idempotent"})
+	if err != nil || second["QueueUrl"] != first["QueueUrl"] {
+		t.Fatalf("idempotent first=%#v second=%#v err=%v", first, second, err)
+	}
+	conflict, err := call(map[string]any{"QueueName": "idempotent", "Attributes": map[string]any{"VisibilityTimeout": "70"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalid, err := call(map[string]any{"QueueName": "standard-invalid", "Attributes": map[string]any{"FifoQueue": "false"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, map[string]any{"conflict": conflict, "invalid": invalid})
+}
+
 func faultCode(err error) string {
 	fault, _ := err.(*spi.Fault)
 	if fault == nil {

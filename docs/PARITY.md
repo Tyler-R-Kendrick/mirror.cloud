@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 26 / 222 (11.7%) |
-| LocalStack SQS test functions not yet traced | 196 / 222 (88.3%) |
+| LocalStack SQS test functions explicitly traced | 30 / 222 (13.5%) |
+| LocalStack SQS test functions not yet traced | 192 / 222 (86.5%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -629,3 +629,7 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_tag_queue_overwrites_existing_tag` | TagQueue overwrites supplied keys while retaining untouched existing tags across atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, chaos/race, and semantic mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_create_queue_with_tags` | CreateQueue persists initial tags for immediate ListQueueTags reads across atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, chaos/race, and semantic mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_tags_case_sensitive` | Tag keys that differ only by case remain distinct across atomic, Verify-style snapshot, AWS SDK contract, and raw HTTP BDD coverage | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_create_queue_without_attributes_is_idempotent` | Repeated CreateQueue calls without attributes return the original URL; atomic characterization, SDK contract, and BDD coverage pin idempotency | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_create_queue_with_same_attributes_is_idempotent` | Repeated CreateQueue calls with identical attributes return the original URL; atomic characterization, SDK contract, and BDD coverage pin idempotency | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_create_queue_with_different_attributes_raises_exception` | Reusing a queue name with a different attribute returns `QueueAlreadyExists` and identifies the differing attribute; atomic snapshot, SDK contract, BDD, and mutation coverage pin the fault | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_create_standard_queue_with_fifo_attribute_raises_error` | Standard queues reject FIFO-only attributes with exact `InvalidAttributeName` faults; atomic snapshot, SDK contract, BDD, and mutation coverage pin the validation | Mapped; focused green |

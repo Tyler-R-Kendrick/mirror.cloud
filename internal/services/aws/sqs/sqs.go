@@ -63,8 +63,29 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			_ = p.col(req, "qdeleted").Delete(ctx, name)
 		}
-		url := fmt.Sprintf("%s/%s/%s", base, req.Identity.Account, name)
 		attrs := asMap(req.Input["Attributes"])
+		if !strings.HasSuffix(name, ".fifo") {
+			for key, message := range map[string]string{
+				"FifoQueue": "Unknown Attribute FifoQueue.", "ContentBasedDeduplication": "Unknown Attribute ContentBasedDeduplication.",
+				"DeduplicationScope":  "You can specify the DeduplicationScope only when FifoQueue is set to true.",
+				"FifoThroughputLimit": "You can specify the FifoThroughputLimit only when FifoQueue is set to true.",
+			} {
+				if _, present := attrs[key]; present {
+					return nil, &spi.Fault{Code: "InvalidAttributeName", Message: message, HTTPStatus: 400, Fault: "client"}
+				}
+			}
+		}
+		if existing, ok, _ := p.col(req, "queues").Get(ctx, name); ok {
+			var current map[string]any
+			_ = json.Unmarshal(existing, &current)
+			for key, value := range attrs {
+				if str(asMap(current["attrs"])[key]) != str(value) {
+					return nil, &spi.Fault{Code: "QueueAlreadyExists", Message: "A queue already exists with the same name and a different value for attribute " + key, HTTPStatus: 400, Fault: "client"}
+				}
+			}
+			return &spi.Response{Output: map[string]any{"QueueUrl": current["url"]}}, nil
+		}
+		url := fmt.Sprintf("%s/%s/%s", base, req.Identity.Account, name)
 		if strings.HasSuffix(name, ".fifo") {
 			attrs["FifoQueue"] = "true"
 		}

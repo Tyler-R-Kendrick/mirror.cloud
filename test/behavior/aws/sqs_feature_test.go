@@ -404,4 +404,17 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("case-sensitive tags %d %s", status, body)
 		}
 	})
+	t.Run("Given an existing queue When creating it again Then the URL is stable and conflicts are rejected", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-idempotent","Attributes":{"VisibilityTimeout":"69"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("CreateQueue", `{"QueueName":"bdd-idempotent"}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte("bdd-idempotent")) {
+			t.Fatalf("idempotent %d %s", status, body)
+		}
+		status, body = call("CreateQueue", `{"QueueName":"bdd-idempotent","Attributes":{"VisibilityTimeout":"70"}}`)
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("QueueAlreadyExists")) || !bytes.Contains(body, []byte("VisibilityTimeout")) {
+			t.Fatalf("conflict %d %s", status, body)
+		}
+	})
 }

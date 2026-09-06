@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 
 	mcfg "github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
@@ -46,5 +47,37 @@ func TestAWSSDKSQSListQueuesContract(t *testing.T) {
 	empty, err := client.ListQueues(context.Background(), &sqs.ListQueuesInput{QueueNamePrefix: aws.String("missing")})
 	if err != nil || len(empty.QueueUrls) != 0 {
 		t.Fatalf("empty page %#v %v", empty, err)
+	}
+}
+
+func TestAWSSDKSQSQueueMetadataContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-metadata")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{
+		QueueUrl: created.QueueUrl,
+		AttributeNames: []types.QueueAttributeName{
+			types.QueueAttributeNameQueueArn,
+			types.QueueAttributeNameCreatedTimestamp,
+			types.QueueAttributeNameVisibilityTimeout,
+		},
+	})
+	if err != nil || len(result.Attributes) != 3 || result.Attributes["QueueArn"] != "arn:aws:sqs:us-east-1:000000000000:sdk-metadata" ||
+		result.Attributes["CreatedTimestamp"] == "" || result.Attributes["VisibilityTimeout"] != "30" {
+		t.Fatalf("metadata %#v, %v", result, err)
 	}
 }

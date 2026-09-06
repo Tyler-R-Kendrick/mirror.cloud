@@ -77,6 +77,9 @@ func TestCreateSendReceiveDelete(t *testing.T) {
 	if msg["Body"] != "hello" {
 		t.Fatalf("body: %v", msg["Body"])
 	}
+	if msg["MD5OfBody"] != sent.Output["MD5OfMessageBody"] {
+		t.Fatalf("receive md5 %v", msg["MD5OfBody"])
+	}
 	handle, _ := msg["ReceiptHandle"].(string)
 	if handle == "" {
 		t.Fatal("missing ReceiptHandle")

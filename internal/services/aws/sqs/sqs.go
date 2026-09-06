@@ -379,7 +379,7 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 				if req.Input["AttributeNames"] != nil && str(m["trace"]) != "" {
 					attributes["AWSTraceHeader"] = m["trace"]
 				}
-				wire := map[string]any{"MessageId": m["id"], "ReceiptHandle": m["handle"], "Body": m["body"], "Attributes": attributes}
+				wire := map[string]any{"MessageId": m["id"], "ReceiptHandle": m["handle"], "Body": m["body"], "MD5OfBody": m["md5"], "Attributes": attributes}
 				if want := req.Input["MessageAttributeNames"]; want != nil && m["attrs"] != nil {
 					wire["MessageAttributes"] = filterMsgAttrs(m["attrs"], want)
 				}

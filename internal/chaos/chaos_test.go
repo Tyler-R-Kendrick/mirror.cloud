@@ -662,7 +662,7 @@ func TestConcurrentSQSMessagesRemainQueueScoped(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	errs := make(chan error, 32)
+	errs := make(chan error, 64)
 	var wg sync.WaitGroup
 	for index := range 32 {
 		wg.Add(1)

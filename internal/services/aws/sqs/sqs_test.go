@@ -215,6 +215,44 @@ func TestReceiveEmptyQueueCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"short": short.Output, "long": long.Output})
 }
 
+func TestReceiveMessageWaitTimeValidation(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "wait-time"}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := call("SendMessage", map[string]any{"QueueName": "wait-time", "MessageBody": "message"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, value := range []int{-1, 21} {
+		_, err := call("ReceiveMessage", map[string]any{"QueueName": "wait-time", "WaitTimeSeconds": value})
+		fault, ok := err.(*spi.Fault)
+		want := fmt.Sprintf("Value %d for parameter WaitTimeSeconds is invalid. Reason: Must be >= 0 and <= 20, if provided.", value)
+		if !ok || fault.Code != "InvalidParameterValue" || fault.Message != want || fault.HTTPStatus != 400 {
+			t.Fatalf("wait=%d fault %#v", value, err)
+		}
+	}
+	for _, input := range []map[string]any{
+		{"QueueName": "wait-time"},
+		{"QueueName": "wait-time", "WaitTimeSeconds": 0},
+	} {
+		response, err := call("ReceiveMessage", input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages, _ := response.Output["Messages"].([]any)
+		if len(messages) != 1 || messages[0].(map[string]any)["Body"] != "message" {
+			t.Fatalf("short poll %#v", response)
+		}
+	}
+}
+
 func TestListQueuesPrefixAndPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

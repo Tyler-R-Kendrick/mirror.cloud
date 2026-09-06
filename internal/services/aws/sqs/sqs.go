@@ -362,7 +362,14 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 			return nil, &spi.Fault{Code: "InvalidParameterValue", Message: fmt.Sprintf("Value %d for parameter MaxNumberOfMessages is invalid. Reason: Must be between 1 and 10, if provided.", max), HTTPStatus: 400, Fault: "client"}
 		}
 	}
-	wait := time.Duration(asInt(req.Input["WaitTimeSeconds"])) * time.Second
+	waitSeconds := asInt(req.Input["WaitTimeSeconds"])
+	if raw, ok := req.Input["WaitTimeSeconds"]; ok {
+		waitSeconds = asInt(raw)
+		if waitSeconds < 0 || waitSeconds > 20 {
+			return nil, &spi.Fault{Code: "InvalidParameterValue", Message: fmt.Sprintf("Value %d for parameter WaitTimeSeconds is invalid. Reason: Must be >= 0 and <= 20, if provided.", waitSeconds), HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	wait := time.Duration(waitSeconds) * time.Second
 	attrs := p.queueAttrs(ctx, req, name)
 	vis := 30
 	if v, ok := req.Input["VisibilityTimeout"]; ok && v != nil && v != "" {

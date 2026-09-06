@@ -212,6 +212,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if len(entries) == 0 {
 			return nil, &spi.Fault{Code: "AWS.SimpleQueueService.EmptyBatchRequest", Message: "There should be at least one SendMessageBatchRequestEntry in the request.", HTTPStatus: 400, Fault: "client"}
 		}
+		total := 0
+		for _, entry := range entries {
+			message := asMap(entry)
+			total += messageSize(str(message["MessageBody"]), message["MessageAttributes"])
+		}
+		if total > 1<<20 {
+			return nil, &spi.Fault{Code: "AWS.SimpleQueueService.BatchRequestTooLong", Message: fmt.Sprintf("Batch requests cannot be longer than 1048576 bytes. You have sent %d bytes.", total), HTTPStatus: 400, Fault: "client"}
+		}
 		var ok []any
 		var failed []any
 		for _, e := range entries {

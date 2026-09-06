@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 59.6% |
-| LocalStack SQS test functions explicitly traced | 19 / 222 (8.6%) |
-| LocalStack SQS test functions not yet traced | 203 / 222 (91.4%) |
+| LocalStack SQS test functions explicitly traced | 21 / 222 (9.5%) |
+| LocalStack SQS test functions not yet traced | 201 / 222 (90.5%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -622,3 +622,5 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_send_message_batch_with_empty_list` | SendMessageBatch rejects an empty `Entries` list with HTTP 400 and `AWS.SimpleQueueService.EmptyBatchRequest`; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic validation mutants pin the fault | Mapped; full race-clean |
 | `test_sqs.py::TestSqsProvider::test_send_oversized_message` | SendMessage rejects a body plus message attributes above the default 1 MiB limit with the exact `InvalidParameterValue` fault; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and size-validation mutants pin byte accounting | Mapped; full race-clean |
 | `test_sqs.py::TestSqsProvider::test_send_message_with_updated_maximum_message_size` | A queue-level `MaximumMessageSize=1024` accepts a 1024-byte body and rejects a 1025-byte body-plus-attributes payload with the exact AWS message; the same seven test forms cover the configured boundary | Mapped; full race-clean |
+| `test_sqs.py::TestSqsProvider::test_send_message_batch_with_oversized_contents` | SendMessageBatch rejects a 1 MiB-plus-one request with `AWS.SimpleQueueService.BatchRequestTooLong` and the exact sent-byte count; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and batch-size mutants pin the limit | Mapped; full race-clean |
+| `test_sqs.py::TestSqsProvider::test_send_message_batch_with_oversized_contents_with_updated_maximum_message_size` | Batch sends continue to use the 1 MiB request limit even when queue `MaximumMessageSize=2048`; the configured per-message boundary and successful two-entry response are covered by the same seven forms | Mapped; full race-clean |

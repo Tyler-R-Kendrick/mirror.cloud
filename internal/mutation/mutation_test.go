@@ -17947,6 +17947,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSendMessageUpdatedMaximumSizeCharacterization",
 		},
 		{
+			name: "sqs-batch-accept-oversized-request",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if total > 1<<20 {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestSendMessageBatchOversizedCharacterization",
+		},
+		{
+			name: "sqs-batch-wrong-size-threshold",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if total > 1<<20 {`,
+			new:  `if total > 1<<19 {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestSendMessageBatchOversizedCharacterization",
+		},
+		{
 			name: "cloudcontrol-write-wrong-collection",
 			file: filepath.Join("internal", "services", "aws", "cloudcontrol", "cloudcontrol.go"),
 			old:  `p.col(req, "ccres").Put(ctx, id, b)`,

@@ -805,6 +805,37 @@ func TestConcurrentSQSMessageSizeLimitsRemainStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSBatchSizeLimitsRemainStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-size"}}); err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Repeat("a", (1<<20)-8)
+	errs := make(chan error, 8)
+	var wg sync.WaitGroup
+	for index := range 8 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "batch-size", "Entries": []any{
+				map[string]any{"Id": fmt.Sprintf("%d-1", index), "MessageBody": body, "MessageAttributes": map[string]any{"k": map[string]any{"DataType": "String", "StringValue": "x"}}},
+				map[string]any{"Id": fmt.Sprintf("%d-2", index), "MessageBody": "a"},
+			}}})
+			errs <- err
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "AWS.SimpleQueueService.BatchRequestTooLong" {
+			t.Fatalf("batch size error %#v", err)
+		}
+	}
+}
+
 func TestConcurrentDynamoDBTransactionTokenChoosesOnePayload(t *testing.T) {
 	p := dynamodb.New(spitest.Deps(t))
 	ctx := context.Background()

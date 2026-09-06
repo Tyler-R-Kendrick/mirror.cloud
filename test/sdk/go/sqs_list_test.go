@@ -152,6 +152,24 @@ func TestAWSSDKSQSMessageSizeContract(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "Message must be shorter than 1024 bytes") {
 		t.Fatalf("updated size error %v", err)
 	}
+	_, err = client.SendMessageBatch(context.Background(), &sqs.SendMessageBatchInput{QueueUrl: created.QueueUrl, Entries: []types.SendMessageBatchRequestEntry{
+		{Id: aws.String("1"), MessageBody: aws.String(strings.Repeat("a", (1<<20)-8)), MessageAttributes: attributes},
+		{Id: aws.String("2"), MessageBody: aws.String("a")},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "BatchRequestTooLong") || !strings.Contains(err.Error(), "1048577") {
+		t.Fatalf("oversized batch error %v", err)
+	}
+	batchQueue, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-batch-maximum"), Attributes: map[string]string{"MaximumMessageSize": "2048"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batchResult, err := client.SendMessageBatch(context.Background(), &sqs.SendMessageBatchInput{QueueUrl: batchQueue.QueueUrl, Entries: []types.SendMessageBatchRequestEntry{
+		{Id: aws.String("1"), MessageBody: aws.String(strings.Repeat("a", 2040)), MessageAttributes: attributes},
+		{Id: aws.String("2"), MessageBody: aws.String("a")},
+	}})
+	if err != nil || len(batchResult.Successful) != 2 {
+		t.Fatalf("updated batch %#v error %v", batchResult, err)
+	}
 }
 
 func TestAWSSDKSQSQueueMetadataContract(t *testing.T) {

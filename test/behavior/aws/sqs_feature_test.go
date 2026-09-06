@@ -301,4 +301,31 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("reduced maximum %d %s", status, body)
 		}
 	})
+	t.Run("Given an oversized batch When sending Then BatchRequestTooLong is returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-batch-size"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-batch-size", "Entries": []any{
+			map[string]any{"Id": "1", "MessageBody": strings.Repeat("a", (1<<20)-8), "MessageAttributes": map[string]any{"k": map[string]any{"DataType": "String", "StringValue": "x"}}},
+			map[string]any{"Id": "2", "MessageBody": "a"},
+		}})
+		status, body := call("SendMessageBatch", string(payload))
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("BatchRequestTooLong")) || !bytes.Contains(body, []byte("1048577")) {
+			t.Fatalf("oversized batch %d %s", status, body)
+		}
+	})
+	t.Run("Given a reduced queue limit When sending a batch Then the batch limit remains one MiB", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-batch-maximum","Attributes":{"MaximumMessageSize":"2048"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-batch-maximum", "Entries": []any{
+			map[string]any{"Id": "1", "MessageBody": strings.Repeat("a", 2040), "MessageAttributes": map[string]any{"k": map[string]any{"DataType": "String", "StringValue": "x"}}},
+			map[string]any{"Id": "2", "MessageBody": "a"},
+		}})
+		status, body := call("SendMessageBatch", string(payload))
+		var response map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &response) != nil || len(response["Successful"].([]any)) != 2 {
+			t.Fatalf("updated batch %d %s", status, body)
+		}
+	})
 }

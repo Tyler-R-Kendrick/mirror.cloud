@@ -551,6 +551,46 @@ func TestSendMessageUpdatedMaximumSizeCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
+func TestSendMessageBatchOversizedCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	ctx := context.Background()
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-size"}}); err != nil {
+		t.Fatal(err)
+	}
+	attrs := map[string]any{"k": map[string]any{"DataType": "String", "StringValue": "x"}}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "batch-size", "Entries": []any{
+		map[string]any{"Id": "1", "MessageBody": strings.Repeat("a", (1<<20)-8), "MessageAttributes": attrs},
+		map[string]any{"Id": "2", "MessageBody": "a"},
+	}}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("oversized batch fault %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
+}
+
+func TestSendMessageBatchUpdatedMaximumSizeCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	ctx := context.Background()
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-maximum", "Attributes": map[string]any{"MaximumMessageSize": "2048"}}}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "batch-maximum", "Entries": []any{
+		map[string]any{"Id": "1", "MessageBody": strings.Repeat("a", 2040), "MessageAttributes": map[string]any{"k": map[string]any{"DataType": "String", "StringValue": "x"}}},
+		map[string]any{"Id": "2", "MessageBody": "a"},
+	}}})
+	if err != nil || len(response.Output["Successful"].([]any)) != 2 {
+		t.Fatalf("updated batch %#v error %v", response, err)
+	}
+	failed := 0
+	if entries, ok := response.Output["Failed"].([]any); ok {
+		failed = len(entries)
+	}
+	golden.AssertJSON(t, map[string]any{"successful": len(response.Output["Successful"].([]any)), "failed": failed})
+}
+
 func TestListQueuesPrefixAndPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -1305,6 +1345,33 @@ func FuzzMessageSizeBoundary(f *testing.F) {
 			fault, ok := err.(*spi.Fault)
 			if !ok || fault.Code != "InvalidParameterValue" {
 				t.Fatalf("size=%d error %#v", bodyLength, err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func FuzzSendMessageBatchSizeBoundary(f *testing.F) {
+	f.Add(uint8(0))
+	f.Add(uint8(1))
+	f.Fuzz(func(t *testing.T, raw uint8) {
+		delta := int(raw % 2)
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-size"}}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "batch-size", "Entries": []any{map[string]any{
+			"Id": "1", "MessageBody": strings.Repeat("a", (1<<20)-8+delta), "MessageAttributes": map[string]any{"k": map[string]any{"DataType": "String", "StringValue": "x"}},
+		}}}})
+		if delta == 1 {
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "AWS.SimpleQueueService.BatchRequestTooLong" {
+				t.Fatalf("batch delta=%d error %#v", delta, err)
 			}
 			return
 		}

@@ -1,0 +1,18 @@
+{
+  "all": {
+    "Attributes": {
+      "ApproximateNumberOfMessages": "0",
+      "CreatedTimestamp": "1577934245",
+      "DelaySeconds": "5",
+      "QueueArn": "arn:aws:sqs:us-east-1:123456789012:metadata",
+      "VisibilityTimeout": "30"
+    }
+  },
+  "selected": {
+    "Attributes": {
+      "CreatedTimestamp": "1577934245",
+      "QueueArn": "arn:aws:sqs:us-east-1:123456789012:metadata",
+      "VisibilityTimeout": "30"
+    }
+  }
+}

@@ -167,6 +167,35 @@ func TestCreateQueueMetadataAttributes(t *testing.T) {
 	}
 }
 
+func TestQueueMetadataCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	if err := deps.Clock.Advance(time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC).Sub(deps.Clock.Now())); err != nil {
+		t.Fatal(err)
+	}
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
+		"QueueName": "metadata", "Attributes": map[string]any{"DelaySeconds": "5"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{
+		"QueueUrl": created.Output["QueueUrl"], "AttributeNames": []any{"QueueArn", "CreatedTimestamp", "VisibilityTimeout"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{
+		"QueueUrl": created.Output["QueueUrl"], "AttributeNames": []any{"All"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, map[string]any{"selected": selected.Output, "all": all.Output})
+}
+
 func TestListQueuesCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

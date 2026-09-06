@@ -432,6 +432,26 @@ func TestEncodedMessageContentRoundTrips(t *testing.T) {
 	}
 }
 
+func TestEncodedMessageContentCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "encoded"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("SendMessage", map[string]any{"QueueName": "encoded", "MessageBody": `"&quot;&quot;` + "\r"}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := call("ReceiveMessage", map[string]any{"QueueName": "encoded"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, response.Output)
+}
+
 func TestListQueuesPrefixAndPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

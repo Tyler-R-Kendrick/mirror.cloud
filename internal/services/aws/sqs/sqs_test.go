@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/base64"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -873,13 +874,16 @@ func FuzzSendReceiveMessageDigest(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		received, err := call("ReceiveMessage", map[string]any{"QueueName": "roundtrip", "VisibilityTimeout": 0})
+		received, err := call("ReceiveMessage", map[string]any{"QueueName": "roundtrip", "VisibilityTimeout": 0, "MessageSystemAttributeNames": []any{"All"}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		message := received.Output["Messages"].([]any)[0].(map[string]any)
 		want := fmt.Sprintf("%x", md5.Sum(body))
-		if message["Body"] != string(body) || message["MD5OfBody"] != want || sent.Output["MD5OfMessageBody"] != want {
+		attributes := message["Attributes"].(map[string]any)
+		sentAt, sentErr := strconv.ParseInt(attributes["SentTimestamp"].(string), 10, 64)
+		first, firstErr := strconv.ParseInt(attributes["ApproximateFirstReceiveTimestamp"].(string), 10, 64)
+		if message["Body"] != string(body) || message["MD5OfBody"] != want || sent.Output["MD5OfMessageBody"] != want || sentErr != nil || firstErr != nil || first < sentAt {
 			t.Fatalf("sent=%#v received=%#v want=%s", sent.Output, message, want)
 		}
 	})

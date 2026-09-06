@@ -504,6 +504,21 @@ func TestSendBatchReceiveMultipleCharacterization(t *testing.T) {
 	golden.AssertJSON(t, received.Output)
 }
 
+func TestSendMessageBatchEmptyCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "empty-batch"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "empty-batch", "Entries": []any{}}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("empty batch fault %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
+}
+
 func TestListQueuesPrefixAndPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -1207,6 +1222,36 @@ func FuzzSendMessageBatchBodies(f *testing.F) {
 		}
 		if !seen[bodies[0]] || !seen[bodies[1]] {
 			t.Fatalf("batch bodies %#v want %#v", seen, bodies)
+		}
+	})
+}
+
+func FuzzSendMessageBatchEntryCount(f *testing.F) {
+	f.Add(uint8(0))
+	f.Add(uint8(1))
+	f.Add(uint8(2))
+	f.Fuzz(func(t *testing.T, raw uint8) {
+		count := int(raw % 3)
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-count"}}); err != nil {
+			t.Fatal(err)
+		}
+		entries := make([]any, count)
+		for index := range entries {
+			entries[index] = map[string]any{"Id": fmt.Sprintf("%d", index), "MessageBody": fmt.Sprintf("message-%d", index)}
+		}
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "batch-count", "Entries": entries}})
+		if count == 0 {
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "AWS.SimpleQueueService.EmptyBatchRequest" {
+				t.Fatalf("empty batch error %#v", err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatal(err)
 		}
 	})
 }

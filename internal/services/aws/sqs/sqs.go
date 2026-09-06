@@ -209,6 +209,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"Tags": tags}}, nil
 	case "SendMessageBatch":
 		entries, _ := req.Input["Entries"].([]any)
+		if len(entries) == 0 {
+			return nil, &spi.Fault{Code: "AWS.SimpleQueueService.EmptyBatchRequest", Message: "There should be at least one SendMessageBatchRequestEntry in the request.", HTTPStatus: 400, Fault: "client"}
+		}
 		var ok []any
 		var failed []any
 		for _, e := range entries {

@@ -272,4 +272,13 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("mixed batch bodies %#v", seen)
 		}
 	})
+	t.Run("Given an empty message batch When sending Then EmptyBatchRequest is returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-empty-batch"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("SendMessageBatch", `{"QueueUrl":"http://queue/000000000000/bdd-empty-batch","Entries":[]}`)
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte(`"__type":"AWS.SimpleQueueService.EmptyBatchRequest"`)) {
+			t.Fatalf("empty batch %d %s", status, body)
+		}
+	})
 }

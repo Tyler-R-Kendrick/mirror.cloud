@@ -17907,6 +17907,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSendMessageBatchCharacterization",
 		},
 		{
+			name: "sqs-batch-accept-empty-entries",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if len(entries) == 0 {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestSendMessageBatchEmptyCharacterization",
+		},
+		{
+			name: "sqs-batch-wrong-empty-code",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `Code: "AWS.SimpleQueueService.EmptyBatchRequest"`,
+			new:  `Code: "EmptyBatchRequest"`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestSendMessageBatchEmptyCharacterization",
+		},
+		{
 			name: "cloudcontrol-write-wrong-collection",
 			file: filepath.Join("internal", "services", "aws", "cloudcontrol", "cloudcontrol.go"),
 			old:  `p.col(req, "ccres").Put(ctx, id, b)`,

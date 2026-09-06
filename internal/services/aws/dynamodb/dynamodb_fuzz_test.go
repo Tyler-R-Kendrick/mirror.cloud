@@ -375,6 +375,50 @@ func FuzzDynamoDBKinesisDestination(f *testing.F) {
 	})
 }
 
+func FuzzDynamoDBGlobalTable(f *testing.F) {
+	f.Add([]byte{0x90}, false, false)
+	f.Add([]byte("replicated"), true, true)
+	f.Fuzz(func(t *testing.T, raw []byte, writeFromReplica, deleteReplica bool) {
+		if len(raw) > 1024 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		call := func(region, operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: "000000000000", Region: region}, Operation: operation, Input: input})
+		}
+		_, _ = call("ap-south-1", "CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
+		if _, err := call("ap-south-1", "UpdateTable", map[string]any{"TableName": "T", "ReplicaUpdates": []any{map[string]any{"Create": map[string]any{"RegionName": "us-east-1"}}}}); err != nil {
+			t.Fatal(err)
+		}
+		writer, reader := "ap-south-1", "us-east-1"
+		if writeFromReplica {
+			writer, reader = reader, writer
+		}
+		encoded := base64.StdEncoding.EncodeToString(raw)
+		if _, err := call(writer, "PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "one"}, "data": map[string]any{"B": encoded}}}); err != nil {
+			t.Fatal(err)
+		}
+		response, err := call(reader, "GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "one"}}})
+		if err != nil || str(asMap(asMap(response.Output["Item"])["data"])["B"]) != encoded {
+			t.Fatal("replica changed binary item")
+		}
+		if deleteReplica {
+			_, err = call("ap-south-1", "UpdateTable", map[string]any{"TableName": "T", "ReplicaUpdates": []any{map[string]any{"Delete": map[string]any{"RegionName": "us-east-1"}}}})
+			_, missing := call("us-east-1", "GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "one"}}})
+			if err != nil || missing == nil {
+				t.Fatal("deleted replica remained available")
+			}
+		} else {
+			_, err = call(reader, "DeleteItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "one"}}})
+			response, getErr := call(writer, "GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "one"}}})
+			if err != nil || getErr != nil || response.Output["Item"] != nil {
+				t.Fatal("replica delete did not propagate")
+			}
+		}
+	})
+}
+
 func FuzzDynamoDBTransactions(f *testing.F) {
 	f.Add([]byte{0x90}, false)
 	f.Add([]byte("transaction"), true)

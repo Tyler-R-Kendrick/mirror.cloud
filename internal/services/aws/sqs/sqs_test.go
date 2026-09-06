@@ -382,6 +382,32 @@ func TestMessagesRemainQueueScoped(t *testing.T) {
 	}
 }
 
+func TestMessagesRemainQueueScopedCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	for _, name := range []string{"queue-0", "queue-1"} {
+		if _, err := call("CreateQueue", map[string]any{"QueueName": name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := call("SendMessage", map[string]any{"QueueName": "queue-0", "MessageBody": "message"}); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := call("ReceiveMessage", map[string]any{"QueueName": "queue-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	received, err := call("ReceiveMessage", map[string]any{"QueueName": "queue-0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, map[string]any{"queue-1": empty.Output, "queue-0": received.Output})
+}
+
 func TestListQueuesPrefixAndPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

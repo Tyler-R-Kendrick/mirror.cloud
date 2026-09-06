@@ -68,6 +68,16 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a us-east-1 table When NoSQL Workbench signs for localhost Then the table is found", func(t *testing.T) {
+		if status, body := call("CreateTable", `{"TableName":"RegionBDD"}`); status != http.StatusOK {
+			t.Fatalf("create region table %d %s", status, body)
+		}
+		status, body := request("DynamoDB_20120810", "AWS4-HMAC-SHA256 Credential=test/20200101/localhost/dynamodb/aws4_request, SignedHeaders=host, Signature=00", "DescribeTable", `{"TableName":"RegionBDD"}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"TableArn":"arn:aws:dynamodb:us-east-1:000000000000:table/RegionBDD"`)) {
+			t.Fatalf("localhost region describe %d %s", status, body)
+		}
+	})
+
 	t.Run("Given a missing table When reading or updating TTL Then ResourceNotFound is returned", func(t *testing.T) {
 		for _, action := range []string{"DescribeTimeToLive", "UpdateTimeToLive"} {
 			status, body := call(action, `{"TableName":"missing","TimeToLiveSpecification":{"Enabled":true,"AttributeName":"ttl"}}`)

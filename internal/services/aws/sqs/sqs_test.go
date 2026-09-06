@@ -645,6 +645,7 @@ func FuzzQueueDeletionWindow(f *testing.F) {
 }
 
 func FuzzSendReceiveMessageDigest(f *testing.F) {
+	f.Add([]byte{})
 	f.Add([]byte("message"))
 	f.Add([]byte{0, 1, 2, 255})
 	f.Fuzz(func(t *testing.T, body []byte) {
@@ -661,6 +662,13 @@ func FuzzSendReceiveMessageDigest(f *testing.F) {
 			t.Fatal(err)
 		}
 		sent, err := call("SendMessage", map[string]any{"QueueName": "roundtrip", "MessageBody": string(body)})
+		if len(body) == 0 {
+			fault, _ := err.(*spi.Fault)
+			if fault == nil || fault.Code != "MissingParameter" {
+				t.Fatalf("empty body fault %#v", err)
+			}
+			return
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

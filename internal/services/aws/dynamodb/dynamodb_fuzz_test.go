@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -189,6 +190,45 @@ func FuzzDynamoDBDefaultSSE(f *testing.F) {
 		}
 		if firstARN == "" || firstARN != secondARN || str(asMap(asMap(updated.Output["TableDescription"])["SSEDescription"])["KMSMasterKeyArn"]) != firstARN || asMap(key.Output["KeyMetadata"])["KeyManager"] != "AWS" {
 			t.Fatalf("default SSE did not persist: first=%q second=%q update=%#v key=%#v", firstARN, secondARN, updated, key)
+		}
+	})
+}
+
+func FuzzDynamoDBBackupInsights(f *testing.F) {
+	f.Add(uint16(60), true)
+	f.Fuzz(func(t *testing.T, seconds uint16, enabled bool) {
+		deps := spitest.Deps(t)
+		p := New(deps)
+		ctx := context.Background()
+		id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+		call := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		if _, err := call("CreateTable", map[string]any{"TableName": "T"}); err != nil {
+			t.Fatal(err)
+		}
+		updated, updateErr := call("UpdateContinuousBackups", map[string]any{"TableName": "T", "PointInTimeRecoverySpecification": map[string]any{"PointInTimeRecoveryEnabled": enabled}})
+		if err := deps.Clock.Advance(time.Duration(seconds) * time.Second); err != nil {
+			t.Fatal(err)
+		}
+		described, describeErr := call("DescribeContinuousBackups", map[string]any{"TableName": "T"})
+		insights, insightsErr := call("DescribeContributorInsights", map[string]any{"TableName": "T"})
+		if updateErr != nil || describeErr != nil || insightsErr != nil {
+			t.Fatalf("backup calls: update=%v describe=%v insights=%v", updateErr, describeErr, insightsErr)
+		}
+		updatedRecovery := asMap(asMap(updated.Output["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
+		describedRecovery := asMap(asMap(described.Output["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
+		wantStatus := "DISABLED"
+		if enabled {
+			wantStatus = "ENABLED"
+			if asInt(updatedRecovery["RecoveryPeriodInDays"]) != 35 || asInt(describedRecovery["EarliestRestorableDateTime"]) != 0 || asInt(describedRecovery["LatestRestorableDateTime"]) != int(seconds) {
+				t.Fatalf("recovery window %#v %#v", updatedRecovery, describedRecovery)
+			}
+		} else if describedRecovery["EarliestRestorableDateTime"] != nil || describedRecovery["LatestRestorableDateTime"] != nil {
+			t.Fatalf("disabled recovery exposed dates %#v", describedRecovery)
+		}
+		if updatedRecovery["PointInTimeRecoveryStatus"] != wantStatus || describedRecovery["PointInTimeRecoveryStatus"] != wantStatus || insights.Output["ContributorInsightsStatus"] != "DISABLED" {
+			t.Fatalf("backup or insights status: update=%#v describe=%#v insights=%#v", updated.Output, described.Output, insights.Output)
 		}
 	})
 }

@@ -77,6 +77,27 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("Given a table When enabling backups Then recovery and disabled insights are described", func(t *testing.T) {
+		if status, body := call("CreateTable", `{"TableName":"Backup"}`); status != http.StatusOK {
+			t.Fatalf("create backup table %d %s", status, body)
+		}
+		status, body := call("UpdateContinuousBackups", `{"TableName":"Backup","PointInTimeRecoverySpecification":{"PointInTimeRecoveryEnabled":true}}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"PointInTimeRecoveryStatus":"ENABLED"`)) || !bytes.Contains(body, []byte(`"RecoveryPeriodInDays":35`)) || !bytes.Contains(body, []byte(`"EarliestRestorableDateTime"`)) || !bytes.Contains(body, []byte(`"LatestRestorableDateTime"`)) {
+			t.Fatalf("enable continuous backups %d %s", status, body)
+		}
+		if status, body = call("DescribeContinuousBackups", `{"TableName":"Backup"}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"PointInTimeRecoveryStatus":"ENABLED"`)) {
+			t.Fatalf("describe continuous backups %d %s", status, body)
+		}
+		if status, body = call("DescribeContributorInsights", `{"TableName":"Backup"}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"TableName":"Backup"`)) || !bytes.Contains(body, []byte(`"ContributorInsightsStatus":"DISABLED"`)) {
+			t.Fatalf("describe contributor insights %d %s", status, body)
+		}
+		for _, action := range []string{"DescribeContinuousBackups", "DescribeContributorInsights"} {
+			if status, body = call(action, `{"TableName":"missing"}`); status != http.StatusBadRequest || !bytes.Contains(body, []byte("ResourceNotFoundException")) {
+				t.Fatalf("%s missing table %d %s", action, status, body)
+			}
+		}
+	})
+
 	t.Run("Given tags at table creation When tags change Then listing reflects the lifecycle", func(t *testing.T) {
 		status, body := call("CreateTable", `{"TableName":"Tags","Tags":[{"Key":"Name","Value":"test"}]}`)
 		var created map[string]any

@@ -340,4 +340,30 @@ func TestSQSQueueListing(t *testing.T) {
 			}
 		}
 	})
+	t.Run("Given queue tags When tagging and untagging Then the final empty set is omitted", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-tagged"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("TagQueue", `{"QueueUrl":"http://queue/000000000000/bdd-tagged","Tags":{"tag1":"value1","tag2":"value2","tag3":""}}`); status != http.StatusOK {
+			t.Fatalf("tag %d %s", status, body)
+		}
+		status, body := call("ListQueueTags", `{"QueueUrl":"http://queue/000000000000/bdd-tagged"}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"tag1":"value1"`)) || !bytes.Contains(body, []byte(`"tag3":""`)) {
+			t.Fatalf("list %d %s", status, body)
+		}
+		if status, body = call("UntagQueue", `{"QueueUrl":"http://queue/000000000000/bdd-tagged","TagKeys":["tag1","tag3"]}`); status != http.StatusOK {
+			t.Fatalf("untag partial %d %s", status, body)
+		}
+		status, body = call("ListQueueTags", `{"QueueUrl":"http://queue/000000000000/bdd-tagged"}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"tag2":"value2"`)) || bytes.Contains(body, []byte(`"tag1"`)) {
+			t.Fatalf("partial list %d %s", status, body)
+		}
+		if status, body = call("UntagQueue", `{"QueueUrl":"http://queue/000000000000/bdd-tagged","TagKeys":["tag2"]}`); status != http.StatusOK {
+			t.Fatalf("untag final %d %s", status, body)
+		}
+		status, body = call("ListQueueTags", `{"QueueUrl":"http://queue/000000000000/bdd-tagged"}`)
+		if status != http.StatusOK || bytes.Contains(body, []byte(`"Tags"`)) {
+			t.Fatalf("empty list %d %s", status, body)
+		}
+	})
 }

@@ -206,6 +206,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if ok {
 			_ = json.Unmarshal(b, &tags)
 		}
+		if len(tags) == 0 {
+			return &spi.Response{Output: map[string]any{}}, nil
+		}
 		return &spi.Response{Output: map[string]any{"Tags": tags}}, nil
 	case "SendMessageBatch":
 		entries, _ := req.Input["Entries"].([]any)

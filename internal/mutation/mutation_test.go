@@ -18107,6 +18107,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSendValidationAndDelay",
 		},
 		{
+			name: "sqs-list-tags-empty-shape",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "len(tags) == 0",
+			new:  "false",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestQueueTagCharacterization",
+		},
+		{
 			name: "sqs-disable-message-delay",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "now.Add(time.Duration(delay) * time.Second).UnixNano()",

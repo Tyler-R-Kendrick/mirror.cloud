@@ -909,6 +909,27 @@ func TestStandardMessageGroupIDCharacterization(t *testing.T) {
 	})
 }
 
+func TestQueueTagCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response.Output
+	}
+	call("CreateQueue", map[string]any{"QueueName": "tagged"})
+	call("TagQueue", map[string]any{"QueueName": "tagged", "Tags": map[string]any{"tag1": "value1", "tag2": "value2", "tag3": ""}})
+	first := call("ListQueueTags", map[string]any{"QueueName": "tagged"})
+	call("UntagQueue", map[string]any{"QueueName": "tagged", "TagKeys": []any{"tag1", "tag3"}})
+	second := call("ListQueueTags", map[string]any{"QueueName": "tagged"})
+	call("UntagQueue", map[string]any{"QueueName": "tagged", "TagKeys": []any{"tag2"}})
+	final := call("ListQueueTags", map[string]any{"QueueName": "tagged"})
+	golden.AssertJSON(t, map[string]any{"first": first, "second": second, "final": final})
+}
+
 func faultCode(err error) string {
 	fault, _ := err.(*spi.Fault)
 	if fault == nil {
@@ -1194,6 +1215,32 @@ func FuzzStandardMessageGroupID(f *testing.F) {
 		fault, ok := err.(*spi.Fault)
 		if !ok || fault.Code != "InvalidParameterValue" {
 			t.Fatalf("invalid group %q error %#v", group, err)
+		}
+	})
+}
+
+func FuzzQueueTags(f *testing.F) {
+	f.Add("tag", "value")
+	f.Add("", "")
+	f.Fuzz(func(t *testing.T, key, value string) {
+		if len(key) > 256 || len(value) > 1024 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "tags"}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "TagQueue", Input: map[string]any{"QueueName": "tags", "Tags": map[string]any{key: value}}}); err != nil {
+			t.Fatal(err)
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListQueueTags", Input: map[string]any{"QueueName": "tags"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(response.Output) != 1 || str(asMap(response.Output["Tags"])[key]) != value {
+			t.Fatalf("tags %#v", response.Output)
 		}
 	})
 }

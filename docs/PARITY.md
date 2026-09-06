@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 22 / 222 (9.9%) |
-| LocalStack SQS test functions not yet traced | 200 / 222 (90.1%) |
+| LocalStack SQS test functions explicitly traced | 23 / 222 (10.4%) |
+| LocalStack SQS test functions not yet traced | 199 / 222 (89.6%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -625,3 +625,4 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_send_message_batch_with_oversized_contents` | SendMessageBatch rejects a 1 MiB-plus-one request with `AWS.SimpleQueueService.BatchRequestTooLong` and the exact sent-byte count; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and batch-size mutants pin the limit | Mapped; full race-clean |
 | `test_sqs.py::TestSqsProvider::test_send_message_batch_with_oversized_contents_with_updated_maximum_message_size` | Batch sends continue to use the 1 MiB request limit even when queue `MaximumMessageSize=2048`; the configured per-message boundary and successful two-entry response are covered by the same seven forms | Mapped; full race-clean |
 | `test_sqs.py::TestSqsProvider::test_send_message_to_standard_queue_with_invalid_message_group_id` | Standard queues reject empty, overlong, and space-containing `MessageGroupId` values with the exact `InvalidParameterValue` message; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin validation and accepted punctuation | Mapped; full race-clean |
+| `test_sqs.py::TestSqsProvider::test_tag_untag_queue` | TagQueue/ListQueueTags preserve tag values, UntagQueue removes selected keys and ignores missing keys, and the final empty response omits `Tags`; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin the wire shape | Mapped; focused green |

@@ -870,6 +870,36 @@ func TestConcurrentSQSStandardMessageGroupValidationIsStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSQueueTagUpdatesRemainReadable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "tags"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "TagQueue", Input: map[string]any{"QueueName": "tags", "Tags": map[string]any{fmt.Sprintf("tag-%d", index): "value"}}})
+			errs <- err
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListQueueTags", Input: map[string]any{"QueueName": "tags"}})
+	if err != nil || len(response.Output["Tags"].(map[string]any)) == 0 {
+		t.Fatalf("tagged response %#v error %v", response, err)
+	}
+}
+
 func TestConcurrentDynamoDBTransactionTokenChoosesOnePayload(t *testing.T) {
 	p := dynamodb.New(spitest.Deps(t))
 	ctx := context.Background()

@@ -198,6 +198,48 @@ func TestAWSSDKSQSStandardMessageGroupIDContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSTagQueueContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-tagged")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tags := map[string]string{"tag1": "value1", "tag2": "value2", "tag3": ""}
+	if _, err := client.TagQueue(context.Background(), &sqs.TagQueueInput{QueueUrl: created.QueueUrl, Tags: tags}); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := client.ListQueueTags(context.Background(), &sqs.ListQueueTagsInput{QueueUrl: created.QueueUrl})
+	if err != nil || len(listed.Tags) != len(tags) || listed.Tags["tag1"] != "value1" || listed.Tags["tag3"] != "" {
+		t.Fatalf("listed tags %#v error %v", listed, err)
+	}
+	if _, err := client.UntagQueue(context.Background(), &sqs.UntagQueueInput{QueueUrl: created.QueueUrl, TagKeys: []string{"tag1", "tag3", "missing"}}); err != nil {
+		t.Fatal(err)
+	}
+	listed, err = client.ListQueueTags(context.Background(), &sqs.ListQueueTagsInput{QueueUrl: created.QueueUrl})
+	if err != nil || len(listed.Tags) != 1 || listed.Tags["tag2"] != "value2" {
+		t.Fatalf("partial tags %#v error %v", listed, err)
+	}
+	if _, err := client.UntagQueue(context.Background(), &sqs.UntagQueueInput{QueueUrl: created.QueueUrl, TagKeys: []string{"tag2"}}); err != nil {
+		t.Fatal(err)
+	}
+	listed, err = client.ListQueueTags(context.Background(), &sqs.ListQueueTagsInput{QueueUrl: created.QueueUrl})
+	if err != nil || len(listed.Tags) != 0 {
+		t.Fatalf("empty tags %#v error %v", listed, err)
+	}
+}
+
 func TestAWSSDKSQSQueueMetadataContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

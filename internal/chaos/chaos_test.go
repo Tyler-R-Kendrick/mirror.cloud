@@ -650,6 +650,52 @@ func TestConcurrentSQSReceiveWaitTimeLimitsAreStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSMessagesRemainQueueScoped(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	for index := range 32 {
+		if _, err := call("CreateQueue", map[string]any{"QueueName": fmt.Sprintf("isolated-%02d", index)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := call("SendMessage", map[string]any{"QueueName": fmt.Sprintf("isolated-%02d", index), "MessageBody": fmt.Sprintf("message-%02d", index)})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := call("ReceiveMessage", map[string]any{"QueueName": fmt.Sprintf("isolated-%02d", index)})
+			if err == nil {
+				messages, _ := response.Output["Messages"].([]any)
+				if len(messages) != 1 || messages[0].(map[string]any)["Body"] != fmt.Sprintf("message-%02d", index) {
+					err = fmt.Errorf("queue %d response %#v", index, response.Output)
+				}
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestConcurrentDynamoDBTransactionTokenChoosesOnePayload(t *testing.T) {
 	p := dynamodb.New(spitest.Deps(t))
 	ctx := context.Background()

@@ -16,12 +16,13 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 )
 
 func TestDynamoDBTableLifecycle(t *testing.T) {
 	deps := spitest.Deps(t)
 	cfg := config.Default()
-	cfg.Services = []string{"aws.dynamodb"}
+	cfg.Services = []string{"aws.dynamodb", "aws.kms"}
 	reg, err := registry.New(deps, cfg.Services, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -267,6 +268,29 @@ func TestDynamoDBTableLifecycle(t *testing.T) {
 		provisioned := `{"TableName":"ProvisionedMetadataBDD","ProvisionedThroughput":{"ReadCapacityUnits":5,"WriteCapacityUnits":5},"GlobalSecondaryIndexes":[{"IndexName":"by-value","ProvisionedThroughput":{"ReadCapacityUnits":1,"WriteCapacityUnits":1}}]}`
 		if status, body := call("CreateTable", provisioned); status != http.StatusOK || !bytes.Contains(body, []byte(`"ProvisionedThroughput":{"NumberOfDecreasesToday":0,"ReadCapacityUnits":1,"WriteCapacityUnits":1}`)) {
 			t.Fatalf("provisioned metadata %d %s", status, body)
+		}
+	})
+
+	t.Run("Given partial server-side encryption When tables and metadata change Then one default KMS key is preserved", func(t *testing.T) {
+		create := `{"TableName":"DefaultEncryptedBDD","ProvisionedThroughput":{"ReadCapacityUnits":5,"WriteCapacityUnits":5},"SSESpecification":{"Enabled":true}}`
+		status, body := call("CreateTable", create)
+		var created map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &created) != nil {
+			t.Fatalf("create default encryption %d %s", status, body)
+		}
+		keyARN := created["TableDescription"].(map[string]any)["SSEDescription"].(map[string]any)["KMSMasterKeyArn"].(string)
+		kmsPayload := `{"KeyId":` + fmt.Sprintf("%q", keyARN) + `}`
+		if status, body := request("TrentService", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/kms/aws4_request, SignedHeaders=host, Signature=00", "DescribeKey", kmsPayload); status != http.StatusOK || !bytes.Contains(body, []byte(`"KeyManager":"AWS"`)) || !bytes.Contains(body, []byte(`"Description":"Default key that protects my DynamoDB data when no other key is defined"`)) {
+			t.Fatalf("describe default encryption key %d %s", status, body)
+		}
+		if status, body := call("CreateTable", `{"TableName":"AlsoEncryptedBDD","SSESpecification":{"Enabled":true}}`); status != http.StatusOK || !bytes.Contains(body, []byte(keyARN)) {
+			t.Fatalf("reuse default encryption key %d %s", status, body)
+		}
+		if status, body := call("UpdateTable", `{"TableName":"DefaultEncryptedBDD","SSESpecification":{"Enabled":false}}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"Status":"UPDATING"`)) {
+			t.Fatalf("disable default encryption %d %s", status, body)
+		}
+		if status, body := call("UpdateTable", `{"TableName":"DefaultEncryptedBDD","BillingMode":"PAY_PER_REQUEST"}`); status != http.StatusOK || !bytes.Contains(body, []byte(keyARN)) || !bytes.Contains(body, []byte(`"Status":"ENABLED"`)) {
+			t.Fatalf("preserve default encryption %d %s", status, body)
 		}
 	})
 

@@ -157,6 +157,21 @@ func TestReceiveMessageMaxNumberValidation(t *testing.T) {
 	}
 }
 
+func TestReceiveMessageMaxNumberCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "max-messages"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "max-messages", "MaxNumberOfMessages": 11}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("max messages fault %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
+}
+
 func TestListQueuesPrefixAndPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

@@ -573,6 +573,37 @@ func TestAWSSDKSQSFIFOApproximateMessageCountContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSFIFOContentBasedDeduplicationStrategyContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-dedup-strategy.fifo"), Attributes: map[string]string{"SqsManagedSseEnabled": "true", "ContentBasedDeduplication": "true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameAll}})
+	if err != nil || before.Attributes["ContentBasedDeduplication"] != "true" || before.Attributes["SqsManagedSseEnabled"] != "true" {
+		t.Fatalf("before %#v error %v", before, err)
+	}
+	if _, err := client.SetQueueAttributes(context.Background(), &sqs.SetQueueAttributesInput{QueueUrl: created.QueueUrl, Attributes: map[string]string{"ContentBasedDeduplication": "false"}}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameAll}})
+	if err != nil || after.Attributes["ContentBasedDeduplication"] != "false" || after.Attributes["SqsManagedSseEnabled"] != "true" {
+		t.Fatalf("after %#v error %v", after, err)
+	}
+}
+
 func TestAWSSDKSQSMultipleQueuesContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

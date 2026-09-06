@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 34 / 222 (15.3%) |
-| LocalStack SQS test functions not yet traced | 188 / 222 (84.7%) |
+| LocalStack SQS test functions explicitly traced | 35 / 222 (15.8%) |
+| LocalStack SQS test functions not yet traced | 187 / 222 (84.2%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -629,6 +629,7 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_fifo_queue_send_message_with_zero_delay_defaults_to_queue_delay` | FIFO SendMessage with `DelaySeconds=0` honors the queue-level delay; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin delayed visibility | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_message_attributes` | FIFO messages preserve requested message attributes and mutate `ApproximateReceiveCount` across repeated `AttributeNames=All` receives; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin the wire shape | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_approx_number_of_messages` | FIFO queue approximate message count excludes in-flight messages after a batched receive; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin visible-count behavior | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_fifo_set_content_based_deduplication_strategy` | FIFO `ContentBasedDeduplication` changes persist through SetQueueAttributes while unrelated SSE metadata remains intact; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, and concurrent chaos/race coverage pin updates | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_tag_untag_queue` | TagQueue/ListQueueTags preserve tag values, UntagQueue removes selected keys and ignores missing keys, and the final empty response omits `Tags`; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin the wire shape | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_tag_queue_overwrites_existing_tag` | TagQueue overwrites supplied keys while retaining untouched existing tags across atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, chaos/race, and semantic mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_create_queue_with_tags` | CreateQueue persists initial tags for immediate ListQueueTags reads across atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, chaos/race, and semantic mutation coverage | Mapped; focused green |

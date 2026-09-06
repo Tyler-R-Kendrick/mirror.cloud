@@ -425,6 +425,45 @@ func TestFIFOApproximateMessageCountCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"before": before, "received": received, "after": after})
 }
 
+func TestFIFOContentBasedDeduplicationStrategyCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response.Output
+	}
+	call("CreateQueue", map[string]any{"QueueName": "dedup-strategy.fifo", "Attributes": map[string]any{"SqsManagedSseEnabled": "true", "ContentBasedDeduplication": "true"}})
+	before := call("GetQueueAttributes", map[string]any{"QueueName": "dedup-strategy.fifo", "AttributeNames": []any{"All"}})
+	call("SetQueueAttributes", map[string]any{"QueueName": "dedup-strategy.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "false"}})
+	after := call("GetQueueAttributes", map[string]any{"QueueName": "dedup-strategy.fifo", "AttributeNames": []any{"All"}})
+	golden.AssertJSON(t, map[string]any{"before": before, "after": after})
+}
+
+func FuzzFIFOContentBasedDeduplicationStrategy(f *testing.F) {
+	f.Add(true)
+	f.Add(false)
+	f.Fuzz(func(t *testing.T, enabled bool) {
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-dedup-strategy.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true"}}}); err != nil {
+			t.Fatal(err)
+		}
+		value := strconv.FormatBool(enabled)
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "fuzz-dedup-strategy.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": value}}}); err != nil {
+			t.Fatal(err)
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "fuzz-dedup-strategy.fifo", "AttributeNames": []any{"ContentBasedDeduplication"}}})
+		if err != nil || asMap(response.Output["Attributes"])["ContentBasedDeduplication"] != value {
+			t.Fatalf("enabled=%v response=%#v error=%v", enabled, response.Output, err)
+		}
+	})
+}
+
 func FuzzFIFOApproximateMessageCount(f *testing.F) {
 	f.Add(1)
 	f.Add(5)

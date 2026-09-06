@@ -1,0 +1,24 @@
+{
+  "after": {
+    "Attributes": {
+      "ApproximateNumberOfMessages": "0",
+      "ContentBasedDeduplication": "false",
+      "CreatedTimestamp": "0",
+      "FifoQueue": "true",
+      "QueueArn": "arn:aws:sqs:us-east-1:123456789012:dedup-strategy.fifo",
+      "SqsManagedSseEnabled": "true",
+      "VisibilityTimeout": "30"
+    }
+  },
+  "before": {
+    "Attributes": {
+      "ApproximateNumberOfMessages": "0",
+      "ContentBasedDeduplication": "true",
+      "CreatedTimestamp": "0",
+      "FifoQueue": "true",
+      "QueueArn": "arn:aws:sqs:us-east-1:123456789012:dedup-strategy.fifo",
+      "SqsManagedSseEnabled": "true",
+      "VisibilityTimeout": "30"
+    }
+  }
+}

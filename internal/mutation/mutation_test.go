@@ -17571,6 +17571,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFIFOApproximateMessageCountCharacterization",
 		},
 		{
+			name: "sqs-set-attributes-drop-existing",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "attrs := asMap(req.Input[\"Attributes\"])\n\t\tif b, ok, _ := p.col(req, \"qattrs\").Get(ctx, name); ok {",
+			new:  "attrs := asMap(req.Input[\"Attributes\"])\n\t\tif false {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestFIFOContentBasedDeduplicationStrategyCharacterization",
+		},
+		{
 			name: "sqs-list-ignore-prefix",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  `prefix := str(req.Input["QueueNamePrefix"])`,
@@ -18149,8 +18157,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sqs-tag-overwrite-drops-existing",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
-			old:  "current[key] = value",
-			new:  "current = map[string]any{key: value}",
+			old:  "for key, value := range tags {\n\t\t\tcurrent[key] = value\n\t\t}",
+			new:  "for key, value := range tags {\n\t\t\tcurrent = map[string]any{key: value}\n\t\t}",
 			pkg:  "./internal/services/aws/sqs",
 			run:  "TestQueueTagOverwriteCharacterization",
 		},

@@ -5963,3 +5963,26 @@ func TestConcurrentSQSFIFOApproximateCountExcludesInFlight(t *testing.T) {
 		t.Fatalf("count %#v error %v", response.Output, err)
 	}
 }
+
+func TestConcurrentSQSFIFOContentBasedDeduplicationStrategyIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-dedup-strategy.fifo", "Attributes": map[string]any{"SqsManagedSseEnabled": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "chaos-dedup-strategy.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "false"}}})
+		}()
+	}
+	wg.Wait()
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "chaos-dedup-strategy.fifo", "AttributeNames": []any{"All"}}})
+	if err != nil || response.Output["Attributes"].(map[string]any)["ContentBasedDeduplication"] != "false" || response.Output["Attributes"].(map[string]any)["SqsManagedSseEnabled"] != "true" {
+		t.Fatalf("attributes %#v error %v", response.Output, err)
+	}
+}

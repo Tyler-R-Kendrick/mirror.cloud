@@ -480,4 +480,17 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("count %d %s", status, body)
 		}
 	})
+	t.Run("Given FIFO deduplication is enabled When updating the strategy Then the attribute changes", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-dedup-strategy.fifo","Attributes":{"SqsManagedSseEnabled":"true","ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("SetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-dedup-strategy.fifo","Attributes":{"ContentBasedDeduplication":"false"}}`)
+		if status != http.StatusOK {
+			t.Fatalf("set %d %s", status, body)
+		}
+		status, body = call("GetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-dedup-strategy.fifo","AttributeNames":["All"]}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"ContentBasedDeduplication":"false"`)) || !bytes.Contains(body, []byte(`"SqsManagedSseEnabled":"true"`)) {
+			t.Fatalf("get %d %s", status, body)
+		}
+	})
 }

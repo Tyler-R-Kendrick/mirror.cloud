@@ -58,4 +58,19 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("empty list %d %s", status, body)
 		}
 	})
+	t.Run("Given a queue When requesting metadata Then only selected attributes are returned", func(t *testing.T) {
+		status, body := call("CreateQueue", `{"QueueName":"bdd-metadata"}`)
+		var created map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &created) != nil {
+			t.Fatalf("create %d %s", status, body)
+		}
+		queueURL, _ := json.Marshal(created["QueueUrl"])
+		status, body = call("GetQueueAttributes", `{"QueueUrl":`+string(queueURL)+`,"AttributeNames":["QueueArn","CreatedTimestamp","VisibilityTimeout"]}`)
+		var result map[string]map[string]string
+		if status != http.StatusOK || json.Unmarshal(body, &result) != nil || len(result["Attributes"]) != 3 ||
+			result["Attributes"]["QueueArn"] != "arn:aws:sqs:us-east-1:000000000000:bdd-metadata" ||
+			result["Attributes"]["CreatedTimestamp"] == "" || result["Attributes"]["VisibilityTimeout"] != "30" {
+			t.Fatalf("metadata %d %s", status, body)
+		}
+	})
 }

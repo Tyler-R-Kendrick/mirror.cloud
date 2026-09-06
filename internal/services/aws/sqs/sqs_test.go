@@ -983,6 +983,23 @@ func FuzzCreateQueueTags(f *testing.F) {
 	})
 }
 
+func TestQueueTagKeysAreCaseSensitive(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "tag-case"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "TagQueue", Input: map[string]any{"QueueName": "tag-case", "Tags": map[string]any{"MyTag": "value1", "mytag": "value2"}}}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListQueueTags", Input: map[string]any{"QueueName": "tag-case"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, response.Output)
+}
+
 func faultCode(err error) string {
 	fault, _ := err.(*spi.Fault)
 	if fault == nil {

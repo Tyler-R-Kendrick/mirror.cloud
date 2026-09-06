@@ -392,4 +392,16 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("created tags %d %s", status, body)
 		}
 	})
+	t.Run("Given tag keys differing only by case When listing Then both are retained", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-tag-case"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("TagQueue", `{"QueueUrl":"http://queue/000000000000/bdd-tag-case","Tags":{"MyTag":"value1","mytag":"value2"}}`); status != http.StatusOK {
+			t.Fatalf("tag %d %s", status, body)
+		}
+		status, body := call("ListQueueTags", `{"QueueUrl":"http://queue/000000000000/bdd-tag-case"}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"MyTag":"value1"`)) || !bytes.Contains(body, []byte(`"mytag":"value2"`)) {
+			t.Fatalf("case-sensitive tags %d %s", status, body)
+		}
+	})
 }

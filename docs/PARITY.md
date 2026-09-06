@@ -586,3 +586,22 @@ The pinned inventory is the 56 direct test functions in `tests/aws/services/dyna
 | `test_dynamodb.py::TestDynamoDB::test_global_tables` | Legacy CreateGlobalTable/DescribeGlobalTable/UpdateGlobalTable preserve replication groups, apply mixed create/delete updates, reject duplicates, and reject missing tables; atomic and Verify-style characterization coverage extends the same contract, BDD, fuzz, chaos, and mutation stack | Mapped; full race-clean |
 
 All 56 pinned DynamoDB test functions are explicitly traced. This completes the pinned LocalStack source inventory; it does not claim total AWS DynamoDB parity beyond that authority.
+
+## SQS baseline
+
+Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited on 2026-09-06.
+
+| Measure | Current evidence |
+|---|---:|
+| Requested test forms wired | 7 / 7 (100%) |
+| SQS operations routed to emulation | 23 / 23 (100%) |
+| SQS statement coverage | 47.7% |
+| LocalStack SQS test functions explicitly traced | 2 / 222 (0.9%) |
+| LocalStack SQS test functions not yet traced | 220 / 222 (99.1%) |
+
+The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
+
+| LocalStack test | Mirror evidence | Result |
+|---|---|---|
+| `test_sqs.py::TestSqsProvider::test_list_queues` | ListQueues applies QueueNamePrefix and omits QueueUrls when no queue matches; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin both branches | Mapped; full race-clean |
+| `test_sqs.py::TestSqsProvider::test_list_queues_pagination` | MaxResults returns lexically ordered pages and a base64 last-URL NextToken that resumes strictly after the prior page; all seven requested test forms pin token shape, continuation, final-page omission, and concurrent completeness | Mapped; full race-clean |

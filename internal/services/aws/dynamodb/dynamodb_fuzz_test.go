@@ -106,6 +106,51 @@ func FuzzDynamoDBTableClass(f *testing.F) {
 	})
 }
 
+func FuzzDynamoDBTableMetadata(f *testing.F) {
+	f.Add(uint64(1000), uint64(1200), true, []byte("key"))
+	f.Fuzz(func(t *testing.T, reads, writes uint64, onDemand bool, rawKey []byte) {
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+		call := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		reads = reads%100000 + 1
+		writes = writes%100000 + 1
+		key := hex.EncodeToString(rawKey)
+		if key == "" {
+			key = "0"
+		}
+		input := map[string]any{
+			"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}},
+			"GlobalSecondaryIndexes": []any{map[string]any{"IndexName": "by-value", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 1, "WriteCapacityUnits": 1}}},
+			"SSESpecification":       map[string]any{"Enabled": true, "KMSMasterKeyId": key},
+			"WarmThroughput":         map[string]any{"ReadUnitsPerSecond": reads, "WriteUnitsPerSecond": writes},
+		}
+		if onDemand {
+			input["BillingMode"] = "PAY_PER_REQUEST"
+			delete(asMap(asSlice(input["GlobalSecondaryIndexes"])[0]), "ProvisionedThroughput")
+		} else {
+			input["ProvisionedThroughput"] = map[string]any{"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}
+		}
+		created, createErr := call("CreateTable", input)
+		described, describeErr := call("DescribeTable", map[string]any{"TableName": "T"})
+		_, invalidErr := call("CreateTable", map[string]any{"TableName": "Invalid", "BillingMode": "PAY_PER_REQUEST", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 1, "WriteCapacityUnits": 1}})
+		if createErr != nil || describeErr != nil || invalidErr == nil {
+			t.Fatalf("metadata calls: create=%v describe=%v invalid=%v", createErr, describeErr, invalidErr)
+		}
+		createdTable := asMap(created.Output["TableDescription"])
+		describedTable := asMap(described.Output["Table"])
+		if createdTable["TableStatus"] != "CREATING" || describedTable["TableStatus"] != "ACTIVE" || asInt(asMap(describedTable["WarmThroughput"])["ReadUnitsPerSecond"]) != int(reads) || asInt(asMap(describedTable["WarmThroughput"])["WriteUnitsPerSecond"]) != int(writes) || asMap(describedTable["WarmThroughput"])["Status"] != "ACTIVE" || str(asMap(describedTable["SSEDescription"])["KMSMasterKeyArn"]) != "arn:aws:kms:us-east-1:000000000000:key/"+key || len(asSlice(describedTable["GlobalSecondaryIndexes"])) != 1 {
+			t.Fatalf("table metadata did not round trip: %#v %#v", createdTable, describedTable)
+		}
+		throughput := asMap(describedTable["ProvisionedThroughput"])
+		if onDemand && (str(asMap(describedTable["BillingModeSummary"])["BillingMode"]) != "PAY_PER_REQUEST" || asInt(throughput["ReadCapacityUnits"]) != 0) || !onDemand && asInt(throughput["ReadCapacityUnits"]) != 5 {
+			t.Fatalf("billing metadata did not round trip: %#v", describedTable)
+		}
+	})
+}
+
 func FuzzDynamoDBPartiQL(f *testing.F) {
 	f.Add(int64(20), true)
 	f.Fuzz(func(t *testing.T, age int64, hasName bool) {

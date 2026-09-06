@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 57.4% |
-| LocalStack SQS test functions explicitly traced | 8 / 222 (3.6%) |
-| LocalStack SQS test functions not yet traced | 214 / 222 (96.4%) |
+| LocalStack SQS test functions explicitly traced | 9 / 222 (4.1%) |
+| LocalStack SQS test functions not yet traced | 213 / 222 (95.9%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -611,3 +611,4 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_create_queue_recently_deleted_can_be_disabled` | LocalStack-only compatibility toggle that deliberately disables AWS's 60-second QueueDeletedRecently rule | Not an AWS contract; intentionally excluded |
 | `test_sqs.py::TestSqsProvider::test_send_receive_message` | SendMessage returns the body MD5 and ReceiveMessage returns the same MessageId, body, receipt handle, and MD5OfBody; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation tests pin the round trip | Mapped; full race-clean |
 | `test_sqs.py::TestSqsProvider::test_send_empty_message` | SendMessage rejects an empty body with HTTP 400, code `MissingParameter`, and the exact AWS message; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation tests pin the fault | Mapped; full race-clean |
+| `test_sqs.py::TestSqsProvider::test_send_receive_max_number_of_messages` | ReceiveMessage rejects MaxNumberOfMessages outside 1-10 instead of clamping it; value 11 returns HTTP 400, code `InvalidParameterValue`, and the exact AWS reason across atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation tests | Mapped; full race-clean |

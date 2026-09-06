@@ -132,7 +132,7 @@ func TestBootedServerSQSSection48(t *testing.T) {
 		t.Fatalf("list %v", listed)
 	}
 	jsonCall("SetQueueAttributes", `{"QueueName":"q","Attributes":{"DelaySeconds":"0"}}`)
-	attrs := jsonCall("GetQueueAttributes", `{"QueueName":"q"}`)
+	attrs := jsonCall("GetQueueAttributes", `{"QueueName":"q","AttributeNames":["DelaySeconds","VisibilityTimeout"]}`)
 	if asM(attrs["Attributes"])["DelaySeconds"] == nil && asM(attrs["Attributes"])["VisibilityTimeout"] == nil {
 		t.Fatalf("attrs %v", attrs)
 	}
@@ -190,12 +190,12 @@ func TestBootedServerSQSSection48(t *testing.T) {
 		t.Fatalf("dlq sources %v", srcs)
 	}
 	jsonCall("AddPermission", `{"QueueName":"src","Label":"allow-send","AWSAccountIds":["111111111111"],"Actions":["SendMessage"]}`)
-	pol := jsonCall("GetQueueAttributes", `{"QueueName":"src"}`)
+	pol := jsonCall("GetQueueAttributes", `{"QueueName":"src","AttributeNames":["Policy"]}`)
 	if !strings.Contains(fmtJSON(pol["Attributes"]), "allow-send") {
 		t.Fatalf("policy %v", pol)
 	}
 	jsonCall("RemovePermission", `{"QueueName":"src","Label":"allow-send"}`)
-	pol2 := jsonCall("GetQueueAttributes", `{"QueueName":"src"}`)
+	pol2 := jsonCall("GetQueueAttributes", `{"QueueName":"src","AttributeNames":["Policy"]}`)
 	if strings.Contains(fmtJSON(pol2["Attributes"]), "allow-send") {
 		t.Fatalf("policy still labeled %v", pol2)
 	}
@@ -314,7 +314,7 @@ polled:
 	} else if h.Get("x-mirror-fidelity") != "emulate" {
 		t.Fatalf("query AddPermission fidelity %q", h.Get("x-mirror-fidelity"))
 	}
-	if code, body, _ := queryCall(url.Values{"Action": {"GetQueueAttributes"}, "Version": {"2012-11-05"}, "QueueName": {"permq"}}); code >= 300 || !strings.Contains(body, "qlabel") {
+	if code, body, _ := queryCall(url.Values{"Action": {"GetQueueAttributes"}, "Version": {"2012-11-05"}, "QueueName": {"permq"}, "AttributeName.1": {"Policy"}}); code >= 300 || !strings.Contains(body, "qlabel") {
 		t.Fatalf("query policy %d %s", code, body)
 	}
 	if code, body, _ := queryCall(url.Values{"Action": {"RemovePermission"}, "Version": {"2012-11-05"}, "QueueName": {"permq"}, "Label": {"qlabel"}}); code >= 300 {

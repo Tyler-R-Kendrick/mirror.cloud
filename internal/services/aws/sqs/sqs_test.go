@@ -108,6 +108,24 @@ func TestCreateSendReceiveDelete(t *testing.T) {
 	}
 }
 
+func TestSendReceiveCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "roundtrip"})
+	sent := call("SendMessage", map[string]any{"QueueName": "roundtrip", "MessageBody": "message"})
+	received := call("ReceiveMessage", map[string]any{"QueueName": "roundtrip", "VisibilityTimeout": 0})
+	golden.AssertJSON(t, map[string]any{"sent": sent.Output, "received": received.Output})
+}
+
 func TestListQueuesPrefixAndPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

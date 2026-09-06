@@ -521,8 +521,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 |---|---:|
 | Requested test forms wired | 7 / 7 (100%) |
 | DynamoDB operations routed to emulation | 62 / 62 (100%) |
-| LocalStack DynamoDB test functions explicitly traced | 49 / 56 (87.5%) |
-| LocalStack DynamoDB test functions not yet traced | 7 / 56 (12.5%) |
+| LocalStack DynamoDB test functions explicitly traced | 53 / 56 (94.6%) |
+| LocalStack DynamoDB test functions not yet traced | 3 / 56 (5.4%) |
 
 The pinned inventory is the 56 direct test functions in `tests/aws/services/dynamodb/test_dynamodb.py`; parametrized cases are not expanded.
 
@@ -577,3 +577,7 @@ The pinned inventory is the 56 direct test functions in `tests/aws/services/dyna
 | `test_dynamodb.py::TestDynamoDB::test_dynamodb_describe_contributor_insights` | DescribeContributorInsights returns the table name and DISABLED default for an existing table while all table-scoped backup and insights operations reject missing tables; every requested test form covers the behavior | Mapped; full race-clean |
 | `test_dynamodb.py::TestDynamoDB::test_data_encoding_consistency` | GetItem and NEW_AND_OLD_IMAGES stream records preserve identical binary and numeric attribute maps before and after UpdateItem, including reuse of an AT_SEQUENCE_NUMBER iterator; an exact Verify-style characterization and focused semantic mutants extend the existing atomic, SDK, raw HTTP BDD, native binary fuzz, and concurrent stream coverage | Mapped; full race-clean |
 | `test_dynamodb.py::TestDynamoDB::test_nosql_workbench_localhost_region` | Shared SigV4 identity parsing maps a credential-scoped `localhost` region to `us-east-1` while retaining explicit Mirror region overrides, so NoSQL Workbench sees tables created through normal east-region clients; atomic, Verify-style snapshot, AWS SDK, raw HTTP BDD, 10,000-case fuzz, concurrent chaos/race, and semantic mutation coverage pin both header and query credentials | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_binary_data_with_stream` | DynamoDB writes preserve arbitrary binary values in stream images and Kinesis destination payloads; atomic, Verify-style snapshot, AWS SDK, raw HTTP BDD, 10,000-case fuzz, concurrent chaos/race, and semantic mutation coverage pin the base64 boundary | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_kinesis_streaming_destination_crud` | Enable, describe, update, and disable preserve LocalStack's ENABLING, ACTIVE, UPDATING, DISABLING, and DISABLED responses plus exact missing-table, missing-configuration, invalid-precision, missing-destination, and repeated-update faults; every requested test form covers the lifecycle | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_dynamodb_with_kinesis_stream` | PutItem, UpdateItem, and DeleteItem emit ordered INSERT, MODIFY, and REMOVE records to an enabled Kinesis destination with correct old/new images and without `eventSourceARN`; atomic, snapshot, SDK, BDD, fuzz, chaos/race, and mutation checks pin the bridge | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_stream_destination_records` | An enabled destination receives a readable Kinesis record for a DynamoDB write even when DynamoDB Streams are not enabled, and disabling the destination stops later emission; all seven requested test forms cover the behavior | Mapped; full race-clean |

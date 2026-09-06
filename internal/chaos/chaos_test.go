@@ -272,6 +272,55 @@ func TestConcurrentDynamoDBBatchWritesRemainReadable(t *testing.T) {
 	}
 }
 
+func TestConcurrentDynamoDBTableMetadataUpdatesRemainWhole(t *testing.T) {
+	p := dynamodb.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	_, err := call("CreateTable", map[string]any{
+		"TableName": "T", "BillingMode": "PAY_PER_REQUEST",
+		"GlobalSecondaryIndexes": []any{map[string]any{"IndexName": "by-value"}},
+		"SSESpecification":       map[string]any{"Enabled": true, "KMSMasterKeyId": "key-id"},
+		"WarmThroughput":         map[string]any{"ReadUnitsPerSecond": 1, "WriteUnitsPerSecond": 1001},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := call("UpdateTable", map[string]any{"TableName": "T", "WarmThroughput": map[string]any{"ReadUnitsPerSecond": index, "WriteUnitsPerSecond": index + 1000}})
+			if err == nil && response.Output["TableDescription"].(map[string]any)["TableStatus"] != "UPDATING" {
+				err = errors.New("update status was not UPDATING")
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	described, err := call("DescribeTable", map[string]any{"TableName": "T"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	table := described.Output["Table"].(map[string]any)
+	warm := table["WarmThroughput"].(map[string]any)
+	read := int(warm["ReadUnitsPerSecond"].(float64))
+	write := int(warm["WriteUnitsPerSecond"].(float64))
+	if write != read+1000 || warm["Status"] != "ACTIVE" || table["SSEDescription"] == nil || table["BillingModeSummary"] == nil || len(table["GlobalSecondaryIndexes"].([]any)) != 1 {
+		t.Fatalf("torn table metadata %#v", table)
+	}
+}
+
 func (r failAfterReader) Read(p []byte) (int, error) {
 	n, err := r.Reader.Read(p)
 	if err == io.EOF {

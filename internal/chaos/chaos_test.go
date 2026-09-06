@@ -419,6 +419,58 @@ func TestConcurrentSQSQueueRecreationCannotBypassDeletionWindow(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSSendReceiveDigestsMatchBodies(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "roundtrip"}); err != nil {
+		t.Fatal(err)
+	}
+	var digests sync.Map
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for index := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := call("SendMessage", map[string]any{"QueueName": "roundtrip", "MessageBody": fmt.Sprintf("message-%02d", index)})
+			if err == nil {
+				digests.Store(response.Output["MessageId"], response.Output["MD5OfMessageBody"])
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	received := 0
+	for received < 64 {
+		response, err := call("ReceiveMessage", map[string]any{"QueueName": "roundtrip", "MaxNumberOfMessages": 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages := response.Output["Messages"].([]any)
+		if len(messages) == 0 {
+			t.Fatalf("received %d messages", received)
+		}
+		for _, raw := range messages {
+			message := raw.(map[string]any)
+			want, ok := digests.Load(message["MessageId"])
+			if !ok || message["MD5OfBody"] != want {
+				t.Fatalf("message digest %#v want %v", message, want)
+			}
+			received++
+		}
+	}
+}
+
 func TestConcurrentDynamoDBTransactionTokenChoosesOnePayload(t *testing.T) {
 	p := dynamodb.New(spitest.Deps(t))
 	ctx := context.Background()

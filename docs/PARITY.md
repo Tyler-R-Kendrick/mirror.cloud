@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 59.6% |
-| LocalStack SQS test functions explicitly traced | 13 / 222 (5.9%) |
-| LocalStack SQS test functions not yet traced | 209 / 222 (94.1%) |
+| LocalStack SQS test functions explicitly traced | 14 / 222 (6.3%) |
+| LocalStack SQS test functions not yet traced | 208 / 222 (93.7%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -616,3 +616,4 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_send_receive_wait_time_seconds` | ReceiveMessage rejects WaitTimeSeconds below 0 or above 20 with the exact AWS `InvalidParameterValue` faults, while omitted and explicit zero perform immediate short polls; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation tests pin both bounds and valid behavior | Mapped; full race-clean |
 | `test_sqs.py::TestSqsProvider::test_receive_message_attributes_timestamp_types` | ReceiveMessage returns decimal-millisecond `SentTimestamp` and `ApproximateFirstReceiveTimestamp` values when system attributes are requested through legacy or modern SDK field names, and omits unrequested attributes; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation tests pin capture, formatting, and filtering | Mapped; full race-clean |
 | `test_sqs.py::TestSqsProvider::test_send_receive_message_multiple_queues` | Messages remain isolated by queue: receiving from a different queue omits `Messages`, while the target queue returns exactly its own body; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and a semantic global-collection mutant pin storage scoping | Mapped; full race-clean |
+| `test_sqs.py::TestSqsProvider::test_send_receive_message_encoded_content` | A body containing a literal quote, HTML entity text, and carriage return round-trips byte-for-byte without entity decoding or newline normalization; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, pinned fuzz seed, concurrent chaos/race, and a semantic decoding mutant pin preservation | Mapped; full race-clean |

@@ -156,3 +156,29 @@ func TestAWSSDKSQSMaxNumberOfMessagesContract(t *testing.T) {
 		t.Fatalf("max messages error %v", err)
 	}
 }
+
+func TestAWSSDKSQSReceiveEmptyQueueContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-empty-receive")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, wait := range []int32{0, 1} {
+		response, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, MaxNumberOfMessages: 1, WaitTimeSeconds: wait})
+		if err != nil || response.Messages != nil {
+			t.Fatalf("wait=%d response %#v error %v", wait, response, err)
+		}
+	}
+}

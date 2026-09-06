@@ -249,6 +249,43 @@ func TestQueueMetadataCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"selected": selected.Output, "all": all.Output})
 }
 
+func TestQueueRecentlyDeletedCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	if err := clk.Advance(time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC).Sub(clk.Now())); err != nil {
+		t.Fatal(err)
+	}
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "deleted"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("DeleteQueue", map[string]any{"QueueName": "deleted"}); err != nil {
+		t.Fatal(err)
+	}
+	attempt := func() map[string]any {
+		response, err := call("CreateQueue", map[string]any{"QueueName": "deleted"})
+		if err == nil {
+			return response.Output
+		}
+		fault, ok := err.(*spi.Fault)
+		if !ok {
+			t.Fatalf("create fault %#v", err)
+		}
+		return map[string]any{"Code": fault.Code, "Message": fault.Message}
+	}
+	immediate := attempt()
+	_ = clk.Advance(59 * time.Second)
+	beforeBoundary := attempt()
+	_ = clk.Advance(time.Second)
+	golden.AssertJSON(t, map[string]any{"immediate": immediate, "beforeBoundary": beforeBoundary, "atBoundary": attempt()})
+}
+
 func TestListQueuesCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

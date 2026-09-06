@@ -1,0 +1,13 @@
+{
+  "atBoundary": {
+    "QueueUrl": "http://127.0.0.1:4566/123456789012/deleted"
+  },
+  "beforeBoundary": {
+    "Code": "AWS.SimpleQueueService.QueueDeletedRecently",
+    "Message": "You must wait 60 seconds after deleting a queue before you can create another with the same name."
+  },
+  "immediate": {
+    "Code": "AWS.SimpleQueueService.QueueDeletedRecently",
+    "Message": "You must wait 60 seconds after deleting a queue before you can create another with the same name."
+  }
+}

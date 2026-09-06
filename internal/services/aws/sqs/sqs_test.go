@@ -1028,11 +1028,18 @@ func TestCreateQueueIdempotencyAndAttributeValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "idempotent", "Attributes": map[string]any{"VisibilityTimeout": "70"}}}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := call(map[string]any{"QueueName": "idempotent", "Attributes": map[string]any{"VisibilityTimeout": "70"}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	invalid, err := call(map[string]any{"QueueName": "standard-invalid", "Attributes": map[string]any{"FifoQueue": "false"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	golden.AssertJSON(t, map[string]any{"conflict": conflict, "invalid": invalid})
+	golden.AssertJSON(t, map[string]any{"conflict": conflict, "updated": updated, "invalid": invalid})
 }
 
 func faultCode(err error) string {

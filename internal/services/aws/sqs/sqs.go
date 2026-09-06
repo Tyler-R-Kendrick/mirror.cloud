@@ -78,8 +78,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if existing, ok, _ := p.col(req, "queues").Get(ctx, name); ok {
 			var current map[string]any
 			_ = json.Unmarshal(existing, &current)
+			effective := p.queueAttrs(ctx, req, name)
 			for key, value := range attrs {
-				if str(asMap(current["attrs"])[key]) != str(value) {
+				if str(effective[key]) != str(value) {
 					return nil, &spi.Fault{Code: "QueueAlreadyExists", Message: "A queue already exists with the same name and a different value for attribute " + key, HTTPStatus: 400, Fault: "client"}
 				}
 			}

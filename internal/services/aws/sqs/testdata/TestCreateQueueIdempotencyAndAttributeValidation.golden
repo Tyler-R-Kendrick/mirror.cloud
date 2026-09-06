@@ -8,5 +8,8 @@
     "Code": "InvalidAttributeName",
     "HTTPStatus": 400,
     "Message": "Unknown Attribute FifoQueue."
+  },
+  "updated": {
+    "QueueUrl": "http://127.0.0.1:4566/123456789012/idempotent"
   }
 }

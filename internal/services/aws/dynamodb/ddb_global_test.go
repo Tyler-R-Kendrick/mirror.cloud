@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -121,4 +122,62 @@ func TestDynamoDBLegacyGlobalTableLifecycle(t *testing.T) {
 	if _, err := call("UpdateGlobalTable", map[string]any{"GlobalTableName": "missing"}); err == nil || !strings.Contains(err.Error(), "GlobalTableNotFoundException") {
 		t.Fatalf("missing update: %v", err)
 	}
+}
+
+func TestDynamoDBGlobalTableCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	call := func(region, operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: "000000000000", Region: region}, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+	fault := func(region, operation string, input map[string]any) map[string]any {
+		t.Helper()
+		_, err := p.Invoke(ctx, &spi.Request{Identity: spi.Identity{Account: "000000000000", Region: region}, Operation: operation, Input: input})
+		got, ok := err.(*spi.Fault)
+		if !ok {
+			t.Fatalf("%s fault: %#v", operation, err)
+		}
+		return map[string]any{"code": got.Code, "message": got.Message}
+	}
+	call("ap-south-1", "CreateTable", map[string]any{
+		"TableName":           "songs",
+		"KeySchema":           []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}},
+		"StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_IMAGE"},
+	})
+	createdUS := call("ap-south-1", "UpdateTable", map[string]any{"TableName": "songs", "ReplicaUpdates": []any{
+		map[string]any{"Create": map[string]any{"RegionName": "us-east-1", "KMSMasterKeyId": "foo"}},
+	}})
+	createdEU := call("ap-south-1", "UpdateTable", map[string]any{"TableName": "songs", "ReplicaUpdates": []any{
+		map[string]any{"Create": map[string]any{"RegionName": "eu-west-1", "KMSMasterKeyId": "bar"}},
+	}})
+	call("ap-south-1", "PutItem", map[string]any{"TableName": "songs", "Item": map[string]any{"id": map[string]any{"S": "one"}}})
+	streams := map[string]any{}
+	items := map[string]any{}
+	for _, region := range []string{"ap-south-1", "us-east-1", "eu-west-1"} {
+		streams[region] = call(region, "ListStreams", map[string]any{"TableName": "songs"})
+		items[region] = call(region, "GetItem", map[string]any{"TableName": "songs", "Key": map[string]any{"id": map[string]any{"S": "one"}}})
+	}
+	deletedEU := call("ap-south-1", "UpdateTable", map[string]any{"TableName": "songs", "ReplicaUpdates": []any{
+		map[string]any{"Delete": map[string]any{"RegionName": "eu-west-1"}},
+	}})
+	missingDelete := fault("ap-south-1", "UpdateTable", map[string]any{"TableName": "songs", "ReplicaUpdates": []any{
+		map[string]any{"Delete": map[string]any{"RegionName": "eu-west-1"}},
+	}})
+	regions := []any{map[string]any{"RegionName": "us-east-1"}, map[string]any{"RegionName": "us-west-1"}, map[string]any{"RegionName": "eu-central-1"}}
+	legacyCreated := call("ap-south-1", "CreateGlobalTable", map[string]any{"GlobalTableName": "legacy", "ReplicationGroup": regions})
+	legacyDuplicate := fault("ap-south-1", "CreateGlobalTable", map[string]any{"GlobalTableName": "legacy", "ReplicationGroup": regions})
+	legacyUpdated := call("ap-south-1", "UpdateGlobalTable", map[string]any{"GlobalTableName": "legacy", "ReplicaUpdates": []any{
+		map[string]any{"Create": map[string]any{"RegionName": "us-east-2"}},
+		map[string]any{"Delete": map[string]any{"RegionName": "us-west-1"}},
+	}})
+	golden.AssertJSON(t, map[string]any{
+		"createdUS": createdUS, "createdEU": createdEU, "streams": streams, "items": items,
+		"deletedEU": deletedEU, "missingDelete": missingDelete,
+		"legacyCreated": legacyCreated, "legacyDuplicate": legacyDuplicate, "legacyUpdated": legacyUpdated,
+	})
 }

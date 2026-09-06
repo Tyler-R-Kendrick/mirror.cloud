@@ -1,0 +1,194 @@
+{
+  "createdEU": {
+    "TableDescription": {
+      "CreationDateTime": 0,
+      "DeletionProtectionEnabled": false,
+      "ItemCount": 0,
+      "KeySchema": [
+        {
+          "AttributeName": "id",
+          "KeyType": "HASH"
+        }
+      ],
+      "LatestStreamArn": "arn:aws:dynamodb:ap-south-1:000000000000:table/songs/stream/7c589129",
+      "LatestStreamLabel": "7c589129",
+      "Replicas": [
+        {
+          "KMSMasterKeyId": "foo",
+          "RegionName": "us-east-1",
+          "ReplicaStatus": "ACTIVE"
+        },
+        {
+          "KMSMasterKeyId": "bar",
+          "RegionName": "eu-west-1",
+          "ReplicaStatus": "ACTIVE"
+        }
+      ],
+      "StreamSpecification": {
+        "StreamEnabled": true,
+        "StreamViewType": "NEW_IMAGE"
+      },
+      "TableArn": "arn:aws:dynamodb:ap-south-1:000000000000:table/songs",
+      "TableId": "7883ef26-ec05-4d81-abf7-41c52afb9a65",
+      "TableName": "songs",
+      "TableSizeBytes": 0,
+      "TableStatus": "UPDATING"
+    }
+  },
+  "createdUS": {
+    "TableDescription": {
+      "CreationDateTime": 0,
+      "DeletionProtectionEnabled": false,
+      "ItemCount": 0,
+      "KeySchema": [
+        {
+          "AttributeName": "id",
+          "KeyType": "HASH"
+        }
+      ],
+      "LatestStreamArn": "arn:aws:dynamodb:ap-south-1:000000000000:table/songs/stream/7c589129",
+      "LatestStreamLabel": "7c589129",
+      "Replicas": [
+        {
+          "KMSMasterKeyId": "foo",
+          "RegionName": "us-east-1",
+          "ReplicaStatus": "ACTIVE"
+        }
+      ],
+      "StreamSpecification": {
+        "StreamEnabled": true,
+        "StreamViewType": "NEW_IMAGE"
+      },
+      "TableArn": "arn:aws:dynamodb:ap-south-1:000000000000:table/songs",
+      "TableId": "7883ef26-ec05-4d81-abf7-41c52afb9a65",
+      "TableName": "songs",
+      "TableSizeBytes": 0,
+      "TableStatus": "UPDATING"
+    }
+  },
+  "deletedEU": {
+    "TableDescription": {
+      "CreationDateTime": 0,
+      "DeletionProtectionEnabled": false,
+      "ItemCount": 0,
+      "KeySchema": [
+        {
+          "AttributeName": "id",
+          "KeyType": "HASH"
+        }
+      ],
+      "LatestStreamArn": "arn:aws:dynamodb:ap-south-1:000000000000:table/songs/stream/7c589129",
+      "LatestStreamLabel": "7c589129",
+      "Replicas": [
+        {
+          "KMSMasterKeyId": "foo",
+          "RegionName": "us-east-1",
+          "ReplicaStatus": "ACTIVE"
+        }
+      ],
+      "StreamSpecification": {
+        "StreamEnabled": true,
+        "StreamViewType": "NEW_IMAGE"
+      },
+      "TableArn": "arn:aws:dynamodb:ap-south-1:000000000000:table/songs",
+      "TableId": "7883ef26-ec05-4d81-abf7-41c52afb9a65",
+      "TableName": "songs",
+      "TableSizeBytes": 0,
+      "TableStatus": "UPDATING"
+    }
+  },
+  "items": {
+    "ap-south-1": {
+      "Item": {
+        "id": {
+          "S": "one"
+        }
+      }
+    },
+    "eu-west-1": {
+      "Item": {
+        "id": {
+          "S": "one"
+        }
+      }
+    },
+    "us-east-1": {
+      "Item": {
+        "id": {
+          "S": "one"
+        }
+      }
+    }
+  },
+  "legacyCreated": {
+    "GlobalTableDescription": {
+      "GlobalTableName": "legacy",
+      "GlobalTableStatus": "ACTIVE",
+      "ReplicationGroup": [
+        {
+          "RegionName": "us-east-1"
+        },
+        {
+          "RegionName": "us-west-1"
+        },
+        {
+          "RegionName": "eu-central-1"
+        }
+      ]
+    }
+  },
+  "legacyDuplicate": {
+    "code": "GlobalTableAlreadyExistsException",
+    "message": "Global Table already exists: legacy"
+  },
+  "legacyUpdated": {
+    "GlobalTableDescription": {
+      "GlobalTableName": "legacy",
+      "GlobalTableStatus": "ACTIVE",
+      "ReplicationGroup": [
+        {
+          "RegionName": "us-east-1"
+        },
+        {
+          "RegionName": "eu-central-1"
+        },
+        {
+          "RegionName": "us-east-2"
+        }
+      ]
+    }
+  },
+  "missingDelete": {
+    "code": "ValidationException",
+    "message": "Update global table operation failed because one or more replicas were not part of the global table"
+  },
+  "streams": {
+    "ap-south-1": {
+      "Streams": [
+        {
+          "StreamArn": "arn:aws:dynamodb:ap-south-1:000000000000:table/songs/stream/7c589129",
+          "StreamLabel": "7c589129",
+          "TableName": "songs"
+        }
+      ]
+    },
+    "eu-west-1": {
+      "Streams": [
+        {
+          "StreamArn": "arn:aws:dynamodb:eu-west-1:000000000000:table/songs/stream/9c8e2cb0",
+          "StreamLabel": "9c8e2cb0",
+          "TableName": "songs"
+        }
+      ]
+    },
+    "us-east-1": {
+      "Streams": [
+        {
+          "StreamArn": "arn:aws:dynamodb:us-east-1:000000000000:table/songs/stream/5f59f223",
+          "StreamLabel": "5f59f223",
+          "TableName": "songs"
+        }
+      ]
+    }
+  }
+}

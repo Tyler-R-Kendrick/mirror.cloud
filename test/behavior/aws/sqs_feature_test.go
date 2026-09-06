@@ -89,4 +89,23 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("recreate %d %s", status, body)
 		}
 	})
+	t.Run("Given a sent message When receiving it Then its body and digest round trip", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-roundtrip"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-roundtrip","MessageBody":"message"}`)
+		var sent map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &sent) != nil {
+			t.Fatalf("send %d %s", status, body)
+		}
+		status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-roundtrip","VisibilityTimeout":0}`)
+		var received map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &received) != nil || len(received["Messages"].([]any)) != 1 {
+			t.Fatalf("receive %d %s", status, body)
+		}
+		message := received["Messages"].([]any)[0].(map[string]any)
+		if message["Body"] != "message" || message["MD5OfBody"] != sent["MD5OfMessageBody"] || message["MD5OfBody"] != "78e731027d8fd50ed642340b7c9a63b3" {
+			t.Fatalf("round trip sent=%#v received=%#v", sent, message)
+		}
+	})
 }

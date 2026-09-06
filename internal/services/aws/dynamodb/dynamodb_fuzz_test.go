@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -320,6 +322,55 @@ func FuzzDynamoDBStreamRecords(f *testing.F) {
 		}
 		if asInt(dynamodb["SizeBytes"]) != wantSize || dynamodb["StreamViewType"] != view || !strings.HasPrefix(str(stream.Output["NextShardIterator"]), arn+"|") {
 			t.Fatalf("stream record metadata: %#v", dynamodb)
+		}
+	})
+}
+
+func FuzzDynamoDBKinesisDestination(f *testing.F) {
+	f.Add([]byte{0x90}, true)
+	f.Add([]byte("stream"), false)
+	f.Fuzz(func(t *testing.T, raw []byte, disable bool) {
+		if len(raw) > 1024 {
+			t.Skip()
+		}
+		deps := spitest.Deps(t)
+		ddb := New(deps)
+		kin := kinesis.New(deps)
+		ctx := context.Background()
+		id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+		call := func(pack spi.BehaviorPack, operation string, input map[string]any) (*spi.Response, error) {
+			return pack.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		_, _ = call(kin, "CreateStream", map[string]any{"StreamName": "s"})
+		_, _ = call(ddb, "CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
+		streamARN := "arn:aws:kinesis:us-east-1:000000000000:stream/s"
+		if _, err := call(ddb, "EnableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN}); err != nil {
+			t.Fatal(err)
+		}
+		encoded := base64.StdEncoding.EncodeToString(raw)
+		if _, err := call(ddb, "PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "one"}, "data": map[string]any{"B": encoded}}}); err != nil {
+			t.Fatal(err)
+		}
+		if disable {
+			if _, err := call(ddb, "DisableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, _ = call(ddb, "PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "two"}}})
+		iterator, _ := call(kin, "GetShardIterator", map[string]any{"StreamName": "s", "ShardIteratorType": "TRIM_HORIZON"})
+		response, err := call(kin, "GetRecords", map[string]any{"ShardIterator": iterator.Output["ShardIterator"]})
+		want := 2
+		if disable {
+			want = 1
+		}
+		records := asSlice(response.Output["Records"])
+		if err != nil || len(records) != want {
+			t.Fatalf("destination record count: %d want %d: %v", len(records), want, err)
+		}
+		payload, _ := base64.StdEncoding.DecodeString(str(asMap(records[0])["Data"]))
+		var event map[string]any
+		if json.Unmarshal(payload, &event) != nil || event["eventName"] != "INSERT" || str(asMap(asMap(asMap(event["dynamodb"])["NewImage"])["data"])["B"]) != encoded {
+			t.Fatalf("destination binary payload: %s", payload)
 		}
 	})
 }

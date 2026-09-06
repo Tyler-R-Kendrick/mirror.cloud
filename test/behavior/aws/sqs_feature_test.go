@@ -366,4 +366,21 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("empty list %d %s", status, body)
 		}
 	})
+	t.Run("Given existing queue tags When tagging again Then untouched tags remain", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-tag-overwrite"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		for _, payload := range []string{
+			`{"QueueUrl":"http://queue/000000000000/bdd-tag-overwrite","Tags":{"tag1":"value1","tag2":"value2"}}`,
+			`{"QueueUrl":"http://queue/000000000000/bdd-tag-overwrite","Tags":{"tag1":"VALUE1","tag3":"value3"}}`,
+		} {
+			if status, body := call("TagQueue", payload); status != http.StatusOK {
+				t.Fatalf("tag %d %s", status, body)
+			}
+		}
+		status, body := call("ListQueueTags", `{"QueueUrl":"http://queue/000000000000/bdd-tag-overwrite"}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"tag1":"VALUE1"`)) || !bytes.Contains(body, []byte(`"tag2":"value2"`)) || !bytes.Contains(body, []byte(`"tag3":"value3"`)) {
+			t.Fatalf("overwrite %d %s", status, body)
+		}
+	})
 }

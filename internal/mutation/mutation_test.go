@@ -18115,6 +18115,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestQueueTagCharacterization",
 		},
 		{
+			name: "sqs-tag-overwrite-drops-existing",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "current[key] = value",
+			new:  "current = map[string]any{key: value}",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestQueueTagOverwriteCharacterization",
+		},
+		{
 			name: "sqs-disable-message-delay",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "now.Add(time.Duration(delay) * time.Second).UnixNano()",

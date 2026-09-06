@@ -181,7 +181,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "TagQueue":
 		name := queueName(req)
 		tags := asMap(req.Input["Tags"])
-		b, _ := json.Marshal(tags)
+		current := map[string]any{}
+		if b, ok, _ := p.col(req, "qtags").Get(ctx, name); ok {
+			_ = json.Unmarshal(b, &current)
+		}
+		for key, value := range tags {
+			current[key] = value
+		}
+		b, _ := json.Marshal(current)
 		_ = p.col(req, "qtags").Put(ctx, name, b)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "UntagQueue":

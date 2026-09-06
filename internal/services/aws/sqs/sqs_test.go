@@ -931,6 +931,23 @@ func TestQueueTagCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"first": first, "second": second, "final": final})
 }
 
+func TestQueueTagOverwriteCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response.Output
+	}
+	call("CreateQueue", map[string]any{"QueueName": "tag-overwrite"})
+	call("TagQueue", map[string]any{"QueueName": "tag-overwrite", "Tags": map[string]any{"tag1": "value1", "tag2": "value2"}})
+	call("TagQueue", map[string]any{"QueueName": "tag-overwrite", "Tags": map[string]any{"tag1": "VALUE1", "tag3": "value3"}})
+	golden.AssertJSON(t, call("ListQueueTags", map[string]any{"QueueName": "tag-overwrite"}))
+}
+
 func faultCode(err error) string {
 	fault, _ := err.(*spi.Fault)
 	if fault == nil {

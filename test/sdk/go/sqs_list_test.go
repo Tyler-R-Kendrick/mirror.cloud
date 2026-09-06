@@ -224,7 +224,14 @@ func TestAWSSDKSQSTagQueueContract(t *testing.T) {
 	if err != nil || len(listed.Tags) != len(tags) || listed.Tags["tag1"] != "value1" || listed.Tags["tag3"] != "" {
 		t.Fatalf("listed tags %#v error %v", listed, err)
 	}
-	if _, err := client.UntagQueue(context.Background(), &sqs.UntagQueueInput{QueueUrl: created.QueueUrl, TagKeys: []string{"tag1", "tag3", "missing"}}); err != nil {
+	if _, err := client.TagQueue(context.Background(), &sqs.TagQueueInput{QueueUrl: created.QueueUrl, Tags: map[string]string{"tag1": "VALUE1", "tag4": "value4"}}); err != nil {
+		t.Fatal(err)
+	}
+	listed, err = client.ListQueueTags(context.Background(), &sqs.ListQueueTagsInput{QueueUrl: created.QueueUrl})
+	if err != nil || len(listed.Tags) != 4 || listed.Tags["tag1"] != "VALUE1" || listed.Tags["tag2"] != "value2" || listed.Tags["tag3"] != "" || listed.Tags["tag4"] != "value4" {
+		t.Fatalf("overwritten tags %#v error %v", listed, err)
+	}
+	if _, err := client.UntagQueue(context.Background(), &sqs.UntagQueueInput{QueueUrl: created.QueueUrl, TagKeys: []string{"tag1", "tag3", "tag4", "missing"}}); err != nil {
 		t.Fatal(err)
 	}
 	listed, err = client.ListQueueTags(context.Background(), &sqs.ListQueueTagsInput{QueueUrl: created.QueueUrl})

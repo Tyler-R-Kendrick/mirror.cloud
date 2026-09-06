@@ -34,6 +34,7 @@ func TestDynamoDBGlobalTableReplicas(t *testing.T) {
 		"KeySchema":           []any{map[string]any{"AttributeName": "Artist", "KeyType": "HASH"}, map[string]any{"AttributeName": "SongTitle", "KeyType": "RANGE"}},
 		"StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_AND_OLD_IMAGES"},
 	})
+	must("ap-south-1", "PutItem", map[string]any{"TableName": "songs", "Item": map[string]any{"Artist": map[string]any{"S": "Oasis"}, "SongTitle": map[string]any{"S": "Live Forever"}}})
 	must("ap-south-1", "UpdateTable", map[string]any{"TableName": "songs", "ReplicaUpdates": []any{
 		map[string]any{"Create": map[string]any{"RegionName": "us-east-1", "KMSMasterKeyId": "foo"}},
 	}})
@@ -51,6 +52,9 @@ func TestDynamoDBGlobalTableReplicas(t *testing.T) {
 		}
 		if tables := asSlice(must(region, "ListTables", nil).Output["TableNames"]); len(tables) != 1 || str(tables[0]) != "songs" {
 			t.Fatalf("%s tables %#v", region, tables)
+		}
+		if got := must(region, "GetItem", map[string]any{"TableName": "songs", "Key": map[string]any{"Artist": map[string]any{"S": "Oasis"}, "SongTitle": map[string]any{"S": "Live Forever"}}}).Output["Item"]; got == nil {
+			t.Fatalf("%s missed item copied during replica creation", region)
 		}
 	}
 

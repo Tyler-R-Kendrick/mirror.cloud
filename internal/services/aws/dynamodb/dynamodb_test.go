@@ -824,6 +824,30 @@ func TestDynamoDBBackupsAndContributorInsights(t *testing.T) {
 	}
 }
 
+func TestDynamoDBBackupInsightsCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	must := func(operation string, input map[string]any) map[string]any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+	must("CreateTable", map[string]any{"TableName": "T"})
+	initial := must("DescribeContinuousBackups", map[string]any{"TableName": "T"})
+	enabled := must("UpdateContinuousBackups", map[string]any{"TableName": "T", "PointInTimeRecoverySpecification": map[string]any{"PointInTimeRecoveryEnabled": true}})
+	if err := deps.Clock.Advance(time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	reenabled := must("UpdateContinuousBackups", map[string]any{"TableName": "T", "PointInTimeRecoverySpecification": map[string]any{"PointInTimeRecoveryEnabled": true}})
+	described := must("DescribeContinuousBackups", map[string]any{"TableName": "T"})
+	insights := must("DescribeContributorInsights", map[string]any{"TableName": "T"})
+	golden.AssertJSON(t, map[string]any{"initial": initial, "enabled": enabled, "reenabled": reenabled, "described": described, "insights": insights})
+}
+
 func TestDynamoDBTableClass(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

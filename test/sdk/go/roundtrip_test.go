@@ -41,6 +41,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
@@ -914,7 +915,7 @@ func hmacSHA256Test(key []byte, value string) []byte {
 
 func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	cfg := mcfg.Default()
-	cfg.Services = []string{"aws.s3", "aws.dynamodb", "aws.kms", "aws.sqs"}
+	cfg.Services = []string{"aws.s3", "aws.dynamodb", "aws.kinesis", "aws.kms", "aws.sqs"}
 	cfg.Seed = "sdk-rt"
 	rt, err := runtime.Boot(cfg)
 	if err != nil {
@@ -3085,6 +3086,53 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	}
 
 	ddb := dynamodb.NewFromConfig(awscfg, func(o *dynamodb.Options) { o.BaseEndpoint = aws.String(ts.URL) })
+	kinesisCall := func(operation, body string) map[string]any {
+		t.Helper()
+		request, _ := http.NewRequest(http.MethodPost, ts.URL, strings.NewReader(body))
+		request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/kinesis/aws4_request, SignedHeaders=host, Signature=00")
+		request.Header.Set("Content-Type", "application/x-amz-json-1.1")
+		request.Header.Set("X-Amz-Target", "Kinesis_20131202."+operation)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("%s: %d %s", operation, response.StatusCode, raw)
+		}
+		output := map[string]any{}
+		_ = json.Unmarshal(raw, &output)
+		return output
+	}
+	kinesisCall("CreateStream", `{"StreamName":"ddb-sdk"}`)
+	kinesisARN := "arn:aws:kinesis:us-east-1:000000000000:stream/ddb-sdk"
+	if _, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("KinesisSDK"), BillingMode: ddbtypes.BillingModePayPerRequest, KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: ddbtypes.KeyTypeHash}}, AttributeDefinitions: []ddbtypes.AttributeDefinition{{AttributeName: aws.String("id"), AttributeType: ddbtypes.ScalarAttributeTypeS}}}); err != nil {
+		t.Fatalf("create kinesis destination table: %v", err)
+	}
+	enabledDestination, err := ddb.EnableKinesisStreamingDestination(context.Background(), &dynamodb.EnableKinesisStreamingDestinationInput{TableName: aws.String("KinesisSDK"), StreamArn: &kinesisARN})
+	if err != nil || enabledDestination.DestinationStatus != ddbtypes.DestinationStatusEnabling {
+		t.Fatalf("enable kinesis destination: %#v %v", enabledDestination, err)
+	}
+	if described, err := ddb.DescribeKinesisStreamingDestination(context.Background(), &dynamodb.DescribeKinesisStreamingDestinationInput{TableName: aws.String("KinesisSDK")}); err != nil || len(described.KinesisDataStreamDestinations) != 1 || described.KinesisDataStreamDestinations[0].DestinationStatus != ddbtypes.DestinationStatusActive {
+		t.Fatalf("describe kinesis destination: %#v %v", described, err)
+	}
+	if _, err := ddb.PutItem(context.Background(), &dynamodb.PutItemInput{TableName: aws.String("KinesisSDK"), Item: map[string]ddbtypes.AttributeValue{"id": &ddbtypes.AttributeValueMemberS{Value: "one"}}}); err != nil {
+		t.Fatalf("put kinesis destination item: %v", err)
+	}
+	kinesisIterator := kinesisCall("GetShardIterator", `{"StreamName":"ddb-sdk","ShardId":"shardId-000000000000","ShardIteratorType":"TRIM_HORIZON"}`)["ShardIterator"].(string)
+	records := kinesisCall("GetRecords", `{"ShardIterator":`+fmt.Sprintf("%q", kinesisIterator)+`}`)["Records"].([]any)
+	if len(records) != 1 {
+		t.Fatalf("kinesis destination records: %#v", records)
+	}
+	payload, _ := base64.StdEncoding.DecodeString(records[0].(map[string]any)["Data"].(string))
+	if !bytes.Contains(payload, []byte(`"tableName":"KinesisSDK"`)) || !bytes.Contains(payload, []byte(`"eventName":"INSERT"`)) {
+		t.Fatalf("kinesis destination payload: %s", payload)
+	}
+	disabledDestination, err := ddb.DisableKinesisStreamingDestination(context.Background(), &dynamodb.DisableKinesisStreamingDestinationInput{TableName: aws.String("KinesisSDK"), StreamArn: &kinesisARN})
+	if err != nil || disabledDestination.DestinationStatus != ddbtypes.DestinationStatusDisabling {
+		t.Fatalf("disable kinesis destination: %#v %v", disabledDestination, err)
+	}
 	if _, err := ddb.DescribeTimeToLive(context.Background(), &dynamodb.DescribeTimeToLiveInput{TableName: aws.String("missing")}); err == nil || !strings.Contains(err.Error(), "ResourceNotFoundException") {
 		t.Fatalf("missing table ttl describe: %v", err)
 	}

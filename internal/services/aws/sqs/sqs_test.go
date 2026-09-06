@@ -956,6 +956,7 @@ func FuzzQueueDeletionWindow(f *testing.F) {
 func FuzzSendReceiveMessageDigest(f *testing.F) {
 	f.Add([]byte{})
 	f.Add([]byte("message"))
+	f.Add([]byte(`"&quot;&quot;` + "\r"))
 	f.Add([]byte{0, 1, 2, 255})
 	f.Fuzz(func(t *testing.T, body []byte) {
 		if len(body) > 1024 || !utf8.Valid(body) {

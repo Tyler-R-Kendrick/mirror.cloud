@@ -2,6 +2,7 @@ package sqs
 
 import (
 	"context"
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -99,6 +100,42 @@ func TestCreateSendReceiveDelete(t *testing.T) {
 	left, _ := empty.Output["Messages"].([]any)
 	if len(left) != 0 {
 		t.Fatalf("message survived delete: %+v", left)
+	}
+}
+
+func TestListQueuesPrefixAndPagination(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	for _, name := range []string{"a-0", "a-1", "b-0"} {
+		call("CreateQueue", map[string]any{"QueueName": name})
+	}
+	if queues := call("ListQueues", map[string]any{"QueueNamePrefix": "a-"}).Output["QueueUrls"].([]any); len(queues) != 2 {
+		t.Fatalf("prefix queues %#v", queues)
+	}
+	first := call("ListQueues", map[string]any{"QueueNamePrefix": "a-", "MaxResults": 1}).Output
+	urls := first["QueueUrls"].([]any)
+	if len(urls) != 1 {
+		t.Fatalf("first page %#v", first)
+	}
+	wantToken := base64.StdEncoding.EncodeToString([]byte(urls[0].(string)))
+	if first["NextToken"] != wantToken {
+		t.Fatalf("first page %#v", first)
+	}
+	second := call("ListQueues", map[string]any{"QueueNamePrefix": "a-", "MaxResults": 10, "NextToken": first["NextToken"]}).Output
+	if urls := second["QueueUrls"].([]any); len(urls) != 1 || !strings.HasSuffix(urls[0].(string), "/a-1") || second["NextToken"] != nil {
+		t.Fatalf("second page %#v", second)
+	}
+	if missing := call("ListQueues", map[string]any{"QueueNamePrefix": "missing"}).Output; missing["QueueUrls"] != nil {
+		t.Fatalf("empty prefix %#v", missing)
 	}
 }
 

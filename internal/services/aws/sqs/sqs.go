@@ -4,6 +4,7 @@ package sqs
 import (
 	"context"
 	"crypto/md5"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -74,14 +75,30 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = json.Unmarshal(b, &m)
 		return &spi.Response{Output: map[string]any{"QueueUrl": m["url"]}}, nil
 	case "ListQueues":
-		kvs, _, _ := p.col(req, "queues").List(ctx, "", "", 0)
+		prefix := str(req.Input["QueueNamePrefix"])
+		after := ""
+		if token := str(req.Input["NextToken"]); token != "" {
+			decoded, err := base64.StdEncoding.DecodeString(token)
+			if err != nil {
+				return nil, &spi.Fault{Code: "InvalidAddress", Message: "The address " + token + " is not valid for this endpoint.", HTTPStatus: 400, Fault: "client"}
+			}
+			after = arnQueue(string(decoded))
+		}
+		kvs, more, _ := p.col(req, "queues").List(ctx, prefix, after, asInt(req.Input["MaxResults"]))
 		var urls []any
 		for _, kv := range kvs {
 			var m map[string]any
 			_ = json.Unmarshal(kv.Value, &m)
 			urls = append(urls, m["url"])
 		}
-		return &spi.Response{Output: map[string]any{"QueueUrls": urls}}, nil
+		out := map[string]any{}
+		if len(urls) > 0 {
+			out["QueueUrls"] = urls
+		}
+		if more {
+			out["NextToken"] = base64.StdEncoding.EncodeToString([]byte(str(urls[len(urls)-1])))
+		}
+		return &spi.Response{Output: out}, nil
 	case "DeleteQueue":
 		name := queueName(req)
 		_ = p.col(req, "queues").Delete(ctx, name)

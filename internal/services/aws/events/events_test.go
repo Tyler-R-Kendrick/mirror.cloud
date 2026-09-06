@@ -69,8 +69,8 @@ func TestPutEventsDeliversOnlyMatchingRules(t *testing.T) {
 			t.Fatalf("%s event %#v", queue, got[0])
 		}
 	}
-	if got := invoke(sp, "ReceiveMessage", map[string]any{"QueueName": "ignored"}).Output["Messages"].([]any); len(got) != 0 {
-		t.Fatalf("disabled rule delivered %#v", got)
+	if output := invoke(sp, "ReceiveMessage", map[string]any{"QueueName": "ignored"}).Output; output["Messages"] != nil {
+		t.Fatalf("disabled rule delivered %#v", output)
 	}
 }
 
@@ -404,7 +404,7 @@ func TestPutEventsRetriesAndDeadLettersTargets(t *testing.T) {
 	invoke(p, "PutEvents", map[string]any{"Entries": []any{map[string]any{"Source": "aged", "DetailType": "test", "Detail": `{}`}}})
 	_ = deps.Clock.Advance(time.Minute)
 	eventuallyEvent(t, func() bool {
-		messages := invoke(queue, "ReceiveMessage", map[string]any{"QueueName": "aged-failures", "MaxNumberOfMessages": 1, "MessageAttributeNames": []any{"All"}}).Output["Messages"].([]any)
+		messages, _ := invoke(queue, "ReceiveMessage", map[string]any{"QueueName": "aged-failures", "MaxNumberOfMessages": 1, "MessageAttributeNames": []any{"All"}}).Output["Messages"].([]any)
 		if len(messages) == 0 {
 			return false
 		}
@@ -877,8 +877,8 @@ func TestTargetsUpsertRemoveAndEventBusIsolation(t *testing.T) {
 		}
 	}
 	for _, queue := range []string{"old", "preserved"} {
-		if got := invoke(sp, "ReceiveMessage", map[string]any{"QueueName": queue}).Output["Messages"].([]any); len(got) != 0 {
-			t.Fatalf("%s unexpectedly received %#v", queue, got)
+		if output := invoke(sp, "ReceiveMessage", map[string]any{"QueueName": queue}).Output; output["Messages"] != nil {
+			t.Fatalf("%s unexpectedly received %#v", queue, output)
 		}
 	}
 }

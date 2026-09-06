@@ -338,7 +338,7 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	msg := map[string]any{
 		"id": id, "body": body, "handle": rh, "md5": md5hex,
 		"group": group, "seq": seq,
-		"visibleAt": now.Add(time.Duration(delay) * time.Second).UnixNano(), "receiveCount": 0,
+		"visibleAt": now.Add(time.Duration(delay) * time.Second).UnixNano(), "receiveCount": 0, "sentAt": now.UnixMilli(),
 		"attrs": req.Input["MessageAttributes"], "trace": trace,
 	}
 	raw, _ := json.Marshal(msg)
@@ -386,13 +386,29 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 				return &spi.Response{Output: map[string]any{}}, nil
 			}
 			out := make([]any, 0, len(msgs))
+			wanted := map[string]bool{}
+			for _, name := range stringList(req.Input, "AttributeNames", "AttributeName") {
+				wanted[name] = true
+			}
 			for _, m := range msgs {
 				p.afterReceive(ctx, req, name, m, vis)
-				attributes := map[string]any{"ApproximateReceiveCount": fmt.Sprintf("%v", m["receiveCount"])}
-				if req.Input["AttributeNames"] != nil && str(m["trace"]) != "" {
+				attributes := map[string]any{}
+				if wanted["All"] || wanted["ApproximateReceiveCount"] {
+					attributes["ApproximateReceiveCount"] = fmt.Sprintf("%v", m["receiveCount"])
+				}
+				if wanted["All"] || wanted["SentTimestamp"] {
+					attributes["SentTimestamp"] = fmt.Sprintf("%v", m["sentAt"])
+				}
+				if wanted["All"] || wanted["ApproximateFirstReceiveTimestamp"] {
+					attributes["ApproximateFirstReceiveTimestamp"] = fmt.Sprintf("%v", m["firstReceiveAt"])
+				}
+				if (wanted["All"] || wanted["AWSTraceHeader"]) && str(m["trace"]) != "" {
 					attributes["AWSTraceHeader"] = m["trace"]
 				}
-				wire := map[string]any{"MessageId": m["id"], "ReceiptHandle": m["handle"], "Body": m["body"], "MD5OfBody": m["md5"], "Attributes": attributes}
+				wire := map[string]any{"MessageId": m["id"], "ReceiptHandle": m["handle"], "Body": m["body"], "MD5OfBody": m["md5"]}
+				if len(attributes) > 0 {
+					wire["Attributes"] = attributes
+				}
 				if want := req.Input["MessageAttributeNames"]; want != nil && m["attrs"] != nil {
 					wire["MessageAttributes"] = filterMsgAttrs(m["attrs"], want)
 				}
@@ -449,6 +465,9 @@ func (p *Pack) visible(ctx context.Context, req *spi.Request, name string, now t
 func (p *Pack) afterReceive(ctx context.Context, req *spi.Request, name string, m map[string]any, vis int) {
 	n := asInt(m["receiveCount"]) + 1
 	m["receiveCount"] = n
+	if n == 1 {
+		m["firstReceiveAt"] = p.deps.Clock.Now().UnixMilli()
+	}
 	rh := str(m["handle"])
 	attrs := p.queueAttrs(ctx, req, name)
 	max, dlq := redrive(attrs)

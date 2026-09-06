@@ -1,0 +1,6 @@
+{
+  "Code": "InvalidParameterValue",
+  "Fault": "client",
+  "HTTPStatus": 400,
+  "Message": "The queue should either have ContentBasedDeduplication enabled or MessageDeduplicationId provided explicitly"
+}

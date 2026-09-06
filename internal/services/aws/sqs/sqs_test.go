@@ -626,6 +626,24 @@ func TestInvalidBatchEntryIDCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
+func TestFIFOBatchMissingDeduplicationIDCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-missing-dedup.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "false"}}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "batch-missing-dedup.fifo", "Entries": []any{
+		map[string]any{"Id": "message-1", "MessageBody": "message-1", "MessageGroupId": "test-group", "MessageDeduplicationId": "dedup-1"},
+		map[string]any{"Id": "message-2", "MessageBody": "message-2", "MessageGroupId": "test-group"},
+	}}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("missing deduplication id error %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
+}
+
 func TestSendBatchReceiveMultipleCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -1158,6 +1176,34 @@ func FuzzInvalidBatchEntryID(f *testing.F) {
 		fault, ok := err.(*spi.Fault)
 		if !ok || fault.Code != "AWS.SimpleQueueService.InvalidBatchEntryId" {
 			t.Fatalf("invalid id %q error %#v", entryID, err)
+		}
+	})
+}
+
+func FuzzFIFOBatchDeduplicationPresence(f *testing.F) {
+	f.Add(true)
+	f.Add(false)
+	f.Fuzz(func(t *testing.T, provided bool) {
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-batch-dedup.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "false"}}}); err != nil {
+			t.Fatal(err)
+		}
+		entry := map[string]any{"Id": "message-1", "MessageBody": "message", "MessageGroupId": "group-1"}
+		if provided {
+			entry["MessageDeduplicationId"] = "dedup-1"
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "fuzz-batch-dedup.fifo", "Entries": []any{entry}}})
+		if provided {
+			if err != nil || len(response.Output["Successful"].([]any)) != 1 {
+				t.Fatalf("provided response %#v error %v", response.Output, err)
+			}
+		} else {
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidParameterValue" {
+				t.Fatalf("missing response %#v error %#v", response.Output, err)
+			}
 		}
 	})
 }

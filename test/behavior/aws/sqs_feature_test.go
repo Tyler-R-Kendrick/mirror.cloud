@@ -427,6 +427,15 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("invalid batch id %d %s", status, body)
 		}
 	})
+	t.Run("Given a FIFO batch with a missing deduplication id Then the batch fault is returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-batch-missing-dedup.fifo","Attributes":{"ContentBasedDeduplication":"false"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("SendMessageBatch", `{"QueueUrl":"http://queue/000000000000/bdd-batch-missing-dedup.fifo","Entries":[{"Id":"message-1","MessageBody":"message-1","MessageGroupId":"test-group","MessageDeduplicationId":"dedup-1"},{"Id":"message-2","MessageBody":"message-2","MessageGroupId":"test-group"}]}`)
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte(`"__type":"InvalidParameterValue"`)) || !bytes.Contains(body, []byte("ContentBasedDeduplication enabled or MessageDeduplicationId provided explicitly")) {
+			t.Fatalf("missing deduplication id %d %s", status, body)
+		}
+	})
 	t.Run("Given a FIFO queue When sending invalid deduplication ids Then the validation fault is returned", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-dedup-invalid.fifo","Attributes":{"ContentBasedDeduplication":"false"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

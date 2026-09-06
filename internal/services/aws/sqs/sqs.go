@@ -260,11 +260,18 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if len(entries) == 0 {
 			return nil, &spi.Fault{Code: "AWS.SimpleQueueService.EmptyBatchRequest", Message: "There should be at least one SendMessageBatchRequestEntry in the request.", HTTPStatus: 400, Fault: "client"}
 		}
+		name := queueName(req)
+		attrs := p.queueAttrs(ctx, req, name)
 		total := 0
 		for _, entry := range entries {
 			message := asMap(entry)
 			if !validBatchEntryID(str(message["Id"])) {
 				return nil, &spi.Fault{Code: "AWS.SimpleQueueService.InvalidBatchEntryId", Message: "A batch entry id can only contain alphanumeric characters, hyphens and underscores. It can be at most 80 letters long.", HTTPStatus: 400, Fault: "client"}
+			}
+			if strings.HasSuffix(name, ".fifo") && str(attrs["ContentBasedDeduplication"]) != "true" {
+				if _, provided := message["MessageDeduplicationId"]; !provided || str(message["MessageDeduplicationId"]) == "" {
+					return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "The queue should either have ContentBasedDeduplication enabled or MessageDeduplicationId provided explicitly", HTTPStatus: 400, Fault: "client"}
+				}
 			}
 			total += messageSize(str(message["MessageBody"]), message["MessageAttributes"])
 		}

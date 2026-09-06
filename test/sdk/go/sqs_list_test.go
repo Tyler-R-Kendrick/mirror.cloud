@@ -119,6 +119,33 @@ func TestAWSSDKSQSInvalidBatchEntryIDContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSFIFOBatchMissingDeduplicationIDContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-batch-missing-dedup.fifo"), Attributes: map[string]string{"ContentBasedDeduplication": "false"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.SendMessageBatch(context.Background(), &sqs.SendMessageBatchInput{QueueUrl: created.QueueUrl, Entries: []types.SendMessageBatchRequestEntry{
+		{Id: aws.String("message-1"), MessageBody: aws.String("message-1"), MessageGroupId: aws.String("test-group"), MessageDeduplicationId: aws.String("dedup-1")},
+		{Id: aws.String("message-2"), MessageBody: aws.String("message-2"), MessageGroupId: aws.String("test-group")},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "ContentBasedDeduplication enabled or MessageDeduplicationId provided explicitly") {
+		t.Fatalf("missing deduplication id error %v", err)
+	}
+}
+
 func TestAWSSDKSQSEmptyMessageBatchContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

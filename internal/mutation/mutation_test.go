@@ -17555,6 +17555,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestInvalidBatchEntryIDCharacterization",
 		},
 		{
+			name: "sqs-batch-accept-missing-fifo-deduplication-id",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if _, provided := message[\"MessageDeduplicationId\"]; !provided || str(message[\"MessageDeduplicationId\"]) == \"\" {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestFIFOBatchMissingDeduplicationIDCharacterization",
+		},
+		{
 			name: "sqs-fifo-zero-delay-ignore-queue-delay",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "if req.Input[\"DelaySeconds\"] == nil || (fifo && delay == 0) {",

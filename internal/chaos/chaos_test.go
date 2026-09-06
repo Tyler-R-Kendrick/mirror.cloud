@@ -5880,6 +5880,34 @@ func TestConcurrentSQSInvalidBatchEntryIDsAreStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSFIFOBatchMissingDeduplicationIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-batch-missing-dedup.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "false"}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "chaos-batch-missing-dedup.fifo", "Entries": []any{map[string]any{"Id": "message-1", "MessageBody": "message", "MessageGroupId": "group-1"}}}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidParameterValue" || !strings.Contains(fault.Message, "ContentBasedDeduplication enabled") {
+				errs <- fmt.Errorf("missing deduplication id error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSFIFOZeroDelayUsesQueueDelay(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)

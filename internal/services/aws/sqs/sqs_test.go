@@ -195,6 +195,26 @@ func TestReceiveEmptyQueueOmitsMessages(t *testing.T) {
 	}
 }
 
+func TestReceiveEmptyQueueCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	deps.Clock = clock.Real{}
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "empty"}}); err != nil {
+		t.Fatal(err)
+	}
+	short, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "empty", "MaxNumberOfMessages": 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	long, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "empty", "MaxNumberOfMessages": 1, "WaitTimeSeconds": 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, map[string]any{"short": short.Output, "long": long.Output})
+}
+
 func TestListQueuesPrefixAndPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

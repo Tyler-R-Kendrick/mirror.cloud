@@ -108,4 +108,14 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("round trip sent=%#v received=%#v", sent, message)
 		}
 	})
+	t.Run("Given an empty message body When sending Then the required parameter fault is returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-empty-body"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-empty-body","MessageBody":""}`)
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte(`"__type":"MissingParameter"`)) ||
+			!bytes.Contains(body, []byte("The request must contain the parameter MessageBody.")) {
+			t.Fatalf("empty message %d %s", status, body)
+		}
+	})
 }

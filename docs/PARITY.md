@@ -515,14 +515,14 @@ All 463 pinned S3 test functions are explicitly traced. That completes this sour
 
 ## DynamoDB baseline
 
-Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited on 2026-09-05.
+Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited on 2026-09-06.
 
 | Measure | Current evidence |
 |---|---:|
 | Requested test forms wired | 7 / 7 (100%) |
 | DynamoDB operations routed to emulation | 62 / 62 (100%) |
-| LocalStack DynamoDB test functions explicitly traced | 53 / 56 (94.6%) |
-| LocalStack DynamoDB test functions not yet traced | 3 / 56 (5.4%) |
+| LocalStack DynamoDB test functions explicitly traced | 56 / 56 (100%) |
+| LocalStack DynamoDB test functions not yet traced | 0 / 56 (0%) |
 
 The pinned inventory is the 56 direct test functions in `tests/aws/services/dynamodb/test_dynamodb.py`; parametrized cases are not expanded.
 
@@ -581,3 +581,8 @@ The pinned inventory is the 56 direct test functions in `tests/aws/services/dyna
 | `test_dynamodb.py::TestDynamoDB::test_kinesis_streaming_destination_crud` | Enable, describe, update, and disable preserve LocalStack's ENABLING, ACTIVE, UPDATING, DISABLING, and DISABLED responses plus exact missing-table, missing-configuration, invalid-precision, missing-destination, and repeated-update faults; every requested test form covers the lifecycle | Mapped; full race-clean |
 | `test_dynamodb.py::TestDynamoDB::test_dynamodb_with_kinesis_stream` | PutItem, UpdateItem, and DeleteItem emit ordered INSERT, MODIFY, and REMOVE records to an enabled Kinesis destination with correct old/new images and without `eventSourceARN`; atomic, snapshot, SDK, BDD, fuzz, chaos/race, and mutation checks pin the bridge | Mapped; full race-clean |
 | `test_dynamodb.py::TestDynamoDB::test_stream_destination_records` | An enabled destination receives a readable Kinesis record for a DynamoDB write even when DynamoDB Streams are not enabled, and disabling the destination stops later emission; all seven requested test forms cover the behavior | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_global_tables_version_2019` | UpdateTable creates and removes regional replicas, copies existing data, replicates later writes bidirectionally, exposes every replica through DescribeTable/ListTables, preserves per-replica KMS metadata, and rejects removal of absent replicas with LocalStack's exact fault; atomic, snapshot, SDK contract, BDD, fuzz, chaos/race, and mutation coverage pin the lifecycle | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_streams_on_global_tables` | Every stream-enabled replica receives its own regional stream ARN and the same replicated batch-write records through the shared item-write hook; atomic, Verify-style snapshot, SDK-adjacent contract, raw HTTP BDD, fuzz, chaos/race, and semantic mutation coverage pin the behavior | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_global_tables` | Legacy CreateGlobalTable/DescribeGlobalTable/UpdateGlobalTable preserve replication groups, apply mixed create/delete updates, reject duplicates, and reject missing tables; atomic and Verify-style characterization coverage extends the same contract, BDD, fuzz, chaos, and mutation stack | Mapped; full race-clean |
+
+All 56 pinned DynamoDB test functions are explicitly traced. This completes the pinned LocalStack source inventory; it does not claim total AWS DynamoDB parity beyond that authority.

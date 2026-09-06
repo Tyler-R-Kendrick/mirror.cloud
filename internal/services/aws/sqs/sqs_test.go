@@ -544,3 +544,42 @@ func FuzzQueueMetadataAttributeSelection(f *testing.F) {
 		}
 	})
 }
+
+func FuzzQueueDeletionWindow(f *testing.F) {
+	f.Add(uint8(0))
+	f.Add(uint8(59))
+	f.Add(uint8(60))
+	f.Fuzz(func(t *testing.T, raw uint8) {
+		seconds := int(raw) % 121
+		deps := spitest.Deps(t)
+		p := New(deps)
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		call := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		if _, err := call("CreateQueue", map[string]any{"QueueName": "deleted", "Attributes": map[string]any{"DelaySeconds": "5"}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := call("DeleteQueue", map[string]any{"QueueName": "deleted"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := deps.Clock.Advance(time.Duration(seconds) * time.Second); err != nil {
+			t.Fatal(err)
+		}
+		_, err := call("CreateQueue", map[string]any{"QueueName": "deleted"})
+		if seconds < 60 {
+			if fault, ok := err.(*spi.Fault); !ok || fault.Code != "AWS.SimpleQueueService.QueueDeletedRecently" {
+				t.Fatalf("%ds recreate fault %#v", seconds, err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("%ds recreate %v", seconds, err)
+		}
+		response, err := call("GetQueueAttributes", map[string]any{"QueueName": "deleted", "AttributeNames": []any{"All"}})
+		if err != nil || response.Output["Attributes"].(map[string]any)["DelaySeconds"] != nil {
+			t.Fatalf("%ds stale attributes %#v, %v", seconds, response, err)
+		}
+	})
+}

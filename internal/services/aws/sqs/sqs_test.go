@@ -567,6 +567,16 @@ func TestSendMessageBatchOversizedCharacterization(t *testing.T) {
 	if !ok {
 		t.Fatalf("oversized batch fault %#v", err)
 	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-size-valid"}}); err != nil {
+		t.Fatal(err)
+	}
+	valid, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "batch-size-valid", "Entries": []any{
+		map[string]any{"Id": "1", "MessageBody": strings.Repeat("a", 600000)},
+		map[string]any{"Id": "2", "MessageBody": "a"},
+	}}})
+	if err != nil || len(valid.Output["Successful"].([]any)) != 2 {
+		t.Fatalf("valid batch %#v error %v", valid, err)
+	}
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 

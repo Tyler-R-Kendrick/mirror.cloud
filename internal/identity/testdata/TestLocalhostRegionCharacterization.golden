@@ -1,0 +1,23 @@
+{
+  "header": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "test",
+    "ARN": "arn:aws:iam::000000000000:user/mirror-local",
+    "Project": "000000000000"
+  },
+  "override": {
+    "Account": "000000000000",
+    "Region": "localhost",
+    "AccessKeyID": "test",
+    "ARN": "arn:aws:iam::000000000000:user/mirror-local",
+    "Project": "000000000000"
+  },
+  "query": {
+    "Account": "000000000000",
+    "Region": "us-east-1",
+    "AccessKeyID": "test",
+    "ARN": "arn:aws:iam::000000000000:user/mirror-local",
+    "Project": "000000000000"
+  }
+}

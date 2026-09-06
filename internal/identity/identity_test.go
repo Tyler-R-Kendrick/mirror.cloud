@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 )
 
 func TestParseAndExpiry(t *testing.T) {
@@ -69,6 +71,19 @@ func TestLocalhostCredentialUsesUSEast1(t *testing.T) {
 			t.Fatalf("%s localhost credential region %q", name, got)
 		}
 	}
+}
+
+func TestLocalhostRegionCharacterization(t *testing.T) {
+	header := httptest.NewRequest("POST", "/", nil)
+	header.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/localhost/dynamodb/aws4_request, SignedHeaders=host, Signature=00")
+	query := httptest.NewRequest("GET", "/?X-Amz-Credential=test%2F20200101%2Flocalhost%2Fdynamodb%2Faws4_request", nil)
+	override := header.Clone(header.Context())
+	override.Header.Set("X-Mirror-Region", "localhost")
+	golden.AssertJSON(t, map[string]any{
+		"header":   Parse(header, "", "eu-west-1", time.Unix(0, 0)),
+		"query":    Parse(query, "", "eu-west-1", time.Unix(0, 0)),
+		"override": Parse(override, "", "eu-west-1", time.Unix(0, 0)),
+	})
 }
 
 func TestPresignedAuthFault(t *testing.T) {

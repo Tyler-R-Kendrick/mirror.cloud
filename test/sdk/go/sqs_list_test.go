@@ -255,3 +255,38 @@ func TestAWSSDKSQSMessageTimestampContract(t *testing.T) {
 		t.Fatalf("timestamp attributes %#v", attributes)
 	}
 }
+
+func TestAWSSDKSQSMultipleQueuesContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	queues := make([]string, 2)
+	for index := range queues {
+		created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String(fmt.Sprintf("sdk-queue-%d", index))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		queues[index] = aws.ToString(created.QueueUrl)
+	}
+	if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: &queues[0], MessageBody: aws.String("message")}); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: &queues[1]})
+	if err != nil || empty.Messages != nil {
+		t.Fatalf("queue-1 %#v error %v", empty, err)
+	}
+	received, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: &queues[0]})
+	if err != nil || len(received.Messages) != 1 || aws.ToString(received.Messages[0].Body) != "message" {
+		t.Fatalf("queue-0 %#v error %v", received, err)
+	}
+}

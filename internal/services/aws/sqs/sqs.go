@@ -349,7 +349,15 @@ func queueMissing() *spi.Fault {
 
 func (p *Pack) countMsgs(ctx context.Context, req *spi.Request, name string) int {
 	kvs, _, _ := p.col(req, "msgs:"+name).List(ctx, "", "", 0)
-	return len(kvs)
+	now := p.deps.Clock.Now().UnixNano()
+	count := 0
+	for _, kv := range kvs {
+		var message map[string]any
+		if json.Unmarshal(kv.Value, &message) == nil && int64(asFloat(message["visibleAt"])) <= now {
+			count++
+		}
+	}
+	return count
 }
 
 func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error) {

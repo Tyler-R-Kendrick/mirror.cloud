@@ -1,0 +1,34 @@
+{
+  "after": {
+    "Attributes": {
+      "ApproximateNumberOfMessages": "2"
+    }
+  },
+  "before": {
+    "Attributes": {
+      "ApproximateNumberOfMessages": "5"
+    }
+  },
+  "received": {
+    "Messages": [
+      {
+        "Body": "g1-m1",
+        "MD5OfBody": "fc4286b824b39ddf3606c9f27ff664bd",
+        "MessageId": "7c5891299f6489f8",
+        "ReceiptHandle": "5f59f223d7974d142efbc70e360dac9bd91fc24a55cb61c9216632095f55fd84"
+      },
+      {
+        "Body": "g2-m1",
+        "MD5OfBody": "b53e35d70dfa49ecf94f3489945c10b7",
+        "MessageId": "3ed10eca83a29db2",
+        "ReceiptHandle": "4da7b6a4902c32359fbe7e4f9612b72d90b68c014d75a5babe4aca2d78764805"
+      },
+      {
+        "Body": "g3-m1",
+        "MD5OfBody": "71b0a1fb62a7a2d69fca5cb8bacc6883",
+        "MessageId": "e7175ec1cd1d60f2",
+        "ReceiptHandle": "77df676fe2a7a5e2a158514dec7a6dd45a694b39a0bf31326482c22c87311fd2"
+      }
+    ]
+  }
+}

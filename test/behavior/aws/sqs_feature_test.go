@@ -461,4 +461,23 @@ func TestSQSQueueListing(t *testing.T) {
 			}
 		}
 	})
+	t.Run("Given FIFO messages When receiving a batch Then approximate count excludes in-flight messages", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-fifo-count.fifo","Attributes":{"ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		for _, message := range []string{"g1-m1", "g1-m2", "g1-m3", "g2-m1", "g3-m1"} {
+			payload := `{"QueueUrl":"http://queue/000000000000/bdd-fifo-count.fifo","MessageBody":"` + message + `","MessageGroupId":"` + message[:2] + `"}`
+			if status, body := call("SendMessage", payload); status != http.StatusOK {
+				t.Fatalf("send %s %d %s", message, status, body)
+			}
+		}
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-fifo-count.fifo","MaxNumberOfMessages":4,"WaitTimeSeconds":0}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"Messages"`)) {
+			t.Fatalf("receive %d %s", status, body)
+		}
+		status, body = call("GetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-fifo-count.fifo","AttributeNames":["ApproximateNumberOfMessages"]}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"ApproximateNumberOfMessages":"2"`)) {
+			t.Fatalf("count %d %s", status, body)
+		}
+	})
 }

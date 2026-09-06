@@ -403,6 +403,53 @@ func FuzzFIFOMessageAttributes(f *testing.F) {
 	})
 }
 
+func TestFIFOApproximateMessageCountCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response.Output
+	}
+	call("CreateQueue", map[string]any{"QueueName": "fifo-count.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true"}})
+	for _, message := range []string{"g1-m1", "g1-m2", "g1-m3", "g2-m1", "g3-m1"} {
+		call("SendMessage", map[string]any{"QueueName": "fifo-count.fifo", "MessageBody": message, "MessageGroupId": strings.Split(message, "-")[0]})
+	}
+	before := call("GetQueueAttributes", map[string]any{"QueueName": "fifo-count.fifo", "AttributeNames": []any{"ApproximateNumberOfMessages"}})
+	received := call("ReceiveMessage", map[string]any{"QueueName": "fifo-count.fifo", "MaxNumberOfMessages": 4, "WaitTimeSeconds": 0})
+	after := call("GetQueueAttributes", map[string]any{"QueueName": "fifo-count.fifo", "AttributeNames": []any{"ApproximateNumberOfMessages"}})
+	golden.AssertJSON(t, map[string]any{"before": before, "received": received, "after": after})
+}
+
+func FuzzFIFOApproximateMessageCount(f *testing.F) {
+	f.Add(1)
+	f.Add(5)
+	f.Fuzz(func(t *testing.T, count int) {
+		if count < 1 || count > 10 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-fifo-count.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true"}}}); err != nil {
+			t.Fatal(err)
+		}
+		for i := range count {
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-fifo-count.fifo", "MessageBody": fmt.Sprintf("message-%d", i), "MessageGroupId": fmt.Sprintf("group-%d", i)}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "fuzz-fifo-count.fifo", "AttributeNames": []any{"ApproximateNumberOfMessages"}}})
+		if err != nil || asMap(response.Output["Attributes"])["ApproximateNumberOfMessages"] != strconv.Itoa(count) {
+			t.Fatalf("count=%d response=%#v error=%v", count, response.Output, err)
+		}
+	})
+}
+
 func TestMessagesRemainQueueScoped(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

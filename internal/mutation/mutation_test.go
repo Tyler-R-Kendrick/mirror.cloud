@@ -17563,6 +17563,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFIFOMessageAttributesCharacterization",
 		},
 		{
+			name: "sqs-approximate-count-includes-inflight-messages",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "return count\n}",
+			new:  "return 0\n}",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestFIFOApproximateMessageCountCharacterization",
+		},
+		{
 			name: "sqs-list-ignore-prefix",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  `prefix := str(req.Input["QueueNamePrefix"])`,

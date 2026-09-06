@@ -538,6 +538,41 @@ func TestAWSSDKSQSFIFOMessageAttributesContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSFIFOApproximateMessageCountContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-fifo-count.fifo"), Attributes: map[string]string{"ContentBasedDeduplication": "true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range []struct{ body, group string }{{"g1-m1", "g1"}, {"g1-m2", "g1"}, {"g1-m3", "g1"}, {"g2-m1", "g2"}, {"g3-m1", "g3"}} {
+		if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String(message.body), MessageGroupId: aws.String(message.group)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if before, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameApproximateNumberOfMessages}}); err != nil || before.Attributes["ApproximateNumberOfMessages"] != "5" {
+		t.Fatalf("before %#v error %v", before, err)
+	}
+	if _, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, MaxNumberOfMessages: 4, WaitTimeSeconds: 0}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameApproximateNumberOfMessages}})
+	if err != nil || after.Attributes["ApproximateNumberOfMessages"] != "2" {
+		t.Fatalf("after %#v error %v", after, err)
+	}
+}
+
 func TestAWSSDKSQSMultipleQueuesContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

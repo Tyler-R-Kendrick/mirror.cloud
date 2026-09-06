@@ -5937,3 +5937,29 @@ func TestConcurrentSQSFIFOMessageAttributesAreRetained(t *testing.T) {
 		}
 	}
 }
+
+func TestConcurrentSQSFIFOApproximateCountExcludesInFlight(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-fifo-count.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true"}}}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-fifo-count.fifo", "MessageBody": fmt.Sprintf("message-%d", i), "MessageGroupId": fmt.Sprintf("group-%d", i)}})
+		}(i)
+	}
+	wg.Wait()
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-fifo-count.fifo", "MaxNumberOfMessages": 4}}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "chaos-fifo-count.fifo", "AttributeNames": []any{"ApproximateNumberOfMessages"}}})
+	if err != nil || response.Output["Attributes"].(map[string]any)["ApproximateNumberOfMessages"] != "4" {
+		t.Fatalf("count %#v error %v", response.Output, err)
+	}
+}

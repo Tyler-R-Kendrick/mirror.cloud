@@ -886,3 +886,34 @@ func FuzzEmptyReceiveOmitsMessages(f *testing.F) {
 		}
 	})
 }
+
+func FuzzReceiveMessageWaitTime(f *testing.F) {
+	for _, seed := range []int8{-1, 0, 20, 21, 127} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, raw int8) {
+		wait := int(raw)
+		p := New(spitest.Deps(t))
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "wait-time"}}); err != nil {
+			t.Fatal(err)
+		}
+		ctx := context.Background()
+		if wait > 0 && wait <= 20 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithCancel(ctx)
+			cancel()
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "wait-time", "WaitTimeSeconds": wait}})
+		if wait < 0 || wait > 20 {
+			fault, _ := err.(*spi.Fault)
+			if fault == nil || fault.Code != "InvalidParameterValue" {
+				t.Fatalf("wait=%d fault %#v", wait, err)
+			}
+			return
+		}
+		if err != nil || response.Output["Messages"] != nil {
+			t.Fatalf("wait=%d response %#v error %v", wait, response, err)
+		}
+	})
+}

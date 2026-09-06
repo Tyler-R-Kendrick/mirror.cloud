@@ -521,8 +521,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 |---|---:|
 | Requested test forms wired | 7 / 7 (100%) |
 | DynamoDB operations routed to emulation | 62 / 62 (100%) |
-| LocalStack DynamoDB test functions explicitly traced | 45 / 56 (80.4%) |
-| LocalStack DynamoDB test functions not yet traced | 11 / 56 (19.6%) |
+| LocalStack DynamoDB test functions explicitly traced | 47 / 56 (83.9%) |
+| LocalStack DynamoDB test functions not yet traced | 9 / 56 (16.1%) |
 
 The pinned inventory is the 56 direct test functions in `tests/aws/services/dynamodb/test_dynamodb.py`; parametrized cases are not expanded.
 
@@ -573,3 +573,5 @@ The pinned inventory is the 56 direct test functions in `tests/aws/services/dyna
 | `test_dynamodb.py::TestDynamoDB::test_gsi_with_billing_mode` | PAY_PER_REQUEST and PROVISIONED global secondary indexes preserve their respective zero or requested throughput, index ARN, and create/describe status transitions; atomic, snapshot, SDK, BDD, fuzz, chaos, and mutation coverage pin both parametrized cases | Mapped; full race-clean |
 | `test_dynamodb.py::TestDynamoDB::test_dynamodb_create_table_with_partial_sse_specification` | Enabling SSE without a key provisions and reuses the account-and-region AWS-managed `alias/aws/dynamodb` KMS key, returns an ENABLED KMS SSEDescription, and exposes AWS-compatible key metadata without secret key material; atomic, Verify-style snapshot, SDK contract, raw HTTP BDD, fuzz, concurrent chaos, and semantic mutation coverage pin the lifecycle | Mapped; full race-clean |
 | `test_dynamodb.py::TestDynamoDB::test_dynamodb_update_table_without_sse_specification_change` | Disabling SSE reports UPDATING without persisting the transient request, while unrelated UpdateTable changes preserve the enabled encryption description and KMS ARN; every requested test form pins both paths | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_continuous_backup_update` | UpdateContinuousBackups enables point-in-time recovery with a 35-day window, preserves the earliest restorable timestamp across repeated enables, advances the latest timestamp, and DescribeContinuousBackups returns the persisted state; atomic, Verify-style snapshot, SDK contract, raw HTTP BDD, 10,000-case fuzz, concurrent chaos, and semantic mutation coverage pin the lifecycle | Mapped; full race-clean |
+| `test_dynamodb.py::TestDynamoDB::test_dynamodb_describe_contributor_insights` | DescribeContributorInsights returns the table name and DISABLED default for an existing table while all table-scoped backup and insights operations reject missing tables; every requested test form covers the behavior | Mapped; full race-clean |

@@ -431,21 +431,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 		}
 		return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{"TableName": dst, "TableStatus": "ACTIVE"}}}, nil
-	case "EnableKinesisStreamingDestination":
-		stream := first(req.Input, "StreamArn")
-		_ = p.col(req, "kinesisdest").Put(ctx, table+"/"+stream, []byte(stream))
-		return &spi.Response{Output: map[string]any{"TableName": table, "StreamArn": stream, "DestinationStatus": "ACTIVE"}}, nil
-	case "DisableKinesisStreamingDestination":
-		stream := first(req.Input, "StreamArn")
-		_ = p.col(req, "kinesisdest").Delete(ctx, table+"/"+stream)
-		return &spi.Response{Output: map[string]any{"TableName": table, "StreamArn": stream, "DestinationStatus": "DISABLED"}}, nil
-	case "DescribeKinesisStreamingDestination":
-		kvs, _, _ := p.col(req, "kinesisdest").List(ctx, table+"/", "", 0)
-		var dest []any
-		for _, kv := range kvs {
-			dest = append(dest, map[string]any{"StreamArn": string(kv.Value), "DestinationStatus": "ACTIVE"})
-		}
-		return &spi.Response{Output: map[string]any{"TableName": table, "KinesisDataStreamDestinations": dest}}, nil
+	case "EnableKinesisStreamingDestination", "DisableKinesisStreamingDestination", "DescribeKinesisStreamingDestination":
+		return p.kinesisDestination(ctx, req)
 	case "BatchGetItem":
 		out := map[string]any{}
 		if ri, ok := req.Input["RequestItems"].(map[string]any); ok {
@@ -627,7 +614,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "SearchVectors":
 		return p.searchVectors(ctx, req)
 	case "UpdateKinesisStreamingDestination":
-		return p.updateKinesisDest(ctx, req)
+		return p.kinesisDestination(ctx, req)
 	case "ListStreams":
 		return p.listStreams(ctx, req)
 	case "DescribeStream":

@@ -41,15 +41,11 @@ func (p *Pack) ensureStream(req *spi.Request, rec map[string]any, table string) 
 	rec["LatestStreamArn"] = streamARN(req, table, label)
 }
 
-func (p *Pack) streamEnabled(ctx context.Context, req *spi.Request, table string) (map[string]any, bool) {
-	td := p.tableDef(ctx, req, table)
-	spec := asMap(td["StreamSpecification"])
-	return td, truthy(spec["StreamEnabled"])
-}
-
 func (p *Pack) emitStream(ctx context.Context, req *spi.Request, table, event string, item, old map[string]any) {
-	td, ok := p.streamEnabled(ctx, req, table)
-	if !ok {
+	td := p.tableDef(ctx, req, table)
+	destinations := p.activeKinesisDestinations(ctx, req, table)
+	streamEnabled := truthy(asMap(td["StreamSpecification"])["StreamEnabled"])
+	if !streamEnabled && len(destinations) == 0 {
 		return
 	}
 	if event == "REMOVE" && old == nil || event == "MODIFY" && reflect.DeepEqual(item, old) {
@@ -105,9 +101,126 @@ func (p *Pack) emitStream(ctx context.Context, req *spi.Request, table, event st
 		"dynamodb":     ddb,
 	}
 	b, _ := json.Marshal(rec)
-	_ = p.col(req, "ddbstream:"+table).Put(ctx, fmt.Sprintf("%015d", seq), b)
-	if p.deps.Bus != nil {
-		_ = p.deps.Bus.Publish(ctx, "dynamodb-stream", b)
+	if streamEnabled {
+		_ = p.col(req, "ddbstream:"+table).Put(ctx, fmt.Sprintf("%015d", seq), b)
+		if p.deps.Bus != nil {
+			_ = p.deps.Bus.Publish(ctx, "dynamodb-stream", b)
+		}
+	}
+	p.emitKinesisDestinations(ctx, req, destinations, table, event, ddb)
+}
+
+func (p *Pack) kinesisDestination(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	table := str(req.Input["TableName"])
+	tableDefinition := p.tableDef(ctx, req, table)
+	if str(tableDefinition["TableName"]) == "" {
+		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Requested resource not found: Table: " + table + " not found", HTTPStatus: 400, Fault: "client"}
+	}
+	if req.Operation == "DescribeKinesisStreamingDestination" {
+		kvs, _, _ := p.col(req, "kinesisdest").List(ctx, table+"/", "", 0)
+		destinations := make([]any, 0, len(kvs))
+		for _, kv := range kvs {
+			var destination map[string]any
+			if json.Unmarshal(kv.Value, &destination) == nil {
+				destinations = append(destinations, destination)
+			}
+		}
+		return &spi.Response{Output: map[string]any{"TableName": table, "KinesisDataStreamDestinations": destinations}}, nil
+	}
+	streamARN := str(req.Input["StreamArn"])
+	streamName := kinesisStreamName(req, streamARN)
+	key := table + "/" + streamARN
+	destinations := p.col(req, "kinesisdest")
+	stored, exists, _ := destinations.Get(ctx, key)
+	if req.Operation == "EnableKinesisStreamingDestination" {
+		if streamName == "" {
+			return nil, &spi.Fault{Code: "ValidationException", Message: "Kinesis stream not found: " + streamARN, HTTPStatus: 400, Fault: "client"}
+		}
+		if _, ok, _ := p.col(req, "kinesis").Get(ctx, streamName); !ok {
+			return nil, &spi.Fault{Code: "ValidationException", Message: "Kinesis stream not found: " + streamARN, HTTPStatus: 400, Fault: "client"}
+		}
+		record := map[string]any{"StreamArn": streamARN, "DestinationStatus": "ACTIVE"}
+		b, _ := json.Marshal(record)
+		_ = destinations.Put(ctx, key, b)
+		return &spi.Response{Output: map[string]any{"TableName": table, "StreamArn": streamARN, "DestinationStatus": "ENABLING", "EnableKinesisStreamingConfiguration": map[string]any{}}}, nil
+	}
+	if !exists {
+		return nil, &spi.Fault{Code: "ValidationException", Message: "Table is not in a valid state to enable Kinesis Streaming Destination: No streaming destination with streamArn: " + streamARN + " found for table with tableName: " + table, HTTPStatus: 400, Fault: "client"}
+	}
+	var record map[string]any
+	_ = json.Unmarshal(stored, &record)
+	if req.Operation == "DisableKinesisStreamingDestination" {
+		record["DestinationStatus"] = "DISABLED"
+		b, _ := json.Marshal(record)
+		_ = destinations.Put(ctx, key, b)
+		return &spi.Response{Output: map[string]any{"TableName": table, "StreamArn": streamARN, "DestinationStatus": "DISABLING"}}, nil
+	}
+	configuration := asMap(req.Input["UpdateKinesisStreamingConfiguration"])
+	if len(configuration) == 0 {
+		return nil, &spi.Fault{Code: "ValidationException", Message: "Streaming destination cannot be updated with given parameters: UpdateKinesisStreamingConfiguration cannot be null or contain only null values", HTTPStatus: 400, Fault: "client"}
+	}
+	precision := str(configuration["ApproximateCreationDateTimePrecision"])
+	if precision != "MILLISECOND" && precision != "MICROSECOND" {
+		return nil, &spi.Fault{Code: "ValidationException", Message: "1 validation error detected: Value '" + precision + "' at 'updateKinesisStreamingConfiguration.approximateCreationDateTimePrecision' failed to satisfy constraint: Member must satisfy enum value set: [MILLISECOND, MICROSECOND]", HTTPStatus: 400, Fault: "client"}
+	}
+	if record["ApproximateCreationDateTimePrecision"] == precision {
+		return nil, &spi.Fault{Code: "ValidationException", Message: "Invalid Request: Precision is already set to the desired value of " + precision + " for tableId: " + str(tableDefinition["TableId"]) + ", kdsArn: " + streamARN, HTTPStatus: 400, Fault: "client"}
+	}
+	record["DestinationStatus"] = "ACTIVE"
+	record["ApproximateCreationDateTimePrecision"] = precision
+	b, _ := json.Marshal(record)
+	_ = destinations.Put(ctx, key, b)
+	return &spi.Response{Output: map[string]any{"TableName": table, "StreamArn": streamARN, "DestinationStatus": "UPDATING", "UpdateKinesisStreamingConfiguration": configuration}}, nil
+}
+
+func kinesisStreamName(req *spi.Request, arn string) string {
+	prefix := "arn:aws:kinesis:" + req.Identity.Region + ":" + req.Identity.Account + ":stream/"
+	return strings.TrimPrefix(arn, prefix)
+}
+
+func (p *Pack) activeKinesisDestinations(ctx context.Context, req *spi.Request, table string) []map[string]any {
+	kvs, _, _ := p.col(req, "kinesisdest").List(ctx, table+"/", "", 0)
+	destinations := make([]map[string]any, 0, len(kvs))
+	for _, kv := range kvs {
+		var destination map[string]any
+		if json.Unmarshal(kv.Value, &destination) == nil && destination["DestinationStatus"] == "ACTIVE" {
+			destinations = append(destinations, destination)
+		}
+	}
+	return destinations
+}
+
+func (p *Pack) emitKinesisDestinations(ctx context.Context, req *spi.Request, destinations []map[string]any, table, event string, dynamodb map[string]any) {
+	payload, _ := json.Marshal(map[string]any{"tableName": table, "eventName": event, "dynamodb": dynamodb})
+	for _, destination := range destinations {
+		streamName := kinesisStreamName(req, str(destination["StreamArn"]))
+		if streamName == "" {
+			continue
+		}
+		scope := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region)
+		_ = scope.Txn(ctx, func(tx spi.ScopeTx) error {
+			streams := tx.Collection("kinesis")
+			b, ok, err := streams.Get(streamName)
+			if err != nil || !ok {
+				return err
+			}
+			var stream map[string]any
+			_ = json.Unmarshal(b, &stream)
+			sequence := asInt(stream["Seq"])
+			stream["Seq"] = sequence + 1
+			b, _ = json.Marshal(stream)
+			if err := streams.Put(streamName, b); err != nil {
+				return err
+			}
+			record := map[string]any{
+				"SequenceNumber":              strconv.Itoa(sequence),
+				"PartitionKey":                table,
+				"Data":                        base64.StdEncoding.EncodeToString(payload),
+				"ApproximateArrivalTimestamp": float64(p.deps.Clock.Now().UnixMilli()) / 1000,
+			}
+			b, _ = json.Marshal(record)
+			return tx.Collection("kinesis:"+streamName).Put(strconv.Itoa(sequence), b)
+		})
 	}
 }
 

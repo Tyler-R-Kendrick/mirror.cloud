@@ -2,6 +2,7 @@ package dynamodb
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -165,6 +167,98 @@ func TestDynamoDBDataEncodingCharacterization(t *testing.T) {
 		"updatedStream":   asMap(asMap(updatedRecords[1])["dynamodb"])["NewImage"],
 		"recordEventName": asMap(updatedRecords[1])["eventName"],
 	})
+}
+
+func TestDynamoDBKinesisDestination(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	kinesisPack := kinesis.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	must := func(operation string, input map[string]any) map[string]any {
+		response, err := call(operation, input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+	if _, err := kinesisPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStream", Input: map[string]any{"StreamName": "s"}}); err != nil {
+		t.Fatal(err)
+	}
+	streamARN := "arn:aws:kinesis:us-east-1:000000000000:stream/s"
+	must("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
+	if _, err := call("EnableKinesisStreamingDestination", map[string]any{"TableName": "missing", "StreamArn": streamARN}); err == nil {
+		t.Fatal("enabled destination for missing table")
+	}
+	enabled := must("EnableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN})
+	if enabled["DestinationStatus"] != "ENABLING" || len(asMap(enabled["EnableKinesisStreamingConfiguration"])) != 0 {
+		t.Fatalf("enable destination %#v", enabled)
+	}
+	described := must("DescribeKinesisStreamingDestination", map[string]any{"TableName": "T"})
+	destination := asMap(asSlice(described["KinesisDataStreamDestinations"])[0])
+	if destination["StreamArn"] != streamARN || destination["DestinationStatus"] != "ACTIVE" {
+		t.Fatalf("describe destination %#v", described)
+	}
+	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "one"}, "data": map[string]any{"B": "kA=="}}})
+	must("UpdateItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "one"}}, "UpdateExpression": "SET value=:v", "ExpressionAttributeValues": map[string]any{":v": map[string]any{"S": "changed"}}})
+	must("DeleteItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "one"}}})
+	iterator, err := kinesisPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetShardIterator", Input: map[string]any{"StreamName": "s", "ShardIteratorType": "TRIM_HORIZON"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordResponse, err := kinesisPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetRecords", Input: map[string]any{"ShardIterator": iterator.Output["ShardIterator"]}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := asSlice(recordResponse.Output["Records"])
+	if len(records) != 3 {
+		t.Fatalf("Kinesis destination records %#v", records)
+	}
+	for index, event := range []string{"INSERT", "MODIFY", "REMOVE"} {
+		encoded := str(asMap(records[index])["Data"])
+		payload, err := base64.StdEncoding.DecodeString(encoded)
+		var record map[string]any
+		if err != nil || json.Unmarshal(payload, &record) != nil || record["tableName"] != "T" || record["eventName"] != event || record["eventSourceARN"] != nil {
+			t.Fatalf("%s Kinesis record %s", event, payload)
+		}
+		dynamodb := asMap(record["dynamodb"])
+		if event == "INSERT" && (dynamodb["NewImage"] == nil || dynamodb["OldImage"] != nil) || event == "MODIFY" && (dynamodb["NewImage"] == nil || dynamodb["OldImage"] == nil) || event == "REMOVE" && (dynamodb["NewImage"] != nil || dynamodb["OldImage"] == nil) {
+			t.Fatalf("%s Kinesis images %#v", event, dynamodb)
+		}
+	}
+	for _, input := range []map[string]any{
+		{"TableName": "T", "StreamArn": streamARN},
+		{"TableName": "T", "StreamArn": streamARN, "UpdateKinesisStreamingConfiguration": map[string]any{"ApproximateCreationDateTimePrecision": "SECOND"}},
+		{"TableName": "T", "StreamArn": "arn:aws:kinesis:us-east-1:000000000000:stream/missing", "UpdateKinesisStreamingConfiguration": map[string]any{"ApproximateCreationDateTimePrecision": "MICROSECOND"}},
+	} {
+		if _, err := call("UpdateKinesisStreamingDestination", input); err == nil {
+			t.Fatalf("invalid destination update succeeded %#v", input)
+		}
+	}
+	configuration := map[string]any{"ApproximateCreationDateTimePrecision": "MICROSECOND"}
+	updated := must("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN, "UpdateKinesisStreamingConfiguration": configuration})
+	if updated["DestinationStatus"] != "UPDATING" || asMap(updated["UpdateKinesisStreamingConfiguration"])["ApproximateCreationDateTimePrecision"] != "MICROSECOND" {
+		t.Fatalf("update destination %#v", updated)
+	}
+	if _, err := call("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN, "UpdateKinesisStreamingConfiguration": configuration}); err == nil {
+		t.Fatal("idempotent destination update succeeded")
+	}
+	disabled := must("DisableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN})
+	if disabled["DestinationStatus"] != "DISABLING" {
+		t.Fatalf("disable destination %#v", disabled)
+	}
+	described = must("DescribeKinesisStreamingDestination", map[string]any{"TableName": "T"})
+	if asMap(asSlice(described["KinesisDataStreamDestinations"])[0])["DestinationStatus"] != "DISABLED" {
+		t.Fatalf("disabled destination %#v", described)
+	}
+	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "after-disable"}}})
+	recordResponse, err = kinesisPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetRecords", Input: map[string]any{"ShardIterator": iterator.Output["ShardIterator"]}})
+	if err != nil || len(asSlice(recordResponse.Output["Records"])) != 3 {
+		t.Fatalf("disabled destination emitted records %#v %v", recordResponse, err)
+	}
 }
 
 func TestBootedServerDynamoDBStreams(t *testing.T) {

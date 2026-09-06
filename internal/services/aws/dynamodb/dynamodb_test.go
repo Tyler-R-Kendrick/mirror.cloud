@@ -1016,10 +1016,10 @@ func TestDynamoDBExtendedOperations(t *testing.T) {
 	if hits := must("SearchVectors", map[string]any{"TableName": "T"}).Output["Items"].([]any); len(hits) != 1 {
 		t.Fatalf("unfiltered vectors %#v", hits)
 	}
-	if destination := must("UpdateKinesisStreamingDestination", map[string]any{
-		"TableName": "T", "StreamArn": "arn:aws:kinesis:us-east-1:000000000000:stream/s", "ApproximateCreationDateTimePrecision": "MICROSECOND",
-	}).Output; destination["DestinationStatus"] != "ACTIVE" || destination["ApproximateCreationDateTimePrecision"] != "MICROSECOND" {
-		t.Fatalf("kinesis destination %#v", destination)
+	if _, err := call("UpdateKinesisStreamingDestination", map[string]any{
+		"TableName": "T", "StreamArn": "arn:aws:kinesis:us-east-1:000000000000:stream/s", "UpdateKinesisStreamingConfiguration": map[string]any{"ApproximateCreationDateTimePrecision": "MICROSECOND"},
+	}); err == nil {
+		t.Fatal("updated a missing Kinesis destination")
 	}
 	if _, err := call("Unknown", nil); err == nil {
 		t.Fatal("unknown operation succeeded")

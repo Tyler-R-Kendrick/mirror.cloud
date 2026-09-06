@@ -427,16 +427,3 @@ func (p *Pack) searchVectors(ctx context.Context, req *spi.Request) (*spi.Respon
 	}
 	return &spi.Response{Output: map[string]any{"Items": hits}}, nil
 }
-
-func (p *Pack) updateKinesisDest(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	table := str(req.Input["TableName"])
-	stream := str(req.Input["StreamArn"])
-	col := p.col(req, "kinesis:"+table)
-	rec := map[string]any{"StreamArn": stream, "DestinationStatus": "ACTIVE"}
-	if v := req.Input["ApproximateCreationDateTimePrecision"]; v != nil {
-		rec["ApproximateCreationDateTimePrecision"] = v
-	}
-	b, _ := json.Marshal(rec)
-	_ = col.Put(ctx, stream, b)
-	return &spi.Response{Output: rec}, nil
-}

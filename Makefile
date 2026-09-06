@@ -64,6 +64,7 @@ test-fuzz:
 	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBBinaryValues$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBTableClass$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBTableMetadata$$' -fuzztime=10000x -parallel=4
+	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBDefaultSSE$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBPartiQL$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBStreamRecords$$' -fuzztime=10000x -parallel=4
 	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBTransactions$$' -fuzztime=10000x -parallel=4

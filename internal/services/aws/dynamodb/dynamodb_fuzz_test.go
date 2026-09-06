@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -147,6 +148,47 @@ func FuzzDynamoDBTableMetadata(f *testing.F) {
 		throughput := asMap(describedTable["ProvisionedThroughput"])
 		if onDemand && (str(asMap(describedTable["BillingModeSummary"])["BillingMode"]) != "PAY_PER_REQUEST" || asInt(throughput["ReadCapacityUnits"]) != 0) || !onDemand && asInt(throughput["ReadCapacityUnits"]) != 5 {
 			t.Fatalf("billing metadata did not round trip: %#v", describedTable)
+		}
+	})
+}
+
+func FuzzDynamoDBDefaultSSE(f *testing.F) {
+	f.Add([]byte("table"), true)
+	f.Fuzz(func(t *testing.T, raw []byte, disable bool) {
+		if len(raw) > 128 {
+			t.Skip()
+		}
+		deps := spitest.Deps(t)
+		p := New(deps)
+		ctx := context.Background()
+		id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+		call := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		name := hex.EncodeToString(raw)
+		first, firstErr := call("CreateTable", map[string]any{"TableName": "A" + name, "SSESpecification": map[string]any{"Enabled": true}})
+		second, secondErr := call("CreateTable", map[string]any{"TableName": "B" + name, "SSESpecification": map[string]any{"Enabled": true}})
+		if firstErr != nil || secondErr != nil {
+			t.Fatalf("default SSE create: %v %v", firstErr, secondErr)
+		}
+		firstARN := str(asMap(asMap(first.Output["TableDescription"])["SSEDescription"])["KMSMasterKeyArn"])
+		secondARN := str(asMap(asMap(second.Output["TableDescription"])["SSEDescription"])["KMSMasterKeyArn"])
+		if disable {
+			disabled, err := call("UpdateTable", map[string]any{"TableName": "A" + name, "SSESpecification": map[string]any{"Enabled": false}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if asMap(asMap(disabled.Output["TableDescription"])["SSEDescription"])["Status"] != "UPDATING" {
+				t.Fatalf("default SSE disable: %#v", disabled)
+			}
+		}
+		updated, updateErr := call("UpdateTable", map[string]any{"TableName": "A" + name, "BillingMode": "PAY_PER_REQUEST"})
+		key, keyErr := kms.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeKey", Input: map[string]any{"KeyId": firstARN}})
+		if updateErr != nil || keyErr != nil {
+			t.Fatalf("default SSE did not persist: first=%q second=%q update=%#v key=%#v errors=%v/%v", firstARN, secondARN, updated, key, updateErr, keyErr)
+		}
+		if firstARN == "" || firstARN != secondARN || str(asMap(asMap(updated.Output["TableDescription"])["SSEDescription"])["KMSMasterKeyArn"]) != firstARN || asMap(key.Output["KeyMetadata"])["KeyManager"] != "AWS" {
+			t.Fatalf("default SSE did not persist: first=%q second=%q update=%#v key=%#v", firstARN, secondARN, updated, key)
 		}
 	})
 }

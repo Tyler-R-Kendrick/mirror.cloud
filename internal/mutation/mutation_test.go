@@ -16531,6 +16531,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFirehoseMetadataExtraction",
 		},
 		{
+			name: "identity-keep-localhost-region",
+			file: filepath.Join("internal", "identity", "identity.go"),
+			old:  "if region == \"localhost\" {\n\t\tregion = defaultRegion\n\t}",
+			new:  "if false {\n\t\tregion = defaultRegion\n\t}",
+			pkg:  "./internal/identity",
+			run:  "TestLocalhostRegionCharacterization",
+		},
+		{
 			name: "identity-expiry-after-to-before",
 			file: filepath.Join("internal", "identity", "identity.go"),
 			old:  "!now.UTC().Before(expires)",

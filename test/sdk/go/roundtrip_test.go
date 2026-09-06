@@ -3210,6 +3210,31 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil || describedClass.Table == nil || describedClass.Table.TableClassSummary == nil || describedClass.Table.TableClassSummary.TableClass != ddbtypes.TableClassStandardInfrequentAccess {
 		t.Fatalf("describe table class: %#v %v", describedClass, err)
 	}
+	if _, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("InvalidBilling"), BillingMode: ddbtypes.BillingModePayPerRequest, KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: ddbtypes.KeyTypeHash}}, AttributeDefinitions: []ddbtypes.AttributeDefinition{{AttributeName: aws.String("id"), AttributeType: ddbtypes.ScalarAttributeTypeS}}, ProvisionedThroughput: &ddbtypes.ProvisionedThroughput{ReadCapacityUnits: aws.Int64(5), WriteCapacityUnits: aws.Int64(5)}}); err == nil || !strings.Contains(err.Error(), "Neither ReadCapacityUnits nor WriteCapacityUnits can be specified when BillingMode is PAY_PER_REQUEST") {
+		t.Fatalf("pay-per-request throughput validation: %v", err)
+	}
+	createdEncrypted, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("EncryptedMetadata"), BillingMode: ddbtypes.BillingModePayPerRequest, KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: ddbtypes.KeyTypeHash}}, AttributeDefinitions: []ddbtypes.AttributeDefinition{{AttributeName: aws.String("id"), AttributeType: ddbtypes.ScalarAttributeTypeS}}, SSESpecification: &ddbtypes.SSESpecification{Enabled: aws.Bool(true), SSEType: ddbtypes.SSETypeKms, KMSMasterKeyId: aws.String("key-id")}})
+	if err != nil || createdEncrypted.TableDescription == nil || createdEncrypted.TableDescription.SSEDescription == nil || createdEncrypted.TableDescription.SSEDescription.Status != ddbtypes.SSEStatusEnabled || aws.ToString(createdEncrypted.TableDescription.SSEDescription.KMSMasterKeyArn) != "arn:aws:kms:us-east-1:000000000000:key/key-id" {
+		t.Fatalf("explicit table encryption: %#v %v", createdEncrypted, err)
+	}
+	createdMetadata, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{
+		TableName: aws.String("MetadataSDK"), BillingMode: ddbtypes.BillingModePayPerRequest,
+		KeySchema:              []ddbtypes.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: ddbtypes.KeyTypeHash}},
+		AttributeDefinitions:   []ddbtypes.AttributeDefinition{{AttributeName: aws.String("id"), AttributeType: ddbtypes.ScalarAttributeTypeS}, {AttributeName: aws.String("value"), AttributeType: ddbtypes.ScalarAttributeTypeS}},
+		GlobalSecondaryIndexes: []ddbtypes.GlobalSecondaryIndex{{IndexName: aws.String("by-value"), KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("value"), KeyType: ddbtypes.KeyTypeHash}}, Projection: &ddbtypes.Projection{ProjectionType: ddbtypes.ProjectionTypeAll}}},
+		WarmThroughput:         &ddbtypes.WarmThroughput{ReadUnitsPerSecond: aws.Int64(1000), WriteUnitsPerSecond: aws.Int64(1200)},
+	})
+	if err != nil || createdMetadata.TableDescription == nil || createdMetadata.TableDescription.BillingModeSummary == nil || createdMetadata.TableDescription.BillingModeSummary.BillingMode != ddbtypes.BillingModePayPerRequest || createdMetadata.TableDescription.ProvisionedThroughput == nil || aws.ToInt64(createdMetadata.TableDescription.ProvisionedThroughput.ReadCapacityUnits) != 0 || len(createdMetadata.TableDescription.GlobalSecondaryIndexes) != 1 || createdMetadata.TableDescription.GlobalSecondaryIndexes[0].ProvisionedThroughput == nil || aws.ToInt64(createdMetadata.TableDescription.GlobalSecondaryIndexes[0].ProvisionedThroughput.WriteCapacityUnits) != 0 || createdMetadata.TableDescription.WarmThroughput == nil || createdMetadata.TableDescription.WarmThroughput.Status != ddbtypes.TableStatusUpdating {
+		t.Fatalf("on-demand table metadata: %#v %v", createdMetadata, err)
+	}
+	describedMetadata, err := ddb.DescribeTable(context.Background(), &dynamodb.DescribeTableInput{TableName: aws.String("MetadataSDK")})
+	if err != nil || describedMetadata.Table == nil || describedMetadata.Table.WarmThroughput == nil || describedMetadata.Table.WarmThroughput.Status != ddbtypes.TableStatusActive || len(describedMetadata.Table.GlobalSecondaryIndexes) != 1 || describedMetadata.Table.GlobalSecondaryIndexes[0].IndexStatus != ddbtypes.IndexStatusActive {
+		t.Fatalf("described table metadata: %#v %v", describedMetadata, err)
+	}
+	createdProvisioned, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("ProvisionedMetadataSDK"), KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("id"), KeyType: ddbtypes.KeyTypeHash}}, AttributeDefinitions: []ddbtypes.AttributeDefinition{{AttributeName: aws.String("id"), AttributeType: ddbtypes.ScalarAttributeTypeS}, {AttributeName: aws.String("value"), AttributeType: ddbtypes.ScalarAttributeTypeS}}, ProvisionedThroughput: &ddbtypes.ProvisionedThroughput{ReadCapacityUnits: aws.Int64(5), WriteCapacityUnits: aws.Int64(5)}, GlobalSecondaryIndexes: []ddbtypes.GlobalSecondaryIndex{{IndexName: aws.String("by-value"), KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("value"), KeyType: ddbtypes.KeyTypeHash}}, Projection: &ddbtypes.Projection{ProjectionType: ddbtypes.ProjectionTypeAll}, ProvisionedThroughput: &ddbtypes.ProvisionedThroughput{ReadCapacityUnits: aws.Int64(1), WriteCapacityUnits: aws.Int64(1)}}}})
+	if err != nil || createdProvisioned.TableDescription == nil || aws.ToInt64(createdProvisioned.TableDescription.ProvisionedThroughput.ReadCapacityUnits) != 5 || len(createdProvisioned.TableDescription.GlobalSecondaryIndexes) != 1 || aws.ToInt64(createdProvisioned.TableDescription.GlobalSecondaryIndexes[0].ProvisionedThroughput.ReadCapacityUnits) != 1 {
+		t.Fatalf("provisioned table metadata: %#v %v", createdProvisioned, err)
+	}
 	if _, err := ddb.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("PartiQL"), BillingMode: ddbtypes.BillingModePayPerRequest, KeySchema: []ddbtypes.KeySchemaElement{{AttributeName: aws.String("Username"), KeyType: ddbtypes.KeyTypeHash}}, AttributeDefinitions: []ddbtypes.AttributeDefinition{{AttributeName: aws.String("Username"), AttributeType: ddbtypes.ScalarAttributeTypeS}}}); err != nil {
 		t.Fatalf("create PartiQL table: %v", err)
 	}

@@ -295,7 +295,8 @@ func TestReceiveMessageWaitTimeCharacterization(t *testing.T) {
 }
 
 func TestReceiveMessageTimestampAttributes(t *testing.T) {
-	p := New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -305,6 +306,9 @@ func TestReceiveMessageTimestampAttributes(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := call("SendMessage", map[string]any{"QueueName": "timestamps", "MessageBody": "message"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := deps.Clock.Advance(time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 	response, err := call("ReceiveMessage", map[string]any{"QueueName": "timestamps", "MessageSystemAttributeNames": []any{"All"}})
@@ -316,13 +320,14 @@ func TestReceiveMessageTimestampAttributes(t *testing.T) {
 		t.Fatalf("receive %#v", response.Output)
 	}
 	attributes, _ := messages[0].(map[string]any)["Attributes"].(map[string]any)
-	if attributes["SentTimestamp"] != "0" || attributes["ApproximateFirstReceiveTimestamp"] != "0" || attributes["ApproximateReceiveCount"] != "1" {
+	if attributes["SentTimestamp"] != "0" || attributes["ApproximateFirstReceiveTimestamp"] != "1" || attributes["ApproximateReceiveCount"] != "1" {
 		t.Fatalf("timestamp attributes %#v", attributes)
 	}
 }
 
 func TestReceiveMessageTimestampsCharacterization(t *testing.T) {
-	p := New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -332,6 +337,9 @@ func TestReceiveMessageTimestampsCharacterization(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := call("SendMessage", map[string]any{"QueueName": "timestamps", "MessageBody": "message"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := deps.Clock.Advance(time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 	response, err := call("ReceiveMessage", map[string]any{"QueueName": "timestamps", "AttributeNames": []any{"All"}})

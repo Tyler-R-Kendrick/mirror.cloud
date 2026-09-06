@@ -25,6 +25,7 @@ test-snapshot:
 	$(GO) test ./internal/catalog ./internal/edge ./internal/identity ./internal/mock ./internal/proto/aws/restxml ./internal/runtime ./internal/specdiff -count=1
 	$(GO) test ./internal/services/aws/s3 -run 'Characterization$$|TestNamedBucketConfigurations$$|TestUploadPartCopyConditionsAndRange$$' -count=1
 	$(GO) test ./internal/services/aws/dynamodb -run 'Characterization$$' -count=1
+	$(GO) test ./internal/services/aws/sqs -run 'Characterization$$' -count=1
 	$(GO) test ./internal/services/aws/states -run 'Characterization$$' -count=1
 
 test-chaos:
@@ -34,7 +35,7 @@ test-bdd:
 	$(GO) test ./test/behavior/... ./test/terraform -count=1
 
 test-fuzz-seeds:
-	$(GO) test ./internal/edge ./internal/identity ./internal/services/aws/dynamodb ./internal/services/aws/dynamodb/expr ./internal/services/aws/firehose ./internal/services/aws/s3 ./internal/services/aws/states ./internal/services/gcp/gcs -count=1
+	$(GO) test ./internal/edge ./internal/identity ./internal/services/aws/dynamodb ./internal/services/aws/dynamodb/expr ./internal/services/aws/firehose ./internal/services/aws/s3 ./internal/services/aws/sqs ./internal/services/aws/states ./internal/services/gcp/gcs -count=1
 
 test-fuzz:
 	$(GO) test ./internal/edge -run '^$$' -fuzz '^FuzzDeframeAWSChunked$$' -fuzztime=10000x -parallel=4

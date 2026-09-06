@@ -595,9 +595,9 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 |---|---:|
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
-| SQS statement coverage | 58.2% |
-| LocalStack SQS test functions explicitly traced | 11 / 222 (5.0%) |
-| LocalStack SQS test functions not yet traced | 211 / 222 (95.0%) |
+| SQS statement coverage | 59.6% |
+| LocalStack SQS test functions explicitly traced | 12 / 222 (5.4%) |
+| LocalStack SQS test functions not yet traced | 210 / 222 (94.6%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -614,3 +614,4 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_send_receive_max_number_of_messages` | ReceiveMessage rejects MaxNumberOfMessages outside 1-10 instead of clamping it; value 11 returns HTTP 400, code `InvalidParameterValue`, and the exact AWS reason across atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation tests | Mapped; full race-clean |
 | `test_sqs.py::TestSqsProvider::test_receive_empty_queue` | Empty short and one-second long polls return HTTP 200 while omitting `Messages`; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation tests pin the AWS response shape | Mapped; full race-clean |
 | `test_sqs.py::TestSqsProvider::test_send_receive_wait_time_seconds` | ReceiveMessage rejects WaitTimeSeconds below 0 or above 20 with the exact AWS `InvalidParameterValue` faults, while omitted and explicit zero perform immediate short polls; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation tests pin both bounds and valid behavior | Mapped; full race-clean |
+| `test_sqs.py::TestSqsProvider::test_receive_message_attributes_timestamp_types` | ReceiveMessage returns decimal-millisecond `SentTimestamp` and `ApproximateFirstReceiveTimestamp` values when system attributes are requested through legacy or modern SDK field names, and omits unrequested attributes; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation tests pin capture, formatting, and filtering | Mapped; full race-clean |

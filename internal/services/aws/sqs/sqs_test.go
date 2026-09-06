@@ -2,11 +2,13 @@ package sqs
 
 import (
 	"context"
+	"crypto/md5"
 	"encoding/base64"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
@@ -615,6 +617,38 @@ func FuzzQueueDeletionWindow(f *testing.F) {
 		response, err := call("GetQueueAttributes", map[string]any{"QueueName": "deleted", "AttributeNames": []any{"All"}})
 		if err != nil || response.Output["Attributes"].(map[string]any)["DelaySeconds"] != nil {
 			t.Fatalf("%ds stale attributes %#v, %v", seconds, response, err)
+		}
+	})
+}
+
+func FuzzSendReceiveMessageDigest(f *testing.F) {
+	f.Add([]byte("message"))
+	f.Add([]byte{0, 1, 2, 255})
+	f.Fuzz(func(t *testing.T, body []byte) {
+		if len(body) > 1024 || !utf8.Valid(body) {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		call := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		if _, err := call("CreateQueue", map[string]any{"QueueName": "roundtrip"}); err != nil {
+			t.Fatal(err)
+		}
+		sent, err := call("SendMessage", map[string]any{"QueueName": "roundtrip", "MessageBody": string(body)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		received, err := call("ReceiveMessage", map[string]any{"QueueName": "roundtrip", "VisibilityTimeout": 0})
+		if err != nil {
+			t.Fatal(err)
+		}
+		message := received.Output["Messages"].([]any)[0].(map[string]any)
+		want := fmt.Sprintf("%x", md5.Sum(body))
+		if message["Body"] != string(body) || message["MD5OfBody"] != want || sent.Output["MD5OfMessageBody"] != want {
+			t.Fatalf("sent=%#v received=%#v want=%s", sent.Output, message, want)
 		}
 	})
 }

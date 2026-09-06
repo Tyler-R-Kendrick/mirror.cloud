@@ -261,6 +261,45 @@ func TestDynamoDBKinesisDestination(t *testing.T) {
 	}
 }
 
+func TestDynamoDBKinesisDestinationCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	kinesisPack := kinesis.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	must := func(operation string, input map[string]any) map[string]any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+	kinesisMust := func(operation string, input map[string]any) map[string]any {
+		response, err := kinesisPack.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+	kinesisMust("CreateStream", map[string]any{"StreamName": "s"})
+	streamARN := "arn:aws:kinesis:us-east-1:000000000000:stream/s"
+	must("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
+	enabled := must("EnableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN})
+	active := must("DescribeKinesisStreamingDestination", map[string]any{"TableName": "T"})
+	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "one"}, "data": map[string]any{"B": "kA=="}}})
+	iterator := kinesisMust("GetShardIterator", map[string]any{"StreamName": "s", "ShardIteratorType": "TRIM_HORIZON"})
+	records := kinesisMust("GetRecords", map[string]any{"ShardIterator": iterator["ShardIterator"]})
+	encoded := str(asMap(asSlice(records["Records"])[0])["Data"])
+	payload, _ := base64.StdEncoding.DecodeString(encoded)
+	var record map[string]any
+	_ = json.Unmarshal(payload, &record)
+	configuration := map[string]any{"ApproximateCreationDateTimePrecision": "MICROSECOND"}
+	updated := must("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN, "UpdateKinesisStreamingConfiguration": configuration})
+	disabled := must("DisableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN})
+	inactive := must("DescribeKinesisStreamingDestination", map[string]any{"TableName": "T"})
+	golden.AssertJSON(t, map[string]any{"enabled": enabled, "active": active, "record": record, "updated": updated, "disabled": disabled, "inactive": inactive})
+}
+
 func TestBootedServerDynamoDBStreams(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []string{"aws.dynamodb"}

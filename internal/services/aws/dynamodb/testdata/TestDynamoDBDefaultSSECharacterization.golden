@@ -1,0 +1,46 @@
+{
+  "created": {
+    "KMSMasterKeyArn": "arn:aws:kms:us-east-1:000000000000:key/7c589129",
+    "SSEType": "KMS",
+    "Status": "ENABLED"
+  },
+  "described": {
+    "KMSMasterKeyArn": "arn:aws:kms:us-east-1:000000000000:key/7c589129",
+    "SSEType": "KMS",
+    "Status": "ENABLED"
+  },
+  "disabled": {
+    "KMSMasterKeyArn": "arn:aws:kms:us-east-1:000000000000:key/7c589129",
+    "SSEType": "KMS",
+    "Status": "UPDATING"
+  },
+  "key": {
+    "AWSAccountId": "000000000000",
+    "Arn": "arn:aws:kms:us-east-1:000000000000:key/7c589129",
+    "CreationDate": 0,
+    "CurrentKeyMaterialId": "278ea77c-b5a2-44b8-bfc4-72334d5807c3",
+    "CustomerMasterKeySpec": "SYMMETRIC_DEFAULT",
+    "Description": "Default key that protects my DynamoDB data when no other key is defined",
+    "Enabled": true,
+    "EncryptionAlgorithms": [
+      "SYMMETRIC_DEFAULT"
+    ],
+    "KeyId": "7c589129",
+    "KeyManager": "AWS",
+    "KeySpec": "SYMMETRIC_DEFAULT",
+    "KeyState": "Enabled",
+    "KeyUsage": "ENCRYPT_DECRYPT",
+    "MultiRegion": false,
+    "Origin": "AWS_KMS"
+  },
+  "reused": {
+    "KMSMasterKeyArn": "arn:aws:kms:us-east-1:000000000000:key/7c589129",
+    "SSEType": "KMS",
+    "Status": "ENABLED"
+  },
+  "updated": {
+    "KMSMasterKeyArn": "arn:aws:kms:us-east-1:000000000000:key/7c589129",
+    "SSEType": "KMS",
+    "Status": "ENABLED"
+  }
+}

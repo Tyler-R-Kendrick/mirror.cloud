@@ -724,6 +724,38 @@ func TestDynamoDBTableMetadataCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"invalid": invalid, "encrypted": encrypted, "onDemand": onDemand, "described": described, "provisioned": provisioned})
 }
 
+func TestDynamoDBDefaultSSECharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	must := func(operation string, input map[string]any) map[string]any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+	created := must("CreateTable", map[string]any{"TableName": "Encrypted", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}, "SSESpecification": map[string]any{"Enabled": true}})
+	sse := asMap(asMap(created["TableDescription"])["SSEDescription"])
+	key, err := kms.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeKey", Input: map[string]any{"KeyId": sse["KMSMasterKeyArn"]}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := must("CreateTable", map[string]any{"TableName": "AlsoEncrypted", "SSESpecification": map[string]any{"Enabled": true}})
+	disabled := must("UpdateTable", map[string]any{"TableName": "Encrypted", "SSESpecification": map[string]any{"Enabled": false}})
+	updated := must("UpdateTable", map[string]any{"TableName": "Encrypted", "BillingMode": "PAY_PER_REQUEST"})
+	described := must("DescribeTable", map[string]any{"TableName": "Encrypted"})
+	golden.AssertJSON(t, map[string]any{
+		"created":   sse,
+		"key":       key.Output["KeyMetadata"],
+		"reused":    asMap(asMap(second["TableDescription"])["SSEDescription"]),
+		"disabled":  asMap(asMap(disabled["TableDescription"])["SSEDescription"]),
+		"updated":   asMap(asMap(updated["TableDescription"])["SSEDescription"]),
+		"described": asMap(asMap(described["Table"])["SSEDescription"]),
+	})
+}
+
 func TestDynamoDBTableClass(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

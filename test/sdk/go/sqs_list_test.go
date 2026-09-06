@@ -2,6 +2,7 @@ package sdk_test
 
 import (
 	"context"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -179,6 +180,44 @@ func TestAWSSDKSQSReceiveEmptyQueueContract(t *testing.T) {
 		response, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, MaxNumberOfMessages: 1, WaitTimeSeconds: wait})
 		if err != nil || response.Messages != nil {
 			t.Fatalf("wait=%d response %#v error %v", wait, response, err)
+		}
+	}
+}
+
+func TestAWSSDKSQSReceiveWaitTimeContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-wait-time")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("message")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, value := range []int32{-1, 21} {
+		_, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, WaitTimeSeconds: value})
+		want := fmt.Sprintf("Value %d for parameter WaitTimeSeconds is invalid. Reason: Must be >= 0 and <= 20, if provided.", value)
+		if err == nil || !strings.Contains(err.Error(), "InvalidParameterValue") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("wait=%d error %v", value, err)
+		}
+	}
+	for range 2 {
+		response, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, WaitTimeSeconds: 0})
+		if err != nil || len(response.Messages) != 1 || aws.ToString(response.Messages[0].Body) != "message" {
+			t.Fatalf("short poll %#v error %v", response, err)
 		}
 	}
 }

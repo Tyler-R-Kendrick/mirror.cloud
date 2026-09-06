@@ -263,6 +263,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		total := 0
 		for _, entry := range entries {
 			message := asMap(entry)
+			if !validBatchEntryID(str(message["Id"])) {
+				return nil, &spi.Fault{Code: "AWS.SimpleQueueService.InvalidBatchEntryId", Message: "A batch entry id can only contain alphanumeric characters, hyphens and underscores. It can be at most 80 letters long.", HTTPStatus: 400, Fault: "client"}
+			}
 			total += messageSize(str(message["MessageBody"]), message["MessageAttributes"])
 		}
 		if total > 1<<20 {
@@ -461,6 +464,18 @@ func messageSize(body string, attrs any) int {
 		}
 	}
 	return size
+}
+
+func validBatchEntryID(value string) bool {
+	if len(value) == 0 || len(value) > 80 {
+		return false
+	}
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, error) {

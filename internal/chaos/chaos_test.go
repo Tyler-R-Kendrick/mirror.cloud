@@ -5852,6 +5852,34 @@ func TestConcurrentSQSFIFODeduplicationValidationIsStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSInvalidBatchEntryIDsAreStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-invalid-batch-id"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "chaos-invalid-batch-id", "Entries": []any{map[string]any{"Id": "message:invalid", "MessageBody": "message"}}}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "AWS.SimpleQueueService.InvalidBatchEntryId" {
+				errs <- fmt.Errorf("invalid batch id error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSFIFOZeroDelayUsesQueueDelay(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)

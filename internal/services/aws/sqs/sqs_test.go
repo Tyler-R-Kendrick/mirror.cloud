@@ -611,6 +611,21 @@ func TestSendMessageBatchCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"batch": batch.Output, "first": first.Output, "second": second.Output, "empty": empty.Output})
 }
 
+func TestInvalidBatchEntryIDCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "invalid-batch-id"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "invalid-batch-id", "Entries": []any{map[string]any{"Id": "message:invalid", "MessageBody": "message"}}}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("invalid batch id error %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
+}
+
 func TestSendBatchReceiveMultipleCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -1115,6 +1130,34 @@ func FuzzCreateQueueTags(f *testing.F) {
 		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListQueueTags", Input: map[string]any{"QueueName": "create-tags"}})
 		if err != nil || str(asMap(response.Output["Tags"])[key]) != value {
 			t.Fatalf("tags %#v error %v", response.Output, err)
+		}
+	})
+}
+
+func FuzzInvalidBatchEntryID(f *testing.F) {
+	f.Add("message-1")
+	f.Add("message:invalid")
+	f.Add(strings.Repeat("a", 81))
+	f.Fuzz(func(t *testing.T, entryID string) {
+		if len(entryID) > 256 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-batch-id"}}); err != nil {
+			t.Fatal(err)
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "fuzz-batch-id", "Entries": []any{map[string]any{"Id": entryID, "MessageBody": "message"}}}})
+		if validBatchEntryID(entryID) {
+			if err != nil || len(response.Output["Successful"].([]any)) != 1 {
+				t.Fatalf("valid id %q response %#v error %v", entryID, response.Output, err)
+			}
+			return
+		}
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "AWS.SimpleQueueService.InvalidBatchEntryId" {
+			t.Fatalf("invalid id %q error %#v", entryID, err)
 		}
 	})
 }

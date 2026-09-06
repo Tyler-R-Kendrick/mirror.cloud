@@ -95,6 +95,30 @@ func TestAWSSDKSQSSendMessageBatchContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSInvalidBatchEntryIDContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-invalid-batch-id")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.SendMessageBatch(context.Background(), &sqs.SendMessageBatchInput{QueueUrl: created.QueueUrl, Entries: []types.SendMessageBatchRequestEntry{{Id: aws.String("message:invalid"), MessageBody: aws.String("message")}}})
+	if err == nil || !strings.Contains(err.Error(), "InvalidBatchEntryId") || !strings.Contains(err.Error(), "can only contain alphanumeric characters") {
+		t.Fatalf("invalid batch id error %v", err)
+	}
+}
+
 func TestAWSSDKSQSEmptyMessageBatchContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

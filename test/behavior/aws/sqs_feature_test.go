@@ -418,6 +418,15 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("conflict %d %s", status, body)
 		}
 	})
+	t.Run("Given a batch entry with punctuation When sending Then the invalid batch id fault is returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-invalid-batch-id"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("SendMessageBatch", `{"QueueUrl":"http://queue/000000000000/bdd-invalid-batch-id","Entries":[{"Id":"message:invalid","MessageBody":"message"}]}`)
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidBatchEntryId")) || !bytes.Contains(body, []byte("can only contain alphanumeric characters, hyphens and underscores")) {
+			t.Fatalf("invalid batch id %d %s", status, body)
+		}
+	})
 	t.Run("Given a FIFO queue When sending invalid deduplication ids Then the validation fault is returned", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-dedup-invalid.fifo","Attributes":{"ContentBasedDeduplication":"false"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

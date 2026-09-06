@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iam"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
@@ -174,7 +175,8 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 	})
 
 	t.Run("dynamodb", func(t *testing.T) {
-		p := dynamodb.New(spitest.Deps(t))
+		deps := spitest.Deps(t)
+		p := dynamodb.New(deps)
 		seen := map[string]bool{}
 		inv := func(op string, in map[string]any) *spi.Response {
 			return call(t, p, ctx, id, seen, op, in, nil, "")
@@ -210,15 +212,20 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		bArn := str(asMap(bak.Output["BackupDetails"])["BackupArn"])
 		inv("RestoreTableFromBackup", map[string]any{"BackupArn": bArn, "TargetTableName": "Tr"})
 		inv("DeleteBackup", map[string]any{"BackupArn": bArn})
-		inv("EnableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": "arn:k"})
-		inv("DisableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": "arn:k"})
+		if _, err := kinesis.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStream", Input: map[string]any{"StreamName": "s"}}); err != nil {
+			t.Fatal(err)
+		}
+		streamARN := "arn:aws:kinesis:us-east-1:000000000000:stream/s"
+		inv("EnableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN})
+		inv("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN, "UpdateKinesisStreamingConfiguration": map[string]any{"ApproximateCreationDateTimePrecision": "MICROSECOND"}})
+		inv("DisableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN})
 		inv("DeleteItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "1"}}})
 		inv("CreateTable", map[string]any{"TableName": "gone"})
 		inv("DeleteTable", map[string]any{"TableName": "gone"})
 		fat := map[string]any{"TableName": "T", "GlobalTableName": "GT", "ExportArn": "arn:e", "ImportArn": "arn:i",
 			"Statement": "SELECT * FROM T", "ReplicationGroup": []any{map[string]any{"RegionName": "us-east-1"}},
 			"ContributorInsightsAction": "ENABLE", "S3Bucket": "bucket", "SourceTableName": "T", "TargetTableName": "Tpitr",
-			"TableCreationParameters": map[string]any{"TableName": "Timp"}, "StreamArn": "arn:k"}
+			"TableCreationParameters": map[string]any{"TableName": "Timp"}, "StreamArn": streamARN}
 		for _, op := range p.Operations() {
 			if isWriteOp(op) && !seen[op] {
 				inv(op, fat)

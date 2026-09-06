@@ -1,0 +1,17 @@
+{
+  "empty": {
+    "Code": "InvalidParameterValue",
+    "HTTPStatus": 400,
+    "Message": "Value  for parameter MessageGroupId is invalid. Reason: MessageGroupId can only include alphanumeric and punctuation characters. 1 to 128 in length."
+  },
+  "spaces": {
+    "Code": "InvalidParameterValue",
+    "HTTPStatus": 400,
+    "Message": "Value group 123 for parameter MessageGroupId is invalid. Reason: MessageGroupId can only include alphanumeric and punctuation characters. 1 to 128 in length."
+  },
+  "tooLong": {
+    "Code": "InvalidParameterValue",
+    "HTTPStatus": 400,
+    "Message": "Value aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa for parameter MessageGroupId is invalid. Reason: MessageGroupId can only include alphanumeric and punctuation characters. 1 to 128 in length."
+  }
+}

@@ -224,11 +224,15 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		var failed []any
 		for _, e := range entries {
 			m := asMap(e)
-			sub := &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Input: map[string]any{
+			input := map[string]any{
 				"QueueUrl": req.Input["QueueUrl"], "QueueName": queueName(req), "MessageBody": str(m["MessageBody"]),
-				"MessageGroupId": m["MessageGroupId"], "MessageDeduplicationId": m["MessageDeduplicationId"],
-				"MessageAttributes": m["MessageAttributes"], "DelaySeconds": m["DelaySeconds"],
-			}, Operation: "SendMessage"}
+				"MessageDeduplicationId": m["MessageDeduplicationId"],
+				"MessageAttributes":      m["MessageAttributes"], "DelaySeconds": m["DelaySeconds"],
+			}
+			if group, present := m["MessageGroupId"]; present && group != nil {
+				input["MessageGroupId"] = group
+			}
+			sub := &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Input: input, Operation: "SendMessage"}
 			resp, err := p.Invoke(ctx, sub)
 			if err != nil {
 				fault, _ := err.(*spi.Fault)
@@ -327,7 +331,13 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	now := p.deps.Clock.Now()
 	group := str(req.Input["MessageGroupId"])
 	dedup := str(req.Input["MessageDeduplicationId"])
-	if strings.HasSuffix(name, ".fifo") && group == "" {
+	fifo := strings.HasSuffix(name, ".fifo")
+	if !fifo {
+		if _, provided := req.Input["MessageGroupId"]; provided && !validMessageGroupID(group) {
+			return nil, &spi.Fault{Code: "InvalidParameterValue", Message: fmt.Sprintf("Value %s for parameter MessageGroupId is invalid. Reason: MessageGroupId can only include alphanumeric and punctuation characters. 1 to 128 in length.", group), HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	if fifo && group == "" {
 		return nil, &spi.Fault{Code: "MissingParameter", Message: "MessageGroupId", HTTPStatus: 400, Fault: "client"}
 	}
 	if dedup == "" && str(attrs["ContentBasedDeduplication"]) == "true" {
@@ -658,6 +668,19 @@ func queueName(req *spi.Request) string {
 }
 
 func str(v any) string { s, _ := v.(string); return s }
+
+func validMessageGroupID(value string) bool {
+	if len(value) == 0 || len(value) > 128 {
+		return false
+	}
+	const punctuation = `!"#$%&'()*+,-./:;<=>?@[\\]^_` + "`" + `{|}~`
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && !strings.ContainsRune(punctuation, r) {
+			return false
+		}
+	}
+	return true
+}
 
 func filterMsgAttrs(attrs, want any) any {
 	m := asMap(attrs)

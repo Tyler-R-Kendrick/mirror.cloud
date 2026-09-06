@@ -18101,7 +18101,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sqs-disable-fifo-group-validation",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
-			old:  `strings.HasSuffix(name, ".fifo") && group == ""`,
+			old:  `fifo && group == ""`,
 			new:  `false && group == ""`,
 			pkg:  "./internal/services/aws/sqs",
 			run:  "TestSendValidationAndDelay",

@@ -887,6 +887,28 @@ func TestSendValidationAndDelay(t *testing.T) {
 	}
 }
 
+func TestStandardMessageGroupIDCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(group string) map[string]any {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{
+			"QueueName": "standard", "MessageBody": "message", "MessageGroupId": group,
+		}})
+		fault, ok := err.(*spi.Fault)
+		if !ok {
+			t.Fatalf("group %q error %#v", group, err)
+		}
+		return map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "standard"}}); err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"empty": call(""), "tooLong": call(strings.Repeat("a", 129)), "spaces": call("group 123"),
+	})
+}
+
 func faultCode(err error) string {
 	fault, _ := err.(*spi.Fault)
 	if fault == nil {
@@ -1142,6 +1164,36 @@ func FuzzSendReceiveMessageDigest(f *testing.F) {
 		first, firstErr := strconv.ParseInt(attributes["ApproximateFirstReceiveTimestamp"].(string), 10, 64)
 		if message["Body"] != string(body) || message["MD5OfBody"] != want || sent.Output["MD5OfMessageBody"] != want || sentErr != nil || firstErr != nil || first < sentAt {
 			t.Fatalf("sent=%#v received=%#v want=%s", sent.Output, message, want)
+		}
+	})
+}
+
+func FuzzStandardMessageGroupID(f *testing.F) {
+	f.Add("group")
+	f.Add("")
+	f.Add("group 123")
+	f.Add(strings.Repeat("a", 128))
+	f.Add(strings.Repeat("a", 129))
+	f.Fuzz(func(t *testing.T, group string) {
+		if len(group) > 256 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "group"}}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "group", "MessageBody": "message", "MessageGroupId": group}})
+		if validMessageGroupID(group) {
+			if err != nil {
+				t.Fatalf("valid group %q rejected: %v", group, err)
+			}
+			return
+		}
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "InvalidParameterValue" {
+			t.Fatalf("invalid group %q error %#v", group, err)
 		}
 	})
 }

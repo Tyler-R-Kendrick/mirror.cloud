@@ -328,4 +328,16 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("updated batch %d %s", status, body)
 		}
 	})
+	t.Run("Given a standard queue When sending an invalid message group Then the request is rejected", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-standard-group"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		for _, group := range []string{"", strings.Repeat("a", 129), "group 123"} {
+			payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-standard-group", "MessageBody": "message", "MessageGroupId": group})
+			status, body := call("SendMessage", string(payload))
+			if status != http.StatusBadRequest || !bytes.Contains(body, []byte(`"__type":"InvalidParameterValue"`)) || !bytes.Contains(body, []byte("MessageGroupId can only include alphanumeric and punctuation characters")) {
+				t.Fatalf("group %q response %d %s", group, status, body)
+			}
+		}
+	})
 }

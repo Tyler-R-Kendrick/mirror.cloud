@@ -836,6 +836,40 @@ func TestConcurrentSQSBatchSizeLimitsRemainStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSStandardMessageGroupValidationIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "group"}}); err != nil {
+		t.Fatal(err)
+	}
+	values := []string{"", strings.Repeat("a", 129), "group 123"}
+	errs := make(chan error, len(values)*8)
+	var wg sync.WaitGroup
+	for range 8 {
+		for _, group := range values {
+			wg.Add(1)
+			go func(group string) {
+				defer wg.Done()
+				_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "group", "MessageBody": "message", "MessageGroupId": group}})
+				fault, ok := err.(*spi.Fault)
+				if !ok || fault.Code != "InvalidParameterValue" || !strings.Contains(fault.Message, "MessageGroupId can only include alphanumeric and punctuation characters") {
+					errs <- fmt.Errorf("group %q error %#v", group, err)
+					return
+				}
+				errs <- nil
+			}(group)
+		}
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestConcurrentDynamoDBTransactionTokenChoosesOnePayload(t *testing.T) {
 	p := dynamodb.New(spitest.Deps(t))
 	ctx := context.Background()

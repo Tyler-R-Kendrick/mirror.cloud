@@ -181,23 +181,25 @@ func TestQueueCannotBeRecreatedUntilDeleteWindowExpires(t *testing.T) {
 	p := New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	name := "deleted.fifo"
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
 		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
 	}
-	created, err := call("CreateQueue", map[string]any{"QueueName": "deleted", "Attributes": map[string]any{"DelaySeconds": "5"}})
+	created, err := call("CreateQueue", map[string]any{"QueueName": name, "Attributes": map[string]any{"DelaySeconds": "5"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := call("TagQueue", map[string]any{"QueueName": "deleted", "Tags": map[string]any{"old": "tag"}}); err != nil {
+	if _, err := call("TagQueue", map[string]any{"QueueName": name, "Tags": map[string]any{"old": "tag"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := call("SendMessage", map[string]any{"QueueName": "deleted", "MessageBody": "old"}); err != nil {
+	firstSent, err := call("SendMessage", map[string]any{"QueueName": name, "MessageBody": "old", "MessageGroupId": "group", "MessageDeduplicationId": "dedup"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := call("DeleteQueue", map[string]any{"QueueName": "deleted"}); err != nil {
+	if _, err := call("DeleteQueue", map[string]any{"QueueName": name}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = call("CreateQueue", map[string]any{"QueueName": "deleted"})
+	_, err = call("CreateQueue", map[string]any{"QueueName": name})
 	fault, ok := err.(*spi.Fault)
 	if !ok || fault.Code != "AWS.SimpleQueueService.QueueDeletedRecently" || fault.Message != "You must wait 60 seconds after deleting a queue before you can create another with the same name." {
 		t.Fatalf("recently deleted fault %#v", err)
@@ -205,17 +207,19 @@ func TestQueueCannotBeRecreatedUntilDeleteWindowExpires(t *testing.T) {
 	if err := clk.Advance(time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	recreated, err := call("CreateQueue", map[string]any{"QueueName": "deleted"})
+	recreated, err := call("CreateQueue", map[string]any{"QueueName": name})
 	if err != nil || recreated.Output["QueueUrl"] != created.Output["QueueUrl"] {
 		t.Fatalf("recreate %#v, %v", recreated, err)
 	}
-	attrs, attrErr := call("GetQueueAttributes", map[string]any{"QueueName": "deleted", "AttributeNames": []any{"All"}})
-	tags, tagErr := call("ListQueueTags", map[string]any{"QueueName": "deleted"})
-	messages, receiveErr := call("ReceiveMessage", map[string]any{"QueueName": "deleted"})
+	secondSent, sendErr := call("SendMessage", map[string]any{"QueueName": name, "MessageBody": "old", "MessageGroupId": "group", "MessageDeduplicationId": "dedup"})
+	attrs, attrErr := call("GetQueueAttributes", map[string]any{"QueueName": name, "AttributeNames": []any{"All"}})
+	tags, tagErr := call("ListQueueTags", map[string]any{"QueueName": name})
+	messages, receiveErr := call("ReceiveMessage", map[string]any{"QueueName": name})
 	if attrErr != nil || tagErr != nil || receiveErr != nil {
 		t.Fatalf("recreated queue reads: %v, %v, %v", attrErr, tagErr, receiveErr)
 	}
-	if attrs.Output["Attributes"].(map[string]any)["DelaySeconds"] != nil || len(tags.Output["Tags"].(map[string]any)) != 0 || len(messages.Output["Messages"].([]any)) != 0 {
+	if sendErr != nil || secondSent.Output["MessageId"] == firstSent.Output["MessageId"] || attrs.Output["Attributes"].(map[string]any)["DelaySeconds"] != nil ||
+		len(tags.Output["Tags"].(map[string]any)) != 0 || len(messages.Output["Messages"].([]any)) != 1 {
 		t.Fatalf("deleted state survived: attrs=%#v tags=%#v messages=%#v", attrs.Output, tags.Output, messages.Output)
 	}
 }

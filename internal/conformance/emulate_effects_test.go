@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iam"
@@ -137,7 +138,8 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 	})
 
 	t.Run("sqs", func(t *testing.T) {
-		p := sqs.New(spitest.Deps(t))
+		deps := spitest.Deps(t)
+		p := sqs.New(deps)
 		seen := map[string]bool{}
 		inv := func(op string, in map[string]any) *spi.Response {
 			return call(t, p, ctx, id, seen, op, in, nil, "")
@@ -160,6 +162,9 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv("UntagQueue", map[string]any{"QueueName": "q", "TagKeys": []any{"k"}})
 		inv("PurgeQueue", map[string]any{"QueueName": "q"})
 		inv("DeleteQueue", map[string]any{"QueueName": "q"})
+		if err := deps.Clock.Advance(time.Minute); err != nil {
+			t.Fatal(err)
+		}
 		inv("CreateQueue", map[string]any{"QueueName": "q"})
 		fat := map[string]any{
 			"QueueName": "q", "QueueUrl": "http://q", "TaskHandle": "t1",

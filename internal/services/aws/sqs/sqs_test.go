@@ -415,3 +415,46 @@ func FuzzListQueuesPagination(f *testing.F) {
 		}
 	})
 }
+
+func FuzzQueueMetadataAttributeSelection(f *testing.F) {
+	f.Add([]byte{0, 1, 2})
+	f.Add([]byte{4})
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		if len(raw) > 64 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "metadata"}}); err != nil {
+			t.Fatal(err)
+		}
+		choices := []string{"QueueArn", "CreatedTimestamp", "VisibilityTimeout", "missing", "All"}
+		names := make([]any, 0, len(raw))
+		want := map[string]bool{}
+		for _, value := range raw {
+			name := choices[int(value)%len(choices)]
+			names = append(names, name)
+			if name != "missing" && name != "All" {
+				want[name] = true
+			}
+			if name == "All" {
+				want = map[string]bool{"ApproximateNumberOfMessages": true, "QueueArn": true, "CreatedTimestamp": true, "VisibilityTimeout": true}
+				break
+			}
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "metadata", "AttributeNames": names}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		attrs := response.Output["Attributes"].(map[string]any)
+		if len(attrs) != len(want) {
+			t.Fatalf("attributes %#v want %#v", attrs, want)
+		}
+		for name := range attrs {
+			if !want[name] {
+				t.Fatalf("unrequested attribute %s in %#v", name, attrs)
+			}
+		}
+	})
+}

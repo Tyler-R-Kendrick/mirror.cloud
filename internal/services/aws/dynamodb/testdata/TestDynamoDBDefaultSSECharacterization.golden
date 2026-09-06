@@ -14,6 +14,7 @@
     "SSEType": "KMS",
     "Status": "UPDATING"
   },
+  "hasSSESpecification": false,
   "key": {
     "AWSAccountId": "000000000000",
     "Arn": "arn:aws:kms:us-east-1:000000000000:key/7c589129",

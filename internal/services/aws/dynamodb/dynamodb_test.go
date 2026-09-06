@@ -671,6 +671,13 @@ func TestDynamoDBTableMetadata(t *testing.T) {
 	if updatedSSE["Status"] != "ENABLED" || updatedSSE["KMSMasterKeyArn"] != keyARN {
 		t.Fatalf("unrelated update changed SSE %#v", updated)
 	}
+	describedDefault, err := call("DescribeTable", map[string]any{"TableName": "DefaultEncrypted"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := asMap(describedDefault.Output["Table"])["SSESpecification"]; ok {
+		t.Fatalf("describe leaked SSESpecification %#v", describedDefault)
+	}
 	created, err := call("CreateTable", map[string]any{
 		"TableName": "Metadata", "BillingMode": "PAY_PER_REQUEST",
 		"KeySchema":              []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}},
@@ -746,13 +753,16 @@ func TestDynamoDBDefaultSSECharacterization(t *testing.T) {
 	disabled := must("UpdateTable", map[string]any{"TableName": "Encrypted", "SSESpecification": map[string]any{"Enabled": false}})
 	updated := must("UpdateTable", map[string]any{"TableName": "Encrypted", "BillingMode": "PAY_PER_REQUEST"})
 	described := must("DescribeTable", map[string]any{"TableName": "Encrypted"})
+	describedTable := asMap(described["Table"])
+	_, hasSSESpecification := describedTable["SSESpecification"]
 	golden.AssertJSON(t, map[string]any{
-		"created":   sse,
-		"key":       key.Output["KeyMetadata"],
-		"reused":    asMap(asMap(second["TableDescription"])["SSEDescription"]),
-		"disabled":  asMap(asMap(disabled["TableDescription"])["SSEDescription"]),
-		"updated":   asMap(asMap(updated["TableDescription"])["SSEDescription"]),
-		"described": asMap(asMap(described["Table"])["SSEDescription"]),
+		"created":             sse,
+		"key":                 key.Output["KeyMetadata"],
+		"reused":              asMap(asMap(second["TableDescription"])["SSEDescription"]),
+		"disabled":            asMap(asMap(disabled["TableDescription"])["SSEDescription"]),
+		"updated":             asMap(asMap(updated["TableDescription"])["SSEDescription"]),
+		"described":           asMap(describedTable["SSEDescription"]),
+		"hasSSESpecification": hasSSESpecification,
 	})
 }
 

@@ -408,6 +408,30 @@ func TestMessagesRemainQueueScopedCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"queue-1": empty.Output, "queue-0": received.Output})
 }
 
+func TestEncodedMessageContentRoundTrips(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "encoded"}); err != nil {
+		t.Fatal(err)
+	}
+	want := `"&quot;&quot;` + "\r"
+	if _, err := call("SendMessage", map[string]any{"QueueName": "encoded", "MessageBody": want}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := call("ReceiveMessage", map[string]any{"QueueName": "encoded"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, _ := response.Output["Messages"].([]any)
+	if len(messages) != 1 || messages[0].(map[string]any)["Body"] != want {
+		t.Fatalf("encoded receive %#v", response.Output)
+	}
+}
+
 func TestListQueuesPrefixAndPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

@@ -3107,6 +3107,13 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if arn != "arn:aws:dynamodb:us-east-1:000000000000:table/T" {
 		t.Fatalf("table arn %q", arn)
 	}
+	localhostConfig := awscfg
+	localhostConfig.Region = "localhost"
+	localhostDDB := dynamodb.NewFromConfig(localhostConfig, func(o *dynamodb.Options) { o.BaseEndpoint = aws.String(ts.URL) })
+	localhostTable, err := localhostDDB.DescribeTable(context.Background(), &dynamodb.DescribeTableInput{TableName: aws.String("T")})
+	if err != nil || localhostTable.Table == nil || aws.ToString(localhostTable.Table.TableArn) != arn {
+		t.Fatalf("localhost region table: %#v %v", localhostTable, err)
+	}
 	if tags, err := ddb.ListTagsOfResource(context.Background(), &dynamodb.ListTagsOfResourceInput{ResourceArn: &arn}); err != nil || len(tags.Tags) != 1 || aws.ToString(tags.Tags[0].Key) != "Name" {
 		t.Fatalf("creation tags: %#v %v", tags, err)
 	}

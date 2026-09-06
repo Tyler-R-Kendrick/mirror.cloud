@@ -425,6 +425,58 @@ func TestConcurrentDynamoDBBackupsRemainConsistent(t *testing.T) {
 	}
 }
 
+func TestConcurrentDynamoDBLocalhostRegionsShareTables(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.dynamodb"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
+	defer ts.Close()
+	call := func(region, operation, payload string) (int, []byte, error) {
+		request, _ := http.NewRequest(http.MethodPost, ts.URL, strings.NewReader(payload))
+		request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/"+region+"/dynamodb/aws4_request, SignedHeaders=host, Signature=00")
+		request.Header.Set("Content-Type", "application/x-amz-json-1.0")
+		request.Header.Set("X-Amz-Target", "DynamoDB_20120810."+operation)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		return response.StatusCode, body, err
+	}
+	if status, body, err := call("us-east-1", "CreateTable", `{"TableName":"T"}`); err != nil || status != http.StatusOK {
+		t.Fatalf("create table: %d %s %v", status, body, err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			region := "us-east-1"
+			if index%2 == 0 {
+				region = "localhost"
+			}
+			status, body, err := call(region, "DescribeTable", `{"TableName":"T"}`)
+			if err == nil && (status != http.StatusOK || !bytes.Contains(body, []byte(`"TableArn":"arn:aws:dynamodb:us-east-1:000000000000:table/T"`))) {
+				err = fmt.Errorf("%s describe: %d %s", region, status, body)
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func (r failAfterReader) Read(p []byte) (int, error) {
 	n, err := r.Reader.Read(p)
 	if err == io.EOF {

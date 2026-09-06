@@ -3515,9 +3515,10 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if _, err := sqsc.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("q")}); err != nil {
 		t.Fatalf("create queue: %v", err)
 	}
-	if _, err := sqsc.SendMessage(context.Background(), &sqs.SendMessageInput{
+	sentSQS, err := sqsc.SendMessage(context.Background(), &sqs.SendMessageInput{
 		QueueUrl: aws.String(ts.URL + "/000000000000/q"), MessageBody: aws.String("hello-sqs-sdk"),
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("send: %v", err)
 	}
 	recv, err := sqsc.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{
@@ -3526,7 +3527,8 @@ func TestAWSSDKRoundTripS3DynamoDBSQS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("recv: %v", err)
 	}
-	if len(recv.Messages) != 1 || aws.ToString(recv.Messages[0].Body) != "hello-sqs-sdk" {
+	if len(recv.Messages) != 1 || aws.ToString(recv.Messages[0].Body) != "hello-sqs-sdk" ||
+		aws.ToString(recv.Messages[0].MD5OfBody) != aws.ToString(sentSQS.MD5OfMessageBody) {
 		t.Fatalf("recv %#v", recv.Messages)
 	}
 }

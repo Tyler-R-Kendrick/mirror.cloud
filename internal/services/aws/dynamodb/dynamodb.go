@@ -12,6 +12,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb/expr"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -89,7 +90,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		rec["DeletionProtectionEnabled"] = false
 		rec["ItemCount"] = 0
 		rec["TableSizeBytes"] = 0
-		p.prepareTableMetadata(req, rec)
+		if err := p.prepareTableMetadata(ctx, req, rec); err != nil {
+			return nil, err
+		}
 		if class := str(rec["TableClass"]); class != "" {
 			rec["TableClassSummary"] = map[string]any{"TableClass": class}
 			delete(rec, "TableClass")
@@ -523,15 +526,23 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if class := str(req.Input["TableClass"]); class != "" {
 			m["TableClassSummary"] = map[string]any{"TableClass": class}
 		}
-		for _, key := range []string{"AttributeDefinitions", "BillingMode", "ProvisionedThroughput", "WarmThroughput"} {
+		for _, key := range []string{"AttributeDefinitions", "BillingMode", "ProvisionedThroughput", "SSESpecification", "WarmThroughput"} {
 			if value := req.Input[key]; value != nil {
 				m[key] = value
 			}
 		}
-		p.prepareTableMetadata(req, m)
+		if err := p.prepareTableMetadata(ctx, req, m); err != nil {
+			return nil, err
+		}
 		nb, _ := json.Marshal(m)
 		_ = p.col(req, "tables").Put(ctx, table, nb)
-		return &spi.Response{Output: map[string]any{"TableDescription": tableDescription(m, "UPDATING")}}, nil
+		description := tableDescription(m, "UPDATING")
+		if spec := asMap(req.Input["SSESpecification"]); spec["Enabled"] == false {
+			if sse := asMap(description["SSEDescription"]); len(sse) > 0 {
+				sse["Status"] = "UPDATING"
+			}
+		}
+		return &spi.Response{Output: map[string]any{"TableDescription": description}}, nil
 	case "TagResource":
 		arn := str(req.Input["ResourceArn"])
 		var tags []any
@@ -758,7 +769,7 @@ func cloneMap(m map[string]any) map[string]any {
 	return o
 }
 
-func (p *Pack) prepareTableMetadata(req *spi.Request, table map[string]any) {
+func (p *Pack) prepareTableMetadata(ctx context.Context, req *spi.Request, table map[string]any) error {
 	billing := str(table["BillingMode"])
 	if billing == "" {
 		billing = str(asMap(table["BillingModeSummary"])["BillingMode"])
@@ -790,15 +801,28 @@ func (p *Pack) prepareTableMetadata(req *spi.Request, table map[string]any) {
 			index["ProvisionedThroughput"] = indexThroughput
 		}
 	}
-	if spec := asMap(table["SSESpecification"]); spec["Enabled"] == true {
-		if key := str(spec["KMSMasterKeyId"]); key != "" {
-			if !strings.HasPrefix(key, "arn:") {
+	if spec := asMap(table["SSESpecification"]); len(spec) > 0 {
+		if spec["Enabled"] == true {
+			key := str(spec["KMSMasterKeyId"])
+			if key == "" {
+				var err error
+				key, err = p.defaultDynamoDBKey(ctx, req)
+				if err != nil {
+					return err
+				}
+			} else if !strings.HasPrefix(key, "arn:") {
 				key = "arn:aws:kms:" + req.Identity.Region + ":" + req.Identity.Account + ":key/" + key
 			}
 			table["SSEDescription"] = map[string]any{"Status": "ENABLED", "SSEType": "KMS", "KMSMasterKeyArn": key}
-			delete(table, "SSESpecification")
 		}
+		delete(table, "SSESpecification")
 	}
+	return nil
+}
+
+func (p *Pack) defaultDynamoDBKey(ctx context.Context, req *spi.Request) (string, error) {
+	metadata, err := kms.New(p.deps).EnsureAWSManagedKey(ctx, req.Identity, "alias/aws/dynamodb", "Default key that protects my DynamoDB data when no other key is defined")
+	return str(metadata["Arn"]), err
 }
 
 func tableDescription(table map[string]any, status string) map[string]any {

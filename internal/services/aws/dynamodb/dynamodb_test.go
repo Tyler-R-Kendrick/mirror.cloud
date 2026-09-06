@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -618,7 +619,8 @@ func TestDynamoDBBatchCharacterization(t *testing.T) {
 }
 
 func TestDynamoDBTableMetadata(t *testing.T) {
-	p := New(spitest.Deps(t))
+	deps := spitest.Deps(t)
+	p := New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
@@ -639,6 +641,35 @@ func TestDynamoDBTableMetadata(t *testing.T) {
 	sse := asMap(asMap(explicit.Output["TableDescription"])["SSEDescription"])
 	if sse["Status"] != "ENABLED" || sse["SSEType"] != "KMS" || sse["KMSMasterKeyArn"] != "arn:aws:kms:us-east-1:000000000000:key/key-id" {
 		t.Fatalf("explicit SSE description %#v", sse)
+	}
+	partial, err := call("CreateTable", map[string]any{"TableName": "DefaultEncrypted", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}, "SSESpecification": map[string]any{"Enabled": true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	partialSSE := asMap(asMap(partial.Output["TableDescription"])["SSEDescription"])
+	keyARN := str(partialSSE["KMSMasterKeyArn"])
+	key, err := kms.New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeKey", Input: map[string]any{"KeyId": keyARN}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := asMap(key.Output["KeyMetadata"])
+	if partialSSE["Status"] != "ENABLED" || !strings.HasPrefix(keyARN, "arn:aws:kms:us-east-1:000000000000:key/") || metadata["KeyManager"] != "AWS" || metadata["Description"] != "Default key that protects my DynamoDB data when no other key is defined" {
+		t.Fatalf("default SSE key: sse=%#v key=%#v", partialSSE, metadata)
+	}
+	disabled, err := call("UpdateTable", map[string]any{"TableName": "DefaultEncrypted", "SSESpecification": map[string]any{"Enabled": false}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asMap(asMap(disabled.Output["TableDescription"])["SSEDescription"])["Status"] != "UPDATING" {
+		t.Fatalf("disable SSE response %#v", disabled)
+	}
+	updated, err := call("UpdateTable", map[string]any{"TableName": "DefaultEncrypted", "BillingMode": "PAY_PER_REQUEST"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedSSE := asMap(asMap(updated.Output["TableDescription"])["SSEDescription"])
+	if updatedSSE["Status"] != "ENABLED" || updatedSSE["KMSMasterKeyArn"] != keyARN {
+		t.Fatalf("unrelated update changed SSE %#v", updated)
 	}
 	created, err := call("CreateTable", map[string]any{
 		"TableName": "Metadata", "BillingMode": "PAY_PER_REQUEST",

@@ -58,7 +58,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if strings.HasSuffix(name, ".fifo") {
 			attrs["FifoQueue"] = "true"
 		}
-		meta, _ := json.Marshal(map[string]any{"url": url, "name": name, "attrs": attrs, "seq": 0})
+		meta, _ := json.Marshal(map[string]any{
+			"url": url, "name": name, "attrs": attrs, "seq": 0,
+			"created": strconv.FormatInt(p.deps.Clock.Now().Unix(), 10),
+		})
 		_ = p.col(req, "queues").Put(ctx, name, meta)
 		if len(attrs) > 0 {
 			ab, _ := json.Marshal(attrs)
@@ -114,13 +117,35 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "GetQueueAttributes":
 		name := queueName(req)
 		n := p.countMsgs(ctx, req, name)
-		attrs := map[string]any{"ApproximateNumberOfMessages": fmt.Sprintf("%d", n), "VisibilityTimeout": "30"}
+		attrs := map[string]any{
+			"ApproximateNumberOfMessages": fmt.Sprintf("%d", n),
+			"QueueArn":                    fmt.Sprintf("arn:aws:sqs:%s:%s:%s", req.Identity.Region, req.Identity.Account, name),
+			"VisibilityTimeout":           "30",
+		}
+		if b, ok, _ := p.col(req, "queues").Get(ctx, name); ok {
+			var meta map[string]any
+			_ = json.Unmarshal(b, &meta)
+			attrs["CreatedTimestamp"] = meta["created"]
+		}
 		if b, ok, _ := p.col(req, "qattrs").Get(ctx, name); ok {
 			var extra map[string]any
 			_ = json.Unmarshal(b, &extra)
 			for k, v := range extra {
 				attrs[k] = v
 			}
+		}
+		if names := stringList(req.Input, "AttributeNames", "AttributeName"); len(names) > 0 {
+			filtered := map[string]any{}
+			for _, name := range names {
+				if name == "All" {
+					filtered = attrs
+					break
+				}
+				if value, ok := attrs[name]; ok {
+					filtered[name] = value
+				}
+			}
+			attrs = filtered
 		}
 		return &spi.Response{Output: map[string]any{"Attributes": attrs}}, nil
 	case "SetQueueAttributes":

@@ -141,6 +141,32 @@ func TestListQueuesPrefixAndPagination(t *testing.T) {
 	}
 }
 
+func TestCreateQueueMetadataAttributes(t *testing.T) {
+	deps := spitest.Deps(t)
+	wantCreated := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	if err := deps.Clock.Advance(wantCreated.Sub(deps.Clock.Now())); err != nil {
+		t.Fatal(err)
+	}
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "metadata"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{
+		"QueueUrl": created.Output["QueueUrl"], "AttributeNames": []any{"QueueArn", "CreatedTimestamp", "VisibilityTimeout"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attrs := response.Output["Attributes"].(map[string]any)
+	if len(attrs) != 3 || attrs["QueueArn"] != "arn:aws:sqs:us-east-1:123456789012:metadata" ||
+		attrs["CreatedTimestamp"] != "1577934245" || attrs["VisibilityTimeout"] != "30" {
+		t.Fatalf("attributes %#v", attrs)
+	}
+}
+
 func TestListQueuesCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

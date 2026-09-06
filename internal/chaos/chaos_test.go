@@ -471,6 +471,60 @@ func TestConcurrentSQSSendReceiveDigestsMatchBodies(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSEmptyMessagesAreRejected(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "empty-body"}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 64)
+	var wg sync.WaitGroup
+	for index := range 64 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			body := fmt.Sprintf("message-%02d", index)
+			if index%2 == 0 {
+				body = ""
+			}
+			_, err := call("SendMessage", map[string]any{"QueueName": "empty-body", "MessageBody": body})
+			if body == "" {
+				fault, _ := err.(*spi.Fault)
+				if fault == nil || fault.Code != "MissingParameter" {
+					errs <- fmt.Errorf("empty message fault %#v", err)
+					return
+				}
+				errs <- nil
+				return
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	received := 0
+	for received < 32 {
+		response, err := call("ReceiveMessage", map[string]any{"QueueName": "empty-body", "MaxNumberOfMessages": 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages := response.Output["Messages"].([]any)
+		if len(messages) == 0 {
+			t.Fatalf("received %d messages", received)
+		}
+		received += len(messages)
+	}
+}
+
 func TestConcurrentDynamoDBTransactionTokenChoosesOnePayload(t *testing.T) {
 	p := dynamodb.New(spitest.Deps(t))
 	ctx := context.Background()

@@ -724,8 +724,9 @@ func TestQueueCannotBeRecreatedUntilDeleteWindowExpires(t *testing.T) {
 	if attrErr != nil || tagErr != nil || receiveErr != nil {
 		t.Fatalf("recreated queue reads: %v, %v, %v", attrErr, tagErr, receiveErr)
 	}
+	emptyTags := len(tags.Output) == 0 || len(asMap(tags.Output["Tags"])) == 0
 	if sendErr != nil || secondSent.Output["MessageId"] == firstSent.Output["MessageId"] || attrs.Output["Attributes"].(map[string]any)["DelaySeconds"] != nil ||
-		len(tags.Output["Tags"].(map[string]any)) != 0 || len(messages.Output["Messages"].([]any)) != 1 {
+		!emptyTags || len(messages.Output["Messages"].([]any)) != 1 {
 		t.Fatalf("deleted state survived: attrs=%#v tags=%#v messages=%#v", attrs.Output, tags.Output, messages.Output)
 	}
 }

@@ -389,6 +389,14 @@ func TestSendValidationAndDelay(t *testing.T) {
 		t.Fatalf("batch response %#v error %v", batch, err)
 	}
 	_, _ = invoke("CreateQueue", map[string]any{"QueueName": "delayed", "Attributes": map[string]any{"DelaySeconds": "10"}})
+	if _, err := invoke("SendMessage", map[string]any{"QueueName": "delayed", "MessageBody": ""}); err != nil {
+		fault, _ := err.(*spi.Fault)
+		if fault == nil || fault.Code != "MissingParameter" || fault.Message != "The request must contain the parameter MessageBody." {
+			t.Fatalf("empty message error %v", err)
+		}
+	} else {
+		t.Fatal("empty message accepted")
+	}
 	if _, err := invoke("SendMessage", map[string]any{"QueueName": "delayed", "MessageBody": "later"}); err != nil {
 		t.Fatal(err)
 	}

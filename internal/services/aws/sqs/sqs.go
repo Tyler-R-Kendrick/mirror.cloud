@@ -296,6 +296,9 @@ func (p *Pack) countMsgs(ctx context.Context, req *spi.Request, name string) int
 func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	name := queueName(req)
 	body := str(req.Input["MessageBody"])
+	if body == "" {
+		return nil, &spi.Fault{Code: "MissingParameter", Message: "The request must contain the parameter MessageBody.", HTTPStatus: 400, Fault: "client"}
+	}
 	sum := md5.Sum([]byte(body))
 	md5hex := hex.EncodeToString(sum[:])
 	attrs := p.queueAttrs(ctx, req, name)

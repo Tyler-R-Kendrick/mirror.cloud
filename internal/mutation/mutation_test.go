@@ -17539,6 +17539,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFIFODedupDLQLongPoll",
 		},
 		{
+			name: "sqs-fifo-accept-invalid-deduplication-id",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if provided && !validMessageGroupID(dedup) {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestFIFODeduplicationIDCharacterization",
+		},
+		{
 			name: "sqs-list-ignore-prefix",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  `prefix := str(req.Input["QueueNamePrefix"])`,

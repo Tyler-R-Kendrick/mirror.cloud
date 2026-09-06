@@ -983,6 +983,39 @@ func FuzzCreateQueueTags(f *testing.F) {
 	})
 }
 
+func FuzzFIFODeduplicationID(f *testing.F) {
+	f.Add("")
+	f.Add("dedup-1")
+	f.Add(strings.Repeat("a", 129))
+	f.Add("group 123")
+	f.Fuzz(func(t *testing.T, value string) {
+		if len(value) > 256 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
+			"QueueName": "fuzz-dedup.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "false"},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{
+			"QueueName": "fuzz-dedup.fifo", "MessageBody": "message", "MessageGroupId": "group-1", "MessageDeduplicationId": value,
+		}})
+		if validMessageGroupID(value) {
+			if err != nil {
+				t.Fatalf("valid id %q error %v", value, err)
+			}
+			return
+		}
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "InvalidParameterValue" || !strings.Contains(fault.Message, "MessageDeduplicationId can only include alphanumeric and punctuation characters") {
+			t.Fatalf("invalid id %q error %#v", value, err)
+		}
+	})
+}
+
 func TestQueueTagKeysAreCaseSensitive(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -1040,6 +1073,30 @@ func TestCreateQueueIdempotencyAndAttributeValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden.AssertJSON(t, map[string]any{"conflict": conflict, "updated": updated, "invalid": invalid})
+}
+
+func TestFIFODeduplicationIDCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
+		"QueueName": "dedup-invalid.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "false"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	call := func(value string) map[string]any {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{
+			"QueueName": "dedup-invalid.fifo", "MessageBody": "message", "MessageGroupId": "group-1", "MessageDeduplicationId": value,
+		}})
+		fault, ok := err.(*spi.Fault)
+		if !ok {
+			t.Fatalf("deduplication id %q error %#v", value, err)
+		}
+		return map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault}
+	}
+	golden.AssertJSON(t, map[string]any{
+		"empty": call(""), "tooLong": call(strings.Repeat("a", 129)), "spaces": call("group 123"),
+	})
 }
 
 func faultCode(err error) string {

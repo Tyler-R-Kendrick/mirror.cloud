@@ -5816,3 +5816,38 @@ func TestBusSubscriberPanicIsolated(t *testing.T) {
 		t.Fatal("expected subscriber panic to propagate (current contract)")
 	}
 }
+
+func TestConcurrentSQSFIFODeduplicationValidationIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
+		"QueueName": "chaos-dedup.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "false"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	values := []string{"", strings.Repeat("a", 129), "group 123"}
+	errs := make(chan error, len(values)*8)
+	var wg sync.WaitGroup
+	for range 8 {
+		for _, value := range values {
+			wg.Add(1)
+			go func(value string) {
+				defer wg.Done()
+				_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{
+					"QueueName": "chaos-dedup.fifo", "MessageBody": "message", "MessageGroupId": "group-1", "MessageDeduplicationId": value,
+				}})
+				fault, ok := err.(*spi.Fault)
+				if !ok || fault.Code != "InvalidParameterValue" || !strings.Contains(fault.Message, "MessageDeduplicationId can only include alphanumeric and punctuation characters") {
+					errs <- fmt.Errorf("deduplication id %q error %#v", value, err)
+				}
+			}(value)
+		}
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}

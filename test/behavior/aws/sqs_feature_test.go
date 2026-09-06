@@ -417,4 +417,16 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("conflict %d %s", status, body)
 		}
 	})
+	t.Run("Given a FIFO queue When sending invalid deduplication ids Then the validation fault is returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-dedup-invalid.fifo","Attributes":{"ContentBasedDeduplication":"false"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		for _, value := range []string{"", strings.Repeat("a", 129), "group 123"} {
+			payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-dedup-invalid.fifo", "MessageBody": "message", "MessageGroupId": "group-1", "MessageDeduplicationId": value})
+			status, body := call("SendMessage", string(payload))
+			if status != http.StatusBadRequest || !bytes.Contains(body, []byte(`"__type":"InvalidParameterValue"`)) || !bytes.Contains(body, []byte("MessageDeduplicationId can only include alphanumeric and punctuation characters")) {
+				t.Fatalf("deduplication id %q %d %s", value, status, body)
+			}
+		}
+	})
 }

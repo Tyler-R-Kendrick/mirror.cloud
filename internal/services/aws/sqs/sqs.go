@@ -380,11 +380,17 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	if fifo && group == "" {
 		return nil, &spi.Fault{Code: "MissingParameter", Message: "MessageGroupId", HTTPStatus: 400, Fault: "client"}
 	}
+	if fifo {
+		_, provided := req.Input["MessageDeduplicationId"]
+		if provided && !validMessageGroupID(dedup) {
+			return nil, &spi.Fault{Code: "InvalidParameterValue", Message: fmt.Sprintf("Value %s for parameter MessageDeduplicationId is invalid. Reason: MessageDeduplicationId can only include alphanumeric and punctuation characters. 1 to 128 in length.", dedup), HTTPStatus: 400, Fault: "client"}
+		}
+		if !provided && dedup == "" && str(attrs["ContentBasedDeduplication"]) != "true" {
+			return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "MessageDeduplicationId is required when ContentBasedDeduplication is disabled.", HTTPStatus: 400, Fault: "client"}
+		}
+	}
 	if dedup == "" && str(attrs["ContentBasedDeduplication"]) == "true" {
 		dedup = md5hex
-	}
-	if strings.HasSuffix(name, ".fifo") && dedup == "" {
-		return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "MessageDeduplicationId is required when ContentBasedDeduplication is disabled.", HTTPStatus: 400, Fault: "client"}
 	}
 	delay := asInt(req.Input["DelaySeconds"])
 	if req.Input["DelaySeconds"] == nil {

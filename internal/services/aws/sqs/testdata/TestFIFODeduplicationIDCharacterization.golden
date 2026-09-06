@@ -1,0 +1,20 @@
+{
+  "empty": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "Value  for parameter MessageDeduplicationId is invalid. Reason: MessageDeduplicationId can only include alphanumeric and punctuation characters. 1 to 128 in length."
+  },
+  "spaces": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "Value group 123 for parameter MessageDeduplicationId is invalid. Reason: MessageDeduplicationId can only include alphanumeric and punctuation characters. 1 to 128 in length."
+  },
+  "tooLong": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "Value aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa for parameter MessageDeduplicationId is invalid. Reason: MessageDeduplicationId can only include alphanumeric and punctuation characters. 1 to 128 in length."
+  }
+}

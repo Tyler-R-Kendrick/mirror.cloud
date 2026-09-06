@@ -185,14 +185,21 @@ func TestDynamoDBKinesisDestination(t *testing.T) {
 		}
 		return response.Output
 	}
+	mustFault := func(operation string, input map[string]any, message string) {
+		t.Helper()
+		_, err := call(operation, input)
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "ValidationException" && fault.Code != "ResourceNotFoundException" || fault.Message != message {
+			t.Fatalf("%s fault: %#v", operation, err)
+		}
+	}
 	if _, err := kinesisPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStream", Input: map[string]any{"StreamName": "s"}}); err != nil {
 		t.Fatal(err)
 	}
 	streamARN := "arn:aws:kinesis:us-east-1:000000000000:stream/s"
-	must("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
-	if _, err := call("EnableKinesisStreamingDestination", map[string]any{"TableName": "missing", "StreamArn": streamARN}); err == nil {
-		t.Fatal("enabled destination for missing table")
-	}
+	created := must("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
+	tableID := str(asMap(created["TableDescription"])["TableId"])
+	mustFault("EnableKinesisStreamingDestination", map[string]any{"TableName": "missing", "StreamArn": streamARN}, "Requested resource not found: Table: missing not found")
 	enabled := must("EnableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN})
 	if enabled["DestinationStatus"] != "ENABLING" || len(asMap(enabled["EnableKinesisStreamingConfiguration"])) != 0 {
 		t.Fatalf("enable destination %#v", enabled)
@@ -229,23 +236,17 @@ func TestDynamoDBKinesisDestination(t *testing.T) {
 			t.Fatalf("%s Kinesis images %#v", event, dynamodb)
 		}
 	}
-	for _, input := range []map[string]any{
-		{"TableName": "T", "StreamArn": streamARN},
-		{"TableName": "T", "StreamArn": streamARN, "UpdateKinesisStreamingConfiguration": map[string]any{"ApproximateCreationDateTimePrecision": "SECOND"}},
-		{"TableName": "T", "StreamArn": "arn:aws:kinesis:us-east-1:000000000000:stream/missing", "UpdateKinesisStreamingConfiguration": map[string]any{"ApproximateCreationDateTimePrecision": "MICROSECOND"}},
-	} {
-		if _, err := call("UpdateKinesisStreamingDestination", input); err == nil {
-			t.Fatalf("invalid destination update succeeded %#v", input)
-		}
-	}
+	mustFault("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN}, "Streaming destination cannot be updated with given parameters: UpdateKinesisStreamingConfiguration cannot be null or contain only null values")
+	mustFault("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN, "UpdateKinesisStreamingConfiguration": map[string]any{"ApproximateCreationDateTimePrecision": "SECOND"}}, "1 validation error detected: Value 'SECOND' at 'updateKinesisStreamingConfiguration.approximateCreationDateTimePrecision' failed to satisfy constraint: Member must satisfy enum value set: [MILLISECOND, MICROSECOND]")
+	missingARN := "arn:aws:kinesis:us-east-1:000000000000:stream/missing"
+	mustFault("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": missingARN, "UpdateKinesisStreamingConfiguration": map[string]any{"ApproximateCreationDateTimePrecision": "MICROSECOND"}}, "Table is not in a valid state to enable Kinesis Streaming Destination: No streaming destination with streamArn: "+missingARN+" found for table with tableName: T")
 	configuration := map[string]any{"ApproximateCreationDateTimePrecision": "MICROSECOND"}
 	updated := must("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN, "UpdateKinesisStreamingConfiguration": configuration})
 	if updated["DestinationStatus"] != "UPDATING" || asMap(updated["UpdateKinesisStreamingConfiguration"])["ApproximateCreationDateTimePrecision"] != "MICROSECOND" {
 		t.Fatalf("update destination %#v", updated)
 	}
-	if _, err := call("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN, "UpdateKinesisStreamingConfiguration": configuration}); err == nil {
-		t.Fatal("idempotent destination update succeeded")
-	}
+	mustFault("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN, "UpdateKinesisStreamingConfiguration": configuration}, "Invalid Request: Precision is already set to the desired value of MICROSECOND for tableId: "+tableID+", kdsArn: "+streamARN)
+	mustFault("DisableKinesisStreamingDestination", map[string]any{"TableName": "missing", "StreamArn": streamARN}, "Requested resource not found: Table: missing not found")
 	disabled := must("DisableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN})
 	if disabled["DestinationStatus"] != "DISABLING" {
 		t.Fatalf("disable destination %#v", disabled)
@@ -274,6 +275,15 @@ func TestDynamoDBKinesisDestinationCharacterization(t *testing.T) {
 		}
 		return response.Output
 	}
+	fault := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		got, ok := err.(*spi.Fault)
+		if !ok {
+			t.Fatalf("%s fault: %#v", operation, err)
+		}
+		return map[string]any{"code": got.Code, "message": got.Message}
+	}
 	kinesisMust := func(operation string, input map[string]any) map[string]any {
 		response, err := kinesisPack.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
 		if err != nil {
@@ -284,6 +294,7 @@ func TestDynamoDBKinesisDestinationCharacterization(t *testing.T) {
 	kinesisMust("CreateStream", map[string]any{"StreamName": "s"})
 	streamARN := "arn:aws:kinesis:us-east-1:000000000000:stream/s"
 	must("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
+	faults := map[string]any{"missingTable": fault("EnableKinesisStreamingDestination", map[string]any{"TableName": "missing", "StreamArn": streamARN})}
 	enabled := must("EnableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN})
 	active := must("DescribeKinesisStreamingDestination", map[string]any{"TableName": "T"})
 	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "one"}, "data": map[string]any{"B": "kA=="}}})
@@ -293,11 +304,17 @@ func TestDynamoDBKinesisDestinationCharacterization(t *testing.T) {
 	payload, _ := base64.StdEncoding.DecodeString(encoded)
 	var record map[string]any
 	_ = json.Unmarshal(payload, &record)
+	faults["missingConfiguration"] = fault("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN})
+	faults["invalidPrecision"] = fault("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN, "UpdateKinesisStreamingConfiguration": map[string]any{"ApproximateCreationDateTimePrecision": "SECOND"}})
+	missingARN := "arn:aws:kinesis:us-east-1:000000000000:stream/missing"
+	faults["missingDestination"] = fault("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": missingARN, "UpdateKinesisStreamingConfiguration": map[string]any{"ApproximateCreationDateTimePrecision": "MICROSECOND"}})
 	configuration := map[string]any{"ApproximateCreationDateTimePrecision": "MICROSECOND"}
 	updated := must("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN, "UpdateKinesisStreamingConfiguration": configuration})
+	faults["repeatPrecision"] = fault("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN, "UpdateKinesisStreamingConfiguration": configuration})
+	faults["disableMissingTable"] = fault("DisableKinesisStreamingDestination", map[string]any{"TableName": "missing", "StreamArn": streamARN})
 	disabled := must("DisableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN})
 	inactive := must("DescribeKinesisStreamingDestination", map[string]any{"TableName": "T"})
-	golden.AssertJSON(t, map[string]any{"enabled": enabled, "active": active, "record": record, "updated": updated, "disabled": disabled, "inactive": inactive})
+	golden.AssertJSON(t, map[string]any{"enabled": enabled, "active": active, "record": record, "faults": faults, "updated": updated, "disabled": disabled, "inactive": inactive})
 }
 
 func TestBootedServerDynamoDBStreams(t *testing.T) {

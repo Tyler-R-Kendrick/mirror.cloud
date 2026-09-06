@@ -19,6 +19,32 @@
     "StreamArn": "arn:aws:kinesis:us-east-1:000000000000:stream/s",
     "TableName": "T"
   },
+  "faults": {
+    "disableMissingTable": {
+      "code": "ResourceNotFoundException",
+      "message": "Requested resource not found: Table: missing not found"
+    },
+    "invalidPrecision": {
+      "code": "ValidationException",
+      "message": "1 validation error detected: Value 'SECOND' at 'updateKinesisStreamingConfiguration.approximateCreationDateTimePrecision' failed to satisfy constraint: Member must satisfy enum value set: [MILLISECOND, MICROSECOND]"
+    },
+    "missingConfiguration": {
+      "code": "ValidationException",
+      "message": "Streaming destination cannot be updated with given parameters: UpdateKinesisStreamingConfiguration cannot be null or contain only null values"
+    },
+    "missingDestination": {
+      "code": "ValidationException",
+      "message": "Table is not in a valid state to enable Kinesis Streaming Destination: No streaming destination with streamArn: arn:aws:kinesis:us-east-1:000000000000:stream/missing found for table with tableName: T"
+    },
+    "missingTable": {
+      "code": "ResourceNotFoundException",
+      "message": "Requested resource not found: Table: missing not found"
+    },
+    "repeatPrecision": {
+      "code": "ValidationException",
+      "message": "Invalid Request: Precision is already set to the desired value of MICROSECOND for tableId: 79310823-0b1a-444b-9528-357dcebab4fe, kdsArn: arn:aws:kinesis:us-east-1:000000000000:stream/s"
+    }
+  },
   "inactive": {
     "KinesisDataStreamDestinations": [
       {

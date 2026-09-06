@@ -336,6 +336,45 @@ func TestConcurrentSQSQueueListingsKeepEveryQueue(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSQueueMetadataRemainsIsolated(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	for index := range 32 {
+		name := fmt.Sprintf("metadata-%02d", index)
+		if _, err := call("CreateQueue", map[string]any{"QueueName": name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for index := range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			name := fmt.Sprintf("metadata-%02d", index)
+			response, err := call("GetQueueAttributes", map[string]any{"QueueName": name, "AttributeNames": []any{"QueueArn", "CreatedTimestamp", "VisibilityTimeout"}})
+			if err == nil {
+				attrs := response.Output["Attributes"].(map[string]any)
+				if len(attrs) != 3 || attrs["QueueArn"] != "arn:aws:sqs:us-east-1:000000000000:"+name || attrs["CreatedTimestamp"] == "" || attrs["VisibilityTimeout"] != "30" {
+					err = fmt.Errorf("%s metadata %#v", name, attrs)
+				}
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestConcurrentDynamoDBTransactionTokenChoosesOnePayload(t *testing.T) {
 	p := dynamodb.New(spitest.Deps(t))
 	ctx := context.Background()

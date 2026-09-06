@@ -383,4 +383,13 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("overwrite %d %s", status, body)
 		}
 	})
+	t.Run("Given tags on CreateQueue When listing tags Then they are available immediately", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-create-tags","Tags":{"tag1":"value1","tag2":"value2"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("ListQueueTags", `{"QueueUrl":"http://queue/000000000000/bdd-create-tags"}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"tag1":"value1"`)) || !bytes.Contains(body, []byte(`"tag2":"value2"`)) {
+			t.Fatalf("created tags %d %s", status, body)
+		}
+	})
 }

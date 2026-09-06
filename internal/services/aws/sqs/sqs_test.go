@@ -948,6 +948,41 @@ func TestQueueTagOverwriteCharacterization(t *testing.T) {
 	golden.AssertJSON(t, call("ListQueueTags", map[string]any{"QueueName": "tag-overwrite"}))
 }
 
+func TestCreateQueueTagsCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "create-tags", "Tags": map[string]any{"tag1": "value1", "tag2": "value2"}}}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListQueueTags", Input: map[string]any{"QueueName": "create-tags"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, response.Output)
+}
+
+func FuzzCreateQueueTags(f *testing.F) {
+	f.Add("tag", "value")
+	f.Add("", "")
+	f.Fuzz(func(t *testing.T, key, value string) {
+		if len(key) > 256 || len(value) > 1024 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "create-tags", "Tags": map[string]any{key: value}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListQueueTags", Input: map[string]any{"QueueName": "create-tags"}})
+		if err != nil || str(asMap(response.Output["Tags"])[key]) != value {
+			t.Fatalf("tags %#v error %v", response.Output, err)
+		}
+	})
+}
+
 func faultCode(err error) string {
 	fault, _ := err.(*spi.Fault)
 	if fault == nil {

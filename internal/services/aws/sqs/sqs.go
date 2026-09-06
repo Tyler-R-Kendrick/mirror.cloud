@@ -77,6 +77,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			ab, _ := json.Marshal(attrs)
 			_ = p.col(req, "qattrs").Put(ctx, name, ab)
 		}
+		tags := asMap(req.Input["Tags"])
+		if len(tags) == 0 {
+			tags = asMap(req.Input["tags"])
+		}
+		if len(tags) > 0 {
+			tb, _ := json.Marshal(tags)
+			_ = p.col(req, "qtags").Put(ctx, name, tb)
+		}
 		return &spi.Response{Output: map[string]any{"QueueUrl": url}}, nil
 	case "GetQueueUrl":
 		name := str(req.Input["QueueName"])
@@ -651,11 +659,17 @@ func asFloat(v any) float64 {
 }
 
 func asMap(v any) map[string]any {
-	m, _ := v.(map[string]any)
-	if m == nil {
-		return map[string]any{}
+	switch m := v.(type) {
+	case map[string]any:
+		return m
+	case map[string]string:
+		out := make(map[string]any, len(m))
+		for key, value := range m {
+			out[key] = value
+		}
+		return out
 	}
-	return m
+	return map[string]any{}
 }
 
 func advertise(req *spi.Request) string {

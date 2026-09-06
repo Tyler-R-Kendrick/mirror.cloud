@@ -290,3 +290,31 @@ func TestAWSSDKSQSMultipleQueuesContract(t *testing.T) {
 		t.Fatalf("queue-0 %#v error %v", received, err)
 	}
 }
+
+func TestAWSSDKSQSEncodedContentContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-encoded")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `"&quot;&quot;` + "\r"
+	if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: &want}); err != nil {
+		t.Fatal(err)
+	}
+	received, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl})
+	if err != nil || len(received.Messages) != 1 || aws.ToString(received.Messages[0].Body) != want {
+		t.Fatalf("encoded response %#v error %v", received, err)
+	}
+}

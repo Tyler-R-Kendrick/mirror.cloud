@@ -437,7 +437,11 @@ func TestConcurrentSQSSendReceiveDigestsMatchBodies(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			response, err := call("SendMessage", map[string]any{"QueueName": "roundtrip", "MessageBody": fmt.Sprintf("message-%02d", index)})
+			body := fmt.Sprintf("message-%02d", index)
+			if index == 0 {
+				body = `"&quot;&quot;` + "\r"
+			}
+			response, err := call("SendMessage", map[string]any{"QueueName": "roundtrip", "MessageBody": body})
 			if err == nil {
 				digests.Store(response.Output["MessageId"], response.Output["MD5OfMessageBody"])
 			}
@@ -452,6 +456,7 @@ func TestConcurrentSQSSendReceiveDigestsMatchBodies(t *testing.T) {
 		}
 	}
 	received := 0
+	encoded := false
 	for received < 64 {
 		response, err := call("ReceiveMessage", map[string]any{"QueueName": "roundtrip", "MaxNumberOfMessages": 10, "MessageSystemAttributeNames": []any{"All"}})
 		if err != nil {
@@ -463,6 +468,7 @@ func TestConcurrentSQSSendReceiveDigestsMatchBodies(t *testing.T) {
 		}
 		for _, raw := range messages {
 			message := raw.(map[string]any)
+			encoded = encoded || message["Body"] == `"&quot;&quot;`+"\r"
 			want, ok := digests.Load(message["MessageId"])
 			attributes := message["Attributes"].(map[string]any)
 			sent, sentErr := strconv.ParseInt(attributes["SentTimestamp"].(string), 10, 64)
@@ -472,6 +478,9 @@ func TestConcurrentSQSSendReceiveDigestsMatchBodies(t *testing.T) {
 			}
 			received++
 		}
+	}
+	if !encoded {
+		t.Fatal("encoded message missing")
 	}
 }
 

@@ -8643,6 +8643,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestDynamoDBStreamCharacterization",
 		},
 		{
+			name: "dynamodb-stream-replace-new-image-with-keys",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "ddb_stream.go"),
+			old:  "default:\n\t\tif event != \"REMOVE\" && item != nil {\n\t\t\tddb[\"NewImage\"] = item",
+			new:  "default:\n\t\tif event != \"REMOVE\" && item != nil {\n\t\t\tddb[\"NewImage\"] = keys",
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestDynamoDBDataEncodingCharacterization",
+		},
+		{
+			name: "dynamodb-stream-skip-starting-record",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "ddb_stream.go"),
+			old:  `if n < start {`,
+			new:  `if n <= start {`,
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestDynamoDBDataEncodingCharacterization",
+		},
+		{
 			name: "dynamodb-stream-ignore-exclusive-start-shard",
 			file: filepath.Join("internal", "services", "aws", "dynamodb", "ddb_stream.go"),
 			old:  `if first(req.Input, "ExclusiveStartShardId") == shardID {`,

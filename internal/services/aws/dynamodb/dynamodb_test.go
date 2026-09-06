@@ -399,6 +399,7 @@ func TestDynamoDBItemFaults(t *testing.T) {
 	if _, err := call("DeleteTable", map[string]any{"TableName": "T"}); err != nil {
 		t.Fatal(err)
 	}
+	assertFault("BatchWriteItem", map[string]any{"RequestItems": map[string]any{"missing": []any{map[string]any{"PutRequest": map[string]any{"Item": map[string]any{"id": map[string]any{"S": "1"}}}}}}}, "ResourceNotFoundException")
 	assertFault("Query", map[string]any{"TableName": "T"}, "ResourceNotFoundException")
 	assertFault("TransactWriteItems", map[string]any{"TransactItems": []any{map[string]any{"Put": map[string]any{"TableName": "missing", "Item": map[string]any{}}}}}, "ResourceNotFoundException")
 }

@@ -453,7 +453,7 @@ func TestConcurrentSQSSendReceiveDigestsMatchBodies(t *testing.T) {
 	}
 	received := 0
 	for received < 64 {
-		response, err := call("ReceiveMessage", map[string]any{"QueueName": "roundtrip", "MaxNumberOfMessages": 10})
+		response, err := call("ReceiveMessage", map[string]any{"QueueName": "roundtrip", "MaxNumberOfMessages": 10, "MessageSystemAttributeNames": []any{"All"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -464,7 +464,10 @@ func TestConcurrentSQSSendReceiveDigestsMatchBodies(t *testing.T) {
 		for _, raw := range messages {
 			message := raw.(map[string]any)
 			want, ok := digests.Load(message["MessageId"])
-			if !ok || message["MD5OfBody"] != want {
+			attributes := message["Attributes"].(map[string]any)
+			sent, sentErr := strconv.ParseInt(attributes["SentTimestamp"].(string), 10, 64)
+			first, firstErr := strconv.ParseInt(attributes["ApproximateFirstReceiveTimestamp"].(string), 10, 64)
+			if !ok || message["MD5OfBody"] != want || sentErr != nil || firstErr != nil || first < sent {
 				t.Fatalf("message digest %#v want %v", message, want)
 			}
 			received++

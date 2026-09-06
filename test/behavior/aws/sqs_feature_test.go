@@ -3,6 +3,7 @@ package behavior
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -139,6 +140,34 @@ func TestSQSQueueListing(t *testing.T) {
 			status, body := call("ReceiveMessage", input)
 			if status != http.StatusOK || bytes.Contains(body, []byte(`"Messages"`)) {
 				t.Fatalf("empty receive %d %s", status, body)
+			}
+		}
+	})
+	t.Run("Given receive wait times When polling Then bounds and short polls match AWS", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-wait-time"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		for range 2 {
+			if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-wait-time","MessageBody":"message"}`); status != http.StatusOK {
+				t.Fatalf("send %d %s", status, body)
+			}
+		}
+		for _, value := range []int{-1, 21} {
+			status, body := call("ReceiveMessage", fmt.Sprintf(`{"QueueUrl":"http://queue/000000000000/bdd-wait-time","WaitTimeSeconds":%d}`, value))
+			want := fmt.Sprintf("Value %d for parameter WaitTimeSeconds is invalid. Reason: Must be >= 0 and <= 20, if provided.", value)
+			var response map[string]any
+			if status != http.StatusBadRequest || json.Unmarshal(body, &response) != nil || response["__type"] != "InvalidParameterValue" || response["message"] != want {
+				t.Fatalf("wait=%d response %d %s", value, status, body)
+			}
+		}
+		for _, input := range []string{
+			`{"QueueUrl":"http://queue/000000000000/bdd-wait-time"}`,
+			`{"QueueUrl":"http://queue/000000000000/bdd-wait-time","WaitTimeSeconds":0}`,
+		} {
+			status, body := call("ReceiveMessage", input)
+			var response map[string]any
+			if status != http.StatusOK || json.Unmarshal(body, &response) != nil || len(response["Messages"].([]any)) != 1 || response["Messages"].([]any)[0].(map[string]any)["Body"] != "message" {
+				t.Fatalf("short poll %d %s", status, body)
 			}
 		}
 	})

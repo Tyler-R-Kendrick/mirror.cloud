@@ -1,0 +1,162 @@
+{
+  "described": {
+    "Table": {
+      "BillingModeSummary": {
+        "BillingMode": "PAY_PER_REQUEST"
+      },
+      "CreationDateTime": 0,
+      "DeletionProtectionEnabled": false,
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexArn": "arn:aws:dynamodb:us-east-1:000000000000:table/OnDemand/index/by-value",
+          "IndexName": "by-value",
+          "IndexSizeBytes": 0,
+          "IndexStatus": "ACTIVE",
+          "ItemCount": 0,
+          "KeySchema": [
+            {
+              "AttributeName": "value",
+              "KeyType": "HASH"
+            }
+          ],
+          "Projection": {
+            "ProjectionType": "ALL"
+          },
+          "ProvisionedThroughput": {
+            "NumberOfDecreasesToday": 0,
+            "ReadCapacityUnits": 0,
+            "WriteCapacityUnits": 0
+          }
+        }
+      ],
+      "ItemCount": 0,
+      "KeySchema": [
+        {
+          "AttributeName": "id",
+          "KeyType": "HASH"
+        }
+      ],
+      "ProvisionedThroughput": {
+        "NumberOfDecreasesToday": 0,
+        "ReadCapacityUnits": 0,
+        "WriteCapacityUnits": 0
+      },
+      "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/OnDemand",
+      "TableId": "bc0ea3b7-c0ed-4ddd-b17c-b98538557241",
+      "TableName": "OnDemand",
+      "TableSizeBytes": 0,
+      "TableStatus": "ACTIVE",
+      "WarmThroughput": {
+        "ReadUnitsPerSecond": 1000,
+        "Status": "ACTIVE",
+        "WriteUnitsPerSecond": 1200
+      }
+    }
+  },
+  "encrypted": {
+    "TableDescription": {
+      "CreationDateTime": 0,
+      "DeletionProtectionEnabled": false,
+      "ItemCount": 0,
+      "SSEDescription": {
+        "KMSMasterKeyArn": "arn:aws:kms:us-east-1:000000000000:key/key-id",
+        "SSEType": "KMS",
+        "Status": "ENABLED"
+      },
+      "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/Encrypted",
+      "TableId": "7056696e-9804-4e98-b353-181f01686178",
+      "TableName": "Encrypted",
+      "TableSizeBytes": 0,
+      "TableStatus": "CREATING"
+    }
+  },
+  "invalid": {
+    "code": "ValidationException",
+    "message": "One or more parameter values were invalid: Neither ReadCapacityUnits nor WriteCapacityUnits can be specified when BillingMode is PAY_PER_REQUEST"
+  },
+  "onDemand": {
+    "TableDescription": {
+      "BillingModeSummary": {
+        "BillingMode": "PAY_PER_REQUEST"
+      },
+      "CreationDateTime": 0,
+      "DeletionProtectionEnabled": false,
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexArn": "arn:aws:dynamodb:us-east-1:000000000000:table/OnDemand/index/by-value",
+          "IndexName": "by-value",
+          "IndexSizeBytes": 0,
+          "IndexStatus": "CREATING",
+          "ItemCount": 0,
+          "KeySchema": [
+            {
+              "AttributeName": "value",
+              "KeyType": "HASH"
+            }
+          ],
+          "Projection": {
+            "ProjectionType": "ALL"
+          },
+          "ProvisionedThroughput": {
+            "NumberOfDecreasesToday": 0,
+            "ReadCapacityUnits": 0,
+            "WriteCapacityUnits": 0
+          }
+        }
+      ],
+      "ItemCount": 0,
+      "KeySchema": [
+        {
+          "AttributeName": "id",
+          "KeyType": "HASH"
+        }
+      ],
+      "ProvisionedThroughput": {
+        "NumberOfDecreasesToday": 0,
+        "ReadCapacityUnits": 0,
+        "WriteCapacityUnits": 0
+      },
+      "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/OnDemand",
+      "TableId": "bc0ea3b7-c0ed-4ddd-b17c-b98538557241",
+      "TableName": "OnDemand",
+      "TableSizeBytes": 0,
+      "TableStatus": "CREATING",
+      "WarmThroughput": {
+        "ReadUnitsPerSecond": 1000,
+        "Status": "UPDATING",
+        "WriteUnitsPerSecond": 1200
+      }
+    }
+  },
+  "provisioned": {
+    "TableDescription": {
+      "CreationDateTime": 0,
+      "DeletionProtectionEnabled": false,
+      "GlobalSecondaryIndexes": [
+        {
+          "IndexArn": "arn:aws:dynamodb:us-east-1:000000000000:table/Provisioned/index/by-value",
+          "IndexName": "by-value",
+          "IndexSizeBytes": 0,
+          "IndexStatus": "CREATING",
+          "ItemCount": 0,
+          "ProvisionedThroughput": {
+            "NumberOfDecreasesToday": 0,
+            "ReadCapacityUnits": 1,
+            "WriteCapacityUnits": 1
+          }
+        }
+      ],
+      "ItemCount": 0,
+      "ProvisionedThroughput": {
+        "NumberOfDecreasesToday": 0,
+        "ReadCapacityUnits": 5,
+        "WriteCapacityUnits": 5
+      },
+      "TableArn": "arn:aws:dynamodb:us-east-1:000000000000:table/Provisioned",
+      "TableId": "b7f901dc-acd7-4e2c-b3fa-399db206c795",
+      "TableName": "Provisioned",
+      "TableSizeBytes": 0,
+      "TableStatus": "CREATING"
+    }
+  }
+}

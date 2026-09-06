@@ -662,6 +662,31 @@ func TestDynamoDBTableMetadata(t *testing.T) {
 	}
 }
 
+func TestDynamoDBTableMetadataCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			fault := err.(*spi.Fault)
+			return map[string]any{"code": fault.Code, "message": fault.Message}
+		}
+		return response.Output
+	}
+	invalid := call("CreateTable", map[string]any{"TableName": "Invalid", "BillingMode": "PAY_PER_REQUEST", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}})
+	encrypted := call("CreateTable", map[string]any{"TableName": "Encrypted", "SSESpecification": map[string]any{"Enabled": true, "SSEType": "KMS", "KMSMasterKeyId": "key-id"}})
+	onDemand := call("CreateTable", map[string]any{
+		"TableName": "OnDemand", "BillingMode": "PAY_PER_REQUEST",
+		"KeySchema":              []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}},
+		"GlobalSecondaryIndexes": []any{map[string]any{"IndexName": "by-value", "KeySchema": []any{map[string]any{"AttributeName": "value", "KeyType": "HASH"}}, "Projection": map[string]any{"ProjectionType": "ALL"}}},
+		"WarmThroughput":         map[string]any{"ReadUnitsPerSecond": 1000, "WriteUnitsPerSecond": 1200},
+	})
+	described := call("DescribeTable", map[string]any{"TableName": "OnDemand"})
+	provisioned := call("CreateTable", map[string]any{"TableName": "Provisioned", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}, "GlobalSecondaryIndexes": []any{map[string]any{"IndexName": "by-value", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 1, "WriteCapacityUnits": 1}}}})
+	golden.AssertJSON(t, map[string]any{"invalid": invalid, "encrypted": encrypted, "onDemand": onDemand, "described": described, "provisioned": provisioned})
+}
+
 func TestDynamoDBTableClass(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

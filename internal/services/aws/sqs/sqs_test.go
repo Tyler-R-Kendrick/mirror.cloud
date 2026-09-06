@@ -320,6 +320,30 @@ func TestReceiveMessageTimestampAttributes(t *testing.T) {
 	}
 }
 
+func TestReceiveMessageTimestampsCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "timestamps"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call("SendMessage", map[string]any{"QueueName": "timestamps", "MessageBody": "message"}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := call("ReceiveMessage", map[string]any{"QueueName": "timestamps", "AttributeNames": []any{"All"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, _ := response.Output["Messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("receive %#v", response.Output)
+	}
+	golden.AssertJSON(t, messages[0].(map[string]any)["Attributes"])
+}
+
 func TestListQueuesPrefixAndPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

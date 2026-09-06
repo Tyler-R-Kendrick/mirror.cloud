@@ -46,6 +46,9 @@ func Parse(r *http.Request, defaultAcct, defaultReg string, now time.Time) spi.I
 	}
 	expired := strings.HasSuffix(id.ARN, ":expired")
 	akid, region := parseCredential(cred)
+	if region == "localhost" {
+		region = defaultRegion
+	}
 	if akid != "" {
 		id.AccessKeyID = akid
 		if r.Header.Get("X-Mirror-Region") == "" && region != "" {

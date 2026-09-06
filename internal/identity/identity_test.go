@@ -57,6 +57,20 @@ func TestParseAndExpiry(t *testing.T) {
 	}
 }
 
+func TestLocalhostCredentialUsesUSEast1(t *testing.T) {
+	for name, request := range map[string]*http.Request{
+		"header": httptest.NewRequest("POST", "/", nil),
+		"query":  httptest.NewRequest("GET", "/?X-Amz-Credential=test%2F20200101%2Flocalhost%2Fdynamodb%2Faws4_request", nil),
+	} {
+		if name == "header" {
+			request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/localhost/dynamodb/aws4_request, SignedHeaders=host, Signature=00")
+		}
+		if got := Parse(request, "", "eu-west-1", time.Unix(0, 0)).Region; got != "us-east-1" {
+			t.Fatalf("%s localhost credential region %q", name, got)
+		}
+	}
+}
+
 func TestPresignedAuthFault(t *testing.T) {
 	for name, target := range map[string]string{
 		"none":       "/x?list-type=2",

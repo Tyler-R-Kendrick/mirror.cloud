@@ -559,6 +559,21 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("delete too many entries %d %s", status, body)
 		}
 	})
+	t.Run("Given one invalid body in a send batch Then only that entry fails", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-batch-invalid-contents"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		entries := make([]map[string]any, 10)
+		for i := range entries {
+			entries[i] = map[string]any{"Id": fmt.Sprintf("%d", i), "MessageBody": fmt.Sprintf("%d", i)}
+		}
+		entries[9]["MessageBody"] = "\x01"
+		payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-batch-invalid-contents", "Entries": entries})
+		status, body := call("SendMessageBatch", string(payload))
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"Successful"`)) || !bytes.Contains(body, []byte(`"Failed"`)) || !bytes.Contains(body, []byte("InvalidMessageContents")) {
+			t.Fatalf("partial failure %d %s", status, body)
+		}
+	})
 	t.Run("Given a FIFO queue When sending invalid deduplication ids Then the validation fault is returned", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-dedup-invalid.fifo","Attributes":{"ContentBasedDeduplication":"false"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

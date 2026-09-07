@@ -226,6 +226,35 @@ func TestAWSSDKSQSTooManyBatchEntriesContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSSendMessageBatchInvalidContentsPartialFailureContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-batch-invalid-contents")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]types.SendMessageBatchRequestEntry, 10)
+	for i := range entries {
+		entries[i] = types.SendMessageBatchRequestEntry{Id: aws.String(strconv.Itoa(i)), MessageBody: aws.String(strconv.Itoa(i))}
+	}
+	entries[9] = types.SendMessageBatchRequestEntry{Id: aws.String("9"), MessageBody: aws.String("\x01")}
+	result, err := client.SendMessageBatch(context.Background(), &sqs.SendMessageBatchInput{QueueUrl: created.QueueUrl, Entries: entries})
+	if err != nil || len(result.Successful) != 9 || len(result.Failed) != 1 || aws.ToString(result.Failed[0].Code) != "InvalidMessageContents" {
+		t.Fatalf("invalid contents batch result %#v error %v", result, err)
+	}
+}
+
 func TestAWSSDKSQSEmptyMessageBatchContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

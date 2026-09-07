@@ -17603,6 +17603,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestInvalidMessageContentsCharacterization",
 		},
 		{
+			name: "sqs-batch-accept-invalid-message-contents",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "resp, err := p.Invoke(ctx, sub)\n\t\t\tif err != nil {",
+			new:  "resp, err := p.Invoke(ctx, sub)\n\t\t\tif false {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestSendMessageBatchInvalidContentsPartialFailureCharacterization",
+		},
+		{
 			name: "sqs-keep-expired-messages-visible",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "if messageExpired(attrs, m, now.UnixNano()) {",

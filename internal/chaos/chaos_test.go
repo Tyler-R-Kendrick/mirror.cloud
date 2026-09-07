@@ -6115,6 +6115,41 @@ func TestConcurrentSQSInvalidMessageContentsAreStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSSendMessageBatchInvalidContentsAreStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-batch-invalid-contents"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "chaos-batch-invalid-contents", "Entries": []any{
+				map[string]any{"Id": "1", "MessageBody": "valid"},
+				map[string]any{"Id": "2", "MessageBody": "invalid-\x00"},
+			}}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			failed := response.Output["Failed"].([]any)
+			if len(response.Output["Successful"].([]any)) != 1 || len(failed) != 1 || failed[0].(map[string]any)["Code"] != "InvalidMessageContents" {
+				errs <- fmt.Errorf("batch invalid contents response %#v", response.Output)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSMessageRetentionIsStable(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)

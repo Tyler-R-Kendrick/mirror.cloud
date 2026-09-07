@@ -1302,6 +1302,31 @@ func TestDeleteMessageBatchTooManyEntriesCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
+func TestSendMessageBatchInvalidContentsPartialFailureCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-invalid-contents"}}); err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]any, 10)
+	for i := range entries {
+		entries[i] = map[string]any{"Id": strconv.Itoa(i), "MessageBody": strconv.Itoa(i)}
+	}
+	entries[9] = map[string]any{"Id": "9", "MessageBody": "\x01"}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "batch-invalid-contents", "Entries": entries}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	successful := response.Output["Successful"].([]any)
+	failed := response.Output["Failed"].([]any)
+	if len(successful) != 9 || len(failed) != 1 {
+		t.Fatalf("batch response %#v", response.Output)
+	}
+	failure := failed[0].(map[string]any)
+	golden.AssertJSON(t, map[string]any{"successful": len(successful), "failed": failure})
+}
+
 func TestSendBatchReceiveMultipleCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -1834,6 +1859,36 @@ func FuzzInvalidBatchEntryID(f *testing.F) {
 		fault, ok := err.(*spi.Fault)
 		if !ok || fault.Code != "AWS.SimpleQueueService.InvalidBatchEntryId" {
 			t.Fatalf("invalid id %q error %#v", entryID, err)
+		}
+	})
+}
+
+func FuzzSendMessageBatchInvalidContents(f *testing.F) {
+	f.Add("\x01")
+	f.Add("ok")
+	f.Fuzz(func(t *testing.T, body string) {
+		if len(body) > 256 || body == "" {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-batch-contents"}}); err != nil {
+			t.Fatal(err)
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "fuzz-batch-contents", "Entries": []any{map[string]any{"Id": "1", "MessageBody": body}}}})
+		if validMessageContents(body) {
+			if err != nil || len(response.Output["Successful"].([]any)) != 1 {
+				t.Fatalf("valid body %q response %#v error %v", body, response.Output, err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("invalid body should be per-entry failure: %q error %v", body, err)
+		}
+		failed := response.Output["Failed"].([]any)
+		if len(failed) != 1 || asMap(failed[0])["Code"] != "InvalidMessageContents" {
+			t.Fatalf("invalid body %q response %#v", body, response.Output)
 		}
 	})
 }

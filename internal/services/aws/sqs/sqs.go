@@ -216,6 +216,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "SetQueueAttributes":
 		name := queueName(req)
 		attrs := asMap(req.Input["Attributes"])
+		if fifo, present := attrs["FifoQueue"]; present && (!strings.HasSuffix(name, ".fifo") || str(fifo) != "true") {
+			return nil, &spi.Fault{Code: "InvalidAttributeName", Message: "Unknown Attribute FifoQueue.", HTTPStatus: 400, Fault: "client"}
+		}
 		current := map[string]any{}
 		if b, ok, _ := p.col(req, "qattrs").Get(ctx, name); ok {
 			_ = json.Unmarshal(b, &current)

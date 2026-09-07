@@ -799,6 +799,38 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("fifo conflict %d %s", status, body)
 		}
 	})
+	t.Run("Given queue state changes When creating again Then intrinsic messages and modified attributes do not break idempotency", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-state"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		for _, message := range []string{"one", "two", "three"} {
+			if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-state","MessageBody":"`+message+`"}`); status != http.StatusOK {
+				t.Fatalf("send %d %s", status, body)
+			}
+		}
+		status, body := call("CreateQueue", `{"QueueName":"bdd-state"}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte("bdd-state")) {
+			t.Fatalf("state idempotency %d %s", status, body)
+		}
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-modified","Attributes":{"VisibilityTimeout":"1","ReceiveMessageWaitTimeSeconds":"1"}}`); status != http.StatusOK {
+			t.Fatalf("modified create %d %s", status, body)
+		}
+		if status, body := call("SetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-modified","Attributes":{"VisibilityTimeout":"2","ReceiveMessageWaitTimeSeconds":"2"}}`); status != http.StatusOK {
+			t.Fatalf("modified update %d %s", status, body)
+		}
+		status, body = call("CreateQueue", `{"QueueName":"bdd-modified","Attributes":{"VisibilityTimeout":"1","ReceiveMessageWaitTimeSeconds":"1"}}`)
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("QueueAlreadyExists")) {
+			t.Fatalf("original attributes %d %s", status, body)
+		}
+		status, body = call("CreateQueue", `{"QueueName":"bdd-modified","Attributes":{"VisibilityTimeout":"2","ReceiveMessageWaitTimeSeconds":"2"}}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte("bdd-modified")) {
+			t.Fatalf("modified attributes %d %s", status, body)
+		}
+		status, body = call("CreateQueue", `{"QueueName":"bdd-modified"}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte("bdd-modified")) {
+			t.Fatalf("default attributes %d %s", status, body)
+		}
+	})
 	t.Run("Given a batch entry with punctuation When sending Then the invalid batch id fault is returned", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-invalid-batch-id"}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

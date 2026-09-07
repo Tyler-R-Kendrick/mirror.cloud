@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 126 / 222 (56.8%) |
-| LocalStack SQS test functions not yet traced | 96 / 222 (43.2%) |
+| LocalStack SQS test functions explicitly traced | 130 / 222 (58.6%) |
+| LocalStack SQS test functions not yet traced | 92 / 222 (41.4%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -610,6 +610,10 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_create_fifo_queue_with_same_attributes_is_idempotent` | Recreating a FIFO queue with the same FifoQueue attribute returns the original URL; atomic Verify-style snapshot, SDK contract, and BDD coverage pin FIFO idempotency | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_create_fifo_queue_with_different_attributes_raises_error` | Recreating a FIFO queue with a changed ContentBasedDeduplication value returns QueueAlreadyExists and names the differing attribute; atomic Verify-style snapshot, SDK contract, BDD, and mutation coverage pin the fault | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_send_message_with_delay_0_works_for_fifo` | FIFO SendMessage accepts explicit DelaySeconds=0 and preserves the MD5OfMessageBody through immediate ReceiveMessage delivery; atomic Verify-style snapshot, raw HTTP BDD, native delay fuzz, and FIFO delay mutation coverage pin the wire digest | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_create_queue_after_internal_attributes_changes_works` | Recreating a queue after delayed messages changes intrinsic state but still returns the original URL; atomic Verify-style snapshot and raw HTTP BDD coverage pin idempotency | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_create_queue_with_default_arguments_works_with_modified_attributes` | After SetQueueAttributes changes visibility and receive-wait values, omitted attributes still return the original URL; upstream marks this case skipped, while Mirror's atomic snapshot and BDD scenario pin the supported behavior | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_create_queue_after_modified_attributes` | Recreating with the original attributes conflicts after modification, while recreated modified or omitted attributes return the URL; upstream marks this case skipped, and Mirror pins the behavior atomically and over HTTP | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_create_queue_after_send` | Recreating a queue after visible messages are sent ignores intrinsic message counters and returns the original URL; atomic Verify-style snapshot and raw HTTP BDD coverage pin the behavior | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_external_endpoint` | Configured `AdvertiseURL` is used for CreateQueue URLs while the returned URL remains usable for message send/receive; atomic snapshot, raw HTTP BDD, concurrent chaos/race, and advertise-seam mutation coverage pin external endpoint advertisement | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_get_queue_url_contains_localstack_host` | Without an explicit advertise URL, GetQueueUrl retains the default LocalStack host and account/name path; the same atomic endpoint characterization and HTTP lifecycle coverage pin the default | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_list_queues_pagination` | MaxResults returns lexically ordered pages and a base64 last-URL NextToken that resumes strictly after the prior page; all seven requested test forms pin token shape, continuation, final-page omission, and concurrent completeness | Mapped; full race-clean |

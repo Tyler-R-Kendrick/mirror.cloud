@@ -3575,6 +3575,68 @@ func TestFIFODelayZeroMessageBodyCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"sent": sent.Output["MD5OfMessageBody"], "received": message["MD5OfBody"], "body": message["Body"]})
 }
 
+func TestCreateQueueAfterStateChangesCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	create := func(name string, attributes map[string]any) (map[string]any, error) {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name, "Attributes": attributes}})
+		if fault, ok := err.(*spi.Fault); ok {
+			return map[string]any{"Code": fault.Code, "Message": fault.Message}, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return response.Output, nil
+	}
+	if _, err := create("internal-state", nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range []struct {
+		body  string
+		delay int
+	}{{"foobar-1", 1}, {"foobar-2", 0}} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "internal-state", "MessageBody": message.body, "DelaySeconds": message.delay}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	internalState, err := create("internal-state", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := create("modified-state", map[string]any{"VisibilityTimeout": "1", "ReceiveMessageWaitTimeSeconds": "1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "modified-state", "Attributes": map[string]any{"VisibilityTimeout": "2", "ReceiveMessageWaitTimeSeconds": "2"}}}); err != nil {
+		t.Fatal(err)
+	}
+	original, err := create("modified-state", map[string]any{"VisibilityTimeout": "1", "ReceiveMessageWaitTimeSeconds": "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	modified, err := create("modified-state", map[string]any{"VisibilityTimeout": "2", "ReceiveMessageWaitTimeSeconds": "2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults, err := create("modified-state", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := create("sent-state", nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{"foobar", "bared", "baz"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "sent-state", "MessageBody": body}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sentState, err := create("sent-state", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, map[string]any{"internal": internalState, "original": original, "modified": modified, "defaults": defaults, "sent": sentState})
+}
+
 func TestSSEMutualExclusionCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

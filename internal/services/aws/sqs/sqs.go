@@ -70,6 +70,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			_ = p.col(req, "qdeleted").Delete(ctx, name)
 		}
 		attrs := asMap(req.Input["Attributes"])
+		if fault := validateSSEAttributes(attrs); fault != nil {
+			return nil, fault
+		}
 		if raw, present := attrs["RedrivePolicy"]; present && str(raw) != "" {
 			if fault := validateRedrivePolicy(str(raw)); fault != nil {
 				return nil, fault
@@ -245,6 +248,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				continue
 			}
 			current[key] = value
+		}
+		if fault := validateSSEAttributes(current); fault != nil {
+			return nil, fault
 		}
 		b, _ := json.Marshal(current)
 		_ = p.col(req, "qattrs").Put(ctx, name, b)
@@ -1138,6 +1144,13 @@ func validateRedrivePolicy(raw string) *spi.Fault {
 
 func invalidRedrivePolicyFault() *spi.Fault {
 	return &spi.Fault{Code: "InvalidParameterValue", Message: "Invalid value for the parameter RedrivePolicy.", HTTPStatus: 400, Fault: "client"}
+}
+
+func validateSSEAttributes(attrs map[string]any) *spi.Fault {
+	if str(attrs["KmsMasterKeyId"]) != "" && str(attrs["SqsManagedSseEnabled"]) == "true" {
+		return &spi.Fault{Code: "InvalidAttributeValue", Message: "The SqsManagedSseEnabled and KmsMasterKeyId attributes are mutually exclusive.", HTTPStatus: 400, Fault: "client"}
+	}
+	return nil
 }
 
 func sortMsgs(msgs []map[string]any) {

@@ -1,0 +1,16 @@
+{
+  "attributes": {
+    "ApproximateNumberOfMessages": "0",
+    "ApproximateNumberOfMessagesDelayed": "0",
+    "ApproximateNumberOfMessagesNotVisible": "0",
+    "CreatedTimestamp": "0",
+    "QueueArn": "arn:aws:sqs:us-east-1:123456789012:sse-exclusive",
+    "VisibilityTimeout": "30"
+  },
+  "error": {
+    "Code": "InvalidAttributeValue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "The SqsManagedSseEnabled and KmsMasterKeyId attributes are mutually exclusive."
+  }
+}

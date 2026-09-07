@@ -18587,6 +18587,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestCreateQueueIdempotencyAndAttributeValidation",
 		},
 		{
+			name: "sqs-allow-mutually-exclusive-sse",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if str(attrs["KmsMasterKeyId"]) != "" && str(attrs["SqsManagedSseEnabled"]) == "true" {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestSSEMutualExclusionCharacterization",
+		},
+		{
 			name: "sqs-disable-message-delay",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "now.Add(time.Duration(delay) * time.Second).UnixNano()",

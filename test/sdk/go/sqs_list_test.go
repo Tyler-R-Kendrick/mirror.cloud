@@ -1802,6 +1802,48 @@ func TestAWSSDKSQSCreateQueueIdempotencyContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSSSEMutualExclusionContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	kmsQueue, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-sse-kms")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SetQueueAttributes(context.Background(), &sqs.SetQueueAttributesInput{QueueUrl: kmsQueue.QueueUrl, Attributes: map[string]string{"KmsMasterKeyId": "testKeyId", "KmsDataKeyReusePeriodSeconds": "6000", "SqsManagedSseEnabled": "false"}}); err != nil {
+		t.Fatal(err)
+	}
+	kmsAttributes, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: kmsQueue.QueueUrl, AttributeNames: []types.QueueAttributeName{"KmsMasterKeyId", "KmsDataKeyReusePeriodSeconds", "SqsManagedSseEnabled"}})
+	if err != nil || kmsAttributes.Attributes["KmsMasterKeyId"] != "testKeyId" || kmsAttributes.Attributes["SqsManagedSseEnabled"] != "false" {
+		t.Fatalf("KMS SSE attributes %#v error %v", kmsAttributes.Attributes, err)
+	}
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-sse-exclusive")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.SetQueueAttributes(context.Background(), &sqs.SetQueueAttributesInput{QueueUrl: created.QueueUrl, Attributes: map[string]string{"KmsMasterKeyId": "testKeyId", "SqsManagedSseEnabled": "true"}})
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("SSE conflict error %v", err)
+	}
+	attributes, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameAll}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := attributes.Attributes["KmsMasterKeyId"]; ok {
+		t.Fatalf("conflicting KMS attribute persisted %#v", attributes.Attributes)
+	}
+}
+
 func TestAWSSDKSQSFIFOQueueNameValidationContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

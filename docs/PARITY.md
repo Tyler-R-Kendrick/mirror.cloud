@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 92 / 222 (41.4%) |
-| LocalStack SQS test functions not yet traced | 130 / 222 (58.6%) |
+| LocalStack SQS test functions explicitly traced | 94 / 222 (42.3%) |
+| LocalStack SQS test functions not yet traced | 128 / 222 (57.7%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -653,6 +653,8 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_sqs_fifo_message_group_scope_no_throughput_setting` | Message-group deduplication scope remains effective without `FifoThroughputLimit`, allowing identical content in distinct groups to arrive independently; atomic characterization snapshot extends the shared AWS SDK/BDD/fuzz/chaos/mutation coverage for the same scope seam | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_change_to_high_throughput_after_creation` | Updating a queue-created `queue` scope to `messageGroup` changes GetQueueAttributes but does not change the live deduplication cache; atomic transition characterization, AWS SDK contract, raw HTTP BDD, concurrent chaos/race, and immutable-scope mutants pin the AWS behavior | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_change_to_regular_throughput_after_creation` | Updating a queue-created `messageGroup` scope to `queue` likewise leaves existing and new deduplication IDs on the creation-time scope; the same atomic, SDK, BDD, chaos, and mutation stack pins the transition | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_sse_queue_attributes` | KMS and SQS-managed encryption attributes round-trip independently through SetQueueAttributes/GetQueueAttributes; atomic Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and SSE mutation coverage pin both modes | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_sse_kms_and_sqs_are_mutually_exclusive` | SetQueueAttributes rejects simultaneous KmsMasterKeyId and SqsManagedSseEnabled=true without persisting either attribute; atomic Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin the conflict | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_system_attributes_have_no_effect_on_attr_md5` | MessageSystemAttributes produce their separate pinned MD5 while leaving MD5OfMessageAttributes unchanged; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and digest mutants pin separation | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_aws_trace_header_propagation` | X-Amzn-Trace-Id on SendMessage is retained as AWSTraceHeader for a requested receive system attribute; atomic characterization snapshot, AWS SDK transport contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and trace mutants pin propagation | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_set_unsupported_attribute_standard` | SetQueueAttributes rejects both `FifoQueue=true` and `FifoQueue=false` on standard queues with `InvalidAttributeName`; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin the rejection | Mapped; focused green |

@@ -1,0 +1,10 @@
+{
+  "sse-kms": {
+    "KmsDataKeyReusePeriodSeconds": "6000",
+    "KmsMasterKeyId": "testKeyId",
+    "SqsManagedSseEnabled": "false"
+  },
+  "sse-sqs": {
+    "SqsManagedSseEnabled": "true"
+  }
+}

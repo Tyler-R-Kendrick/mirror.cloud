@@ -1184,6 +1184,19 @@ func FuzzRedrivePolicyValidation(f *testing.F) {
 	})
 }
 
+func FuzzSSEMutualExclusion(f *testing.F) {
+	f.Add("testKeyId", "true")
+	f.Add("", "true")
+	f.Add("testKeyId", "false")
+	f.Fuzz(func(t *testing.T, keyID, managed string) {
+		attrs := map[string]any{"KmsMasterKeyId": keyID, "SqsManagedSseEnabled": managed}
+		fault := validateSSEAttributes(attrs)
+		if (keyID != "" && managed == "true") != (fault != nil) {
+			t.Fatalf("key=%q managed=%q fault=%v", keyID, managed, fault)
+		}
+	})
+}
+
 func FuzzListDeadLetterSourceQueues(f *testing.F) {
 	f.Add(1)
 	f.Add(2)
@@ -2991,6 +3004,57 @@ func TestCreateQueueIdempotencyAndAttributeValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden.AssertJSON(t, map[string]any{"conflict": conflict, "updated": updated, "invalid": invalid})
+}
+
+func TestSSEMutualExclusionCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "sse-exclusive"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{
+		"QueueName":  "sse-exclusive",
+		"Attributes": map[string]any{"KmsMasterKeyId": "testKeyId", "SqsManagedSseEnabled": "true"},
+	}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("SSE conflict error %#v", err)
+	}
+	attrs, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "sse-exclusive", "AttributeNames": []any{"All"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"error":      map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault},
+		"attributes": attrs.Output["Attributes"],
+	})
+}
+
+func TestSSEAttributesCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	for name, attributes := range map[string]map[string]any{
+		"sse-kms": {"KmsMasterKeyId": "testKeyId", "KmsDataKeyReusePeriodSeconds": "6000", "SqsManagedSseEnabled": "false"},
+		"sse-sqs": {"SqsManagedSseEnabled": "true"},
+	} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": name, "Attributes": attributes}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	output := map[string]any{}
+	for _, name := range []string{"sse-kms", "sse-sqs"} {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": name, "AttributeNames": []any{"KmsMasterKeyId", "KmsDataKeyReusePeriodSeconds", "SqsManagedSseEnabled"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		output[name] = response.Output["Attributes"]
+	}
+	golden.AssertJSON(t, output)
 }
 
 func TestFIFOQueueNameValidationCharacterization(t *testing.T) {

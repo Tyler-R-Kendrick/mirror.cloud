@@ -1140,6 +1140,28 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("partial delete ordering %#v", remaining)
 		}
 	})
+	t.Run("Given both SSE modes When updating a queue Then AWS rejects the conflicting attributes", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-sse-kms"}`); status != http.StatusOK {
+			t.Fatalf("create KMS %d %s", status, body)
+		}
+		if status, body := call("SetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-sse-kms","Attributes":{"KmsMasterKeyId":"testKeyId","KmsDataKeyReusePeriodSeconds":"6000","SqsManagedSseEnabled":"false"}}`); status != http.StatusOK {
+			t.Fatalf("set KMS %d %s", status, body)
+		}
+		if status, body := call("GetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-sse-kms","AttributeNames":["KmsMasterKeyId","KmsDataKeyReusePeriodSeconds","SqsManagedSseEnabled"]}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"KmsMasterKeyId":"testKeyId"`)) || !bytes.Contains(body, []byte(`"SqsManagedSseEnabled":"false"`)) {
+			t.Fatalf("get KMS %d %s", status, body)
+		}
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-sse-exclusive"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("SetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-sse-exclusive","Attributes":{"KmsMasterKeyId":"testKeyId","SqsManagedSseEnabled":"true"}}`)
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("mutually exclusive")) {
+			t.Fatalf("SSE conflict %d %s", status, body)
+		}
+		status, body = call("GetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-sse-exclusive","AttributeNames":["All"]}`)
+		if status != http.StatusOK || bytes.Contains(body, []byte(`"KmsMasterKeyId":"testKeyId"`)) {
+			t.Fatalf("conflicting attributes persisted %d %s", status, body)
+		}
+	})
 }
 
 func TestSQSAdvertisedQueueURLBDD(t *testing.T) {

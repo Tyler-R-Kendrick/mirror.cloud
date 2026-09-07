@@ -7275,3 +7275,42 @@ func TestConcurrentSQSDeleteMessageBatchEmptyIsStable(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestConcurrentSQSSSEMutualExclusionIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	name := "chaos-sse-exclusive"
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": name, "Attributes": map[string]any{"KmsMasterKeyId": "testKeyId", "SqsManagedSseEnabled": "true"}}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidAttributeValue" {
+				errs <- fmt.Errorf("SSE conflict error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": name, "AttributeNames": []any{"All"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attrs, _ := response.Output["Attributes"].(map[string]any)
+	if _, ok := attrs["KmsMasterKeyId"]; ok {
+		t.Fatalf("conflicting KMS attribute persisted %#v", attrs)
+	}
+	if _, ok := attrs["SqsManagedSseEnabled"]; ok {
+		t.Fatalf("conflicting SQS-managed attribute persisted %#v", attrs)
+	}
+}

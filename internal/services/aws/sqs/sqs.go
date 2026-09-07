@@ -662,6 +662,9 @@ func (p *Pack) visible(ctx context.Context, req *spi.Request, name string, now t
 				order = append(order, group)
 				firstSeq[group] = asInt(m["seq"])
 			}
+			if seq := asInt(m["seq"]); seq < firstSeq[group] {
+				firstSeq[group] = seq
+			}
 			groups[group] = append(groups[group], m)
 		}
 		for _, messages := range groups {

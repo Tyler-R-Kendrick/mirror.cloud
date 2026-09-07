@@ -17579,6 +17579,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestMessageAttributeNameFiltersCharacterization",
 		},
 		{
+			name: "sqs-accept-invalid-message-contents",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if !validMessageContents(body) {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestInvalidMessageContentsCharacterization",
+		},
+		{
 			name: "sqs-batch-accept-missing-fifo-deduplication-id",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "if _, provided := message[\"MessageDeduplicationId\"]; !provided || str(message[\"MessageDeduplicationId\"]) == \"\" {",

@@ -159,6 +159,20 @@ func TestEmptyMessageCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
+func TestInvalidMessageContentsCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "invalid-contents"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "invalid-contents", "MessageBody": "Invalid-\x00"}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("invalid contents error %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
+}
+
 func TestReceiveMessageMaxNumberValidation(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -638,6 +652,32 @@ func FuzzMessageAttributeNameFilters(f *testing.F) {
 		want := []int{0, 1, 2, 3}[int(raw)%len(filters)]
 		if len(attrs) != want {
 			t.Fatalf("filter %#v attrs %#v", filter, attrs)
+		}
+	})
+}
+
+func FuzzInvalidMessageContents(f *testing.F) {
+	f.Add(uint8(0))
+	f.Add(uint8(1))
+	f.Fuzz(func(t *testing.T, raw uint8) {
+		body := "valid"
+		if raw%2 == 1 {
+			body += "\x00"
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-invalid-contents"}}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-invalid-contents", "MessageBody": body}})
+		if raw%2 == 1 {
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidMessageContents" {
+				t.Fatalf("invalid body error %#v", err)
+			}
+		} else if err != nil {
+			t.Fatal(err)
 		}
 	})
 }

@@ -121,6 +121,16 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("empty message %d %s", status, body)
 		}
 	})
+	t.Run("Given disallowed message characters When sending Then invalid contents are rejected", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-invalid-contents"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-invalid-contents", "MessageBody": "Invalid-\x00"})
+		status, body := call("SendMessage", string(payload))
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte(`"__type":"InvalidMessageContents"`)) || !bytes.Contains(body, []byte("The message contains characters outside the allowed set.")) {
+			t.Fatalf("invalid contents %d %s", status, body)
+		}
+	})
 	t.Run("Given an oversized receive batch When receiving Then the invalid parameter fault is returned", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-max-messages"}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

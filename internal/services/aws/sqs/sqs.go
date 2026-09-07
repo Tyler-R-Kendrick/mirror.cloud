@@ -397,6 +397,9 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	if body == "" {
 		return nil, &spi.Fault{Code: "MissingParameter", Message: "The request must contain the parameter MessageBody.", HTTPStatus: 400, Fault: "client"}
 	}
+	if !validMessageContents(body) {
+		return nil, &spi.Fault{Code: "InvalidMessageContents", Message: "The message contains characters outside the allowed set.", HTTPStatus: 400, Fault: "client"}
+	}
 	sum := md5.Sum([]byte(body))
 	md5hex := hex.EncodeToString(sum[:])
 	attrs := p.queueAttrs(ctx, req, name)
@@ -468,6 +471,15 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 		_ = p.deps.Bus.Publish(ctx, "sqs", raw)
 	}
 	return &spi.Response{Output: map[string]any{"MessageId": id, "MD5OfMessageBody": md5hex}}, nil
+}
+
+func validMessageContents(body string) bool {
+	for _, r := range body {
+		if r != '\t' && r != '\n' && r != '\r' && (r < 0x20 || r > 0xD7FF && r < 0xE000 || r > 0xFFFD && r < 0x10000) {
+			return false
+		}
+	}
+	return true
 }
 
 func messageSize(body string, attrs any) int {

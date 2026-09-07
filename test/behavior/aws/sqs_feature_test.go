@@ -1154,12 +1154,29 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("create %d %s", status, body)
 		}
 		status, body := call("SetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-sse-exclusive","Attributes":{"KmsMasterKeyId":"testKeyId","SqsManagedSseEnabled":"true"}}`)
-		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("mutually exclusive")) {
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("one type of server-side encryption")) {
 			t.Fatalf("SSE conflict %d %s", status, body)
 		}
 		status, body = call("GetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-sse-exclusive","AttributeNames":["All"]}`)
 		if status != http.StatusOK || bytes.Contains(body, []byte(`"KmsMasterKeyId":"testKeyId"`)) {
 			t.Fatalf("conflicting attributes persisted %d %s", status, body)
+		}
+	})
+	t.Run("Given queue attributes When creating and updating Then defaults and changes are returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-attribute-update","Attributes":{"MessageRetentionPeriod":"604800","ReceiveMessageWaitTimeSeconds":"10","VisibilityTimeout":"20"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("GetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-attribute-update","AttributeNames":["All"]}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"MaximumMessageSize":"1048576"`)) || !bytes.Contains(body, []byte(`"SqsManagedSseEnabled":"true"`)) || !bytes.Contains(body, []byte(`"ReceiveMessageWaitTimeSeconds":"10"`)) {
+			t.Fatalf("initial attributes %d %s", status, body)
+		}
+		status, body = call("SetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-attribute-update","Attributes":{"MaximumMessageSize":"2048","VisibilityTimeout":"69","DelaySeconds":"420"}}`)
+		if status != http.StatusOK {
+			t.Fatalf("update %d %s", status, body)
+		}
+		status, body = call("GetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-attribute-update","AttributeNames":["All"]}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"MaximumMessageSize":"2048"`)) || !bytes.Contains(body, []byte(`"VisibilityTimeout":"69"`)) || !bytes.Contains(body, []byte(`"DelaySeconds":"420"`)) {
+			t.Fatalf("updated attributes %d %s", status, body)
 		}
 	})
 }

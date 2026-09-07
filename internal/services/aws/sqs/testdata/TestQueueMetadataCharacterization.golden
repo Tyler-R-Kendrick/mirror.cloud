@@ -6,7 +6,12 @@
       "ApproximateNumberOfMessagesNotVisible": "0",
       "CreatedTimestamp": "1577934245",
       "DelaySeconds": "5",
+      "LastModifiedTimestamp": "1577934245",
+      "MaximumMessageSize": "1048576",
+      "MessageRetentionPeriod": "345600",
       "QueueArn": "arn:aws:sqs:us-east-1:123456789012:metadata",
+      "ReceiveMessageWaitTimeSeconds": "0",
+      "SqsManagedSseEnabled": "true",
       "VisibilityTimeout": "30"
     }
   },

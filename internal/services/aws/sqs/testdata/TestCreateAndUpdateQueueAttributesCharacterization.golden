@@ -4,17 +4,15 @@
       "ApproximateNumberOfMessages": "0",
       "ApproximateNumberOfMessagesDelayed": "0",
       "ApproximateNumberOfMessagesNotVisible": "0",
-      "ContentBasedDeduplication": "false",
       "CreatedTimestamp": "0",
-      "DelaySeconds": "0",
-      "FifoQueue": "true",
+      "DelaySeconds": "420",
       "LastModifiedTimestamp": "0",
-      "MaximumMessageSize": "1048576",
-      "MessageRetentionPeriod": "345600",
-      "QueueArn": "arn:aws:sqs:us-east-1:123456789012:dedup-strategy.fifo",
-      "ReceiveMessageWaitTimeSeconds": "0",
+      "MaximumMessageSize": "2048",
+      "MessageRetentionPeriod": "604800",
+      "QueueArn": "arn:aws:sqs:us-east-1:123456789012:attribute-update",
+      "ReceiveMessageWaitTimeSeconds": "10",
       "SqsManagedSseEnabled": "true",
-      "VisibilityTimeout": "30"
+      "VisibilityTimeout": "69"
     }
   },
   "before": {
@@ -22,17 +20,15 @@
       "ApproximateNumberOfMessages": "0",
       "ApproximateNumberOfMessagesDelayed": "0",
       "ApproximateNumberOfMessagesNotVisible": "0",
-      "ContentBasedDeduplication": "true",
       "CreatedTimestamp": "0",
       "DelaySeconds": "0",
-      "FifoQueue": "true",
       "LastModifiedTimestamp": "0",
       "MaximumMessageSize": "1048576",
-      "MessageRetentionPeriod": "345600",
-      "QueueArn": "arn:aws:sqs:us-east-1:123456789012:dedup-strategy.fifo",
-      "ReceiveMessageWaitTimeSeconds": "0",
+      "MessageRetentionPeriod": "604800",
+      "QueueArn": "arn:aws:sqs:us-east-1:123456789012:attribute-update",
+      "ReceiveMessageWaitTimeSeconds": "10",
       "SqsManagedSseEnabled": "true",
-      "VisibilityTimeout": "30"
+      "VisibilityTimeout": "20"
     }
   }
 }

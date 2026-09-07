@@ -111,9 +111,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if strings.HasSuffix(name, ".fifo") {
 			attrs["FifoQueue"] = "true"
 		}
+		now := strconv.FormatInt(p.deps.Clock.Now().Unix(), 10)
 		meta, _ := json.Marshal(map[string]any{
 			"url": url, "name": name, "attrs": attrs, "dedupScope": str(attrs["DeduplicationScope"]), "seq": 0,
-			"created": strconv.FormatInt(p.deps.Clock.Now().Unix(), 10),
+			"created": now, "lastModified": now,
 		})
 		_ = p.col(req, "queues").Put(ctx, name, meta)
 		if len(attrs) > 0 {
@@ -202,11 +203,20 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			"ApproximateNumberOfMessagesDelayed":    fmt.Sprintf("%d", delayed),
 			"QueueArn":                              fmt.Sprintf("arn:%s:sqs:%s:%s:%s", arnPartition(req.Identity.Region), req.Identity.Region, req.Identity.Account, name),
 			"VisibilityTimeout":                     "30",
+			"DelaySeconds":                          "0",
+			"MaximumMessageSize":                    "1048576",
+			"MessageRetentionPeriod":                "345600",
+			"ReceiveMessageWaitTimeSeconds":         "0",
+			"SqsManagedSseEnabled":                  "true",
 		}
 		if b, ok, _ := p.col(req, "queues").Get(ctx, name); ok {
 			var meta map[string]any
 			_ = json.Unmarshal(b, &meta)
 			attrs["CreatedTimestamp"] = meta["created"]
+			attrs["LastModifiedTimestamp"] = meta["lastModified"]
+			if attrs["LastModifiedTimestamp"] == nil {
+				attrs["LastModifiedTimestamp"] = meta["created"]
+			}
 		}
 		if b, ok, _ := p.col(req, "qattrs").Get(ctx, name); ok {
 			var extra map[string]any
@@ -247,13 +257,32 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				delete(current, key)
 				continue
 			}
+			if key == "KmsMasterKeyId" && str(value) == "" {
+				delete(current, key)
+				continue
+			}
+			if key == "KmsDataKeyReusePeriodSeconds" && str(value) == "300" {
+				delete(current, key)
+				continue
+			}
 			current[key] = value
+		}
+		if str(attrs["KmsMasterKeyId"]) != "" && str(attrs["SqsManagedSseEnabled"]) == "" {
+			current["SqsManagedSseEnabled"] = "false"
 		}
 		if fault := validateSSEAttributes(current); fault != nil {
 			return nil, fault
 		}
 		b, _ := json.Marshal(current)
 		_ = p.col(req, "qattrs").Put(ctx, name, b)
+		if metaBytes, ok, _ := p.col(req, "queues").Get(ctx, name); ok {
+			var meta map[string]any
+			_ = json.Unmarshal(metaBytes, &meta)
+			meta["lastModified"] = strconv.FormatInt(p.deps.Clock.Now().Unix(), 10)
+			if updated, marshalErr := json.Marshal(meta); marshalErr == nil {
+				_ = p.col(req, "queues").Put(ctx, name, updated)
+			}
+		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "PurgeQueue":
 		name := queueName(req)
@@ -1148,7 +1177,7 @@ func invalidRedrivePolicyFault() *spi.Fault {
 
 func validateSSEAttributes(attrs map[string]any) *spi.Fault {
 	if str(attrs["KmsMasterKeyId"]) != "" && str(attrs["SqsManagedSseEnabled"]) == "true" {
-		return &spi.Fault{Code: "InvalidAttributeValue", Message: "The SqsManagedSseEnabled and KmsMasterKeyId attributes are mutually exclusive.", HTTPStatus: 400, Fault: "client"}
+		return &spi.Fault{Code: "InvalidAttributeName", Message: "You can use one type of server-side encryption (SSE) at one time. You can either enable KMS SSE or SQS SSE.", HTTPStatus: 400, Fault: "client"}
 	}
 	return nil
 }

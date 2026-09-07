@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 95 / 222 (42.8%) |
-| LocalStack SQS test functions not yet traced | 127 / 222 (57.2%) |
+| LocalStack SQS test functions explicitly traced | 97 / 222 (43.7%) |
+| LocalStack SQS test functions not yet traced | 125 / 222 (56.3%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -608,6 +608,8 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_get_queue_url_contains_localstack_host` | Without an explicit advertise URL, GetQueueUrl retains the default LocalStack host and account/name path; the same atomic endpoint characterization and HTTP lifecycle coverage pin the default | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_list_queues_pagination` | MaxResults returns lexically ordered pages and a base64 last-URL NextToken that resumes strictly after the prior page; all seven requested test forms pin token shape, continuation, final-page omission, and concurrent completeness | Mapped; full race-clean |
 | `test_sqs.py::TestSqsProvider::test_create_queue_and_get_attributes` | CreateQueue records its creation epoch; GetQueueAttributes exposes QueueArn, CreatedTimestamp, and default VisibilityTimeout while returning only requested names across JSON, Query, and AWS SDK paths; all seven requested test forms pin metadata values and isolation | Mapped; full race-clean |
+| `test_sqs.py::TestSqsProvider::test_create_and_update_queue_attributes` | CreateQueue persists retention, receive-wait, and visibility attributes, while SetQueueAttributes updates size, visibility, and delay without losing defaults; atomic Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and attribute mutation coverage pin both reads | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_set_queue_attributes_default_values` | Queue defaults expose SSE-SQS, standard size/retention/delay/wait values; KMS updates set managed SSE false and clearing key/reuse values removes KMS fields while retaining the mode; atomic snapshot, SDK, BDD, fuzz, chaos/race, and mutation coverage pin defaults and reset semantics | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_get_specific_queue_attribute_response` | QueueArn uses the AWS partition for standard, GovCloud, and China regions while selected attributes remain isolated; atomic Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and ARN mutation coverage pin the response | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_create_queue_recently_deleted` | DeleteQueue records a 60-second tombstone and clears attributes, tags, messages, and FIFO dedup state; CreateQueue returns AWS.SimpleQueueService.QueueDeletedRecently with the AWS message before the boundary and recreates at the boundary; all seven requested test forms pin timing, protocol, cleanup, and concurrent enforcement | Mapped; full race-clean |
 | `test_sqs.py::TestSqsProvider::test_create_queue_recently_deleted_cache` | LocalStack-only white-box assertion against its private `sqs_stores.deleted` cache; Mirror's equivalent tombstone expiry and removal invariant is covered through its public behavior and native store-level atomic checks | Not an AWS contract; equivalent invariant covered |

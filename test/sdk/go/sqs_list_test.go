@@ -674,6 +674,13 @@ func TestAWSSDKSQSQueueMetadataContract(t *testing.T) {
 		result.Attributes["CreatedTimestamp"] == "" || result.Attributes["VisibilityTimeout"] != "30" {
 		t.Fatalf("metadata %#v, %v", result, err)
 	}
+	if _, err := client.SetQueueAttributes(context.Background(), &sqs.SetQueueAttributesInput{QueueUrl: created.QueueUrl, Attributes: map[string]string{"MaximumMessageSize": "2048", "VisibilityTimeout": "69", "DelaySeconds": "420"}}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameAll}})
+	if err != nil || updated.Attributes["MaximumMessageSize"] != "2048" || updated.Attributes["VisibilityTimeout"] != "69" || updated.Attributes["DelaySeconds"] != "420" || updated.Attributes["SqsManagedSseEnabled"] != "true" {
+		t.Fatalf("updated metadata %#v, %v", updated, err)
+	}
 }
 
 func TestAWSSDKSQSRecentlyDeletedContract(t *testing.T) {
@@ -1832,7 +1839,7 @@ func TestAWSSDKSQSSSEMutualExclusionContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = client.SetQueueAttributes(context.Background(), &sqs.SetQueueAttributesInput{QueueUrl: created.QueueUrl, Attributes: map[string]string{"KmsMasterKeyId": "testKeyId", "SqsManagedSseEnabled": "true"}})
-	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+	if err == nil || !strings.Contains(err.Error(), "one type of server-side encryption") {
 		t.Fatalf("SSE conflict error %v", err)
 	}
 	attributes, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameAll}})

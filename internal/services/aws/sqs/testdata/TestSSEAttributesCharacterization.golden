@@ -4,6 +4,20 @@
     "KmsMasterKeyId": "testKeyId",
     "SqsManagedSseEnabled": "false"
   },
+  "sse-kms-defaults": {
+    "ApproximateNumberOfMessages": "0",
+    "ApproximateNumberOfMessagesDelayed": "0",
+    "ApproximateNumberOfMessagesNotVisible": "0",
+    "CreatedTimestamp": "0",
+    "DelaySeconds": "0",
+    "LastModifiedTimestamp": "0",
+    "MaximumMessageSize": "1048576",
+    "MessageRetentionPeriod": "345600",
+    "QueueArn": "arn:aws:sqs:us-east-1:123456789012:sse-kms",
+    "ReceiveMessageWaitTimeSeconds": "0",
+    "SqsManagedSseEnabled": "false",
+    "VisibilityTimeout": "30"
+  },
   "sse-sqs": {
     "SqsManagedSseEnabled": "true"
   }

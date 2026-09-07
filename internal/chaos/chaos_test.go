@@ -7292,7 +7292,7 @@ func TestConcurrentSQSSSEMutualExclusionIsStable(t *testing.T) {
 			defer wg.Done()
 			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": name, "Attributes": map[string]any{"KmsMasterKeyId": "testKeyId", "SqsManagedSseEnabled": "true"}}})
 			fault, ok := err.(*spi.Fault)
-			if !ok || fault.Code != "InvalidAttributeValue" {
+			if !ok || fault.Code != "InvalidAttributeName" {
 				errs <- fmt.Errorf("SSE conflict error %#v", err)
 			}
 		}()
@@ -7310,8 +7310,8 @@ func TestConcurrentSQSSSEMutualExclusionIsStable(t *testing.T) {
 	if _, ok := attrs["KmsMasterKeyId"]; ok {
 		t.Fatalf("conflicting KMS attribute persisted %#v", attrs)
 	}
-	if _, ok := attrs["SqsManagedSseEnabled"]; ok {
-		t.Fatalf("conflicting SQS-managed attribute persisted %#v", attrs)
+	if managed, ok := attrs["SqsManagedSseEnabled"]; !ok || managed != "true" {
+		t.Fatalf("default SQS-managed attribute changed %#v", attrs)
 	}
 }
 
@@ -7350,5 +7350,42 @@ func TestConcurrentSQSQueueArnPartitionsAreStable(t *testing.T) {
 	close(errs)
 	for err := range errs {
 		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSQueueAttributeUpdatesAreStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	name := "chaos-attribute-update"
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+		t.Fatal(err)
+	}
+	attrs := map[string]any{"MaximumMessageSize": "2048", "VisibilityTimeout": "69", "DelaySeconds": "420"}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": name, "Attributes": attrs}}); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": name, "AttributeNames": []any{"All"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := response.Output["Attributes"].(map[string]any)
+	for key, want := range attrs {
+		if got[key] != want {
+			t.Fatalf("attribute %s=%v want %v output=%#v", key, got[key], want, response.Output)
+		}
 	}
 }

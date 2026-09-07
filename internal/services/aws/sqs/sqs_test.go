@@ -2325,7 +2325,7 @@ func TestQueueCannotBeRecreatedUntilDeleteWindowExpires(t *testing.T) {
 		t.Fatalf("recreated queue reads: %v, %v, %v", attrErr, tagErr, receiveErr)
 	}
 	emptyTags := len(tags.Output) == 0 || len(asMap(tags.Output["Tags"])) == 0
-	if sendErr != nil || secondSent.Output["MessageId"] == firstSent.Output["MessageId"] || attrs.Output["Attributes"].(map[string]any)["DelaySeconds"] != nil ||
+	if sendErr != nil || secondSent.Output["MessageId"] == firstSent.Output["MessageId"] || attrs.Output["Attributes"].(map[string]any)["DelaySeconds"] != "0" ||
 		!emptyTags || len(messages.Output["Messages"].([]any)) != 1 {
 		t.Fatalf("deleted state survived: attrs=%#v tags=%#v messages=%#v", attrs.Output, tags.Output, messages.Output)
 	}
@@ -2358,6 +2358,27 @@ func TestQueueMetadataCharacterization(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden.AssertJSON(t, map[string]any{"selected": selected.Output, "all": all.Output})
+}
+
+func TestCreateAndUpdateQueueAttributesCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "attribute-update", "Attributes": map[string]any{"MessageRetentionPeriod": "604800", "ReceiveMessageWaitTimeSeconds": "10", "VisibilityTimeout": "20"}}}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "attribute-update", "AttributeNames": []any{"All"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "attribute-update", "Attributes": map[string]any{"MaximumMessageSize": "2048", "VisibilityTimeout": "69", "DelaySeconds": "420"}}}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "attribute-update", "AttributeNames": []any{"All"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, map[string]any{"before": before.Output, "after": after.Output})
 }
 
 func TestQueueAdvertiseURLCharacterization(t *testing.T) {
@@ -3097,6 +3118,14 @@ func TestSSEAttributesCharacterization(t *testing.T) {
 		}
 		output[name] = response.Output["Attributes"]
 	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "sse-kms", "Attributes": map[string]any{"KmsMasterKeyId": "", "KmsDataKeyReusePeriodSeconds": "300"}}}); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "sse-kms", "AttributeNames": []any{"All"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output["sse-kms-defaults"] = cleared.Output["Attributes"]
 	golden.AssertJSON(t, output)
 }
 
@@ -3620,7 +3649,7 @@ func FuzzQueueMetadataAttributeSelection(f *testing.F) {
 				want[name] = true
 			}
 			if name == "All" {
-				want = map[string]bool{"ApproximateNumberOfMessages": true, "ApproximateNumberOfMessagesDelayed": true, "ApproximateNumberOfMessagesNotVisible": true, "QueueArn": true, "CreatedTimestamp": true, "VisibilityTimeout": true}
+				want = map[string]bool{"ApproximateNumberOfMessages": true, "ApproximateNumberOfMessagesDelayed": true, "ApproximateNumberOfMessagesNotVisible": true, "QueueArn": true, "CreatedTimestamp": true, "LastModifiedTimestamp": true, "DelaySeconds": true, "MaximumMessageSize": true, "MessageRetentionPeriod": true, "ReceiveMessageWaitTimeSeconds": true, "SqsManagedSseEnabled": true, "VisibilityTimeout": true}
 				break
 			}
 		}
@@ -3673,7 +3702,7 @@ func FuzzQueueDeletionWindow(f *testing.F) {
 			t.Fatalf("%ds recreate %v", seconds, err)
 		}
 		response, err := call("GetQueueAttributes", map[string]any{"QueueName": "deleted", "AttributeNames": []any{"All"}})
-		if err != nil || response.Output["Attributes"].(map[string]any)["DelaySeconds"] != nil {
+		if err != nil || response.Output["Attributes"].(map[string]any)["DelaySeconds"] != "0" {
 			t.Fatalf("%ds stale attributes %#v, %v", seconds, response, err)
 		}
 	})

@@ -783,6 +783,22 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("conflict %d %s", status, body)
 		}
 	})
+	t.Run("Given FIFO queues When creating them repeatedly Then same attributes are idempotent and changes conflict", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-same.fifo","Attributes":{"FifoQueue":"true"}}`); status != http.StatusOK {
+			t.Fatalf("fifo create %d %s", status, body)
+		}
+		status, body := call("CreateQueue", `{"QueueName":"bdd-same.fifo","Attributes":{"FifoQueue":"true"}}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte("bdd-same.fifo")) {
+			t.Fatalf("fifo idempotent %d %s", status, body)
+		}
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-different.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
+			t.Fatalf("fifo baseline %d %s", status, body)
+		}
+		status, body = call("CreateQueue", `{"QueueName":"bdd-different.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"false"}}`)
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("QueueAlreadyExists")) || !bytes.Contains(body, []byte("ContentBasedDeduplication")) {
+			t.Fatalf("fifo conflict %d %s", status, body)
+		}
+	})
 	t.Run("Given a batch entry with punctuation When sending Then the invalid batch id fault is returned", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-invalid-batch-id"}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

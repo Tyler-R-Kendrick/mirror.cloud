@@ -3497,7 +3497,7 @@ func TestCreateQueueIdempotencyAndAttributeValidation(t *testing.T) {
 		}
 		return response.Output, nil
 	}
-	first, err := call(map[string]any{"QueueName": "idempotent", "Attributes": map[string]any{"VisibilityTimeout": "69"}})
+	first, err := call(map[string]any{"QueueName": "idempotent", "Attributes": map[string]any{"VisibilityTimeout": "69", "ReceiveMessageWaitTimeSeconds": "1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3521,6 +3521,39 @@ func TestCreateQueueIdempotencyAndAttributeValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden.AssertJSON(t, map[string]any{"conflict": conflict, "updated": updated, "invalid": invalid})
+}
+
+func TestFIFOQueueCreateIdempotencyCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	create := func(name string, attributes map[string]any) (map[string]any, error) {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name, "Attributes": attributes}})
+		if fault, ok := err.(*spi.Fault); ok {
+			return map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus}, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return response.Output, nil
+	}
+	same := map[string]any{"FifoQueue": "true"}
+	first, err := create("same.fifo", same)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := create("same.fifo", same)
+	if err != nil || second["QueueUrl"] != first["QueueUrl"] {
+		t.Fatalf("fifo idempotency first=%#v second=%#v err=%v", first, second, err)
+	}
+	if _, err := create("different.fifo", map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}); err != nil {
+		t.Fatal(err)
+	}
+	conflict, err := create("different.fifo", map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, map[string]any{"same": second, "conflict": conflict})
 }
 
 func TestSSEMutualExclusionCharacterization(t *testing.T) {

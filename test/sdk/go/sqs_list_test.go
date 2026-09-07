@@ -1301,14 +1301,14 @@ func TestAWSSDKSQSRedrivePolicyClearingContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:dlq","maxReceiveCount":"42"}`
-	if _, err := client.SetQueueAttributes(context.Background(), &sqs.SetQueueAttributesInput{QueueUrl: created.QueueUrl, Attributes: map[string]string{"RedrivePolicy": policy}}); err != nil {
+	if _, err := client.SetQueueAttributes(context.Background(), &sqs.SetQueueAttributesInput{QueueUrl: created.QueueUrl, Attributes: map[string]string{"RedrivePolicy": policy, "Policy": policy}}); err != nil {
 		t.Fatal(err)
 	}
 	set, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameAll}})
-	if err != nil || set.Attributes["RedrivePolicy"] != policy {
+	if err != nil || set.Attributes["RedrivePolicy"] != policy || set.Attributes["Policy"] != policy {
 		t.Fatalf("set %#v error %v", set, err)
 	}
-	if _, err := client.SetQueueAttributes(context.Background(), &sqs.SetQueueAttributesInput{QueueUrl: created.QueueUrl, Attributes: map[string]string{"RedrivePolicy": ""}}); err != nil {
+	if _, err := client.SetQueueAttributes(context.Background(), &sqs.SetQueueAttributesInput{QueueUrl: created.QueueUrl, Attributes: map[string]string{"RedrivePolicy": "", "Policy": ""}}); err != nil {
 		t.Fatal(err)
 	}
 	cleared, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameAll}})
@@ -1316,6 +1316,9 @@ func TestAWSSDKSQSRedrivePolicyClearingContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, present := cleared.Attributes["RedrivePolicy"]; present {
+		t.Fatalf("policy was not cleared %#v", cleared)
+	}
+	if _, present := cleared.Attributes["Policy"]; present {
 		t.Fatalf("policy was not cleared %#v", cleared)
 	}
 }

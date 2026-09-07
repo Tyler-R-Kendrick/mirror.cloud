@@ -947,25 +947,26 @@ func TestRedrivePolicyClearingCharacterization(t *testing.T) {
 		t.Fatal(err)
 	}
 	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:dlq","maxReceiveCount":"42"}`
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "redrive-policy", "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "redrive-policy", "Attributes": map[string]any{"RedrivePolicy": policy, "Policy": policy}}}); err != nil {
 		t.Fatal(err)
 	}
 	set, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "redrive-policy", "AttributeNames": []any{"All"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if asMap(set.Output["Attributes"])["RedrivePolicy"] != policy {
+	if asMap(set.Output["Attributes"])["RedrivePolicy"] != policy || asMap(set.Output["Attributes"])["Policy"] != policy {
 		t.Fatalf("set policy %#v", set.Output)
 	}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "redrive-policy", "Attributes": map[string]any{"RedrivePolicy": ""}}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "redrive-policy", "Attributes": map[string]any{"RedrivePolicy": "", "Policy": ""}}}); err != nil {
 		t.Fatal(err)
 	}
 	cleared, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "redrive-policy", "AttributeNames": []any{"All"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, present := asMap(cleared.Output["Attributes"])["RedrivePolicy"]
-	golden.AssertJSON(t, map[string]any{"set": asMap(set.Output["Attributes"])["RedrivePolicy"], "cleared": present})
+	_, redrivePresent := asMap(cleared.Output["Attributes"])["RedrivePolicy"]
+	_, policyPresent := asMap(cleared.Output["Attributes"])["Policy"]
+	golden.AssertJSON(t, map[string]any{"setRedrive": asMap(set.Output["Attributes"])["RedrivePolicy"], "setPolicy": asMap(set.Output["Attributes"])["Policy"], "clearedRedrive": redrivePresent, "clearedPolicy": policyPresent})
 }
 
 func FuzzFIFOContentBasedDeduplicationStrategy(f *testing.F) {
@@ -1000,22 +1001,23 @@ func FuzzRedrivePolicyClearing(f *testing.F) {
 			t.Fatal(err)
 		}
 		policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:dlq","maxReceiveCount":"42"}`
-		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "fuzz-redrive-policy", "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "fuzz-redrive-policy", "Attributes": map[string]any{"RedrivePolicy": policy, "Policy": policy}}}); err != nil {
 			t.Fatal(err)
 		}
 		value := policy
 		if clear {
 			value = ""
 		}
-		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "fuzz-redrive-policy", "Attributes": map[string]any{"RedrivePolicy": value}}}); err != nil {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "fuzz-redrive-policy", "Attributes": map[string]any{"RedrivePolicy": value, "Policy": value}}}); err != nil {
 			t.Fatal(err)
 		}
 		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "fuzz-redrive-policy", "AttributeNames": []any{"All"}}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, present := asMap(response.Output["Attributes"])["RedrivePolicy"]
-		if present == clear {
+		_, redrivePresent := asMap(response.Output["Attributes"])["RedrivePolicy"]
+		_, policyPresent := asMap(response.Output["Attributes"])["Policy"]
+		if redrivePresent == clear || policyPresent == clear {
 			t.Fatalf("clear=%v response=%#v", clear, response.Output)
 		}
 	})

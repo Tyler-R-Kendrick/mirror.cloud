@@ -81,16 +81,16 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("create %d %s", status, body)
 		}
 		policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:dlq","maxReceiveCount":"42"}`
-		payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-redrive-policy", "Attributes": map[string]string{"RedrivePolicy": policy}})
+		payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-redrive-policy", "Attributes": map[string]string{"RedrivePolicy": policy, "Policy": policy}})
 		if status, body := call("SetQueueAttributes", string(payload)); status != http.StatusOK {
 			t.Fatalf("set %d %s", status, body)
 		}
-		payload, _ = json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-redrive-policy", "Attributes": map[string]string{"RedrivePolicy": ""}})
+		payload, _ = json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-redrive-policy", "Attributes": map[string]string{"RedrivePolicy": "", "Policy": ""}})
 		if status, body := call("SetQueueAttributes", string(payload)); status != http.StatusOK {
 			t.Fatalf("clear %d %s", status, body)
 		}
 		status, body := call("GetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-redrive-policy","AttributeNames":["All"]}`)
-		if status != http.StatusOK || bytes.Contains(body, []byte("RedrivePolicy")) {
+		if status != http.StatusOK || bytes.Contains(body, []byte("RedrivePolicy")) || bytes.Contains(body, []byte("Policy")) {
 			t.Fatalf("redrive policy remained %d %s", status, body)
 		}
 	})

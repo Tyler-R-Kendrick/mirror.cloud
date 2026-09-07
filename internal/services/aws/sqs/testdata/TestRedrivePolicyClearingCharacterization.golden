@@ -1,4 +1,6 @@
 {
-  "cleared": false,
-  "set": "{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:123456789012:dlq\",\"maxReceiveCount\":\"42\"}"
+  "clearedPolicy": false,
+  "clearedRedrive": false,
+  "setPolicy": "{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:123456789012:dlq\",\"maxReceiveCount\":\"42\"}",
+  "setRedrive": "{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:123456789012:dlq\",\"maxReceiveCount\":\"42\"}"
 }

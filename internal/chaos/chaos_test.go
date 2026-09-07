@@ -995,11 +995,11 @@ func TestConcurrentSQSRedrivePolicyClearingIsStable(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "chaos-redrive-policy", "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "chaos-redrive-policy", "Attributes": map[string]any{"RedrivePolicy": policy, "Policy": policy}}}); err != nil {
 				errs <- err
 				return
 			}
-			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "chaos-redrive-policy", "Attributes": map[string]any{"RedrivePolicy": ""}}}); err != nil {
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "chaos-redrive-policy", "Attributes": map[string]any{"RedrivePolicy": "", "Policy": ""}}}); err != nil {
 				errs <- err
 			}
 		}()
@@ -1015,6 +1015,9 @@ func TestConcurrentSQSRedrivePolicyClearingIsStable(t *testing.T) {
 	}
 	attributes, _ := response.Output["Attributes"].(map[string]any)
 	if _, present := attributes["RedrivePolicy"]; present {
+		t.Fatalf("redrive policy remained %#v", response.Output)
+	}
+	if _, present := attributes["Policy"]; present {
 		t.Fatalf("redrive policy remained %#v", response.Output)
 	}
 }

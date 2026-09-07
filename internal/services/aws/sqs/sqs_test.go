@@ -3556,6 +3556,25 @@ func TestFIFOQueueCreateIdempotencyCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"same": second, "conflict": conflict})
 }
 
+func TestFIFODelayZeroMessageBodyCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "delay-zero.fifo", "Attributes": map[string]any{"FifoQueue": "true"}}}); err != nil {
+		t.Fatal(err)
+	}
+	sent, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "delay-zero.fifo", "DelaySeconds": 0, "MessageBody": "Hello World!", "MessageGroupId": "test", "MessageDeduplicationId": "42"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	received, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "delay-zero.fifo", "VisibilityTimeout": 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := received.Output["Messages"].([]any)[0].(map[string]any)
+	golden.AssertJSON(t, map[string]any{"sent": sent.Output["MD5OfMessageBody"], "received": message["MD5OfBody"], "body": message["Body"]})
+}
+
 func TestSSEMutualExclusionCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

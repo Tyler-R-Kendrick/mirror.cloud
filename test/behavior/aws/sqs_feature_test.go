@@ -934,6 +934,21 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("delayed receive %d %s", status, body)
 		}
 	})
+	t.Run("Given a FIFO queue When sending with zero delay Then the body digest is preserved", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-zero-delay.fifo","Attributes":{"FifoQueue":"true"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-zero-delay.fifo","DelaySeconds":0,"MessageBody":"Hello World!","MessageGroupId":"test","MessageDeduplicationId":"42"}`)
+		var sent map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &sent) != nil {
+			t.Fatalf("send %d %s", status, body)
+		}
+		status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-zero-delay.fifo","VisibilityTimeout":0}`)
+		var received map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &received) != nil || received["Messages"].([]any)[0].(map[string]any)["MD5OfBody"] != sent["MD5OfMessageBody"] {
+			t.Fatalf("receive %d %s", status, body)
+		}
+	})
 	t.Run("Given a FIFO queue When sending with a per-message delay Then the request is rejected", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-invalid-delay.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

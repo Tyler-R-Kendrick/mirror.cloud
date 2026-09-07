@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -2927,6 +2928,39 @@ func TestQueueAdvertiseURLCharacterization(t *testing.T) {
 		t.Fatalf("default queue URL %#v error %v", defaultURL.Output, err)
 	}
 	golden.AssertJSON(t, map[string]any{"created": response.Output, "lookup": url.Output, "default": defaultURL.Output})
+}
+
+func TestQueueHostVariantsCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	httpRequest := httptest.NewRequest(http.MethodPost, "http://edge/", nil)
+	httpRequest.Host = "aws-local:12345"
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "host-variant"}, HTTP: httpRequest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Output["QueueUrl"] != "http://aws-local:12345/123456789012/host-variant" {
+		t.Fatalf("host advertisement %#v", created.Output)
+	}
+	call := func(url, body string) map[string]any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueUrl": url, "MessageBody": body}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+	call(created.Output["QueueUrl"].(string), "aws-local")
+	call("http://127.0.0.1/123456789012/host-variant", "loopback")
+	first, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueUrl": "http://aws-local:12345/123456789012/host-variant", "MaxNumberOfMessages": 10, "VisibilityTimeout": 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := first.Output["Messages"].([]any)
+	if len(messages) != 2 || messages[0].(map[string]any)["Body"] != "aws-local" || messages[1].(map[string]any)["Body"] != "loopback" {
+		t.Fatalf("host variant receive %#v", first.Output)
+	}
+	golden.AssertJSON(t, map[string]any{"created": created.Output, "received": first.Output})
 }
 
 func TestQueueRecentlyDeletedCharacterization(t *testing.T) {

@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 91.3% |
-| LocalStack SQS test functions explicitly traced | 141 / 222 (63.5%) |
-| LocalStack SQS test functions not yet traced | 81 / 222 (36.5%) |
+| LocalStack SQS test functions explicitly traced | 143 / 222 (64.4%) |
+| LocalStack SQS test functions not yet traced | 79 / 222 (35.6%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -625,6 +625,8 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_receive_message_with_visibility_timeout_updates_timeout` | Consecutive receives with VisibilityTimeout=0 then 3 produce a new receipt handle and suppress a third receive; atomic Verify-style snapshot and raw HTTP BDD coverage pin timeout updates | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_message_retention_fifo` | FIFO messages are removed once MessageRetentionPeriod elapses; atomic Verify-style snapshot and raw HTTP BDD coverage pin expiry across groups | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_message_retention_with_inflight` | Retention removes both visible and in-flight messages, and stale receipt deletion remains harmless; atomic Verify-style snapshot and retention mutation coverage pin cleanup | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_external_hostname_via_host_header` | CreateQueue advertises the request Host while queue identity remains account-and-name based; atomic Verify-style snapshot pins the returned host-specific URL | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_external_host_via_header_complete_message_lifecycle` | Send and Receive accept the advertised host and loopback host variants for the same queue path; atomic Verify-style snapshot pins the complete lifecycle | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_external_endpoint` | Configured `AdvertiseURL` is used for CreateQueue URLs while the returned URL remains usable for message send/receive; atomic snapshot, raw HTTP BDD, concurrent chaos/race, and advertise-seam mutation coverage pin external endpoint advertisement | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_get_queue_url_contains_localstack_host` | Without an explicit advertise URL, GetQueueUrl retains the default LocalStack host and account/name path; the same atomic endpoint characterization and HTTP lifecycle coverage pin the default | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_list_queues_pagination` | MaxResults returns lexically ordered pages and a base64 last-URL NextToken that resumes strictly after the prior page; all seven requested test forms pin token shape, continuation, final-page omission, and concurrent completeness | Mapped; full race-clean |

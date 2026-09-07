@@ -6203,6 +6203,46 @@ func TestConcurrentSQSReceiptsRemainValid(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSFIFOExpiredDeletesAreStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	handles := make([]string, 16)
+	for index := range handles {
+		name := fmt.Sprintf("chaos-expired-%d.fifo", index)
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name, "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": "0"}}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": "message", "MessageGroupId": "group"}}); err != nil {
+			t.Fatal(err)
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		handles[index] = response.Output["Messages"].([]any)[0].(map[string]any)["ReceiptHandle"].(string)
+	}
+	errs := make(chan error, len(handles))
+	var wg sync.WaitGroup
+	for index, handle := range handles {
+		wg.Add(1)
+		go func(index int, handle string) {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessage", Input: map[string]any{"QueueName": fmt.Sprintf("chaos-expired-%d.fifo", index), "ReceiptHandle": handle}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidParameterValue" || !strings.Contains(fault.Message, "receipt handle has expired") {
+				errs <- fmt.Errorf("expired delete %d: %#v", index, err)
+			}
+		}(index, handle)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSFIFOBatchMissingDeduplicationIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := sqs.New(deps)

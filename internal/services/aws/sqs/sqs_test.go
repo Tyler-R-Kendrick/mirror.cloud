@@ -293,6 +293,35 @@ func TestPriorReceiptHandleRemainsUsable(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"oldHandleLength": len(oldHandle), "deletedWithOldHandle": left == nil})
 }
 
+func TestFIFODeleteAfterVisibilityTimeoutCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "expired.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": "1"}})
+	call("SendMessage", map[string]any{"QueueName": "expired.fifo", "MessageBody": "message", "MessageGroupId": "group"})
+	received := call("ReceiveMessage", map[string]any{"QueueName": "expired.fifo"}).Output["Messages"].([]any)[0].(map[string]any)
+	if err := clk.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessage", Input: map[string]any{"QueueName": "expired.fifo", "ReceiptHandle": received["ReceiptHandle"]}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("expired FIFO receipt error %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
+}
+
 func TestSuccessivePurgeCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
@@ -943,6 +972,41 @@ func FuzzReceiptHandleRotation(f *testing.F) {
 		secondHandle := second.Output["Messages"].([]any)[0].(map[string]any)["ReceiptHandle"]
 		if firstHandle == secondHandle {
 			t.Fatalf("timeout=%d handle did not rotate", timeout)
+		}
+	})
+}
+
+func FuzzFIFODeleteAfterVisibilityTimeout(f *testing.F) {
+	f.Add(uint8(0))
+	f.Add(uint8(2))
+	f.Fuzz(func(t *testing.T, timeout uint8) {
+		if timeout > 10 {
+			t.Skip()
+		}
+		clk := clock.NewControllable()
+		deps := spitest.Deps(t)
+		deps.Clock = clk
+		p := New(deps)
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-expired.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": strconv.Itoa(int(timeout))}}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-expired.fifo", "MessageBody": "message", "MessageGroupId": "group"}}); err != nil {
+			t.Fatal(err)
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "fuzz-expired.fifo"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		handle := response.Output["Messages"].([]any)[0].(map[string]any)["ReceiptHandle"]
+		if err := clk.Advance(time.Duration(timeout) * time.Second); err != nil {
+			t.Fatal(err)
+		}
+		_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessage", Input: map[string]any{"QueueName": "fuzz-expired.fifo", "ReceiptHandle": handle}})
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "InvalidParameterValue" || !strings.Contains(fault.Message, "receipt handle has expired") {
+			t.Fatalf("timeout=%d error %#v", timeout, err)
 		}
 	})
 }

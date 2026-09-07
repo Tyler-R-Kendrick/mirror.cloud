@@ -656,4 +656,23 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("prior handle receive %d %s", status, body)
 		}
 	})
+	t.Run("Given an expired FIFO receipt When deleting Then the expiry fault is returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-expired.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true","VisibilityTimeout":"0"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-expired.fifo","MessageBody":"message","MessageGroupId":"group"}`); status != http.StatusOK {
+			t.Fatalf("send %d %s", status, body)
+		}
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-expired.fifo"}`)
+		var received map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &received) != nil {
+			t.Fatalf("receive %d %s", status, body)
+		}
+		handle := received["Messages"].([]any)[0].(map[string]any)["ReceiptHandle"]
+		payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-expired.fifo", "ReceiptHandle": handle})
+		status, body = call("DeleteMessage", string(payload))
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte(`"__type":"InvalidParameterValue"`)) || !bytes.Contains(body, []byte("receipt handle has expired")) {
+			t.Fatalf("expired delete %d %s", status, body)
+		}
+	})
 }

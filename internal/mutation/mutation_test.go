@@ -17627,6 +17627,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestPriorReceiptHandleRemainsUsable",
 		},
 		{
+			name: "sqs-allow-expired-fifo-delete",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if strings.HasSuffix(name, ".fifo") && p.receiptExpired(ctx, req, name, handle) {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestFIFODeleteAfterVisibilityTimeoutCharacterization",
+		},
+		{
 			name: "sqs-batch-accept-missing-fifo-deduplication-id",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "if _, provided := message[\"MessageDeduplicationId\"]; !provided || str(message[\"MessageDeduplicationId\"]) == \"\" {",

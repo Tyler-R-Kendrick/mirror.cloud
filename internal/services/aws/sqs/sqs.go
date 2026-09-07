@@ -166,6 +166,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !validReceiptHandle(handle) {
 			return nil, receiptHandleFault(handle)
 		}
+		if strings.HasSuffix(name, ".fifo") && p.receiptExpired(ctx, req, name, handle) {
+			return nil, &spi.Fault{Code: "InvalidParameterValue", Message: fmt.Sprintf("Value %s for parameter ReceiptHandle is invalid. Reason: The receipt handle has expired.", handle), HTTPStatus: 400, Fault: "client"}
+		}
 		_ = p.col(req, "msgs:"+name).Delete(ctx, p.resolveHandle(ctx, req, name, handle))
 		_ = p.col(req, "rhandles:"+name).Delete(ctx, handle)
 		return &spi.Response{Output: map[string]any{}}, nil
@@ -716,6 +719,18 @@ func (p *Pack) resolveHandle(ctx context.Context, req *spi.Request, name, handle
 		handle = string(next)
 	}
 	return handle
+}
+
+func (p *Pack) receiptExpired(ctx context.Context, req *spi.Request, name, handle string) bool {
+	b, ok, _ := p.col(req, "msgs:"+name).Get(ctx, p.resolveHandle(ctx, req, name, handle))
+	if !ok {
+		return false
+	}
+	var message map[string]any
+	if json.Unmarshal(b, &message) != nil {
+		return false
+	}
+	return asInt(message["receiveCount"]) > 0 && int64(asFloat(message["visibleAt"])) <= p.deps.Clock.Now().UnixNano()
 }
 
 func validReceiptHandle(handle string) bool {

@@ -57,7 +57,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3tables"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/scheduler"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/secretsmanager"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/securityhub"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ssm"

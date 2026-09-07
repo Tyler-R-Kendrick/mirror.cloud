@@ -1948,7 +1948,7 @@ func TestSendValidationAndDelay(t *testing.T) {
 		t.Fatalf("missing dedup error %v", err)
 	}
 	batch, err := invoke("SendMessageBatch", map[string]any{"QueueName": "strict.fifo", "Entries": []any{
-		map[string]any{"Id": "bad", "MessageBody": "x"},
+		map[string]any{"Id": "bad", "MessageBody": "", "MessageGroupId": "g", "MessageDeduplicationId": "bad-d"},
 		map[string]any{"Id": "ok", "MessageBody": "x", "MessageGroupId": "g", "MessageDeduplicationId": "d"},
 	}})
 	if err != nil || len(batch.Output["Successful"].([]any)) != 1 || len(batch.Output["Failed"].([]any)) != 1 {

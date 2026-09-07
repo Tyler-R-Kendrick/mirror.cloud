@@ -39,13 +39,16 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 			Traits json.RawMessage `json:"traits"`
 		} `json:"members"`
 		Member *struct {
-			Target string `json:"target"`
+			Target string          `json:"target"`
+			Traits json.RawMessage `json:"traits"`
 		} `json:"member"`
 		Key *struct {
-			Target string `json:"target"`
+			Target string          `json:"target"`
+			Traits json.RawMessage `json:"traits"`
 		} `json:"key"`
 		Value *struct {
-			Target string `json:"target"`
+			Target string          `json:"target"`
+			Traits json.RawMessage `json:"traits"`
 		} `json:"value"`
 		Input *struct {
 			Target string `json:"target"`
@@ -250,13 +253,13 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 				}
 			}
 			if sh.Member != nil {
-				ms.Member = sh.Member.Target
+				ms.Member, ms.MemberBinding = sh.Member.Target, binding(sh.Member.Traits)
 			}
 			if sh.Value != nil && ms.Member == "" {
-				ms.Member = sh.Value.Target
+				ms.Member, ms.MemberBinding = sh.Value.Target, binding(sh.Value.Traits)
 			}
 			if sh.Key != nil {
-				ms.Key = sh.Key.Target
+				ms.Key, ms.KeyBinding = sh.Key.Target, binding(sh.Key.Traits)
 			}
 			svc.Shapes[sid] = ms
 		}
@@ -442,6 +445,13 @@ func binding(traits json.RawMessage) model.MemberBinding {
 	}
 	if v, ok := str("smithy.api#xmlName"); ok {
 		b.Name = v
+	}
+	// ec2Query names a member twice: xmlName is what the response carries and
+	// ec2QueryName is what the request form field is called. They are not the
+	// same string -- DryRun answers to `dryRun` and is asked for as `DryRun` --
+	// so one field cannot serve both directions.
+	if v, ok := str("aws.protocols#ec2QueryName"); ok {
+		b.QueryName = v
 	}
 	if v, ok := str("smithy.api#timestampFormat"); ok {
 		b.TimestampFormat = v

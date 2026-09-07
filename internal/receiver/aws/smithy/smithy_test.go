@@ -150,8 +150,20 @@ const bindingDoc = `{
         "When":   {"target": "smithy.api#String", "traits": {"smithy.api#timestampFormat": "http-date"}},
         "Attr":   {"target": "smithy.api#String", "traits": {"smithy.api#xmlAttribute": {}}},
         "Code":   {"target": "smithy.api#String", "traits": {"smithy.api#httpResponseCode": {}}},
-        "Ns":     {"target": "smithy.api#String", "traits": {"smithy.api#xmlNamespace": {"uri": "http://example/"}}}
+        "Ns":     {"target": "smithy.api#String", "traits": {"smithy.api#xmlNamespace": {"uri": "http://example/"}}},
+        "Items":  {"target": "com.example#ItemList"},
+        "Tags":   {"target": "com.example#TagMap"},
+        "DryRun": {"target": "smithy.api#String", "traits": {"aws.protocols#ec2QueryName": "DryRun", "smithy.api#xmlName": "dryRun"}}
       }
+    },
+    "com.example#ItemList": {
+      "type": "list",
+      "member": {"target": "smithy.api#String", "traits": {"smithy.api#xmlName": "item"}}
+    },
+    "com.example#TagMap": {
+      "type": "map",
+      "key":   {"target": "smithy.api#String", "traits": {"smithy.api#xmlName": "k"}},
+      "value": {"target": "smithy.api#String", "traits": {"smithy.api#xmlName": "v"}}
     }
   }
 }`
@@ -197,6 +209,20 @@ func TestIngestRecordsWhereAMemberSitsOnTheWire(t *testing.T) {
 	// what its request encoding depends on.
 	if got := out["Vpcs"].Binding; got.Name != "vpcSet" || !got.XMLFlattened {
 		t.Errorf("Vpcs binding is %+v, want name vpcSet and flattened", got)
+	}
+	// A list names its own element, and nothing else can: `Vpcs` is `vpcSet`,
+	// but the rows inside it are `item`. Reading the element name off the
+	// containing member writes `<vpcSet><member>`, which no ec2 client decodes.
+	if got := svc.Shapes["com.example#ItemList"].MemberBinding.Name; got != "item" {
+		t.Errorf("list element is named %q, want item", got)
+	}
+	tags := svc.Shapes["com.example#TagMap"]
+	if tags.KeyBinding.Name != "k" || tags.MemberBinding.Name != "v" {
+		t.Errorf("map entry is named %+v/%+v, want k/v", tags.KeyBinding, tags.MemberBinding)
+	}
+	// ec2Query asks for a member under a different name than it answers with.
+	if got := out["DryRun"].Binding; got.QueryName != "DryRun" || got.Name != "dryRun" {
+		t.Errorf("DryRun binding is %+v, want request name DryRun and wire name dryRun", got)
 	}
 	if got := out["Nested"].Binding.Name; got != "nested" {
 		t.Errorf("a jsonName was not recorded: %q", got)

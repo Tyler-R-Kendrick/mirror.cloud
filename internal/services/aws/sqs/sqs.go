@@ -1081,7 +1081,14 @@ func receiptHandleFault(handle string) *spi.Fault {
 }
 
 func (p *Pack) queueAttrs(ctx context.Context, req *spi.Request, name string) map[string]any {
-	out := map[string]any{}
+	out := map[string]any{
+		"DelaySeconds":                  "0",
+		"MaximumMessageSize":            "1048576",
+		"MessageRetentionPeriod":        "345600",
+		"ReceiveMessageWaitTimeSeconds": "0",
+		"SqsManagedSseEnabled":          "true",
+		"VisibilityTimeout":             "30",
+	}
 	if b, ok, _ := p.col(req, "queues").Get(ctx, name); ok {
 		var meta map[string]any
 		_ = json.Unmarshal(b, &meta)

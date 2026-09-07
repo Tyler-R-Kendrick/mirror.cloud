@@ -2519,6 +2519,7 @@ func TestQueueTagCharacterization(t *testing.T) {
 	call("UntagQueue", map[string]any{"QueueName": "tagged", "TagKeys": []any{"tag1", "tag3"}})
 	second := call("ListQueueTags", map[string]any{"QueueName": "tagged"})
 	call("UntagQueue", map[string]any{"QueueName": "tagged", "TagKeys": []any{"tag2"}})
+	call("UntagQueue", map[string]any{"QueueName": "tagged", "TagKeys": []any{"missing"}})
 	final := call("ListQueueTags", map[string]any{"QueueName": "tagged"})
 	golden.AssertJSON(t, map[string]any{"first": first, "second": second, "final": final})
 }

@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 90 / 222 (40.5%) |
-| LocalStack SQS test functions not yet traced | 132 / 222 (59.5%) |
+| LocalStack SQS test functions explicitly traced | 92 / 222 (41.4%) |
+| LocalStack SQS test functions not yet traced | 130 / 222 (58.6%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -681,6 +681,8 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_fifo_message_group_visibility_after_terminate_visibility_timeout` | Terminating the first message's visibility in a partially hidden FIFO group lets another fully visible group deliver first, then returns the released message without exposing the still-hidden successor; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and mutation coverage pin ordering | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_queue_send_message_with_delay_seconds_fails` | SendMessage rejects non-zero per-message `DelaySeconds` on FIFO queues with `InvalidParameterValue` and the AWS queue-type reason, while queue-level delay and explicit zero remain supported; atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage pin the distinction | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_tag_untag_queue` | TagQueue/ListQueueTags preserve tag values, UntagQueue removes selected keys and ignores missing keys, and the final empty response omits `Tags`; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin the wire shape | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_untag_queue_ignores_non_existing_tag` | UntagQueue remains successful when a requested key is absent; the queue-tag characterization, SDK, BDD, fuzz, concurrent chaos, and tag mutation stack pin the no-op behavior | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_list_queue_tags` | ListQueueTags returns the persisted tag map and omits `Tags` after the final removal; the same seven-form queue-tag evidence stack pins both shapes | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_tag_queue_overwrites_existing_tag` | TagQueue overwrites supplied keys while retaining untouched existing tags across atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, chaos/race, and semantic mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_create_queue_with_tags` | CreateQueue persists initial tags for immediate ListQueueTags reads across atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, chaos/race, and semantic mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_tags_case_sensitive` | Tag keys that differ only by case remain distinct across atomic, Verify-style snapshot, AWS SDK contract, and raw HTTP BDD coverage | Mapped; focused green |

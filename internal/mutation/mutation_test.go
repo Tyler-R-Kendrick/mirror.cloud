@@ -17883,6 +17883,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestTraceHeaderPropagationCharacterization",
 		},
 		{
+			name: "sqs-dedup-scope-by-message-group",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if fifo && str(attrs[\"DeduplicationScope\"]) == \"messageGroup\" {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestFIFODeduplicationScopeCharacterization",
+		},
+		{
+			name: "sqs-dedup-retry-uses-request-digest",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "output := map[string]any{\"MessageId\": d[\"id\"], \"MD5OfMessageBody\": md5hex}",
+			new:  "output := map[string]any{\"MessageId\": d[\"id\"], \"MD5OfMessageBody\": d[\"md5\"]}",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestFIFODeduplicationScopeCharacterization",
+		},
+		{
 			name: "sqs-batch-accept-too-many-entries",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "case \"SendMessageBatch\":\n\t\tentries, _ := req.Input[\"Entries\"].([]any)\n\t\tif len(entries) == 0 {\n\t\t\treturn nil, &spi.Fault{Code: \"AWS.SimpleQueueService.EmptyBatchRequest\", Message: \"There should be at least one SendMessageBatchRequestEntry in the request.\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tif len(entries) > 10 {",

@@ -515,7 +515,7 @@ All 463 pinned S3 test functions are explicitly traced. That completes this sour
 
 ## DynamoDB baseline
 
-Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited on 2026-09-06.
+Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited on 2026-09-07.
 
 | Measure | Current evidence |
 |---|---:|
@@ -589,15 +589,15 @@ All 56 pinned DynamoDB test functions are explicitly traced. This completes the 
 
 ## SQS baseline
 
-Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited on 2026-09-06.
+Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited on 2026-09-07.
 
 | Measure | Current evidence |
 |---|---:|
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 80 / 222 (36.0%) |
-| LocalStack SQS test functions not yet traced | 142 / 222 (64.0%) |
+| LocalStack SQS test functions explicitly traced | 81 / 222 (36.5%) |
+| LocalStack SQS test functions not yet traced | 141 / 222 (63.5%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -644,6 +644,7 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_dead_letter_queue_max_receive_count` | A message exceeding max receive count leaves the source receive response and arrives once in the dead-letter queue; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and threshold mutants pin the boundary | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_sequence_number` | FIFO SendMessage returns a SequenceNumber while standard SendMessage omits it; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and sequence mutants pin queue-type response shape | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_sequence_number_increases` | FIFO SequenceNumber values increase for successive sends; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and transactional sequence mutants pin monotonicity | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_fifo_high_throughput_ordering` | FIFO queues using message-group deduplication scope accept the same deduplication ID in distinct groups while retaining duplicate suppression within each group; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and scope/retry-digest mutants pin the behavior | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_system_attributes_have_no_effect_on_attr_md5` | MessageSystemAttributes produce their separate pinned MD5 while leaving MD5OfMessageAttributes unchanged; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and digest mutants pin separation | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_aws_trace_header_propagation` | X-Amzn-Trace-Id on SendMessage is retained as AWSTraceHeader for a requested receive system attribute; atomic characterization snapshot, AWS SDK transport contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and trace mutants pin propagation | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_set_unsupported_attribute_standard` | SetQueueAttributes rejects both `FifoQueue=true` and `FifoQueue=false` on standard queues with `InvalidAttributeName`; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin the rejection | Mapped; focused green |

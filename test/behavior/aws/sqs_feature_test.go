@@ -94,6 +94,22 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("redrive policy remained %d %s", status, body)
 		}
 	})
+	t.Run("Given source queues with a dead-letter target When listing sources Then both sources are returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-dead-letter"}`); status != http.StatusOK {
+			t.Fatalf("dead letter create %d %s", status, body)
+		}
+		policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:bdd-dead-letter","maxReceiveCount":"42"}`
+		for _, name := range []string{"bdd-source-a", "bdd-source-b"} {
+			payload, _ := json.Marshal(map[string]any{"QueueName": name, "Attributes": map[string]string{"RedrivePolicy": policy}})
+			if status, body := call("CreateQueue", string(payload)); status != http.StatusOK {
+				t.Fatalf("source create %s %d %s", name, status, body)
+			}
+		}
+		status, body := call("ListDeadLetterSourceQueues", `{"QueueUrl":"http://queue/000000000000/bdd-dead-letter"}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte("bdd-source-a")) || !bytes.Contains(body, []byte("bdd-source-b")) {
+			t.Fatalf("sources %d %s", status, body)
+		}
+	})
 	t.Run("Given a deleted queue When recreating immediately Then the deletion window is enforced", func(t *testing.T) {
 		status, body := call("CreateQueue", `{"QueueName":"bdd-deleted"}`)
 		var created map[string]any

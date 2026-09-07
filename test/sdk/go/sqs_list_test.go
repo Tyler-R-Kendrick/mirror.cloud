@@ -1323,6 +1323,40 @@ func TestAWSSDKSQSRedrivePolicyClearingContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSListDeadLetterSourceQueuesContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	_, err = client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-dead-letter")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arn := "arn:aws:sqs:us-east-1:000000000000:sdk-dead-letter"
+	for _, name := range []string{"sdk-source-a", "sdk-source-b"} {
+		source, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String(name)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := client.SetQueueAttributes(context.Background(), &sqs.SetQueueAttributesInput{QueueUrl: source.QueueUrl, Attributes: map[string]string{"RedrivePolicy": fmt.Sprintf(`{"deadLetterTargetArn":"%s","maxReceiveCount":"42"}`, arn)}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := client.ListDeadLetterSourceQueues(context.Background(), &sqs.ListDeadLetterSourceQueuesInput{QueueUrl: aws.String("http://queue/000000000000/sdk-dead-letter")})
+	if err != nil || len(result.QueueUrls) != 2 || !strings.Contains(result.QueueUrls[0], "sdk-source-") || !strings.Contains(result.QueueUrls[1], "sdk-source-") {
+		t.Fatalf("sources %#v error %v", result, err)
+	}
+}
+
 func TestAWSSDKSQSMultipleQueuesContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

@@ -969,6 +969,30 @@ func TestRedrivePolicyClearingCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"setRedrive": asMap(set.Output["Attributes"])["RedrivePolicy"], "setPolicy": asMap(set.Output["Attributes"])["Policy"], "clearedRedrive": redrivePresent, "clearedPolicy": policyPresent})
 }
 
+func TestListDeadLetterSourceQueuesCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	for _, name := range []string{"dead-letter", "source-a", "source-b"} {
+		attrs := map[string]any{}
+		if name != "dead-letter" {
+			attrs["RedrivePolicy"] = `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:dead-letter","maxReceiveCount":"42"}`
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name, "Attributes": attrs}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListDeadLetterSourceQueues", Input: map[string]any{"QueueName": "dead-letter"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	urls := response.Output["QueueUrls"].([]any)
+	if len(urls) != 2 || !strings.Contains(str(urls[0]), "source-") || !strings.Contains(str(urls[1]), "source-") {
+		t.Fatalf("dead-letter sources %#v", response.Output)
+	}
+	golden.AssertJSON(t, map[string]any{"count": len(urls), "containsSourceA": strings.Contains(str(urls[0]), "source-a") || strings.Contains(str(urls[1]), "source-a"), "containsSourceB": strings.Contains(str(urls[0]), "source-b") || strings.Contains(str(urls[1]), "source-b")})
+}
+
 func FuzzFIFOContentBasedDeduplicationStrategy(f *testing.F) {
 	f.Add(true)
 	f.Add(false)
@@ -1019,6 +1043,32 @@ func FuzzRedrivePolicyClearing(f *testing.F) {
 		_, policyPresent := asMap(response.Output["Attributes"])["Policy"]
 		if redrivePresent == clear || policyPresent == clear {
 			t.Fatalf("clear=%v response=%#v", clear, response.Output)
+		}
+	})
+}
+
+func FuzzListDeadLetterSourceQueues(f *testing.F) {
+	f.Add(1)
+	f.Add(2)
+	f.Fuzz(func(t *testing.T, sourceCount int) {
+		if sourceCount < 1 || sourceCount > 2 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-dead-letter"}}); err != nil {
+			t.Fatal(err)
+		}
+		policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:fuzz-dead-letter","maxReceiveCount":"42"}`
+		for i := range sourceCount {
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": fmt.Sprintf("fuzz-source-%d", i), "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListDeadLetterSourceQueues", Input: map[string]any{"QueueName": "fuzz-dead-letter"}})
+		if err != nil || len(response.Output["QueueUrls"].([]any)) != sourceCount {
+			t.Fatalf("sourceCount=%d response=%#v error=%v", sourceCount, response.Output, err)
 		}
 	})
 }

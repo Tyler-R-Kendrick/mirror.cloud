@@ -1022,6 +1022,38 @@ func TestConcurrentSQSRedrivePolicyClearingIsStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSListDeadLetterSourceQueuesIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-dead-letter"}}); err != nil {
+		t.Fatal(err)
+	}
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:chaos-dead-letter","maxReceiveCount":"42"}`
+	for _, name := range []string{"chaos-source-a", "chaos-source-b"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name, "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListDeadLetterSourceQueues", Input: map[string]any{"QueueName": "chaos-dead-letter"}})
+			if err != nil || len(response.Output["QueueUrls"].([]any)) != 2 {
+				errs <- fmt.Errorf("dead-letter sources %#v error %v", response, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSStandardMessageGroupValidationIsStable(t *testing.T) {
 	p := sqs.New(spitest.Deps(t))
 	ctx := context.Background()

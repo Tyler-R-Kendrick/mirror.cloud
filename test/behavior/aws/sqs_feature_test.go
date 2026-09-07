@@ -1252,6 +1252,49 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("cancel validation %d %s", status, body)
 		}
 	})
+	t.Run("Given a throttled move task When cancelling after it starts Then it stops in progress", func(t *testing.T) {
+		for _, name := range []string{"bdd-move-cancel-source", "bdd-move-cancel-dlq", "bdd-move-cancel-destination"} {
+			if status, body := call("CreateQueue", `{"QueueName":"`+name+`"}`); status != http.StatusOK {
+				t.Fatalf("create %s %d %s", name, status, body)
+			}
+		}
+		policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-cancel-dlq","maxReceiveCount":"1"}`
+		if status, body := call("SetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-move-cancel-source","Attributes":{"RedrivePolicy":`+strconv.Quote(policy)+`}}`); status != http.StatusOK {
+			t.Fatalf("set policy %d %s", status, body)
+		}
+		for i := 0; i < 3; i++ {
+			if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-move-cancel-source","MessageBody":"cancel-`+strconv.Itoa(i)+`"}`); status != http.StatusOK {
+				t.Fatalf("send %d %s", status, body)
+			}
+		}
+		for i := 0; i < 6; i++ {
+			if status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-move-cancel-source","VisibilityTimeout":0}`); status != http.StatusOK {
+				t.Fatalf("receive %d %s", status, body)
+			}
+		}
+		status, body := call("StartMessageMoveTask", `{"SourceArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-cancel-dlq","DestinationArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-cancel-destination","MaxNumberOfMessagesPerSecond":1}`)
+		var started map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &started) != nil || started["TaskHandle"] == "" {
+			t.Fatalf("start %d %s", status, body)
+		}
+		status, body = call("StartMessageMoveTask", `{"SourceArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-cancel-dlq","DestinationArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-cancel-destination","MaxNumberOfMessagesPerSecond":1}`)
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("There is already a task running")) {
+			t.Fatalf("duplicate start %d %s", status, body)
+		}
+		handle, _ := json.Marshal(started["TaskHandle"])
+		status, body = call("CancelMessageMoveTask", `{"TaskHandle":`+string(handle)+`}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte("ApproximateNumberOfMessagesMoved")) {
+			t.Fatalf("cancel %d %s", status, body)
+		}
+		for i := 0; i < 50; i++ {
+			status, body = call("ListMessageMoveTasks", `{"SourceArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-cancel-dlq"}`)
+			if status == http.StatusOK && bytes.Contains(body, []byte(`"Status":"CANCELLED"`)) {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatalf("task did not cancel %d %s", status, body)
+	})
 }
 
 func TestSQSAdvertisedQueueURLBDD(t *testing.T) {

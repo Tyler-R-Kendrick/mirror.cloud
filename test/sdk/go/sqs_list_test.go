@@ -1963,6 +1963,53 @@ func TestAWSSDKSQSMessageMoveTaskValidationContract(t *testing.T) {
 	if _, err := client.CancelMessageMoveTask(context.Background(), &sqs.CancelMessageMoveTaskInput{TaskHandle: aws.String(unknownTask)}); err == nil || !strings.Contains(err.Error(), "Task does not exist") {
 		t.Fatalf("invalid task id error %v", err)
 	}
+	for i := 0; i < 3; i++ {
+		if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: dlq.QueueUrl, MessageBody: aws.String(fmt.Sprintf("throttle-%d", i))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	throttled, err := client.StartMessageMoveTask(context.Background(), &sqs.StartMessageMoveTaskInput{SourceArn: aws.String(dlqAttrs.Attributes["QueueArn"]), DestinationArn: aws.String(destinationAttrs.Attributes["QueueArn"]), MaxNumberOfMessagesPerSecond: aws.Int32(1)})
+	if err != nil || aws.ToString(throttled.TaskHandle) == "" {
+		t.Fatalf("throttled move task %#v error %v", throttled, err)
+	}
+	if _, err := client.StartMessageMoveTask(context.Background(), &sqs.StartMessageMoveTaskInput{SourceArn: aws.String(dlqAttrs.Attributes["QueueArn"]), DestinationArn: aws.String(destinationAttrs.Attributes["QueueArn"]), MaxNumberOfMessagesPerSecond: aws.Int32(1)}); err == nil || !strings.Contains(err.Error(), "There is already a task running") {
+		t.Fatalf("duplicate throttled move task error %v", err)
+	}
+	running, err := client.ListMessageMoveTasks(context.Background(), &sqs.ListMessageMoveTasksInput{SourceArn: aws.String(dlqAttrs.Attributes["QueueArn"])})
+	foundRunning := false
+	for _, result := range running.Results {
+		if aws.ToInt32(result.MaxNumberOfMessagesPerSecond) == 1 && aws.ToString(result.Status) == "RUNNING" {
+			foundRunning = true
+		}
+	}
+	if err != nil || !foundRunning {
+		t.Fatalf("throttled move task list %#v error %v", running, err)
+	}
+	if _, err := client.CancelMessageMoveTask(context.Background(), &sqs.CancelMessageMoveTaskInput{TaskHandle: throttled.TaskHandle}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 50; i++ {
+		running, err = client.ListMessageMoveTasks(context.Background(), &sqs.ListMessageMoveTasksInput{SourceArn: aws.String(dlqAttrs.Attributes["QueueArn"])})
+		foundCancelled := false
+		for _, result := range running.Results {
+			if aws.ToInt64(result.ApproximateNumberOfMessagesToMove) == 3 && aws.ToString(result.Status) == "CANCELLED" {
+				foundCancelled = true
+			}
+		}
+		if err == nil && foundCancelled {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	foundCancelled := false
+	for _, result := range running.Results {
+		if aws.ToInt64(result.ApproximateNumberOfMessagesToMove) == 3 && aws.ToString(result.Status) == "CANCELLED" {
+			foundCancelled = true
+		}
+	}
+	if err != nil || !foundCancelled {
+		t.Fatalf("cancelled throttled move task list %#v error %v", running, err)
+	}
 }
 
 func TestAWSSDKSQSFIFOQueueNameValidationContract(t *testing.T) {

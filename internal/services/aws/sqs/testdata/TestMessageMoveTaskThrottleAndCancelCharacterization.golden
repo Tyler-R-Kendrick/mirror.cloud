@@ -1,0 +1,7 @@
+{
+  "duplicateCode": "InvalidParameterValue",
+  "maxPerSecond": 1,
+  "movedAtCancel": 1,
+  "statusAfter": "CANCELLED",
+  "statusWhile": "RUNNING"
+}

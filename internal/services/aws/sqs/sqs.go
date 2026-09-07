@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -27,7 +28,10 @@ func init() {
 }
 
 // Pack implements SQS.
-type Pack struct{ deps spi.Deps }
+type Pack struct {
+	deps   spi.Deps
+	moveMu sync.Mutex
+}
 
 // New constructs the pack.
 func New(d spi.Deps) *Pack { return &Pack{deps: d} }
@@ -1441,29 +1445,37 @@ func (p *Pack) startMove(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	kvs, _, _ := p.col(req, "msgs:"+src).List(ctx, "", "", 0)
 	toMove := len(kvs)
-	moved := 0
-	now := p.deps.Clock.Now().UnixNano()
-	for _, kv := range kvs {
-		var m map[string]any
-		_ = json.Unmarshal(kv.Value, &m)
-		dest := dst
-		if dest == "" {
-			dest = str(m["origin"])
-		}
-		if dest == "" || dest == src {
-			continue
-		}
-		_ = p.col(req, "msgs:"+src).Delete(ctx, kv.Key)
-		m["handle"] = p.deps.Rand.Hex(64)
-		m["receiveCount"] = 0
-		m["visibleAt"] = now
-		raw, _ := json.Marshal(m)
-		_ = p.col(req, "msgs:"+dest).Put(ctx, str(m["handle"]), raw)
-		moved++
-	}
 	taskIDHex := p.deps.Rand.Hex(32)
 	taskID := fmt.Sprintf("%s-%s-%s-%s-%s", taskIDHex[:8], taskIDHex[8:12], taskIDHex[12:16], taskIDHex[16:20], taskIDHex[20:])
 	handle := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(`{"taskId":"%s","sourceArn":"%s"}`, taskID, sourceArn)))
+	maxPerSecond := asInt(req.Input["MaxNumberOfMessagesPerSecond"])
+	if maxPerSecond > 0 {
+		p.moveMu.Lock()
+		defer p.moveMu.Unlock()
+		active, _, _ := p.col(req, "qmove").List(ctx, "", "", 0)
+		for _, kv := range active {
+			var prior map[string]any
+			if json.Unmarshal(kv.Value, &prior) == nil && str(prior["source"]) == src && str(prior["Status"]) == "RUNNING" {
+				return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "There is already a task running. Only one active task is allowed for a source queue arn at a given time.", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+		rec := map[string]any{
+			"TaskHandle": handle, "Status": "RUNNING", "SourceArn": sourceArn, "DestinationArn": req.Input["DestinationArn"],
+			"ApproximateNumberOfMessagesMoved": 0, "ApproximateNumberOfMessagesToMove": toMove,
+			"MaxNumberOfMessagesPerSecond": maxPerSecond, "StartedTimestamp": p.deps.Clock.Now().Unix(), "source": src,
+		}
+		b, _ := json.Marshal(rec)
+		_ = p.col(req, "qmove").Put(ctx, handle, b)
+		request := *req
+		go p.runMoveTask(&request, handle, src, dst, maxPerSecond)
+		return &spi.Response{Output: map[string]any{"TaskHandle": handle}}, nil
+	}
+	moved := 0
+	for _, kv := range kvs {
+		if ok, _ := p.moveOne(ctx, req, src, dst, kv); ok {
+			moved++
+		}
+	}
 	rec := map[string]any{
 		"TaskHandle": handle, "Status": "COMPLETED",
 		"SourceArn": sourceArn, "DestinationArn": req.Input["DestinationArn"],
@@ -1474,6 +1486,103 @@ func (p *Pack) startMove(ctx context.Context, req *spi.Request) (*spi.Response, 
 	b, _ := json.Marshal(rec)
 	_ = p.col(req, "qmove").Put(ctx, handle, b)
 	return &spi.Response{Output: map[string]any{"TaskHandle": handle}}, nil
+}
+
+func (p *Pack) moveOne(ctx context.Context, req *spi.Request, src, dst string, kv spi.KV) (bool, bool) {
+	var m map[string]any
+	if json.Unmarshal(kv.Value, &m) != nil {
+		return false, false
+	}
+	dest := dst
+	if dest == "" {
+		dest = str(m["origin"])
+	}
+	if dest == "" || dest == src {
+		return false, false
+	}
+	if !p.queueExists(ctx, req, dest) {
+		return false, true
+	}
+	_ = p.col(req, "msgs:"+src).Delete(ctx, kv.Key)
+	m["handle"] = p.deps.Rand.Hex(64)
+	m["receiveCount"] = 0
+	m["visibleAt"] = p.deps.Clock.Now().UnixNano()
+	raw, _ := json.Marshal(m)
+	_ = p.col(req, "msgs:"+dest).Put(ctx, str(m["handle"]), raw)
+	return true, false
+}
+
+func (p *Pack) runMoveTask(req *spi.Request, handle, src, dst string, maxPerSecond int) {
+	ctx := context.Background()
+	interval := time.Second / time.Duration(maxPerSecond)
+	for {
+		b, ok, _ := p.col(req, "qmove").Get(ctx, handle)
+		if !ok {
+			return
+		}
+		var rec map[string]any
+		if json.Unmarshal(b, &rec) != nil {
+			return
+		}
+		if str(rec["Status"]) == "CANCELLING" {
+			rec["Status"] = "CANCELLED"
+			p.updateMoveRecord(ctx, req, handle, rec)
+			return
+		}
+		if dst != "" {
+			if !p.queueExists(ctx, req, dst) {
+				rec["Status"] = "FAILED"
+				rec["FailureReason"] = "The destination queue does not exist."
+				p.updateMoveRecord(ctx, req, handle, rec)
+				return
+			}
+		}
+		kvs, _, _ := p.col(req, "msgs:"+src).List(ctx, "", "", 0)
+		moved := false
+		for _, kv := range kvs {
+			var failed bool
+			moved, failed = p.moveOne(ctx, req, src, dst, kv)
+			if failed {
+				rec["Status"] = "FAILED"
+				rec["FailureReason"] = "The destination queue does not exist."
+			}
+			if moved || failed {
+				break
+			}
+		}
+		if str(rec["Status"]) == "FAILED" {
+			p.updateMoveRecord(ctx, req, handle, rec)
+			return
+		}
+		if moved {
+			rec["ApproximateNumberOfMessagesMoved"] = asInt(rec["ApproximateNumberOfMessagesMoved"]) + 1
+		} else {
+			rec["Status"] = "COMPLETED"
+		}
+		if p.updateMoveRecord(ctx, req, handle, rec) != "RUNNING" {
+			return
+		}
+		<-p.deps.Clock.After(interval)
+	}
+}
+
+func (p *Pack) updateMoveRecord(ctx context.Context, req *spi.Request, handle string, rec map[string]any) string {
+	_ = p.col(req, "qmove").Txn(ctx, func(tx spi.Tx) error {
+		b, ok, err := tx.Get(handle)
+		if err != nil || !ok {
+			return err
+		}
+		var current map[string]any
+		if json.Unmarshal(b, &current) == nil && str(current["Status"]) == "CANCELLING" && str(rec["Status"]) != "CANCELLED" {
+			rec["Status"] = "CANCELLED"
+		}
+		nb, marshalErr := json.Marshal(rec)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		return tx.Put(handle, nb)
+	})
+	return str(rec["Status"])
 }
 
 func (p *Pack) isDeadLetterQueue(ctx context.Context, req *spi.Request, targetArn string) bool {
@@ -1519,7 +1628,7 @@ func (p *Pack) cancelMove(ctx context.Context, req *spi.Request) (*spi.Response,
 	rec["Status"] = "CANCELLING"
 	nb, _ := json.Marshal(rec)
 	_ = p.col(req, "qmove").Put(ctx, h, nb)
-	return &spi.Response{Output: map[string]any{}}, nil
+	return &spi.Response{Output: map[string]any{"ApproximateNumberOfMessagesMoved": rec["ApproximateNumberOfMessagesMoved"]}}, nil
 }
 
 func (p *Pack) listMoves(ctx context.Context, req *spi.Request) (*spi.Response, error) {

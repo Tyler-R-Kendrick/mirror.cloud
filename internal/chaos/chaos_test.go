@@ -7473,3 +7473,59 @@ func TestConcurrentSQSMessageMoveTaskWorkflowIsStable(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestConcurrentSQSMessageMoveTaskStartsAllowOneActiveTask(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	for _, name := range []string{"chaos-start-source", "chaos-start-dlq", "chaos-start-destination"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:chaos-start-dlq","maxReceiveCount":"1"}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "chaos-start-source", "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-start-dlq", "MessageBody": "start"}}); err != nil {
+		t.Fatal(err)
+	}
+	input := map[string]any{"SourceArn": "arn:aws:sqs:us-east-1:000000000000:chaos-start-dlq", "DestinationArn": "arn:aws:sqs:us-east-1:000000000000:chaos-start-destination", "MaxNumberOfMessagesPerSecond": 1}
+	errs := make(chan error, 16)
+	handles := make(chan string, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: input})
+			if err == nil {
+				handle, _ := response.Output["TaskHandle"].(string)
+				handles <- handle
+				return
+			}
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidParameterValue" {
+				errs <- fmt.Errorf("duplicate start %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	close(handles)
+	for err := range errs {
+		t.Error(err)
+	}
+	var handle string
+	for candidate := range handles {
+		if handle == "" {
+			handle = candidate
+		}
+	}
+	if handle == "" {
+		t.Fatal("no active move task")
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CancelMessageMoveTask", Input: map[string]any{"TaskHandle": handle}}); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -2433,6 +2433,74 @@ func TestMessageMoveTaskCancelValidationCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"invalidHandle": call("foobared"), "invalidSource": call(unknownSource), "invalidTask": call(unknownTask)})
 }
 
+func TestMessageMoveTaskThrottleAndCancelCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	deps.Clock = clock.Real{}
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	for _, name := range []string{"move-throttle-source", "move-throttle-dlq", "move-throttle-destination"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:move-throttle-dlq","maxReceiveCount":"1"}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "move-throttle-source", "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "move-throttle-dlq", "MessageBody": fmt.Sprintf("message-%d", i)}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sourceArn := queueARN(&spi.Request{Identity: id}, "move-throttle-dlq")
+	destinationArn := queueARN(&spi.Request{Identity: id}, "move-throttle-destination")
+	started, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: map[string]any{"SourceArn": sourceArn, "DestinationArn": destinationArn, "MaxNumberOfMessagesPerSecond": 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle := str(started.Output["TaskHandle"])
+	_, duplicateErr := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: map[string]any{"SourceArn": sourceArn, "DestinationArn": destinationArn, "MaxNumberOfMessagesPerSecond": 1}})
+	duplicate, ok := duplicateErr.(*spi.Fault)
+	if !ok || duplicate.Code != "InvalidParameterValue" {
+		t.Fatalf("duplicate move task error %#v", duplicateErr)
+	}
+	list := func() map[string]any {
+		response, invokeErr := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListMessageMoveTasks", Input: map[string]any{"SourceArn": sourceArn}})
+		if invokeErr != nil {
+			t.Fatal(invokeErr)
+		}
+		return response.Output["Results"].([]any)[0].(map[string]any)
+	}
+	var while map[string]any
+	for i := 0; i < 100; i++ {
+		while = list()
+		if asInt(while["ApproximateNumberOfMessagesMoved"]) >= 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancelled, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CancelMessageMoveTask", Input: map[string]any{"TaskHandle": handle}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var after map[string]any
+	for i := 0; i < 100; i++ {
+		after = list()
+		if str(after["Status"]) == "CANCELLED" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if str(after["Status"]) != "CANCELLED" {
+		t.Fatalf("task did not cancel: %#v", after)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"statusWhile": while["Status"], "maxPerSecond": while["MaxNumberOfMessagesPerSecond"],
+		"duplicateCode": duplicate.Code, "movedAtCancel": cancelled.Output["ApproximateNumberOfMessagesMoved"], "statusAfter": after["Status"],
+	})
+}
+
 func TestMessageMoveTaskWorkflowCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

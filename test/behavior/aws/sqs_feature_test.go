@@ -1295,6 +1295,38 @@ func TestSQSQueueListing(t *testing.T) {
 		}
 		t.Fatalf("task did not cancel %d %s", status, body)
 	})
+	t.Run("Given a throttled move task When its destination is deleted Then it fails and leaves the DLQ messages", func(t *testing.T) {
+		for _, name := range []string{"bdd-move-delete-source", "bdd-move-delete-dlq", "bdd-move-delete-destination"} {
+			if status, body := call("CreateQueue", `{"QueueName":"`+name+`"}`); status != http.StatusOK {
+				t.Fatalf("create %s %d %s", name, status, body)
+			}
+		}
+		policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-delete-dlq","maxReceiveCount":"1"}`
+		if status, body := call("SetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-move-delete-source","Attributes":{"RedrivePolicy":`+strconv.Quote(policy)+`}}`); status != http.StatusOK {
+			t.Fatalf("set policy %d %s", status, body)
+		}
+		for i := 0; i < 3; i++ {
+			if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-move-delete-dlq","MessageBody":"delete-`+strconv.Itoa(i)+`"}`); status != http.StatusOK {
+				t.Fatalf("send %d %s", status, body)
+			}
+		}
+		status, body := call("StartMessageMoveTask", `{"SourceArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-delete-dlq","DestinationArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-delete-destination","MaxNumberOfMessagesPerSecond":1}`)
+		var started map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &started) != nil {
+			t.Fatalf("start %d %s", status, body)
+		}
+		if status, body := call("DeleteQueue", `{"QueueUrl":"http://queue/000000000000/bdd-move-delete-destination"}`); status != http.StatusOK {
+			t.Fatalf("delete destination %d %s", status, body)
+		}
+		for i := 0; i < 50; i++ {
+			status, body = call("ListMessageMoveTasks", `{"SourceArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-delete-dlq"}`)
+			if status == http.StatusOK && bytes.Contains(body, []byte(`"Status":"FAILED"`)) && bytes.Contains(body, []byte("destination queue does not exist")) {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatalf("task did not fail after destination deletion %d %s", status, body)
+	})
 }
 
 func TestSQSAdvertisedQueueURLBDD(t *testing.T) {

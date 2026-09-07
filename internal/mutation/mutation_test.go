@@ -18677,10 +18677,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sqs-ignore-move-cancellation",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
-			old:  `rec["Status"] = "CANCELLED"`,
-			new:  `rec["Status"] = "COMPLETED"`,
-			pkg:  "./internal/services/aws/sqs",
-			run:  "TestMessageMoveTaskThrottleAndCancelCharacterization",
+			old: `if json.Unmarshal(b, &current) == nil && str(current["Status"]) == "CANCELLING" && str(rec["Status"]) != "CANCELLED" {
+			rec["Status"] = "CANCELLED"`,
+			new: `if json.Unmarshal(b, &current) == nil && str(current["Status"]) == "CANCELLING" && str(rec["Status"]) != "CANCELLED" {
+			rec["Status"] = "COMPLETED"`,
+			pkg: "./internal/services/aws/sqs",
+			run: "TestMessageMoveTaskThrottleAndCancelCharacterization",
 		},
 		{
 			name: "sqs-allow-duplicate-active-move",
@@ -18689,6 +18691,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/sqs",
 			run:  "TestMessageMoveTaskThrottleAndCancelCharacterization",
+		},
+		{
+			name: "sqs-ignore-deleted-move-destination",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if !p.queueExists(ctx, req, dst) {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestMessageMoveTaskDestinationDeletionCharacterization",
 		},
 		{
 			name: "sqs-disable-message-delay",

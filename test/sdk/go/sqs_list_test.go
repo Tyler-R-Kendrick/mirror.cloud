@@ -2010,6 +2010,45 @@ func TestAWSSDKSQSMessageMoveTaskValidationContract(t *testing.T) {
 	if err != nil || !foundCancelled {
 		t.Fatalf("cancelled throttled move task list %#v error %v", running, err)
 	}
+	deletedDestination, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-move-deleted-destination")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deletedDestinationAttrs, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: deletedDestination.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameQueueArn}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: dlq.QueueUrl, MessageBody: aws.String(fmt.Sprintf("delete-%d", i))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := client.StartMessageMoveTask(context.Background(), &sqs.StartMessageMoveTaskInput{SourceArn: aws.String(dlqAttrs.Attributes["QueueArn"]), DestinationArn: aws.String(deletedDestinationAttrs.Attributes["QueueArn"]), MaxNumberOfMessagesPerSecond: aws.Int32(1)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.DeleteQueue(context.Background(), &sqs.DeleteQueueInput{QueueUrl: deletedDestination.QueueUrl}); err != nil {
+		t.Fatal(err)
+	}
+	foundFailed := false
+	var lastListing *sqs.ListMessageMoveTasksOutput
+	for i := 0; i < 50; i++ {
+		listing, listErr := client.ListMessageMoveTasks(context.Background(), &sqs.ListMessageMoveTasksInput{SourceArn: aws.String(dlqAttrs.Attributes["QueueArn"])})
+		lastListing = listing
+		if listErr == nil {
+			for _, result := range listing.Results {
+				if aws.ToString(result.DestinationArn) == deletedDestinationAttrs.Attributes["QueueArn"] && aws.ToString(result.Status) == "FAILED" {
+					foundFailed = true
+				}
+			}
+		}
+		if foundFailed {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !foundFailed {
+		t.Fatalf("move task did not fail after destination deletion: %#v", lastListing)
+	}
 }
 
 func TestAWSSDKSQSFIFOQueueNameValidationContract(t *testing.T) {

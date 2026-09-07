@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 105 / 222 (47.3%) |
-| LocalStack SQS test functions not yet traced | 117 / 222 (52.7%) |
+| LocalStack SQS test functions explicitly traced | 106 / 222 (47.7%) |
+| LocalStack SQS test functions not yet traced | 116 / 222 (52.3%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -708,3 +708,4 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs_move_task.py::test_move_task_with_throughput_limit` | MaxNumberOfMessagesPerSecond starts an asynchronous move, exposes RUNNING status and throughput metadata, then advances one message per interval | Mapped; focused green |
 | `test_sqs_move_task.py::test_move_task_cancel` | Cancelling a throttled task preserves already moved counters and transitions the task to CANCELLED while leaving remaining DLQ messages | Mapped; focused green |
 | `test_sqs_move_task.py::test_start_multiple_move_tasks` | A second active task for the same source ARN is rejected with AWS's exact InvalidParameterValue message | Mapped; focused green |
+| `test_sqs_move_task.py::test_move_task_delete_destination_queue_while_running` | Deleting a throttled task destination transitions the move to FAILED with a failure reason while preserving source-queue messages | Mapped; focused green |

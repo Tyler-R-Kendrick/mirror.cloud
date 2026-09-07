@@ -2501,6 +2501,57 @@ func TestMessageMoveTaskThrottleAndCancelCharacterization(t *testing.T) {
 	})
 }
 
+func TestMessageMoveTaskDestinationDeletionCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	deps.Clock = clock.Real{}
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	for _, name := range []string{"move-delete-source", "move-delete-dlq", "move-delete-destination"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:move-delete-dlq","maxReceiveCount":"1"}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "move-delete-source", "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "move-delete-dlq", "MessageBody": fmt.Sprintf("message-%d", i)}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sourceArn := queueARN(&spi.Request{Identity: id}, "move-delete-dlq")
+	destinationArn := queueARN(&spi.Request{Identity: id}, "move-delete-destination")
+	started, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: map[string]any{"SourceArn": sourceArn, "DestinationArn": destinationArn, "MaxNumberOfMessagesPerSecond": 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteQueue", Input: map[string]any{"QueueName": "move-delete-destination"}}); err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	for i := 0; i < 100; i++ {
+		response, invokeErr := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListMessageMoveTasks", Input: map[string]any{"SourceArn": sourceArn}})
+		if invokeErr != nil {
+			t.Fatal(invokeErr)
+		}
+		result = response.Output["Results"].([]any)[0].(map[string]any)
+		if str(result["Status"]) == "FAILED" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if str(result["Status"]) != "FAILED" {
+		t.Fatalf("task did not fail after destination deletion: %#v", result)
+	}
+	left, _, _ := p.col(&spi.Request{Identity: id}, "msgs:move-delete-dlq").List(ctx, "", "", 0)
+	golden.AssertJSON(t, map[string]any{
+		"taskHandlePresent": str(started.Output["TaskHandle"]) != "", "status": result["Status"],
+		"moved": result["ApproximateNumberOfMessagesMoved"], "failureReason": result["FailureReason"], "messagesLeft": len(left),
+	})
+}
+
 func TestMessageMoveTaskWorkflowCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

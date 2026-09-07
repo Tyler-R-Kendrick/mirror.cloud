@@ -215,6 +215,33 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("timestamp attributes %#v", attributes)
 		}
 	})
+	t.Run("Given message attributes When selecting names Then exact and wildcard filters are honored", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-attribute-filters","Attributes":{"VisibilityTimeout":"0"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-attribute-filters","MessageBody":"message","MessageAttributes":{"Help.Me":{"DataType":"String","StringValue":"Me"},"Hello":{"DataType":"String","StringValue":"There"},"General":{"DataType":"String","StringValue":"Kenobi"}}}`); status != http.StatusOK {
+			t.Fatalf("send %d %s", status, body)
+		}
+		for _, filter := range []string{"[\"Hello\"]", "[\"Hel.*\"]", "[\"*\"]", "[]"} {
+			status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-attribute-filters","MessageAttributeNames":`+filter+`}`)
+			var response map[string]any
+			if status != http.StatusOK || json.Unmarshal(body, &response) != nil || len(response["Messages"].([]any)) != 1 {
+				t.Fatalf("filter %s %d %s", filter, status, body)
+			}
+			attrs := response["Messages"].([]any)[0].(map[string]any)["MessageAttributes"].(map[string]any)
+			want := 0
+			if filter == `["Hello"]` {
+				want = 1
+			} else if filter == `["Hel.*"]` {
+				want = 2
+			} else if filter == `["*"]` {
+				want = 3
+			}
+			if len(attrs) != want {
+				t.Fatalf("filter %s attrs %#v", filter, attrs)
+			}
+		}
+	})
 	t.Run("Given two queues When sending to one Then the other remains empty", func(t *testing.T) {
 		for _, name := range []string{"bdd-queue-0", "bdd-queue-1"} {
 			if status, body := call("CreateQueue", fmt.Sprintf(`{"QueueName":%q}`, name)); status != http.StatusOK {

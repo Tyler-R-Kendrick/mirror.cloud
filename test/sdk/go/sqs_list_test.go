@@ -652,6 +652,51 @@ func TestAWSSDKSQSFIFOMessageAttributesContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSMessageAttributeNameFiltersContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-attribute-filters"), Attributes: map[string]string{"VisibilityTimeout": "0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attributes := map[string]types.MessageAttributeValue{
+		"Help.Me": {DataType: aws.String("String"), StringValue: aws.String("Me")},
+		"Hello":   {DataType: aws.String("String"), StringValue: aws.String("There")},
+		"General": {DataType: aws.String("String"), StringValue: aws.String("Kenobi")},
+	}
+	if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("message"), MessageAttributes: attributes}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		want []string
+	}{
+		{"exact", []string{"Hello"}},
+		{"prefix", []string{"Hel.*"}},
+		{"all", []string{"*"}},
+	} {
+		response, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, MessageAttributeNames: tc.want, WaitTimeSeconds: 0})
+		if err != nil || len(response.Messages) != 1 {
+			t.Fatalf("%s %#v error %v", tc.name, response, err)
+		}
+		got := response.Messages[0].MessageAttributes
+		if tc.name == "all" && len(got) != 3 || tc.name == "exact" && len(got) != 1 || tc.name == "prefix" && len(got) != 2 || tc.name != "all" && got["Hello"].StringValue == nil {
+			t.Fatalf("%s attributes %#v", tc.name, got)
+		}
+	}
+}
+
 func TestAWSSDKSQSFIFOApproximateMessageCountContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

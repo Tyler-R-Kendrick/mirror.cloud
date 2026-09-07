@@ -484,6 +484,40 @@ func TestFIFOMessageAttributesCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"first": first, "second": second})
 }
 
+func TestMessageAttributeNameFiltersCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "attribute-filters", "Attributes": map[string]any{"VisibilityTimeout": "0"}})
+	call("SendMessage", map[string]any{"QueueName": "attribute-filters", "MessageBody": "message", "MessageAttributes": map[string]any{
+		"Help.Me": map[string]any{"DataType": "String", "StringValue": "Me"},
+		"Hello":   map[string]any{"DataType": "String", "StringValue": "There"},
+		"General": map[string]any{"DataType": "String", "StringValue": "Kenobi"},
+	}})
+	outputs := map[string]any{}
+	for _, tc := range []struct {
+		name   string
+		filter []any
+	}{
+		{"empty", []any{}},
+		{"exact", []any{"Hello"}},
+		{"prefix", []any{"Hel.*"}},
+		{"all", []any{"*"}},
+	} {
+		response := call("ReceiveMessage", map[string]any{"QueueName": "attribute-filters", "MessageAttributeNames": tc.filter})
+		outputs[tc.name] = response.Output
+	}
+	golden.AssertJSON(t, outputs)
+}
+
 func FuzzFIFOMessageAttributes(f *testing.F) {
 	f.Add("fifo")
 	f.Add("")
@@ -571,6 +605,39 @@ func FuzzFIFOContentBasedDeduplicationStrategy(f *testing.F) {
 		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "fuzz-dedup-strategy.fifo", "AttributeNames": []any{"ContentBasedDeduplication"}}})
 		if err != nil || asMap(response.Output["Attributes"])["ContentBasedDeduplication"] != value {
 			t.Fatalf("enabled=%v response=%#v error=%v", enabled, response.Output, err)
+		}
+	})
+}
+
+func FuzzMessageAttributeNameFilters(f *testing.F) {
+	f.Add(uint8(0))
+	f.Add(uint8(1))
+	f.Add(uint8(2))
+	f.Add(uint8(3))
+	f.Fuzz(func(t *testing.T, raw uint8) {
+		filters := [][]any{{}, {"Hello"}, {"Hel.*"}, {"*"}}
+		filter := filters[int(raw)%len(filters)]
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		call := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		if _, err := call("CreateQueue", map[string]any{"QueueName": "fuzz-attribute-filters", "Attributes": map[string]any{"VisibilityTimeout": "0"}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := call("SendMessage", map[string]any{"QueueName": "fuzz-attribute-filters", "MessageBody": "message", "MessageAttributes": map[string]any{"Help.Me": map[string]any{"DataType": "String", "StringValue": "Me"}, "Hello": map[string]any{"DataType": "String", "StringValue": "There"}, "General": map[string]any{"DataType": "String", "StringValue": "Kenobi"}}}); err != nil {
+			t.Fatal(err)
+		}
+		response, err := call("ReceiveMessage", map[string]any{"QueueName": "fuzz-attribute-filters", "MessageAttributeNames": filter})
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages := response.Output["Messages"].([]any)
+		attrs := messages[0].(map[string]any)["MessageAttributes"].(map[string]any)
+		want := []int{0, 1, 2, 3}[int(raw)%len(filters)]
+		if len(attrs) != want {
+			t.Fatalf("filter %#v attrs %#v", filter, attrs)
 		}
 	})
 }

@@ -803,22 +803,38 @@ func validMessageGroupID(value string) bool {
 
 func filterMsgAttrs(attrs, want any) any {
 	m := asMap(attrs)
-	names, _ := want.([]any)
-	if len(names) == 0 {
-		if s, ok := want.(string); ok && (s == "All" || s == ".") {
-			return m
+	var names []string
+	switch values := want.(type) {
+	case []any:
+		for _, value := range values {
+			names = append(names, str(value))
 		}
-		return m
+	case []string:
+		names = values
+	case string:
+		names = []string{values}
 	}
-	for _, n := range names {
-		if str(n) == "All" || str(n) == "." {
+	if len(names) == 0 {
+		return map[string]any{}
+	}
+	for _, name := range names {
+		if name == "All" || name == "*" || name == ".*" || name == "." {
 			return m
 		}
 	}
 	out := map[string]any{}
-	for _, n := range names {
-		if v, ok := m[str(n)]; ok {
-			out[str(n)] = v
+	for _, name := range names {
+		if strings.HasSuffix(name, ".*") {
+			prefix := strings.TrimSuffix(name, ".*")
+			for key, value := range m {
+				if strings.HasPrefix(key, prefix) {
+					out[key] = value
+				}
+			}
+			continue
+		}
+		if value, ok := m[name]; ok {
+			out[name] = value
 		}
 	}
 	return out

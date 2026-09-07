@@ -18237,8 +18237,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sqs-empty-receive-return-messages",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
-			old:  `return &spi.Response{Output: map[string]any{"Messages": out}}, nil`,
-			new:  `return &spi.Response{Output: map[string]any{"Messages": []any{}}}, nil`,
+			old:  "if len(out) == 0 {\n\t\t\t\treturn &spi.Response{Output: map[string]any{}}, nil\n\t\t\t}",
+			new:  "if len(out) == 0 {\n\t\t\t\treturn &spi.Response{Output: map[string]any{\"Messages\": []any{}}}, nil\n\t\t\t}",
 			pkg:  "./internal/services/aws/sqs",
 			run:  "TestReceiveEmptyQueueCharacterization",
 		},

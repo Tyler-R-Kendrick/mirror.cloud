@@ -878,6 +878,9 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 			}
 		}
 		if len(out) > 0 || wait == 0 || !now.Before(deadline) {
+			if len(out) == 0 {
+				return &spi.Response{Output: map[string]any{}}, nil
+			}
 			return &spi.Response{Output: map[string]any{"Messages": out}}, nil
 		}
 		d := deadline.Sub(now)

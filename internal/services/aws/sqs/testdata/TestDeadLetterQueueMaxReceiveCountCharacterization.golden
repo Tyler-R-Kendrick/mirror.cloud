@@ -19,7 +19,5 @@
       }
     ]
   },
-  "second": {
-    "Messages": []
-  }
+  "second": {}
 }

@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 79 / 222 (35.6%) |
-| LocalStack SQS test functions not yet traced | 143 / 222 (64.4%) |
+| LocalStack SQS test functions explicitly traced | 80 / 222 (36.0%) |
+| LocalStack SQS test functions not yet traced | 142 / 222 (64.0%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -645,6 +645,7 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_sequence_number` | FIFO SendMessage returns a SequenceNumber while standard SendMessage omits it; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and sequence mutants pin queue-type response shape | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_sequence_number_increases` | FIFO SequenceNumber values increase for successive sends; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and transactional sequence mutants pin monotonicity | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_system_attributes_have_no_effect_on_attr_md5` | MessageSystemAttributes produce their separate pinned MD5 while leaving MD5OfMessageAttributes unchanged; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and digest mutants pin separation | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_aws_trace_header_propagation` | X-Amzn-Trace-Id on SendMessage is retained as AWSTraceHeader for a requested receive system attribute; atomic characterization snapshot, AWS SDK transport contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and trace mutants pin propagation | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_set_unsupported_attribute_standard` | SetQueueAttributes rejects both `FifoQueue=true` and `FifoQueue=false` on standard queues with `InvalidAttributeName`; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin the rejection | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_set_unsupported_attribute_fifo` | FIFO queues accept idempotent `FifoQueue=true` but reject `FifoQueue=false`; the same seven-form setter-validation stack pins both directions | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_create_and_send_to_fifo_queue` | FIFO queue creation preserves the `.fifo` URL suffix and a message with explicit group/deduplication identifiers round-trips through ReceiveMessage; the existing FIFO lifecycle characterization, SDK, BDD, fuzz, chaos/race, and mutation stack covers the contract | Mapped; equivalent stack green |

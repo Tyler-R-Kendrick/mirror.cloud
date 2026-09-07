@@ -17885,10 +17885,18 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sqs-dedup-scope-by-message-group",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
-			old:  "if fifo && str(attrs[\"DeduplicationScope\"]) == \"messageGroup\" {",
+			old:  "if fifo && p.dedupScope(ctx, req, name, attrs) == \"messageGroup\" {",
 			new:  "if false {",
 			pkg:  "./internal/services/aws/sqs",
 			run:  "TestFIFODeduplicationScopeCharacterization",
+		},
+		{
+			name: "sqs-dedup-scope-honors-creation-setting",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if scope := str(meta[\"dedupScope\"]); scope != \"\" {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestFIFODeduplicationScopeUpdateCharacterization",
 		},
 		{
 			name: "sqs-dedup-retry-uses-request-digest",

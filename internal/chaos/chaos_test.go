@@ -1141,6 +1141,41 @@ func TestConcurrentSQSMessageAttributeDigestsRemainStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSMessageAttributeValidationIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-attribute-validation"}}); err != nil {
+		t.Fatal(err)
+	}
+	cases := []map[string]any{
+		{"ErrorDetails": map[string]any{"DataType": "String", "StringValue": ""}},
+		{"aWs.Invalid": map[string]any{"DataType": "String", "StringValue": "value"}},
+		{"Invalid!attr": map[string]any{"DataType": "String", "StringValue": "value"}},
+		{"Attribute_name": map[string]any{"DataType": "Invalid", "StringValue": "value"}},
+	}
+	errs := make(chan error, len(cases)*8)
+	var wg sync.WaitGroup
+	for range 8 {
+		for _, attrs := range cases {
+			wg.Add(1)
+			go func(attrs map[string]any) {
+				defer wg.Done()
+				_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-attribute-validation", "MessageBody": "test", "MessageAttributes": attrs}})
+				fault, ok := err.(*spi.Fault)
+				if !ok || fault.Code != "InvalidParameterValue" {
+					errs <- fmt.Errorf("attributes %#v error %#v", attrs, err)
+				}
+			}(attrs)
+		}
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSStandardMessageGroupValidationIsStable(t *testing.T) {
 	p := sqs.New(spitest.Deps(t))
 	ctx := context.Background()

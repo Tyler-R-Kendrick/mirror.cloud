@@ -865,6 +865,41 @@ func TestMessageAttributeDigestCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"digest": digest, "attributes": message["MessageAttributes"]})
 }
 
+func TestMessageAttributeValidationCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "attribute-validation"}}); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name  string
+		attrs map[string]any
+	}{
+		{"empty-string", map[string]any{"ErrorDetails": map[string]any{"StringValue": "", "DataType": "String"}}},
+		{"control-value", map[string]any{"attr1": map[string]any{"StringValue": "Invalid-\b", "DataType": "String"}}},
+		{"reserved-prefix", map[string]any{"aWs.Invalid": map[string]any{"StringValue": "Valid", "DataType": "String"}}},
+		{"illegal-name", map[string]any{"Invalid!attr": map[string]any{"StringValue": "Valid", "DataType": "String"}}},
+		{"invalid-type", map[string]any{"Attribute_name": map[string]any{"StringValue": "Valid", "DataType": "Invalid"}}},
+		{"empty-custom-type", map[string]any{"Attribute_name": map[string]any{"StringValue": "Valid", "DataType": "Number."}}},
+	}
+	results := map[string]any{}
+	for _, tc := range cases {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "attribute-validation", "MessageBody": "test", "MessageAttributes": tc.attrs}})
+		fault, ok := err.(*spi.Fault)
+		if !ok {
+			t.Fatalf("%s error %#v", tc.name, err)
+		}
+		results[tc.name] = map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault}
+	}
+	valid, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "attribute-validation", "MessageBody": "test", "MessageAttributes": map[string]any{"attr.1øßä": map[string]any{"StringValue": "Valid", "DataType": "String"}}}})
+	if err != nil {
+		t.Fatal("valid unicode attribute", err)
+	}
+	results["valid"] = valid.Output
+	golden.AssertJSON(t, results)
+}
+
 func TestMessageAttributeNameFiltersCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -903,7 +938,7 @@ func FuzzFIFOMessageAttributes(f *testing.F) {
 	f.Add("fifo")
 	f.Add("")
 	f.Fuzz(func(t *testing.T, value string) {
-		if len(value) > 1024 {
+		if value == "" || len(value) > 1024 {
 			t.Skip()
 		}
 		p := New(spitest.Deps(t))
@@ -1168,7 +1203,7 @@ func FuzzMessageAttributeDigest(f *testing.F) {
 	f.Add("value")
 	f.Add("")
 	f.Fuzz(func(t *testing.T, value string) {
-		if len(value) > 256 {
+		if value == "" || len(value) > 256 {
 			t.Skip()
 		}
 		p := New(spitest.Deps(t))
@@ -1186,6 +1221,24 @@ func FuzzMessageAttributeDigest(f *testing.F) {
 		if err != nil || str(received.Output["Messages"].([]any)[0].(map[string]any)["MD5OfMessageAttributes"]) != str(sent.Output["MD5OfMessageAttributes"]) {
 			t.Fatalf("receive %#v error %v", received.Output, err)
 		}
+	})
+}
+
+func FuzzMessageAttributeValidation(f *testing.F) {
+	for _, seed := range []string{"", "aWs.Invalid", "Invalid!attr", "attr.1øßä"} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, name string) {
+		if len([]rune(name)) > 256 {
+			return
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-attribute-validation"}}); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-attribute-validation", "MessageBody": "test", "MessageAttributes": map[string]any{name: map[string]any{"StringValue": "value", "DataType": "String"}}}})
 	})
 }
 

@@ -420,6 +420,17 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("receive digest %d %s", status, body)
 		}
 	})
+	t.Run("Given an empty or reserved message attribute When sending Then validation fails", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-attribute-validation"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		for _, attributes := range []string{`{"ErrorDetails":{"DataType":"String","StringValue":""}}`, `{"aWs.Invalid":{"DataType":"String","StringValue":"value"}}`} {
+			status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-attribute-validation","MessageBody":"test","MessageAttributes":`+attributes+`}`)
+			if status != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidParameterValue")) {
+				t.Fatalf("validation %d %s", status, body)
+			}
+		}
+	})
 	t.Run("Given a batch and a single send When receiving three Then all bodies are present", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-batch-mixed"}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

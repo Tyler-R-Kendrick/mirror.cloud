@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
@@ -460,6 +461,9 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	if !validMessageContents(body) {
 		return nil, &spi.Fault{Code: "InvalidMessageContents", Message: "The message contains characters outside the allowed set.", HTTPStatus: 400, Fault: "client"}
 	}
+	if fault := validateMessageAttributes(req.Input["MessageAttributes"]); fault != nil {
+		return nil, fault
+	}
 	sum := md5.Sum([]byte(body))
 	md5hex := hex.EncodeToString(sum[:])
 	md5attrs := md5MessageAttributes(req.Input["MessageAttributes"])
@@ -614,6 +618,96 @@ func md5MessageAttributes(attrs any) string {
 	}
 	sum := digest.Sum(nil)
 	return hex.EncodeToString(sum)
+}
+
+func validateMessageAttributes(attrs any) *spi.Fault {
+	for name, raw := range asMap(attrs) {
+		if !validMessageAttributeName(name) {
+			return invalidMessageAttributeFault()
+		}
+		attribute := asMap(raw)
+		dataType := str(attribute["DataType"])
+		if !validMessageAttributeDataType(dataType) {
+			return invalidMessageAttributeFault()
+		}
+		stringValue, hasString := attribute["StringValue"]
+		binaryValue, hasBinary := attribute["BinaryValue"]
+		stringList, hasStringList := attribute["StringListValues"]
+		binaryList, hasBinaryList := attribute["BinaryListValues"]
+		count := 0
+		for _, present := range []bool{hasString, hasBinary, hasStringList, hasBinaryList} {
+			if present {
+				count++
+			}
+		}
+		if count != 1 {
+			return invalidMessageAttributeFault()
+		}
+		if hasString {
+			value := str(stringValue)
+			if value == "" || !validMessageContents(value) {
+				return invalidMessageAttributeFault()
+			}
+		}
+		if hasBinary && binaryValue == nil {
+			return invalidMessageAttributeFault()
+		}
+		if hasStringList && len(asAnySlice(stringList)) == 0 {
+			return invalidMessageAttributeFault()
+		}
+		if hasBinaryList && len(asAnySlice(binaryList)) == 0 {
+			return invalidMessageAttributeFault()
+		}
+	}
+	return nil
+}
+
+func validMessageAttributeName(name string) bool {
+	runes := []rune(name)
+	if len(runes) == 0 || len(runes) > 256 || strings.HasPrefix(strings.ToLower(name), "aws.") || strings.HasPrefix(strings.ToLower(name), "amazon.") {
+		return false
+	}
+	if !unicode.IsLetter(runes[0]) && !unicode.IsDigit(runes[0]) {
+		return false
+	}
+	if !unicode.IsLetter(runes[len(runes)-1]) && !unicode.IsDigit(runes[len(runes)-1]) {
+		return false
+	}
+	for _, r := range runes {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '.' && r != '_' && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func validMessageAttributeDataType(dataType string) bool {
+	runes := []rune(dataType)
+	if len(runes) == 0 || len(runes) > 256 {
+		return false
+	}
+	base, suffix, hasSuffix := strings.Cut(dataType, ".")
+	if base != "String" && base != "Number" && base != "Binary" {
+		return false
+	}
+	if !hasSuffix || suffix == "" {
+		return !hasSuffix
+	}
+	for _, r := range suffix {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '.' && r != '_' && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func invalidMessageAttributeFault() *spi.Fault {
+	return &spi.Fault{Code: "InvalidParameterValue", Message: "The message attribute is invalid.", HTTPStatus: 400, Fault: "client"}
+}
+
+func asAnySlice(value any) []any {
+	values, _ := value.([]any)
+	return values
 }
 
 func validBatchEntryID(value string) bool {

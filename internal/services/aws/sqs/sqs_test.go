@@ -2345,7 +2345,11 @@ func TestQueueAdvertiseURLCharacterization(t *testing.T) {
 	if err != nil || url.Output["QueueUrl"] != response.Output["QueueUrl"] {
 		t.Fatalf("stored queue URL %#v error %v", url.Output, err)
 	}
-	golden.AssertJSON(t, map[string]any{"created": response.Output, "lookup": url.Output})
+	defaultURL, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "advertised-default"}})
+	if err != nil || defaultURL.Output["QueueUrl"] != "http://127.0.0.1:4566/123456789012/advertised-default" {
+		t.Fatalf("default queue URL %#v error %v", defaultURL.Output, err)
+	}
+	golden.AssertJSON(t, map[string]any{"created": response.Output, "lookup": url.Output, "default": defaultURL.Output})
 }
 
 func TestQueueRecentlyDeletedCharacterization(t *testing.T) {

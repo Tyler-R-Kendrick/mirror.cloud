@@ -2,6 +2,9 @@
   "created": {
     "QueueUrl": "https://external.example/sqs/123456789012/advertised"
   },
+  "default": {
+    "QueueUrl": "http://127.0.0.1:4566/123456789012/advertised-default"
+  },
   "lookup": {
     "QueueUrl": "https://external.example/sqs/123456789012/advertised"
   }

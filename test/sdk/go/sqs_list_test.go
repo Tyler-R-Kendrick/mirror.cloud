@@ -528,6 +528,9 @@ func TestAWSSDKSQSFIFODeduplicationIDContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("valid"), MessageGroupId: aws.String("group-1"), MessageDeduplicationId: aws.String(strings.Repeat("a", 128))}); err != nil {
+		t.Fatal("valid deduplication id", err)
+	}
 	for _, value := range []string{"", strings.Repeat("a", 129), "group 123"} {
 		_, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("message"), MessageGroupId: aws.String("group-1"), MessageDeduplicationId: aws.String(value)})
 		if err == nil || !strings.Contains(err.Error(), "MessageDeduplicationId can only include alphanumeric and punctuation characters") {

@@ -16,5 +16,10 @@
     "Fault": "client",
     "HTTPStatus": 400,
     "Message": "Value aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa for parameter MessageDeduplicationId is invalid. Reason: MessageDeduplicationId can only include alphanumeric and punctuation characters. 1 to 128 in length."
+  },
+  "valid": {
+    "MD5OfMessageBody": "9f7d0ee82b6a6ca7ddeae841f3253059",
+    "MessageId": "7c5891299f6489f8",
+    "SequenceNumber": "1"
   }
 }

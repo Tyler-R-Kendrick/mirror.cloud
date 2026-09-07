@@ -3031,8 +3031,14 @@ func TestFIFODeduplicationIDCharacterization(t *testing.T) {
 		}
 		return map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault}
 	}
+	valid, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{
+		"QueueName": "dedup-invalid.fifo", "MessageBody": "valid", "MessageGroupId": "group-1", "MessageDeduplicationId": strings.Repeat("a", 128),
+	}})
+	if err != nil {
+		t.Fatal("valid deduplication id", err)
+	}
 	golden.AssertJSON(t, map[string]any{
-		"empty": call(""), "tooLong": call(strings.Repeat("a", 129)), "spaces": call("group 123"),
+		"valid": valid.Output, "empty": call(""), "tooLong": call(strings.Repeat("a", 129)), "spaces": call("group 123"),
 	})
 }
 

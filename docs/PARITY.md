@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 89 / 222 (40.1%) |
-| LocalStack SQS test functions not yet traced | 133 / 222 (59.9%) |
+| LocalStack SQS test functions explicitly traced | 90 / 222 (40.5%) |
+| LocalStack SQS test functions not yet traced | 132 / 222 (59.5%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -628,6 +628,7 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_send_message_batch_with_oversized_contents_with_updated_maximum_message_size` | Batch sends continue to use the 1 MiB request limit even when queue `MaximumMessageSize=2048`; the configured per-message boundary and successful two-entry response are covered by the same seven forms | Mapped; full race-clean |
 | `test_sqs.py::TestSqsProvider::test_send_message_to_standard_queue_with_invalid_message_group_id` | Standard queues reject empty, overlong, and space-containing `MessageGroupId` values with the exact `InvalidParameterValue` message; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin validation and accepted punctuation | Mapped; full race-clean |
 | `test_sqs.py::TestSqsProvider::test_message_deduplication_id_invalid` | FIFO queues reject empty, overlong, and space-containing `MessageDeduplicationId` values with the exact `InvalidParameterValue` message; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin validation | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_message_deduplication_id_success` | A 128-character punctuation-free `MessageDeduplicationId` is accepted on a FIFO queue; the shared atomic snapshot, SDK, BDD, fuzz, concurrent chaos/race, and validation-mutation boundary stack pins the maximum valid length | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_queue_send_message_with_zero_delay_defaults_to_queue_delay` | FIFO SendMessage with `DelaySeconds=0` honors the queue-level delay; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin delayed visibility | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_message_attributes` | FIFO messages preserve requested message attributes and mutate `ApproximateReceiveCount` across repeated `AttributeNames=All` receives; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin the wire shape | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_approx_number_of_messages` | FIFO queue approximate message count excludes in-flight messages after a batched receive; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin visible-count behavior | Mapped; focused green |

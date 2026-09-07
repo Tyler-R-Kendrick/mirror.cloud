@@ -823,6 +823,10 @@ func TestSQSQueueListing(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-dedup-invalid.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"false"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)
 		}
+		validPayload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-dedup-invalid.fifo", "MessageBody": "valid", "MessageGroupId": "group-1", "MessageDeduplicationId": strings.Repeat("a", 128)})
+		if status, body := call("SendMessage", string(validPayload)); status != http.StatusOK {
+			t.Fatalf("valid deduplication id %d %s", status, body)
+		}
 		for _, value := range []string{"", strings.Repeat("a", 129), "group 123"} {
 			payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-dedup-invalid.fifo", "MessageBody": "message", "MessageGroupId": "group-1", "MessageDeduplicationId": value})
 			status, body := call("SendMessage", string(payload))

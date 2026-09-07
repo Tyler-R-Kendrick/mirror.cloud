@@ -6354,6 +6354,9 @@ func TestConcurrentSQSFIFODeduplicationValidationIsStable(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-dedup.fifo", "MessageBody": "valid", "MessageGroupId": "group-1", "MessageDeduplicationId": strings.Repeat("a", 128)}}); err != nil {
+		t.Fatal("valid deduplication id", err)
+	}
 	values := []string{"", strings.Repeat("a", 129), "group 123"}
 	errs := make(chan error, len(values)*8)
 	var wg sync.WaitGroup

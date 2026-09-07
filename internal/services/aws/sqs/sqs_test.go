@@ -2412,6 +2412,27 @@ func TestMessageMoveTaskValidationCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"invalidSource": invalidSource, "missingDestination": missingDestination})
 }
 
+func TestMessageMoveTaskCancelValidationCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "cancel-source"}}); err != nil {
+		t.Fatal(err)
+	}
+	call := func(handle string) map[string]any {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CancelMessageMoveTask", Input: map[string]any{"TaskHandle": handle}})
+		fault, ok := err.(*spi.Fault)
+		if !ok {
+			t.Fatalf("cancel error %#v", err)
+		}
+		return map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault}
+	}
+	validSource := queueARN(&spi.Request{Identity: id}, "cancel-source")
+	unknownTask := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(`{"taskId":"00000000-0000-0000-0000-000000000000","sourceArn":"%s"}`, validSource)))
+	unknownSource := base64.StdEncoding.EncodeToString([]byte(`{"taskId":"00000000-0000-0000-0000-000000000000","sourceArn":"arn:aws:sqs:us-east-1:123456789012:missing"}`))
+	golden.AssertJSON(t, map[string]any{"invalidHandle": call("foobared"), "invalidSource": call(unknownSource), "invalidTask": call(unknownTask)})
+}
+
 func TestMessageMoveTaskWorkflowCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

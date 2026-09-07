@@ -1499,9 +1499,17 @@ func queueARN(req *spi.Request, name string) string {
 
 func (p *Pack) cancelMove(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	h := str(req.Input["TaskHandle"])
+	decoded, err := base64.StdEncoding.DecodeString(h)
+	var document map[string]any
+	if err != nil || json.Unmarshal(decoded, &document) != nil || str(document["taskId"]) == "" || str(document["sourceArn"]) == "" {
+		return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "Value for parameter TaskHandle is invalid.", HTTPStatus: 400, Fault: "client"}
+	}
+	if !p.queueExists(ctx, req, arnQueue(str(document["sourceArn"]))) {
+		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "The resource that you specified for the SourceArn parameter doesn't exist.", HTTPStatus: 404, Fault: "client"}
+	}
 	b, ok, _ := p.col(req, "qmove").Get(ctx, h)
 	if !ok {
-		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "TaskHandle", HTTPStatus: 400, Fault: "client"}
+		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Task does not exist.", HTTPStatus: 404, Fault: "client"}
 	}
 	var rec map[string]any
 	_ = json.Unmarshal(b, &rec)

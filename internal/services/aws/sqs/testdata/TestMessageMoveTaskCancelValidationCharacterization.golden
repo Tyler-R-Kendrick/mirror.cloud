@@ -1,0 +1,20 @@
+{
+  "invalidHandle": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "Value for parameter TaskHandle is invalid."
+  },
+  "invalidSource": {
+    "Code": "ResourceNotFoundException",
+    "Fault": "client",
+    "HTTPStatus": 404,
+    "Message": "The resource that you specified for the SourceArn parameter doesn't exist."
+  },
+  "invalidTask": {
+    "Code": "ResourceNotFoundException",
+    "Fault": "client",
+    "HTTPStatus": 404,
+    "Message": "Task does not exist."
+  }
+}

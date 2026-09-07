@@ -2,6 +2,7 @@ package sdk_test
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1950,6 +1951,17 @@ func TestAWSSDKSQSMessageMoveTaskValidationContract(t *testing.T) {
 	listed, err = client.ListMessageMoveTasks(context.Background(), &sqs.ListMessageMoveTasksInput{SourceArn: aws.String(dlqAttrs.Attributes["QueueArn"])})
 	if err != nil || len(listed.Results) != 2 || aws.ToString(listed.Results[1].Status) != "COMPLETED" || listed.Results[1].ApproximateNumberOfMessagesMoved != 1 {
 		t.Fatalf("default destination move task list %#v error %v", listed, err)
+	}
+	if _, err := client.CancelMessageMoveTask(context.Background(), &sqs.CancelMessageMoveTaskInput{TaskHandle: aws.String("foobared")}); err == nil || !strings.Contains(err.Error(), "TaskHandle is invalid") {
+		t.Fatalf("invalid task handle error %v", err)
+	}
+	unknownSource := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(`{"taskId":"00000000-0000-0000-0000-000000000000","sourceArn":"arn:aws:sqs:us-east-1:000000000000:missing"}`)))
+	if _, err := client.CancelMessageMoveTask(context.Background(), &sqs.CancelMessageMoveTaskInput{TaskHandle: aws.String(unknownSource)}); err == nil || !strings.Contains(err.Error(), "SourceArn parameter") {
+		t.Fatalf("invalid source handle error %v", err)
+	}
+	unknownTask := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(`{"taskId":"00000000-0000-0000-0000-000000000000","sourceArn":"%s"}`, dlqAttrs.Attributes["QueueArn"])))
+	if _, err := client.CancelMessageMoveTask(context.Background(), &sqs.CancelMessageMoveTaskInput{TaskHandle: aws.String(unknownTask)}); err == nil || !strings.Contains(err.Error(), "Task does not exist") {
+		t.Fatalf("invalid task id error %v", err)
 	}
 }
 

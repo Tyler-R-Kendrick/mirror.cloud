@@ -1246,6 +1246,12 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("returned message %d %s", status, body)
 		}
 	})
+	t.Run("Given an invalid move task handle When cancelling Then TaskHandle validation is returned", func(t *testing.T) {
+		status, body := call("CancelMessageMoveTask", `{"TaskHandle":"foobared"}`)
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("TaskHandle is invalid")) {
+			t.Fatalf("cancel validation %d %s", status, body)
+		}
+	})
 }
 
 func TestSQSAdvertisedQueueURLBDD(t *testing.T) {

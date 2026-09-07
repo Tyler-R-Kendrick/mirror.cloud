@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 101 / 222 (45.5%) |
-| LocalStack SQS test functions not yet traced | 121 / 222 (54.5%) |
+| LocalStack SQS test functions explicitly traced | 102 / 222 (45.9%) |
+| LocalStack SQS test functions not yet traced | 120 / 222 (54.1%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -704,3 +704,4 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs_move_task.py::test_destination_needs_to_exist` | StartMessageMoveTask rejects a nonexistent destination ARN with the exact 404 ResourceNotFoundException; atomic Verify-style snapshot, AWS SDK contract, raw HTTP BDD, and concurrent chaos/race validation cover the guard | Mapped; focused green |
 | `test_sqs_move_task.py::test_basic_move_task_workflow` | StartMessageMoveTask moves DLQ messages to an existing destination and returns an AWS-shaped base64 task handle plus completed task counters through ListMessageMoveTasks; atomic Verify-style snapshot, AWS SDK contract, raw HTTP BDD, and concurrent chaos/race coverage pin the workflow | Mapped; focused green |
 | `test_sqs_move_task.py::test_move_task_workflow_with_default_destination` | Omitting DestinationArn returns redriven messages to their original source queue, resets the receive-count boundary, and reports completed move counters; atomic Verify-style snapshot, AWS SDK contract, raw HTTP BDD, concurrent chaos/race, and a receive-count mutation pin the default route | Mapped; focused green |
+| `test_sqs_move_task.py::test_cancel_with_invalid_task_handle` | CancelMessageMoveTask rejects malformed task handles with AWS's exact InvalidParameterValue fault across atomic Verify-style snapshot, AWS SDK contract, and raw HTTP BDD coverage | Mapped; focused green |

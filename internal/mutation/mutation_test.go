@@ -18659,6 +18659,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestMessageMoveTaskDefaultDestinationCharacterization",
 		},
 		{
+			name: "sqs-accept-invalid-move-task-handle",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if err != nil || json.Unmarshal(decoded, &document) != nil || str(document["taskId"]) == "" || str(document["sourceArn"]) == "" {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestMessageMoveTaskCancelValidationCharacterization",
+		},
+		{
 			name: "sqs-disable-message-delay",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "now.Add(time.Duration(delay) * time.Second).UnixNano()",

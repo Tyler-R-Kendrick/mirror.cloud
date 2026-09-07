@@ -1,0 +1,189 @@
+schema: bir/1
+service: aws.securityhub
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is assessed: the only findings that exist are the ones a
+# caller imported, no standard is ever run, and an insight's filters are stored
+# and never applied.
+provenance: authored
+
+resources:
+  # One hub per account and region, which is what the real service allows.
+  hub:
+    collection: shhub
+    singleton: default
+    arn: "arn:{partition}:securityhub:{region}:{account}:hub/default"
+    record:
+      HubArn: arn
+      # A fixed date, not the time it was enabled -- see the quirk.
+      SubscribedAt: "'2020-01-01T00:00:00Z'"
+
+  # A finding is stored exactly as it was imported. AwsSecurityFinding has
+  # forty-four members; enumerating them would store a null for each one the
+  # caller omitted, and GetFindings would answer those nulls.
+  finding:
+    collection: shfind
+    id:
+      input_members: [Id]
+
+  # An insight is keyed by the ARN it is given, since that is what every later
+  # operation names it by.
+  insight:
+    collection: shins
+    key: InsightArn
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [InsightArn]
+    arn: "arn:{partition}:securityhub:{region}:{account}:insight/{id}"
+    record:
+      InsightArn: arn
+
+errors:
+  InvalidAccess:
+    code: InvalidAccessException
+    http: 400
+    fault: client
+
+operations:
+  # EnableSecurityHubResponse declares nothing at all, so this answers nothing
+  # -- see the quirk.
+  EnableSecurityHub:
+    effects:
+      - put: { resource: hub }
+
+  DescribeHub:
+    reads:
+      hub: { resource: hub }
+    require:
+      - { cond: hub_found, error: InvalidAccess }
+    output:
+      HubArn: hub.HubArn
+      SubscribedAt: hub.SubscribedAt
+
+  DisableSecurityHub:
+    effects:
+      - delete: { resource: hub, missing: ignore }
+
+  # One finding per entry, addressed by the id the entry carries. A finding
+  # without one is skipped rather than written to a row keyed by the empty
+  # string that every such finding would share; AwsSecurityFinding declares Id
+  # required, so no SDK sends one -- see the quirk.
+  BatchImportFindings:
+    effects:
+      # A create rather than a put: importing a finding replaces it, so a
+      # re-import drops a note an update had added. A put would merge onto
+      # what is stored and keep it.
+      - create:
+          resource: finding
+          for_each: input.Findings
+          key: "string(item.Id)"
+          when: "'Id' in item && string(item.Id) != ''"
+          spread: item
+    output:
+      SuccessCount: "size(input.Findings)"
+      FailedCount: "0"
+
+  GetFindings:
+    list: { resource: finding, member: Findings, paginate: model }
+
+  # Two patches rather than one, because a member the request did not carry
+  # must not be written as a null over what the finding already has. A finding
+  # the identifiers name but the store does not have is skipped.
+  BatchUpdateFindings:
+    effects:
+      - patch:
+          resource: finding
+          for_each: input.FindingIdentifiers
+          key: "string(item.Id)"
+          missing: ignore
+          when: "'Note' in input"
+          record:
+            Note: input.Note
+      - patch:
+          resource: finding
+          for_each: input.FindingIdentifiers
+          key: "string(item.Id)"
+          missing: ignore
+          when: "'Workflow' in input"
+          record:
+            Workflow: input.Workflow
+    output:
+      ProcessedFindings: input.FindingIdentifiers
+      UnprocessedFindings: "[]"
+
+  CreateInsight:
+    effects:
+      - create:
+          resource: insight
+          spread: input
+    output:
+      InsightArn: rec.InsightArn
+
+  # Every insight, or the ones the request names.
+  GetInsights:
+    list:
+      resource: insight
+      member: Insights
+      paginate: model
+      filter: >
+        !('InsightArns' in input) || size(input.InsightArns) == 0
+          || item.InsightArn in input.InsightArns
+
+  DeleteInsight:
+    effects:
+      - delete: { resource: insight, missing: ignore }
+    output:
+      InsightArn: "string(input.InsightArn)"
+
+quirks:
+  - operation: EnableSecurityHub
+    note: >
+      EnableSecurityHubResponse declares no members, so enabling answers an
+      empty body. The pack answered a HubArn and a SubscribedAt, which no SDK
+      could read off it -- both are declared on DescribeHub instead, and that
+      is where they are answered. EnableDefaultStandards is accepted and
+      discarded: no standard is ever subscribed, and the standards operations
+      are not served at all.
+  - operation: DescribeHub
+    note: >
+      SubscribedAt is 2020-01-01T00:00:00Z for every hub in every account,
+      rather than the time it was enabled, and AutoEnableControls and
+      ControlFindingGenerator are never stored, so a caller reading them gets
+      nothing. Describing before enabling is an InvalidAccessException, which
+      is what the real service does.
+  - operation: BatchImportFindings
+    note: >
+      SuccessCount counts the findings the request carried, not the ones
+      stored, and FailedCount is always zero with no FailedFindings -- so a
+      finding this rejects is still reported as a success. Nothing validates a
+      finding beyond its id: the required AwsAccountId, CreatedAt, Description,
+      GeneratorId, ProductArn, Resources, SchemaVersion, Title and UpdatedAt
+      are stored if sent and not missed if not.
+  - operation: BatchImportFindings
+    note: >
+      A finding carrying no Id is skipped. The pack generated one and stored
+      it, which a write that runs once per element cannot do; skipping is the
+      safer of the two divergences, since keying every such finding by the
+      empty string would collapse them onto one row. AwsSecurityFinding
+      declares Id required, so a request that reaches this path is one no SDK
+      generated from the specification would send.
+  - operation: BatchUpdateFindings
+    note: >
+      Only Note and Workflow are applied. Confidence, Criticality, Severity,
+      Types, UserDefinedFields, VerificationState and RelatedFindings are
+      accepted and discarded, so a caller that lowers a severity sees it
+      unchanged on the next GetFindings. ProcessedFindings echoes every
+      identifier the request carried, including the ones that named no finding,
+      and UnprocessedFindings is always empty -- so a caller cannot tell which
+      of its updates landed.
+  - operation: CreateInsight
+    note: >
+      An insight's Filters are stored and never applied: no operation
+      evaluates them, and GetInsightResults is not served, so an insight is a
+      saved query that can never be run.
+  - operation: DeleteInsight
+    note: >
+      Deleting answers the ARN it was given, which DeleteInsightResponse
+      declares as required; the pack answered an empty body. Deleting an
+      insight that does not exist succeeds and answers that ARN just the same,
+      where the real service answers ResourceNotFoundException.

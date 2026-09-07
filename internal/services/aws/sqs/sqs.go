@@ -216,15 +216,18 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "SetQueueAttributes":
 		name := queueName(req)
 		attrs := asMap(req.Input["Attributes"])
+		current := map[string]any{}
 		if b, ok, _ := p.col(req, "qattrs").Get(ctx, name); ok {
-			current := map[string]any{}
 			_ = json.Unmarshal(b, &current)
-			for key, value := range attrs {
-				current[key] = value
-			}
-			attrs = current
 		}
-		b, _ := json.Marshal(attrs)
+		for key, value := range attrs {
+			if (key == "RedrivePolicy" || key == "Policy") && str(value) == "" {
+				delete(current, key)
+				continue
+			}
+			current[key] = value
+		}
+		b, _ := json.Marshal(current)
 		_ = p.col(req, "qattrs").Put(ctx, name, b)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "PurgeQueue":

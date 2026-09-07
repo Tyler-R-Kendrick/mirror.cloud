@@ -3,6 +3,7 @@ package sdk_test
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1550,6 +1551,54 @@ func TestAWSSDKSQSRedrivePolicyClearingContract(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "InvalidParameterValue") {
 			t.Fatalf("invalid policy %q error %v", value, err)
 		}
+	}
+}
+
+func TestAWSSDKSQSPermissionLifecycleContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-permission")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	label := aws.String("crossaccountpermission")
+	if _, err := client.AddPermission(context.Background(), &sqs.AddPermissionInput{QueueUrl: created.QueueUrl, Label: label, AWSAccountIds: []string{"111111111111", "668614515564"}, Actions: []string{"ReceiveMessage"}}); err != nil {
+		t.Fatal(err)
+	}
+	attrs, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNamePolicy}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var policy map[string]any
+	if err := json.Unmarshal([]byte(attrs.Attributes["Policy"]), &policy); err != nil || policy["Version"] != "2008-10-17" {
+		t.Fatalf("permission policy %#v error %v", policy, err)
+	}
+	if _, err := client.AddPermission(context.Background(), &sqs.AddPermissionInput{QueueUrl: created.QueueUrl, Label: label, AWSAccountIds: []string{"111111111111"}, Actions: []string{"ReceiveMessage"}}); err == nil || !strings.Contains(err.Error(), "Already exists") {
+		t.Fatalf("duplicate permission error %v", err)
+	}
+	if _, err := client.RemovePermission(context.Background(), &sqs.RemovePermissionInput{QueueUrl: created.QueueUrl, Label: label}); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNamePolicy}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := cleared.Attributes["Policy"]; present {
+		t.Fatalf("permission policy remained after removal %#v", cleared.Attributes)
+	}
+	if _, err := client.RemovePermission(context.Background(), &sqs.RemovePermissionInput{QueueUrl: created.QueueUrl, Label: label}); err == nil || !strings.Contains(err.Error(), "can't find label") {
+		t.Fatalf("missing permission error %v", err)
 	}
 }
 

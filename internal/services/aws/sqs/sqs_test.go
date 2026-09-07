@@ -1185,6 +1185,47 @@ func FuzzRedrivePolicyValidation(f *testing.F) {
 	})
 }
 
+func TestPermissionLifecycleCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "permission"}}); err != nil {
+		t.Fatal(err)
+	}
+	invoke := func(operation string, input map[string]any) (*spi.Response, *spi.Fault) {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err == nil {
+			return response, nil
+		}
+		fault, ok := err.(*spi.Fault)
+		if !ok {
+			t.Fatalf("%s error %#v", operation, err)
+		}
+		return nil, fault
+	}
+	base := map[string]any{"QueueName": "permission", "Label": "crossaccountpermission", "AWSAccountIds": []any{"111111111111", "668614515564"}, "Actions": []any{"ReceiveMessage"}}
+	invoke("AddPermission", base)
+	attrs, _ := invoke("GetQueueAttributes", map[string]any{"QueueName": "permission", "AttributeNames": []any{"Policy"}})
+	var policy map[string]any
+	_ = json.Unmarshal([]byte(str(asMap(attrs.Output["Attributes"])["Policy"])), &policy)
+	_, duplicate := invoke("AddPermission", base)
+	remove, removeFault := invoke("RemovePermission", map[string]any{"QueueName": "permission", "Label": "crossaccountpermission"})
+	if removeFault != nil || remove == nil {
+		t.Fatalf("remove permission %#v", removeFault)
+	}
+	afterRemove, afterFault := invoke("GetQueueAttributes", map[string]any{"QueueName": "permission", "AttributeNames": []any{"Policy"}})
+	if afterFault != nil {
+		t.Fatal(afterFault)
+	}
+	_, missing := invoke("RemovePermission", map[string]any{"QueueName": "permission", "Label": "crossaccountpermission"})
+	golden.AssertJSON(t, map[string]any{
+		"version": policy["Version"], "id": policy["Id"], "statement": policy["Statement"],
+		"duplicate":          map[string]any{"Code": duplicate.Code, "Message": duplicate.Message, "HTTPStatus": duplicate.HTTPStatus},
+		"policyAfterRemoval": asMap(afterRemove.Output["Attributes"]),
+		"missing":            map[string]any{"Code": missing.Code, "Message": missing.Message, "HTTPStatus": missing.HTTPStatus},
+	})
+}
+
 func FuzzSSEMutualExclusion(f *testing.F) {
 	f.Add("testKeyId", "true")
 	f.Add("", "true")

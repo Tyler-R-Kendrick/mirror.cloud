@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 109 / 222 (49.1%) |
-| LocalStack SQS test functions not yet traced | 113 / 222 (50.9%) |
+| LocalStack SQS test functions explicitly traced | 110 / 222 (49.5%) |
+| LocalStack SQS test functions not yet traced | 112 / 222 (50.5%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -712,3 +712,4 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs_move_task.py::test_move_task_workflow_with_multiple_sources_as_default_destination` | A shared DLQ returns each redriven message to its own original source when DestinationArn is omitted; atomic characterization and raw HTTP BDD coverage pin per-message origin routing | Mapped; focused green |
 | `test_sqs_move_task.py::test_cancel_with_invalid_source_arn_in_task_handle` | CancelMessageMoveTask returns the exact 404 SourceArn resource fault for a well-formed handle naming a missing queue; atomic characterization and AWS SDK contract cover the boundary | Mapped; focused green |
 | `test_sqs_move_task.py::test_cancel_with_invalid_task_id_in_task_handle` | CancelMessageMoveTask returns the exact 404 Task does not exist fault for a valid source ARN with an unknown task ID; atomic characterization and AWS SDK contract cover the boundary | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_sqs_permission_lifecycle` | AddPermission and RemovePermission preserve AWS's 2008-10-17 default policy, IAM root principals, scalar action shape, duplicate-label fault, and last-statement removal across atomic snapshot, AWS SDK, raw HTTP BDD, and semantic mutation coverage | Mapped; focused green |

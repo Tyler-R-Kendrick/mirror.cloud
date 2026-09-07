@@ -1352,29 +1352,39 @@ func (p *Pack) addPermission(ctx context.Context, req *spi.Request) (*spi.Respon
 	if len(accts) == 0 || len(acts) == 0 {
 		return nil, &spi.Fault{Code: "MissingParameter", Message: "AWSAccountIds/Actions", HTTPStatus: 400, Fault: "client"}
 	}
+	for _, action := range acts {
+		if !sqsPermissionAction(action) {
+			return nil, &spi.Fault{Code: "InvalidParameterValue", Message: fmt.Sprintf("Value SQS:%s for parameter ActionName is invalid. Reason: Please refer to the appropriate WSDL for a list of valid actions.", action), HTTPStatus: 400, Fault: "client"}
+		}
+	}
 	pol := p.loadPolicy(ctx, req, name)
 	stmts, _ := pol["Statement"].([]any)
 	for _, s := range stmts {
 		if str(asMap(s)["Sid"]) == label {
-			return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "Label exists", HTTPStatus: 400, Fault: "client"}
+			return nil, &spi.Fault{Code: "InvalidParameterValue", Message: fmt.Sprintf("Value %s for parameter Label is invalid. Reason: Already exists.", label), HTTPStatus: 400, Fault: "client"}
 		}
 	}
 	arn := fmt.Sprintf("arn:%s:sqs:%s:%s:%s", arnPartition(req.Identity.Region), req.Identity.Region, req.Identity.Account, name)
-	actsOut := make([]any, 0, len(acts))
+	actsOut := make([]string, 0, len(acts))
 	for _, a := range acts {
-		if !strings.Contains(a, ":") {
-			a = "SQS:" + a
-		}
-		actsOut = append(actsOut, a)
+		actsOut = append(actsOut, "SQS:"+strings.TrimPrefix(a, "SQS:"))
 	}
-	acctsOut := make([]any, 0, len(accts))
+	acctsOut := make([]string, 0, len(accts))
 	for _, a := range accts {
-		acctsOut = append(acctsOut, a)
+		acctsOut = append(acctsOut, fmt.Sprintf("arn:%s:iam::%s:root", arnPartition(req.Identity.Region), a))
+	}
+	var principal any = acctsOut
+	if len(acctsOut) == 1 {
+		principal = acctsOut[0]
+	}
+	var action any = actsOut
+	if len(actsOut) == 1 {
+		action = actsOut[0]
 	}
 	stmts = append(stmts, map[string]any{
 		"Sid": label, "Effect": "Allow",
-		"Principal": map[string]any{"AWS": acctsOut},
-		"Action":    actsOut, "Resource": arn,
+		"Principal": map[string]any{"AWS": principal},
+		"Action":    action, "Resource": arn,
 	})
 	pol["Statement"] = stmts
 	if err := p.savePolicy(ctx, req, name, pol); err != nil {
@@ -1398,10 +1408,17 @@ func (p *Pack) removePermission(ctx context.Context, req *spi.Request) (*spi.Res
 		kept = append(kept, s)
 	}
 	if !found {
-		return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "Label not found", HTTPStatus: 400, Fault: "client"}
+		return nil, &spi.Fault{Code: "InvalidParameterValue", Message: fmt.Sprintf("Value %s for parameter Label is invalid. Reason: can't find label.", label), HTTPStatus: 400, Fault: "client"}
 	}
 	pol["Statement"] = kept
-	if err := p.savePolicy(ctx, req, name, pol); err != nil {
+	if len(kept) == 0 {
+		attrs := p.queueAttrs(ctx, req, name)
+		delete(attrs, "Policy")
+		b, _ := json.Marshal(attrs)
+		if err := p.col(req, "qattrs").Put(ctx, name, b); err != nil {
+			return nil, err
+		}
+	} else if err := p.savePolicy(ctx, req, name, pol); err != nil {
 		return nil, err
 	}
 	return &spi.Response{Output: map[string]any{}}, nil
@@ -1666,7 +1683,8 @@ func (p *Pack) listMoves(ctx context.Context, req *spi.Request) (*spi.Response, 
 func (p *Pack) loadPolicy(ctx context.Context, req *spi.Request, name string) map[string]any {
 	attrs := p.queueAttrs(ctx, req, name)
 	raw := str(attrs["Policy"])
-	pol := map[string]any{"Version": "2012-10-17", "Statement": []any{}}
+	arn := fmt.Sprintf("arn:%s:sqs:%s:%s:%s", arnPartition(req.Identity.Region), req.Identity.Region, req.Identity.Account, name)
+	pol := map[string]any{"Version": "2008-10-17", "Id": arn + "/SQSDefaultPolicy", "Statement": []any{}}
 	if raw != "" {
 		_ = json.Unmarshal([]byte(raw), &pol)
 		if pol["Statement"] == nil {
@@ -1674,6 +1692,18 @@ func (p *Pack) loadPolicy(ctx context.Context, req *spi.Request, name string) ma
 		}
 	}
 	return pol
+}
+
+func sqsPermissionAction(action string) bool {
+	if action == "*" {
+		return true
+	}
+	for _, operation := range (&Pack{}).Operations() {
+		if action == operation || action == "SQS:"+operation {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Pack) savePolicy(ctx context.Context, req *spi.Request, name string, pol map[string]any) error {

@@ -100,6 +100,31 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("redrive policy remained %d %s", status, body)
 		}
 	})
+	t.Run("Given a permission When adding and removing it Then the AWS policy shape and faults are preserved", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-permission"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("AddPermission", `{"QueueUrl":"http://queue/000000000000/bdd-permission","Label":"crossaccountpermission","AWSAccountIds":["000000000000","668614515564"],"Actions":["ReceiveMessage"]}`); status != http.StatusOK {
+			t.Fatalf("add permission %d %s", status, body)
+		}
+		status, body := call("GetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-permission","AttributeNames":["Policy"]}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte("2008-10-17")) || !bytes.Contains(body, []byte("arn:aws:iam::668614515564:root")) || !bytes.Contains(body, []byte("SQS:ReceiveMessage")) {
+			t.Fatalf("policy %d %s", status, body)
+		}
+		if status, body := call("AddPermission", `{"QueueUrl":"http://queue/000000000000/bdd-permission","Label":"crossaccountpermission","AWSAccountIds":["668614515564"],"Actions":["ReceiveMessage"]}`); status != http.StatusBadRequest || !bytes.Contains(body, []byte("Already exists")) {
+			t.Fatalf("duplicate permission %d %s", status, body)
+		}
+		if status, body := call("RemovePermission", `{"QueueUrl":"http://queue/000000000000/bdd-permission","Label":"crossaccountpermission"}`); status != http.StatusOK {
+			t.Fatalf("remove permission %d %s", status, body)
+		}
+		status, body = call("GetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-permission","AttributeNames":["Policy"]}`)
+		if status != http.StatusOK || bytes.Contains(body, []byte("Policy")) {
+			t.Fatalf("policy after removal %d %s", status, body)
+		}
+		if status, body := call("RemovePermission", `{"QueueUrl":"http://queue/000000000000/bdd-permission","Label":"crossaccountpermission"}`); status != http.StatusBadRequest || !bytes.Contains(body, []byte("can't find label")) {
+			t.Fatalf("missing permission %d %s", status, body)
+		}
+	})
 	t.Run("Given an invalid redrive policy When creating Then InvalidParameterValue is returned", func(t *testing.T) {
 		payload, _ := json.Marshal(map[string]any{"QueueName": "bdd-invalid-redrive", "Attributes": map[string]string{"RedrivePolicy": `{"deadLetterTargetArn":"dummy","maxReceiveCount":"42"}`}})
 		status, body := call("CreateQueue", string(payload))

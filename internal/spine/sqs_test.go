@@ -332,6 +332,17 @@ func TestBootedServerSQSSection48(t *testing.T) {
 			t.Fatalf("query URL lookup %s %d %s", tc.name, getRes.StatusCode, getBody)
 		}
 	}
+	getReq, _ = http.NewRequest(http.MethodGet, ts.URL+"/000000000000/queryq2?Action=DeleteQueue", nil)
+	getReq.Header.Set("Authorization", auth)
+	getRes, err = http.DefaultClient.Do(getReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	getBody, _ = io.ReadAll(getRes.Body)
+	getRes.Body.Close()
+	if getRes.StatusCode != http.StatusOK || !strings.Contains(string(getBody), "<DeleteQueueResponse") {
+		t.Fatalf("query URL delete %d %s", getRes.StatusCode, getBody)
+	}
 	if code, body, _ := queryCall(url.Values{"Action": {"GetQueueAttributes"}, "Version": {"2012-11-05"}, "QueueName": {"missing-query-queue"}, "AttributeName.1": {"All"}}); code != http.StatusBadRequest || !strings.Contains(body, "AWS.SimpleQueueService.NonExistentQueue") || !strings.Contains(body, "for this wsdl version") {
 		t.Fatalf("query missing queue %d %s", code, body)
 	}

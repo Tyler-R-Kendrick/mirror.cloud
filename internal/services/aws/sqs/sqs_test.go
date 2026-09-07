@@ -2464,6 +2464,51 @@ func TestMessageMoveTaskWorkflowCharacterization(t *testing.T) {
 	})
 }
 
+func TestMessageMoveTaskDefaultDestinationCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	for _, name := range []string{"move-default-source", "move-default-dlq"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:move-default-dlq","maxReceiveCount":"1"}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "move-default-source", "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "move-default-source", "MessageBody": "default-destination"}}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "move-default-source", "VisibilityTimeout": 0}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sourceArn := queueARN(&spi.Request{Identity: id}, "move-default-dlq")
+	started, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: map[string]any{"SourceArn": sourceArn}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListMessageMoveTasks", Input: map[string]any{"SourceArn": sourceArn}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := listed.Output["Results"].([]any)
+	messages, _, _ := p.col(&spi.Request{Identity: id}, "msgs:move-default-source").List(ctx, "", "", 0)
+	if len(messages) != 1 {
+		t.Fatalf("default destination messages %#v", messages)
+	}
+	received, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "move-default-source", "VisibilityTimeout": 0}})
+	if err != nil || len(received.Output["Messages"].([]any)) != 1 {
+		t.Fatalf("default destination receive %#v error %v", received.Output, err)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"taskHandlePresent": str(started.Output["TaskHandle"]) != "", "moved": results[0].(map[string]any)["ApproximateNumberOfMessagesMoved"],
+		"toMove": results[0].(map[string]any)["ApproximateNumberOfMessagesToMove"], "destinationMessages": len(messages),
+	})
+}
+
 func TestQueueAdvertiseURLCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

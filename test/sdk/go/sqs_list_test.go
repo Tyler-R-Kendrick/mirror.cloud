@@ -1936,6 +1936,21 @@ func TestAWSSDKSQSMessageMoveTaskValidationContract(t *testing.T) {
 	if err != nil || len(listed.Results) != 1 || aws.ToString(listed.Results[0].Status) != "COMPLETED" {
 		t.Fatalf("move task list %#v error %v", listed, err)
 	}
+	if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: plain.QueueUrl, MessageBody: aws.String("default-destination")}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: plain.QueueUrl, VisibilityTimeout: 0}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := client.StartMessageMoveTask(context.Background(), &sqs.StartMessageMoveTaskInput{SourceArn: aws.String(dlqAttrs.Attributes["QueueArn"])}); err != nil {
+		t.Fatal(err)
+	}
+	listed, err = client.ListMessageMoveTasks(context.Background(), &sqs.ListMessageMoveTasksInput{SourceArn: aws.String(dlqAttrs.Attributes["QueueArn"])})
+	if err != nil || len(listed.Results) != 2 || aws.ToString(listed.Results[1].Status) != "COMPLETED" || listed.Results[1].ApproximateNumberOfMessagesMoved != 1 {
+		t.Fatalf("default destination move task list %#v error %v", listed, err)
+	}
 }
 
 func TestAWSSDKSQSFIFOQueueNameValidationContract(t *testing.T) {

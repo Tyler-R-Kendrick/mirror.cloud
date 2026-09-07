@@ -1455,6 +1455,7 @@ func (p *Pack) startMove(ctx context.Context, req *spi.Request) (*spi.Response, 
 		}
 		_ = p.col(req, "msgs:"+src).Delete(ctx, kv.Key)
 		m["handle"] = p.deps.Rand.Hex(64)
+		m["receiveCount"] = 0
 		m["visibleAt"] = now
 		raw, _ := json.Marshal(m)
 		_ = p.col(req, "msgs:"+dest).Put(ctx, str(m["handle"]), raw)

@@ -18651,6 +18651,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestMessageMoveTaskWorkflowCharacterization",
 		},
 		{
+			name: "sqs-reset-move-receive-count",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `m["receiveCount"] = 0`,
+			new:  `m["receiveCount"] = 1`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestMessageMoveTaskDefaultDestinationCharacterization",
+		},
+		{
 			name: "sqs-disable-message-delay",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "now.Add(time.Duration(delay) * time.Second).UnixNano()",

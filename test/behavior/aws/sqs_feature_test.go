@@ -1220,6 +1220,32 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("list %d %s", status, body)
 		}
 	})
+	t.Run("Given a redriven message When destination is omitted Then it returns to its source queue", func(t *testing.T) {
+		for _, name := range []string{"bdd-move-default-source", "bdd-move-default-dlq"} {
+			if status, body := call("CreateQueue", `{"QueueName":"`+name+`"}`); status != http.StatusOK {
+				t.Fatalf("create %s %d %s", name, status, body)
+			}
+		}
+		policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-default-dlq","maxReceiveCount":"1"}`
+		if status, body := call("SetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-move-default-source","Attributes":{"RedrivePolicy":`+strconv.Quote(policy)+`}}`); status != http.StatusOK {
+			t.Fatalf("set policy %d %s", status, body)
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-move-default-source","MessageBody":"return-me"}`); status != http.StatusOK {
+			t.Fatalf("send %d %s", status, body)
+		}
+		for range 2 {
+			if status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-move-default-source","VisibilityTimeout":0}`); status != http.StatusOK {
+				t.Fatalf("receive %d %s", status, body)
+			}
+		}
+		if status, body := call("StartMessageMoveTask", `{"SourceArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-default-dlq"}`); status != http.StatusOK {
+			t.Fatalf("start %d %s", status, body)
+		}
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-move-default-source","VisibilityTimeout":0}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"Body":"return-me"`)) {
+			t.Fatalf("returned message %d %s", status, body)
+		}
+	})
 }
 
 func TestSQSAdvertisedQueueURLBDD(t *testing.T) {

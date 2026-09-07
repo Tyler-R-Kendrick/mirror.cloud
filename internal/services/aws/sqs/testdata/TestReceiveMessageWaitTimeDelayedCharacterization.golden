@@ -1,0 +1,10 @@
+{
+  "Messages": [
+    {
+      "Body": "arrived",
+      "MD5OfBody": "241441e184ca822d7768688e9883cc26",
+      "MessageId": "7c5891299f6489f8",
+      "ReceiptHandle": "5f59f223d7974d142efbc70e360dac9bd91fc24a55cb61c9216632095f55fd84"
+    }
+  ]
+}

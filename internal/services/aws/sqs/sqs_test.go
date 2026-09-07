@@ -720,6 +720,43 @@ func TestReceiveMessageWaitWithAvailableMessagesCharacterization(t *testing.T) {
 	}
 }
 
+func TestReceiveMessageWaitTimeDelayedCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	after := make(chan time.Duration, 1)
+	deps.Clock = &observedClock{Clock: clk, after: after}
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "delayed-wait"}}); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *spi.Response, 1)
+	go func() {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "delayed-wait", "WaitTimeSeconds": 10}})
+		if err != nil {
+			t.Errorf("delayed receive: %v", err)
+			return
+		}
+		done <- response
+	}()
+	if delay := <-after; delay != 10*time.Second {
+		t.Fatalf("explicit wait delay %v", delay)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "delayed-wait", "MessageBody": "arrived"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := clk.Advance(10 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	response := <-done
+	messages := response.Output["Messages"].([]any)
+	if len(messages) != 1 || messages[0].(map[string]any)["Body"] != "arrived" {
+		t.Fatalf("delayed response %#v", response.Output)
+	}
+	golden.AssertJSON(t, response.Output)
+}
+
 func TestQueueReceiveWaitTimeCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)

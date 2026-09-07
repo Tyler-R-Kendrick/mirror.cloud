@@ -364,6 +364,19 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("available messages %d in %s: %s", status, time.Since(started), body)
 		}
 	})
+	t.Run("Given an empty queue When an explicit long poll receives a later message Then it returns the message", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-delayed-wait"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		time.AfterFunc(100*time.Millisecond, func() {
+			_, _ = call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-delayed-wait","MessageBody":"arrived"}`)
+		})
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-delayed-wait","WaitTimeSeconds":1}`)
+		var response map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &response) != nil || len(response["Messages"].([]any)) != 1 || response["Messages"].([]any)[0].(map[string]any)["Body"] != "arrived" {
+			t.Fatalf("delayed receive %d %s", status, body)
+		}
+	})
 	t.Run("Given a queue receive wait attribute When polling without a request wait Then the queue wait is used", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-queue-wait","Attributes":{"ReceiveMessageWaitTimeSeconds":"1"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

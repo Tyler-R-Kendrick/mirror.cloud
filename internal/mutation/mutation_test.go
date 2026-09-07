@@ -18275,6 +18275,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestReceiveMessageWaitWithAvailableMessagesCharacterization",
 		},
 		{
+			name: "sqs-receive-ignore-explicit-wait",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if _, explicit := req.Input["WaitTimeSeconds"]; !explicit {`,
+			new:  `if true {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestReceiveMessageWaitTimeDelayedCharacterization",
+		},
+		{
 			name: "sqs-message-shift-sent-timestamp",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  `"sentAt": now.UnixMilli()`,

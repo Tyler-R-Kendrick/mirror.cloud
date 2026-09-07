@@ -2926,6 +2926,38 @@ func TestFIFOPerMessageDelayCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
+func TestFIFOSequenceNumberCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response.Output
+	}
+	call("CreateQueue", map[string]any{"QueueName": "sequence.fifo", "Attributes": map[string]any{"FifoQueue": "true"}})
+	sequences := []string{}
+	for index := 1; index <= 3; index++ {
+		output := call("SendMessage", map[string]any{"QueueName": "sequence.fifo", "MessageBody": fmt.Sprintf("message-%d", index), "MessageGroupId": "group", "MessageDeduplicationId": fmt.Sprintf("dedup-%d", index)})
+		sequence, ok := output["SequenceNumber"].(string)
+		if !ok || sequence == "" {
+			t.Fatalf("FIFO sequence output %#v", output)
+		}
+		sequences = append(sequences, sequence)
+	}
+	duplicate := call("SendMessage", map[string]any{"QueueName": "sequence.fifo", "MessageBody": "message-1", "MessageGroupId": "group", "MessageDeduplicationId": "dedup-1"})
+	standard := call("CreateQueue", map[string]any{"QueueName": "sequence-standard"})
+	_ = standard
+	standardSend := call("SendMessage", map[string]any{"QueueName": "sequence-standard", "MessageBody": "message"})
+	if _, present := standardSend["SequenceNumber"]; present {
+		t.Fatalf("standard sequence output %#v", standardSend)
+	}
+	golden.AssertJSON(t, map[string]any{"sequences": sequences, "duplicate": duplicate, "standard": standardSend})
+}
+
 func faultCode(err error) string {
 	fault, _ := err.(*spi.Fault)
 	if fault == nil {
@@ -3075,6 +3107,33 @@ func FuzzDeadLetterQueueMaxReceiveCount(f *testing.F) {
 		messages, _ := response.Output["Messages"].([]any)
 		if len(messages) != 1 || asMap(messages[0])["Body"] != "poison" {
 			t.Fatalf("dead-letter response %#v", response.Output)
+		}
+	})
+}
+
+func FuzzFIFOSequenceNumbers(f *testing.F) {
+	f.Add(uint8(1))
+	f.Add(uint8(3))
+	f.Add(uint8(8))
+	f.Fuzz(func(t *testing.T, raw uint8) {
+		count := int(raw%8) + 1
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-sequence.fifo", "Attributes": map[string]any{"FifoQueue": "true"}}}); err != nil {
+			t.Fatal(err)
+		}
+		previous := 0
+		for index := 0; index < count; index++ {
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-sequence.fifo", "MessageBody": "message", "MessageGroupId": "group", "MessageDeduplicationId": fmt.Sprintf("dedup-%d", index)}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sequence, _ := strconv.Atoi(str(response.Output["SequenceNumber"]))
+			if sequence <= previous {
+				t.Fatalf("sequence %d after %d", sequence, previous)
+			}
+			previous = sequence
 		}
 	})
 }

@@ -1106,6 +1106,51 @@ func TestConcurrentSQSDeadLetterMaxReceiveCountIsStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSFIFOSequenceNumbersAreStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-sequence.fifo", "Attributes": map[string]any{"FifoQueue": "true"}}}); err != nil {
+		t.Fatal(err)
+	}
+	sequences := make(chan int, 16)
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for index := range 16 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-sequence.fifo", "MessageBody": "message", "MessageGroupId": "group", "MessageDeduplicationId": fmt.Sprintf("dedup-%d", index)}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			sequence, err := strconv.Atoi(fmt.Sprint(response.Output["SequenceNumber"]))
+			if err != nil || sequence < 1 || sequence > 16 {
+				errs <- fmt.Errorf("sequence %#v", response.Output)
+				return
+			}
+			sequences <- sequence
+		}(index)
+	}
+	wg.Wait()
+	close(sequences)
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	seen := map[int]bool{}
+	for sequence := range sequences {
+		if seen[sequence] {
+			t.Fatalf("duplicate sequence %d", sequence)
+		}
+		seen[sequence] = true
+	}
+	if len(seen) != 16 {
+		t.Fatalf("sequence set %#v", seen)
+	}
+}
+
 func TestConcurrentSQSSetFifoAttributeValidationIsStable(t *testing.T) {
 	p := sqs.New(spitest.Deps(t))
 	ctx := context.Background()

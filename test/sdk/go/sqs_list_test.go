@@ -1171,6 +1171,42 @@ func TestAWSSDKSQSFIFOMessageAttributesContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSFIFOSequenceNumberContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	fifo, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-sequence.fifo"), Attributes: map[string]string{"FifoQueue": "true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := "0"
+	for index := 1; index <= 3; index++ {
+		result, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: fifo.QueueUrl, MessageBody: aws.String(fmt.Sprintf("message-%d", index)), MessageGroupId: aws.String("group"), MessageDeduplicationId: aws.String(fmt.Sprintf("dedup-%d", index))})
+		if err != nil || result.SequenceNumber == nil || aws.ToString(result.SequenceNumber) <= previous {
+			t.Fatalf("sequence %d %#v error %v", index, result, err)
+		}
+		previous = aws.ToString(result.SequenceNumber)
+	}
+	standard, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-sequence-standard")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: standard.QueueUrl, MessageBody: aws.String("message")})
+	if err != nil || result.SequenceNumber != nil {
+		t.Fatalf("standard sequence %#v error %v", result, err)
+	}
+}
+
 func TestAWSSDKSQSMessageAttributeDigestContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

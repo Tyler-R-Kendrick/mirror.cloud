@@ -517,6 +517,9 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 			until := int64(asFloat(d["until"]))
 			if now.UnixNano() < until {
 				output := map[string]any{"MessageId": d["id"], "MD5OfMessageBody": d["md5"]}
+				if strings.HasSuffix(name, ".fifo") {
+					output["SequenceNumber"] = strconv.Itoa(asInt(d["seq"]))
+				}
 				if str(d["md5Attrs"]) != "" {
 					output["MD5OfMessageAttributes"] = d["md5Attrs"]
 				}
@@ -537,13 +540,16 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	raw, _ := json.Marshal(msg)
 	_ = p.col(req, "msgs:"+name).Put(ctx, rh, raw)
 	if dedup != "" {
-		db, _ := json.Marshal(map[string]any{"id": id, "md5": md5hex, "md5Attrs": md5attrs, "until": now.Add(5 * time.Minute).UnixNano()})
+		db, _ := json.Marshal(map[string]any{"id": id, "md5": md5hex, "md5Attrs": md5attrs, "seq": seq, "until": now.Add(5 * time.Minute).UnixNano()})
 		_ = p.col(req, "dedup:"+name).Put(ctx, dedup, db)
 	}
 	if p.deps.Bus != nil {
 		_ = p.deps.Bus.Publish(ctx, "sqs", raw)
 	}
 	output := map[string]any{"MessageId": id, "MD5OfMessageBody": md5hex}
+	if fifo {
+		output["SequenceNumber"] = strconv.Itoa(seq)
+	}
 	if md5attrs != "" {
 		output["MD5OfMessageAttributes"] = md5attrs
 	}
@@ -1029,15 +1035,21 @@ func (p *Pack) queueAttrs(ctx context.Context, req *spi.Request, name string) ma
 }
 
 func (p *Pack) nextSeq(ctx context.Context, req *spi.Request, name string) int {
-	b, ok, _ := p.col(req, "queues").Get(ctx, name)
-	meta := map[string]any{}
-	if ok {
-		_ = json.Unmarshal(b, &meta)
-	}
-	n := asInt(meta["seq"]) + 1
-	meta["seq"] = n
-	nb, _ := json.Marshal(meta)
-	_ = p.col(req, "queues").Put(ctx, name, nb)
+	n := 0
+	_ = p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(tx spi.ScopeTx) error {
+		b, ok, err := tx.Collection("queues").Get(name)
+		if err != nil {
+			return err
+		}
+		meta := map[string]any{}
+		if ok {
+			_ = json.Unmarshal(b, &meta)
+		}
+		n = asInt(meta["seq"]) + 1
+		meta["seq"] = n
+		nb, _ := json.Marshal(meta)
+		return tx.Collection("queues").Put(name, nb)
+	})
 	return n
 }
 

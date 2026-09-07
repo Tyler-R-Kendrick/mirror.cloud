@@ -803,6 +803,32 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("FIFO delay %d %s", status, body)
 		}
 	})
+	t.Run("Given a FIFO queue When sending messages Then sequence numbers increase", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-sequence.fifo","Attributes":{"FifoQueue":"true"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		previous := 0
+		for index := 1; index <= 3; index++ {
+			payload := fmt.Sprintf(`{"QueueUrl":"http://queue/000000000000/bdd-sequence.fifo","MessageBody":"message-%d","MessageGroupId":"group","MessageDeduplicationId":"dedup-%d"}`, index, index)
+			status, body := call("SendMessage", payload)
+			var sent map[string]any
+			if status != http.StatusOK || json.Unmarshal(body, &sent) != nil {
+				t.Fatalf("send %d %s", status, body)
+			}
+			sequence, err := strconv.Atoi(fmt.Sprint(sent["SequenceNumber"]))
+			if err != nil || sequence <= previous {
+				t.Fatalf("sequence %#v after %d", sent, previous)
+			}
+			previous = sequence
+		}
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-sequence-standard"}`); status != http.StatusOK {
+			t.Fatalf("standard create %d %s", status, body)
+		}
+		status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-sequence-standard","MessageBody":"message"}`)
+		if status != http.StatusOK || bytes.Contains(body, []byte("SequenceNumber")) {
+			t.Fatalf("standard sequence %d %s", status, body)
+		}
+	})
 	t.Run("Given a FIFO message When receiving all attributes twice Then receive metadata mutates", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-fifo-attrs.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true","VisibilityTimeout":"0"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

@@ -1207,3 +1207,34 @@ func TestSQSAdvertisedQueueURLBDD(t *testing.T) {
 		t.Fatalf("external receive %d %s", receiveResponse.StatusCode, receivedBody)
 	}
 }
+
+func TestSQSQueueArnPartitionBDD(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	call := func(action, payload string) (int, []byte) {
+		t.Helper()
+		request, _ := http.NewRequest(http.MethodPost, server.URL, strings.NewReader(payload))
+		request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-gov-west-1/sqs/aws4_request, SignedHeaders=host, Signature=00")
+		request.Header.Set("Content-Type", "application/x-amz-json-1.0")
+		request.Header.Set("X-Amz-Target", "AmazonSQS."+action)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, _ := io.ReadAll(response.Body)
+		return response.StatusCode, body
+	}
+	if status, body := call("CreateQueue", `{"QueueName":"bdd-gov-arn"}`); status != http.StatusOK {
+		t.Fatalf("create %d %s", status, body)
+	}
+	if status, body := call("GetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-gov-arn","AttributeNames":["QueueArn"]}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"QueueArn":"arn:aws-us-gov:sqs:us-gov-west-1:000000000000:bdd-gov-arn"`)) {
+		t.Fatalf("partitioned ARN %d %s", status, body)
+	}
+}

@@ -7314,3 +7314,41 @@ func TestConcurrentSQSSSEMutualExclusionIsStable(t *testing.T) {
 		t.Fatalf("conflicting SQS-managed attribute persisted %#v", attrs)
 	}
 }
+
+func TestConcurrentSQSQueueArnPartitionsAreStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	regions := []string{"us-east-1", "us-gov-west-1", "cn-north-1"}
+	errs := make(chan error, len(regions)*8)
+	var wg sync.WaitGroup
+	for _, region := range regions {
+		for attempt := range 8 {
+			wg.Add(1)
+			go func(region string, attempt int) {
+				defer wg.Done()
+				id := spi.Identity{Account: "000000000000", Region: region}
+				name := fmt.Sprintf("chaos-arn-%d", attempt)
+				if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+					errs <- err
+					return
+				}
+				response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": name, "AttributeNames": []any{"QueueArn"}}})
+				expectedPartition := "aws"
+				if strings.HasPrefix(region, "us-gov-") {
+					expectedPartition = "aws-us-gov"
+				} else if strings.HasPrefix(region, "cn-") {
+					expectedPartition = "aws-cn"
+				}
+				arn, _ := response.Output["Attributes"].(map[string]any)["QueueArn"].(string)
+				if err != nil || !strings.HasPrefix(arn, "arn:"+expectedPartition+":sqs:"+region+":") {
+					errs <- fmt.Errorf("region=%s response=%#v error=%v", region, response, err)
+				}
+			}(region, attempt)
+		}
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}

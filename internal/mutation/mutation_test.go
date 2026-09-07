@@ -18045,8 +18045,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sqs-queue-arn-wrong-region",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
-			old:  `"QueueArn":                              fmt.Sprintf("arn:aws:sqs:%s:%s:%s", req.Identity.Region, req.Identity.Account, name)`,
-			new:  `"QueueArn":                              fmt.Sprintf("arn:aws:sqs:%s:%s:%s", "mutated", req.Identity.Account, name)`,
+			old:  `"QueueArn":                              fmt.Sprintf("arn:%s:sqs:%s:%s:%s", arnPartition(req.Identity.Region), req.Identity.Region, req.Identity.Account, name)`,
+			new:  `"QueueArn":                              fmt.Sprintf("arn:%s:sqs:%s:%s:%s", "mutated", req.Identity.Region, req.Identity.Account, name)`,
 			pkg:  "./internal/services/aws/sqs",
 			run:  "TestQueueMetadataCharacterization",
 		},
@@ -18593,6 +18593,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/sqs",
 			run:  "TestSSEMutualExclusionCharacterization",
+		},
+		{
+			name: "sqs-queue-arn-ignore-gov-partition",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `return "aws-us-gov"`,
+			new:  `return "aws"`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestQueueArnPartitionCharacterization",
 		},
 		{
 			name: "sqs-disable-message-delay",

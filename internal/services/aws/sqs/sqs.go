@@ -200,7 +200,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			"ApproximateNumberOfMessages":           fmt.Sprintf("%d", visible),
 			"ApproximateNumberOfMessagesNotVisible": fmt.Sprintf("%d", notVisible),
 			"ApproximateNumberOfMessagesDelayed":    fmt.Sprintf("%d", delayed),
-			"QueueArn":                              fmt.Sprintf("arn:aws:sqs:%s:%s:%s", req.Identity.Region, req.Identity.Account, name),
+			"QueueArn":                              fmt.Sprintf("arn:%s:sqs:%s:%s:%s", arnPartition(req.Identity.Region), req.Identity.Region, req.Identity.Account, name),
 			"VisibilityTimeout":                     "30",
 		}
 		if b, ok, _ := p.col(req, "queues").Get(ctx, name); ok {
@@ -1319,7 +1319,7 @@ func (p *Pack) addPermission(ctx context.Context, req *spi.Request) (*spi.Respon
 			return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "Label exists", HTTPStatus: 400, Fault: "client"}
 		}
 	}
-	arn := fmt.Sprintf("arn:aws:sqs:%s:%s:%s", req.Identity.Region, req.Identity.Account, name)
+	arn := fmt.Sprintf("arn:%s:sqs:%s:%s:%s", arnPartition(req.Identity.Region), req.Identity.Region, req.Identity.Account, name)
 	actsOut := make([]any, 0, len(acts))
 	for _, a := range acts {
 		if !strings.Contains(a, ":") {
@@ -1488,6 +1488,21 @@ func arnQueue(s string) string {
 		return s[i+1:]
 	}
 	return s
+}
+
+func arnPartition(region string) string {
+	switch {
+	case strings.HasPrefix(region, "cn-"):
+		return "aws-cn"
+	case strings.HasPrefix(region, "us-gov-"):
+		return "aws-us-gov"
+	case strings.HasPrefix(region, "us-iso-b-"):
+		return "aws-iso-b"
+	case strings.HasPrefix(region, "us-iso-"):
+		return "aws-iso"
+	default:
+		return "aws"
+	}
 }
 
 func stringList(in map[string]any, names ...string) []string {

@@ -1197,6 +1197,23 @@ func FuzzSSEMutualExclusion(f *testing.F) {
 	})
 }
 
+func FuzzARNPartition(f *testing.F) {
+	f.Add("us-east-1")
+	f.Add("us-gov-west-1")
+	f.Add("cn-north-1")
+	f.Add("us-iso-east-1")
+	f.Add("us-isob-east-1")
+	f.Fuzz(func(t *testing.T, region string) {
+		partition := arnPartition(region)
+		if strings.HasPrefix(region, "cn-") && partition != "aws-cn" {
+			t.Fatalf("region=%q partition=%q", region, partition)
+		}
+		if strings.HasPrefix(region, "us-gov-") && partition != "aws-us-gov" {
+			t.Fatalf("region=%q partition=%q", region, partition)
+		}
+	})
+}
+
 func FuzzListDeadLetterSourceQueues(f *testing.F) {
 	f.Add(1)
 	f.Add(2)
@@ -2400,6 +2417,32 @@ func TestQueueRecentlyDeletedCharacterization(t *testing.T) {
 	beforeBoundary := attempt()
 	_ = clk.Advance(time.Second)
 	golden.AssertJSON(t, map[string]any{"immediate": immediate, "beforeBoundary": beforeBoundary, "atBoundary": attempt()})
+}
+
+func TestQueueArnPartitionCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	partitions := []struct {
+		region, partition string
+	}{
+		{"us-east-1", "aws"},
+		{"us-gov-west-1", "aws-us-gov"},
+		{"cn-north-1", "aws-cn"},
+	}
+	output := map[string]any{}
+	for _, tc := range partitions {
+		id := spi.Identity{Account: "123456789012", Region: tc.region}
+		name := "partition-" + strings.ReplaceAll(tc.region, "-", "")
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+			t.Fatal(err)
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": name, "AttributeNames": []any{"QueueArn"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		output[tc.region] = response.Output["Attributes"]
+	}
+	golden.AssertJSON(t, output)
 }
 
 func TestListQueuesCharacterization(t *testing.T) {

@@ -1844,6 +1844,30 @@ func TestAWSSDKSQSSSEMutualExclusionContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSQueueArnPartitionContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-gov-west-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-gov-arn")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attributes, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameQueueArn}})
+	if err != nil || !strings.HasPrefix(attributes.Attributes["QueueArn"], "arn:aws-us-gov:sqs:us-gov-west-1:") {
+		t.Fatalf("partitioned queue ARN %#v error %v", attributes.Attributes, err)
+	}
+}
+
 func TestAWSSDKSQSFIFOQueueNameValidationContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

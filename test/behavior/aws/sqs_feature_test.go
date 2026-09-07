@@ -870,6 +870,21 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("standard sequence %d %s", status, body)
 		}
 	})
+	t.Run("Given message-group deduplication scope When groups reuse an id Then both messages arrive", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-dedup-scope.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"false","DeduplicationScope":"messageGroup","FifoThroughputLimit":"perMessageGroupId"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		for index, group := range []string{"group-1", "group-2"} {
+			payload := fmt.Sprintf(`{"QueueUrl":"http://queue/000000000000/bdd-dedup-scope.fifo","MessageBody":"message-%d","MessageGroupId":"%s","MessageDeduplicationId":"same-dedup"}`, index+1, group)
+			if status, body := call("SendMessage", payload); status != http.StatusOK {
+				t.Fatalf("send %d %s", status, body)
+			}
+		}
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-dedup-scope.fifo","MaxNumberOfMessages":10}`)
+		if status != http.StatusOK || bytes.Count(body, []byte(`"MessageId"`)) != 2 {
+			t.Fatalf("dedup scope %d %s", status, body)
+		}
+	})
 	t.Run("Given a FIFO message When receiving all attributes twice Then receive metadata mutates", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-fifo-attrs.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true","VisibilityTimeout":"0"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

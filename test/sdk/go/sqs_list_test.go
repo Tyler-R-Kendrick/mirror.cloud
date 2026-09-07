@@ -1208,6 +1208,42 @@ func TestAWSSDKSQSFIFOSequenceNumberContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSFIFODeduplicationScopeContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-dedup-scope.fifo"), Attributes: map[string]string{"FifoQueue": "true", "ContentBasedDeduplication": "false", "DeduplicationScope": "messageGroup", "FifoThroughputLimit": "perMessageGroupId"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("group-1"), MessageGroupId: aws.String("group-1"), MessageDeduplicationId: aws.String("same-dedup")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("group-2"), MessageGroupId: aws.String("group-2"), MessageDeduplicationId: aws.String("same-dedup")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("duplicate"), MessageGroupId: aws.String("group-1"), MessageDeduplicationId: aws.String("same-dedup")})
+	if err != nil || aws.ToString(duplicate.MessageId) != aws.ToString(first.MessageId) {
+		t.Fatalf("duplicate %#v first %#v error %v", duplicate, first, err)
+	}
+	received, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, MaxNumberOfMessages: 10, VisibilityTimeout: 0})
+	if err != nil || len(received.Messages) != 2 {
+		t.Fatalf("first=%#v second=%#v received=%#v error=%v", first, second, received, err)
+	}
+}
+
 func TestAWSSDKSQSMessageAttributeDigestContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

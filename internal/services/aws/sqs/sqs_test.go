@@ -1274,6 +1274,32 @@ func FuzzTraceHeaderPropagation(f *testing.F) {
 	})
 }
 
+func FuzzFIFODeduplicationScope(f *testing.F) {
+	f.Add(uint8(2))
+	f.Add(uint8(5))
+	f.Fuzz(func(t *testing.T, raw uint8) {
+		count := int(raw%5) + 2
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-dedup-scope.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false", "DeduplicationScope": "messageGroup", "FifoThroughputLimit": "perMessageGroupId"}}}); err != nil {
+			t.Fatal(err)
+		}
+		for index := 0; index < count; index++ {
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-dedup-scope.fifo", "MessageBody": fmt.Sprintf("message-%d", index), "MessageGroupId": fmt.Sprintf("group-%d", index), "MessageDeduplicationId": "same-dedup"}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "fuzz-dedup-scope.fifo", "MaxNumberOfMessages": 10}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if messages, _ := response.Output["Messages"].([]any); len(messages) != count {
+			t.Fatalf("dedup scope response %#v", response.Output)
+		}
+	})
+}
+
 func FuzzMessageAttributeValidation(f *testing.F) {
 	for _, seed := range []string{"", "aWs.Invalid", "Invalid!attr", "attr.1øßä"} {
 		f.Add(seed)
@@ -3029,6 +3055,30 @@ func TestMessageSystemAttributeDigestCharacterization(t *testing.T) {
 		t.Fatalf("system digest without=%#v with=%#v", without.Output, with.Output)
 	}
 	golden.AssertJSON(t, map[string]any{"without": without.Output, "with": with.Output})
+}
+
+func TestFIFODeduplicationScopeCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response.Output
+	}
+	call("CreateQueue", map[string]any{"QueueName": "dedup-scope.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false", "DeduplicationScope": "messageGroup", "FifoThroughputLimit": "perMessageGroupId"}})
+	first := call("SendMessage", map[string]any{"QueueName": "dedup-scope.fifo", "MessageBody": "group-1", "MessageGroupId": "group-1", "MessageDeduplicationId": "same-dedup"})
+	second := call("SendMessage", map[string]any{"QueueName": "dedup-scope.fifo", "MessageBody": "group-2", "MessageGroupId": "group-2", "MessageDeduplicationId": "same-dedup"})
+	duplicate := call("SendMessage", map[string]any{"QueueName": "dedup-scope.fifo", "MessageBody": "duplicate", "MessageGroupId": "group-1", "MessageDeduplicationId": "same-dedup"})
+	received := call("ReceiveMessage", map[string]any{"QueueName": "dedup-scope.fifo", "MaxNumberOfMessages": 10})
+	messages, _ := received["Messages"].([]any)
+	if len(messages) != 2 || asMap(messages[0])["MessageId"] != first["MessageId"] || asMap(messages[1])["MessageId"] != second["MessageId"] || duplicate["MessageId"] != first["MessageId"] || duplicate["MD5OfMessageBody"] != "24f1b0a79473250c195c7fb84e393392" {
+		t.Fatalf("scope first=%#v second=%#v duplicate=%#v received=%#v", first, second, duplicate, received)
+	}
+	golden.AssertJSON(t, map[string]any{"first": first, "second": second, "duplicate": duplicate, "received": received})
 }
 
 func TestTraceHeaderPropagationCharacterization(t *testing.T) {

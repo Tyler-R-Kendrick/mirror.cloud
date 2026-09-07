@@ -1,0 +1,33 @@
+{
+  "duplicate": {
+    "MD5OfMessageBody": "24f1b0a79473250c195c7fb84e393392",
+    "MessageId": "7c5891299f6489f8",
+    "SequenceNumber": "1"
+  },
+  "first": {
+    "MD5OfMessageBody": "1bbe946fd26759c742d7642ba8474397",
+    "MessageId": "7c5891299f6489f8",
+    "SequenceNumber": "1"
+  },
+  "received": {
+    "Messages": [
+      {
+        "Body": "group-1",
+        "MD5OfBody": "1bbe946fd26759c742d7642ba8474397",
+        "MessageId": "7c5891299f6489f8",
+        "ReceiptHandle": "5f59f223d7974d142efbc70e360dac9bd91fc24a55cb61c9216632095f55fd84"
+      },
+      {
+        "Body": "group-2",
+        "MD5OfBody": "e641639abf8f9dc3b694b0cabb9adf9e",
+        "MessageId": "9c8e2cb00724681e",
+        "ReceiptHandle": "33f6fc5d83b79b8e49c4f349b79ed4dd608853fb5ea222613db6ba4f3f9d4d02"
+      }
+    ]
+  },
+  "second": {
+    "MD5OfMessageBody": "e641639abf8f9dc3b694b0cabb9adf9e",
+    "MessageId": "9c8e2cb00724681e",
+    "SequenceNumber": "2"
+  }
+}

@@ -1151,6 +1151,39 @@ func TestConcurrentSQSFIFOSequenceNumbersAreStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSFIFODeduplicationScopeIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-dedup-scope.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false", "DeduplicationScope": "messageGroup", "FifoThroughputLimit": "perMessageGroupId"}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for index := range 16 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-dedup-scope.fifo", "MessageBody": fmt.Sprintf("message-%d", index), "MessageGroupId": fmt.Sprintf("group-%d", index), "MessageDeduplicationId": "same-dedup"}})
+			if err != nil {
+				errs <- err
+			}
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-dedup-scope.fifo", "MaxNumberOfMessages": 10, "VisibilityTimeout": 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messages, _ := response.Output["Messages"].([]any); len(messages) != 10 {
+		t.Fatalf("dedup scope first receive %#v", response.Output)
+	}
+}
+
 func TestConcurrentSQSSetFifoAttributeValidationIsStable(t *testing.T) {
 	p := sqs.New(spitest.Deps(t))
 	ctx := context.Background()

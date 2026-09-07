@@ -517,21 +517,25 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	if delay < 0 || delay > 900 {
 		return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "DelaySeconds must be between 0 and 900.", HTTPStatus: 400, Fault: "client"}
 	}
+	dedupKey := dedup
+	if fifo && str(attrs["DeduplicationScope"]) == "messageGroup" {
+		dedupKey = group + "\x1f" + dedup
+	}
 	if dedup != "" {
-		if b, ok, _ := p.col(req, "dedup:"+name).Get(ctx, dedup); ok {
+		if b, ok, _ := p.col(req, "dedup:"+name).Get(ctx, dedupKey); ok {
 			var d map[string]any
 			_ = json.Unmarshal(b, &d)
 			until := int64(asFloat(d["until"]))
 			if now.UnixNano() < until {
-				output := map[string]any{"MessageId": d["id"], "MD5OfMessageBody": d["md5"]}
+				output := map[string]any{"MessageId": d["id"], "MD5OfMessageBody": md5hex}
 				if strings.HasSuffix(name, ".fifo") {
 					output["SequenceNumber"] = strconv.Itoa(asInt(d["seq"]))
 				}
-				if str(d["md5System"]) != "" {
-					output["MD5OfMessageSystemAttributes"] = d["md5System"]
+				if md5system != "" {
+					output["MD5OfMessageSystemAttributes"] = md5system
 				}
-				if str(d["md5Attrs"]) != "" {
-					output["MD5OfMessageAttributes"] = d["md5Attrs"]
+				if md5attrs != "" {
+					output["MD5OfMessageAttributes"] = md5attrs
 				}
 				return &spi.Response{Output: output}, nil
 			}
@@ -551,7 +555,7 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	_ = p.col(req, "msgs:"+name).Put(ctx, rh, raw)
 	if dedup != "" {
 		db, _ := json.Marshal(map[string]any{"id": id, "md5": md5hex, "md5Attrs": md5attrs, "md5System": md5system, "seq": seq, "until": now.Add(5 * time.Minute).UnixNano()})
-		_ = p.col(req, "dedup:"+name).Put(ctx, dedup, db)
+		_ = p.col(req, "dedup:"+name).Put(ctx, dedupKey, db)
 	}
 	if p.deps.Bus != nil {
 		_ = p.deps.Bus.Publish(ctx, "sqs", raw)

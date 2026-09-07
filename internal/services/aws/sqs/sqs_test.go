@@ -3081,6 +3081,30 @@ func TestFIFODeduplicationScopeCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"first": first, "second": second, "duplicate": duplicate, "received": received})
 }
 
+func TestFIFOMessageGroupScopeWithoutThroughputCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response.Output
+	}
+	call("CreateQueue", map[string]any{"QueueName": "dedup-scope-default.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "DeduplicationScope": "messageGroup"}})
+	first := call("SendMessage", map[string]any{"QueueName": "dedup-scope-default.fifo", "MessageBody": "Test", "MessageGroupId": "group-1"})
+	firstReceive := call("ReceiveMessage", map[string]any{"QueueName": "dedup-scope-default.fifo", "MaxNumberOfMessages": 1})
+	second := call("SendMessage", map[string]any{"QueueName": "dedup-scope-default.fifo", "MessageBody": "Test", "MessageGroupId": "group-2"})
+	secondReceive := call("ReceiveMessage", map[string]any{"QueueName": "dedup-scope-default.fifo", "MaxNumberOfMessages": 1})
+	messages, _ := secondReceive["Messages"].([]any)
+	if len(messages) != 1 || asMap(messages[0])["MessageId"] != second["MessageId"] || first["MessageId"] == second["MessageId"] || len(asAnySlice(firstReceive["Messages"])) != 1 {
+		t.Fatalf("message-group scope first=%#v firstReceive=%#v second=%#v secondReceive=%#v", first, firstReceive, second, secondReceive)
+	}
+	golden.AssertJSON(t, map[string]any{"first": first, "firstReceive": firstReceive, "second": second, "secondReceive": secondReceive})
+}
+
 func TestTraceHeaderPropagationCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

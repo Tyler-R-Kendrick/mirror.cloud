@@ -1,0 +1,7 @@
+{
+  "expiredChange": true,
+  "extendedBody": "extended",
+  "firstHandleLength": 64,
+  "releasedBody": "test",
+  "secondHandleChanged": true
+}

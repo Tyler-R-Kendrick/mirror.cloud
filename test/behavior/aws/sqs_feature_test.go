@@ -1216,6 +1216,31 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("delete %d %s", status, body)
 		}
 	})
+	t.Run("Given an older receipt handle When terminating visibility Then the message can be received again", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-terminate"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-terminate","MessageBody":"test"}`); status != http.StatusOK {
+			t.Fatalf("send %d %s", status, body)
+		}
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-terminate","VisibilityTimeout":0}`)
+		var first map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &first) != nil {
+			t.Fatalf("first receive %d %s", status, body)
+		}
+		firstHandle := first["Messages"].([]any)[0].(map[string]any)["ReceiptHandle"]
+		if status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-terminate","VisibilityTimeout":3}`); status != http.StatusOK {
+			t.Fatalf("second receive %d %s", status, body)
+		}
+		change, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-terminate", "ReceiptHandle": firstHandle, "VisibilityTimeout": 0})
+		if status, body = call("ChangeMessageVisibility", string(change)); status != http.StatusOK {
+			t.Fatalf("terminate %d %s", status, body)
+		}
+		status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-terminate","WaitTimeSeconds":0}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"Body":"test"`)) {
+			t.Fatalf("released receive %d %s", status, body)
+		}
+	})
 	t.Run("Given an emptied FIFO group When sending again Then the group remains usable", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-reuse-group.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

@@ -1335,3 +1335,63 @@ func TestAWSSDKSQSFIFOQueueNameValidationContract(t *testing.T) {
 		}
 	}
 }
+
+func TestAWSSDKSQSFIFOGroupDeletionOrderingContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	populate := func(queueURL *string) {
+		t.Helper()
+		for _, message := range []struct{ body, group string }{{"g1-m1", "g1"}, {"g2-m1", "g2"}, {"g1-m2", "g1"}, {"g2-m2", "g2"}, {"g1-m3", "g1"}, {"g1-m4", "g1"}, {"g3-m1", "g3"}} {
+			if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: queueURL, MessageBody: aws.String(message.body), MessageGroupId: aws.String(message.group)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	create := func(name string) *string {
+		t.Helper()
+		created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String(name), Attributes: map[string]string{"FifoQueue": "true", "ContentBasedDeduplication": "true"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return created.QueueUrl
+	}
+	fullURL := create("sdk-delete-order.fifo")
+	populate(fullURL)
+	first, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: fullURL, MaxNumberOfMessages: 2})
+	if err != nil || len(first.Messages) != 2 {
+		t.Fatalf("first %#v error %v", first, err)
+	}
+	for _, message := range first.Messages {
+		if _, err := client.DeleteMessage(context.Background(), &sqs.DeleteMessageInput{QueueUrl: fullURL, ReceiptHandle: message.ReceiptHandle}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	remaining, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: fullURL, MaxNumberOfMessages: 10})
+	if err != nil || len(remaining.Messages) != 5 || aws.ToString(remaining.Messages[0].Body) != "g2-m1" {
+		t.Fatalf("full delete %#v error %v", remaining, err)
+	}
+	partialURL := create("sdk-partial-delete-order.fifo")
+	populate(partialURL)
+	first, err = client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: partialURL, MaxNumberOfMessages: 2})
+	if err != nil || len(first.Messages) != 2 {
+		t.Fatalf("partial first %#v error %v", first, err)
+	}
+	if _, err := client.DeleteMessage(context.Background(), &sqs.DeleteMessageInput{QueueUrl: partialURL, ReceiptHandle: first.Messages[0].ReceiptHandle}); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err = client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: partialURL, MaxNumberOfMessages: 10})
+	if err != nil || len(remaining.Messages) != 3 || aws.ToString(remaining.Messages[0].Body) != "g2-m1" {
+		t.Fatalf("partial delete %#v error %v", remaining, err)
+	}
+}

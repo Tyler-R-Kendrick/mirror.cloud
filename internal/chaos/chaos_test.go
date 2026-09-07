@@ -6690,3 +6690,45 @@ func TestConcurrentSQSFIFOQueueNameValidationIsStable(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestConcurrentSQSFIFOGroupDeletionOrderingIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	name := "chaos-delete-order.fifo"
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name, "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range []struct{ body, group string }{{"g1-m1", "g1"}, {"g2-m1", "g2"}, {"g1-m2", "g1"}, {"g2-m2", "g2"}, {"g1-m3", "g1"}} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": message.body, "MessageGroupId": message.group}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MaxNumberOfMessages": 2}})
+	if err != nil || len(first.Output["Messages"].([]any)) != 2 {
+		t.Fatalf("first %#v error %v", first, err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, raw := range first.Output["Messages"].([]any) {
+		message := raw.(map[string]any)
+		wg.Add(1)
+		go func(handle any) {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessage", Input: map[string]any{"QueueName": name, "ReceiptHandle": handle}})
+			if err != nil {
+				errs <- err
+			}
+		}(message["ReceiptHandle"])
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	remaining, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MaxNumberOfMessages": 10}})
+	if err != nil || len(remaining.Output["Messages"].([]any)) != 3 || remaining.Output["Messages"].([]any)[0].(map[string]any)["Body"] != "g2-m1" {
+		t.Fatalf("remaining %#v error %v", remaining.Output, err)
+	}
+}

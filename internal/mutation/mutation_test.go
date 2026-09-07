@@ -17643,6 +17643,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFIFOQueueNameValidationCharacterization",
 		},
 		{
+			name: "sqs-fifo-order-by-earliest-sequence",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if seq := asInt(m["seq"]); seq < firstSeq[group] {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestFIFOMessageGroupVisibilityAfterDeleteCharacterization",
+		},
+		{
 			name: "sqs-visibility-batch-accept-too-many-entries",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "if len(entries) > 10 {\n\t\t\t\treturn nil, &spi.Fault{Code: \"AWS.SimpleQueueService.TooManyEntriesInBatchRequest\"",

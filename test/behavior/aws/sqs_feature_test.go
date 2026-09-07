@@ -803,4 +803,60 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("partial group order %d %s", status, body)
 		}
 	})
+	t.Run("Given FIFO messages When deleting all or part of a group Then ordering remains isolated", func(t *testing.T) {
+		create := func(name string) {
+			t.Helper()
+			if status, body := call("CreateQueue", `{"QueueName":"`+name+`","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
+				t.Fatalf("create %s %d %s", name, status, body)
+			}
+		}
+		send := func(name, body, group string) {
+			t.Helper()
+			payload := `{"QueueUrl":"http://queue/000000000000/` + name + `","MessageBody":"` + body + `","MessageGroupId":"` + group + `"}`
+			if status, response := call("SendMessage", payload); status != http.StatusOK {
+				t.Fatalf("send %s %d %s", name, status, response)
+			}
+		}
+		drain := func(name string, max int) []any {
+			t.Helper()
+			status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/`+name+`","MaxNumberOfMessages":`+strconv.Itoa(max)+`}`)
+			var response map[string]any
+			if status != http.StatusOK || json.Unmarshal(body, &response) != nil {
+				t.Fatalf("receive %s %d %s", name, status, body)
+			}
+			return response["Messages"].([]any)
+		}
+		delete := func(name string, message map[string]any) {
+			t.Helper()
+			payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/" + name, "ReceiptHandle": message["ReceiptHandle"]})
+			if status, body := call("DeleteMessage", string(payload)); status != http.StatusOK {
+				t.Fatalf("delete %s %d %s", name, status, body)
+			}
+		}
+		populate := func(name string) {
+			for _, message := range []struct{ body, group string }{{"g1-m1", "g1"}, {"g2-m1", "g2"}, {"g1-m2", "g1"}, {"g2-m2", "g2"}, {"g1-m3", "g1"}, {"g1-m4", "g1"}, {"g3-m1", "g3"}} {
+				send(name, message.body, message.group)
+			}
+		}
+		full := "bdd-fifo-delete-order.fifo"
+		create(full)
+		populate(full)
+		first := drain(full, 2)
+		for _, raw := range first {
+			delete(full, raw.(map[string]any))
+		}
+		remaining := drain(full, 10)
+		if len(remaining) != 5 || remaining[0].(map[string]any)["Body"] != "g2-m1" {
+			t.Fatalf("full delete ordering %#v", remaining)
+		}
+		partial := "bdd-fifo-partial-delete-order.fifo"
+		create(partial)
+		populate(partial)
+		first = drain(partial, 2)
+		delete(partial, first[0].(map[string]any))
+		remaining = drain(partial, 10)
+		if len(remaining) != 3 || remaining[0].(map[string]any)["Body"] != "g2-m1" {
+			t.Fatalf("partial delete ordering %#v", remaining)
+		}
+	})
 }

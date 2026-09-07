@@ -380,6 +380,115 @@ func TestFIFOMessageGroupVisibilityAfterTerminateCharacterization(t *testing.T) 
 	})
 }
 
+func TestFIFOMessageGroupVisibilityAfterDeleteCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	create := func(name string) {
+		t.Helper()
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
+			"QueueName": name, "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send := func(name, body, group string) {
+		t.Helper()
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{
+			"QueueName": name, "MessageBody": body, "MessageGroupId": group,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	receive := func(name string, max int) []any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MaxNumberOfMessages": max, "VisibilityTimeout": 30}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output["Messages"].([]any)
+	}
+	delete := func(name string, messages []any) {
+		t.Helper()
+		for _, raw := range messages {
+			message := raw.(map[string]any)
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessage", Input: map[string]any{"QueueName": name, "ReceiptHandle": message["ReceiptHandle"]}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	bodies := func(messages []any) []string {
+		out := make([]string, 0, len(messages))
+		for _, raw := range messages {
+			out = append(out, raw.(map[string]any)["Body"].(string))
+		}
+		return out
+	}
+	populate := func(name string) {
+		for _, message := range []struct{ body, group string }{{"g1-m1", "g1"}, {"g2-m1", "g2"}, {"g1-m2", "g1"}, {"g2-m2", "g2"}, {"g1-m3", "g1"}, {"g1-m4", "g1"}, {"g3-m1", "g3"}} {
+			send(name, message.body, message.group)
+		}
+	}
+	full := "fifo-delete-order.fifo"
+	create(full)
+	populate(full)
+	first := receive(full, 2)
+	delete(full, first)
+	fullRemaining := bodies(receive(full, 10))
+
+	partial := "fifo-partial-delete-order.fifo"
+	create(partial)
+	populate(partial)
+	partialFirst := receive(partial, 2)
+	delete(partial, partialFirst[:1])
+	partialRemaining := bodies(receive(partial, 10))
+	golden.AssertJSON(t, map[string]any{"fullDelete": fullRemaining, "partialDelete": partialRemaining})
+}
+
+func FuzzFIFOMessageGroupDeleteVisibility(f *testing.F) {
+	f.Add(false)
+	f.Add(true)
+	f.Fuzz(func(t *testing.T, partial bool) {
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		name := "fuzz-delete-order.fifo"
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name, "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
+			t.Fatal(err)
+		}
+		for _, message := range []struct{ body, group string }{{"g1-m1", "g1"}, {"g2-m1", "g2"}, {"g1-m2", "g1"}, {"g2-m2", "g2"}, {"g3-m1", "g3"}} {
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": message.body, "MessageGroupId": message.group}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		first, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MaxNumberOfMessages": 2}})
+		if err != nil || len(first.Output["Messages"].([]any)) != 2 {
+			t.Fatalf("first %#v error %v", first, err)
+		}
+		messages := first.Output["Messages"].([]any)
+		limit := 2
+		if partial {
+			limit = 1
+		}
+		for _, raw := range messages[:limit] {
+			message := raw.(map[string]any)
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessage", Input: map[string]any{"QueueName": name, "ReceiptHandle": message["ReceiptHandle"]}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		remaining, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MaxNumberOfMessages": 10}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, raw := range remaining.Output["Messages"].([]any) {
+			body := raw.(map[string]any)["Body"]
+			if body == "g1-m1" || body == "g1-m2" {
+				t.Fatalf("deleted or blocked FIFO message resurfaced partial=%v output=%#v", partial, remaining.Output)
+			}
+		}
+	})
+}
+
 func TestSuccessivePurgeCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)

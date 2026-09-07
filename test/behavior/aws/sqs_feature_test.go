@@ -348,6 +348,22 @@ func TestSQSQueueListing(t *testing.T) {
 			}
 		}
 	})
+	t.Run("Given available messages When long polling with a larger batch Then the response does not wait", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-wait-ready"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		for _, message := range []string{"one", "two"} {
+			if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-wait-ready","MessageBody":"`+message+`"}`); status != http.StatusOK {
+				t.Fatalf("send %d %s", status, body)
+			}
+		}
+		started := time.Now()
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-wait-ready","MaxNumberOfMessages":3,"WaitTimeSeconds":5}`)
+		var response map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &response) != nil || len(response["Messages"].([]any)) != 2 || time.Since(started) >= 2*time.Second {
+			t.Fatalf("available messages %d in %s: %s", status, time.Since(started), body)
+		}
+	})
 	t.Run("Given a queue receive wait attribute When polling without a request wait Then the queue wait is used", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-queue-wait","Attributes":{"ReceiveMessageWaitTimeSeconds":"1"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

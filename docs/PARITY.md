@@ -596,14 +596,15 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 120 / 222 (54.1%) |
-| LocalStack SQS test functions not yet traced | 102 / 222 (45.9%) |
+| LocalStack SQS test functions explicitly traced | 121 / 222 (54.5%) |
+| LocalStack SQS test functions not yet traced | 101 / 222 (45.5%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
 | LocalStack test | Mirror evidence | Result |
 |---|---|---|
 | `test_sqs.py::TestSqsProvider::test_list_queues` | ListQueues applies QueueNamePrefix and omits QueueUrls when no queue matches; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin both branches | Mapped; full race-clean |
+| `test_sqs.py::TestSqsProvider::test_receive_message_wait_time_seconds_and_max_number_of_messages_does_not_block` | ReceiveMessage returns all currently available messages immediately even when MaxNumberOfMessages exceeds the queue depth and WaitTimeSeconds is five; atomic Verify-style characterization, raw HTTP BDD, and semantic mutation coverage pin the no-wait branch | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_external_endpoint` | Configured `AdvertiseURL` is used for CreateQueue URLs while the returned URL remains usable for message send/receive; atomic snapshot, raw HTTP BDD, concurrent chaos/race, and advertise-seam mutation coverage pin external endpoint advertisement | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_get_queue_url_contains_localstack_host` | Without an explicit advertise URL, GetQueueUrl retains the default LocalStack host and account/name path; the same atomic endpoint characterization and HTTP lifecycle coverage pin the default | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_list_queues_pagination` | MaxResults returns lexically ordered pages and a base64 last-URL NextToken that resumes strictly after the prior page; all seven requested test forms pin token shape, continuation, final-page omission, and concurrent completeness | Mapped; full race-clean |

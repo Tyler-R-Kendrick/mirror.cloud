@@ -683,6 +683,43 @@ func TestReceiveMessageWaitTimeCharacterization(t *testing.T) {
 	golden.AssertJSON(t, result)
 }
 
+func TestReceiveMessageWaitWithAvailableMessagesCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	after := make(chan time.Duration, 1)
+	deps.Clock = &observedClock{Clock: clk, after: after}
+	p := New(deps)
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	ctx := context.Background()
+	for _, input := range []map[string]any{
+		{"QueueName": "wait-ready", "Attributes": map[string]any{}},
+		{"QueueName": "wait-ready", "MessageBody": "one"},
+		{"QueueName": "wait-ready", "MessageBody": "two"},
+	} {
+		op := "CreateQueue"
+		if input["MessageBody"] != nil {
+			op = "SendMessage"
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: input}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "wait-ready", "MaxNumberOfMessages": 3, "WaitTimeSeconds": 5}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Output["Messages"].([]any)) != 2 {
+		t.Fatalf("available messages %#v", response.Output)
+	}
+	messages := response.Output["Messages"].([]any)
+	golden.AssertJSON(t, map[string]any{"count": len(messages), "first": messages[0].(map[string]any)["Body"], "second": messages[1].(map[string]any)["Body"]})
+	select {
+	case delay := <-after:
+		t.Fatalf("waited %v with available messages", delay)
+	default:
+	}
+}
+
 func TestQueueReceiveWaitTimeCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)

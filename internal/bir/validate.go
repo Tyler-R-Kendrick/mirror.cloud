@@ -273,6 +273,7 @@ func Validate(s *Service, svc *model.Service) error {
 			validateEffect(s, fmt.Sprintf("%s.effects[%d]", where, i), eff, compile,
 				compilerFor(append(append([]string{}, scope...), "item")...), &problems)
 		}
+		checkSpreadMember(s, svc, modelOp, where, op.Effects, &problems)
 
 		if l := op.List; l != nil {
 			if _, ok := s.Resources[l.Resource]; !ok {
@@ -496,6 +497,43 @@ func inputRefs(expr string) []string {
 
 var inputRefRE = regexp.MustCompile(`\binput\.([A-Za-z_][A-Za-z0-9_]*)`)
 
+// spreadRE is the closed set of things a write may copy wholesale.
+var spreadRE = regexp.MustCompile(`^(item|input(\.[A-Za-z_][A-Za-z0-9_]*)*)$`)
+
+// checkSpreadMember reports a write that spreads a request member the
+// operation does not declare. Such a spread copies nothing and says nothing,
+// so the record silently loses whatever the member was carrying -- which is
+// how a bundle comes to store a name and no configuration.
+func checkSpreadMember(s *Service, svc *model.Service, modelOp model.Operation, where string, effects []Effect, problems *Errors) {
+	declared := map[string]bool{}
+	if modelOp.Input != "" {
+		if shape, ok := svc.Shapes[modelOp.Input]; ok {
+			for m := range shape.Members {
+				declared[m] = true
+			}
+		}
+	}
+	if len(declared) == 0 {
+		return
+	}
+	for i, eff := range effects {
+		for kind, w := range map[string]*WriteEffect{
+			"create": eff.Create, "put": eff.Put, "patch": eff.Patch,
+		} {
+			if w == nil || !strings.HasPrefix(w.Spread, "input.") {
+				continue
+			}
+			name := strings.Split(w.Spread, ".")[1]
+			if !declared[name] {
+				*problems = append(*problems, fmt.Errorf(
+					"%s: %s.effects[%d].%s.spread: %q is not a member of %s, so "+
+						"the spread copies nothing",
+					s.ServiceID, where, i, kind, name, modelOp.Input))
+			}
+		}
+	}
+}
+
 // checkOutputMember reports an output member that the operation's output shape
 // does not declare. This is what stops a bundle inventing a member name that
 // no SDK can read.
@@ -672,7 +710,10 @@ func validateEffect(s *Service, where string, eff Effect, compile, perItem func(
 		// bundle loaded, and the engine then failed at request time asking for
 		// an expression nobody had written.
 		body(where+"."+kind+".key", e.Key)
-		compile(where+"."+kind+".when", e.When)
+		// A guard on a per-element write sees the element, for the same reason
+		// the key and the record do: the question it answers is about the
+		// candidate, not about the request as a whole.
+		body(where+"."+kind+".when", e.When)
 		compile(where+"."+kind+".state", e.State)
 		compileAny(where+"."+kind+".record", e.Record, body)
 		// `input` is the only thing a write may spread, and saying so here is
@@ -691,10 +732,22 @@ func validateEffect(s *Service, where string, eff Effect, compile, perItem func(
 				"%s: %s.%s.missing: %q; the only value is `ignore`",
 				s.ServiceID, where, kind, e.Missing))
 		}
-		if e.Spread != "" && e.Spread != "input" {
-			*problems = append(*problems, fmt.Errorf(
-				"%s: %s.%s.spread: %q; a write may spread only `input`",
-				s.ServiceID, where, kind, e.Spread))
+		if e.Spread != "" {
+			if !spreadRE.MatchString(e.Spread) {
+				*problems = append(*problems, fmt.Errorf(
+					"%s: %s.%s.spread: %q; a write may spread `input`, one of its "+
+						"members (`input.X`), or `item`. A read binding is not a "+
+						"form: it is a record the engine never checked against an "+
+						"input shape, and that check is the whole reason a copy "+
+						"this wide is safe.",
+					s.ServiceID, where, kind, e.Spread))
+			}
+			if e.Spread == "item" && e.ForEach == "" {
+				*problems = append(*problems, fmt.Errorf(
+					"%s: %s.%s.spread: `item` is the element a for_each is on, "+
+						"and this write has no for_each",
+					s.ServiceID, where, kind))
+			}
 		}
 		if d := e.Deadline; d != nil {
 			compile(where+"."+kind+".deadline.after", d.After)

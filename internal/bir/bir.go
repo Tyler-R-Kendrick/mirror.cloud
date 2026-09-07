@@ -375,8 +375,9 @@ type WriteEffect struct {
 	Key      string         `yaml:"key,omitempty"`
 	Record   map[string]any `yaml:"record,omitempty"`
 	When     string         `yaml:"when,omitempty"`
-	// Spread copies whole request members into the record before any declared
-	// member is computed. Its only accepted value is "input".
+	// Spread copies a whole value into the record before any declared member
+	// is computed. It accepts `input`, one of the request's members
+	// (`input.ConfigRule`), or `item` -- the element a for_each is on.
 	//
 	// Twenty-five of the hand-written packs store the request itself -- `for k,
 	// v := range req.Input { rec[k] = v }` -- and then force a few members back
@@ -394,6 +395,22 @@ type WriteEffect struct {
 	// validation -- the request has already been checked against the generated
 	// input shape by the time an effect runs, so a spread cannot store a
 	// member no SDK could have sent.
+	//
+	// That bound is why the accepted forms are the three they are, and why a
+	// read binding is not one: `input`, one of its members, and an element of
+	// one of its members all come from a request the engine has validated
+	// against the input shape, and a record loaded from the store does not
+	// come from a request at all. (Validation checks the members the shape
+	// declares -- required ones present, constraints met -- so what the bound
+	// really says is that the value was sent by a caller, not that every key
+	// inside it is declared.) The narrower forms are the same behavior one
+	// level in:
+	// Config's PutConfigurationRecorder stores the ConfigurationRecorder the
+	// caller sent and forces a name onto it, PutConfigRule stores the
+	// ConfigRule and forces an ARN and a state, and SecurityHub's
+	// BatchImportFindings stores each finding it is given. Enumerating those
+	// members instead would not reproduce them, for the same reason as above,
+	// and AwsSecurityFinding alone has forty of them.
 	//
 	// Declared members win over the spread, in both directions of the
 	// resource/effect order that already applies. That is what lets a bundle

@@ -64,6 +64,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			_ = p.col(req, "qdeleted").Delete(ctx, name)
 		}
 		attrs := asMap(req.Input["Attributes"])
+		fifo, fifoSpecified := attrs["FifoQueue"]
+		if strings.HasSuffix(name, ".fifo") && (!fifoSpecified || str(fifo) != "true") {
+			return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "FifoQueue must be specified as true for FIFO queues.", HTTPStatus: 400, Fault: "client"}
+		}
+		if !strings.HasSuffix(name, ".fifo") && fifoSpecified && str(fifo) == "true" {
+			return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "Queue name must end in .fifo for FIFO queues", HTTPStatus: 400, Fault: "client"}
+		}
 		if !strings.HasSuffix(name, ".fifo") {
 			for key, message := range map[string]string{
 				"FifoQueue": "Unknown Attribute FifoQueue.", "ContentBasedDeduplication": "Unknown Attribute ContentBasedDeduplication.",

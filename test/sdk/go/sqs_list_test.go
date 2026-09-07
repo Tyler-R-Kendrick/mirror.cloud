@@ -1282,6 +1282,44 @@ func TestAWSSDKSQSFIFOContentBasedDeduplicationStrategyContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSRedrivePolicyClearingContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-redrive-policy")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:dlq","maxReceiveCount":"42"}`
+	if _, err := client.SetQueueAttributes(context.Background(), &sqs.SetQueueAttributesInput{QueueUrl: created.QueueUrl, Attributes: map[string]string{"RedrivePolicy": policy}}); err != nil {
+		t.Fatal(err)
+	}
+	set, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameAll}})
+	if err != nil || set.Attributes["RedrivePolicy"] != policy {
+		t.Fatalf("set %#v error %v", set, err)
+	}
+	if _, err := client.SetQueueAttributes(context.Background(), &sqs.SetQueueAttributesInput{QueueUrl: created.QueueUrl, Attributes: map[string]string{"RedrivePolicy": ""}}); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameAll}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := cleared.Attributes["RedrivePolicy"]; present {
+		t.Fatalf("policy was not cleared %#v", cleared)
+	}
+}
+
 func TestAWSSDKSQSMultipleQueuesContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

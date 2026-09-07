@@ -1,0 +1,4 @@
+{
+  "cleared": false,
+  "set": "{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:123456789012:dlq\",\"maxReceiveCount\":\"42\"}"
+}

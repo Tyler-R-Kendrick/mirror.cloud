@@ -939,6 +939,35 @@ func TestFIFOContentBasedDeduplicationStrategyCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"before": before, "after": after})
 }
 
+func TestRedrivePolicyClearingCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "redrive-policy"}}); err != nil {
+		t.Fatal(err)
+	}
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:dlq","maxReceiveCount":"42"}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "redrive-policy", "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+		t.Fatal(err)
+	}
+	set, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "redrive-policy", "AttributeNames": []any{"All"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asMap(set.Output["Attributes"])["RedrivePolicy"] != policy {
+		t.Fatalf("set policy %#v", set.Output)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "redrive-policy", "Attributes": map[string]any{"RedrivePolicy": ""}}}); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "redrive-policy", "AttributeNames": []any{"All"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, present := asMap(cleared.Output["Attributes"])["RedrivePolicy"]
+	golden.AssertJSON(t, map[string]any{"set": asMap(set.Output["Attributes"])["RedrivePolicy"], "cleared": present})
+}
+
 func FuzzFIFOContentBasedDeduplicationStrategy(f *testing.F) {
 	f.Add(true)
 	f.Add(false)
@@ -956,6 +985,38 @@ func FuzzFIFOContentBasedDeduplicationStrategy(f *testing.F) {
 		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "fuzz-dedup-strategy.fifo", "AttributeNames": []any{"ContentBasedDeduplication"}}})
 		if err != nil || asMap(response.Output["Attributes"])["ContentBasedDeduplication"] != value {
 			t.Fatalf("enabled=%v response=%#v error=%v", enabled, response.Output, err)
+		}
+	})
+}
+
+func FuzzRedrivePolicyClearing(f *testing.F) {
+	f.Add(true)
+	f.Add(false)
+	f.Fuzz(func(t *testing.T, clear bool) {
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-redrive-policy"}}); err != nil {
+			t.Fatal(err)
+		}
+		policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:dlq","maxReceiveCount":"42"}`
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "fuzz-redrive-policy", "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+			t.Fatal(err)
+		}
+		value := policy
+		if clear {
+			value = ""
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "fuzz-redrive-policy", "Attributes": map[string]any{"RedrivePolicy": value}}}); err != nil {
+			t.Fatal(err)
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "fuzz-redrive-policy", "AttributeNames": []any{"All"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, present := asMap(response.Output["Attributes"])["RedrivePolicy"]
+		if present == clear {
+			t.Fatalf("clear=%v response=%#v", clear, response.Output)
 		}
 	})
 }

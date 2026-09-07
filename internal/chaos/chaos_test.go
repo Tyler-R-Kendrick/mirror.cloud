@@ -981,6 +981,44 @@ func TestConcurrentSQSPublishGetDeleteMessageBatchesRemainConsistent(t *testing.
 	}
 }
 
+func TestConcurrentSQSRedrivePolicyClearingIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-redrive-policy"}}); err != nil {
+		t.Fatal(err)
+	}
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:dlq","maxReceiveCount":"42"}`
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "chaos-redrive-policy", "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+				errs <- err
+				return
+			}
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "chaos-redrive-policy", "Attributes": map[string]any{"RedrivePolicy": ""}}}); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "chaos-redrive-policy", "AttributeNames": []any{"All"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attributes, _ := response.Output["Attributes"].(map[string]any)
+	if _, present := attributes["RedrivePolicy"]; present {
+		t.Fatalf("redrive policy remained %#v", response.Output)
+	}
+}
+
 func TestConcurrentSQSStandardMessageGroupValidationIsStable(t *testing.T) {
 	p := sqs.New(spitest.Deps(t))
 	ctx := context.Background()

@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 61 / 222 (27.5%) |
-| LocalStack SQS test functions not yet traced | 161 / 222 (72.5%) |
+| LocalStack SQS test functions explicitly traced | 62 / 222 (27.9%) |
+| LocalStack SQS test functions not yet traced | 160 / 222 (72.1%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -635,6 +635,7 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_send_batch_missing_message_group_id_for_fifo_queue` | FIFO SendMessageBatch rejects the whole request when an entry omits `MessageGroupId`, returning the top-level `MissingParameter` fault before any partial send; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin the validation boundary | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_send_batch_message_size` | SendMessageBatch keeps the one-MiB request limit while applying a reduced queue `MaximumMessageSize` per entry, returning one successful and one failed entry for 1024/1025-byte bodies; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin the split | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_publish_get_delete_message_batch` | A ten-entry SendMessageBatch is fully received, every receipt is deleted through DeleteMessageBatch, and a confirmation receive is empty; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic deletion mutation coverage pin the lifecycle | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_set_empty_redrive_policy` | Setting a RedrivePolicy persists it, while setting `RedrivePolicy=""` removes it from GetQueueAttributes without disturbing the queue; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin clear semantics | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_too_many_entries_in_batch_request` | SendMessageBatch rejects more than 10 entries with `AWS.SimpleQueueService.TooManyEntriesInBatchRequest` and the exact sent-count message across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_batch_send_with_invalid_char_should_succeed` | SendMessageBatch returns nine successful entries and one `InvalidMessageContents` failed entry instead of failing the entire batch; atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage pin per-entry failure semantics | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_delete_message_batch_invalid_msg_id` | DeleteMessageBatch rejects punctuation, empty, and overlong entry IDs with `AWS.SimpleQueueService.InvalidBatchEntryId` and the exact AWS message across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |

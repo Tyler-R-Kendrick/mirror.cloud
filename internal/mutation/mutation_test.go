@@ -17587,6 +17587,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestInvalidMessageContentsCharacterization",
 		},
 		{
+			name: "sqs-keep-expired-messages-visible",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if messageExpired(attrs, m, now.UnixNano()) {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestMessageRetentionCharacterization",
+		},
+		{
 			name: "sqs-batch-accept-missing-fifo-deduplication-id",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "if _, provided := message[\"MessageDeduplicationId\"]; !provided || str(message[\"MessageDeduplicationId\"]) == \"\" {",

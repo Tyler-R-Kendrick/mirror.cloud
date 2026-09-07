@@ -131,6 +131,19 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("invalid contents %d %s", status, body)
 		}
 	})
+	t.Run("Given a retention period When it expires Then the message is removed", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-retention","Attributes":{"MessageRetentionPeriod":"1"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-retention","MessageBody":"expires"}`); status != http.StatusOK {
+			t.Fatalf("send %d %s", status, body)
+		}
+		time.Sleep(1100 * time.Millisecond)
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-retention","WaitTimeSeconds":0}`)
+		if status != http.StatusOK || bytes.Contains(body, []byte(`"Messages"`)) {
+			t.Fatalf("retention %d %s", status, body)
+		}
+	})
 	t.Run("Given an oversized receive batch When receiving Then the invalid parameter fault is returned", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-max-messages"}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

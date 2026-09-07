@@ -6055,6 +6055,41 @@ func TestConcurrentSQSInvalidMessageContentsAreStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSMessageRetentionIsStable(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-retention", "Attributes": map[string]any{"MessageRetentionPeriod": "1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-retention", "MessageBody": "expires"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := clk.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-retention", "WaitTimeSeconds": 0}})
+			if err != nil || response.Output["Messages"] != nil {
+				errs <- fmt.Errorf("retention response %#v error %v", response, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSFIFOBatchMissingDeduplicationIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := sqs.New(deps)

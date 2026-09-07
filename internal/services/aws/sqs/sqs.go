@@ -381,10 +381,11 @@ func queueMissing() *spi.Fault {
 func (p *Pack) countMsgs(ctx context.Context, req *spi.Request, name string) int {
 	kvs, _, _ := p.col(req, "msgs:"+name).List(ctx, "", "", 0)
 	now := p.deps.Clock.Now().UnixNano()
+	attrs := p.queueAttrs(ctx, req, name)
 	count := 0
 	for _, kv := range kvs {
 		var message map[string]any
-		if json.Unmarshal(kv.Value, &message) == nil && int64(asFloat(message["visibleAt"])) <= now {
+		if json.Unmarshal(kv.Value, &message) == nil && !messageExpired(attrs, message, now) && int64(asFloat(message["visibleAt"])) <= now {
 			count++
 		}
 	}
@@ -592,11 +593,16 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 
 func (p *Pack) visible(ctx context.Context, req *spi.Request, name string, now time.Time, max int) []map[string]any {
 	kvs, _, _ := p.col(req, "msgs:"+name).List(ctx, "", "", 0)
+	attrs := p.queueAttrs(ctx, req, name)
 	var cand []map[string]any
 	inFlight := map[string]bool{}
 	for _, kv := range kvs {
 		var m map[string]any
 		_ = json.Unmarshal(kv.Value, &m)
+		if messageExpired(attrs, m, now.UnixNano()) {
+			_ = p.col(req, "msgs:"+name).Delete(ctx, kv.Key)
+			continue
+		}
 		if int64(asFloat(m["visibleAt"])) > now.UnixNano() {
 			if g := str(m["group"]); g != "" {
 				inFlight[g] = true
@@ -622,6 +628,11 @@ func (p *Pack) visible(ctx context.Context, req *spi.Request, name string, now t
 		}
 	}
 	return out
+}
+
+func messageExpired(attrs, message map[string]any, now int64) bool {
+	retention := asInt(attrs["MessageRetentionPeriod"])
+	return retention > 0 && asFloat(message["sentAt"])+float64(retention*1000) <= float64(now/1_000_000)
 }
 
 func (p *Pack) afterReceive(ctx context.Context, req *spi.Request, name string, m map[string]any, vis int) {

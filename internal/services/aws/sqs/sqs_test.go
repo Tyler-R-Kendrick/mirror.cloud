@@ -173,6 +173,29 @@ func TestInvalidMessageContentsCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
+func TestMessageRetentionCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "retention", "Attributes": map[string]any{"MessageRetentionPeriod": "2"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "retention", "MessageBody": "expires"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := clk.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "retention"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, response.Output)
+}
+
 func TestReceiveMessageMaxNumberValidation(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -678,6 +701,33 @@ func FuzzInvalidMessageContents(f *testing.F) {
 			}
 		} else if err != nil {
 			t.Fatal(err)
+		}
+	})
+}
+
+func FuzzMessageRetention(f *testing.F) {
+	f.Add(uint8(1))
+	f.Add(uint8(2))
+	f.Fuzz(func(t *testing.T, raw uint8) {
+		retention := int(raw%3) + 1
+		clk := clock.NewControllable()
+		deps := spitest.Deps(t)
+		deps.Clock = clk
+		p := New(deps)
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-retention", "Attributes": map[string]any{"MessageRetentionPeriod": fmt.Sprintf("%d", retention)}}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-retention", "MessageBody": "expires"}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := clk.Advance(time.Duration(retention) * time.Second); err != nil {
+			t.Fatal(err)
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "fuzz-retention", "WaitTimeSeconds": 0}})
+		if err != nil || response.Output["Messages"] != nil {
+			t.Fatalf("retention=%d response %#v error %v", retention, response, err)
 		}
 	})
 }

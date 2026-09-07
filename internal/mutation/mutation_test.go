@@ -17571,6 +17571,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestTooManyBatchEntriesCharacterization",
 		},
 		{
+			name: "sqs-ignore-queue-receive-wait-attribute",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if _, explicit := req.Input[\"WaitTimeSeconds\"]; !explicit {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestQueueReceiveWaitTimeCharacterization",
+		},
+		{
 			name: "sqs-fifo-zero-delay-ignore-queue-delay",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "if req.Input[\"DelaySeconds\"] == nil || (fifo && delay == 0) {",

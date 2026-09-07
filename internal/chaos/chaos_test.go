@@ -47,6 +47,16 @@ type failAfterReader struct {
 	io.Reader
 }
 
+type observedChaosClock struct {
+	spi.Clock
+	after chan time.Duration
+}
+
+func (c *observedChaosClock) After(delay time.Duration) <-chan time.Time {
+	c.after <- delay
+	return c.Clock.After(delay)
+}
+
 func TestConcurrentDynamoDBTableCreatesHaveOneWinner(t *testing.T) {
 	p := dynamodb.New(spitest.Deps(t))
 	ctx := context.Background()
@@ -656,6 +666,44 @@ func TestConcurrentSQSReceiveWaitTimeLimitsAreStable(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestConcurrentSQSQueueReceiveWaitAttributeIsStable(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	after := make(chan time.Duration, 16)
+	deps.Clock = &observedChaosClock{Clock: clk, after: after}
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-queue-wait", "Attributes": map[string]any{"ReceiveMessageWaitTimeSeconds": "1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-queue-wait"}})
+			if err != nil || response.Output["Messages"] != nil {
+				errs <- fmt.Errorf("queue wait response %#v error %v", response, err)
+			}
+		}()
+	}
+	for range 16 {
+		if delay := <-after; delay != time.Second {
+			t.Fatalf("queue wait delay %v", delay)
+		}
+	}
+	if err := clk.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
 	}
 }
 

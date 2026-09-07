@@ -173,6 +173,19 @@ func TestSQSQueueListing(t *testing.T) {
 			}
 		}
 	})
+	t.Run("Given a queue receive wait attribute When polling without a request wait Then the queue wait is used", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-queue-wait","Attributes":{"ReceiveMessageWaitTimeSeconds":"1"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		time.AfterFunc(100*time.Millisecond, func() {
+			_, _ = call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-queue-wait","MessageBody":"queue-wait"}`)
+		})
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-queue-wait"}`)
+		var response map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &response) != nil || len(response["Messages"].([]any)) != 1 || response["Messages"].([]any)[0].(map[string]any)["Body"] != "queue-wait" {
+			t.Fatalf("queue wait %d %s", status, body)
+		}
+	})
 	t.Run("Given a received message When requesting all system attributes Then timestamps are numeric", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-timestamps"}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

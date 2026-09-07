@@ -553,6 +553,17 @@ func TestAWSSDKSQSReceiveWaitTimeContract(t *testing.T) {
 			t.Fatalf("short poll %#v error %v", response, err)
 		}
 	}
+	queueWait, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-queue-wait"), Attributes: map[string]string{"ReceiveMessageWaitTimeSeconds": "1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.AfterFunc(100*time.Millisecond, func() {
+		_, _ = client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: queueWait.QueueUrl, MessageBody: aws.String("queue-wait")})
+	})
+	response, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: queueWait.QueueUrl})
+	if err != nil || len(response.Messages) != 1 || aws.ToString(response.Messages[0].Body) != "queue-wait" {
+		t.Fatalf("queue wait %#v error %v", response, err)
+	}
 }
 
 func TestAWSSDKSQSMessageTimestampContract(t *testing.T) {

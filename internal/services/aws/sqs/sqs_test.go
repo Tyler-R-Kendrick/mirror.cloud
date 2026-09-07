@@ -294,6 +294,76 @@ func TestReceiveMessageWaitTimeCharacterization(t *testing.T) {
 	golden.AssertJSON(t, result)
 }
 
+func TestQueueReceiveWaitTimeCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	after := make(chan time.Duration, 1)
+	deps.Clock = &observedClock{Clock: clk, after: after}
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "queue-wait", "Attributes": map[string]any{"ReceiveMessageWaitTimeSeconds": "2"}}}); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *spi.Response, 1)
+	go func() {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "queue-wait"}})
+		if err != nil {
+			t.Errorf("queue wait: %v", err)
+		}
+		done <- response
+	}()
+	if delay := <-after; delay != 2*time.Second {
+		t.Fatalf("queue wait delay %v", delay)
+	}
+	if err := clk.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, (<-done).Output)
+}
+
+func FuzzQueueReceiveWaitTime(f *testing.F) {
+	f.Add(uint8(0))
+	f.Add(uint8(1))
+	f.Fuzz(func(t *testing.T, raw uint8) {
+		queueWait := int(raw % 2)
+		clk := clock.NewControllable()
+		deps := spitest.Deps(t)
+		after := make(chan time.Duration, 1)
+		deps.Clock = &observedClock{Clock: clk, after: after}
+		p := New(deps)
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-queue-wait", "Attributes": map[string]any{"ReceiveMessageWaitTimeSeconds": fmt.Sprintf("%d", queueWait)}}}); err != nil {
+			t.Fatal(err)
+		}
+		if queueWait == 0 {
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "fuzz-queue-wait"}})
+			if err != nil || response.Output["Messages"] != nil {
+				t.Fatalf("zero queue wait %#v error %v", response, err)
+			}
+			return
+		}
+		done := make(chan *spi.Response, 1)
+		go func() {
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "fuzz-queue-wait"}})
+			if err != nil {
+				t.Errorf("queue wait: %v", err)
+			}
+			done <- response
+		}()
+		if delay := <-after; delay != time.Second {
+			t.Fatalf("queue wait delay %v", delay)
+		}
+		if err := clk.Advance(time.Second); err != nil {
+			t.Fatal(err)
+		}
+		if response := <-done; response.Output["Messages"] != nil {
+			t.Fatalf("queue wait response %#v", response.Output)
+		}
+	})
+}
+
 func TestReceiveMessageTimestampAttributes(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

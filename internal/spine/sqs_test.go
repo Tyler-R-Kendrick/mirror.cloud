@@ -288,6 +288,18 @@ func TestBootedServerSQSSection48(t *testing.T) {
 	if getRes.StatusCode != http.StatusOK || getRes.Header.Get("Content-Type") != "application/json" || !strings.Contains(string(getBody), `"GetQueueAttributesResponse"`) || !strings.Contains(string(getBody), `"Name":"QueueArn"`) {
 		t.Fatalf("query JSON attributes %d %q %s", getRes.StatusCode, getRes.Header.Get("Content-Type"), getBody)
 	}
+	getReq, _ = http.NewRequest(http.MethodGet, ts.URL+"/000000000000/queryq", nil)
+	getReq.Header.Set("Authorization", auth)
+	getReq.Header.Set("Accept", "application/json")
+	getRes, err = http.DefaultClient.Do(getReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	getBody, _ = io.ReadAll(getRes.Body)
+	getRes.Body.Close()
+	if getRes.StatusCode != http.StatusNotFound || !strings.Contains(string(getBody), "<UnknownOperationException") {
+		t.Fatalf("query URL missing action %d %s", getRes.StatusCode, getBody)
+	}
 	if code, body, _ := queryCall(url.Values{"Action": {"GetQueueAttributes"}, "Version": {"2012-11-05"}, "QueueName": {"missing-query-queue"}, "AttributeName.1": {"All"}}); code != http.StatusBadRequest || !strings.Contains(body, "AWS.SimpleQueueService.NonExistentQueue") || !strings.Contains(body, "for this wsdl version") {
 		t.Fatalf("query missing queue %d %s", code, body)
 	}

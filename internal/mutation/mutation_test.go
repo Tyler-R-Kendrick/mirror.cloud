@@ -18725,6 +18725,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestBootedServerSQSSection48",
 		},
 		{
+			name: "sqs-query-url-without-action-stays-sqs",
+			file: filepath.Join("internal", "edge", "edge.go"),
+			old:  `if action == "" && r.Method == http.MethodGet && sqsQueuePath(r.URL.Path) {`,
+			new:  `if false {`,
+			pkg:  "./internal/spine",
+			run:  "TestBootedServerSQSSection48",
+		},
+		{
+			name: "sqs-query-missing-action-keeps-unknown-operation",
+			file: filepath.Join("internal", "proto", "aws", "awsquery", "awsquery.go"),
+			old:  `return nil, &spi.Fault{Code: "UnknownOperationException", Message: "The action or operation requested is not valid.", HTTPStatus: http.StatusNotFound, Fault: "client"}`,
+			new:  `return nil, spi.NotImplemented(svc.ID, "unknown", "emulate")`,
+			pkg:  "./internal/spine",
+			run:  "TestBootedServerSQSSection48",
+		},
+		{
 			name: "sqs-permission-policy-version",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  `pol := map[string]any{"Version": "2008-10-17", "Id": arn + "/SQSDefaultPolicy", "Statement": []any{}}`,

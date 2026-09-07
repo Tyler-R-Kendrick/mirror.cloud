@@ -869,11 +869,27 @@ func (s *Server) demux(r *http.Request) *model.Service {
 	if strings.Contains(path, "/_doc") || strings.Contains(path, "/_search") || strings.Contains(path, "/_aws/opensearch") || strings.Contains(path, "/2021-01-01/opensearch") {
 		return s.bundle.ServiceByID("aws.es")
 	}
+	if action == "" && r.Method == http.MethodGet && sqsQueuePath(r.URL.Path) {
+		return s.bundle.ServiceByID("aws.sqs")
+	}
 	// default S3 path-style
 	if r.Header.Get("X-Amz-Target") == "" && action == "" {
 		return s.bundle.ServiceByID("aws.s3")
 	}
 	return nil
+}
+
+func sqsQueuePath(path string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 2 || len(parts[0]) != 12 {
+		return false
+	}
+	for _, r := range parts[0] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return parts[1] != ""
 }
 
 func (s *Server) looksLike(r *http.Request, prefix string) bool {

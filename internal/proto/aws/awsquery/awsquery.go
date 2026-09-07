@@ -28,6 +28,9 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	}
 	action := r.Form.Get("Action")
 	if action == "" {
+		if svc.ID == "aws.sqs" {
+			return nil, &spi.Fault{Code: "UnknownOperationException", Message: "The action or operation requested is not valid.", HTTPStatus: http.StatusNotFound, Fault: "client"}
+		}
 		return nil, spi.NotImplemented(svc.ID, "unknown", "emulate")
 	}
 	if op := svc.OperationByName(action); op != nil {
@@ -122,6 +125,12 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 	if f.Code == "MirrorNotImplemented" {
 		w.Header().Set("x-mirror-not-implemented", svc.ID+"."+op.Name)
 		status = 501
+	}
+	if svc.ID == "aws.sqs" && f.Code == "UnknownOperationException" {
+		w.Header().Set("Content-Type", "text/xml; charset=UTF-8")
+		w.WriteHeader(status)
+		_, err := fmt.Fprintf(w, "<UnknownOperationException><Message>%s</Message><RequestId>%s</RequestId></UnknownOperationException>", xmlEscape(f.Message), requestID)
+		return err
 	}
 	w.Header().Set("Content-Type", "text/xml; charset=UTF-8")
 	w.WriteHeader(status)

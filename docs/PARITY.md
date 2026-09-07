@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 69 / 222 (31.1%) |
-| LocalStack SQS test functions not yet traced | 153 / 222 (68.9%) |
+| LocalStack SQS test functions explicitly traced | 71 / 222 (32.0%) |
+| LocalStack SQS test functions not yet traced | 151 / 222 (68.0%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -642,7 +642,9 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_set_unsupported_attribute_standard` | SetQueueAttributes rejects both `FifoQueue=true` and `FifoQueue=false` on standard queues with `InvalidAttributeName`; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin the rejection | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_set_unsupported_attribute_fifo` | FIFO queues accept idempotent `FifoQueue=true` but reject `FifoQueue=false`; the same seven-form setter-validation stack pins both directions | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_create_and_send_to_fifo_queue` | FIFO queue creation preserves the `.fifo` URL suffix and a message with explicit group/deduplication identifiers round-trips through ReceiveMessage; the existing FIFO lifecycle characterization, SDK, BDD, fuzz, chaos/race, and mutation stack covers the contract | Mapped; equivalent stack green |
-| `test_sqs.py::TestSqsProvider::test_send_message_with_attributes` | Message attributes survive SendMessage/ReceiveMessage and selector filtering; the existing FIFO attribute and name-filter characterization, SDK, BDD, fuzz, chaos/race, and mutation stack covers the wire contract | Mapped; equivalent stack green |
+| `test_sqs.py::TestSqsProvider::test_send_message_with_attributes` | String and binary message attributes survive SendMessage/ReceiveMessage with the AWS MD5OfMessageAttributes digest and selector filtering; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and digest mutants pin the wire contract | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_send_message_with_binary_attributes` | Binary message attributes preserve their decoded bytes and MD5OfMessageAttributes across SendMessage/ReceiveMessage; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and digest mutants pin the binary wire contract | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_sent_message_retains_attributes_after_receive` | ReceiveMessage retains the sent string and binary attributes together with the matching MD5OfMessageAttributes digest; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and digest mutants pin retention | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_too_many_entries_in_batch_request` | SendMessageBatch rejects more than 10 entries with `AWS.SimpleQueueService.TooManyEntriesInBatchRequest` and the exact sent-count message across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_batch_send_with_invalid_char_should_succeed` | SendMessageBatch returns nine successful entries and one `InvalidMessageContents` failed entry instead of failing the entire batch; atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage pin per-entry failure semantics | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_delete_message_batch_invalid_msg_id` | DeleteMessageBatch rejects punctuation, empty, and overlong entry IDs with `AWS.SimpleQueueService.InvalidBatchEntryId` and the exact AWS message across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |

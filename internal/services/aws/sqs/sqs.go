@@ -470,7 +470,11 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	if dedup == "" && str(attrs["ContentBasedDeduplication"]) == "true" {
 		dedup = md5hex
 	}
+	explicitDelay := req.Input["DelaySeconds"] != nil
 	delay := asInt(req.Input["DelaySeconds"])
+	if fifo && explicitDelay && delay > 0 {
+		return nil, &spi.Fault{Code: "InvalidParameterValue", Message: fmt.Sprintf("Value %d for parameter DelaySeconds is invalid. Reason: The request include parameter that is not valid for this queue type.", delay), HTTPStatus: 400, Fault: "client"}
+	}
 	if req.Input["DelaySeconds"] == nil || (fifo && delay == 0) {
 		delay = asInt(attrs["DelaySeconds"])
 	}

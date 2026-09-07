@@ -603,6 +603,15 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("delayed receive %d %s", status, body)
 		}
 	})
+	t.Run("Given a FIFO queue When sending with a per-message delay Then the request is rejected", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-invalid-delay.fifo","Attributes":{"ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-invalid-delay.fifo","MessageBody":"message","MessageGroupId":"group-1","DelaySeconds":2}`)
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte(`"__type":"InvalidParameterValue"`)) || !bytes.Contains(body, []byte("not valid for this queue type")) {
+			t.Fatalf("FIFO delay %d %s", status, body)
+		}
+	})
 	t.Run("Given a FIFO message When receiving all attributes twice Then receive metadata mutates", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-fifo-attrs.fifo","Attributes":{"ContentBasedDeduplication":"true","VisibilityTimeout":"0"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

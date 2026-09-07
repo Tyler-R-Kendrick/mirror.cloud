@@ -2101,6 +2101,27 @@ func FuzzFIFODelayZeroUsesQueueDelay(f *testing.F) {
 	})
 }
 
+func FuzzFIFOPerMessageDelay(f *testing.F) {
+	f.Add(1)
+	f.Add(900)
+	f.Fuzz(func(t *testing.T, delay int) {
+		if delay < 1 || delay > 900 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-invalid-delay.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true"}}}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-invalid-delay.fifo", "MessageBody": "message", "MessageGroupId": "group-1", "DelaySeconds": delay}})
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "InvalidParameterValue" || !strings.Contains(fault.Message, "not valid for this queue type") {
+			t.Fatalf("delay %d error %#v", delay, err)
+		}
+	})
+}
+
 func TestQueueTagKeysAreCaseSensitive(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -2217,6 +2238,21 @@ func TestFIFODelayZeroUsesQueueDelayCharacterization(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden.AssertJSON(t, map[string]any{"sent": sent.Output, "initial": initial.Output, "after": after.Output})
+}
+
+func TestFIFOPerMessageDelayCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "delay-invalid.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true"}}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "delay-invalid.fifo", "MessageBody": "message", "MessageGroupId": "group-1", "DelaySeconds": 2}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("FIFO per-message delay error %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
 func faultCode(err error) string {

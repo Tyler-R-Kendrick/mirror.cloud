@@ -17619,6 +17619,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFIFOMessageGroupVisibilityAfterTerminateCharacterization",
 		},
 		{
+			name: "sqs-fifo-allow-per-message-delay",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if fifo && explicitDelay && delay > 0 {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestFIFOPerMessageDelayCharacterization",
+		},
+		{
 			name: "sqs-keep-expired-messages-visible",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "var cand []map[string]any\n\tinFlight := map[string]bool{}\n\tfor _, kv := range kvs {\n\t\tvar m map[string]any\n\t\t_ = json.Unmarshal(kv.Value, &m)\n\t\tif messageExpired(attrs, m, now.UnixNano()) {",

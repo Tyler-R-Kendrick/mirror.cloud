@@ -417,6 +417,30 @@ func TestAWSSDKSQSFIFOZeroDelayUsesQueueDelayContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSFIFOPerMessageDelayContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-invalid-delay.fifo"), Attributes: map[string]string{"ContentBasedDeduplication": "true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("message"), MessageGroupId: aws.String("group-1"), DelaySeconds: 2})
+	if err == nil || !strings.Contains(err.Error(), "not valid for this queue type") {
+		t.Fatalf("FIFO per-message delay error %v", err)
+	}
+}
+
 func TestAWSSDKSQSTagQueueContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

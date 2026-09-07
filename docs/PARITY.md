@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 47 / 222 (21.2%) |
-| LocalStack SQS test functions not yet traced | 175 / 222 (78.8%) |
+| LocalStack SQS test functions explicitly traced | 49 / 222 (22.1%) |
+| LocalStack SQS test functions not yet traced | 173 / 222 (77.9%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -633,6 +633,8 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_invalid_batch_id` | SendMessageBatch rejects punctuation, empty, and overlong entry IDs with `AWS.SimpleQueueService.InvalidBatchEntryId` and the exact AWS message across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_send_batch_missing_deduplication_id_for_fifo_queue` | FIFO SendMessageBatch rejects an entry missing `MessageDeduplicationId` when content-based deduplication is disabled with the exact AWS top-level fault across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_too_many_entries_in_batch_request` | SendMessageBatch rejects more than 10 entries with `AWS.SimpleQueueService.TooManyEntriesInBatchRequest` and the exact sent-count message across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_delete_message_batch_invalid_msg_id` | DeleteMessageBatch rejects punctuation, empty, and overlong entry IDs with `AWS.SimpleQueueService.InvalidBatchEntryId` and the exact AWS message across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_delete_message_batch_with_too_large_batch` | DeleteMessageBatch rejects more than 10 entries with `AWS.SimpleQueueService.TooManyEntriesInBatchRequest` and the exact sent-count message across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_wait_time_seconds_queue_attribute_waits_correctly` | ReceiveMessage uses `ReceiveMessageWaitTimeSeconds` when `WaitTimeSeconds` is omitted, returning a message arriving during the queue-configured long poll across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_invalid_receipt_handle_should_return_error_message` | ChangeMessageVisibility rejects malformed receipt handles with `ReceiptHandleIsInvalid` and the exact handle-specific message across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_receive_message_message_attribute_names_filters` | ReceiveMessage returns no attributes for an empty selector, exact matches, prefix wildcards, and all-name wildcards with the original values across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |

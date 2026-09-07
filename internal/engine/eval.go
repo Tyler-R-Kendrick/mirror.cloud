@@ -567,15 +567,23 @@ func (ev *eval) spread(from string) (map[string]any, error) {
 	if parts[0] != "input" {
 		return nil, fmt.Errorf("%q is not rooted at `input`", from)
 	}
+	// A member the request did not carry spreads nothing, which is what the
+	// packs this transcribes do: PutConfigurationRecorder with no
+	// ConfigurationRecorder stores the name and nothing else. That holds at
+	// every level of the path, not only the last: `input.A.B` where the
+	// request carries no A is a request that did not carry the value, exactly
+	// as `input.A` is, and erroring on one while spreading nothing for the
+	// other would make the depth of the path decide whether an absent member
+	// is a fault.
 	var cur any = ev.req.Input
 	for _, name := range parts[1:] {
+		if cur == nil {
+			return nil, nil
+		}
 		m, ok := cur.(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("%s is %T, not a record", from, cur)
 		}
-		// A member the request did not carry spreads nothing, which is what
-		// the packs this transcribes do: PutConfigurationRecorder with no
-		// ConfigurationRecorder stores the name and nothing else.
 		cur = m[name]
 	}
 	if cur == nil {

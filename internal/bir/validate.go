@@ -517,9 +517,12 @@ func checkSpreadMember(s *Service, svc *model.Service, modelOp model.Operation, 
 		return
 	}
 	for i, eff := range effects {
-		for kind, w := range map[string]*WriteEffect{
-			"create": eff.Create, "put": eff.Put, "patch": eff.Patch,
-		} {
+		// In a fixed order: two effects with the same mistake must be reported
+		// the same way twice, and a map range does not do that.
+		for _, kind := range []string{"create", "put", "patch"} {
+			w := map[string]*WriteEffect{
+				"create": eff.Create, "put": eff.Put, "patch": eff.Patch,
+			}[kind]
 			if w == nil || !strings.HasPrefix(w.Spread, "input.") {
 				continue
 			}

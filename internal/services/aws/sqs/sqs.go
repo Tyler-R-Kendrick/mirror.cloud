@@ -1282,6 +1282,12 @@ func queueName(req *spi.Request) string {
 	if i := strings.LastIndex(u, "/"); i >= 0 {
 		return u[i+1:]
 	}
+	if req.HTTP != nil {
+		path := strings.TrimRight(req.HTTP.URL.Path, "/")
+		if i := strings.LastIndex(path, "/"); i >= 0 && i+1 < len(path) {
+			return path[i+1:]
+		}
+	}
 	return u
 }
 

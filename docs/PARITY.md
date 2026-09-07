@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 111 / 222 (50.0%) |
-| LocalStack SQS test functions not yet traced | 111 / 222 (50.0%) |
+| LocalStack SQS test functions explicitly traced | 113 / 222 (51.0%) |
+| LocalStack SQS test functions not yet traced | 109 / 222 (49.0%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -651,6 +651,8 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_dead_letter_queue_with_fifo_and_content_based_deduplication` | FIFO content-based deduplication and dead-letter redrive preserve group operation after a poison message moves; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and redrive mutants pin recovery | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_dead_letter_queue_max_receive_count` | A message exceeding max receive count leaves the source receive response and arrives once in the dead-letter queue; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and threshold mutants pin the boundary | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_non_existent_queue` | Deleted queues return the standard AWS non-existent-queue fault for JSON/SDK calls and the Query protocol's WSDL-specific message; atomic characterization, AWS SDK contract, raw HTTP BDD, and semantic mutation coverage pin protocol-specific errors | Mapped; focused green |
+| `test_sqs.py::TestSqsQueryApi::test_get_queue_attributes_all` | Query requests sent to a queue URL path return all queue attributes as repeated `Attribute` name/value members with partition-aware QueueArn and VisibilityTimeout; atomic codec characterization, raw HTTP contract, and semantic mutation coverage pin the wire shape | Mapped; focused green |
+| `test_sqs.py::TestSqsQueryApi::test_get_queue_attributes_with_query_args` | Query queue-URL requests honor a selected AttributeName and omit unrequested fields; raw HTTP contract and the shared attribute filtering characterization pin selection semantics | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_sequence_number` | FIFO SendMessage returns a SequenceNumber while standard SendMessage omits it; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and sequence mutants pin queue-type response shape | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_sequence_number_increases` | FIFO SequenceNumber values increase for successive sends; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and transactional sequence mutants pin monotonicity | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_high_throughput_ordering` | FIFO queues using message-group deduplication scope accept the same deduplication ID in distinct groups while retaining duplicate suppression within each group; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and scope/retry-digest mutants pin the behavior | Mapped; focused green |

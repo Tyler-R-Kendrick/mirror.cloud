@@ -70,7 +70,11 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 		fmt.Fprintf(&b, `<requestId>mirror</requestId></%sResponse>`, op.Name)
 	} else {
 		fmt.Fprintf(&b, `<%sResult>`, op.Name)
-		writeXML(&b, resp.Output)
+		if svc.ID == "aws.sqs" && op.Name == "GetQueueAttributes" {
+			writeSQSAttributes(&b, resp.Output["Attributes"])
+		} else {
+			writeXML(&b, resp.Output)
+		}
 		fmt.Fprintf(&b, `</%sResult><ResponseMetadata><RequestId>mirror</RequestId></ResponseMetadata></%sResponse>`, op.Name, op.Name)
 	}
 	_, err := io.WriteString(w, b.String())
@@ -97,6 +101,24 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 	w.WriteHeader(status)
 	_, err := fmt.Fprintf(w, `<ErrorResponse><Error><Type>%s</Type><Code>%s</Code><Message>%s</Message></Error><RequestId>%s</RequestId></ErrorResponse>`, typ, f.Code, xmlEscape(f.Message), requestID)
 	return err
+}
+
+func writeSQSAttributes(b *strings.Builder, value any) {
+	attrs, ok := value.(map[string]any)
+	if !ok {
+		writeXML(b, map[string]any{"Attributes": value})
+		return
+	}
+	keys := make([]string, 0, len(attrs))
+	for key := range attrs {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	b.WriteString("<Attributes>")
+	for _, key := range keys {
+		fmt.Fprintf(b, "<Attribute><Name>%s</Name><Value>%s</Value></Attribute>", xmlEscape(key), xmlEscape(fmt.Sprint(attrs[key])))
+	}
+	b.WriteString("</Attributes>")
 }
 
 func writeXML(b *strings.Builder, v any) {

@@ -18709,6 +18709,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestBootedServerSQSSection48",
 		},
 		{
+			name: "sqs-query-attributes-use-member-shape",
+			file: filepath.Join("internal", "proto", "aws", "awsquery", "awsquery.go"),
+			old:  `if svc.ID == "aws.sqs" && op.Name == "GetQueueAttributes" {`,
+			new:  `if false {`,
+			pkg:  "./internal/spine",
+			run:  "TestBootedServerSQSSection48",
+		},
+		{
 			name: "sqs-permission-policy-version",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  `pol := map[string]any{"Version": "2008-10-17", "Id": arn + "/SQSDefaultPolicy", "Statement": []any{}}`,

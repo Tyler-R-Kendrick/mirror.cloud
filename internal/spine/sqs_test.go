@@ -254,6 +254,28 @@ func TestBootedServerSQSSection48(t *testing.T) {
 	} else if h.Get("x-mirror-fidelity") != "emulate" {
 		t.Fatalf("query create fidelity %q", h.Get("x-mirror-fidelity"))
 	}
+	getReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/000000000000/queryq?Action=GetQueueAttributes&AttributeName.1=All", nil)
+	getReq.Header.Set("Authorization", auth)
+	getRes, err := http.DefaultClient.Do(getReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	getBody, _ := io.ReadAll(getRes.Body)
+	getRes.Body.Close()
+	if getRes.StatusCode != http.StatusOK || !strings.Contains(string(getBody), "<Name>QueueArn</Name>") || !strings.Contains(string(getBody), "<Name>VisibilityTimeout</Name>") {
+		t.Fatalf("query URL attributes %d %s", getRes.StatusCode, getBody)
+	}
+	getReq, _ = http.NewRequest(http.MethodGet, ts.URL+"/000000000000/queryq?Action=GetQueueAttributes&AttributeName.1=QueueArn", nil)
+	getReq.Header.Set("Authorization", auth)
+	getRes, err = http.DefaultClient.Do(getReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	getBody, _ = io.ReadAll(getRes.Body)
+	getRes.Body.Close()
+	if getRes.StatusCode != http.StatusOK || !strings.Contains(string(getBody), "<Name>QueueArn</Name>") || strings.Contains(string(getBody), "<Name>VisibilityTimeout</Name>") {
+		t.Fatalf("query URL selected attributes %d %s", getRes.StatusCode, getBody)
+	}
 	if code, body, _ := queryCall(url.Values{"Action": {"GetQueueAttributes"}, "Version": {"2012-11-05"}, "QueueName": {"missing-query-queue"}, "AttributeName.1": {"All"}}); code != http.StatusBadRequest || !strings.Contains(body, "AWS.SimpleQueueService.NonExistentQueue") || !strings.Contains(body, "for this wsdl version") {
 		t.Fatalf("query missing queue %d %s", code, body)
 	}

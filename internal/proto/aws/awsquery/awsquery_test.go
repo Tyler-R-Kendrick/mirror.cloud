@@ -83,3 +83,16 @@ func TestAWSQueryFaultsAndUnknownActions(t *testing.T) {
 		t.Fatalf("form encoding %q", got)
 	}
 }
+
+func TestSQSGetQueueAttributesQueryShape(t *testing.T) {
+	svc := &model.Service{ID: "aws.sqs", Protocol: model.ProtoAWSQuery}
+	op := &model.Operation{Name: "GetQueueAttributes"}
+	w := httptest.NewRecorder()
+	if err := (Codec{}).Encode(svc, op, w, &spi.Response{Output: map[string]any{"Attributes": map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:000000000000:q", "VisibilityTimeout": "30"}}}); err != nil {
+		t.Fatal(err)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "<Attributes><Attribute><Name>QueueArn</Name><Value>arn:aws:sqs:us-east-1:000000000000:q</Value></Attribute>") || !strings.Contains(body, "<Attribute><Name>VisibilityTimeout</Name><Value>30</Value></Attribute>") {
+		t.Fatalf("SQS Query attributes %s", body)
+	}
+}

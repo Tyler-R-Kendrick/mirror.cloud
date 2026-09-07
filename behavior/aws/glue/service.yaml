@@ -1,0 +1,284 @@
+schema: bir/1
+service: aws.glue
+
+# Transcribed from the hand-written pack, not established against the real
+# service. Nothing is catalogued and nothing runs: a table is whatever the
+# caller described, a crawler crawls nothing, and a job run is SUCCEEDED before
+# StartJobRun returns.
+provenance: authored
+
+resources:
+  # A database is addressed by DatabaseName wherever a table is involved and by
+  # Name everywhere else, and the order matters: a table operation carries both
+  # -- its own Name and its database's DatabaseName -- so trying Name first
+  # would scope every table under a database named for the table.
+  database:
+    collection: gldb
+    id:
+      input_members: [DatabaseName, Name]
+    record:
+      Name: id
+
+  table:
+    collection: "gltbl:{database.id}"
+    parent: database
+    id:
+      input_members: [Name]
+    record:
+      Name: id
+      DatabaseName: "'DatabaseName' in input ? string(input.DatabaseName) : ''"
+
+  job:
+    collection: gljob
+    id:
+      input_members: [JobName, Name]
+    record:
+      Name: id
+
+  jobrun:
+    collection: "glrun:{job.id}"
+    parent: job
+    id:
+      input_members: [RunId, JobRunId]
+    record:
+      Id: id
+      JobName: "'JobName' in input ? string(input.JobName) : ''"
+      JobRunState: "'SUCCEEDED'"
+
+  crawler:
+    collection: glcr
+    id:
+      input_members: [Name]
+
+errors:
+  InvalidInput:
+    code: InvalidInputException
+    http: 400
+    fault: client
+  NotFound:
+    code: EntityNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  # The name comes from inside the document, and the pack fell back to a
+  # top-level Name that CreateDatabase does not declare -- so the fallback was
+  # unreachable and the require is what a caller actually meets.
+  CreateDatabase:
+    require:
+      - cond: >
+          'DatabaseInput' in input && 'Name' in input.DatabaseInput
+            && string(input.DatabaseInput.Name) != ''
+        error: InvalidInput
+    effects:
+      - create:
+          resource: database
+          key: "string(input.DatabaseInput.Name)"
+          record:
+            Description: >
+              'Description' in input.DatabaseInput
+                ? string(input.DatabaseInput.Description) : ''
+
+  GetDatabase:
+    reads:
+      db: { resource: database }
+    require:
+      - { cond: db_found, error: NotFound }
+    output:
+      Database: db
+
+  GetDatabases:
+    list: { resource: database, member: DatabaseList, paginate: model }
+
+  # Only the description can be changed, and only to a non-empty value.
+  UpdateDatabase:
+    reads:
+      db: { resource: database }
+    require:
+      - { cond: db_found, error: NotFound }
+    effects:
+      - patch:
+          resource: database
+          record:
+            Description: >
+              'DatabaseInput' in input && 'Description' in input.DatabaseInput
+                && string(input.DatabaseInput.Description) != ''
+                ? string(input.DatabaseInput.Description)
+                : ('Description' in db ? db.Description : '')
+
+  DeleteDatabase:
+    effects:
+      - delete: { resource: database, missing: ignore }
+
+  # A create rather than a put, because the pack built the record from the
+  # request and stored that: a table keeps only the three members below, and
+  # re-creating one does not merge onto what was there.
+  CreateTable:
+    reads:
+      database: { resource: database }
+    effects:
+      - create:
+          resource: table
+          key: "'TableInput' in input && 'Name' in input.TableInput ? string(input.TableInput.Name) : ''"
+          record:
+            StorageDescriptor: >
+              'TableInput' in input && 'StorageDescriptor' in input.TableInput
+                ? input.TableInput.StorageDescriptor : null
+
+  GetTable:
+    reads:
+      database: { resource: database }
+      tbl: { resource: table }
+    require:
+      - { cond: tbl_found, error: NotFound }
+    output:
+      Table: tbl
+
+  GetTables:
+    reads:
+      database: { resource: database }
+    list: { resource: table, member: TableList, paginate: model }
+
+  # An update is the same create: the table is rebuilt from the request and
+  # whatever was stored is discarded, and a table that does not exist is
+  # created rather than faulted.
+  UpdateTable:
+    reads:
+      database: { resource: database }
+    effects:
+      - create:
+          resource: table
+          key: "'TableInput' in input && 'Name' in input.TableInput ? string(input.TableInput.Name) : ''"
+          record:
+            StorageDescriptor: >
+              'TableInput' in input && 'StorageDescriptor' in input.TableInput
+                ? input.TableInput.StorageDescriptor : null
+
+  DeleteTable:
+    reads:
+      database: { resource: database }
+    effects:
+      - delete: { resource: table, missing: ignore }
+
+  CreateJob:
+    effects:
+      - create:
+          resource: job
+          record:
+            Role: "'Role' in input ? string(input.Role) : ''"
+            Command: "'Command' in input ? input.Command : null"
+    output:
+      Name: id
+
+  GetJob:
+    reads:
+      j: { resource: job }
+    require:
+      - { cond: j_found, error: NotFound }
+    output:
+      Job: j
+
+  GetJobs:
+    list: { resource: job, member: Jobs, paginate: model }
+
+  DeleteJob:
+    effects:
+      - delete: { resource: job, missing: ignore }
+    output:
+      JobName: "'JobName' in input ? string(input.JobName) : ''"
+
+  StartJobRun:
+    reads:
+      job: { resource: job }
+    effects:
+      - generate: { bind: rid, kind: hex, bytes: 8 }
+      - create:
+          resource: jobrun
+          key: "'jr-' + fx.rid"
+    output:
+      JobRunId: id
+
+  GetJobRun:
+    reads:
+      job: { resource: job }
+      run: { resource: jobrun }
+    require:
+      - { cond: run_found, error: NotFound }
+    output:
+      JobRun: run
+
+  GetJobRuns:
+    reads:
+      job: { resource: job }
+    list: { resource: jobrun, member: JobRuns, paginate: model }
+
+  # The whole request is the crawler, which is what the pack stored.
+  CreateCrawler:
+    effects:
+      - create: { resource: crawler, spread: input }
+
+  # Tags are dropped from the answer: the whole request is stored, and Crawler
+  # declares every member of it except Tags -- which the real service reports
+  # through GetTags, not here.
+  GetCrawler:
+    reads:
+      c: { resource: crawler }
+    require:
+      - { cond: c_found, error: NotFound }
+    output:
+      Crawler: "without(c, ['Tags'])"
+
+  GetCrawlers:
+    list: { resource: crawler, member: Crawlers, paginate: model }
+    output:
+      Crawlers: "items.map(c, without(c, ['Tags']))"
+
+  DeleteCrawler:
+    effects:
+      - delete: { resource: crawler, missing: ignore }
+
+quirks:
+  - operation: CreateTable
+    note: >
+      A table keeps its name, its database and the StorageDescriptor it was
+      given, and nothing else: PartitionKeys, TableType, Parameters, Owner and
+      the rest of TableInput are accepted and discarded. Nothing checks the
+      database exists, so a table can be created in one that was never created
+      and GetTables on that database will list it.
+  - operation: UpdateTable
+    note: >
+      An update rebuilds the table from the request rather than merging, so a
+      StorageDescriptor the caller omits is not kept -- it is removed. It also
+      does not check the table exists, so an update to a table that was never
+      created creates one, where the real service answers
+      EntityNotFoundException. VersionId and SkipArchive are ignored, and there
+      are no versions to archive.
+  - operation: StartJobRun
+    note: >
+      A run is SUCCEEDED before StartJobRun returns, so nothing ever observes
+      RUNNING and a caller polling GetJobRun until the state settles never
+      waits. The run records no StartedOn, CompletedOn, ExecutionTime or
+      ErrorMessage. A caller-supplied JobRunId is ignored and an id is drawn
+      instead, and the job named is not checked to exist -- a run can be
+      started for a job that was never created.
+  - operation: CreateJob
+    note: >
+      A job keeps its name, its role and its command. Everything else the
+      request carries -- DefaultArguments, GlueVersion, WorkerType, Timeout,
+      MaxRetries -- is accepted and discarded, so a job answers a
+      configuration it was not created with. There is no UpdateJob, so a job
+      cannot be changed once created.
+  - operation: CreateCrawler
+    note: >
+      The whole request is stored as the crawler, which means a crawler
+      answers back the Tags it was created with, and Crawler declares no Tags
+      member -- so an SDK drops them. It also means Schedule is stored as the
+      cron string the caller sent, where Crawler declares Schedule as a
+      structure carrying that string and a state. Nothing crawls: the crawler
+      has no State, no CreationTime and no LastCrawl, StartCrawler is not
+      served, and no table is ever created from a target.
+  - operation: GetDatabases
+    note: >
+      Databases and crawlers are listed across the account and region with no
+      filter, and a table is listed only within its database. ResourceShareType
+      and AttributesToGet are ignored.

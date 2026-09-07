@@ -27,7 +27,6 @@ import (
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ecs"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/glue"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
@@ -2784,7 +2783,7 @@ func TestStatesSyncServiceIntegrations(t *testing.T) {
 	if builds := must(served(t, deps, "aws.codebuild"), "ListBuilds", nil)["ids"].([]any); len(builds) != 1 || !strings.HasPrefix(builds[0].(string), "project:") {
 		t.Fatalf("codebuild sync builds %#v", builds)
 	}
-	if runs := must(glue.New(deps), "GetJobRuns", map[string]any{"JobName": "job"})["JobRuns"].([]any); len(runs) != 1 || runs[0].(map[string]any)["JobRunState"] != "SUCCEEDED" {
+	if runs := must(served(t, deps, "aws.glue"), "GetJobRuns", map[string]any{"JobName": "job"})["JobRuns"].([]any); len(runs) != 1 || runs[0].(map[string]any)["JobRunState"] != "SUCCEEDED" {
 		t.Fatalf("glue sync runs %#v", runs)
 	}
 	if steps := must(served(t, deps, "aws.elasticmapreduce"), "ListSteps", map[string]any{"ClusterId": "j-test"})["Steps"].([]any); len(steps) != 1 {

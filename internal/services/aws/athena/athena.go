@@ -11,9 +11,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/glue"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -180,7 +180,10 @@ func (p *Pack) runQuery(ctx context.Context, req *spi.Request, sql, defDB, catal
 }
 
 func (p *Pack) scanTable(ctx context.Context, req *spi.Request, q sel) ([]any, []any, error) {
-	gp := glue.New(p.deps)
+	// Glue is a bundle now, so it is reached the way any service reaches
+	// another: through the registry-backed handler, which carries a build
+	// failure into the call rather than to this caller.
+	gp := bundled.Handler("aws.glue", p.deps)
 	tresp, err := gp.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetTable", Input: map[string]any{"DatabaseName": q.db, "Name": q.table}})
 	if err != nil {
 		return nil, nil, err

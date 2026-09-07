@@ -3,6 +3,7 @@ package sdk_test
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -1264,6 +1265,40 @@ func TestAWSSDKSQSMessageSystemAttributeDigestContract(t *testing.T) {
 	with, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("test"), MessageAttributes: attributes, MessageSystemAttributes: map[string]types.MessageSystemAttributeValue{"AWSTraceHeader": {DataType: aws.String("String"), StringValue: aws.String("Root=1-5759e988-bd862e3fe1be46a994272793;Parent=53995c3f42cd8ad8;Sampled=1")}}})
 	if err != nil || with.MD5OfMessageSystemAttributes == nil || aws.ToString(with.MD5OfMessageAttributes) != aws.ToString(without.MD5OfMessageAttributes) || aws.ToString(with.MD5OfMessageSystemAttributes) != "5ae4d5d7636402d80f4eb6d213245a88" {
 		t.Fatalf("without=%#v with=%#v error=%v", without, with, err)
+	}
+}
+
+func TestAWSSDKSQSTraceHeaderPropagationContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace := "Root=1-3152b799-8954dae64eda91bc9a23a7e8;Parent=7fa8c0f79203be72;Sampled=1"
+	awsConfig.HTTPClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		request = request.Clone(request.Context())
+		request.Header = request.Header.Clone()
+		request.Header.Set("X-Amzn-Trace-Id", trace)
+		return http.DefaultTransport.RoundTrip(request)
+	})}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-trace-header")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("test")}); err != nil {
+		t.Fatal(err)
+	}
+	received, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeName("AWSTraceHeader")}, MessageAttributeNames: []string{"All"}, VisibilityTimeout: 0})
+	if err != nil || len(received.Messages) != 1 || received.Messages[0].Attributes["AWSTraceHeader"] != trace {
+		t.Fatalf("trace receive %#v error %v", received, err)
 	}
 }
 

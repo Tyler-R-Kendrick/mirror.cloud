@@ -1209,8 +1209,9 @@ func TestConcurrentSQSMessageAttributeDigestsRemainStable(t *testing.T) {
 				return
 			}
 			attrs := map[string]any{"binary": map[string]any{"DataType": "Binary", "BinaryValue": base64.StdEncoding.EncodeToString([]byte{byte(index), 1, 2})}, "string": map[string]any{"DataType": "String", "StringValue": fmt.Sprintf("value-%d", index)}}
-			systemAttrs := map[string]any{"AWSTraceHeader": map[string]any{"DataType": "String", "StringValue": fmt.Sprintf("trace-%d", index)}}
-			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": "message", "MessageAttributes": attrs, "MessageSystemAttributes": systemAttrs}})
+			httpRequest := httptest.NewRequest("POST", "http://queue", nil)
+			httpRequest.Header.Set("X-Amzn-Trace-Id", fmt.Sprintf("trace-%d", index))
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, HTTP: httpRequest, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": "message", "MessageAttributes": attrs}})
 			if err != nil {
 				errs <- err
 				return

@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/base64"
 	"fmt"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -1244,6 +1245,31 @@ func FuzzMessageSystemAttributeDigest(f *testing.F) {
 		with, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-system-attribute-digest", "MessageBody": "message", "MessageAttributes": map[string]any{"kind": map[string]any{"DataType": "String", "StringValue": "value"}}, "MessageSystemAttributes": map[string]any{"AWSTraceHeader": map[string]any{"DataType": "String", "StringValue": value}}}})
 		if err != nil || with.Output["MD5OfMessageSystemAttributes"] == nil || with.Output["MD5OfMessageAttributes"] != without.Output["MD5OfMessageAttributes"] {
 			t.Fatalf("system digest without=%#v with=%#v error=%v", without.Output, with.Output, err)
+		}
+	})
+}
+
+func FuzzTraceHeaderPropagation(f *testing.F) {
+	f.Add("Root=1-5759e988")
+	f.Add("trace-parent")
+	f.Fuzz(func(t *testing.T, trace string) {
+		if len(trace) > 256 || trace == "" || !validMessageContents(trace) {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-trace-header"}}); err != nil {
+			t.Fatal(err)
+		}
+		httpRequest := httptest.NewRequest("POST", "http://queue", nil)
+		httpRequest.Header.Set("X-Amzn-Trace-Id", trace)
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, HTTP: httpRequest, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-trace-header", "MessageBody": "message"}}); err != nil {
+			t.Fatal(err)
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "fuzz-trace-header", "AttributeNames": []any{"AWSTraceHeader"}}})
+		if err != nil || len(response.Output["Messages"].([]any)) != 1 || asMap(response.Output["Messages"].([]any)[0].(map[string]any)["Attributes"])["AWSTraceHeader"] != trace {
+			t.Fatalf("trace %#v error %v", response.Output, err)
 		}
 	})
 }
@@ -3003,6 +3029,30 @@ func TestMessageSystemAttributeDigestCharacterization(t *testing.T) {
 		t.Fatalf("system digest without=%#v with=%#v", without.Output, with.Output)
 	}
 	golden.AssertJSON(t, map[string]any{"without": without.Output, "with": with.Output})
+}
+
+func TestTraceHeaderPropagationCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "trace-header"}}); err != nil {
+		t.Fatal(err)
+	}
+	httpRequest := httptest.NewRequest("POST", "http://queue", nil)
+	httpRequest.Header.Set("X-Amzn-Trace-Id", "Root=1-3152b799-8954dae64eda91bc9a23a7e8;Parent=7fa8c0f79203be72;Sampled=1")
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, HTTP: httpRequest, Operation: "SendMessage", Input: map[string]any{"QueueName": "trace-header", "MessageBody": "test", "MessageAttributes": map[string]any{"timestamp": map[string]any{"StringValue": "1493147359900", "DataType": "Number"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	received, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "trace-header", "AttributeNames": []any{"AWSTraceHeader"}, "MessageAttributeNames": []any{"All"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, _ := received.Output["Messages"].([]any)
+	if len(messages) != 1 || asMap(asMap(messages[0])["Attributes"])["AWSTraceHeader"] == nil {
+		t.Fatalf("trace header %#v", received.Output)
+	}
+	golden.AssertJSON(t, received.Output)
 }
 
 func faultCode(err error) string {

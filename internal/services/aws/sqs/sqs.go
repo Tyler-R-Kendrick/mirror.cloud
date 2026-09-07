@@ -467,7 +467,13 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	sum := md5.Sum([]byte(body))
 	md5hex := hex.EncodeToString(sum[:])
 	md5attrs := md5MessageAttributes(req.Input["MessageAttributes"])
-	md5system := md5MessageAttributes(req.Input["MessageSystemAttributes"])
+	systemAttrs := req.Input["MessageSystemAttributes"]
+	if len(asMap(systemAttrs)) == 0 && req.HTTP != nil {
+		if trace := req.HTTP.Header.Get("X-Amzn-Trace-Id"); trace != "" {
+			systemAttrs = map[string]any{"AWSTraceHeader": map[string]any{"DataType": "String", "StringValue": trace}}
+		}
+	}
+	md5system := md5MessageAttributes(systemAttrs)
 	attrs := p.queueAttrs(ctx, req, name)
 	maximum := 1 << 20
 	if configured := asInt(attrs["MaximumMessageSize"]); configured > 0 {
@@ -534,7 +540,7 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	id := p.deps.Rand.Hex(16)
 	rh := p.deps.Rand.Hex(64)
 	seq := p.nextSeq(ctx, req, name)
-	trace := str(asMap(asMap(req.Input["MessageSystemAttributes"])["AWSTraceHeader"])["StringValue"])
+	trace := str(asMap(asMap(systemAttrs)["AWSTraceHeader"])["StringValue"])
 	msg := map[string]any{
 		"id": id, "body": body, "handle": rh, "md5": md5hex, "md5Attrs": md5attrs,
 		"group": group, "seq": seq,

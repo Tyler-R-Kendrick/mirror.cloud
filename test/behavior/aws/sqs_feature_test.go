@@ -460,6 +460,29 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("with system digest %d %s", status, body)
 		}
 	})
+	t.Run("Given an X-Amzn-Trace-Id header When sending Then AWSTraceHeader is retained", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-trace-header"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		trace := "Root=1-3152b799-8954dae64eda91bc9a23a7e8;Parent=7fa8c0f79203be72;Sampled=1"
+		request, _ := http.NewRequest(http.MethodPost, server.URL, strings.NewReader(`{"QueueUrl":"http://queue/000000000000/bdd-trace-header","MessageBody":"test"}`))
+		request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=00")
+		request.Header.Set("Content-Type", "application/x-amz-json-1.0")
+		request.Header.Set("X-Amz-Target", "AmazonSQS.SendMessage")
+		request.Header.Set("X-Amzn-Trace-Id", trace)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("send with trace %d", response.StatusCode)
+		}
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-trace-header","AttributeNames":["AWSTraceHeader"]}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(trace)) {
+			t.Fatalf("trace receive %d %s", status, body)
+		}
+	})
 	t.Run("Given an empty or reserved message attribute When sending Then validation fails", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-attribute-validation"}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

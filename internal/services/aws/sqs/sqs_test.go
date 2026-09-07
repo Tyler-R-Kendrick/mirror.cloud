@@ -2381,6 +2381,36 @@ func TestCreateAndUpdateQueueAttributesCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"before": before.Output, "after": after.Output})
 }
 
+func TestMessageMoveTaskValidationCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(input map[string]any) map[string]any {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: input})
+		fault, ok := err.(*spi.Fault)
+		if !ok {
+			t.Fatalf("move task error %#v", err)
+		}
+		return map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "move-plain"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "move-destination"}}); err != nil {
+		t.Fatal(err)
+	}
+	invalidSource := call(map[string]any{"SourceArn": queueARN(&spi.Request{Identity: id}, "move-plain"), "DestinationArn": queueARN(&spi.Request{Identity: id}, "move-destination")})
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "move-dlq"}}); err != nil {
+		t.Fatal(err)
+	}
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:move-dlq","maxReceiveCount":"1"}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "move-source", "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+		t.Fatal(err)
+	}
+	missingDestination := call(map[string]any{"SourceArn": queueARN(&spi.Request{Identity: id}, "move-dlq"), "DestinationArn": queueARN(&spi.Request{Identity: id}, "missing-destination")})
+	golden.AssertJSON(t, map[string]any{"invalidSource": invalidSource, "missingDestination": missingDestination})
+}
+
 func TestQueueAdvertiseURLCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

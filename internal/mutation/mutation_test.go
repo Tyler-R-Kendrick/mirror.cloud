@@ -18627,6 +18627,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSSEAttributesCharacterization",
 		},
 		{
+			name: "sqs-allow-move-from-non-dlq",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if !p.queueExists(ctx, req, src) || !p.isDeadLetterQueue(ctx, req, sourceArn) {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestMessageMoveTaskValidationCharacterization",
+		},
+		{
+			name: "sqs-allow-move-to-missing-destination",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if dst != "" && !p.queueExists(ctx, req, dst) {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestMessageMoveTaskValidationCharacterization",
+		},
+		{
 			name: "sqs-disable-message-delay",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "now.Add(time.Duration(delay) * time.Second).UnixNano()",

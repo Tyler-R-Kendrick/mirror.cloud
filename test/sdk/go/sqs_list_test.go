@@ -1875,6 +1875,58 @@ func TestAWSSDKSQSQueueArnPartitionContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSMessageMoveTaskValidationContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	plain, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-move-plain")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-move-destination")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainAttrs, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: plain.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameQueueArn}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	destinationAttrs, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: destination.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameQueueArn}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.StartMessageMoveTask(context.Background(), &sqs.StartMessageMoveTaskInput{SourceArn: aws.String(plainAttrs.Attributes["QueueArn"]), DestinationArn: aws.String(destinationAttrs.Attributes["QueueArn"])})
+	if err == nil || !strings.Contains(err.Error(), "Dead Letter Queue") {
+		t.Fatalf("source validation error %v", err)
+	}
+	dlq, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-move-dlq")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dlqAttrs, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: dlq.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameQueueArn}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := fmt.Sprintf(`{"deadLetterTargetArn":"%s","maxReceiveCount":"1"}`, dlqAttrs.Attributes["QueueArn"])
+	if _, err := client.SetQueueAttributes(context.Background(), &sqs.SetQueueAttributesInput{QueueUrl: plain.QueueUrl, Attributes: map[string]string{"RedrivePolicy": policy}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.StartMessageMoveTask(context.Background(), &sqs.StartMessageMoveTaskInput{SourceArn: aws.String(dlqAttrs.Attributes["QueueArn"]), DestinationArn: aws.String("arn:aws:sqs:us-east-1:000000000000:missing")})
+	if err == nil || !strings.Contains(err.Error(), "DestinationArn") {
+		t.Fatalf("destination validation error %v", err)
+	}
+}
+
 func TestAWSSDKSQSFIFOQueueNameValidationContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

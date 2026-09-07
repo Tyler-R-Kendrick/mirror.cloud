@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 97 / 222 (43.7%) |
-| LocalStack SQS test functions not yet traced | 125 / 222 (56.3%) |
+| LocalStack SQS test functions explicitly traced | 99 / 222 (44.6%) |
+| LocalStack SQS test functions not yet traced | 123 / 222 (55.4%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -700,3 +700,5 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_disallow_queue_name_with_slashes` | CreateQueue rejects slash-containing names with `InvalidParameterValue`; the existing queue-name characterization, AWS SDK, raw HTTP BDD, native fuzz, concurrent chaos/race, and queue-name mutation stack pin the trust boundary | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_message_group_visibility_after_delete` | Deleting all in-flight FIFO messages releases the group and preserves other-group ordering; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, fuzz, concurrent chaos/race, and sequence-order mutation coverage pin the drain | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_message_group_visibility_after_partial_delete` | Deleting only part of an in-flight FIFO group keeps its successor blocked while other groups drain; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, fuzz, concurrent chaos/race, and sequence-order mutation coverage pin the isolation | Mapped; focused green |
+| `test_sqs_move_task.py::test_source_needs_redrive_policy` | StartMessageMoveTask rejects a source queue that is not referenced as a dead-letter target with the exact InvalidParameterValue fault; atomic Verify-style snapshot, AWS SDK contract, raw HTTP BDD, and concurrent chaos/race validation cover the guard | Mapped; focused green |
+| `test_sqs_move_task.py::test_destination_needs_to_exist` | StartMessageMoveTask rejects a nonexistent destination ARN with the exact 404 ResourceNotFoundException; atomic Verify-style snapshot, AWS SDK contract, raw HTTP BDD, and concurrent chaos/race validation cover the guard | Mapped; focused green |

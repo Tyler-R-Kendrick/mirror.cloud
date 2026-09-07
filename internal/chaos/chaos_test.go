@@ -7389,3 +7389,44 @@ func TestConcurrentSQSQueueAttributeUpdatesAreStable(t *testing.T) {
 		}
 	}
 }
+
+func TestConcurrentSQSMessageMoveTaskValidationIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	for _, name := range []string{"chaos-move-plain", "chaos-move-destination", "chaos-move-dlq", "chaos-move-source"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:chaos-move-dlq","maxReceiveCount":"1"}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "chaos-move-source", "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: map[string]any{"SourceArn": "arn:aws:sqs:us-east-1:000000000000:chaos-move-plain", "DestinationArn": "arn:aws:sqs:us-east-1:000000000000:chaos-move-destination"}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidParameterValue" {
+				errs <- fmt.Errorf("source validation %#v", err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: map[string]any{"SourceArn": "arn:aws:sqs:us-east-1:000000000000:chaos-move-dlq", "DestinationArn": "arn:aws:sqs:us-east-1:000000000000:missing"}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "ResourceNotFoundException" {
+				errs <- fmt.Errorf("destination validation %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}

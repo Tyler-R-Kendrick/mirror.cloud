@@ -1,0 +1,14 @@
+{
+  "invalidSource": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "Source queue must be configured as a Dead Letter Queue."
+  },
+  "missingDestination": {
+    "Code": "ResourceNotFoundException",
+    "Fault": "client",
+    "HTTPStatus": 404,
+    "Message": "The resource that you specified for the DestinationArn parameter doesn't exist."
+  }
+}

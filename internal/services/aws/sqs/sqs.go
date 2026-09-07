@@ -1422,14 +1422,23 @@ func (p *Pack) listDeadLetterSources(ctx context.Context, req *spi.Request) (*sp
 }
 
 func (p *Pack) startMove(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	src := arnQueue(str(req.Input["SourceArn"]))
+	sourceArn := str(req.Input["SourceArn"])
+	src := arnQueue(sourceArn)
 	if src == "" {
 		src = queueName(req)
+		sourceArn = queueARN(req, src)
 	}
 	if src == "" {
 		return nil, &spi.Fault{Code: "MissingParameter", Message: "SourceArn", HTTPStatus: 400, Fault: "client"}
 	}
-	dst := arnQueue(str(req.Input["DestinationArn"]))
+	if !p.queueExists(ctx, req, src) || !p.isDeadLetterQueue(ctx, req, sourceArn) {
+		return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "Source queue must be configured as a Dead Letter Queue.", HTTPStatus: 400, Fault: "client"}
+	}
+	destinationArn := str(req.Input["DestinationArn"])
+	dst := arnQueue(destinationArn)
+	if dst != "" && !p.queueExists(ctx, req, dst) {
+		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "The resource that you specified for the DestinationArn parameter doesn't exist.", HTTPStatus: 404, Fault: "client"}
+	}
 	kvs, _, _ := p.col(req, "msgs:"+src).List(ctx, "", "", 0)
 	moved := 0
 	now := p.deps.Clock.Now().UnixNano()
@@ -1453,7 +1462,7 @@ func (p *Pack) startMove(ctx context.Context, req *spi.Request) (*spi.Response, 
 	handle := p.deps.Rand.Hex(16)
 	rec := map[string]any{
 		"TaskHandle": handle, "Status": "COMPLETED",
-		"SourceArn": req.Input["SourceArn"], "DestinationArn": req.Input["DestinationArn"],
+		"SourceArn": sourceArn, "DestinationArn": req.Input["DestinationArn"],
 		"ApproximateNumberOfMessagesMoved": moved,
 		"StartedTimestamp":                 p.deps.Clock.Now().Unix(),
 		"source":                           src,
@@ -1461,6 +1470,27 @@ func (p *Pack) startMove(ctx context.Context, req *spi.Request) (*spi.Response, 
 	b, _ := json.Marshal(rec)
 	_ = p.col(req, "qmove").Put(ctx, handle, b)
 	return &spi.Response{Output: map[string]any{"TaskHandle": handle}}, nil
+}
+
+func (p *Pack) isDeadLetterQueue(ctx context.Context, req *spi.Request, targetArn string) bool {
+	kvs, _, _ := p.col(req, "queues").List(ctx, "", "", 0)
+	for _, kv := range kvs {
+		var meta map[string]any
+		if json.Unmarshal(kv.Value, &meta) != nil {
+			continue
+		}
+		name := str(meta["name"])
+		attrs := p.queueAttrs(ctx, req, name)
+		var policy map[string]any
+		if json.Unmarshal([]byte(str(attrs["RedrivePolicy"])), &policy) == nil && str(policy["deadLetterTargetArn"]) == targetArn {
+			return true
+		}
+	}
+	return false
+}
+
+func queueARN(req *spi.Request, name string) string {
+	return fmt.Sprintf("arn:%s:sqs:%s:%s:%s", arnPartition(req.Identity.Region), req.Identity.Region, req.Identity.Account, name)
 }
 
 func (p *Pack) cancelMove(ctx context.Context, req *spi.Request) (*spi.Response, error) {

@@ -1179,6 +1179,24 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("updated attributes %d %s", status, body)
 		}
 	})
+	t.Run("Given a move task When source or destination is invalid Then the exact resource fault is returned", func(t *testing.T) {
+		for _, name := range []string{"bdd-move-plain", "bdd-move-destination", "bdd-move-dlq", "bdd-move-source"} {
+			if status, body := call("CreateQueue", `{"QueueName":"`+name+`"}`); status != http.StatusOK {
+				t.Fatalf("create %s %d %s", name, status, body)
+			}
+		}
+		if status, body := call("StartMessageMoveTask", `{"SourceArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-plain","DestinationArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-destination"}`); status != http.StatusBadRequest || !bytes.Contains(body, []byte("Dead Letter Queue")) {
+			t.Fatalf("source validation %d %s", status, body)
+		}
+		policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-dlq","maxReceiveCount":"1"}`
+		if status, body := call("SetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-move-source","Attributes":{"RedrivePolicy":`+strconv.Quote(policy)+`}}`); status != http.StatusOK {
+			t.Fatalf("set policy %d %s", status, body)
+		}
+		status, body := call("StartMessageMoveTask", `{"SourceArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-dlq","DestinationArn":"arn:aws:sqs:us-east-1:000000000000:missing-destination"}`)
+		if status != http.StatusNotFound || !bytes.Contains(body, []byte("DestinationArn")) {
+			t.Fatalf("destination validation %d %s", status, body)
+		}
+	})
 }
 
 func TestSQSAdvertisedQueueURLBDD(t *testing.T) {

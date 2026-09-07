@@ -1,0 +1,613 @@
+{
+  "schema": "trace/1",
+  "service": "aws.config",
+  "source": "pack:internal/services/aws/configservice@b4b9039e",
+  "note": "The documents a caller sends stored whole, and the evaluations that are the only resources this service has ever seen.",
+  "steps": [
+    {
+      "operation": "DescribeConfigurationRecorders",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ConfigurationRecorders": null
+      }
+    },
+    {
+      "operation": "PutConfigurationRecorder",
+      "input": {
+        "ConfigurationRecorder": {
+          "name": "primary",
+          "recordingGroup": {
+            "allSupported": true
+          },
+          "roleARN": "arn:aws:iam::000000000000:role/config"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "PutConfigurationRecorder",
+      "input": {
+        "ConfigurationRecorder": {
+          "name": "default",
+          "roleARN": "arn:aws:iam::000000000000:role/other"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeConfigurationRecorders",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ConfigurationRecorders": [
+          {
+            "name": "default",
+            "roleARN": "arn:aws:iam::000000000000:role/other"
+          },
+          {
+            "name": "primary",
+            "recordingGroup": {
+              "allSupported": true
+            },
+            "roleARN": "arn:aws:iam::000000000000:role/config"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "StartConfigurationRecorder",
+      "input": {
+        "ConfigurationRecorderName": "primary"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeConfigurationRecorders",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ConfigurationRecorders": [
+          {
+            "name": "default",
+            "roleARN": "arn:aws:iam::000000000000:role/other"
+          },
+          {
+            "name": "primary",
+            "recording": true,
+            "recordingGroup": {
+              "allSupported": true
+            },
+            "roleARN": "arn:aws:iam::000000000000:role/config"
+          }
+        ]
+      },
+      "superseded_members": {
+        "ConfigurationRecorders[1].recording": "The pack set a `recording` flag on the stored configuration recorder when it was started or stopped. ConfigurationRecorder declares no such member -- whether a recorder is running is reported by DescribeConfigurationRecorderStatus, which this service does not serve -- so it was a member no SDK could read off a described recorder. The bundle does not store it, and start and stop change nothing either way, which is what the flag amounted to. Every other member of these steps is still compared."
+      }
+    },
+    {
+      "operation": "StopConfigurationRecorder",
+      "input": {
+        "ConfigurationRecorderName": "primary"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "StartConfigurationRecorder",
+      "input": {
+        "ConfigurationRecorderName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteConfigurationRecorder",
+      "input": {
+        "ConfigurationRecorderName": "default"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeConfigurationRecorders",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ConfigurationRecorders": [
+          {
+            "name": "primary",
+            "recording": false,
+            "recordingGroup": {
+              "allSupported": true
+            },
+            "roleARN": "arn:aws:iam::000000000000:role/config"
+          }
+        ]
+      },
+      "superseded_members": {
+        "ConfigurationRecorders[0].recording": "The pack set a `recording` flag on the stored configuration recorder when it was started or stopped. ConfigurationRecorder declares no such member -- whether a recorder is running is reported by DescribeConfigurationRecorderStatus, which this service does not serve -- so it was a member no SDK could read off a described recorder. The bundle does not store it, and start and stop change nothing either way, which is what the flag amounted to. Every other member of these steps is still compared."
+      }
+    },
+    {
+      "operation": "DeleteConfigurationRecorder",
+      "input": {
+        "ConfigurationRecorderName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "PutDeliveryChannel",
+      "input": {
+        "DeliveryChannel": {
+          "name": "chan",
+          "s3BucketName": "config-bucket",
+          "s3KeyPrefix": "cfg/"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "PutDeliveryChannel",
+      "input": {
+        "DeliveryChannel": {
+          "name": "default",
+          "s3BucketName": "other-bucket"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeDeliveryChannels",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DeliveryChannels": [
+          {
+            "name": "chan",
+            "s3BucketName": "config-bucket",
+            "s3KeyPrefix": "cfg/"
+          },
+          {
+            "name": "default",
+            "s3BucketName": "other-bucket"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDeliveryChannel",
+      "input": {
+        "DeliveryChannelName": "chan"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeDeliveryChannels",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DeliveryChannels": [
+          {
+            "name": "default",
+            "s3BucketName": "other-bucket"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutConfigRule",
+      "input": {
+        "ConfigRule": {
+          "ConfigRuleArn": "arn:aws:config:us-east-1:000000000000:config-rule/s3-encrypted",
+          "ConfigRuleName": "s3-encrypted",
+          "ConfigRuleState": "ACTIVE",
+          "Description": "buckets are encrypted",
+          "Source": {
+            "Owner": "AWS",
+            "SourceIdentifier": "S3_BUCKET_SSE_ENABLED"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeConfigRules",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ConfigRules": [
+          {
+            "ConfigRuleArn": "arn:aws:config:us-east-1:000000000000:config-rule/s3-encrypted",
+            "ConfigRuleName": "s3-encrypted",
+            "ConfigRuleState": "ACTIVE",
+            "Description": "buckets are encrypted",
+            "Source": {
+              "Owner": "AWS",
+              "SourceIdentifier": "S3_BUCKET_SSE_ENABLED"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutConfigRule",
+      "input": {
+        "ConfigRule": {
+          "Source": {
+            "Owner": "AWS",
+            "SourceIdentifier": "X"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidParameterValueException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteConfigRule",
+      "input": {
+        "ConfigRuleName": "s3-encrypted"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeConfigRules",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ConfigRules": null
+      }
+    },
+    {
+      "operation": "DescribeComplianceByConfigRule",
+      "input": {
+        "ConfigRuleNames": [
+          "s3-encrypted"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ComplianceByConfigRules": [
+          {
+            "Compliance": {
+              "ComplianceType": "INSUFFICIENT_DATA"
+            },
+            "ConfigRuleName": ""
+          }
+        ]
+      }
+    },
+    {
+      "operation": "PutEvaluations",
+      "input": {
+        "Evaluations": [
+          {
+            "Annotation": "no encryption",
+            "ComplianceResourceId": "bucket-a",
+            "ComplianceResourceType": "AWS::S3::Bucket",
+            "ComplianceType": "NON_COMPLIANT",
+            "OrderingTimestamp": "2020-01-01T00:00:00Z"
+          },
+          {
+            "ComplianceResourceId": "bucket-b",
+            "ComplianceResourceType": "AWS::S3::Bucket",
+            "ComplianceType": "COMPLIANT",
+            "OrderingTimestamp": "2020-01-01T00:00:00Z"
+          },
+          {
+            "ComplianceResourceId": "",
+            "ComplianceResourceType": "AWS::S3::Bucket",
+            "ComplianceType": "COMPLIANT",
+            "OrderingTimestamp": "2020-01-01T00:00:00Z"
+          }
+        ],
+        "ResultToken": "token"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FailedEvaluations": []
+      }
+    },
+    {
+      "operation": "GetComplianceDetailsByConfigRule",
+      "input": {
+        "ConfigRuleName": "s3-encrypted"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EvaluationResults": [
+          {
+            "Annotation": "no encryption",
+            "ComplianceResourceId": "bucket-a",
+            "ComplianceResourceType": "AWS::S3::Bucket",
+            "ComplianceType": "NON_COMPLIANT",
+            "OrderingTimestamp": "2020-01-01T00:00:00Z"
+          },
+          {
+            "ComplianceResourceId": "bucket-b",
+            "ComplianceResourceType": "AWS::S3::Bucket",
+            "ComplianceType": "COMPLIANT",
+            "OrderingTimestamp": "2020-01-01T00:00:00Z"
+          }
+        ]
+      },
+      "superseded_members": {
+        "EvaluationResults[0].ComplianceResourceId": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "EvaluationResults[0].ComplianceResourceType": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "EvaluationResults[0].EvaluationResultIdentifier": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "EvaluationResults[0].OrderingTimestamp": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "EvaluationResults[1].ComplianceResourceId": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "EvaluationResults[1].ComplianceResourceType": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "EvaluationResults[1].EvaluationResultIdentifier": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "EvaluationResults[1].OrderingTimestamp": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped."
+      }
+    },
+    {
+      "operation": "DescribeComplianceByConfigRule",
+      "input": {
+        "ConfigRuleNames": [
+          "s3-encrypted"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ComplianceByConfigRules": [
+          {
+            "Compliance": {
+              "ComplianceType": "NON_COMPLIANT"
+            },
+            "ConfigRuleName": ""
+          }
+        ]
+      }
+    },
+    {
+      "operation": "ListDiscoveredResources",
+      "input": {
+        "resourceType": "AWS::S3::Bucket"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "resourceIdentifiers": [
+          {
+            "Annotation": "no encryption",
+            "ComplianceResourceId": "bucket-a",
+            "ComplianceResourceType": "AWS::S3::Bucket",
+            "ComplianceType": "NON_COMPLIANT",
+            "OrderingTimestamp": "2020-01-01T00:00:00Z"
+          },
+          {
+            "ComplianceResourceId": "bucket-b",
+            "ComplianceResourceType": "AWS::S3::Bucket",
+            "ComplianceType": "COMPLIANT",
+            "OrderingTimestamp": "2020-01-01T00:00:00Z"
+          }
+        ]
+      },
+      "superseded_members": {
+        "resourceIdentifiers[0].Annotation": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "resourceIdentifiers[0].ComplianceResourceId": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "resourceIdentifiers[0].ComplianceResourceType": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "resourceIdentifiers[0].ComplianceType": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "resourceIdentifiers[0].OrderingTimestamp": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "resourceIdentifiers[0].resourceId": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "resourceIdentifiers[0].resourceType": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "resourceIdentifiers[1].ComplianceResourceId": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "resourceIdentifiers[1].ComplianceResourceType": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "resourceIdentifiers[1].ComplianceType": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "resourceIdentifiers[1].OrderingTimestamp": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "resourceIdentifiers[1].resourceId": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "resourceIdentifiers[1].resourceType": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped."
+      }
+    },
+    {
+      "operation": "GetResourceConfigHistory",
+      "input": {
+        "resourceId": "bucket-a",
+        "resourceType": "AWS::S3::Bucket"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "configurationItems": [
+          {
+            "Annotation": "no encryption",
+            "ComplianceResourceId": "bucket-a",
+            "ComplianceResourceType": "AWS::S3::Bucket",
+            "ComplianceType": "NON_COMPLIANT",
+            "OrderingTimestamp": "2020-01-01T00:00:00Z"
+          }
+        ]
+      },
+      "superseded_members": {
+        "configurationItems[0].Annotation": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "configurationItems[0].ComplianceResourceId": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "configurationItems[0].ComplianceResourceType": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "configurationItems[0].ComplianceType": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "configurationItems[0].OrderingTimestamp": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "configurationItems[0].resourceId": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped.",
+        "configurationItems[0].resourceType": "The pack answered the Evaluation a caller pushed in through PutEvaluations, unchanged, from three different operations whose response shapes are three different things: EvaluationResult, ResourceIdentifier and ConfigurationItem. None of them declares ComplianceResourceId, ComplianceResourceType, ComplianceType, Annotation or OrderingTimestamp, so every member of every row was one no SDK could read. The bundle stores the evaluation as the pack did and projects it into what each shape declares -- an EvaluationResultIdentifier here, a resourceId and resourceType there -- so the members diverge in both directions by construction. The number of rows and their order are still compared, which is what shows the entry carrying no resource id was skipped."
+      }
+    },
+    {
+      "operation": "GetResourceConfigHistory",
+      "input": {
+        "resourceId": "absent",
+        "resourceType": "AWS::S3::Bucket"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "configurationItems": null
+      }
+    }
+  ]
+}

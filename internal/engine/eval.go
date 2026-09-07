@@ -481,7 +481,10 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 	if _, ok := ev.e.ir.Resources[w.Resource]; !ok {
 		return fmt.Errorf("engine: %s: unknown resource %q", path, w.Resource)
 	}
-	if w.When != "" {
+	// A guard on a write with no for_each decides the whole effect, and is
+	// evaluated here where there is nothing per-element to see. A guard on a
+	// for_each is evaluated per element instead -- see below.
+	if w.When != "" && w.ForEach == "" {
 		ok, err := ev.evalBool(path + ".when")
 		if err != nil {
 			return err
@@ -522,11 +525,75 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 	}()
 	for _, e := range list {
 		ev.binds["item"] = e
+		// The guard runs per element, because a batch's elements are not all
+		// alike: Config's PutEvaluations stores an evaluation per entry and
+		// skips the entries carrying no resource id, where writing them would
+		// put every such entry in the account on one row keyed by the empty
+		// string. A guard evaluated once, before any element is bound, cannot
+		// express that.
+		if w.When != "" {
+			ok, err := ev.evalBool(path + ".when")
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
+		}
 		if err := ev.writeOne(ctx, path, w, create); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// spread resolves what a write copies wholesale into its record.
+//
+// Three forms, and they are the three that keep the copy safe: `input` is the
+// whole request, `input.<Member>` is one of its members, and `item` is the
+// element a for_each is on -- which is itself an element of a member. Every
+// one of them has been checked against the generated input shape before any
+// effect runs, so a spread still cannot store something no SDK could have
+// sent. A read binding would not have been, which is why it is not a form.
+func (ev *eval) spread(from string) (map[string]any, error) {
+	if from == "item" {
+		m, ok := ev.binds["item"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("`item` is %T, not a record", ev.binds["item"])
+		}
+		return m, nil
+	}
+	parts := strings.Split(from, ".")
+	if parts[0] != "input" {
+		return nil, fmt.Errorf("%q is not rooted at `input`", from)
+	}
+	// A member the request did not carry spreads nothing, which is what the
+	// packs this transcribes do: PutConfigurationRecorder with no
+	// ConfigurationRecorder stores the name and nothing else. That holds at
+	// every level of the path, not only the last: `input.A.B` where the
+	// request carries no A is a request that did not carry the value, exactly
+	// as `input.A` is, and erroring on one while spreading nothing for the
+	// other would make the depth of the path decide whether an absent member
+	// is a fault.
+	var cur any = ev.req.Input
+	for _, name := range parts[1:] {
+		if cur == nil {
+			return nil, nil
+		}
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%s is %T, not a record", from, cur)
+		}
+		cur = m[name]
+	}
+	if cur == nil {
+		return nil, nil
+	}
+	m, ok := cur.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%s is %T, not a record", from, cur)
+	}
+	return m, nil
 }
 
 // writeOne creates or updates one record. On create, an ID is generated when
@@ -610,8 +677,12 @@ func (ev *eval) writeOne(ctx context.Context, path string, w bir.WriteEffect, cr
 	// the half that cannot be written as expressions: a bundle enumerating the
 	// input shape would store a null for each member the caller omitted, and a
 	// later Get would answer those nulls.
-	if w.Spread == "input" {
-		for k, v := range ev.req.Input {
+	if w.Spread != "" {
+		src, err := ev.spread(w.Spread)
+		if err != nil {
+			return fmt.Errorf("engine: %s: spread: %w", path, err)
+		}
+		for k, v := range src {
 			rec[k] = v
 		}
 	}

@@ -26,7 +26,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cloudformation"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cloudfront"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/cognitoidp"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/configservice"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ec2"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ecr"

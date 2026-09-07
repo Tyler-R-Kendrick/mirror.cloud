@@ -5700,20 +5700,22 @@ var mutants = []mutant{
 		// out, and nothing in the response says so.
 		name: "engine-for-each-writes-only-the-last-element",
 		file: filepath.Join("internal", "engine", "eval.go"),
-		old: `	for _, e := range list {
-		ev.binds["item"] = e
-		if err := ev.writeOne(ctx, path, w, create); err != nil {
+		old: `		if err := ev.writeOne(ctx, path, w, create); err != nil {
 			return err
 		}
-	}`,
-		new: `	for _, e := range list {
-		ev.binds["item"] = e
+	}
+	return nil
+}`,
+		new: `		_ = ev.writeOne
 	}
 	if len(list) > 0 {
+		ev.binds["item"] = list[len(list)-1]
 		if err := ev.writeOne(ctx, path, w, create); err != nil {
 			return err
 		}
-	}`,
+	}
+	return nil
+}`,
 		pkg: "./internal/engine",
 		run: "TestForEachWritesOneRecordPerElement",
 	},
@@ -5747,8 +5749,8 @@ var mutants = []mutant{
 		// this replaced would have been lost silently.
 		name: "engine-write-drops-the-spread",
 		file: filepath.Join("internal", "engine", "eval.go"),
-		old:  `if w.Spread == "input" {`,
-		new:  `if w.Spread == "input" && false {`,
+		old:  `	if w.Spread != "" {`,
+		new:  `	if w.Spread != "" && false {`,
 		pkg:  "./internal/engine",
 		run:  "TestSpreadStoresWhatTheRequestCarried",
 	},
@@ -5758,16 +5760,91 @@ var mutants = []mutant{
 		// not be able to set.
 		name: "engine-spread-outranks-declared-members",
 		file: filepath.Join("internal", "engine", "eval.go"),
-		old: `	if w.Spread == "input" {
-		for k, v := range ev.req.Input {
+		old: `	if w.Spread != "" {
+		src, err := ev.spread(w.Spread)
+		if err != nil {
+			return fmt.Errorf("engine: %s: spread: %w", path, err)
+		}
+		for k, v := range src {
 			rec[k] = v
 		}
 	}
 
-	// Resource-level record members first, then effect-level overrides.`,
-		new: `	// Resource-level record members first, then effect-level overrides.`,
+	// Resource-level record members first, then effect-level overrides.
+	for _, k := range sortedKeysAny(res.Record) {
+		v, err := ev.recordValue(ctx, "resources."+w.Resource+".record."+k, res.Record[k])
+		if err != nil {
+			return err
+		}
+		rec[k] = v
+	}
+	for _, k := range sortedKeysAny(w.Record) {
+		v, err := ev.recordValue(ctx, path+".record."+k, w.Record[k])
+		if err != nil {
+			return err
+		}
+		rec[k] = v
+	}`,
+		new: `	for _, k := range sortedKeysAny(res.Record) {
+		v, err := ev.recordValue(ctx, "resources."+w.Resource+".record."+k, res.Record[k])
+		if err != nil {
+			return err
+		}
+		rec[k] = v
+	}
+	for _, k := range sortedKeysAny(w.Record) {
+		v, err := ev.recordValue(ctx, path+".record."+k, w.Record[k])
+		if err != nil {
+			return err
+		}
+		rec[k] = v
+	}
+	if w.Spread != "" {
+		src, err := ev.spread(w.Spread)
+		if err != nil {
+			return fmt.Errorf("engine: %s: spread: %w", path, err)
+		}
+		for k, v := range src {
+			rec[k] = v
+		}
+	}`,
 		pkg: "./internal/engine",
 		run: "TestDeclaredMembersWinOverTheSpread",
+	},
+	{
+		// A spread that stops descending stores the whole request where the
+		// bundle asked for one member of it. Nothing faults: the record simply
+		// gains a member named for the document instead of the document's own
+		// members, and only a read that counts them notices.
+		name: "engine-spread-ignores-the-member-path",
+		file: filepath.Join("internal", "engine", "eval.go"),
+		old: `	var cur any = ev.req.Input
+	for _, name := range parts[1:] {`,
+		new: `	var cur any = ev.req.Input
+	for _, name := range parts[len(parts):] {`,
+		pkg: "./internal/engine",
+		run: "TestSpreadOfAMemberStoresNothingItWasNotSent",
+	},
+	{
+		// A guard on a batch write that is not evaluated per element writes
+		// every element or none. The failure is not a missing row: it is the
+		// row keyed by the empty string that every entry the guard was there
+		// to skip would then share.
+		name: "engine-batch-guard-is-not-per-element",
+		file: filepath.Join("internal", "engine", "eval.go"),
+		old: `		if w.When != "" {
+			ok, err := ev.evalBool(path + ".when")
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
+		}
+		if err := ev.writeOne(ctx, path, w, create); err != nil {`,
+		new: `		if err := ev.writeOne(ctx, path, w, create); err != nil {`,
+		pkg: "./internal/engine",
+		run: "TestAPerElementGuardSkipsOnlyTheElementsThatFailIt",
 	},
 	{
 		// Taking the last id any read resolved, rather than the one resolved

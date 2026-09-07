@@ -1533,6 +1533,13 @@ func TestAWSSDKSQSRedrivePolicyClearingContract(t *testing.T) {
 	if _, present := cleared.Attributes["Policy"]; present {
 		t.Fatalf("policy was not cleared %#v", cleared)
 	}
+	invalid := []string{`not-json`, `{"maxReceiveCount":"42"}`, `{"deadLetterTargetArn":"dummy","maxReceiveCount":"42"}`, `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:dlq","maxReceiveCount":"invalid"}`}
+	for index, value := range invalid {
+		_, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String(fmt.Sprintf("sdk-redrive-invalid-%d", index)), Attributes: map[string]string{"RedrivePolicy": value}})
+		if err == nil || !strings.Contains(err.Error(), "InvalidParameterValue") {
+			t.Fatalf("invalid policy %q error %v", value, err)
+		}
+	}
 }
 
 func TestAWSSDKSQSListDeadLetterSourceQueuesContract(t *testing.T) {

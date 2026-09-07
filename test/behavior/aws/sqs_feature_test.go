@@ -100,6 +100,13 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("redrive policy remained %d %s", status, body)
 		}
 	})
+	t.Run("Given an invalid redrive policy When creating Then InvalidParameterValue is returned", func(t *testing.T) {
+		payload, _ := json.Marshal(map[string]any{"QueueName": "bdd-invalid-redrive", "Attributes": map[string]string{"RedrivePolicy": `{"deadLetterTargetArn":"dummy","maxReceiveCount":"42"}`}})
+		status, body := call("CreateQueue", string(payload))
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte(`"__type":"InvalidParameterValue"`)) {
+			t.Fatalf("invalid redrive %d %s", status, body)
+		}
+	})
 	t.Run("Given source queues with a dead-letter target When listing sources Then both sources are returned", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-dead-letter"}`); status != http.StatusOK {
 			t.Fatalf("dead letter create %d %s", status, body)
@@ -835,7 +842,7 @@ func TestSQSQueueListing(t *testing.T) {
 		if status != http.StatusOK || bytes.Contains(body, []byte(`"Messages"`)) {
 			t.Fatalf("early receive %d %s", status, body)
 		}
-		time.Sleep(2100 * time.Millisecond)
+		time.Sleep(2500 * time.Millisecond)
 		status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-delay-zero.fifo","WaitTimeSeconds":0}`)
 		if status != http.StatusOK || !bytes.Contains(body, []byte(`"Body":"message"`)) {
 			t.Fatalf("delayed receive %d %s", status, body)

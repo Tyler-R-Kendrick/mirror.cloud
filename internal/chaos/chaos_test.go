@@ -1022,6 +1022,33 @@ func TestConcurrentSQSRedrivePolicyClearingIsStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSRedrivePolicyValidationIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	policies := []string{`not-json`, `{"maxReceiveCount":"42"}`, `{"deadLetterTargetArn":"dummy","maxReceiveCount":"42"}`, `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:dlq","maxReceiveCount":"invalid"}`}
+	errs := make(chan error, len(policies)*8)
+	var wg sync.WaitGroup
+	for index, policy := range policies {
+		for attempt := range 8 {
+			wg.Add(1)
+			go func(index, attempt int, policy string) {
+				defer wg.Done()
+				_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": fmt.Sprintf("chaos-redrive-invalid-%d-%d", index, attempt), "Attributes": map[string]any{"RedrivePolicy": policy}}})
+				fault, ok := err.(*spi.Fault)
+				if !ok || fault.Code != "InvalidParameterValue" {
+					errs <- fmt.Errorf("policy %q error %#v", policy, err)
+				}
+			}(index, attempt, policy)
+		}
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSListDeadLetterSourceQueuesIsStable(t *testing.T) {
 	p := sqs.New(spitest.Deps(t))
 	ctx := context.Background()

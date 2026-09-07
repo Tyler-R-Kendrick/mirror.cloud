@@ -70,6 +70,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			_ = p.col(req, "qdeleted").Delete(ctx, name)
 		}
 		attrs := asMap(req.Input["Attributes"])
+		if raw, present := attrs["RedrivePolicy"]; present && str(raw) != "" {
+			if fault := validateRedrivePolicy(str(raw)); fault != nil {
+				return nil, fault
+			}
+		}
 		fifo, fifoSpecified := attrs["FifoQueue"]
 		if strings.HasSuffix(name, ".fifo") && (!fifoSpecified || str(fifo) != "true") {
 			return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "FifoQueue must be specified as true for FIFO queues.", HTTPStatus: 400, Fault: "client"}
@@ -222,6 +227,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "SetQueueAttributes":
 		name := queueName(req)
 		attrs := asMap(req.Input["Attributes"])
+		if raw, present := attrs["RedrivePolicy"]; present && str(raw) != "" {
+			if fault := validateRedrivePolicy(str(raw)); fault != nil {
+				return nil, fault
+			}
+		}
 		if fifo, present := attrs["FifoQueue"]; present && (!strings.HasSuffix(name, ".fifo") || str(fifo) != "true") {
 			return nil, &spi.Fault{Code: "InvalidAttributeName", Message: "Unknown Attribute FifoQueue.", HTTPStatus: 400, Fault: "client"}
 		}
@@ -1097,6 +1107,37 @@ func redrive(attrs map[string]any) (max int, dlq string) {
 		dlq = arn[i+1:]
 	}
 	return max, dlq
+}
+
+func validateRedrivePolicy(raw string) *spi.Fault {
+	var policy map[string]any
+	if json.Unmarshal([]byte(raw), &policy) != nil {
+		return invalidRedrivePolicyFault()
+	}
+	arn := str(policy["deadLetterTargetArn"])
+	parts := strings.Split(arn, ":")
+	if len(parts) != 6 || parts[0] != "arn" || parts[2] != "sqs" || parts[3] == "" || parts[4] == "" || parts[5] == "" {
+		return invalidRedrivePolicyFault()
+	}
+	var count int
+	switch value := policy["maxReceiveCount"].(type) {
+	case string:
+		var err error
+		count, err = strconv.Atoi(value)
+		if err != nil {
+			return invalidRedrivePolicyFault()
+		}
+	default:
+		count = asInt(value)
+	}
+	if count < 1 || count > 1000 {
+		return invalidRedrivePolicyFault()
+	}
+	return nil
+}
+
+func invalidRedrivePolicyFault() *spi.Fault {
+	return &spi.Fault{Code: "InvalidParameterValue", Message: "Invalid value for the parameter RedrivePolicy.", HTTPStatus: 400, Fault: "client"}
 }
 
 func sortMsgs(msgs []map[string]any) {

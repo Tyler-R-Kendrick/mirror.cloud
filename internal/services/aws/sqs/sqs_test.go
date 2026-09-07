@@ -1035,6 +1035,36 @@ func TestRedrivePolicyClearingCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"setRedrive": asMap(set.Output["Attributes"])["RedrivePolicy"], "setPolicy": asMap(set.Output["Attributes"])["Policy"], "clearedRedrive": redrivePresent, "clearedPolicy": policyPresent})
 }
 
+func TestRedrivePolicyValidationCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	cases := map[string]string{
+		"missingTarget": `{"maxReceiveCount":"42"}`,
+		"missingCount":  `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:dlq"}`,
+		"invalidCount":  `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:dlq","maxReceiveCount":"invalid"}`,
+		"invalidARN":    `{"deadLetterTargetArn":"dummy","maxReceiveCount":"42"}`,
+		"malformed":     "not-json",
+	}
+	faults := map[string]any{}
+	for name, policy := range cases {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "redrive-invalid-" + name, "Attributes": map[string]any{"RedrivePolicy": policy}}})
+		fault, ok := err.(*spi.Fault)
+		if !ok {
+			t.Fatalf("%s error %#v", name, err)
+		}
+		faults[name] = map[string]any{"Code": fault.Code, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "redrive-validation-set"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "redrive-validation-set", "Attributes": map[string]any{"RedrivePolicy": cases["invalidARN"]}}})
+	if fault, ok := err.(*spi.Fault); !ok || fault.Code != "InvalidParameterValue" {
+		t.Fatalf("set invalid policy %#v", err)
+	}
+	golden.AssertJSON(t, faults)
+}
+
 func TestListDeadLetterSourceQueuesCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -1136,6 +1166,20 @@ func FuzzRedrivePolicyClearing(f *testing.F) {
 		_, policyPresent := asMap(response.Output["Attributes"])["Policy"]
 		if redrivePresent == clear || policyPresent == clear {
 			t.Fatalf("clear=%v response=%#v", clear, response.Output)
+		}
+	})
+}
+
+func FuzzRedrivePolicyValidation(f *testing.F) {
+	for _, seed := range []string{"not-json", `{"deadLetterTargetArn":"dummy","maxReceiveCount":"42"}`, `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:dlq","maxReceiveCount":"42"}`} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, policy string) {
+		p := New(spitest.Deps(t))
+		_, err := p.Invoke(context.Background(), &spi.Request{Identity: spi.Identity{Account: "123456789012", Region: "us-east-1"}, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-redrive-validation", "Attributes": map[string]any{"RedrivePolicy": policy}}})
+		valid := policy == "" || validateRedrivePolicy(policy) == nil
+		if valid != (err == nil) {
+			t.Fatalf("policy %q validation=%v error=%v", policy, valid, err)
 		}
 	})
 }

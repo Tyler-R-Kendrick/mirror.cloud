@@ -17763,6 +17763,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestRedrivePolicyClearingCharacterization",
 		},
 		{
+			name: "sqs-accept-invalid-redrive-policy",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if json.Unmarshal([]byte(raw), &policy) != nil {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestRedrivePolicyValidationCharacterization",
+		},
+		{
 			name: "sqs-keep-empty-queue-policy",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "if (key == \"RedrivePolicy\" || key == \"Policy\") && str(value) == \"\" {",

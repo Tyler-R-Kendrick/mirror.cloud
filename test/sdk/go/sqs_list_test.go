@@ -669,6 +669,45 @@ func TestAWSSDKSQSSuccessivePurgeContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSApproximateMessageStatesContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-states")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range []struct {
+		body  string
+		delay int32
+	}{{"visible", 0}, {"delayed-1", 2}, {"delayed-2", 2}} {
+		if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String(message.body), DelaySeconds: message.delay}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	attrs, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{"ApproximateNumberOfMessages", "ApproximateNumberOfMessagesDelayed", "ApproximateNumberOfMessagesNotVisible"}})
+	if err != nil || attrs.Attributes[string(types.QueueAttributeNameApproximateNumberOfMessages)] != "1" || attrs.Attributes[string(types.QueueAttributeNameApproximateNumberOfMessagesDelayed)] != "2" || attrs.Attributes[string(types.QueueAttributeNameApproximateNumberOfMessagesNotVisible)] != "0" {
+		t.Fatalf("initial attributes %#v error %v", attrs.Attributes, err)
+	}
+	if _, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, VisibilityTimeout: 5}); err != nil {
+		t.Fatal(err)
+	}
+	attrs, err = client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{"ApproximateNumberOfMessages", "ApproximateNumberOfMessagesNotVisible"}})
+	if err != nil || attrs.Attributes[string(types.QueueAttributeNameApproximateNumberOfMessages)] != "0" || attrs.Attributes[string(types.QueueAttributeNameApproximateNumberOfMessagesNotVisible)] != "1" {
+		t.Fatalf("in-flight attributes %#v error %v", attrs.Attributes, err)
+	}
+}
+
 func TestAWSSDKSQSMessageTimestampContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

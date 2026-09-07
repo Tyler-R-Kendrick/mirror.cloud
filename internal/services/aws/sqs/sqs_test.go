@@ -196,6 +196,36 @@ func TestMessageRetentionCharacterization(t *testing.T) {
 	golden.AssertJSON(t, response.Output)
 }
 
+func TestApproximateMessageStatesCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "states"})
+	call("SendMessage", map[string]any{"QueueName": "states", "MessageBody": "visible"})
+	call("SendMessage", map[string]any{"QueueName": "states", "MessageBody": "delayed-1", "DelaySeconds": 2})
+	call("SendMessage", map[string]any{"QueueName": "states", "MessageBody": "delayed-2", "DelaySeconds": 2})
+	states := map[string]any{}
+	states["initial"] = call("GetQueueAttributes", map[string]any{"QueueName": "states", "AttributeNames": []any{"All"}}).Output["Attributes"]
+	call("ReceiveMessage", map[string]any{"QueueName": "states", "VisibilityTimeout": 5})
+	states["inFlight"] = call("GetQueueAttributes", map[string]any{"QueueName": "states", "AttributeNames": []any{"All"}}).Output["Attributes"]
+	if err := clk.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	states["released"] = call("GetQueueAttributes", map[string]any{"QueueName": "states", "AttributeNames": []any{"All"}}).Output["Attributes"]
+	golden.AssertJSON(t, states)
+}
+
 func TestSuccessivePurgeCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
@@ -777,6 +807,37 @@ func FuzzSuccessivePurge(f *testing.F) {
 					t.Fatalf("raw=%d purge error %#v", raw, err)
 				}
 			}
+		}
+	})
+}
+
+func FuzzApproximateMessageStates(f *testing.F) {
+	f.Add(uint8(0))
+	f.Add(uint8(2))
+	f.Fuzz(func(t *testing.T, delay uint8) {
+		if delay > 10 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-states"}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-states", "MessageBody": "message", "DelaySeconds": int(delay)}}); err != nil {
+			t.Fatal(err)
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "fuzz-states", "AttributeNames": []any{"ApproximateNumberOfMessages", "ApproximateNumberOfMessagesDelayed"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		attrs := asMap(response.Output["Attributes"])
+		wantVisible, wantDelayed := "1", "0"
+		if delay > 0 {
+			wantVisible, wantDelayed = "0", "1"
+		}
+		if attrs["ApproximateNumberOfMessages"] != wantVisible || attrs["ApproximateNumberOfMessagesDelayed"] != wantDelayed {
+			t.Fatalf("delay=%d attributes=%#v", delay, attrs)
 		}
 	})
 }

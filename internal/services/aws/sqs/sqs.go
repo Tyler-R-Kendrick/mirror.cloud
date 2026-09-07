@@ -170,11 +170,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "GetQueueAttributes":
 		name := queueName(req)
-		n := p.countMsgs(ctx, req, name)
+		visible, notVisible, delayed := p.countMsgStates(ctx, req, name)
 		attrs := map[string]any{
-			"ApproximateNumberOfMessages": fmt.Sprintf("%d", n),
-			"QueueArn":                    fmt.Sprintf("arn:aws:sqs:%s:%s:%s", req.Identity.Region, req.Identity.Account, name),
-			"VisibilityTimeout":           "30",
+			"ApproximateNumberOfMessages":           fmt.Sprintf("%d", visible),
+			"ApproximateNumberOfMessagesNotVisible": fmt.Sprintf("%d", notVisible),
+			"ApproximateNumberOfMessagesDelayed":    fmt.Sprintf("%d", delayed),
+			"QueueArn":                              fmt.Sprintf("arn:aws:sqs:%s:%s:%s", req.Identity.Region, req.Identity.Account, name),
+			"VisibilityTimeout":                     "30",
 		}
 		if b, ok, _ := p.col(req, "queues").Get(ctx, name); ok {
 			var meta map[string]any
@@ -387,17 +389,28 @@ func queueMissing() *spi.Fault {
 }
 
 func (p *Pack) countMsgs(ctx context.Context, req *spi.Request, name string) int {
+	visible, _, _ := p.countMsgStates(ctx, req, name)
+	return visible
+}
+
+func (p *Pack) countMsgStates(ctx context.Context, req *spi.Request, name string) (visible, notVisible, delayed int) {
 	kvs, _, _ := p.col(req, "msgs:"+name).List(ctx, "", "", 0)
 	now := p.deps.Clock.Now().UnixNano()
 	attrs := p.queueAttrs(ctx, req, name)
-	count := 0
 	for _, kv := range kvs {
 		var message map[string]any
-		if json.Unmarshal(kv.Value, &message) == nil && !messageExpired(attrs, message, now) && int64(asFloat(message["visibleAt"])) <= now {
-			count++
+		if json.Unmarshal(kv.Value, &message) != nil || messageExpired(attrs, message, now) {
+			continue
+		}
+		if int64(asFloat(message["visibleAt"])) <= now {
+			visible++
+		} else if asInt(message["receiveCount"]) > 0 {
+			notVisible++
+		} else {
+			delayed++
 		}
 	}
-	return count
+	return visible, notVisible, delayed
 }
 
 func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error) {

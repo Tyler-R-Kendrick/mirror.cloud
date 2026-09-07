@@ -6121,6 +6121,45 @@ func TestConcurrentSQSSuccessivePurgesAreStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSMessageStateMetricsAreStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreateQueue", map[string]any{"QueueName": "chaos-states"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []map[string]any{{"QueueName": "chaos-states", "MessageBody": "visible"}, {"QueueName": "chaos-states", "MessageBody": "delayed", "DelaySeconds": 2}} {
+		if _, err := call("SendMessage", input); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := call("GetQueueAttributes", map[string]any{"QueueName": "chaos-states", "AttributeNames": []any{"ApproximateNumberOfMessages", "ApproximateNumberOfMessagesDelayed", "ApproximateNumberOfMessagesNotVisible"}})
+			attrs := map[string]any{}
+			if response != nil {
+				attrs, _ = response.Output["Attributes"].(map[string]any)
+			}
+			if err != nil || attrs["ApproximateNumberOfMessages"] != "1" || attrs["ApproximateNumberOfMessagesDelayed"] != "1" || attrs["ApproximateNumberOfMessagesNotVisible"] != "0" {
+				errs <- fmt.Errorf("metrics %#v error %v", attrs, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSFIFOBatchMissingDeduplicationIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := sqs.New(deps)

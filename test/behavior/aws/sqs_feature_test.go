@@ -611,4 +611,18 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("get %d %s", status, body)
 		}
 	})
+	t.Run("Given visible and delayed messages When reading queue metrics Then each state is counted", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-message-states"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		for _, payload := range []string{`{"QueueUrl":"http://queue/000000000000/bdd-message-states","MessageBody":"visible"}`, `{"QueueUrl":"http://queue/000000000000/bdd-message-states","MessageBody":"delayed","DelaySeconds":2}`} {
+			if status, body := call("SendMessage", payload); status != http.StatusOK {
+				t.Fatalf("send %d %s", status, body)
+			}
+		}
+		status, body := call("GetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-message-states","AttributeNames":["ApproximateNumberOfMessages","ApproximateNumberOfMessagesDelayed","ApproximateNumberOfMessagesNotVisible"]}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"ApproximateNumberOfMessages":"1"`)) || !bytes.Contains(body, []byte(`"ApproximateNumberOfMessagesDelayed":"1"`)) || !bytes.Contains(body, []byte(`"ApproximateNumberOfMessagesNotVisible":"0"`)) {
+			t.Fatalf("metrics %d %s", status, body)
+		}
+	})
 }

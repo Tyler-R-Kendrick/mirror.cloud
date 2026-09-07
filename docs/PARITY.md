@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 64 / 222 (28.8%) |
-| LocalStack SQS test functions not yet traced | 158 / 222 (71.2%) |
+| LocalStack SQS test functions explicitly traced | 66 / 222 (29.7%) |
+| LocalStack SQS test functions not yet traced | 156 / 222 (70.3%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -638,6 +638,8 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_set_empty_redrive_policy` | Setting a RedrivePolicy persists it, while setting `RedrivePolicy=""` removes it from GetQueueAttributes without disturbing the queue; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin clear semantics | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_set_queue_policy` | SetQueueAttributes persists the queue Policy alongside RedrivePolicy and GetQueueAttributes returns the exact JSON; the shared atomic, Verify-style snapshot, SDK, BDD, fuzz, chaos/race, and mutation stack covers the write/read contract | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_set_empty_queue_policy` | Setting `Policy=""` clears the persisted queue policy and omits it from `AttributeNames=All`; the shared seven-form policy-clearing stack pins removal | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_create_and_send_to_fifo_queue` | FIFO queue creation preserves the `.fifo` URL suffix and a message with explicit group/deduplication identifiers round-trips through ReceiveMessage; the existing FIFO lifecycle characterization, SDK, BDD, fuzz, chaos/race, and mutation stack covers the contract | Mapped; equivalent stack green |
+| `test_sqs.py::TestSqsProvider::test_send_message_with_attributes` | Message attributes survive SendMessage/ReceiveMessage and selector filtering; the existing FIFO attribute and name-filter characterization, SDK, BDD, fuzz, chaos/race, and mutation stack covers the wire contract | Mapped; equivalent stack green |
 | `test_sqs.py::TestSqsProvider::test_too_many_entries_in_batch_request` | SendMessageBatch rejects more than 10 entries with `AWS.SimpleQueueService.TooManyEntriesInBatchRequest` and the exact sent-count message across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_batch_send_with_invalid_char_should_succeed` | SendMessageBatch returns nine successful entries and one `InvalidMessageContents` failed entry instead of failing the entire batch; atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage pin per-entry failure semantics | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_delete_message_batch_invalid_msg_id` | DeleteMessageBatch rejects punctuation, empty, and overlong entry IDs with `AWS.SimpleQueueService.InvalidBatchEntryId` and the exact AWS message across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |

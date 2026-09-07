@@ -360,6 +360,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				return nil, &spi.Fault{Code: "InvalidParameterValue", Message: fmt.Sprintf("Value %s for parameter ReceiptHandle is invalid. Reason: Message does not exist or is not available for visibility timeout change.", handle), HTTPStatus: 400, Fault: "client"}
 			}
 		} else if entries, ok := req.Input["Entries"].([]any); ok {
+			if len(entries) > 10 {
+				return nil, &spi.Fault{Code: "AWS.SimpleQueueService.TooManyEntriesInBatchRequest", Message: fmt.Sprintf("Maximum number of entries per request are 10. You have sent %d.", len(entries)), HTTPStatus: 400, Fault: "client"}
+			}
 			for _, e := range entries {
 				m := asMap(e)
 				p.setVis(ctx, req, name, str(m["ReceiptHandle"]), str(m["VisibilityTimeout"]))

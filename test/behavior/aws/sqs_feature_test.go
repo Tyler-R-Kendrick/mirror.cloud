@@ -574,6 +574,20 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("partial failure %d %s", status, body)
 		}
 	})
+	t.Run("Given more than ten visibility entries Then the entry-count fault is returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-visibility-too-many"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		entries := make([]map[string]any, 20)
+		for i := range entries {
+			entries[i] = map[string]any{"Id": fmt.Sprintf("message-%d", i), "ReceiptHandle": "handle", "VisibilityTimeout": 123}
+		}
+		payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-visibility-too-many", "Entries": entries})
+		status, body := call("ChangeMessageVisibilityBatch", string(payload))
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("TooManyEntriesInBatchRequest")) || !bytes.Contains(body, []byte("Maximum number of entries per request are 10. You have sent 20.")) {
+			t.Fatalf("visibility too many entries %d %s", status, body)
+		}
+	})
 	t.Run("Given a FIFO queue When sending invalid deduplication ids Then the validation fault is returned", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-dedup-invalid.fifo","Attributes":{"ContentBasedDeduplication":"false"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

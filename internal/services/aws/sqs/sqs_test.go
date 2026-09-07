@@ -1406,6 +1406,25 @@ func TestSendMessageBatchInvalidContentsPartialFailureCharacterization(t *testin
 	golden.AssertJSON(t, map[string]any{"successful": len(successful), "failed": failure})
 }
 
+func TestChangeMessageVisibilityBatchTooManyEntriesCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "visibility-too-many"}}); err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]any, 20)
+	for i := range entries {
+		entries[i] = map[string]any{"Id": fmt.Sprintf("message-%d", i), "ReceiptHandle": "handle", "VisibilityTimeout": 123}
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ChangeMessageVisibilityBatch", Input: map[string]any{"QueueName": "visibility-too-many", "Entries": entries}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("too many visibility entries error %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
+}
+
 func TestSendBatchReceiveMultipleCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -1996,6 +2015,38 @@ func FuzzDeleteMessageBatchEntryID(f *testing.F) {
 		fault, ok := err.(*spi.Fault)
 		if !ok || fault.Code != "AWS.SimpleQueueService.InvalidBatchEntryId" {
 			t.Fatalf("invalid id %q error %#v", entryID, err)
+		}
+	})
+}
+
+func FuzzChangeMessageVisibilityBatchSize(f *testing.F) {
+	f.Add(uint8(0))
+	f.Add(uint8(10))
+	f.Add(uint8(11))
+	f.Fuzz(func(t *testing.T, count uint8) {
+		if count > 32 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-visibility-batch"}}); err != nil {
+			t.Fatal(err)
+		}
+		entries := make([]any, int(count))
+		for i := range entries {
+			entries[i] = map[string]any{"Id": fmt.Sprintf("message-%d", i), "ReceiptHandle": "handle", "VisibilityTimeout": 123}
+		}
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ChangeMessageVisibilityBatch", Input: map[string]any{"QueueName": "fuzz-visibility-batch", "Entries": entries}})
+		if count > 10 {
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "AWS.SimpleQueueService.TooManyEntriesInBatchRequest" {
+				t.Fatalf("count=%d error %#v", count, err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("count=%d error %v", count, err)
 		}
 	})
 }

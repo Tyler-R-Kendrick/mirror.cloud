@@ -17627,6 +17627,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFIFOPerMessageDelayCharacterization",
 		},
 		{
+			name: "sqs-visibility-batch-accept-too-many-entries",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if len(entries) > 10 {\n\t\t\t\treturn nil, &spi.Fault{Code: \"AWS.SimpleQueueService.TooManyEntriesInBatchRequest\"",
+			new:  "if false {\n\t\t\t\treturn nil, &spi.Fault{Code: \"AWS.SimpleQueueService.TooManyEntriesInBatchRequest\"",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestChangeMessageVisibilityBatchTooManyEntriesCharacterization",
+		},
+		{
 			name: "sqs-keep-expired-messages-visible",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "var cand []map[string]any\n\tinFlight := map[string]bool{}\n\tfor _, kv := range kvs {\n\t\tvar m map[string]any\n\t\t_ = json.Unmarshal(kv.Value, &m)\n\t\tif messageExpired(attrs, m, now.UnixNano()) {",

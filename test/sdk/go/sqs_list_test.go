@@ -171,6 +171,34 @@ func TestAWSSDKSQSDeleteMessageBatchTooManyEntriesContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSChangeMessageVisibilityBatchTooManyEntriesContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-visibility-too-many")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]types.ChangeMessageVisibilityBatchRequestEntry, 20)
+	for i := range entries {
+		entries[i] = types.ChangeMessageVisibilityBatchRequestEntry{Id: aws.String(fmt.Sprintf("message-%d", i)), ReceiptHandle: aws.String("handle"), VisibilityTimeout: 123}
+	}
+	_, err = client.ChangeMessageVisibilityBatch(context.Background(), &sqs.ChangeMessageVisibilityBatchInput{QueueUrl: created.QueueUrl, Entries: entries})
+	if err == nil || !strings.Contains(err.Error(), "TooManyEntriesInBatchRequest") || !strings.Contains(err.Error(), "Maximum number of entries per request are 10") {
+		t.Fatalf("visibility too many entries error %v", err)
+	}
+}
+
 func TestAWSSDKSQSFIFOBatchMissingDeduplicationIDContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

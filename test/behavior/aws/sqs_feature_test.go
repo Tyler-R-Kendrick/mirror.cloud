@@ -186,6 +186,16 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("queue wait %d %s", status, body)
 		}
 	})
+	t.Run("Given an illegal receipt handle When changing visibility Then the receipt-handle fault is returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-invalid-receipt"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("ChangeMessageVisibility", `{"QueueUrl":"http://queue/000000000000/bdd-invalid-receipt","ReceiptHandle":"garbage","VisibilityTimeout":60}`)
+		var response map[string]any
+		if status != http.StatusBadRequest || json.Unmarshal(body, &response) != nil || response["__type"] != "ReceiptHandleIsInvalid" || response["message"] != `The input receipt handle "garbage" is not a valid receipt handle.` {
+			t.Fatalf("invalid receipt %d %s", status, body)
+		}
+	})
 	t.Run("Given a received message When requesting all system attributes Then timestamps are numeric", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-timestamps"}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

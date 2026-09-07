@@ -566,6 +566,30 @@ func TestAWSSDKSQSReceiveWaitTimeContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSInvalidReceiptHandleContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-invalid-receipt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.ChangeMessageVisibility(context.Background(), &sqs.ChangeMessageVisibilityInput{QueueUrl: created.QueueUrl, ReceiptHandle: aws.String("garbage"), VisibilityTimeout: 60})
+	if err == nil || !strings.Contains(err.Error(), "ReceiptHandleIsInvalid") || !strings.Contains(err.Error(), `The input receipt handle "garbage" is not a valid receipt handle.`) {
+		t.Fatalf("invalid receipt handle error %v", err)
+	}
+}
+
 func TestAWSSDKSQSMessageTimestampContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

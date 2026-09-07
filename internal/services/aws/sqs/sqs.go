@@ -161,7 +161,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.receive(ctx, req)
 	case "DeleteMessage":
 		name := queueName(req)
-		_ = p.col(req, "msgs:"+name).Delete(ctx, str(req.Input["ReceiptHandle"]))
+		handle := str(req.Input["ReceiptHandle"])
+		if !validReceiptHandle(handle) {
+			return nil, receiptHandleFault(handle)
+		}
+		_ = p.col(req, "msgs:"+name).Delete(ctx, handle)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "GetQueueAttributes":
 		name := queueName(req)
@@ -324,7 +328,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "ChangeMessageVisibility", "ChangeMessageVisibilityBatch":
 		name := queueName(req)
 		if req.Operation == "ChangeMessageVisibility" {
-			p.setVis(ctx, req, name, str(req.Input["ReceiptHandle"]), str(req.Input["VisibilityTimeout"]))
+			handle := str(req.Input["ReceiptHandle"])
+			if !validReceiptHandle(handle) {
+				return nil, receiptHandleFault(handle)
+			}
+			if !p.setVis(ctx, req, name, handle, str(req.Input["VisibilityTimeout"])) {
+				return nil, &spi.Fault{Code: "InvalidParameterValue", Message: fmt.Sprintf("Value %s for parameter ReceiptHandle is invalid. Reason: Message does not exist or is not available for visibility timeout change.", handle), HTTPStatus: 400, Fault: "client"}
+			}
 		} else if entries, ok := req.Input["Entries"].([]any); ok {
 			for _, e := range entries {
 				m := asMap(e)
@@ -627,10 +637,10 @@ func (p *Pack) afterReceive(ctx context.Context, req *spi.Request, name string, 
 	_ = p.col(req, "msgs:"+name).Put(ctx, rh, raw)
 }
 
-func (p *Pack) setVis(ctx context.Context, req *spi.Request, name, handle, timeout string) {
+func (p *Pack) setVis(ctx context.Context, req *spi.Request, name, handle, timeout string) bool {
 	b, ok, _ := p.col(req, "msgs:"+name).Get(ctx, handle)
 	if !ok {
-		return
+		return false
 	}
 	var m map[string]any
 	_ = json.Unmarshal(b, &m)
@@ -638,6 +648,19 @@ func (p *Pack) setVis(ctx context.Context, req *spi.Request, name, handle, timeo
 	m["visibleAt"] = p.deps.Clock.Now().Add(time.Duration(sec) * time.Second).UnixNano()
 	nb, _ := json.Marshal(m)
 	_ = p.col(req, "msgs:"+name).Put(ctx, handle, nb)
+	return true
+}
+
+func validReceiptHandle(handle string) bool {
+	if len(handle) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(handle)
+	return err == nil
+}
+
+func receiptHandleFault(handle string) *spi.Fault {
+	return &spi.Fault{Code: "ReceiptHandleIsInvalid", Message: fmt.Sprintf("The input receipt handle %q is not a valid receipt handle.", handle), HTTPStatus: 400, Fault: "client"}
 }
 
 func (p *Pack) queueAttrs(ctx context.Context, req *spi.Request, name string) map[string]any {

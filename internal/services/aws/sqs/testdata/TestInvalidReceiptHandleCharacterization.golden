@@ -1,0 +1,6 @@
+{
+  "Code": "ReceiptHandleIsInvalid",
+  "Fault": "client",
+  "HTTPStatus": 400,
+  "Message": "The input receipt handle \"garbage\" is not a valid receipt handle."
+}

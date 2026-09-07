@@ -111,6 +111,21 @@ func TestCreateSendReceiveDelete(t *testing.T) {
 	}
 }
 
+func TestInvalidReceiptHandleCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "invalid-receipt"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ChangeMessageVisibility", Input: map[string]any{"QueueName": "invalid-receipt", "ReceiptHandle": "garbage", "VisibilityTimeout": 60}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("invalid receipt handle error %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
+}
+
 func TestSendReceiveCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -360,6 +375,32 @@ func FuzzQueueReceiveWaitTime(f *testing.F) {
 		}
 		if response := <-done; response.Output["Messages"] != nil {
 			t.Fatalf("queue wait response %#v", response.Output)
+		}
+	})
+}
+
+func FuzzInvalidReceiptHandle(f *testing.F) {
+	f.Add("garbage")
+	f.Add("")
+	f.Add(strings.Repeat("a", 64))
+	f.Fuzz(func(t *testing.T, handle string) {
+		if len(handle) > 128 || !utf8.ValidString(handle) {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-invalid-receipt"}}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ChangeMessageVisibility", Input: map[string]any{"QueueName": "fuzz-invalid-receipt", "ReceiptHandle": handle, "VisibilityTimeout": 60}})
+		fault, ok := err.(*spi.Fault)
+		if validReceiptHandle(handle) {
+			if !ok || fault.Code != "InvalidParameterValue" {
+				t.Fatalf("valid-shaped missing handle %q error %#v", handle, err)
+			}
+		} else if !ok || fault.Code != "ReceiptHandleIsInvalid" {
+			t.Fatalf("invalid handle %q error %#v", handle, err)
 		}
 	})
 }

@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 39 / 222 (17.6%) |
-| LocalStack SQS test functions not yet traced | 183 / 222 (82.4%) |
+| LocalStack SQS test functions explicitly traced | 40 / 222 (18.0%) |
+| LocalStack SQS test functions not yet traced | 182 / 222 (82.0%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -634,6 +634,7 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_send_batch_missing_deduplication_id_for_fifo_queue` | FIFO SendMessageBatch rejects an entry missing `MessageDeduplicationId` when content-based deduplication is disabled with the exact AWS top-level fault across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_too_many_entries_in_batch_request` | SendMessageBatch rejects more than 10 entries with `AWS.SimpleQueueService.TooManyEntriesInBatchRequest` and the exact sent-count message across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_wait_time_seconds_queue_attribute_waits_correctly` | ReceiveMessage uses `ReceiveMessageWaitTimeSeconds` when `WaitTimeSeconds` is omitted, returning a message arriving during the queue-configured long poll across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_invalid_receipt_handle_should_return_error_message` | ChangeMessageVisibility rejects malformed receipt handles with `ReceiptHandleIsInvalid` and the exact handle-specific message across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_tag_untag_queue` | TagQueue/ListQueueTags preserve tag values, UntagQueue removes selected keys and ignores missing keys, and the final empty response omits `Tags`; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin the wire shape | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_tag_queue_overwrites_existing_tag` | TagQueue overwrites supplied keys while retaining untouched existing tags across atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, chaos/race, and semantic mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_create_queue_with_tags` | CreateQueue persists initial tags for immediate ListQueueTags reads across atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, chaos/race, and semantic mutation coverage | Mapped; focused green |

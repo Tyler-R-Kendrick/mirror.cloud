@@ -5988,6 +5988,66 @@ func TestConcurrentSQSTooManyBatchEntriesIsStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSDeleteMessageBatchInvalidEntryIDsAreStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-delete-invalid-batch-id"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessageBatch", Input: map[string]any{"QueueName": "chaos-delete-invalid-batch-id", "Entries": []any{map[string]any{"Id": "message:invalid", "ReceiptHandle": "handle"}}}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "AWS.SimpleQueueService.InvalidBatchEntryId" {
+				errs <- fmt.Errorf("invalid delete batch id error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+func TestConcurrentSQSDeleteMessageBatchTooManyEntriesIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-delete-too-many-batch"}}); err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]any, 20)
+	for i := range entries {
+		entries[i] = map[string]any{"Id": fmt.Sprintf("message-%d", i), "ReceiptHandle": "handle"}
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessageBatch", Input: map[string]any{"QueueName": "chaos-delete-too-many-batch", "Entries": entries}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "AWS.SimpleQueueService.TooManyEntriesInBatchRequest" || !strings.Contains(fault.Message, "You have sent 20.") {
+				errs <- fmt.Errorf("too many delete batch entries error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSMessageAttributeFiltersAreStable(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := sqs.New(deps)

@@ -330,8 +330,16 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: output}, nil
 	case "DeleteMessageBatch":
-		name := queueName(req)
 		entries, _ := req.Input["Entries"].([]any)
+		if len(entries) > 10 {
+			return nil, &spi.Fault{Code: "AWS.SimpleQueueService.TooManyEntriesInBatchRequest", Message: fmt.Sprintf("Maximum number of entries per request are 10. You have sent %d.", len(entries)), HTTPStatus: 400, Fault: "client"}
+		}
+		for _, entry := range entries {
+			if !validBatchEntryID(str(asMap(entry)["Id"])) {
+				return nil, &spi.Fault{Code: "AWS.SimpleQueueService.InvalidBatchEntryId", Message: "A batch entry id can only contain alphanumeric characters, hyphens and underscores. It can be at most 80 letters long.", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+		name := queueName(req)
 		var ok []any
 		for _, e := range entries {
 			m := asMap(e)

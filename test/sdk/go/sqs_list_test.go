@@ -119,6 +119,58 @@ func TestAWSSDKSQSInvalidBatchEntryIDContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSDeleteMessageBatchInvalidEntryIDContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-delete-invalid-batch-id")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.DeleteMessageBatch(context.Background(), &sqs.DeleteMessageBatchInput{QueueUrl: created.QueueUrl, Entries: []types.DeleteMessageBatchRequestEntry{{Id: aws.String("message:invalid"), ReceiptHandle: aws.String("handle")}}})
+	if err == nil || !strings.Contains(err.Error(), "InvalidBatchEntryId") || !strings.Contains(err.Error(), "can only contain alphanumeric characters") {
+		t.Fatalf("invalid delete batch id error %v", err)
+	}
+}
+
+func TestAWSSDKSQSDeleteMessageBatchTooManyEntriesContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-delete-too-many-batch")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]types.DeleteMessageBatchRequestEntry, 20)
+	for i := range entries {
+		entries[i] = types.DeleteMessageBatchRequestEntry{Id: aws.String(fmt.Sprintf("message-%d", i)), ReceiptHandle: aws.String("handle")}
+	}
+	_, err = client.DeleteMessageBatch(context.Background(), &sqs.DeleteMessageBatchInput{QueueUrl: created.QueueUrl, Entries: entries})
+	if err == nil || !strings.Contains(err.Error(), "TooManyEntriesInBatchRequest") || !strings.Contains(err.Error(), "Maximum number of entries per request are 10") {
+		t.Fatalf("delete too many entries error %v", err)
+	}
+}
+
 func TestAWSSDKSQSFIFOBatchMissingDeduplicationIDContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

@@ -1210,6 +1210,40 @@ func TestTooManyBatchEntriesCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
+func TestDeleteMessageBatchInvalidEntryIDCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "delete-invalid-batch-id"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessageBatch", Input: map[string]any{"QueueName": "delete-invalid-batch-id", "Entries": []any{map[string]any{"Id": "message:invalid", "ReceiptHandle": "handle"}}}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("invalid delete batch id error %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
+}
+
+func TestDeleteMessageBatchTooManyEntriesCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "delete-too-many-batch"}}); err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]any, 20)
+	for i := range entries {
+		entries[i] = map[string]any{"Id": fmt.Sprintf("message-%d", i), "ReceiptHandle": "handle"}
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessageBatch", Input: map[string]any{"QueueName": "delete-too-many-batch", "Entries": entries}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("too many delete batch entries error %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
+}
+
 func TestSendBatchReceiveMultipleCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -1733,6 +1767,34 @@ func FuzzInvalidBatchEntryID(f *testing.F) {
 			t.Fatal(err)
 		}
 		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "fuzz-batch-id", "Entries": []any{map[string]any{"Id": entryID, "MessageBody": "message"}}}})
+		if validBatchEntryID(entryID) {
+			if err != nil || len(response.Output["Successful"].([]any)) != 1 {
+				t.Fatalf("valid id %q response %#v error %v", entryID, response.Output, err)
+			}
+			return
+		}
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "AWS.SimpleQueueService.InvalidBatchEntryId" {
+			t.Fatalf("invalid id %q error %#v", entryID, err)
+		}
+	})
+}
+
+func FuzzDeleteMessageBatchEntryID(f *testing.F) {
+	f.Add("message-1")
+	f.Add("message:invalid")
+	f.Add(strings.Repeat("a", 81))
+	f.Fuzz(func(t *testing.T, entryID string) {
+		if len(entryID) > 256 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-delete-batch-id"}}); err != nil {
+			t.Fatal(err)
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessageBatch", Input: map[string]any{"QueueName": "fuzz-delete-batch-id", "Entries": []any{map[string]any{"Id": entryID, "ReceiptHandle": "handle"}}}})
 		if validBatchEntryID(entryID) {
 			if err != nil || len(response.Output["Successful"].([]any)) != 1 {
 				t.Fatalf("valid id %q response %#v error %v", entryID, response.Output, err)

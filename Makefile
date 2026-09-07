@@ -2,7 +2,7 @@ BIN := bin
 GO  := go
 export CGO_ENABLED := 0
 
-.PHONY: all build test test-unit test-contract test-snapshot test-chaos test-bdd test-fuzz-seeds test-fuzz test-mutation test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence
+.PHONY: all build test test-unit test-contract test-snapshot test-chaos test-bdd test-fuzz-seeds test-fuzz test-mutation test-mutation-shard test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence
 
 all: build
 
@@ -122,6 +122,15 @@ test-fuzz:
 # sooner.
 test-mutation:
 	$(GO) test ./internal/mutation -count=1 -parallel 4 -timeout 3600s
+
+# One slice of the mutation suite. CI runs these as a matrix because the cost
+# is irreducible per mutant -- each needs its own compile of the mutated
+# package -- so the only thing that shrinks the wall clock is running fewer of
+# them per job. `make test-mutation` still runs all of them, which is what to
+# use locally before pushing a change that touches the mutant table.
+test-mutation-shard:
+	MUTATION_SHARD=$(MUTATION_SHARD) MUTATION_SHARDS=$(MUTATION_SHARDS) \
+	  $(GO) test ./internal/mutation -count=1 -parallel 4 -timeout 1800s
 
 test-race:
 	CGO_ENABLED=1 $(GO) test -race $$($(GO) list ./... | grep -v '/internal/mutation$$')

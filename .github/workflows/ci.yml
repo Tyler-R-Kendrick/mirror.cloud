@@ -47,10 +47,36 @@ jobs:
         run: make test-fuzz-seeds
       - name: bounded native fuzzing
         run: make test-fuzz
-      - name: mutation
-        run: make test-mutation
       - name: race detector
         run: make test-race
+
+  # Separate matrix job: the mutation suite had grown to fifty-eight minutes
+  # against a sixty-minute timeout, which meant the next mutant anyone added
+  # would have turned CI red for time rather than for a defect -- a failure
+  # that looks nothing like a surviving mutant and costs an hour to diagnose.
+  #
+  # The per-mutant cost cannot come down much: a mutant is a distinct build of
+  # the mutated package, so it pays a full compile plus the test it runs. What
+  # can come down is how many one job runs. Four shards, and the suite stops
+  # being the critical path for everything else in `test` as well.
+  #
+  # TestShardingIsAPartition proves the split loses no mutant, and the harness
+  # fails a shard that selects none -- because a shard that runs nothing still
+  # reports success.
+  mutation:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.24"
+          cache-dependency-path: test/sdk/go/go.sum
+      - name: mutation shard ${{ matrix.shard }} of 4
+        run: make test-mutation-shard MUTATION_SHARD=${{ matrix.shard }} MUTATION_SHARDS=4
 
   # Separate job: syncing specs leaves ~92 MB under specs/, and a populated
   # specs/ changes what the runtime boots from, so it must not share a

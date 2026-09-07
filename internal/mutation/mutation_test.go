@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -16171,14 +16172,57 @@ var mutants = []mutant{
 	},
 }
 
+// shard reads the slice of the suite this process is responsible for, from
+// MUTATION_SHARD and MUTATION_SHARDS. Unset means the whole suite.
+//
+// Sharding exists because the cost is irreducible per mutant and the suite has
+// outgrown one job. Each mutant needs its own binary -- that is what a mutant
+// is -- so it pays a full compile of the mutated package plus the test it
+// runs: about 3.4 seconds and 1.8 seconds respectively for the large packs.
+// Nineteen hundred of those over four cores is the fifty-eight minutes CI was
+// spending, against a sixty-minute timeout. Nothing about one mutant can be
+// made much cheaper; what can change is how many of them one job runs.
+//
+// Malformed values are fatal rather than ignored. A shard spec that silently
+// fell back to "run everything" would turn a four-way split into four
+// redundant full runs; one that silently ran nothing would be worse, because
+// the job would pass.
+func shard(t *testing.T) (index, count int) {
+	t.Helper()
+	spec, has := os.LookupEnv("MUTATION_SHARDS")
+	if !has || spec == "" {
+		return 0, 1
+	}
+	count, err := strconv.Atoi(spec)
+	if err != nil || count < 1 {
+		t.Fatalf("MUTATION_SHARDS=%q is not a positive integer", spec)
+	}
+	if raw, has := os.LookupEnv("MUTATION_SHARD"); has && raw != "" {
+		index, err = strconv.Atoi(raw)
+		if err != nil || index < 0 || index >= count {
+			t.Fatalf("MUTATION_SHARD=%q is not in [0,%d)", raw, count)
+		}
+	}
+	return index, count
+}
+
 func TestMutantsAreKilled(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("caller")
 	}
 	root := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+	index, count := shard(t)
+	if count > 1 {
+		t.Logf("shard %d of %d", index, count)
+	}
 
-	for _, m := range mutants {
+	ran := 0
+	for i, m := range mutants {
+		if i%count != index {
+			continue
+		}
+		ran++
 		t.Run(m.name, func(t *testing.T) {
 			t.Parallel()
 			src := filepath.Join(root, m.file)
@@ -16207,6 +16251,10 @@ func TestMutantsAreKilled(t *testing.T) {
 				t.Fatalf("mutant survived (tests still passed)\n%s", out)
 			}
 		})
+	}
+	// A shard that matched nothing is a misconfiguration, not a fast pass.
+	if ran == 0 {
+		t.Fatalf("shard %d of %d selected none of the %d mutants", index, count, len(mutants))
 	}
 }
 
@@ -16272,6 +16320,65 @@ func TestMutantNeedlesExist(t *testing.T) {
 				"names. Widen the needle with surrounding lines until it matches "+
 				"once, extending `new` by the same context.",
 				m.name, strings.Count(body, m.old), m.file, m.old)
+		}
+	}
+}
+
+// TestShardingIsAPartition is the guard the sharding needs. Splitting the
+// suite across jobs introduces exactly one new way to be wrong, and it is the
+// dangerous one: a mutant that no shard runs is a mutant that cannot fail, and
+// every job still reports success.
+//
+// So this states the property directly, for every shard count CI might use:
+// the union of the shards is the whole suite and no mutant appears twice.
+// It costs microseconds and runs in the fast suite, where the expensive one
+// cannot.
+func TestShardingIsAPartition(t *testing.T) {
+	for count := 1; count <= 16; count++ {
+		seen := make([]int, len(mutants))
+		for index := 0; index < count; index++ {
+			for i := range mutants {
+				if i%count == index {
+					seen[i]++
+				}
+			}
+		}
+		for i, n := range seen {
+			if n != 1 {
+				t.Fatalf("with %d shards, %s runs %d times", count, mutants[i].name, n)
+			}
+		}
+	}
+}
+
+// TestEveryShardGetsWork checks the other half: a split that leaves a job with
+// nothing to do is a job whose green means nothing. Index-modulo keeps the
+// shards within one mutant of each other, which also balances their cost --
+// the three packages holding four fifths of the suite sit in contiguous runs,
+// so interleaving spreads their compile time evenly rather than handing one
+// shard all of S3.
+func TestEveryShardGetsWork(t *testing.T) {
+	for count := 1; count <= 16; count++ {
+		low, high := len(mutants), 0
+		for index := 0; index < count; index++ {
+			n := 0
+			for i := range mutants {
+				if i%count == index {
+					n++
+				}
+			}
+			if n == 0 {
+				t.Fatalf("with %d shards, shard %d has no mutants", count, index)
+			}
+			if n < low {
+				low = n
+			}
+			if n > high {
+				high = n
+			}
+		}
+		if high-low > 1 {
+			t.Errorf("with %d shards, sizes range %d..%d", count, low, high)
 		}
 	}
 }

@@ -17651,6 +17651,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFIFOQueueNameValidationCharacterization",
 		},
 		{
+			name: "sqs-ignore-advertised-queue-url",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if req.AdvertiseURL != \"\" {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestQueueAdvertiseURLCharacterization",
+		},
+		{
 			name: "sqs-fifo-order-by-earliest-sequence",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  `if seq := asInt(m["seq"]); seq < firstSeq[group] {`,

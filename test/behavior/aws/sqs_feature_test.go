@@ -92,6 +92,19 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("recreate %d %s", status, body)
 		}
 	})
+	t.Run("Given FIFO naming mismatches When creating Then parameter faults are returned", func(t *testing.T) {
+		for _, tc := range []struct {
+			payload, message string
+		}{
+			{`{"QueueName":"bdd-fifo-missing.fifo"}`, "FifoQueue must be specified as true"},
+			{`{"QueueName":"bdd-fifo-false.fifo","Attributes":{"FifoQueue":"false"}}`, "FifoQueue must be specified as true"},
+			{`{"QueueName":"bdd-standard-fifo","Attributes":{"FifoQueue":"true"}}`, "Queue name must end in .fifo for FIFO queues"},
+		} {
+			if status, body := call("CreateQueue", tc.payload); status != http.StatusBadRequest || !bytes.Contains(body, []byte(`"__type":"InvalidParameterValue"`)) || !bytes.Contains(body, []byte(tc.message)) {
+				t.Fatalf("validation %s %d %s", tc.payload, status, body)
+			}
+		}
+	})
 	t.Run("Given a sent message When receiving it Then its body and digest round trip", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-roundtrip"}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)
@@ -514,7 +527,7 @@ func TestSQSQueueListing(t *testing.T) {
 		}
 	})
 	t.Run("Given a FIFO batch with a missing deduplication id Then the batch fault is returned", func(t *testing.T) {
-		if status, body := call("CreateQueue", `{"QueueName":"bdd-batch-missing-dedup.fifo","Attributes":{"ContentBasedDeduplication":"false"}}`); status != http.StatusOK {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-batch-missing-dedup.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"false"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)
 		}
 		status, body := call("SendMessageBatch", `{"QueueUrl":"http://queue/000000000000/bdd-batch-missing-dedup.fifo","Entries":[{"Id":"message-1","MessageBody":"message-1","MessageGroupId":"test-group","MessageDeduplicationId":"dedup-1"},{"Id":"message-2","MessageBody":"message-2","MessageGroupId":"test-group"}]}`)
@@ -589,7 +602,7 @@ func TestSQSQueueListing(t *testing.T) {
 		}
 	})
 	t.Run("Given a FIFO queue When sending invalid deduplication ids Then the validation fault is returned", func(t *testing.T) {
-		if status, body := call("CreateQueue", `{"QueueName":"bdd-dedup-invalid.fifo","Attributes":{"ContentBasedDeduplication":"false"}}`); status != http.StatusOK {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-dedup-invalid.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"false"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)
 		}
 		for _, value := range []string{"", strings.Repeat("a", 129), "group 123"} {
@@ -601,7 +614,7 @@ func TestSQSQueueListing(t *testing.T) {
 		}
 	})
 	t.Run("Given a FIFO queue delay When sending with zero delay Then the queue delay is applied", func(t *testing.T) {
-		if status, body := call("CreateQueue", `{"QueueName":"bdd-delay-zero.fifo","Attributes":{"ContentBasedDeduplication":"true","DelaySeconds":"2"}}`); status != http.StatusOK {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-delay-zero.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true","DelaySeconds":"2"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)
 		}
 		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-delay-zero.fifo","MessageBody":"message","MessageGroupId":"group-1","DelaySeconds":0}`); status != http.StatusOK {
@@ -618,7 +631,7 @@ func TestSQSQueueListing(t *testing.T) {
 		}
 	})
 	t.Run("Given a FIFO queue When sending with a per-message delay Then the request is rejected", func(t *testing.T) {
-		if status, body := call("CreateQueue", `{"QueueName":"bdd-invalid-delay.fifo","Attributes":{"ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-invalid-delay.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)
 		}
 		status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-invalid-delay.fifo","MessageBody":"message","MessageGroupId":"group-1","DelaySeconds":2}`)
@@ -627,7 +640,7 @@ func TestSQSQueueListing(t *testing.T) {
 		}
 	})
 	t.Run("Given a FIFO message When receiving all attributes twice Then receive metadata mutates", func(t *testing.T) {
-		if status, body := call("CreateQueue", `{"QueueName":"bdd-fifo-attrs.fifo","Attributes":{"ContentBasedDeduplication":"true","VisibilityTimeout":"0"}}`); status != http.StatusOK {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-fifo-attrs.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true","VisibilityTimeout":"0"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)
 		}
 		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-fifo-attrs.fifo","MessageBody":"message","MessageGroupId":"group-1","MessageDeduplicationId":"dedup-1","MessageAttributes":{"kind":{"DataType":"String","StringValue":"fifo"}}}`); status != http.StatusOK {
@@ -641,7 +654,7 @@ func TestSQSQueueListing(t *testing.T) {
 		}
 	})
 	t.Run("Given FIFO messages When receiving a batch Then approximate count excludes in-flight messages", func(t *testing.T) {
-		if status, body := call("CreateQueue", `{"QueueName":"bdd-fifo-count.fifo","Attributes":{"ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-fifo-count.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)
 		}
 		for _, message := range []string{"g1-m1", "g1-m2", "g1-m3", "g2-m1", "g3-m1"} {
@@ -660,7 +673,7 @@ func TestSQSQueueListing(t *testing.T) {
 		}
 	})
 	t.Run("Given FIFO deduplication is enabled When updating the strategy Then the attribute changes", func(t *testing.T) {
-		if status, body := call("CreateQueue", `{"QueueName":"bdd-dedup-strategy.fifo","Attributes":{"SqsManagedSseEnabled":"true","ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-dedup-strategy.fifo","Attributes":{"FifoQueue":"true","SqsManagedSseEnabled":"true","ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)
 		}
 		status, body := call("SetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-dedup-strategy.fifo","Attributes":{"ContentBasedDeduplication":"false"}}`)

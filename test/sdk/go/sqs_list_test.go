@@ -213,7 +213,7 @@ func TestAWSSDKSQSFIFOBatchMissingDeduplicationIDContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
-	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-batch-missing-dedup.fifo"), Attributes: map[string]string{"ContentBasedDeduplication": "false"}})
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-batch-missing-dedup.fifo"), Attributes: map[string]string{"FifoQueue": "true", "ContentBasedDeduplication": "false"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +401,7 @@ func TestAWSSDKSQSFIFODeduplicationIDContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
-	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-dedup-invalid.fifo"), Attributes: map[string]string{"ContentBasedDeduplication": "false"}})
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-dedup-invalid.fifo"), Attributes: map[string]string{"FifoQueue": "true", "ContentBasedDeduplication": "false"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +427,7 @@ func TestAWSSDKSQSFIFOZeroDelayUsesQueueDelayContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
-	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-delay-zero.fifo"), Attributes: map[string]string{"ContentBasedDeduplication": "true", "DelaySeconds": "2"}})
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-delay-zero.fifo"), Attributes: map[string]string{"FifoQueue": "true", "ContentBasedDeduplication": "true", "DelaySeconds": "2"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,7 +459,7 @@ func TestAWSSDKSQSFIFOPerMessageDelayContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
-	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-invalid-delay.fifo"), Attributes: map[string]string{"ContentBasedDeduplication": "true"}})
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-invalid-delay.fifo"), Attributes: map[string]string{"FifoQueue": "true", "ContentBasedDeduplication": "true"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1034,7 +1034,7 @@ func TestAWSSDKSQSFIFOMessageAttributesContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
-	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-fifo-attrs.fifo"), Attributes: map[string]string{"ContentBasedDeduplication": "true", "VisibilityTimeout": "0"}})
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-fifo-attrs.fifo"), Attributes: map[string]string{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": "0"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1108,7 +1108,7 @@ func TestAWSSDKSQSFIFOApproximateMessageCountContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
-	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-fifo-count.fifo"), Attributes: map[string]string{"ContentBasedDeduplication": "true"}})
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-fifo-count.fifo"), Attributes: map[string]string{"FifoQueue": "true", "ContentBasedDeduplication": "true"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1143,7 +1143,7 @@ func TestAWSSDKSQSFIFOContentBasedDeduplicationStrategyContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
-	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-dedup-strategy.fifo"), Attributes: map[string]string{"SqsManagedSseEnabled": "true", "ContentBasedDeduplication": "true"}})
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-dedup-strategy.fifo"), Attributes: map[string]string{"FifoQueue": "true", "SqsManagedSseEnabled": "true", "ContentBasedDeduplication": "true"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1303,5 +1303,35 @@ func TestAWSSDKSQSCreateQueueIdempotencyContract(t *testing.T) {
 	_, err = client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-standard-invalid"), Attributes: map[string]string{"FifoQueue": "false"}})
 	if err == nil || !strings.Contains(err.Error(), "Unknown Attribute FifoQueue") {
 		t.Fatalf("invalid fifo attribute error %v", err)
+	}
+}
+
+func TestAWSSDKSQSFIFOQueueNameValidationContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	cases := []struct {
+		name, want string
+		attrs      map[string]string
+	}{
+		{name: "sdk-fifo-missing-attribute.fifo", want: "FifoQueue must be specified as true"},
+		{name: "sdk-fifo-false-attribute.fifo", attrs: map[string]string{"FifoQueue": "false"}, want: "FifoQueue must be specified as true"},
+		{name: "sdk-standard-with-fifo", attrs: map[string]string{"FifoQueue": "true"}, want: "Queue name must end in .fifo for FIFO queues"},
+	}
+	for _, tc := range cases {
+		_, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String(tc.name), Attributes: tc.attrs})
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("queue %s validation error %v", tc.name, err)
+		}
 	}
 }

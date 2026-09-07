@@ -17627,6 +17627,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFIFOPerMessageDelayCharacterization",
 		},
 		{
+			name: "sqs-fifo-require-name-attribute-match",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if strings.HasSuffix(name, ".fifo") && (!fifoSpecified || str(fifo) != "true") {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestFIFOQueueNameValidationCharacterization",
+		},
+		{
+			name: "sqs-standard-reject-fifo-attribute",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if !strings.HasSuffix(name, ".fifo") && fifoSpecified && str(fifo) == "true" {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestFIFOQueueNameValidationCharacterization",
+		},
+		{
 			name: "sqs-visibility-batch-accept-too-many-entries",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "if len(entries) > 10 {\n\t\t\t\treturn nil, &spi.Fault{Code: \"AWS.SimpleQueueService.TooManyEntriesInBatchRequest\"",

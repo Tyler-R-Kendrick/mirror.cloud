@@ -5871,7 +5871,7 @@ func TestConcurrentSQSFIFODeduplicationValidationIsStable(t *testing.T) {
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
-		"QueueName": "chaos-dedup.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "false"},
+		"QueueName": "chaos-dedup.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -6435,7 +6435,7 @@ func TestConcurrentSQSFIFOPerMessageDelaysAreRejected(t *testing.T) {
 	p := sqs.New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-invalid-delay.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true"}}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-invalid-delay.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
 		t.Fatal(err)
 	}
 	errs := make(chan error, 16)
@@ -6495,7 +6495,7 @@ func TestConcurrentSQSFIFOBatchMissingDeduplicationIsStable(t *testing.T) {
 	p := sqs.New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-batch-missing-dedup.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "false"}}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-batch-missing-dedup.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"}}}); err != nil {
 		t.Fatal(err)
 	}
 	errs := make(chan error, 16)
@@ -6526,7 +6526,7 @@ func TestConcurrentSQSFIFOZeroDelayUsesQueueDelay(t *testing.T) {
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
-		"QueueName": "chaos-delay.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true", "DelaySeconds": "2"},
+		"QueueName": "chaos-delay.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "DelaySeconds": "2"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -6570,7 +6570,7 @@ func TestConcurrentSQSFIFOMessageAttributesAreRetained(t *testing.T) {
 	p := sqs.New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-fifo-attrs.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true", "VisibilityTimeout": "0"}}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-fifo-attrs.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": "0"}}}); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -6609,7 +6609,7 @@ func TestConcurrentSQSFIFOApproximateCountExcludesInFlight(t *testing.T) {
 	p := sqs.New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-fifo-count.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true"}}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-fifo-count.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -6635,7 +6635,7 @@ func TestConcurrentSQSFIFOContentBasedDeduplicationStrategyIsStable(t *testing.T
 	p := sqs.New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-dedup-strategy.fifo", "Attributes": map[string]any{"SqsManagedSseEnabled": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-dedup-strategy.fifo", "Attributes": map[string]any{"FifoQueue": "true", "SqsManagedSseEnabled": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -6650,5 +6650,43 @@ func TestConcurrentSQSFIFOContentBasedDeduplicationStrategyIsStable(t *testing.T
 	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "chaos-dedup-strategy.fifo", "AttributeNames": []any{"All"}}})
 	if err != nil || response.Output["Attributes"].(map[string]any)["ContentBasedDeduplication"] != "false" || response.Output["Attributes"].(map[string]any)["SqsManagedSseEnabled"] != "true" {
 		t.Fatalf("attributes %#v error %v", response.Output, err)
+	}
+}
+
+func TestConcurrentSQSFIFOQueueNameValidationIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	cases := []struct {
+		name, message string
+		attrs         map[string]any
+	}{
+		{name: "chaos-missing-attribute.fifo", message: "FifoQueue must be specified as true"},
+		{name: "chaos-false-attribute.fifo", attrs: map[string]any{"FifoQueue": "false"}, message: "FifoQueue must be specified as true"},
+		{name: "chaos-standard-with-fifo", attrs: map[string]any{"FifoQueue": "true"}, message: "Queue name must end in .fifo for FIFO queues"},
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, len(cases)*8)
+	for _, tc := range cases {
+		for range 8 {
+			wg.Add(1)
+			go func(tc struct {
+				name, message string
+				attrs         map[string]any
+			}) {
+				defer wg.Done()
+				_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": tc.name, "Attributes": tc.attrs}})
+				fault, ok := err.(*spi.Fault)
+				if !ok || fault.Code != "InvalidParameterValue" || !strings.Contains(fault.Message, tc.message) {
+					errs <- fmt.Errorf("%s validation error %#v", tc.name, err)
+				}
+			}(tc)
+		}
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
 	}
 }

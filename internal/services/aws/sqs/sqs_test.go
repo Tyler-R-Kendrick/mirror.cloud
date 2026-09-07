@@ -717,7 +717,7 @@ func TestFIFOMessageAttributesCharacterization(t *testing.T) {
 		}
 		return response.Output
 	}
-	call("CreateQueue", map[string]any{"QueueName": "fifo-attrs.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true", "VisibilityTimeout": "0"}})
+	call("CreateQueue", map[string]any{"QueueName": "fifo-attrs.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": "0"}})
 	call("SendMessage", map[string]any{"QueueName": "fifo-attrs.fifo", "MessageBody": "message-body-1", "MessageGroupId": "group-1", "MessageDeduplicationId": "dedup-1", "MessageAttributes": map[string]any{
 		"kind": map[string]any{"DataType": "String", "StringValue": "fifo"},
 	}})
@@ -770,7 +770,7 @@ func FuzzFIFOMessageAttributes(f *testing.F) {
 		p := New(spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-fifo-attrs.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true", "VisibilityTimeout": "0"}}}); err != nil {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-fifo-attrs.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": "0"}}}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-fifo-attrs.fifo", "MessageBody": "message", "MessageGroupId": "group-1", "MessageDeduplicationId": "dedup-1", "MessageAttributes": map[string]any{"kind": map[string]any{"DataType": "String", "StringValue": value}}}}); err != nil {
@@ -802,7 +802,7 @@ func TestFIFOApproximateMessageCountCharacterization(t *testing.T) {
 		}
 		return response.Output
 	}
-	call("CreateQueue", map[string]any{"QueueName": "fifo-count.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true"}})
+	call("CreateQueue", map[string]any{"QueueName": "fifo-count.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}})
 	for _, message := range []string{"g1-m1", "g1-m2", "g1-m3", "g2-m1", "g3-m1"} {
 		call("SendMessage", map[string]any{"QueueName": "fifo-count.fifo", "MessageBody": message, "MessageGroupId": strings.Split(message, "-")[0]})
 	}
@@ -823,7 +823,7 @@ func TestFIFOContentBasedDeduplicationStrategyCharacterization(t *testing.T) {
 		}
 		return response.Output
 	}
-	call("CreateQueue", map[string]any{"QueueName": "dedup-strategy.fifo", "Attributes": map[string]any{"SqsManagedSseEnabled": "true", "ContentBasedDeduplication": "true"}})
+	call("CreateQueue", map[string]any{"QueueName": "dedup-strategy.fifo", "Attributes": map[string]any{"FifoQueue": "true", "SqsManagedSseEnabled": "true", "ContentBasedDeduplication": "true"}})
 	before := call("GetQueueAttributes", map[string]any{"QueueName": "dedup-strategy.fifo", "AttributeNames": []any{"All"}})
 	call("SetQueueAttributes", map[string]any{"QueueName": "dedup-strategy.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "false"}})
 	after := call("GetQueueAttributes", map[string]any{"QueueName": "dedup-strategy.fifo", "AttributeNames": []any{"All"}})
@@ -837,7 +837,7 @@ func FuzzFIFOContentBasedDeduplicationStrategy(f *testing.F) {
 		p := New(spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-dedup-strategy.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true"}}}); err != nil {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-dedup-strategy.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
 			t.Fatal(err)
 		}
 		value := strconv.FormatBool(enabled)
@@ -1158,7 +1158,7 @@ func FuzzFIFOApproximateMessageCount(f *testing.F) {
 		p := New(spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-fifo-count.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true"}}}); err != nil {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-fifo-count.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
 			t.Fatal(err)
 		}
 		for i := range count {
@@ -1314,7 +1314,7 @@ func TestFIFOBatchMissingDeduplicationIDCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-missing-dedup.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "false"}}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-missing-dedup.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"}}}); err != nil {
 		t.Fatal(err)
 	}
 	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "batch-missing-dedup.fifo", "Entries": []any{
@@ -1631,7 +1631,7 @@ func TestQueueCannotBeRecreatedUntilDeleteWindowExpires(t *testing.T) {
 	call := func(operation string, input map[string]any) (*spi.Response, error) {
 		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
 	}
-	created, err := call("CreateQueue", map[string]any{"QueueName": name, "Attributes": map[string]any{"DelaySeconds": "5"}})
+	created, err := call("CreateQueue", map[string]any{"QueueName": name, "Attributes": map[string]any{"FifoQueue": "true", "DelaySeconds": "5"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1663,7 +1663,7 @@ func TestQueueCannotBeRecreatedUntilDeleteWindowExpires(t *testing.T) {
 	if err := clk.Advance(time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	recreated, err := call("CreateQueue", map[string]any{"QueueName": name})
+	recreated, err := call("CreateQueue", map[string]any{"QueueName": name, "Attributes": map[string]any{"FifoQueue": "true"}})
 	if err != nil || recreated.Output["QueueUrl"] != created.Output["QueueUrl"] {
 		t.Fatalf("recreate %#v, %v", recreated, err)
 	}
@@ -1798,7 +1798,7 @@ func TestSendValidationAndDelay(t *testing.T) {
 	invoke := func(op string, in map[string]any) (*spi.Response, error) {
 		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
 	}
-	_, _ = invoke("CreateQueue", map[string]any{"QueueName": "strict.fifo"})
+	_, _ = invoke("CreateQueue", map[string]any{"QueueName": "strict.fifo", "Attributes": map[string]any{"FifoQueue": "true"}})
 	if _, err := invoke("SendMessage", map[string]any{"QueueName": "strict.fifo", "MessageBody": "x"}); faultCode(err) != "MissingParameter" {
 		t.Fatalf("missing group error %v", err)
 	}
@@ -2058,7 +2058,7 @@ func FuzzFIFOBatchDeduplicationPresence(f *testing.F) {
 		p := New(spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-batch-dedup.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "false"}}}); err != nil {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-batch-dedup.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"}}}); err != nil {
 			t.Fatal(err)
 		}
 		entry := map[string]any{"Id": "message-1", "MessageBody": "message", "MessageGroupId": "group-1"}
@@ -2092,7 +2092,7 @@ func FuzzFIFODeduplicationID(f *testing.F) {
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
-			"QueueName": "fuzz-dedup.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "false"},
+			"QueueName": "fuzz-dedup.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"},
 		}}); err != nil {
 			t.Fatal(err)
 		}
@@ -2126,7 +2126,7 @@ func FuzzFIFODelayZeroUsesQueueDelay(f *testing.F) {
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
-			"QueueName": "fuzz-delay.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true", "DelaySeconds": strconv.Itoa(delay)},
+			"QueueName": "fuzz-delay.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "DelaySeconds": strconv.Itoa(delay)},
 		}}); err != nil {
 			t.Fatal(err)
 		}
@@ -2162,7 +2162,7 @@ func FuzzFIFOPerMessageDelay(f *testing.F) {
 		p := New(spitest.Deps(t))
 		ctx := context.Background()
 		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-invalid-delay.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true"}}}); err != nil {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-invalid-delay.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
 			t.Fatal(err)
 		}
 		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-invalid-delay.fifo", "MessageBody": "message", "MessageGroupId": "group-1", "DelaySeconds": delay}})
@@ -2232,12 +2232,31 @@ func TestCreateQueueIdempotencyAndAttributeValidation(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"conflict": conflict, "updated": updated, "invalid": invalid})
 }
 
+func TestFIFOQueueNameValidationCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(input map[string]any) map[string]any {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: input})
+		fault, ok := err.(*spi.Fault)
+		if !ok {
+			t.Fatalf("CreateQueue %#v error %#v", input, err)
+		}
+		return map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault}
+	}
+	golden.AssertJSON(t, map[string]any{
+		"fifoMissingAttribute":  call(map[string]any{"QueueName": "missing-attribute.fifo"}),
+		"fifoFalseAttribute":    call(map[string]any{"QueueName": "false-attribute.fifo", "Attributes": map[string]any{"FifoQueue": "false"}}),
+		"standardFIFOAttribute": call(map[string]any{"QueueName": "standard-with-fifo", "Attributes": map[string]any{"FifoQueue": "true"}}),
+	})
+}
+
 func TestFIFODeduplicationIDCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
-		"QueueName": "dedup-invalid.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "false"},
+		"QueueName": "dedup-invalid.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -2264,7 +2283,7 @@ func TestFIFODelayZeroUsesQueueDelayCharacterization(t *testing.T) {
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
-		"QueueName": "delay-zero.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true", "DelaySeconds": "2"},
+		"QueueName": "delay-zero.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "DelaySeconds": "2"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -2295,7 +2314,7 @@ func TestFIFOPerMessageDelayCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
-	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "delay-invalid.fifo", "Attributes": map[string]any{"ContentBasedDeduplication": "true"}}}); err != nil {
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "delay-invalid.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
 		t.Fatal(err)
 	}
 	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "delay-invalid.fifo", "MessageBody": "message", "MessageGroupId": "group-1", "DelaySeconds": 2}})
@@ -2331,6 +2350,7 @@ func TestFIFODedupDLQLongPoll(t *testing.T) {
 	}
 	inv("CreateQueue", map[string]any{"QueueName": "dlq"})
 	inv("CreateQueue", map[string]any{"QueueName": "q.fifo", "Attributes": map[string]any{
+		"FifoQueue":                 "true",
 		"ContentBasedDeduplication": "true",
 		"RedrivePolicy":             `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:1:dlq","maxReceiveCount":"1"}`,
 		"VisibilityTimeout":         "0",

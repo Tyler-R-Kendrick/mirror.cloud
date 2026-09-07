@@ -1,0 +1,20 @@
+{
+  "fifoFalseAttribute": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "FifoQueue must be specified as true for FIFO queues."
+  },
+  "fifoMissingAttribute": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "FifoQueue must be specified as true for FIFO queues."
+  },
+  "standardFIFOAttribute": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "Queue name must end in .fifo for FIFO queues"
+  }
+}

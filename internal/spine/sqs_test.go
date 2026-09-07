@@ -167,7 +167,7 @@ func TestBootedServerSQSSection48(t *testing.T) {
 		t.Fatalf("purge left %v", empty)
 	}
 
-	jsonCall("CreateQueue", `{"QueueName":"f.fifo","Attributes":{"ContentBasedDeduplication":"true"}}`)
+	jsonCall("CreateQueue", `{"QueueName":"f.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true"}}`)
 	jsonCall("SendMessage", `{"QueueName":"f.fifo","MessageBody":"g1a","MessageGroupId":"g1","MessageDeduplicationId":"d1"}`)
 	jsonCall("SendMessage", `{"QueueName":"f.fifo","MessageBody":"g1a","MessageGroupId":"g1","MessageDeduplicationId":"d1"}`)
 	jsonCall("SendMessage", `{"QueueName":"f.fifo","MessageBody":"g2a","MessageGroupId":"g2","MessageDeduplicationId":"d2"}`)
@@ -254,6 +254,9 @@ func TestBootedServerSQSSection48(t *testing.T) {
 	} else if h.Get("x-mirror-fidelity") != "emulate" {
 		t.Fatalf("query create fidelity %q", h.Get("x-mirror-fidelity"))
 	}
+	if code, body, _ := queryCall(url.Values{"Action": {"GetQueueAttributes"}, "Version": {"2012-11-05"}, "QueueName": {"missing-query-queue"}, "AttributeName.1": {"All"}}); code != http.StatusBadRequest || !strings.Contains(body, "AWS.SimpleQueueService.NonExistentQueue") || !strings.Contains(body, "for this wsdl version") {
+		t.Fatalf("query missing queue %d %s", code, body)
+	}
 	if code, body, _ := queryCall(url.Values{"Action": {"SendMessage"}, "Version": {"2012-11-05"}, "QueueName": {"queryq"}, "MessageBody": {"hello-query-wire"}}); code >= 300 {
 		t.Fatalf("query send %d %s", code, body)
 	}
@@ -267,8 +270,8 @@ func TestBootedServerSQSSection48(t *testing.T) {
 	if !strings.Contains(qrecv, "hello-query-wire") {
 		t.Fatalf("query recv body %s", qrecv)
 	}
-	if code, body, _ := queryCall(url.Values{"Action": {"DeleteMessage"}, "Version": {"2012-11-05"}, "QueueName": {"queryq"}, "ReceiptHandle": {"nope"}}); code >= 300 {
-		t.Fatalf("query delete %d %s", code, body)
+	if code, body, _ := queryCall(url.Values{"Action": {"DeleteMessage"}, "Version": {"2012-11-05"}, "QueueName": {"queryq"}, "ReceiptHandle": {"nope"}}); code != http.StatusBadRequest || !strings.Contains(body, "ReceiptHandleIsInvalid") {
+		t.Fatalf("query delete validation %d %s", code, body)
 	}
 	if code, body, _ := queryCall(url.Values{"Action": {"ReceiveMessage"}, "Version": {"2012-11-05"}, "QueueName": {"f.fifo"}, "WaitTimeSeconds": {"0"}}); code >= 300 {
 		t.Fatalf("query fifo recv %d %s", code, body)

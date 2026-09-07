@@ -67,6 +67,18 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("invalid queue name %d %s", status, body)
 		}
 	})
+	t.Run("Given a deleted queue When reading it Then the AWS non-existent queue fault is returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-missing-queue"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("DeleteQueue", `{"QueueUrl":"http://queue/000000000000/bdd-missing-queue"}`); status != http.StatusOK {
+			t.Fatalf("delete %d %s", status, body)
+		}
+		status, body := call("GetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-missing-queue","AttributeNames":["All"]}`)
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte(`"__type":"AWS.SimpleQueueService.NonExistentQueue"`)) || !bytes.Contains(body, []byte(`"message":"The specified queue does not exist."`)) {
+			t.Fatalf("missing queue %d %s", status, body)
+		}
+	})
 	t.Run("Given a queue When requesting metadata Then only selected attributes are returned", func(t *testing.T) {
 		status, body := call("CreateQueue", `{"QueueName":"bdd-metadata"}`)
 		var created map[string]any

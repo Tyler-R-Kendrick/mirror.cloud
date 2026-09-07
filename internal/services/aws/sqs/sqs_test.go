@@ -113,6 +113,27 @@ func TestCreateSendReceiveDelete(t *testing.T) {
 	}
 }
 
+func TestMissingQueueProtocolCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	faultFor := func(req *spi.Request) map[string]any {
+		_, err := p.Invoke(context.Background(), req)
+		fault, ok := err.(*spi.Fault)
+		if !ok {
+			t.Fatalf("missing queue error %#v", err)
+		}
+		return map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault}
+	}
+	query := httptest.NewRequest("POST", "http://sqs/", nil)
+	json := httptest.NewRequest("POST", "http://sqs/", nil)
+	json.Header.Set("X-Amz-Target", "AmazonSQS.GetQueueAttributes")
+	golden.AssertJSON(t, map[string]any{
+		"json":   faultFor(&spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "missing"}, HTTP: json}),
+		"query":  faultFor(&spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "missing"}, HTTP: query}),
+		"direct": faultFor(&spi.Request{Identity: id, Operation: "GetQueueUrl", Input: map[string]any{"QueueName": "missing"}}),
+	})
+}
+
 func TestInvalidReceiptHandleCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

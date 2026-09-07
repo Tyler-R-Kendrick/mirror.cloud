@@ -55,7 +55,7 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	base := advertise(req)
 	if queueScoped(req.Operation) && !p.queueExists(ctx, req, queueName(req)) {
-		return nil, queueMissing()
+		return nil, queueMissing(req)
 	}
 	switch req.Operation {
 	case "CreateQueue":
@@ -138,7 +138,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		name := str(req.Input["QueueName"])
 		b, ok, _ := p.col(req, "queues").Get(ctx, name)
 		if !ok {
-			return nil, queueMissing()
+			return nil, queueMissing(req)
 		}
 		var m map[string]any
 		_ = json.Unmarshal(b, &m)
@@ -475,8 +475,12 @@ func (p *Pack) queueExists(ctx context.Context, req *spi.Request, name string) b
 	return ok
 }
 
-func queueMissing() *spi.Fault {
-	return &spi.Fault{Code: "AWS.SimpleQueueService.NonExistentQueue", Message: "The specified queue does not exist.", HTTPStatus: 400, Fault: "client"}
+func queueMissing(req *spi.Request) *spi.Fault {
+	message := "The specified queue does not exist."
+	if req != nil && req.HTTP != nil && req.HTTP.Header.Get("X-Amz-Target") == "" {
+		message = "The specified queue does not exist for this wsdl version."
+	}
+	return &spi.Fault{Code: "AWS.SimpleQueueService.NonExistentQueue", Message: message, HTTPStatus: 400, Fault: "client"}
 }
 
 func (p *Pack) countMsgs(ctx context.Context, req *spi.Request, name string) int {
@@ -827,18 +831,19 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 	deadline := p.deps.Clock.Now().Add(wait)
 	for {
 		now := p.deps.Clock.Now()
-		msgs := p.visible(ctx, req, name, now, max)
-		if len(msgs) > 0 || wait == 0 || !now.Before(deadline) {
+		out := make([]any, 0, max)
+		wanted := map[string]bool{}
+		names := stringList(req.Input, "AttributeNames", "AttributeName")
+		names = append(names, stringList(req.Input, "MessageSystemAttributeNames", "MessageSystemAttributeName")...)
+		for _, name := range names {
+			wanted[name] = true
+		}
+		for len(out) < max {
+			msgs := p.visible(ctx, req, name, now, max-len(out))
 			if len(msgs) == 0 {
-				return &spi.Response{Output: map[string]any{}}, nil
+				break
 			}
-			out := make([]any, 0, len(msgs))
-			wanted := map[string]bool{}
-			names := stringList(req.Input, "AttributeNames", "AttributeName")
-			names = append(names, stringList(req.Input, "MessageSystemAttributeNames", "MessageSystemAttributeName")...)
-			for _, name := range names {
-				wanted[name] = true
-			}
+			before := len(out)
 			for _, m := range msgs {
 				if p.afterReceive(ctx, req, name, m, vis) {
 					continue
@@ -868,6 +873,11 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 				}
 				out = append(out, wire)
 			}
+			if len(out) > before {
+				break
+			}
+		}
+		if len(out) > 0 || wait == 0 || !now.Before(deadline) {
 			return &spi.Response{Output: map[string]any{"Messages": out}}, nil
 		}
 		d := deadline.Sub(now)

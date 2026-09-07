@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"github.com/aws/smithy-go"
 
 	mcfg "github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
@@ -682,6 +684,41 @@ func TestAWSSDKSQSQueueMetadataContract(t *testing.T) {
 	updated, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameAll}})
 	if err != nil || updated.Attributes["MaximumMessageSize"] != "2048" || updated.Attributes["VisibilityTimeout"] != "69" || updated.Attributes["DelaySeconds"] != "420" || updated.Attributes["SqsManagedSseEnabled"] != "true" {
 		t.Fatalf("updated metadata %#v, %v", updated, err)
+	}
+}
+
+func TestAWSSDKSQSNonExistentQueueContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-missing-queue")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.DeleteQueue(context.Background(), &sqs.DeleteQueueInput{QueueUrl: created.QueueUrl}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameAll}})
+	if err == nil || !strings.Contains(err.Error(), "AWS.SimpleQueueService.NonExistentQueue") {
+		t.Fatalf("attributes missing queue error %v", err)
+	}
+	var apiErr smithy.APIError
+	if !errors.As(err, &apiErr) || apiErr.ErrorCode() != "AWS.SimpleQueueService.NonExistentQueue" {
+		t.Fatalf("attributes api error %T %v", err, err)
+	}
+	_, err = client.GetQueueUrl(context.Background(), &sqs.GetQueueUrlInput{QueueName: aws.String("sdk-missing-queue")})
+	if err == nil || !errors.As(err, &apiErr) || apiErr.ErrorCode() != "AWS.SimpleQueueService.NonExistentQueue" {
+		t.Fatalf("url missing queue error %T %v", err, err)
 	}
 }
 

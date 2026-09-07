@@ -783,13 +783,31 @@ running it. So the rule is about the method, not a new gate: **when a change
 retargets mutants, the whole mutation suite is the verification, not a filter
 of it.**
 
-**And it is now slow enough to matter.** That run took 3246 seconds against a
-3600-second timeout -- ninety percent of the budget, on a step that used to
-take about twenty-five minutes. This stack added twenty-four mutants and CI now
-has very little headroom before the gate starts failing for time rather than
-for defects. That is a real problem and the fix is not to delete mutants: the
-harness rebuilds and re-runs a whole package per mutant, and mutants sharing a
-package could share one build.
+**And it was slow enough to matter.** That run took 3246 seconds against a
+3600-second timeout, and the three that followed took 3359, 3267 and 3480 --
+the last of them ninety-seven percent of the budget, on a step that used to
+take about twenty-five minutes. The next mutant anyone added would have turned
+the gate red for time rather than for a defect, and a timeout looks nothing
+like a surviving mutant.
+
+Measuring it corrected two guesses, including the one written here first. The
+sketch above was that mutants sharing a package could share one build. They
+cannot: a mutant *is* a distinct build of the mutated package, and there is
+nothing to share. The other guess was `-vet=off`, which does nothing, because
+vet is cached with the build -- 5.19 seconds against 5.26 on a cold rebuild.
+
+What the measurement actually shows, on the large packs, is about 3.4 seconds
+to compile the mutated package and 1.8 to run the test it names. Nineteen
+hundred of those over four cores is exactly the fifty-eight minutes CI was
+spending. Per-mutant cost is irreducible; the only lever is how many mutants
+one job runs. Four shards, split by index so the three packages holding four
+fifths of the suite spread evenly rather than landing on one shard, and a
+shard now takes 722 seconds against a 1800-second timeout.
+
+The lesson is the same one this section is about. The first fix written down
+here was plausible, cost nothing to write, and was wrong; measuring took ten
+minutes and produced a different change. A remedy recorded without a
+measurement is a guess wearing a finding's clothes.
 
 ### Reviewing the exemptions found the same rot in three places
 

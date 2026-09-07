@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -290,5 +291,79 @@ func TestIngestIsDeterministic(t *testing.T) {
 			t.Fatalf("operation %d is %s then %s", i,
 				first.Operations[i].Name, second.Operations[i].Name)
 		}
+	}
+}
+
+// TestADanglingRefIsRefused. A `$ref` is copied through without being looked
+// up -- it has to be, since a schema may refer to one defined after it -- so
+// nothing inside the walk stops a document naming a schema it does not define.
+// The result would be exactly the defect this receiver had: members pointing
+// at shapes that are not there, in a model that looks populated.
+//
+// TestNoShapeRefersToOneThatIsNotThere proves that for the document above.
+// This proves the receiver will not emit one for any document.
+func TestADanglingRefIsRefused(t *testing.T) {
+	for _, tc := range []struct{ name, doc string }{
+		{
+			name: "a property refers to a schema that is not defined",
+			doc: `{"name": "storage", "resources": {"b": {"methods": {"get": {
+			  "id": "storage.b.get", "httpMethod": "GET", "path": "b",
+			  "response": {"$ref": "Bucket"}}}}},
+			  "schemas": {"Bucket": {"type": "object", "properties": {
+			    "owner": {"$ref": "Missing"}}}}}`,
+		},
+		{
+			name: "a list item refers to a schema that is not defined",
+			doc: `{"name": "storage", "resources": {"b": {"methods": {"get": {
+			  "id": "storage.b.get", "httpMethod": "GET", "path": "b",
+			  "response": {"$ref": "Bucket"}}}}},
+			  "schemas": {"Bucket": {"type": "object", "properties": {
+			    "acl": {"type": "array", "items": {"$ref": "Missing"}}}}}}`,
+		},
+		{
+			name: "a request body refers to a schema that is not defined",
+			doc: `{"name": "storage", "resources": {"b": {"methods": {"insert": {
+			  "id": "storage.b.insert", "httpMethod": "POST", "path": "b",
+			  "request": {"$ref": "Missing"}}}}}}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svcs, err := (Receiver{}).Ingest(context.Background(),
+				model.SourceRef{Path: "storage.json"}, []byte(tc.doc))
+			if err == nil {
+				t.Fatalf("ingested a document with a dangling reference: %+v", svcs)
+			}
+			if !strings.Contains(err.Error(), "Missing") {
+				t.Errorf("the error does not name the reference that dangles: %v", err)
+			}
+		})
+	}
+}
+
+// TestABodyRefThatResolvesIsNotRefused keeps the check from being a blanket
+// refusal: the request body is looked up in the shapes built so far, and a
+// method whose body names a schema the document does define must still load.
+func TestABodyRefThatResolvesIsNotRefused(t *testing.T) {
+	svc := ingest(t)
+	in := svc.Shapes[op(t, svc, "storage.buckets.insert").Input]
+	if _, ok := in.Members["name"]; !ok {
+		t.Error("the insert request lost the body members it resolves")
+	}
+}
+
+// TestADanglingResponseRefIsNotSwallowed. The fallback for a method with no
+// response is an empty structure, and it would have been reached by a method
+// whose response names a schema that is not defined -- turning a defect in the
+// document into "this method answers nothing", which is a thing a bundle would
+// then be written against.
+func TestADanglingResponseRefIsNotSwallowed(t *testing.T) {
+	doc := `{"name": "storage", "resources": {"b": {"methods": {"get": {
+	  "id": "storage.b.get", "httpMethod": "GET", "path": "b",
+	  "response": {"$ref": "Missing"}}}}}}`
+	if _, err := (Receiver{}).Ingest(context.Background(),
+		model.SourceRef{Path: "storage.json"}, []byte(doc)); err == nil {
+		t.Fatal("a method whose response names an undefined schema was ingested as answering nothing")
+	} else if !strings.Contains(err.Error(), "Missing") {
+		t.Errorf("the error does not name the reference that dangles: %v", err)
 	}
 }

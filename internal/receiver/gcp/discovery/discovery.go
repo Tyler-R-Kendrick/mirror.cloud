@@ -4,6 +4,7 @@ package discovery
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -133,7 +134,50 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 		return svc.Operations[i].Name < svc.Operations[j].Name
 	})
 	svc.Shapes = sh.shapes
+	if err := resolves(&svc, sh.missing); err != nil {
+		return nil, err
+	}
 	return []model.Service{svc}, nil
+}
+
+// resolves refuses a model whose references do not. A `$ref` is copied through
+// without being looked up -- it has to be, since a schema may refer to one
+// defined after it -- so a document naming a schema it does not define would
+// otherwise produce exactly the defect this receiver had: members pointing at
+// shapes that are not there, in a model that looks populated.
+//
+// A test over one document proves it for that document. This proves it for
+// whatever is ingested next.
+func resolves(svc *model.Service, swallowed []string) error {
+	missing := append([]string(nil), swallowed...)
+	check := func(from, ref string) {
+		if ref == "" {
+			return
+		}
+		if _, ok := svc.Shapes[ref]; !ok {
+			missing = append(missing, from+" -> "+ref)
+		}
+	}
+	for _, op := range svc.Operations {
+		check("operation "+op.Name+" input", op.Input)
+		check("operation "+op.Name+" output", op.Output)
+	}
+	for _, id := range sortedShapes(svc.Shapes) {
+		sh := svc.Shapes[id]
+		for _, name := range sortedMembers(sh.Members) {
+			check(id+"."+name, sh.Members[name].Shape)
+		}
+		check(id+" (member)", sh.Member)
+		if sh.Kind == model.KindMap {
+			check(id+" (key)", sh.Key)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	return fmt.Errorf("discovery: %s: %d unresolved reference(s): %s",
+		svc.ID, len(missing), strings.Join(missing, "; "))
 }
 
 // shaper builds the shape graph, giving a name to each anonymous schema it
@@ -143,6 +187,13 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 // in, which is unique by construction and reads as what it is.
 type shaper struct {
 	shapes map[string]model.Shape
+	// missing collects references that were swallowed rather than carried
+	// into the model, so the check at the end can still see them. A request
+	// body is the one place a `$ref` is dereferenced rather than copied: the
+	// members are merged and the reference itself does not survive, so a body
+	// naming a schema the document does not define would have produced an
+	// empty request shape and no complaint.
+	missing []string
 }
 
 // define registers a named Discovery schema under its own name.
@@ -162,16 +213,20 @@ func (s *shaper) define(name string, sch schema) {
 // against one description and served through another.
 //
 // A parameter and a body member of the same name is the one case where that
-// flattening loses something. The parameter wins, because it is the one the
-// caller can always send.
+// flattening loses something, and the order here is the codec's: it unmarshals
+// the body into the map and then writes every query parameter over it, so the
+// parameter is what a service sees. The model says what the runtime does, for
+// the same reason as above.
 func (s *shaper) request(m method, global map[string]schema) string {
 	id := m.ID + ".request"
 	members := map[string]model.Member{}
 	if m.Request != nil && m.Request.Ref != "" {
-		if body, ok := s.shapes[m.Request.Ref]; ok {
-			for name, member := range body.Members {
-				members[name] = member
-			}
+		body, ok := s.shapes[m.Request.Ref]
+		if !ok {
+			s.missing = append(s.missing, id+" (body) -> "+m.Request.Ref)
+		}
+		for name, member := range body.Members {
+			members[name] = member
 		}
 	}
 	for _, src := range []map[string]schema{global, m.Parameters} {
@@ -194,10 +249,11 @@ func (s *shaper) request(m method, global map[string]schema) string {
 // bundle that names an output member on a method that has none should be told
 // that, and an operation with no output shape cannot be told anything.
 func (s *shaper) response(m method) string {
+	// A named response is carried through whether or not the schema exists,
+	// so the check at the end sees it. Falling back to an empty structure
+	// would turn a document defect into "this method answers nothing".
 	if m.Response != nil && m.Response.Ref != "" {
-		if _, ok := s.shapes[m.Response.Ref]; ok {
-			return m.Response.Ref
-		}
+		return m.Response.Ref
 	}
 	id := m.ID + ".response"
 	s.shapes[id] = model.Shape{ID: id, Kind: model.KindStructure, Members: map[string]model.Member{}}
@@ -364,6 +420,10 @@ func sortedMethods(m map[string]method) []string {
 	sort.Strings(out)
 	return out
 }
+
+func sortedShapes(m map[string]model.Shape) []string { return sortedKeys(m) }
+
+func sortedMembers(m map[string]model.Member) []string { return sortedKeys(m) }
 
 func sortedResources(m map[string]resource) []string {
 	out := make([]string, 0, len(m))

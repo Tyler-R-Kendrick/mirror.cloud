@@ -1357,6 +1357,42 @@ func TestAWSSDKSQSListDeadLetterSourceQueuesContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSSetFifoAttributeValidationContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	standard, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-standard-attribute")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"true", "false"} {
+		_, err := client.SetQueueAttributes(context.Background(), &sqs.SetQueueAttributesInput{QueueUrl: standard.QueueUrl, Attributes: map[string]string{"FifoQueue": value}})
+		if err == nil || !strings.Contains(err.Error(), "InvalidAttributeName") {
+			t.Fatalf("standard FifoQueue=%s error %v", value, err)
+		}
+	}
+	fifo, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-fifo-attribute.fifo"), Attributes: map[string]string{"FifoQueue": "true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SetQueueAttributes(context.Background(), &sqs.SetQueueAttributesInput{QueueUrl: fifo.QueueUrl, Attributes: map[string]string{"FifoQueue": "true"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SetQueueAttributes(context.Background(), &sqs.SetQueueAttributesInput{QueueUrl: fifo.QueueUrl, Attributes: map[string]string{"FifoQueue": "false"}}); err == nil || !strings.Contains(err.Error(), "InvalidAttributeName") {
+		t.Fatalf("fifo false error %v", err)
+	}
+}
+
 func TestAWSSDKSQSMultipleQueuesContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

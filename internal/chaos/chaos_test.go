@@ -1054,6 +1054,48 @@ func TestConcurrentSQSListDeadLetterSourceQueuesIsStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSSetFifoAttributeValidationIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-standard-attribute"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-fifo-attribute.fifo", "Attributes": map[string]any{"FifoQueue": "true"}}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for range 8 {
+		for _, test := range []struct {
+			name, value string
+			valid       bool
+		}{{"chaos-standard-attribute", "true", false}, {"chaos-standard-attribute", "false", false}, {"chaos-fifo-attribute.fifo", "true", true}, {"chaos-fifo-attribute.fifo", "false", false}} {
+			wg.Add(1)
+			go func(test struct {
+				name, value string
+				valid       bool
+			}) {
+				defer wg.Done()
+				_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": test.name, "Attributes": map[string]any{"FifoQueue": test.value}}})
+				if test.valid && err != nil {
+					errs <- err
+				} else if !test.valid {
+					fault, ok := err.(*spi.Fault)
+					if !ok || fault.Code != "InvalidAttributeName" {
+						errs <- fmt.Errorf("%s=%s error %#v", test.name, test.value, err)
+					}
+				}
+			}(test)
+		}
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSStandardMessageGroupValidationIsStable(t *testing.T) {
 	p := sqs.New(spitest.Deps(t))
 	ctx := context.Background()

@@ -110,6 +110,26 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("sources %d %s", status, body)
 		}
 	})
+	t.Run("Given queue types When changing FifoQueue Then unsupported mutations are rejected", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-standard-attribute"}`); status != http.StatusOK {
+			t.Fatalf("standard create %d %s", status, body)
+		}
+		for _, value := range []string{"true", "false"} {
+			payload := `{"QueueUrl":"http://queue/000000000000/bdd-standard-attribute","Attributes":{"FifoQueue":"` + value + `"}}`
+			if status, body := call("SetQueueAttributes", payload); status != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidAttributeName")) {
+				t.Fatalf("standard %s %d %s", value, status, body)
+			}
+		}
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-fifo-attribute.fifo","Attributes":{"FifoQueue":"true"}}`); status != http.StatusOK {
+			t.Fatalf("fifo create %d %s", status, body)
+		}
+		if status, body := call("SetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-fifo-attribute.fifo","Attributes":{"FifoQueue":"true"}}`); status != http.StatusOK {
+			t.Fatalf("fifo true %d %s", status, body)
+		}
+		if status, body := call("SetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-fifo-attribute.fifo","Attributes":{"FifoQueue":"false"}}`); status != http.StatusBadRequest || !bytes.Contains(body, []byte("InvalidAttributeName")) {
+			t.Fatalf("fifo false %d %s", status, body)
+		}
+	})
 	t.Run("Given a deleted queue When recreating immediately Then the deletion window is enforced", func(t *testing.T) {
 		status, body := call("CreateQueue", `{"QueueName":"bdd-deleted"}`)
 		var created map[string]any

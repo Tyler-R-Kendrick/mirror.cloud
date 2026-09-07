@@ -1,0 +1,20 @@
+{
+  "fifoFalse": {
+    "Code": "InvalidAttributeName",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "Unknown Attribute FifoQueue."
+  },
+  "standardFalse": {
+    "Code": "InvalidAttributeName",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "Unknown Attribute FifoQueue."
+  },
+  "standardTrue": {
+    "Code": "InvalidAttributeName",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "Unknown Attribute FifoQueue."
+  }
+}

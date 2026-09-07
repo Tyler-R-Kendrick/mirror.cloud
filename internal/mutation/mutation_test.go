@@ -17771,6 +17771,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestListDeadLetterSourceQueuesCharacterization",
 		},
 		{
+			name: "sqs-allow-fifo-attribute-mutation",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if fifo, present := attrs[\"FifoQueue\"]; present && (!strings.HasSuffix(name, \".fifo\") || str(fifo) != \"true\") {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestSetFifoAttributeValidationCharacterization",
+		},
+		{
 			name: "sqs-batch-accept-too-many-entries",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "case \"SendMessageBatch\":\n\t\tentries, _ := req.Input[\"Entries\"].([]any)\n\t\tif len(entries) == 0 {\n\t\t\treturn nil, &spi.Fault{Code: \"AWS.SimpleQueueService.EmptyBatchRequest\", Message: \"There should be at least one SendMessageBatchRequestEntry in the request.\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tif len(entries) > 10 {",

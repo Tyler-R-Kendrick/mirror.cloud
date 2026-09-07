@@ -993,6 +993,33 @@ func TestListDeadLetterSourceQueuesCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"count": len(urls), "containsSourceA": strings.Contains(str(urls[0]), "source-a") || strings.Contains(str(urls[1]), "source-a"), "containsSourceB": strings.Contains(str(urls[0]), "source-b") || strings.Contains(str(urls[1]), "source-b")})
 }
 
+func TestSetFifoAttributeValidationCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	for _, name := range []string{"standard-attribute", "fifo-attribute.fifo"} {
+		attrs := map[string]any{}
+		if strings.HasSuffix(name, ".fifo") {
+			attrs["FifoQueue"] = "true"
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name, "Attributes": attrs}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	faultFor := func(name, value string) map[string]any {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": name, "Attributes": map[string]any{"FifoQueue": value}}})
+		fault, ok := err.(*spi.Fault)
+		if !ok {
+			t.Fatalf("fifo attribute %s=%s error %#v", name, value, err)
+		}
+		return map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "fifo-attribute.fifo", "Attributes": map[string]any{"FifoQueue": "true"}}}); err != nil {
+		t.Fatal(err)
+	}
+	golden.AssertJSON(t, map[string]any{"standardTrue": faultFor("standard-attribute", "true"), "standardFalse": faultFor("standard-attribute", "false"), "fifoFalse": faultFor("fifo-attribute.fifo", "false")})
+}
+
 func FuzzFIFOContentBasedDeduplicationStrategy(f *testing.F) {
 	f.Add(true)
 	f.Add(false)
@@ -1069,6 +1096,40 @@ func FuzzListDeadLetterSourceQueues(f *testing.F) {
 		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListDeadLetterSourceQueues", Input: map[string]any{"QueueName": "fuzz-dead-letter"}})
 		if err != nil || len(response.Output["QueueUrls"].([]any)) != sourceCount {
 			t.Fatalf("sourceCount=%d response=%#v error=%v", sourceCount, response.Output, err)
+		}
+	})
+}
+
+func FuzzSetFifoAttributeValidation(f *testing.F) {
+	f.Add(false, false)
+	f.Add(false, true)
+	f.Add(true, false)
+	f.Add(true, true)
+	f.Fuzz(func(t *testing.T, fifo, enabled bool) {
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		name := "fuzz-fifo-attribute"
+		attrs := map[string]any{}
+		if fifo {
+			name += ".fifo"
+			attrs["FifoQueue"] = "true"
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name, "Attributes": attrs}}); err != nil {
+			t.Fatal(err)
+		}
+		value := "false"
+		if enabled {
+			value = "true"
+		}
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": name, "Attributes": map[string]any{"FifoQueue": value}}})
+		if !fifo || !enabled {
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidAttributeName" {
+				t.Fatalf("fifo=%v enabled=%v error %#v", fifo, enabled, err)
+			}
+		} else if err != nil {
+			t.Fatalf("fifo=%v enabled=%v error %v", fifo, enabled, err)
 		}
 	})
 }

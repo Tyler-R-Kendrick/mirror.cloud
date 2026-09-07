@@ -412,6 +412,33 @@ func TestAWSSDKSQSMessageSizeContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSBatchPerEntryMaximumSizeContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-batch-entry-maximum"), Attributes: map[string]string{"MaximumMessageSize": "1024"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.SendMessageBatch(context.Background(), &sqs.SendMessageBatchInput{QueueUrl: created.QueueUrl, Entries: []types.SendMessageBatchRequestEntry{
+		{Id: aws.String("valid"), MessageBody: aws.String(strings.Repeat("a", 1024))},
+		{Id: aws.String("oversized"), MessageBody: aws.String(strings.Repeat("a", 1025))},
+	}})
+	if err != nil || len(result.Successful) != 1 || len(result.Failed) != 1 || result.Failed[0].Code == nil || !strings.Contains(*result.Failed[0].Code, "InvalidParameterValue") {
+		t.Fatalf("batch per-entry size %#v error %v", result, err)
+	}
+}
+
 func TestAWSSDKSQSStandardMessageGroupIDContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

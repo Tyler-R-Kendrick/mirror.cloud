@@ -428,6 +428,20 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("updated batch %d %s", status, body)
 		}
 	})
+	t.Run("Given a reduced per-message limit When sending a batch Then only the oversized entry fails", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-batch-entry-maximum","Attributes":{"MaximumMessageSize":"1024"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-batch-entry-maximum", "Entries": []any{
+			map[string]any{"Id": "valid", "MessageBody": strings.Repeat("a", 1024)},
+			map[string]any{"Id": "oversized", "MessageBody": strings.Repeat("a", 1025)},
+		}})
+		status, body := call("SendMessageBatch", string(payload))
+		var response map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &response) != nil || len(response["Successful"].([]any)) != 1 || len(response["Failed"].([]any)) != 1 || !bytes.Contains(body, []byte("InvalidParameterValue")) {
+			t.Fatalf("per-entry maximum %d %s", status, body)
+		}
+	})
 	t.Run("Given a standard queue When sending an invalid message group Then the request is rejected", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-standard-group"}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

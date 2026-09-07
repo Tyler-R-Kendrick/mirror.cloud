@@ -1693,6 +1693,28 @@ func TestSendMessageBatchUpdatedMaximumSizeCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"successful": len(response.Output["Successful"].([]any)), "failed": failed})
 }
 
+func TestSendMessageBatchPerEntryMaximumSizeCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	ctx := context.Background()
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-entry-maximum", "Attributes": map[string]any{"MaximumMessageSize": "1024"}}}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "batch-entry-maximum", "Entries": []any{
+		map[string]any{"Id": "valid", "MessageBody": strings.Repeat("a", 1024)},
+		map[string]any{"Id": "oversized", "MessageBody": strings.Repeat("a", 1025)},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	successful := response.Output["Successful"].([]any)
+	failed := response.Output["Failed"].([]any)
+	if len(successful) != 1 || len(failed) != 1 {
+		t.Fatalf("batch response %#v", response.Output)
+	}
+	golden.AssertJSON(t, map[string]any{"successful": successful, "failed": failed})
+}
+
 func TestListQueuesPrefixAndPagination(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -2267,6 +2289,38 @@ func FuzzFIFOBatchMessageGroupPresence(f *testing.F) {
 			if !ok || fault.Code != "MissingParameter" || fault.Message != "MessageGroupId" {
 				t.Fatalf("missing response error %#v", err)
 			}
+		}
+	})
+}
+
+func FuzzSendMessageBatchPerEntryMaximumSize(f *testing.F) {
+	f.Add(false)
+	f.Add(true)
+	f.Fuzz(func(t *testing.T, oversized bool) {
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-batch-entry-maximum", "Attributes": map[string]any{"MaximumMessageSize": "1024"}}}); err != nil {
+			t.Fatal(err)
+		}
+		secondBody := strings.Repeat("a", 1024)
+		if oversized {
+			secondBody = strings.Repeat("a", 1025)
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "fuzz-batch-entry-maximum", "Entries": []any{
+			map[string]any{"Id": "valid", "MessageBody": strings.Repeat("a", 1024)},
+			map[string]any{"Id": "second", "MessageBody": secondBody},
+		}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		successful := response.Output["Successful"].([]any)
+		failed, _ := response.Output["Failed"].([]any)
+		if oversized && (len(successful) != 1 || len(failed) != 1) {
+			t.Fatalf("oversized response %#v", response.Output)
+		}
+		if !oversized && (len(successful) != 2 || len(failed) != 0) {
+			t.Fatalf("valid response %#v", response.Output)
 		}
 	})
 }

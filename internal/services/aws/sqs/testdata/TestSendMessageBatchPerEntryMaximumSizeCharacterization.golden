@@ -1,0 +1,17 @@
+{
+  "failed": [
+    {
+      "Code": "InvalidParameterValue",
+      "Id": "oversized",
+      "Message": "One or more parameters are invalid. Reason: Message must be shorter than 1024 bytes.",
+      "SenderFault": true
+    }
+  ],
+  "successful": [
+    {
+      "Id": "valid",
+      "MD5OfMessageBody": "c9a34cfc85d982698c6ac89f76071abd",
+      "MessageId": "7c5891299f6489f8"
+    }
+  ]
+}

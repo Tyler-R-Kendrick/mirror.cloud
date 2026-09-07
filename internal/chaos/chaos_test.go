@@ -884,6 +884,42 @@ func TestConcurrentSQSBatchSizeLimitsRemainStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSBatchPerEntrySizeLimitsRemainStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "batch-entry-maximum", "Attributes": map[string]any{"MaximumMessageSize": "1024"}}}); err != nil {
+		t.Fatal(err)
+	}
+	entries := []any{
+		map[string]any{"Id": "valid", "MessageBody": strings.Repeat("a", 1024)},
+		map[string]any{"Id": "oversized", "MessageBody": strings.Repeat("a", 1025)},
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "batch-entry-maximum", "Entries": entries}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			successful, _ := response.Output["Successful"].([]any)
+			failed, _ := response.Output["Failed"].([]any)
+			if len(successful) != 1 || len(failed) != 1 {
+				errs <- fmt.Errorf("batch per-entry size response %#v", response.Output)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSStandardMessageGroupValidationIsStable(t *testing.T) {
 	p := sqs.New(spitest.Deps(t))
 	ctx := context.Background()

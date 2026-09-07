@@ -698,4 +698,29 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("expired delete %d %s", status, body)
 		}
 	})
+	t.Run("Given an emptied FIFO group When sending again Then the group remains usable", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-reuse-group.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-reuse-group.fifo","MessageBody":"first","MessageGroupId":"g1"}`); status != http.StatusOK {
+			t.Fatalf("first send %d %s", status, body)
+		}
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-reuse-group.fifo"}`)
+		var received map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &received) != nil {
+			t.Fatalf("first receive %d %s", status, body)
+		}
+		message := received["Messages"].([]any)[0].(map[string]any)
+		deletePayload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-reuse-group.fifo", "ReceiptHandle": message["ReceiptHandle"]})
+		if status, body = call("DeleteMessage", string(deletePayload)); status != http.StatusOK {
+			t.Fatalf("delete %d %s", status, body)
+		}
+		if status, body = call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-reuse-group.fifo","MessageBody":"second","MessageGroupId":"g1"}`); status != http.StatusOK {
+			t.Fatalf("second send %d %s", status, body)
+		}
+		status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-reuse-group.fifo"}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"Body":"second"`)) {
+			t.Fatalf("final receive %d %s", status, body)
+		}
+	})
 }

@@ -6303,6 +6303,48 @@ func TestConcurrentSQSFIFOExpiredDeletesAreStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSFIFOMessageGroupReuseIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-reuse-group.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-reuse-group.fifo", "MessageBody": "first", "MessageGroupId": "g1"}}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-reuse-group.fifo"}})
+	if err != nil || len(first.Output["Messages"].([]any)) != 1 {
+		t.Fatalf("first receive %#v error %v", first, err)
+	}
+	message := first.Output["Messages"].([]any)[0].(map[string]any)
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessage", Input: map[string]any{"QueueName": "chaos-reuse-group.fifo", "ReceiptHandle": message["ReceiptHandle"]}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for index := range 16 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			_, sendErr := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-reuse-group.fifo", "MessageBody": fmt.Sprintf("second-%d", index), "MessageGroupId": "g1", "MessageDeduplicationId": fmt.Sprintf("dedup-%d", index)}})
+			if sendErr != nil {
+				errs <- sendErr
+			}
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "chaos-reuse-group.fifo", "MaxNumberOfMessages": 10, "VisibilityTimeout": 0}})
+	if err != nil || len(response.Output["Messages"].([]any)) == 0 {
+		t.Fatalf("reused group receive %#v error %v", response, err)
+	}
+}
+
 func TestConcurrentSQSFIFOBatchMissingDeduplicationIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := sqs.New(deps)

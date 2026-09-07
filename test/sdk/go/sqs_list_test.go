@@ -829,6 +829,47 @@ func TestAWSSDKSQSFIFOExpiredReceiptDeleteContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSFIFOMessageGroupReuseContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-reuse-group.fifo"), Attributes: map[string]string{"FifoQueue": "true", "ContentBasedDeduplication": "true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("first"), MessageGroupId: aws.String("g1")}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl})
+	if err != nil || len(first.Messages) != 1 {
+		t.Fatalf("first receive %#v error %v", first, err)
+	}
+	if _, err := client.DeleteMessage(context.Background(), &sqs.DeleteMessageInput{QueueUrl: created.QueueUrl, ReceiptHandle: first.Messages[0].ReceiptHandle}); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl})
+	if err != nil || len(empty.Messages) != 0 {
+		t.Fatalf("empty receive %#v error %v", empty, err)
+	}
+	if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("second"), MessageGroupId: aws.String("g1")}); err != nil {
+		t.Fatal(err)
+	}
+	final, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl})
+	if err != nil || len(final.Messages) != 1 || aws.ToString(final.Messages[0].Body) != "second" {
+		t.Fatalf("final receive %#v error %v", final, err)
+	}
+}
+
 func TestAWSSDKSQSMessageTimestampContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

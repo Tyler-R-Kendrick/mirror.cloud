@@ -322,6 +322,28 @@ func TestFIFODeleteAfterVisibilityTimeoutCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
+func TestFIFOEmptyMessageGroupReuseCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "reuse-group.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}})
+	call("SendMessage", map[string]any{"QueueName": "reuse-group.fifo", "MessageBody": "first", "MessageGroupId": "g1"})
+	first := call("ReceiveMessage", map[string]any{"QueueName": "reuse-group.fifo"}).Output["Messages"].([]any)[0].(map[string]any)
+	call("DeleteMessage", map[string]any{"QueueName": "reuse-group.fifo", "ReceiptHandle": first["ReceiptHandle"]})
+	empty := call("ReceiveMessage", map[string]any{"QueueName": "reuse-group.fifo"}).Output
+	call("SendMessage", map[string]any{"QueueName": "reuse-group.fifo", "MessageBody": "second", "MessageGroupId": "g1"})
+	final := call("ReceiveMessage", map[string]any{"QueueName": "reuse-group.fifo"}).Output
+	golden.AssertJSON(t, map[string]any{"empty": empty, "finalBody": final["Messages"].([]any)[0].(map[string]any)["Body"]})
+}
+
 func TestSuccessivePurgeCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
@@ -1007,6 +1029,42 @@ func FuzzFIFODeleteAfterVisibilityTimeout(f *testing.F) {
 		fault, ok := err.(*spi.Fault)
 		if !ok || fault.Code != "InvalidParameterValue" || !strings.Contains(fault.Message, "receipt handle has expired") {
 			t.Fatalf("timeout=%d error %#v", timeout, err)
+		}
+	})
+}
+
+func FuzzFIFOMessageGroupReuse(f *testing.F) {
+	f.Add("second")
+	f.Fuzz(func(t *testing.T, body string) {
+		if len(body) > 256 || body == "" {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		invoke := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		if _, err := invoke("CreateQueue", map[string]any{"QueueName": "fuzz-reuse-group.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := invoke("SendMessage", map[string]any{"QueueName": "fuzz-reuse-group.fifo", "MessageBody": "first", "MessageGroupId": "g1"}); err != nil {
+			t.Fatal(err)
+		}
+		received, err := invoke("ReceiveMessage", map[string]any{"QueueName": "fuzz-reuse-group.fifo"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		message := received.Output["Messages"].([]any)[0].(map[string]any)
+		if _, err := invoke("DeleteMessage", map[string]any{"QueueName": "fuzz-reuse-group.fifo", "ReceiptHandle": message["ReceiptHandle"]}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := invoke("SendMessage", map[string]any{"QueueName": "fuzz-reuse-group.fifo", "MessageBody": body, "MessageGroupId": "g1", "MessageDeduplicationId": "second"}); err != nil {
+			t.Fatal(err)
+		}
+		final, err := invoke("ReceiveMessage", map[string]any{"QueueName": "fuzz-reuse-group.fifo"})
+		if err != nil || len(final.Output["Messages"].([]any)) != 1 || final.Output["Messages"].([]any)[0].(map[string]any)["Body"] != body {
+			t.Fatalf("body=%q response=%#v error=%v", body, final.Output, err)
 		}
 	})
 }

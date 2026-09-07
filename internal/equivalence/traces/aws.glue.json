@@ -1,0 +1,972 @@
+{
+  "schema": "trace/1",
+  "service": "aws.glue",
+  "source": "pack:internal/services/aws/glue@3584acda",
+  "note": "Databases, tables scoped to their database, jobs, runs scoped to their job, and the crawler that is its own request.",
+  "steps": [
+    {
+      "operation": "GetDatabases",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DatabaseList": null
+      }
+    },
+    {
+      "operation": "CreateDatabase",
+      "input": {
+        "DatabaseInput": {
+          "Description": "the lake",
+          "LocationUri": "s3://lake/",
+          "Name": "lake"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateDatabase",
+      "input": {
+        "DatabaseInput": {
+          "Name": "marts"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateDatabase",
+      "input": {
+        "DatabaseInput": {
+          "Name": ""
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "InvalidInputException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetDatabase",
+      "input": {
+        "Name": "lake"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Database": {
+          "Description": "the lake",
+          "Name": "lake"
+        }
+      }
+    },
+    {
+      "operation": "GetDatabases",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DatabaseList": [
+          {
+            "Description": "the lake",
+            "Name": "lake"
+          },
+          {
+            "Description": "",
+            "Name": "marts"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetDatabase",
+      "input": {
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "EntityNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateDatabase",
+      "input": {
+        "DatabaseInput": {
+          "Description": "changed",
+          "Name": "lake"
+        },
+        "Name": "lake"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetDatabase",
+      "input": {
+        "Name": "lake"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Database": {
+          "Description": "changed",
+          "Name": "lake"
+        }
+      }
+    },
+    {
+      "operation": "UpdateDatabase",
+      "input": {
+        "DatabaseInput": {
+          "Name": "lake"
+        },
+        "Name": "lake"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetDatabase",
+      "input": {
+        "Name": "lake"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Database": {
+          "Description": "changed",
+          "Name": "lake"
+        }
+      }
+    },
+    {
+      "operation": "UpdateDatabase",
+      "input": {
+        "DatabaseInput": {
+          "Description": "x",
+          "Name": "absent"
+        },
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "EntityNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteDatabase",
+      "input": {
+        "Name": "marts"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetDatabases",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DatabaseList": [
+          {
+            "Description": "changed",
+            "Name": "lake"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteDatabase",
+      "input": {
+        "Name": "marts"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetTables",
+      "input": {
+        "DatabaseName": "lake"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TableList": null
+      }
+    },
+    {
+      "operation": "CreateTable",
+      "input": {
+        "DatabaseName": "lake",
+        "TableInput": {
+          "Name": "events",
+          "Parameters": {
+            "classification": "json"
+          },
+          "StorageDescriptor": {
+            "Columns": [
+              {
+                "Name": "id",
+                "Type": "string"
+              }
+            ],
+            "Compressed": false,
+            "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
+            "Location": "s3://lake/events/",
+            "SerdeInfo": {
+              "SerializationLibrary": "org.openx.data.jsonserde.JsonSerDe"
+            },
+            "StoredAsSubDirectories": false
+          },
+          "TableType": "EXTERNAL_TABLE"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateTable",
+      "input": {
+        "DatabaseName": "other",
+        "TableInput": {
+          "Name": "events",
+          "StorageDescriptor": {
+            "Location": "s3://other/"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetTable",
+      "input": {
+        "DatabaseName": "lake",
+        "Name": "events"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Table": {
+          "DatabaseName": "lake",
+          "Name": "events",
+          "StorageDescriptor": {
+            "Columns": [
+              {
+                "Name": "id",
+                "Type": "string"
+              }
+            ],
+            "Compressed": false,
+            "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
+            "Location": "s3://lake/events/",
+            "SerdeInfo": {
+              "SerializationLibrary": "org.openx.data.jsonserde.JsonSerDe"
+            },
+            "StoredAsSubDirectories": false
+          }
+        }
+      }
+    },
+    {
+      "operation": "GetTable",
+      "input": {
+        "DatabaseName": "other",
+        "Name": "events"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Table": {
+          "DatabaseName": "other",
+          "Name": "events",
+          "StorageDescriptor": {
+            "Location": "s3://other/"
+          }
+        }
+      }
+    },
+    {
+      "operation": "GetTables",
+      "input": {
+        "DatabaseName": "lake"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TableList": [
+          {
+            "DatabaseName": "lake",
+            "Name": "events",
+            "StorageDescriptor": {
+              "Columns": [
+                {
+                  "Name": "id",
+                  "Type": "string"
+                }
+              ],
+              "Compressed": false,
+              "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
+              "Location": "s3://lake/events/",
+              "SerdeInfo": {
+                "SerializationLibrary": "org.openx.data.jsonserde.JsonSerDe"
+              },
+              "StoredAsSubDirectories": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetTable",
+      "input": {
+        "DatabaseName": "lake",
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "EntityNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "UpdateTable",
+      "input": {
+        "DatabaseName": "lake",
+        "TableInput": {
+          "Name": "events"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetTable",
+      "input": {
+        "DatabaseName": "lake",
+        "Name": "events"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Table": {
+          "DatabaseName": "lake",
+          "Name": "events",
+          "StorageDescriptor": null
+        }
+      }
+    },
+    {
+      "operation": "UpdateTable",
+      "input": {
+        "DatabaseName": "lake",
+        "TableInput": {
+          "Name": "invented",
+          "StorageDescriptor": {
+            "Location": "s3://x/"
+          }
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetTable",
+      "input": {
+        "DatabaseName": "lake",
+        "Name": "invented"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Table": {
+          "DatabaseName": "lake",
+          "Name": "invented",
+          "StorageDescriptor": {
+            "Location": "s3://x/"
+          }
+        }
+      }
+    },
+    {
+      "operation": "DeleteTable",
+      "input": {
+        "DatabaseName": "lake",
+        "Name": "events"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetTables",
+      "input": {
+        "DatabaseName": "lake"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "TableList": [
+          {
+            "DatabaseName": "lake",
+            "Name": "invented",
+            "StorageDescriptor": {
+              "Location": "s3://x/"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteTable",
+      "input": {
+        "DatabaseName": "lake",
+        "Name": "events"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "CreateJob",
+      "input": {
+        "Command": {
+          "Name": "glueetl",
+          "ScriptLocation": "s3://scripts/n.py"
+        },
+        "GlueVersion": "4.0",
+        "Name": "nightly",
+        "NumberOfWorkers": 2,
+        "Role": "arn:aws:iam::000000000000:role/glue",
+        "WorkerType": "G.1X"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Name": "nightly"
+      }
+    },
+    {
+      "operation": "GetJob",
+      "input": {
+        "JobName": "nightly"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Job": {
+          "Command": {
+            "Name": "glueetl",
+            "ScriptLocation": "s3://scripts/n.py"
+          },
+          "Name": "nightly",
+          "Role": "arn:aws:iam::000000000000:role/glue"
+        }
+      }
+    },
+    {
+      "operation": "GetJobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Jobs": [
+          {
+            "Command": {
+              "Name": "glueetl",
+              "ScriptLocation": "s3://scripts/n.py"
+            },
+            "Name": "nightly",
+            "Role": "arn:aws:iam::000000000000:role/glue"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetJob",
+      "input": {
+        "JobName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "EntityNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "StartJobRun",
+      "input": {
+        "Arguments": {
+          "--src": "s3://lake/"
+        },
+        "JobName": "nightly"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobRunId": "jr-7c589129"
+      }
+    },
+    {
+      "operation": "GetJobRun",
+      "input": {
+        "JobName": "nightly",
+        "RunId": {
+          "$fromPath": "JobRunId",
+          "$fromStep": 33
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobRun": {
+          "Id": "jr-7c589129",
+          "JobName": "nightly",
+          "JobRunState": "SUCCEEDED"
+        }
+      }
+    },
+    {
+      "operation": "GetJobRuns",
+      "input": {
+        "JobName": "nightly"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobRuns": [
+          {
+            "Id": "jr-7c589129",
+            "JobName": "nightly",
+            "JobRunState": "SUCCEEDED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetJobRun",
+      "input": {
+        "JobName": "nightly",
+        "RunId": "jr-absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "EntityNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetJobRuns",
+      "input": {
+        "JobName": "other"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobRuns": null
+      }
+    },
+    {
+      "operation": "DeleteJob",
+      "input": {
+        "JobName": "nightly"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobName": "nightly"
+      }
+    },
+    {
+      "operation": "GetJobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Jobs": null
+      }
+    },
+    {
+      "operation": "DeleteJob",
+      "input": {
+        "JobName": "nightly"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobName": "nightly"
+      }
+    },
+    {
+      "operation": "CreateCrawler",
+      "input": {
+        "DatabaseName": "lake",
+        "Name": "lake-crawler",
+        "Role": "arn:aws:iam::000000000000:role/glue",
+        "Schedule": "cron(0 1 * * ? *)",
+        "Tags": {
+          "team": "data"
+        },
+        "Targets": {
+          "S3Targets": [
+            {
+              "Path": "s3://lake/"
+            }
+          ]
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetCrawler",
+      "input": {
+        "Name": "lake-crawler"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Crawler": {
+          "DatabaseName": "lake",
+          "Name": "lake-crawler",
+          "Role": "arn:aws:iam::000000000000:role/glue",
+          "Schedule": "cron(0 1 * * ? *)",
+          "Tags": {
+            "team": "data"
+          },
+          "Targets": {
+            "S3Targets": [
+              {
+                "Path": "s3://lake/"
+              }
+            ]
+          }
+        }
+      },
+      "superseded_members": {
+        "Crawler.Tags": "The pack stored the whole CreateCrawler request as the crawler and answered it back, so a crawler carried the Tags it was created with. Crawler declares every member of that request except Tags -- the real service reports a crawler's tags through GetTags, not through GetCrawler -- so it was a member no SDK could read. The bundle stores the request as the pack did and drops Tags from the answer. Every other member of these steps, and the row count and order, are still compared."
+      }
+    },
+    {
+      "operation": "GetCrawlers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Crawlers": [
+          {
+            "DatabaseName": "lake",
+            "Name": "lake-crawler",
+            "Role": "arn:aws:iam::000000000000:role/glue",
+            "Schedule": "cron(0 1 * * ? *)",
+            "Tags": {
+              "team": "data"
+            },
+            "Targets": {
+              "S3Targets": [
+                {
+                  "Path": "s3://lake/"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "superseded_members": {
+        "Crawlers[0].Tags": "The pack stored the whole CreateCrawler request as the crawler and answered it back, so a crawler carried the Tags it was created with. Crawler declares every member of that request except Tags -- the real service reports a crawler's tags through GetTags, not through GetCrawler -- so it was a member no SDK could read. The bundle stores the request as the pack did and drops Tags from the answer. Every other member of these steps, and the row count and order, are still compared."
+      }
+    },
+    {
+      "operation": "GetCrawler",
+      "input": {
+        "Name": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "EntityNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteCrawler",
+      "input": {
+        "Name": "lake-crawler"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetCrawlers",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Crawlers": null
+      }
+    },
+    {
+      "operation": "DeleteCrawler",
+      "input": {
+        "Name": "lake-crawler"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

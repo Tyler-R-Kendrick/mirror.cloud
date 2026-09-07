@@ -36,7 +36,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/elastictranscoder"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/events"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/firehose"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/glue"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iam"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kafka"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"

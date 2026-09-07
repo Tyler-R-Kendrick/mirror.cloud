@@ -15,7 +15,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/glue"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 )
 

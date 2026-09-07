@@ -1,0 +1,352 @@
+{
+  "schema": "trace/1",
+  "service": "aws.lex-models",
+  "source": "pack:internal/services/aws/lexmodels@fa38f003",
+  "note": "Bots and intents, the version label that addresses neither, and the delete that is not an error.",
+  "steps": [
+    {
+      "operation": "PutBot",
+      "input": {
+        "childDirected": false,
+        "locale": "en-US",
+        "name": "order-bot"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "checksum": "7c589129",
+        "locale": "en-US",
+        "name": "order-bot",
+        "status": "READY"
+      }
+    },
+    {
+      "operation": "GetBot",
+      "input": {
+        "name": "order-bot",
+        "versionOrAlias": "$LATEST"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "checksum": "7c589129",
+        "locale": "en-US",
+        "name": "order-bot",
+        "status": "READY"
+      }
+    },
+    {
+      "operation": "PutBot",
+      "input": {
+        "childDirected": true,
+        "locale": "en-GB",
+        "name": "help-bot"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "checksum": "5f59f223",
+        "locale": "en-GB",
+        "name": "help-bot",
+        "status": "READY"
+      }
+    },
+    {
+      "operation": "GetBot",
+      "input": {
+        "name": "help-bot",
+        "versionOrAlias": "$LATEST"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "checksum": "5f59f223",
+        "locale": "en-GB",
+        "name": "help-bot",
+        "status": "READY"
+      }
+    },
+    {
+      "operation": "GetBots",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "bots": [
+          {
+            "checksum": "5f59f223",
+            "locale": "en-GB",
+            "name": "help-bot",
+            "status": "READY"
+          },
+          {
+            "checksum": "7c589129",
+            "locale": "en-US",
+            "name": "order-bot",
+            "status": "READY"
+          }
+        ]
+      },
+      "superseded_members": {
+        "bots[0].checksum": "The pack answered GetBots with the whole stored bot record, including its locale and its checksum. BotMetadata declares neither -- it carries name, status, version, description and the two dates -- so they were members no SDK could read off a listed bot. The bundle still stores both, because GetBotResponse does declare them and the recording shows GetBot answering them; it projects the listed item down to what BotMetadata carries. Every other member of these steps is still compared.",
+        "bots[0].locale": "The pack answered GetBots with the whole stored bot record, including its locale and its checksum. BotMetadata declares neither -- it carries name, status, version, description and the two dates -- so they were members no SDK could read off a listed bot. The bundle still stores both, because GetBotResponse does declare them and the recording shows GetBot answering them; it projects the listed item down to what BotMetadata carries. Every other member of these steps is still compared.",
+        "bots[1].checksum": "The pack answered GetBots with the whole stored bot record, including its locale and its checksum. BotMetadata declares neither -- it carries name, status, version, description and the two dates -- so they were members no SDK could read off a listed bot. The bundle still stores both, because GetBotResponse does declare them and the recording shows GetBot answering them; it projects the listed item down to what BotMetadata carries. Every other member of these steps is still compared.",
+        "bots[1].locale": "The pack answered GetBots with the whole stored bot record, including its locale and its checksum. BotMetadata declares neither -- it carries name, status, version, description and the two dates -- so they were members no SDK could read off a listed bot. The bundle still stores both, because GetBotResponse does declare them and the recording shows GetBot answering them; it projects the listed item down to what BotMetadata carries. Every other member of these steps is still compared."
+      }
+    },
+    {
+      "operation": "GetBot",
+      "input": {
+        "name": "absent-bot",
+        "versionOrAlias": "$LATEST"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "PutBot",
+      "input": {
+        "childDirected": false,
+        "locale": "de-DE",
+        "name": "order-bot"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "checksum": "9c8e2cb0",
+        "locale": "de-DE",
+        "name": "order-bot",
+        "status": "READY"
+      }
+    },
+    {
+      "operation": "GetBot",
+      "input": {
+        "name": "order-bot",
+        "versionOrAlias": "$LATEST"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "checksum": "9c8e2cb0",
+        "locale": "de-DE",
+        "name": "order-bot",
+        "status": "READY"
+      }
+    },
+    {
+      "operation": "PutIntent",
+      "input": {
+        "name": "OrderFlowers"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "checksum": "33f6fc5d",
+        "name": "OrderFlowers"
+      }
+    },
+    {
+      "operation": "GetIntent",
+      "input": {
+        "name": "OrderFlowers",
+        "version": "$LATEST"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "checksum": "33f6fc5d",
+        "name": "OrderFlowers"
+      }
+    },
+    {
+      "operation": "GetIntent",
+      "input": {
+        "name": "AbsentIntent",
+        "version": "$LATEST"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteIntent",
+      "input": {
+        "name": "OrderFlowers"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetIntent",
+      "input": {
+        "name": "OrderFlowers",
+        "version": "$LATEST"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteIntent",
+      "input": {
+        "name": "OrderFlowers"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DeleteBot",
+      "input": {
+        "name": "order-bot"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "GetBot",
+      "input": {
+        "name": "order-bot",
+        "versionOrAlias": "$LATEST"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetBots",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "bots": [
+          {
+            "checksum": "5f59f223",
+            "locale": "en-GB",
+            "name": "help-bot",
+            "status": "READY"
+          }
+        ]
+      },
+      "superseded_members": {
+        "bots[0].checksum": "The pack answered GetBots with the whole stored bot record, including its locale and its checksum. BotMetadata declares neither -- it carries name, status, version, description and the two dates -- so they were members no SDK could read off a listed bot. The bundle still stores both, because GetBotResponse does declare them and the recording shows GetBot answering them; it projects the listed item down to what BotMetadata carries. Every other member of these steps is still compared.",
+        "bots[0].locale": "The pack answered GetBots with the whole stored bot record, including its locale and its checksum. BotMetadata declares neither -- it carries name, status, version, description and the two dates -- so they were members no SDK could read off a listed bot. The bundle still stores both, because GetBotResponse does declare them and the recording shows GetBot answering them; it projects the listed item down to what BotMetadata carries. Every other member of these steps is still compared."
+      }
+    },
+    {
+      "operation": "DeleteBot",
+      "input": {
+        "name": "order-bot"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    }
+  ]
+}

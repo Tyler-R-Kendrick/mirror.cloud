@@ -417,6 +417,20 @@ type WriteEffect struct {
 	// overwrite -- the exact failure shape this project keeps finding in the
 	// packs -- so the loader refuses it rather than the engine producing it.
 	ForEach string `yaml:"for_each,omitempty"`
+	// Missing says what an update does when the record is not there. The
+	// default writes it anyway, which is what "update or create" means and
+	// what most of these operations do; "ignore" skips the write entirely.
+	//
+	// It exists because a batch update over ids the caller supplied cannot
+	// check them one at a time: EMR's TerminateJobFlows takes a list of
+	// cluster ids and moves each to TERMINATED, and the pack skipped the ones
+	// that were not there. Without this the same bundle conjures a cluster
+	// per unknown id -- a row with a status and no name that ListClusters
+	// then answers -- which is the phantom-record failure this project keeps
+	// finding in the packs, reintroduced by the thing replacing them.
+	//
+	// It has no meaning on a create, and the loader refuses it there.
+	Missing string `yaml:"missing,omitempty"`
 	// State is the lifecycle state a created record starts in, when that is
 	// not the chart's initial state. An SQS message sent with a delay is born
 	// invisible and becomes visible when its deadline passes.

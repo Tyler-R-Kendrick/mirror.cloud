@@ -679,6 +679,18 @@ func validateEffect(s *Service, where string, eff Effect, compile, perItem func(
 		// what keeps it that way: a bundle that spread a read binding would be
 		// copying a record the engine never checked against an input shape,
 		// which is the one property that makes the copy safe at all.
+		switch e.Missing {
+		case "", "ignore":
+			if e.Missing != "" && kind == "create" {
+				*problems = append(*problems, fmt.Errorf(
+					"%s: %s.create.missing: a create has no record to be missing",
+					s.ServiceID, where))
+			}
+		default:
+			*problems = append(*problems, fmt.Errorf(
+				"%s: %s.%s.missing: %q; the only value is `ignore`",
+				s.ServiceID, where, kind, e.Missing))
+		}
 		if e.Spread != "" && e.Spread != "input" {
 			*problems = append(*problems, fmt.Errorf(
 				"%s: %s.%s.spread: %q; a write may spread only `input`",

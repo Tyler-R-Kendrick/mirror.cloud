@@ -27,7 +27,6 @@ import (
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ecs"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/emr"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/glue"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
@@ -2773,7 +2772,7 @@ func TestStatesSyncServiceIntegrations(t *testing.T) {
 		return response.Output
 	}
 
-	definition := `{"StartAt":"Batch","States":{"Batch":{"Type":"Task","Resource":"arn:aws:states:::batch:submitJob.sync","Parameters":{"JobName":"job","JobQueue":"queue","JobDefinition":"definition"},"ResultPath":null,"Next":"Build"},"Build":{"Type":"Task","Resource":"arn:aws:states:::codebuild:startBuild.sync","Parameters":{"ProjectName":"project"},"ResultPath":null,"Next":"Glue"},"Glue":{"Type":"Task","Resource":"arn:aws:states:::glue:startJobRun.sync","Parameters":{"JobName":"job"},"ResultPath":null,"Next":"Cluster"},"Cluster":{"Type":"Task","Resource":"arn:aws:states:::elasticmapreduce:createCluster.sync","Parameters":{"Name":"cluster"},"ResultPath":null,"Next":"Step"},"Step":{"Type":"Task","Resource":"arn:aws:states:::elasticmapreduce:addStep.sync","Parameters":{"JobFlowId":"j-test"},"End":true}}}`
+	definition := `{"StartAt":"Batch","States":{"Batch":{"Type":"Task","Resource":"arn:aws:states:::batch:submitJob.sync","Parameters":{"JobName":"job","JobQueue":"queue","JobDefinition":"definition"},"ResultPath":null,"Next":"Build"},"Build":{"Type":"Task","Resource":"arn:aws:states:::codebuild:startBuild.sync","Parameters":{"ProjectName":"project"},"ResultPath":null,"Next":"Glue"},"Glue":{"Type":"Task","Resource":"arn:aws:states:::glue:startJobRun.sync","Parameters":{"JobName":"job"},"ResultPath":null,"Next":"Cluster"},"Cluster":{"Type":"Task","Resource":"arn:aws:states:::elasticmapreduce:createCluster.sync","Parameters":{"Name":"cluster","Instances":{"InstanceCount":1,"MasterInstanceType":"m5.xlarge"}},"ResultPath":null,"Next":"Step"},"Step":{"Type":"Task","Resource":"arn:aws:states:::elasticmapreduce:addStep.sync","Parameters":{"JobFlowId":"j-test","Steps":[{"Name":"step","ActionOnFailure":"CONTINUE","HadoopJarStep":{"Jar":"command-runner.jar"}}]},"End":true}}}`
 	machine := must(p, "CreateStateMachine", map[string]any{"name": "sync-jobs", "definition": definition, "roleArn": testRoleARN})
 	executionARN := must(p, "StartExecution", map[string]any{"stateMachineArn": machine["stateMachineArn"]})["executionArn"].(string)
 	if execution := must(p, "DescribeExecution", map[string]any{"executionArn": executionARN}); execution["status"] != "SUCCEEDED" || !strings.Contains(execution["output"].(string), "StepIds") {
@@ -2788,7 +2787,7 @@ func TestStatesSyncServiceIntegrations(t *testing.T) {
 	if runs := must(glue.New(deps), "GetJobRuns", map[string]any{"JobName": "job"})["JobRuns"].([]any); len(runs) != 1 || runs[0].(map[string]any)["JobRunState"] != "SUCCEEDED" {
 		t.Fatalf("glue sync runs %#v", runs)
 	}
-	if steps := must(emr.New(deps), "ListSteps", map[string]any{"ClusterId": "j-test"})["Steps"].([]any); len(steps) != 1 {
+	if steps := must(served(t, deps, "aws.elasticmapreduce"), "ListSteps", map[string]any{"ClusterId": "j-test"})["Steps"].([]any); len(steps) != 1 {
 		t.Fatalf("emr sync steps %#v", steps)
 	}
 	childDefinition := `{"StartAt":"Done","States":{"Done":{"Type":"Pass","Result":{"ok":true},"End":true}}}`

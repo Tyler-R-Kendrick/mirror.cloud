@@ -588,9 +588,17 @@ func (ev *eval) writeOne(ctx context.Context, path string, w bir.WriteEffect, cr
 				key = k
 			}
 		}
-		if raw, found, err := col.Get(ctx, key); err != nil {
+		raw, found, err := col.Get(ctx, key)
+		if err != nil {
 			return err
-		} else if found {
+		}
+		if !found && w.Missing == "ignore" {
+			// An update that declines to create is a no-op, not a fault: the
+			// operations that need this are batch updates over ids the caller
+			// supplied, and the pack they came from skipped what was absent.
+			return nil
+		}
+		if found {
 			if err := unmarshal(raw, &rec); err != nil {
 				return err
 			}

@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 115 / 222 (51.8%) |
-| LocalStack SQS test functions not yet traced | 107 / 222 (48.2%) |
+| LocalStack SQS test functions explicitly traced | 117 / 222 (52.7%) |
+| LocalStack SQS test functions not yet traced | 105 / 222 (47.3%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -655,6 +655,8 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsQueryApi::test_get_queue_attributes_with_query_args` | Query queue-URL requests honor a selected AttributeName and omit unrequested fields; raw HTTP contract and the shared attribute filtering characterization pin selection semantics | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_get_queue_attributes_json_format` | An `Accept: application/json` Query request returns the SQS JSON envelope with repeated Name/Value attributes; codec characterization, raw HTTP contract, and semantic mutation coverage pin content negotiation | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_get_without_query_json_format_returns_returns_xml` | A queue-URL GET without an Action remains on SQS and returns a 404 `UnknownOperationException` XML response even when JSON is requested; raw HTTP contract and edge/codec mutation coverage pin demux behavior | Mapped; focused green |
+| `test_sqs.py::TestSqsQueryApi::test_get_queue_url_works_for_same_queue` | Query GetQueueUrl returns the queue URL requested by name when called through a queue URL endpoint, including the owner account parameter; raw HTTP contract pins the endpoint path behavior | Mapped; focused green |
+| `test_sqs.py::TestSqsQueryApi::test_get_queue_url_work_for_different_queue` | Query GetQueueUrl resolves a different queue by QueueName rather than echoing the endpoint path; raw HTTP contract pins name-based lookup | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_sequence_number` | FIFO SendMessage returns a SequenceNumber while standard SendMessage omits it; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and sequence mutants pin queue-type response shape | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_sequence_number_increases` | FIFO SequenceNumber values increase for successive sends; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and transactional sequence mutants pin monotonicity | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_high_throughput_ordering` | FIFO queues using message-group deduplication scope accept the same deduplication ID in distinct groups while retaining duplicate suppression within each group; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and scope/retry-digest mutants pin the behavior | Mapped; focused green |

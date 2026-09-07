@@ -300,6 +300,27 @@ func TestBootedServerSQSSection48(t *testing.T) {
 	if getRes.StatusCode != http.StatusNotFound || !strings.Contains(string(getBody), "<UnknownOperationException") {
 		t.Fatalf("query URL missing action %d %s", getRes.StatusCode, getBody)
 	}
+	if code, body, _ := queryCall(url.Values{"Action": {"CreateQueue"}, "Version": {"2012-11-05"}, "QueueName": {"queryq2"}}); code != http.StatusOK {
+		t.Fatalf("query second create %d %s", code, body)
+	}
+	for _, tc := range []struct {
+		name, want, reject string
+	}{
+		{"queryq", "queryq", ""},
+		{"queryq2", "queryq2", "queryq"},
+	} {
+		getReq, _ = http.NewRequest(http.MethodGet, ts.URL+"/000000000000/queryq?Action=GetQueueUrl&QueueName="+tc.name+"&QueueOwnerAWSAccountId=000000000000", nil)
+		getReq.Header.Set("Authorization", auth)
+		getRes, err = http.DefaultClient.Do(getReq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		getBody, _ = io.ReadAll(getRes.Body)
+		getRes.Body.Close()
+		if getRes.StatusCode != http.StatusOK || !strings.Contains(string(getBody), "/"+tc.want+"</") || (tc.reject != "" && strings.Contains(string(getBody), "/"+tc.reject+"</")) {
+			t.Fatalf("query URL lookup %s %d %s", tc.name, getRes.StatusCode, getBody)
+		}
+	}
 	if code, body, _ := queryCall(url.Values{"Action": {"GetQueueAttributes"}, "Version": {"2012-11-05"}, "QueueName": {"missing-query-queue"}, "AttributeName.1": {"All"}}); code != http.StatusBadRequest || !strings.Contains(body, "AWS.SimpleQueueService.NonExistentQueue") || !strings.Contains(body, "for this wsdl version") {
 		t.Fatalf("query missing queue %d %s", code, body)
 	}

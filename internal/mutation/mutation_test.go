@@ -18741,6 +18741,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestBootedServerSQSSection48",
 		},
 		{
+			name: "sqs-query-get-url-uses-name-parameter",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "case \"GetQueueUrl\":\n\t\tname := str(req.Input[\"QueueName\"])",
+			new:  "case \"GetQueueUrl\":\n\t\tname := queueName(req)",
+			pkg:  "./internal/spine",
+			run:  "TestBootedServerSQSSection48",
+		},
+		{
 			name: "sqs-permission-policy-version",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  `pol := map[string]any{"Version": "2008-10-17", "Id": arn + "/SQSDefaultPolicy", "Statement": []any{}}`,

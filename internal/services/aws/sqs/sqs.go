@@ -629,6 +629,68 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 func (p *Pack) visible(ctx context.Context, req *spi.Request, name string, now time.Time, max int) []map[string]any {
 	kvs, _, _ := p.col(req, "msgs:"+name).List(ctx, "", "", 0)
 	attrs := p.queueAttrs(ctx, req, name)
+	if strings.HasSuffix(name, ".fifo") {
+		groups := map[string][]map[string]any{}
+		firstSeq := map[string]int{}
+		order := []string{}
+		for _, kv := range kvs {
+			var m map[string]any
+			_ = json.Unmarshal(kv.Value, &m)
+			if messageExpired(attrs, m, now.UnixNano()) {
+				_ = p.col(req, "msgs:"+name).Delete(ctx, kv.Key)
+				continue
+			}
+			group := str(m["group"])
+			if group == "" {
+				group = kv.Key
+			}
+			if _, ok := groups[group]; !ok {
+				order = append(order, group)
+				firstSeq[group] = asInt(m["seq"])
+			}
+			groups[group] = append(groups[group], m)
+		}
+		for _, messages := range groups {
+			sortMsgs(messages)
+		}
+		partial := map[string]bool{}
+		for group, messages := range groups {
+			visible := 0
+			for _, m := range messages {
+				if int64(asFloat(m["visibleAt"])) > now.UnixNano() {
+					break
+				}
+				visible++
+			}
+			if visible > 0 && visible < len(messages) {
+				partial[group] = true
+			}
+		}
+		for i := 0; i < len(order); i++ {
+			for j := i + 1; j < len(order); j++ {
+				if partial[order[j]] != partial[order[i]] {
+					if !partial[order[j]] {
+						order[i], order[j] = order[j], order[i]
+					}
+				} else if firstSeq[order[j]] < firstSeq[order[i]] {
+					order[i], order[j] = order[j], order[i]
+				}
+			}
+		}
+		var out []map[string]any
+		for _, group := range order {
+			for _, m := range groups[group] {
+				if int64(asFloat(m["visibleAt"])) > now.UnixNano() {
+					break
+				}
+				out = append(out, m)
+				if len(out) >= max {
+					return out
+				}
+			}
+		}
+		return out
+	}
 	var cand []map[string]any
 	inFlight := map[string]bool{}
 	for _, kv := range kvs {

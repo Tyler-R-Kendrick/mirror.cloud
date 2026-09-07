@@ -6380,6 +6380,56 @@ func TestConcurrentSQSFIFOMessageGroupReuseIsStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSFIFOPartialGroupVisibilityIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	errs := make(chan error, 8)
+	var wg sync.WaitGroup
+	for index := range 8 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			name := fmt.Sprintf("chaos-partial-%d.fifo", index)
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name, "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": "30"}}}); err != nil {
+				errs <- err
+				return
+			}
+			for _, message := range []struct{ body, group string }{{"g1-m1", "g1"}, {"g1-m2", "g1"}, {"g2-m1", "g2"}} {
+				if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": message.body, "MessageGroupId": message.group}}); err != nil {
+					errs <- err
+					return
+				}
+			}
+			first, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MaxNumberOfMessages": 2}})
+			if err != nil || len(first.Output["Messages"].([]any)) != 2 {
+				errs <- fmt.Errorf("first %d %#v error %v", index, first, err)
+				return
+			}
+			firstMessage := first.Output["Messages"].([]any)[0].(map[string]any)
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ChangeMessageVisibility", Input: map[string]any{"QueueName": name, "ReceiptHandle": firstMessage["ReceiptHandle"], "VisibilityTimeout": 0}}); err != nil {
+				errs <- err
+				return
+			}
+			second, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MaxNumberOfMessages": 3}})
+			if err != nil || len(second.Output["Messages"].([]any)) != 2 {
+				errs <- fmt.Errorf("second %d %#v error %v", index, second, err)
+				return
+			}
+			messages := second.Output["Messages"].([]any)
+			if messages[0].(map[string]any)["Body"] != "g2-m1" || messages[1].(map[string]any)["Body"] != "g1-m1" {
+				errs <- fmt.Errorf("ordering %d %#v", index, second.Output)
+			}
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSFIFOBatchMissingDeduplicationIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := sqs.New(deps)

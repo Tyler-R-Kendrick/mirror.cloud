@@ -899,6 +899,42 @@ func TestAWSSDKSQSFIFOMessageGroupReuseContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSFIFOPartialGroupVisibilityContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-partial-group.fifo"), Attributes: map[string]string{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": "30"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range []struct{ body, group string }{{"g1-m1", "g1"}, {"g1-m2", "g1"}, {"g2-m1", "g2"}} {
+		if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String(message.body), MessageGroupId: aws.String(message.group)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, MaxNumberOfMessages: 2})
+	if err != nil || len(first.Messages) != 2 {
+		t.Fatalf("first receive %#v error %v", first, err)
+	}
+	if _, err := client.ChangeMessageVisibility(context.Background(), &sqs.ChangeMessageVisibilityInput{QueueUrl: created.QueueUrl, ReceiptHandle: first.Messages[0].ReceiptHandle, VisibilityTimeout: 0}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, MaxNumberOfMessages: 3})
+	if err != nil || len(second.Messages) != 2 || aws.ToString(second.Messages[0].Body) != "g2-m1" || aws.ToString(second.Messages[1].Body) != "g1-m1" {
+		t.Fatalf("partial visibility receive %#v error %v", second, err)
+	}
+}
+
 func TestAWSSDKSQSMessageTimestampContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}
@@ -1036,7 +1072,7 @@ func TestAWSSDKSQSFIFOApproximateMessageCountContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	after, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{QueueUrl: created.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameApproximateNumberOfMessages}})
-	if err != nil || after.Attributes["ApproximateNumberOfMessages"] != "2" {
+	if err != nil || after.Attributes["ApproximateNumberOfMessages"] != "1" {
 		t.Fatalf("after %#v error %v", after, err)
 	}
 }

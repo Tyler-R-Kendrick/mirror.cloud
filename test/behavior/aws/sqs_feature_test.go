@@ -632,7 +632,7 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("receive %d %s", status, body)
 		}
 		status, body = call("GetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-fifo-count.fifo","AttributeNames":["ApproximateNumberOfMessages"]}`)
-		if status != http.StatusOK || !bytes.Contains(body, []byte(`"ApproximateNumberOfMessages":"2"`)) {
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"ApproximateNumberOfMessages":"1"`)) {
 			t.Fatalf("count %d %s", status, body)
 		}
 	})
@@ -736,6 +736,35 @@ func TestSQSQueueListing(t *testing.T) {
 		status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-reuse-group.fifo"}`)
 		if status != http.StatusOK || !bytes.Contains(body, []byte(`"Body":"second"`)) {
 			t.Fatalf("final receive %d %s", status, body)
+		}
+	})
+	t.Run("Given a partially visible FIFO group When receiving Then other groups are prioritized", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-partial-group.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true","VisibilityTimeout":"30"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		for _, payload := range []string{
+			`{"QueueUrl":"http://queue/000000000000/bdd-partial-group.fifo","MessageBody":"g1-m1","MessageGroupId":"g1"}`,
+			`{"QueueUrl":"http://queue/000000000000/bdd-partial-group.fifo","MessageBody":"g1-m2","MessageGroupId":"g1"}`,
+			`{"QueueUrl":"http://queue/000000000000/bdd-partial-group.fifo","MessageBody":"g2-m1","MessageGroupId":"g2"}`,
+		} {
+			if status, body := call("SendMessage", payload); status != http.StatusOK {
+				t.Fatalf("send %d %s", status, body)
+			}
+		}
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-partial-group.fifo","MaxNumberOfMessages":2}`)
+		var first map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &first) != nil {
+			t.Fatalf("first receive %d %s", status, body)
+		}
+		firstMessage := first["Messages"].([]any)[0].(map[string]any)
+		change, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-partial-group.fifo", "ReceiptHandle": firstMessage["ReceiptHandle"], "VisibilityTimeout": 0})
+		if status, body = call("ChangeMessageVisibility", string(change)); status != http.StatusOK {
+			t.Fatalf("change visibility %d %s", status, body)
+		}
+		status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-partial-group.fifo","MaxNumberOfMessages":3}`)
+		g2, g1 := bytes.Index(body, []byte(`"Body":"g2-m1"`)), bytes.Index(body, []byte(`"Body":"g1-m1"`))
+		if status != http.StatusOK || g2 < 0 || g1 < 0 || g2 > g1 {
+			t.Fatalf("partial group order %d %s", status, body)
 		}
 	})
 }

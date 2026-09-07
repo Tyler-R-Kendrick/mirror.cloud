@@ -344,6 +344,42 @@ func TestFIFOEmptyMessageGroupReuseCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"empty": empty, "finalBody": final["Messages"].([]any)[0].(map[string]any)["Body"]})
 }
 
+func TestFIFOMessageGroupVisibilityAfterTerminateCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+	call("CreateQueue", map[string]any{"QueueName": "partial-group.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": "30"}})
+	call("SendMessage", map[string]any{"QueueName": "partial-group.fifo", "MessageBody": "g1-m1", "MessageGroupId": "g1"})
+	call("SendMessage", map[string]any{"QueueName": "partial-group.fifo", "MessageBody": "g1-m2", "MessageGroupId": "g1"})
+	call("SendMessage", map[string]any{"QueueName": "partial-group.fifo", "MessageBody": "g2-m1", "MessageGroupId": "g2"})
+	first := call("ReceiveMessage", map[string]any{"QueueName": "partial-group.fifo", "MaxNumberOfMessages": 2})
+	firstMessages := first["Messages"].([]any)
+	if len(firstMessages) != 2 {
+		t.Fatalf("first receive %#v", first)
+	}
+	call("ChangeMessageVisibility", map[string]any{"QueueName": "partial-group.fifo", "ReceiptHandle": asMap(firstMessages[0])["ReceiptHandle"], "VisibilityTimeout": 0})
+	second := call("ReceiveMessage", map[string]any{"QueueName": "partial-group.fifo", "MaxNumberOfMessages": 3})
+	secondMessages := second["Messages"].([]any)
+	if len(secondMessages) != 2 {
+		t.Fatalf("second receive %#v", second)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"first":  []any{asMap(firstMessages[0])["Body"], asMap(firstMessages[1])["Body"]},
+		"second": []any{asMap(secondMessages[0])["Body"], asMap(secondMessages[1])["Body"]},
+	})
+}
+
 func TestSuccessivePurgeCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
@@ -1065,6 +1101,49 @@ func FuzzFIFOMessageGroupReuse(f *testing.F) {
 		final, err := invoke("ReceiveMessage", map[string]any{"QueueName": "fuzz-reuse-group.fifo"})
 		if err != nil || len(final.Output["Messages"].([]any)) != 1 || final.Output["Messages"].([]any)[0].(map[string]any)["Body"] != body {
 			t.Fatalf("body=%q response=%#v error=%v", body, final.Output, err)
+		}
+	})
+}
+
+func FuzzFIFOMessageGroupVisibilityAfterTerminate(f *testing.F) {
+	f.Add(uint8(1))
+	f.Add(uint8(3))
+	f.Fuzz(func(t *testing.T, timeout uint8) {
+		if timeout == 0 || timeout > 30 {
+			t.Skip()
+		}
+		clk := clock.NewControllable()
+		deps := spitest.Deps(t)
+		deps.Clock = clk
+		p := New(deps)
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		invoke := func(operation string, input map[string]any) (*spi.Response, error) {
+			return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		}
+		if _, err := invoke("CreateQueue", map[string]any{"QueueName": "fuzz-partial-group.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": int(timeout)}}); err != nil {
+			t.Fatal(err)
+		}
+		for _, message := range []struct{ body, group string }{{"g1-m1", "g1"}, {"g1-m2", "g1"}, {"g2-m1", "g2"}} {
+			if _, err := invoke("SendMessage", map[string]any{"QueueName": "fuzz-partial-group.fifo", "MessageBody": message.body, "MessageGroupId": message.group}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		first, err := invoke("ReceiveMessage", map[string]any{"QueueName": "fuzz-partial-group.fifo", "MaxNumberOfMessages": 2})
+		if err != nil || len(first.Output["Messages"].([]any)) != 2 {
+			t.Fatalf("first %#v error %v", first, err)
+		}
+		firstMessage := first.Output["Messages"].([]any)[0].(map[string]any)
+		if _, err := invoke("ChangeMessageVisibility", map[string]any{"QueueName": "fuzz-partial-group.fifo", "ReceiptHandle": firstMessage["ReceiptHandle"], "VisibilityTimeout": 0}); err != nil {
+			t.Fatal(err)
+		}
+		second, err := invoke("ReceiveMessage", map[string]any{"QueueName": "fuzz-partial-group.fifo", "MaxNumberOfMessages": 3})
+		if err != nil || len(second.Output["Messages"].([]any)) != 2 {
+			t.Fatalf("second %#v error %v", second, err)
+		}
+		messages := second.Output["Messages"].([]any)
+		if asMap(messages[0])["Body"] != "g2-m1" || asMap(messages[1])["Body"] != "g1-m1" {
+			t.Fatalf("partial visibility ordering %#v", second.Output)
 		}
 	})
 }
@@ -2179,14 +2258,14 @@ func TestFIFODedupDLQLongPoll(t *testing.T) {
 	}
 	got := inv("ReceiveMessage", map[string]any{"QueueName": "q.fifo", "MaxNumberOfMessages": 10, "VisibilityTimeout": 0})
 	msgs, _ := got.Output["Messages"].([]any)
-	if len(msgs) != 2 {
+	if len(msgs) != 3 {
 		t.Fatalf("fifo+dedup receive %d %v", len(msgs), got.Output)
 	}
 	bodies := map[string]bool{}
 	for _, m := range msgs {
 		bodies[m.(map[string]any)["Body"].(string)] = true
 	}
-	if !bodies["g1a"] || !bodies["g2a"] || bodies["g1b"] {
+	if !bodies["g1a"] || !bodies["g1b"] || !bodies["g2a"] {
 		t.Fatalf("fifo order/dedup %v", bodies)
 	}
 

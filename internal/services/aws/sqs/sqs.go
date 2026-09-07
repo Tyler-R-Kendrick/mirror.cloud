@@ -101,7 +101,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			attrs["FifoQueue"] = "true"
 		}
 		meta, _ := json.Marshal(map[string]any{
-			"url": url, "name": name, "attrs": attrs, "seq": 0,
+			"url": url, "name": name, "attrs": attrs, "dedupScope": str(attrs["DeduplicationScope"]), "seq": 0,
 			"created": strconv.FormatInt(p.deps.Clock.Now().Unix(), 10),
 		})
 		_ = p.col(req, "queues").Put(ctx, name, meta)
@@ -518,7 +518,7 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 		return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "DelaySeconds must be between 0 and 900.", HTTPStatus: 400, Fault: "client"}
 	}
 	dedupKey := dedup
-	if fifo && str(attrs["DeduplicationScope"]) == "messageGroup" {
+	if fifo && p.dedupScope(ctx, req, name, attrs) == "messageGroup" {
 		dedupKey = group + "\x1f" + dedup
 	}
 	if dedup != "" {
@@ -1049,6 +1049,17 @@ func (p *Pack) queueAttrs(ctx context.Context, req *spi.Request, name string) ma
 		}
 	}
 	return out
+}
+
+func (p *Pack) dedupScope(ctx context.Context, req *spi.Request, name string, attrs map[string]any) string {
+	if b, ok, _ := p.col(req, "queues").Get(ctx, name); ok {
+		var meta map[string]any
+		_ = json.Unmarshal(b, &meta)
+		if scope := str(meta["dedupScope"]); scope != "" {
+			return scope
+		}
+	}
+	return str(attrs["DeduplicationScope"])
 }
 
 func (p *Pack) nextSeq(ctx context.Context, req *spi.Request, name string) int {

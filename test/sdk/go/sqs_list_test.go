@@ -1242,6 +1242,21 @@ func TestAWSSDKSQSFIFODeduplicationScopeContract(t *testing.T) {
 	if err != nil || len(received.Messages) != 2 {
 		t.Fatalf("first=%#v second=%#v received=%#v error=%v", first, second, received, err)
 	}
+	createdQueueScope, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-dedup-scope-update.fifo"), Attributes: map[string]string{"FifoQueue": "true", "ContentBasedDeduplication": "false", "DeduplicationScope": "queue"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: createdQueueScope.QueueUrl, MessageBody: aws.String("first"), MessageGroupId: aws.String("group-1"), MessageDeduplicationId: aws.String("same-dedup")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SetQueueAttributes(context.Background(), &sqs.SetQueueAttributesInput{QueueUrl: createdQueueScope.QueueUrl, Attributes: map[string]string{"DeduplicationScope": "messageGroup", "FifoThroughputLimit": "perMessageGroupId"}}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: createdQueueScope.QueueUrl, MessageBody: aws.String("updated"), MessageGroupId: aws.String("group-2"), MessageDeduplicationId: aws.String("same-dedup")})
+	if err != nil || aws.ToString(updated.MessageId) != aws.ToString(initial.MessageId) {
+		t.Fatalf("scope update initial=%#v updated=%#v error=%v", initial, updated, err)
+	}
 }
 
 func TestAWSSDKSQSMessageAttributeDigestContract(t *testing.T) {

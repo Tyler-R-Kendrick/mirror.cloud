@@ -3105,6 +3105,47 @@ func TestFIFOMessageGroupScopeWithoutThroughputCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"first": first, "firstReceive": firstReceive, "second": second, "secondReceive": secondReceive})
 }
 
+func TestFIFODeduplicationScopeUpdateCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response.Output
+	}
+	call("CreateQueue", map[string]any{"QueueName": "dedup-scope-update.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false", "DeduplicationScope": "queue"}})
+	first := call("SendMessage", map[string]any{"QueueName": "dedup-scope-update.fifo", "MessageBody": "Test1", "MessageGroupId": "group-1", "MessageDeduplicationId": "same-dedup"})
+	firstReceive := call("ReceiveMessage", map[string]any{"QueueName": "dedup-scope-update.fifo", "MaxNumberOfMessages": 1})
+	call("DeleteMessage", map[string]any{"QueueName": "dedup-scope-update.fifo", "ReceiptHandle": asMap(asAnySlice(firstReceive["Messages"])[0])["ReceiptHandle"]})
+	queueDuplicate := call("SendMessage", map[string]any{"QueueName": "dedup-scope-update.fifo", "MessageBody": "Test2", "MessageGroupId": "group-2", "MessageDeduplicationId": "same-dedup"})
+	queueReceive := call("ReceiveMessage", map[string]any{"QueueName": "dedup-scope-update.fifo", "MaxNumberOfMessages": 1, "VisibilityTimeout": 0})
+	call("SetQueueAttributes", map[string]any{"QueueName": "dedup-scope-update.fifo", "Attributes": map[string]any{"DeduplicationScope": "messageGroup", "FifoThroughputLimit": "perMessageGroupId"}})
+	updated := call("SendMessage", map[string]any{"QueueName": "dedup-scope-update.fifo", "MessageBody": "Test3", "MessageGroupId": "group-3", "MessageDeduplicationId": "same-dedup"})
+	updatedReceive := call("ReceiveMessage", map[string]any{"QueueName": "dedup-scope-update.fifo", "MaxNumberOfMessages": 1, "VisibilityTimeout": 0})
+	if first["MessageId"] != queueDuplicate["MessageId"] || len(asAnySlice(queueReceive["Messages"])) != 0 || first["MessageId"] != updated["MessageId"] || len(asAnySlice(updatedReceive["Messages"])) != 0 {
+		t.Fatalf("queue scope update first=%#v queueDuplicate=%#v queueReceive=%#v updated=%#v updatedReceive=%#v", first, queueDuplicate, queueReceive, updated, updatedReceive)
+	}
+
+	call("CreateQueue", map[string]any{"QueueName": "dedup-scope-update-high.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false", "DeduplicationScope": "messageGroup", "FifoThroughputLimit": "perMessageGroupId"}})
+	highFirst := call("SendMessage", map[string]any{"QueueName": "dedup-scope-update-high.fifo", "MessageBody": "Test1", "MessageGroupId": "group-1", "MessageDeduplicationId": "same-dedup"})
+	highFirstReceive := call("ReceiveMessage", map[string]any{"QueueName": "dedup-scope-update-high.fifo", "MaxNumberOfMessages": 1})
+	call("DeleteMessage", map[string]any{"QueueName": "dedup-scope-update-high.fifo", "ReceiptHandle": asMap(asAnySlice(highFirstReceive["Messages"])[0])["ReceiptHandle"]})
+	highSecond := call("SendMessage", map[string]any{"QueueName": "dedup-scope-update-high.fifo", "MessageBody": "Test2", "MessageGroupId": "group-2", "MessageDeduplicationId": "same-dedup"})
+	highSecondReceive := call("ReceiveMessage", map[string]any{"QueueName": "dedup-scope-update-high.fifo", "MaxNumberOfMessages": 1})
+	call("DeleteMessage", map[string]any{"QueueName": "dedup-scope-update-high.fifo", "ReceiptHandle": asMap(asAnySlice(highSecondReceive["Messages"])[0])["ReceiptHandle"]})
+	call("SetQueueAttributes", map[string]any{"QueueName": "dedup-scope-update-high.fifo", "Attributes": map[string]any{"DeduplicationScope": "queue", "FifoThroughputLimit": "perQueue"}})
+	highUpdated := call("SendMessage", map[string]any{"QueueName": "dedup-scope-update-high.fifo", "MessageBody": "Test3", "MessageGroupId": "group-3", "MessageDeduplicationId": "same-dedup"})
+	highUpdatedReceive := call("ReceiveMessage", map[string]any{"QueueName": "dedup-scope-update-high.fifo", "MaxNumberOfMessages": 1})
+	if highFirst["MessageId"] == highSecond["MessageId"] || len(asAnySlice(highSecondReceive["Messages"])) != 1 || highSecond["MessageId"] == highUpdated["MessageId"] || len(asAnySlice(highUpdatedReceive["Messages"])) != 1 {
+		t.Fatalf("message-group scope update first=%#v second=%#v secondReceive=%#v updated=%#v updatedReceive=%#v", highFirst, highSecond, highSecondReceive, highUpdated, highUpdatedReceive)
+	}
+	golden.AssertJSON(t, map[string]any{"queueDuplicate": queueDuplicate, "queueReceive": queueReceive, "updated": updated, "updatedReceive": updatedReceive, "highSecond": highSecond, "highSecondReceive": highSecondReceive, "highUpdated": highUpdated, "highUpdatedReceive": highUpdatedReceive})
+}
+
 func TestTraceHeaderPropagationCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

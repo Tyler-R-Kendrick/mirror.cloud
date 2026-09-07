@@ -885,6 +885,24 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("dedup scope %d %s", status, body)
 		}
 	})
+	t.Run("Given a queue deduplication scope When the scope is updated Then existing semantics remain stable", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-dedup-scope-update.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"false","DeduplicationScope":"queue"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-dedup-scope-update.fifo","MessageBody":"first","MessageGroupId":"group-1","MessageDeduplicationId":"same-dedup"}`); status != http.StatusOK {
+			t.Fatalf("first %d %s", status, body)
+		}
+		if status, body := call("SetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-dedup-scope-update.fifo","Attributes":{"DeduplicationScope":"messageGroup","FifoThroughputLimit":"perMessageGroupId"}}`); status != http.StatusOK {
+			t.Fatalf("update %d %s", status, body)
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-dedup-scope-update.fifo","MessageBody":"second","MessageGroupId":"group-2","MessageDeduplicationId":"same-dedup"}`); status != http.StatusOK || !bytes.Contains(body, []byte(`"MessageId"`)) {
+			t.Fatalf("duplicate %d %s", status, body)
+		}
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-dedup-scope-update.fifo","MaxNumberOfMessages":10}`)
+		if status != http.StatusOK || bytes.Count(body, []byte(`"MessageId"`)) != 1 {
+			t.Fatalf("updated scope receive %d %s", status, body)
+		}
+	})
 	t.Run("Given a FIFO message When receiving all attributes twice Then receive metadata mutates", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-fifo-attrs.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true","VisibilityTimeout":"0"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

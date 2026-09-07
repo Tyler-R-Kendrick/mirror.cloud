@@ -1,0 +1,44 @@
+{
+  "highSecond": {
+    "MD5OfMessageBody": "c454552d52d55d3ef56408742887362b",
+    "MessageId": "83d4958a39f75457",
+    "SequenceNumber": "2"
+  },
+  "highSecondReceive": {
+    "Messages": [
+      {
+        "Body": "Test2",
+        "MD5OfBody": "c454552d52d55d3ef56408742887362b",
+        "MessageId": "83d4958a39f75457",
+        "ReceiptHandle": "100aa4e60b963dc5ea239f1a89b17f21c27ea9356fee2331658b2f769a69a34c"
+      }
+    ]
+  },
+  "highUpdated": {
+    "MD5OfMessageBody": "b3f66ec1535de7702c38e94408fa4a17",
+    "MessageId": "3ed10eca83a29db2",
+    "SequenceNumber": "3"
+  },
+  "highUpdatedReceive": {
+    "Messages": [
+      {
+        "Body": "Test3",
+        "MD5OfBody": "b3f66ec1535de7702c38e94408fa4a17",
+        "MessageId": "3ed10eca83a29db2",
+        "ReceiptHandle": "4da7b6a4902c32359fbe7e4f9612b72d90b68c014d75a5babe4aca2d78764805"
+      }
+    ]
+  },
+  "queueDuplicate": {
+    "MD5OfMessageBody": "c454552d52d55d3ef56408742887362b",
+    "MessageId": "7c5891299f6489f8",
+    "SequenceNumber": "1"
+  },
+  "queueReceive": {},
+  "updated": {
+    "MD5OfMessageBody": "b3f66ec1535de7702c38e94408fa4a17",
+    "MessageId": "7c5891299f6489f8",
+    "SequenceNumber": "1"
+  },
+  "updatedReceive": {}
+}

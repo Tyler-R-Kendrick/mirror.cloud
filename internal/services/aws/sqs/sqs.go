@@ -1198,6 +1198,9 @@ func asMap(v any) map[string]any {
 }
 
 func advertise(req *spi.Request) string {
+	if req.AdvertiseURL != "" {
+		return strings.TrimRight(req.AdvertiseURL, "/")
+	}
 	if req.HTTP != nil && req.HTTP.Host != "" {
 		scheme := "http"
 		return scheme + "://" + req.HTTP.Host

@@ -2330,6 +2330,24 @@ func TestQueueMetadataCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"selected": selected.Output, "all": all.Output})
 }
 
+func TestQueueAdvertiseURLCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, AdvertiseURL: "https://external.example/sqs/", Operation: "CreateQueue", Input: map[string]any{"QueueName": "advertised"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Output["QueueUrl"] != "https://external.example/sqs/123456789012/advertised" {
+		t.Fatalf("advertised queue URL %#v", response.Output)
+	}
+	url, err := p.Invoke(ctx, &spi.Request{Identity: id, AdvertiseURL: "https://ignored.example", Operation: "GetQueueUrl", Input: map[string]any{"QueueName": "advertised"}})
+	if err != nil || url.Output["QueueUrl"] != response.Output["QueueUrl"] {
+		t.Fatalf("stored queue URL %#v error %v", url.Output, err)
+	}
+	golden.AssertJSON(t, map[string]any{"created": response.Output, "lookup": url.Output})
+}
+
 func TestQueueRecentlyDeletedCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	if err := clk.Advance(time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC).Sub(clk.Now())); err != nil {

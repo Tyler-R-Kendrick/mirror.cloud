@@ -386,6 +386,30 @@ func TestConcurrentSQSQueueMetadataRemainsIsolated(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSAdvertiseURLsRemainConsistent(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	errs := make(chan error, 8)
+	var wg sync.WaitGroup
+	for index := range 8 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			name := fmt.Sprintf("chaos-advertised-%d", index)
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, AdvertiseURL: "https://external.example/sqs/", Operation: "CreateQueue", Input: map[string]any{"QueueName": name}})
+			if err != nil || response.Output["QueueUrl"] != "https://external.example/sqs/000000000000/"+name {
+				errs <- fmt.Errorf("queue %s response %#v error %v", name, response, err)
+			}
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSQueueRecreationCannotBypassDeletionWindow(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := sqs.New(deps)

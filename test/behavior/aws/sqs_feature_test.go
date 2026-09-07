@@ -1137,3 +1137,47 @@ func TestSQSQueueListing(t *testing.T) {
 		}
 	})
 }
+
+func TestSQSAdvertisedQueueURLBDD(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	cfg.AdvertiseURL = "https://external.example/sqs/"
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	request, _ := http.NewRequest(http.MethodPost, server.URL, strings.NewReader(`{"QueueName":"bdd-advertised"}`))
+	request.Header.Set("X-Amz-Target", "AmazonSQS.CreateQueue")
+	request.Header.Set("Content-Type", "application/x-amz-json-1.0")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(`"QueueUrl":"https://external.example/sqs/000000000000/bdd-advertised"`)) {
+		t.Fatalf("advertised queue URL %d %s", response.StatusCode, body)
+	}
+	sendRequest, _ := http.NewRequest(http.MethodPost, server.URL, strings.NewReader(`{"QueueUrl":"https://external.example/sqs/000000000000/bdd-advertised","MessageBody":"external"}`))
+	sendRequest.Header.Set("X-Amz-Target", "AmazonSQS.SendMessage")
+	sendRequest.Header.Set("Content-Type", "application/x-amz-json-1.0")
+	sendResponse, err := http.DefaultClient.Do(sendRequest)
+	if err != nil || sendResponse.StatusCode != http.StatusOK {
+		t.Fatalf("external send response=%v error=%v", sendResponse, err)
+	}
+	sendResponse.Body.Close()
+	receiveRequest, _ := http.NewRequest(http.MethodPost, server.URL, strings.NewReader(`{"QueueUrl":"https://external.example/sqs/000000000000/bdd-advertised"}`))
+	receiveRequest.Header.Set("X-Amz-Target", "AmazonSQS.ReceiveMessage")
+	receiveRequest.Header.Set("Content-Type", "application/x-amz-json-1.0")
+	receiveResponse, err := http.DefaultClient.Do(receiveRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer receiveResponse.Body.Close()
+	receivedBody, _ := io.ReadAll(receiveResponse.Body)
+	if receiveResponse.StatusCode != http.StatusOK || !bytes.Contains(receivedBody, []byte(`"Body":"external"`)) {
+		t.Fatalf("external receive %d %s", receiveResponse.StatusCode, receivedBody)
+	}
+}

@@ -12455,6 +12455,50 @@ var mutants = []mutant{
 		run: "TestIngestRecordsTheSigningName",
 	},
 	{
+		name: "smithy-drop-the-list-element-name",
+		file: filepath.Join("internal", "receiver", "aws", "smithy", "smithy.go"),
+		old:  "\t\t\t\tms.Member, ms.MemberBinding = sh.Member.Target, binding(sh.Member.Traits)",
+		new:  "\t\t\t\tms.Member = sh.Member.Target",
+		// A list names its own element and nothing else can. Losing it writes
+		// <vpcSet><member> where ec2 answers <vpcSet><item>, which no client
+		// decodes -- and, like every receiver change, is invisible downstream
+		// until the models are regenerated, so the ingest test is what proves it.
+		pkg: "./internal/receiver/aws/smithy",
+		run: "TestIngestRecordsWhereAMemberSitsOnTheWire",
+	},
+	{
+		name: "awsquery-encode-keeps-the-declared-name",
+		file: filepath.Join("internal", "proto", "aws", "awsquery", "awsquery.go"),
+		old:  "\t\tif m.Binding.Name != \"\" {\n\t\t\treturn m.Binding.Name, m.Shape, m.Binding.XMLFlattened\n\t\t}",
+		new:  "\t\tif false {\n\t\t\treturn m.Binding.Name, m.Shape, m.Binding.XMLFlattened\n\t\t}",
+		pkg:  "./internal/proto/aws/awsquery",
+		run:  "TestEncodeWritesDeclaredMembersOnTheWire",
+	},
+	{
+		name: "awsquery-encode-ignores-the-list-element-name",
+		file: filepath.Join("internal", "proto", "aws", "awsquery", "awsquery.go"),
+		old:  "\telem := shape.MemberBinding.Name",
+		new:  "\telem := \"\"",
+		pkg:  "./internal/proto/aws/awsquery",
+		run:  "TestEncodeWritesDeclaredMembersOnTheWire",
+	},
+	{
+		name: "awsquery-decode-reads-ec2-by-its-response-names",
+		file: filepath.Join("internal", "proto", "aws", "awsquery", "awsquery.go"),
+		old:  "\tif svc.Protocol == model.ProtoEC2Query {\n\t\tswitch {",
+		new:  "\tif false {\n\t\tswitch {",
+		pkg:  "./internal/proto/aws/awsquery",
+		run:  "TestDecodeReadsEC2RequestNames",
+	},
+	{
+		name: "awsquery-decode-unflattens-ec2-lists",
+		file: filepath.Join("internal", "proto", "aws", "awsquery", "awsquery.go"),
+		old:  "\treturn b.XMLFlattened || svc.Protocol == model.ProtoEC2Query",
+		new:  "\treturn b.XMLFlattened",
+		pkg:  "./internal/proto/aws/awsquery",
+		run:  "TestDecodeReadsEC2RequestNames",
+	},
+	{
 		name: "demux-ignore-the-signing-name",
 		file: filepath.Join("internal", "edge", "resolve.go"),
 		old:  "\tfor _, alias := range svc.Aliases {",

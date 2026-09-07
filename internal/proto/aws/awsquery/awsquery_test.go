@@ -60,9 +60,20 @@ func TestAWSQueryContract(t *testing.T) {
 func shapedService() *model.Service {
 	return &model.Service{
 		ID: "aws.shaped", Protocol: model.ProtoAWSQuery,
-		Operations: []model.Operation{{Name: "Do", Input: "DoInput"}},
+		Operations: []model.Operation{{Name: "Do", Input: "DoInput", Output: "DoOutput"}},
 		Shapes: map[string]model.Shape{
 			"String": {Kind: model.KindString},
+			"DoOutput": {Kind: model.KindStructure, Members: map[string]model.Member{
+				"Plain":    {Shape: "String"},
+				"Renamed":  {Shape: "String", Binding: model.MemberBinding{Name: "onTheWire"}},
+				"Items":    {Shape: "NamedList", Binding: model.MemberBinding{Name: "itemSet"}},
+				"Loose":    {Shape: "StringList", Binding: model.MemberBinding{Name: "looseSet", XMLFlattened: true}},
+				"Anon":     {Shape: "StringList"},
+				"Tags":     {Shape: "StringMap", Binding: model.MemberBinding{Name: "tagSet"}},
+				"Labelled": {Shape: "LabelledMap"},
+			}},
+			"NamedList":   {Kind: model.KindList, Member: "Inner", MemberBinding: model.MemberBinding{Name: "item"}},
+			"LabelledMap": {Kind: model.KindMap, Key: "String", Member: "String", KeyBinding: model.MemberBinding{Name: "k"}, MemberBinding: model.MemberBinding{Name: "v"}},
 			"DoInput": {Kind: model.KindStructure, Members: map[string]model.Member{
 				"Name":       {Shape: "String"},
 				"Identities": {Shape: "StringList"},
@@ -219,5 +230,106 @@ func TestAWSQueryFaultsAndUnknownActions(t *testing.T) {
 	}
 	if got := FormEncode(url.Values{"b": {"2"}, "a": {"1"}}); got != "a=1&b=2" {
 		t.Fatalf("form encoding %q", got)
+	}
+}
+
+func encodeOutput(t *testing.T, svc *model.Service, out map[string]any) string {
+	t.Helper()
+	w := httptest.NewRecorder()
+	op := &svc.Operations[0]
+	if err := (Codec{}).Encode(svc, op, w, &spi.Response{Output: out}); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	return w.Body.String()
+}
+
+func TestEncodeWritesDeclaredMembersOnTheWire(t *testing.T) {
+	svc := shapedService()
+	body := encodeOutput(t, svc, map[string]any{
+		"Plain":    "p",
+		"Renamed":  "r",
+		"Items":    []any{map[string]any{"First": "ada"}},
+		"Loose":    []any{"x", "y"},
+		"Anon":     []any{"z"},
+		"Tags":     map[string]any{"team": "storage"},
+		"Labelled": map[string]any{"a": "b"},
+	})
+	for _, want := range []string{
+		"<Plain>p</Plain>",
+		// Declared as Renamed, written as the wire name a client reads.
+		"<onTheWire>r</onTheWire>",
+		// The wrapper comes from the member, the element from the list's own
+		// member -- which is how ec2 gets <vpcSet><item>.
+		"<itemSet><item><First>ada</First></item></itemSet>",
+		// A flattened list has no wrapper: each element carries the member name.
+		"<looseSet>x</looseSet><looseSet>y</looseSet>",
+		// A list whose shape names no element keeps the protocol default.
+		"<Anon><member>z</member></Anon>",
+		"<tagSet><entry><key>team</key><value>storage</value></entry></tagSet>",
+		"<Labelled><entry><k>a</k><v>b</v></entry></Labelled>",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("response is missing %s:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "<Renamed>") || strings.Contains(body, "<Items>") {
+		t.Errorf("declared names reached the wire:\n%s", body)
+	}
+}
+
+func TestEncodeDoesNotRenameWhatIsAlreadyOnTheWire(t *testing.T) {
+	// The hand-written packs answer in wire names already -- ec2's says vpcSet.
+	// Renaming a second time would turn those into nothing a client can read,
+	// and would make a pack and the bundle replacing it disagree, which is
+	// exactly what the equivalence gate compares.
+	svc := shapedService()
+	declared := encodeOutput(t, svc, map[string]any{
+		"Renamed": "r", "Items": []any{map[string]any{"First": "ada"}}, "Loose": []any{"x"},
+	})
+	wire := encodeOutput(t, svc, map[string]any{
+		"onTheWire": "r", "itemSet": []any{map[string]any{"First": "ada"}}, "looseSet": []any{"x"},
+	})
+	if declared != wire {
+		t.Errorf("declared and wire producers disagree:\n%s\n%s", declared, wire)
+	}
+}
+
+func TestEncodeLeavesUndeclaredKeysAlone(t *testing.T) {
+	// A pack answering something the model does not carry keeps the bytes it
+	// always produced; the shape is a rename table, not a filter.
+	body := encodeOutput(t, shapedService(), map[string]any{
+		"Undeclared": []any{map[string]any{"Deep": "d"}},
+	})
+	if !strings.Contains(body, "<Undeclared><member><Deep>d</Deep></member></Undeclared>") {
+		t.Errorf("undeclared member was rewritten:\n%s", body)
+	}
+}
+
+func TestDecodeReadsEC2RequestNames(t *testing.T) {
+	// ec2Query asks for a member under a different name than it answers with,
+	// and flattens every list in a request without any trait saying so. Reading
+	// an ec2 request by its response names finds no structured member at all.
+	svc := shapedService()
+	svc.Protocol = model.ProtoEC2Query
+	input := svc.Shapes["DoInput"]
+	input.Members["Renamed"] = model.Member{Shape: "String", Binding: model.MemberBinding{Name: "onTheWire"}}
+	input.Members["Explicit"] = model.Member{Shape: "String", Binding: model.MemberBinding{Name: "dryRun", QueryName: "DryRun"}}
+	input.Members["Identities"] = model.Member{Shape: "StringList", Binding: model.MemberBinding{Name: "vpcId"}}
+	svc.Shapes["DoInput"] = input
+
+	in := decodeForm(t, svc, url.Values{
+		"OnTheWire": {"capitalized"},
+		"DryRun":    {"true"},
+		"VpcId.1":   {"vpc-1"},
+		"VpcId.2":   {"vpc-2"},
+	})
+	if got := in["Renamed"]; got != "capitalized" {
+		t.Errorf("Renamed = %#v, want the capitalized xmlName to be read", got)
+	}
+	if got := in["Explicit"]; got != "true" {
+		t.Errorf("Explicit = %#v, want ec2QueryName to win over xmlName", got)
+	}
+	if got := in["Identities"]; !reflect.DeepEqual(got, []any{"vpc-1", "vpc-2"}) {
+		t.Errorf("Identities = %#v, want the flattened list [vpc-1 vpc-2]", got)
 	}
 }

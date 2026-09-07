@@ -2552,6 +2552,41 @@ func TestMessageMoveTaskDestinationDeletionCharacterization(t *testing.T) {
 	})
 }
 
+func TestMessageMoveTaskMultipleDefaultDestinationsCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	for _, name := range []string{"move-multi-source-a", "move-multi-source-b", "move-multi-dlq"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:move-multi-dlq","maxReceiveCount":"1"}`
+	for _, name := range []string{"move-multi-source-a", "move-multi-source-b"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": name, "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": name}}); err != nil {
+			t.Fatal(err)
+		}
+		for range 2 {
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "VisibilityTimeout": 0}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	sourceArn := queueARN(&spi.Request{Identity: id}, "move-multi-dlq")
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: map[string]any{"SourceArn": sourceArn}}); err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, name := range []string{"move-multi-source-a", "move-multi-source-b"} {
+		messages, _, _ := p.col(&spi.Request{Identity: id}, "msgs:"+name).List(ctx, "", "", 0)
+		counts[name] = len(messages)
+	}
+	golden.AssertJSON(t, map[string]any{"sourceACount": counts["move-multi-source-a"], "sourceBCount": counts["move-multi-source-b"]})
+}
+
 func TestMessageMoveTaskWorkflowCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

@@ -1327,6 +1327,36 @@ func TestSQSQueueListing(t *testing.T) {
 		}
 		t.Fatalf("task did not fail after destination deletion %d %s", status, body)
 	})
+	t.Run("Given multiple source queues share a DLQ When destination is omitted Then each message returns to its origin", func(t *testing.T) {
+		for _, name := range []string{"bdd-move-multi-source-a", "bdd-move-multi-source-b", "bdd-move-multi-dlq"} {
+			if status, body := call("CreateQueue", `{"QueueName":"`+name+`"}`); status != http.StatusOK {
+				t.Fatalf("create %s %d %s", name, status, body)
+			}
+		}
+		policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-multi-dlq","maxReceiveCount":"1"}`
+		for _, name := range []string{"bdd-move-multi-source-a", "bdd-move-multi-source-b"} {
+			if status, body := call("SetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/`+name+`","Attributes":{"RedrivePolicy":`+strconv.Quote(policy)+`}}`); status != http.StatusOK {
+				t.Fatalf("set policy %s %d %s", name, status, body)
+			}
+			if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/`+name+`","MessageBody":"`+name+`"}`); status != http.StatusOK {
+				t.Fatalf("send %s %d %s", name, status, body)
+			}
+			for i := 0; i < 2; i++ {
+				if status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/`+name+`","VisibilityTimeout":0}`); status != http.StatusOK {
+					t.Fatalf("receive %s %d %s", name, status, body)
+				}
+			}
+		}
+		if status, body := call("StartMessageMoveTask", `{"SourceArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-multi-dlq"}`); status != http.StatusOK {
+			t.Fatalf("start %d %s", status, body)
+		}
+		for _, name := range []string{"bdd-move-multi-source-a", "bdd-move-multi-source-b"} {
+			status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/`+name+`","VisibilityTimeout":0}`)
+			if status != http.StatusOK || !bytes.Contains(body, []byte(`"Body":"`+name+`"`)) {
+				t.Fatalf("returned %s %d %s", name, status, body)
+			}
+		}
+	})
 }
 
 func TestSQSAdvertisedQueueURLBDD(t *testing.T) {

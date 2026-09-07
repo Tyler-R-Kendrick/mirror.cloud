@@ -442,6 +442,24 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("receive digest %d %s", status, body)
 		}
 	})
+	t.Run("Given system attributes When sending Then their digest is separate", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-system-attribute-digest"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		messageAttributes := `{"timestamp":{"DataType":"Number","StringValue":"1493147359900"}}`
+		withoutPayload := `{"QueueUrl":"http://queue/000000000000/bdd-system-attribute-digest","MessageBody":"test","MessageAttributes":` + messageAttributes + `}`
+		status, body := call("SendMessage", withoutPayload)
+		var without map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &without) != nil || without["MD5OfMessageSystemAttributes"] != nil {
+			t.Fatalf("without system digest %d %s", status, body)
+		}
+		withPayload := `{"QueueUrl":"http://queue/000000000000/bdd-system-attribute-digest","MessageBody":"test","MessageAttributes":` + messageAttributes + `,"MessageSystemAttributes":{"AWSTraceHeader":{"DataType":"String","StringValue":"Root=1-5759e988-bd862e3fe1be46a994272793;Parent=53995c3f42cd8ad8;Sampled=1"}}}`
+		status, body = call("SendMessage", withPayload)
+		var with map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &with) != nil || with["MD5OfMessageAttributes"] != without["MD5OfMessageAttributes"] || with["MD5OfMessageSystemAttributes"] != "5ae4d5d7636402d80f4eb6d213245a88" {
+			t.Fatalf("with system digest %d %s", status, body)
+		}
+	})
 	t.Run("Given an empty or reserved message attribute When sending Then validation fails", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-attribute-validation"}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

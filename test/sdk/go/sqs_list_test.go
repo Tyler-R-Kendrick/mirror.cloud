@@ -1238,6 +1238,35 @@ func TestAWSSDKSQSMessageAttributeDigestContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSMessageSystemAttributeDigestContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-system-attribute-digest")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attributes := map[string]types.MessageAttributeValue{"timestamp": {DataType: aws.String("Number"), StringValue: aws.String("1493147359900")}}
+	without, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("test"), MessageAttributes: attributes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	with, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("test"), MessageAttributes: attributes, MessageSystemAttributes: map[string]types.MessageSystemAttributeValue{"AWSTraceHeader": {DataType: aws.String("String"), StringValue: aws.String("Root=1-5759e988-bd862e3fe1be46a994272793;Parent=53995c3f42cd8ad8;Sampled=1")}}})
+	if err != nil || with.MD5OfMessageSystemAttributes == nil || aws.ToString(with.MD5OfMessageAttributes) != aws.ToString(without.MD5OfMessageAttributes) || aws.ToString(with.MD5OfMessageSystemAttributes) != "5ae4d5d7636402d80f4eb6d213245a88" {
+		t.Fatalf("without=%#v with=%#v error=%v", without, with, err)
+	}
+}
+
 func TestAWSSDKSQSMessageAttributeValidationContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

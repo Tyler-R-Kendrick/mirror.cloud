@@ -1209,12 +1209,17 @@ func TestConcurrentSQSMessageAttributeDigestsRemainStable(t *testing.T) {
 				return
 			}
 			attrs := map[string]any{"binary": map[string]any{"DataType": "Binary", "BinaryValue": base64.StdEncoding.EncodeToString([]byte{byte(index), 1, 2})}, "string": map[string]any{"DataType": "String", "StringValue": fmt.Sprintf("value-%d", index)}}
-			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": "message", "MessageAttributes": attrs}})
+			systemAttrs := map[string]any{"AWSTraceHeader": map[string]any{"DataType": "String", "StringValue": fmt.Sprintf("trace-%d", index)}}
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": "message", "MessageAttributes": attrs, "MessageSystemAttributes": systemAttrs}})
 			if err != nil {
 				errs <- err
 				return
 			}
 			digest, _ := response.Output["MD5OfMessageAttributes"].(string)
+			if systemDigest, _ := response.Output["MD5OfMessageSystemAttributes"].(string); systemDigest == "" {
+				errs <- fmt.Errorf("attribute system digest queue=%s output=%#v", name, response.Output)
+				return
+			}
 			received, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MessageAttributeNames": []any{"All"}}})
 			var receivedDigest string
 			if err == nil {

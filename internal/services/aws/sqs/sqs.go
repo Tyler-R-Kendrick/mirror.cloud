@@ -467,6 +467,7 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	sum := md5.Sum([]byte(body))
 	md5hex := hex.EncodeToString(sum[:])
 	md5attrs := md5MessageAttributes(req.Input["MessageAttributes"])
+	md5system := md5MessageAttributes(req.Input["MessageSystemAttributes"])
 	attrs := p.queueAttrs(ctx, req, name)
 	maximum := 1 << 20
 	if configured := asInt(attrs["MaximumMessageSize"]); configured > 0 {
@@ -520,6 +521,9 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 				if strings.HasSuffix(name, ".fifo") {
 					output["SequenceNumber"] = strconv.Itoa(asInt(d["seq"]))
 				}
+				if str(d["md5System"]) != "" {
+					output["MD5OfMessageSystemAttributes"] = d["md5System"]
+				}
 				if str(d["md5Attrs"]) != "" {
 					output["MD5OfMessageAttributes"] = d["md5Attrs"]
 				}
@@ -540,7 +544,7 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	raw, _ := json.Marshal(msg)
 	_ = p.col(req, "msgs:"+name).Put(ctx, rh, raw)
 	if dedup != "" {
-		db, _ := json.Marshal(map[string]any{"id": id, "md5": md5hex, "md5Attrs": md5attrs, "seq": seq, "until": now.Add(5 * time.Minute).UnixNano()})
+		db, _ := json.Marshal(map[string]any{"id": id, "md5": md5hex, "md5Attrs": md5attrs, "md5System": md5system, "seq": seq, "until": now.Add(5 * time.Minute).UnixNano()})
 		_ = p.col(req, "dedup:"+name).Put(ctx, dedup, db)
 	}
 	if p.deps.Bus != nil {
@@ -552,6 +556,9 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	}
 	if md5attrs != "" {
 		output["MD5OfMessageAttributes"] = md5attrs
+	}
+	if md5system != "" {
+		output["MD5OfMessageSystemAttributes"] = md5system
 	}
 	return &spi.Response{Output: output}, nil
 }

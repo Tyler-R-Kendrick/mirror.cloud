@@ -1224,6 +1224,30 @@ func FuzzMessageAttributeDigest(f *testing.F) {
 	})
 }
 
+func FuzzMessageSystemAttributeDigest(f *testing.F) {
+	f.Add("trace")
+	f.Add("Root=1-5759e988")
+	f.Fuzz(func(t *testing.T, value string) {
+		if len(value) > 256 || !validMessageContents(value) {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-system-attribute-digest"}}); err != nil {
+			t.Fatal(err)
+		}
+		without, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-system-attribute-digest", "MessageBody": "message", "MessageAttributes": map[string]any{"kind": map[string]any{"DataType": "String", "StringValue": "value"}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		with, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-system-attribute-digest", "MessageBody": "message", "MessageAttributes": map[string]any{"kind": map[string]any{"DataType": "String", "StringValue": "value"}}, "MessageSystemAttributes": map[string]any{"AWSTraceHeader": map[string]any{"DataType": "String", "StringValue": value}}}})
+		if err != nil || with.Output["MD5OfMessageSystemAttributes"] == nil || with.Output["MD5OfMessageAttributes"] != without.Output["MD5OfMessageAttributes"] {
+			t.Fatalf("system digest without=%#v with=%#v error=%v", without.Output, with.Output, err)
+		}
+	})
+}
+
 func FuzzMessageAttributeValidation(f *testing.F) {
 	for _, seed := range []string{"", "aWs.Invalid", "Invalid!attr", "attr.1øßä"} {
 		f.Add(seed)
@@ -2956,6 +2980,29 @@ func TestFIFOSequenceNumberCharacterization(t *testing.T) {
 		t.Fatalf("standard sequence output %#v", standardSend)
 	}
 	golden.AssertJSON(t, map[string]any{"sequences": sequences, "duplicate": duplicate, "standard": standardSend})
+}
+
+func TestMessageSystemAttributeDigestCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "system-attribute-digest"}}); err != nil {
+		t.Fatal(err)
+	}
+	messageAttributes := map[string]any{"timestamp": map[string]any{"StringValue": "1493147359900", "DataType": "Number"}}
+	systemAttributes := map[string]any{"AWSTraceHeader": map[string]any{"StringValue": "Root=1-5759e988-bd862e3fe1be46a994272793;Parent=53995c3f42cd8ad8;Sampled=1", "DataType": "String"}}
+	without, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "system-attribute-digest", "MessageBody": "test", "MessageAttributes": messageAttributes}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	with, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "system-attribute-digest", "MessageBody": "test", "MessageAttributes": messageAttributes, "MessageSystemAttributes": systemAttributes}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if without.Output["MD5OfMessageSystemAttributes"] != nil || with.Output["MD5OfMessageAttributes"] != without.Output["MD5OfMessageAttributes"] || with.Output["MD5OfMessageSystemAttributes"] != "5ae4d5d7636402d80f4eb6d213245a88" {
+		t.Fatalf("system digest without=%#v with=%#v", without.Output, with.Output)
+	}
+	golden.AssertJSON(t, map[string]any{"without": without.Output, "with": with.Output})
 }
 
 func faultCode(err error) string {

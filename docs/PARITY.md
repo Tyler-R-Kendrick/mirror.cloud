@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 54 / 222 (24.3%) |
-| LocalStack SQS test functions not yet traced | 168 / 222 (75.7%) |
+| LocalStack SQS test functions explicitly traced | 56 / 222 (25.2%) |
+| LocalStack SQS test functions not yet traced | 166 / 222 (74.8%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -657,3 +657,5 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_create_queue_with_same_attributes_is_idempotent` | Repeated CreateQueue calls with identical attributes return the original URL; atomic characterization, SDK contract, and BDD coverage pin idempotency | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_create_queue_with_different_attributes_raises_exception` | Reusing a queue name with a different attribute returns `QueueAlreadyExists` and identifies the differing attribute; atomic snapshot, SDK contract, BDD, and mutation coverage pin the fault | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_create_standard_queue_with_fifo_attribute_raises_error` | Standard queues reject FIFO-only attributes with exact `InvalidAttributeName` faults; atomic snapshot, SDK contract, BDD, and mutation coverage pin the validation | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_fifo_queue_requires_suffix` | FIFO CreateQueue rejects a name without the `.fifo` suffix with `InvalidParameterValue`; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, fuzz, concurrent chaos/race, and semantic mutation coverage pin the boundary | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_standard_queue_cannot_have_fifo_suffix` | CreateQueue rejects a `.fifo` name unless `FifoQueue=true` and rejects FIFO attributes on standard names with `InvalidParameterValue`; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, fuzz, concurrent chaos/race, and semantic mutation coverage pin both directions | Mapped; focused green |

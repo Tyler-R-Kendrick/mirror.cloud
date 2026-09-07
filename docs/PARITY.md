@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 84 / 222 (37.8%) |
-| LocalStack SQS test functions not yet traced | 138 / 222 (62.2%) |
+| LocalStack SQS test functions explicitly traced | 85 / 222 (38.3%) |
+| LocalStack SQS test functions not yet traced | 137 / 222 (61.7%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -685,5 +685,6 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_create_standard_queue_with_fifo_attribute_raises_error` | Standard queues reject FIFO-only attributes with exact `InvalidAttributeName` faults; atomic snapshot, SDK contract, BDD, and mutation coverage pin the validation | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_queue_requires_suffix` | FIFO CreateQueue rejects a name without the `.fifo` suffix with `InvalidParameterValue`; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, fuzz, concurrent chaos/race, and semantic mutation coverage pin the boundary | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_standard_queue_cannot_have_fifo_suffix` | CreateQueue rejects a `.fifo` name unless `FifoQueue=true` and rejects FIFO attributes on standard names with `InvalidParameterValue`; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, fuzz, concurrent chaos/race, and semantic mutation coverage pin both directions | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_disallow_queue_name_with_slashes` | CreateQueue rejects slash-containing names with `InvalidParameterValue`; the existing queue-name characterization, AWS SDK, raw HTTP BDD, native fuzz, concurrent chaos/race, and queue-name mutation stack pin the trust boundary | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_message_group_visibility_after_delete` | Deleting all in-flight FIFO messages releases the group and preserves other-group ordering; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, fuzz, concurrent chaos/race, and sequence-order mutation coverage pin the drain | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_message_group_visibility_after_partial_delete` | Deleting only part of an in-flight FIFO group keeps its successor blocked while other groups drain; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, fuzz, concurrent chaos/race, and sequence-order mutation coverage pin the isolation | Mapped; focused green |

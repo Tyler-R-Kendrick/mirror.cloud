@@ -17643,6 +17643,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFIFOQueueNameValidationCharacterization",
 		},
 		{
+			name: "sqs-reject-invalid-queue-name",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if !validQueueName(name) {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestFIFOQueueNameValidationCharacterization",
+		},
+		{
 			name: "sqs-fifo-order-by-earliest-sequence",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  `if seq := asInt(m["seq"]); seq < firstSeq[group] {`,

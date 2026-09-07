@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 73 / 222 (32.9%) |
-| LocalStack SQS test functions not yet traced | 149 / 222 (67.1%) |
+| LocalStack SQS test functions explicitly traced | 76 / 222 (34.2%) |
+| LocalStack SQS test functions not yet traced | 146 / 222 (65.8%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -639,6 +639,9 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_set_queue_policy` | SetQueueAttributes persists the queue Policy alongside RedrivePolicy and GetQueueAttributes returns the exact JSON; the shared atomic, Verify-style snapshot, SDK, BDD, fuzz, chaos/race, and mutation stack covers the write/read contract | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_set_empty_queue_policy` | Setting `Policy=""` clears the persisted queue policy and omits it from `AttributeNames=All`; the shared seven-form policy-clearing stack pins removal | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_dead_letter_queue_list_sources` | Queues whose RedrivePolicy targets a dead-letter queue are listed by ListDeadLetterSourceQueues, while unrelated queues are excluded; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic source-filter mutation coverage pin the result | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_dead_letter_queue_config` | A queue accepts a RedrivePolicy targeting a configured dead-letter queue with a max receive count; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and redrive mutants pin configuration | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_dead_letter_queue_with_fifo_and_content_based_deduplication` | FIFO content-based deduplication and dead-letter redrive preserve group operation after a poison message moves; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and redrive mutants pin recovery | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_dead_letter_queue_max_receive_count` | A message exceeding max receive count leaves the source receive response and arrives once in the dead-letter queue; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and threshold mutants pin the boundary | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_set_unsupported_attribute_standard` | SetQueueAttributes rejects both `FifoQueue=true` and `FifoQueue=false` on standard queues with `InvalidAttributeName`; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin the rejection | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_set_unsupported_attribute_fifo` | FIFO queues accept idempotent `FifoQueue=true` but reject `FifoQueue=false`; the same seven-form setter-validation stack pins both directions | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_create_and_send_to_fifo_queue` | FIFO queue creation preserves the `.fifo` URL suffix and a message with explicit group/deduplication identifiers round-trips through ReceiveMessage; the existing FIFO lifecycle characterization, SDK, BDD, fuzz, chaos/race, and mutation stack covers the contract | Mapped; equivalent stack green |

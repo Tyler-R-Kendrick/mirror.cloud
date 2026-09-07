@@ -3637,6 +3637,46 @@ func TestCreateQueueAfterStateChangesCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"internal": internalState, "original": original, "modified": modified, "defaults": defaults, "sent": sentState})
 }
 
+func TestSendDelayAndWaitTimeCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	after := make(chan time.Duration, 1)
+	deps.Clock = &observedClock{Clock: clk, after: after}
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "delay-and-wait"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "delay-and-wait", "MessageBody": "foobar", "DelaySeconds": 1}}); err != nil {
+		t.Fatal(err)
+	}
+	short, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "delay-and-wait"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *spi.Response, 1)
+	go func() {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "delay-and-wait", "WaitTimeSeconds": 2}})
+		if err != nil {
+			t.Errorf("delay wait: %v", err)
+			return
+		}
+		done <- response
+	}()
+	if delay := <-after; delay != 2*time.Second {
+		t.Fatalf("explicit wait delay %v", delay)
+	}
+	if err := clk.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	long := <-done
+	if _, ok := short.Output["Messages"]; ok || len(long.Output["Messages"].([]any)) != 1 {
+		t.Fatalf("delay and wait short=%#v long=%#v", short.Output, long.Output)
+	}
+	golden.AssertJSON(t, map[string]any{"short": short.Output, "long": long.Output})
+}
+
 func TestSSEMutualExclusionCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

@@ -296,6 +296,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if !validBatchEntryID(str(message["Id"])) {
 				return nil, &spi.Fault{Code: "AWS.SimpleQueueService.InvalidBatchEntryId", Message: "A batch entry id can only contain alphanumeric characters, hyphens and underscores. It can be at most 80 letters long.", HTTPStatus: 400, Fault: "client"}
 			}
+			if strings.HasSuffix(name, ".fifo") && str(message["MessageGroupId"]) == "" {
+				return nil, &spi.Fault{Code: "MissingParameter", Message: "MessageGroupId", HTTPStatus: 400, Fault: "client"}
+			}
 			if strings.HasSuffix(name, ".fifo") && str(attrs["ContentBasedDeduplication"]) != "true" && str(message["MessageGroupId"]) != "" {
 				if _, provided := message["MessageDeduplicationId"]; !provided || str(message["MessageDeduplicationId"]) == "" {
 					return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "The queue should either have ContentBasedDeduplication enabled or MessageDeduplicationId provided explicitly", HTTPStatus: 400, Fault: "client"}

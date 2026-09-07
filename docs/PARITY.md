@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 118 / 222 (53.2%) |
-| LocalStack SQS test functions not yet traced | 104 / 222 (46.8%) |
+| LocalStack SQS test functions explicitly traced | 119 / 222 (53.6%) |
+| LocalStack SQS test functions not yet traced | 103 / 222 (46.4%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -658,6 +658,7 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsQueryApi::test_get_queue_url_works_for_same_queue` | Query GetQueueUrl returns the queue URL requested by name when called through a queue URL endpoint, including the owner account parameter; raw HTTP contract pins the endpoint path behavior | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_get_queue_url_work_for_different_queue` | Query GetQueueUrl resolves a different queue by QueueName rather than echoing the endpoint path; raw HTTP contract pins name-based lookup | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_get_queue_attributes_with_invalid_arg_returns_error` | Query GetQueueAttributes rejects an unknown AttributeName with `InvalidAttributeName` and the exact `Unknown Attribute Foobar.` message while allowing known-but-absent optional fields; atomic characterization, raw HTTP contract, and semantic mutation coverage pin validation | Mapped; focused green |
+| `test_sqs.py::TestSqsQueryApi::test_get_queue_attributes_of_fifo_queue` | Query GetQueueAttributes on a FIFO queue returns `FifoQueue=true` and the `.fifo` queue identity through the queue-URL path; raw HTTP contract pins FIFO metadata | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_sequence_number` | FIFO SendMessage returns a SequenceNumber while standard SendMessage omits it; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and sequence mutants pin queue-type response shape | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_sequence_number_increases` | FIFO SequenceNumber values increase for successive sends; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and transactional sequence mutants pin monotonicity | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_high_throughput_ordering` | FIFO queues using message-group deduplication scope accept the same deduplication ID in distinct groups while retaining duplicate suppression within each group; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and scope/retry-digest mutants pin the behavior | Mapped; focused green |

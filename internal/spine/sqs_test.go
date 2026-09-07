@@ -175,6 +175,17 @@ func TestBootedServerSQSSection48(t *testing.T) {
 	if len(asSlice(fifo["Messages"])) != 2 {
 		t.Fatalf("fifo %v", fifo)
 	}
+	fifoReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/000000000000/f.fifo?Action=GetQueueAttributes&AttributeName.1=All", nil)
+	fifoReq.Header.Set("Authorization", auth)
+	fifoRes, err := http.DefaultClient.Do(fifoReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fifoBody, _ := io.ReadAll(fifoRes.Body)
+	fifoRes.Body.Close()
+	if fifoRes.StatusCode != http.StatusOK || !strings.Contains(string(fifoBody), "<Name>FifoQueue</Name><Value>true</Value>") || !strings.Contains(string(fifoBody), "f.fifo") {
+		t.Fatalf("fifo query attributes %d %s", fifoRes.StatusCode, fifoBody)
+	}
 
 	jsonCall("CreateQueue", `{"QueueName":"src","Attributes":{"RedrivePolicy":"{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:000000000000:dlq\",\"maxReceiveCount\":\"1\"}","VisibilityTimeout":"0"}}`)
 	jsonCall("SendMessage", `{"QueueName":"src","MessageBody":"poison"}`)

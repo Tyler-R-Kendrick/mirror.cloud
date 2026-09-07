@@ -1440,6 +1440,7 @@ func (p *Pack) startMove(ctx context.Context, req *spi.Request) (*spi.Response, 
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "The resource that you specified for the DestinationArn parameter doesn't exist.", HTTPStatus: 404, Fault: "client"}
 	}
 	kvs, _, _ := p.col(req, "msgs:"+src).List(ctx, "", "", 0)
+	toMove := len(kvs)
 	moved := 0
 	now := p.deps.Clock.Now().UnixNano()
 	for _, kv := range kvs {
@@ -1459,13 +1460,15 @@ func (p *Pack) startMove(ctx context.Context, req *spi.Request) (*spi.Response, 
 		_ = p.col(req, "msgs:"+dest).Put(ctx, str(m["handle"]), raw)
 		moved++
 	}
-	handle := p.deps.Rand.Hex(16)
+	taskIDHex := p.deps.Rand.Hex(32)
+	taskID := fmt.Sprintf("%s-%s-%s-%s-%s", taskIDHex[:8], taskIDHex[8:12], taskIDHex[12:16], taskIDHex[16:20], taskIDHex[20:])
+	handle := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(`{"taskId":"%s","sourceArn":"%s"}`, taskID, sourceArn)))
 	rec := map[string]any{
 		"TaskHandle": handle, "Status": "COMPLETED",
 		"SourceArn": sourceArn, "DestinationArn": req.Input["DestinationArn"],
-		"ApproximateNumberOfMessagesMoved": moved,
-		"StartedTimestamp":                 p.deps.Clock.Now().Unix(),
-		"source":                           src,
+		"ApproximateNumberOfMessagesMoved": moved, "ApproximateNumberOfMessagesToMove": toMove,
+		"StartedTimestamp": p.deps.Clock.Now().Unix(),
+		"source":           src,
 	}
 	b, _ := json.Marshal(rec)
 	_ = p.col(req, "qmove").Put(ctx, handle, b)
@@ -1520,7 +1523,24 @@ func (p *Pack) listMoves(ctx context.Context, req *spi.Request) (*spi.Response, 
 		if src != "" && str(rec["source"]) != src {
 			continue
 		}
-		out = append(out, rec)
+		public := map[string]any{
+			"ApproximateNumberOfMessagesMoved":  rec["ApproximateNumberOfMessagesMoved"],
+			"ApproximateNumberOfMessagesToMove": rec["ApproximateNumberOfMessagesToMove"],
+			"SourceArn":                         rec["SourceArn"],
+			"StartedTimestamp":                  rec["StartedTimestamp"],
+			"Status":                            rec["Status"],
+		}
+		if destination := str(rec["DestinationArn"]); destination != "" {
+			public["DestinationArn"] = destination
+		}
+		if reason := str(rec["FailureReason"]); reason != "" {
+			public["FailureReason"] = reason
+		}
+		if str(rec["Status"]) == "RUNNING" {
+			public["TaskHandle"] = rec["TaskHandle"]
+			public["MaxNumberOfMessagesPerSecond"] = rec["MaxNumberOfMessagesPerSecond"]
+		}
+		out = append(out, public)
 	}
 	return &spi.Response{Output: map[string]any{"Results": out}}, nil
 }

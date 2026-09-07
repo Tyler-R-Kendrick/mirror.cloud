@@ -7430,3 +7430,46 @@ func TestConcurrentSQSMessageMoveTaskValidationIsStable(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestConcurrentSQSMessageMoveTaskWorkflowIsStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	for _, name := range []string{"chaos-workflow-source", "chaos-workflow-dlq", "chaos-workflow-destination"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:chaos-workflow-dlq","maxReceiveCount":"1"}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "chaos-workflow-source", "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "chaos-workflow-dlq", "MessageBody": "workflow"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: map[string]any{"SourceArn": "arn:aws:sqs:us-east-1:000000000000:chaos-workflow-dlq", "DestinationArn": "arn:aws:sqs:us-east-1:000000000000:chaos-workflow-destination"}}); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 32)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListMessageMoveTasks", Input: map[string]any{"SourceArn": "arn:aws:sqs:us-east-1:000000000000:chaos-workflow-dlq"}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			results, ok := response.Output["Results"].([]any)
+			if !ok || len(results) != 1 || results[0].(map[string]any)["Status"] != "COMPLETED" {
+				errs <- fmt.Errorf("workflow list %#v", response.Output)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}

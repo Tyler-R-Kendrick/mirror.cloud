@@ -1197,6 +1197,29 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("destination validation %d %s", status, body)
 		}
 	})
+	t.Run("Given DLQ messages When starting a move task Then messages and task counters are reported", func(t *testing.T) {
+		for _, name := range []string{"bdd-move-workflow-source", "bdd-move-workflow-dlq", "bdd-move-workflow-destination"} {
+			if status, body := call("CreateQueue", `{"QueueName":"`+name+`"}`); status != http.StatusOK {
+				t.Fatalf("create %s %d %s", name, status, body)
+			}
+		}
+		policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-workflow-dlq","maxReceiveCount":"1"}`
+		if status, body := call("SetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-move-workflow-source","Attributes":{"RedrivePolicy":`+strconv.Quote(policy)+`}}`); status != http.StatusOK {
+			t.Fatalf("set policy %d %s", status, body)
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-move-workflow-dlq","MessageBody":"workflow"}`); status != http.StatusOK {
+			t.Fatalf("send %d %s", status, body)
+		}
+		status, body := call("StartMessageMoveTask", `{"SourceArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-workflow-dlq","DestinationArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-workflow-destination"}`)
+		var started map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &started) != nil || started["TaskHandle"] == "" {
+			t.Fatalf("start %d %s", status, body)
+		}
+		status, body = call("ListMessageMoveTasks", `{"SourceArn":"arn:aws:sqs:us-east-1:000000000000:bdd-move-workflow-dlq"}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"ApproximateNumberOfMessagesMoved":1`)) || !bytes.Contains(body, []byte(`"ApproximateNumberOfMessagesToMove":1`)) || !bytes.Contains(body, []byte(`"Status":"COMPLETED"`)) {
+			t.Fatalf("list %d %s", status, body)
+		}
+	})
 }
 
 func TestSQSAdvertisedQueueURLBDD(t *testing.T) {

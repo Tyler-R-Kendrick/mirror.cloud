@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http/httptest"
 	"strconv"
@@ -2409,6 +2410,58 @@ func TestMessageMoveTaskValidationCharacterization(t *testing.T) {
 	}
 	missingDestination := call(map[string]any{"SourceArn": queueARN(&spi.Request{Identity: id}, "move-dlq"), "DestinationArn": queueARN(&spi.Request{Identity: id}, "missing-destination")})
 	golden.AssertJSON(t, map[string]any{"invalidSource": invalidSource, "missingDestination": missingDestination})
+}
+
+func TestMessageMoveTaskWorkflowCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	create := func(name string, attrs map[string]any) {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name, "Attributes": attrs}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	create("move-original", nil)
+	create("move-dlq", nil)
+	create("move-destination", nil)
+	policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:move-dlq","maxReceiveCount":"1"}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "move-original", "Attributes": map[string]any{"RedrivePolicy": policy}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{"message-1", "message-2"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "move-dlq", "MessageBody": body}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sourceArn := queueARN(&spi.Request{Identity: id}, "move-dlq")
+	destinationArn := queueARN(&spi.Request{Identity: id}, "move-destination")
+	started, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: map[string]any{"SourceArn": sourceArn, "DestinationArn": destinationArn}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle := str(started.Output["TaskHandle"])
+	decoded, err := base64.StdEncoding.DecodeString(handle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(decoded, &document); err != nil || len(str(document["taskId"])) != 36 || str(document["sourceArn"]) != sourceArn {
+		t.Fatalf("move handle %q document %#v error %v", handle, document, err)
+	}
+	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListMessageMoveTasks", Input: map[string]any{"SourceArn": sourceArn}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := listed.Output["Results"].([]any)
+	if len(results) != 1 {
+		t.Fatalf("move results %#v", listed.Output)
+	}
+	record := results[0].(map[string]any)
+	golden.AssertJSON(t, map[string]any{
+		"taskHandleLength": len(handle), "taskIdLength": len(str(document["taskId"])),
+		"moved": record["ApproximateNumberOfMessagesMoved"], "toMove": record["ApproximateNumberOfMessagesToMove"],
+		"sourceArn": record["SourceArn"], "destinationArn": record["DestinationArn"], "status": record["Status"],
+	})
 }
 
 func TestQueueAdvertiseURLCharacterization(t *testing.T) {

@@ -1925,6 +1925,17 @@ func TestAWSSDKSQSMessageMoveTaskValidationContract(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "DestinationArn") {
 		t.Fatalf("destination validation error %v", err)
 	}
+	if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: dlq.QueueUrl, MessageBody: aws.String("move-me")}); err != nil {
+		t.Fatal(err)
+	}
+	started, err := client.StartMessageMoveTask(context.Background(), &sqs.StartMessageMoveTaskInput{SourceArn: aws.String(dlqAttrs.Attributes["QueueArn"]), DestinationArn: aws.String(destinationAttrs.Attributes["QueueArn"])})
+	if err != nil || aws.ToString(started.TaskHandle) == "" {
+		t.Fatalf("move task %#v error %v", started, err)
+	}
+	listed, err := client.ListMessageMoveTasks(context.Background(), &sqs.ListMessageMoveTasksInput{SourceArn: aws.String(dlqAttrs.Attributes["QueueArn"])})
+	if err != nil || len(listed.Results) != 1 || aws.ToString(listed.Results[0].Status) != "COMPLETED" {
+		t.Fatalf("move task list %#v error %v", listed, err)
+	}
 }
 
 func TestAWSSDKSQSFIFOQueueNameValidationContract(t *testing.T) {

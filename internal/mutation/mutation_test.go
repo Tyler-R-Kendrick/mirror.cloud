@@ -17851,6 +17851,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFIFOSequenceNumberCharacterization",
 		},
 		{
+			name: "sqs-drop-message-system-attribute-digest",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "md5system := md5MessageAttributes(req.Input[\"MessageSystemAttributes\"])",
+			new:  "md5system := \"\"",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestMessageSystemAttributeDigestCharacterization",
+		},
+		{
+			name: "sqs-drop-message-system-digest-response",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if md5system != \"\" {\n\t\toutput[\"MD5OfMessageSystemAttributes\"] = md5system\n\t}",
+			new:  "if false {\n\t\toutput[\"MD5OfMessageSystemAttributes\"] = md5system\n\t}",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestMessageSystemAttributeDigestCharacterization",
+		},
+		{
 			name: "sqs-batch-accept-too-many-entries",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "case \"SendMessageBatch\":\n\t\tentries, _ := req.Input[\"Entries\"].([]any)\n\t\tif len(entries) == 0 {\n\t\t\treturn nil, &spi.Fault{Code: \"AWS.SimpleQueueService.EmptyBatchRequest\", Message: \"There should be at least one SendMessageBatchRequestEntry in the request.\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tif len(entries) > 10 {",

@@ -6518,6 +6518,38 @@ func TestConcurrentSQSFIFOBatchMissingDeduplicationIsStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSFIFOBatchMissingMessageGroupIsStable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "chaos-batch-missing-group.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"}}}); err != nil {
+		t.Fatal(err)
+	}
+	entries := []any{
+		map[string]any{"Id": "message-1", "MessageBody": "message-1", "MessageGroupId": "group-1", "MessageDeduplicationId": "dedup-1"},
+		map[string]any{"Id": "message-2", "MessageBody": "message-2", "MessageDeduplicationId": "dedup-2"},
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "chaos-batch-missing-group.fifo", "Entries": entries}})
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "MissingParameter" || fault.Message != "MessageGroupId" {
+				errs <- fmt.Errorf("missing message group id error %#v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSFIFOZeroDelayUsesQueueDelay(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)

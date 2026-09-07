@@ -535,6 +535,15 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("missing deduplication id %d %s", status, body)
 		}
 	})
+	t.Run("Given a FIFO batch with a missing message group id Then the batch fault is returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-batch-missing-group.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"false"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("SendMessageBatch", `{"QueueUrl":"http://queue/000000000000/bdd-batch-missing-group.fifo","Entries":[{"Id":"message-1","MessageBody":"message-1","MessageGroupId":"test-group","MessageDeduplicationId":"dedup-1"},{"Id":"message-2","MessageBody":"message-2","MessageDeduplicationId":"dedup-2"}]}`)
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte(`"__type":"MissingParameter"`)) || !bytes.Contains(body, []byte("MessageGroupId")) {
+			t.Fatalf("missing message group id %d %s", status, body)
+		}
+	})
 	t.Run("Given more than ten batch entries When sending Then the entry-count fault is returned", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-too-many-batch"}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

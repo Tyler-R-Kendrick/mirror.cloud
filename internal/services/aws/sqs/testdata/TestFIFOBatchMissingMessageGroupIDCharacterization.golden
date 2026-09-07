@@ -1,0 +1,6 @@
+{
+  "Code": "MissingParameter",
+  "Fault": "client",
+  "HTTPStatus": 400,
+  "Message": "MessageGroupId"
+}

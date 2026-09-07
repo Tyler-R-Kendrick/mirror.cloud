@@ -324,6 +324,9 @@ func TestBootedServerSQSSection48(t *testing.T) {
 	if code, body, _ := queryCall(url.Values{"Action": {"GetQueueAttributes"}, "Version": {"2012-11-05"}, "QueueName": {"missing-query-queue"}, "AttributeName.1": {"All"}}); code != http.StatusBadRequest || !strings.Contains(body, "AWS.SimpleQueueService.NonExistentQueue") || !strings.Contains(body, "for this wsdl version") {
 		t.Fatalf("query missing queue %d %s", code, body)
 	}
+	if code, body, _ := queryCall(url.Values{"Action": {"GetQueueAttributes"}, "Version": {"2012-11-05"}, "QueueName": {"queryq"}, "AttributeName.1": {"Foobar"}}); code != http.StatusBadRequest || !strings.Contains(body, "InvalidAttributeName") || !strings.Contains(body, "Unknown Attribute Foobar.") {
+		t.Fatalf("query invalid attribute %d %s", code, body)
+	}
 	if code, body, _ := queryCall(url.Values{"Action": {"SendMessage"}, "Version": {"2012-11-05"}, "QueueName": {"queryq"}, "MessageBody": {"hello-query-wire"}}); code >= 300 {
 		t.Fatalf("query send %d %s", code, body)
 	}

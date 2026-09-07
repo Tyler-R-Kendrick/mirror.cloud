@@ -1057,6 +1057,20 @@ func TestRedrivePolicyClearingCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"setRedrive": asMap(set.Output["Attributes"])["RedrivePolicy"], "setPolicy": asMap(set.Output["Attributes"])["Policy"], "clearedRedrive": redrivePresent, "clearedPolicy": policyPresent})
 }
 
+func TestGetQueueAttributesInvalidNameCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "invalid-attribute"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "invalid-attribute", "AttributeNames": []any{"Foobar"}}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("invalid attribute error %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
+}
+
 func TestRedrivePolicyValidationCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

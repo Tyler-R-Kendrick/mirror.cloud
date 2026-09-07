@@ -230,14 +230,19 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 		}
 		filtered := map[string]any{}
-		for _, name := range stringList(req.Input, "AttributeNames", "AttributeName") {
-			if name == "All" {
+		for _, attribute := range stringList(req.Input, "AttributeNames", "AttributeName") {
+			if attribute == "All" {
 				filtered = attrs
 				break
 			}
-			if value, ok := attrs[name]; ok {
-				filtered[name] = value
+			if value, ok := attrs[attribute]; ok {
+				filtered[attribute] = value
+				continue
 			}
+			if knownQueueAttribute(attribute) {
+				continue
+			}
+			return nil, &spi.Fault{Code: "InvalidAttributeName", Message: "Unknown Attribute " + attribute + ".", HTTPStatus: 400, Fault: "client"}
 		}
 		attrs = filtered
 		return &spi.Response{Output: map[string]any{"Attributes": attrs}}, nil
@@ -1121,6 +1126,15 @@ func (p *Pack) queueAttrs(ctx context.Context, req *spi.Request, name string) ma
 		}
 	}
 	return out
+}
+
+func knownQueueAttribute(name string) bool {
+	switch name {
+	case "ApproximateNumberOfMessages", "ApproximateNumberOfMessagesNotVisible", "ApproximateNumberOfMessagesDelayed", "QueueArn", "VisibilityTimeout", "DelaySeconds", "MaximumMessageSize", "MessageRetentionPeriod", "ReceiveMessageWaitTimeSeconds", "SqsManagedSseEnabled", "CreatedTimestamp", "LastModifiedTimestamp", "FifoQueue", "ContentBasedDeduplication", "DeduplicationScope", "FifoThroughputLimit", "RedrivePolicy", "Policy", "KmsMasterKeyId", "KmsDataKeyReusePeriodSeconds":
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *Pack) dedupScope(ctx context.Context, req *spi.Request, name string, attrs map[string]any) string {

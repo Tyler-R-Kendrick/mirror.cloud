@@ -1418,6 +1418,47 @@ func TestAWSSDKSQSListDeadLetterSourceQueuesContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSDeadLetterMaxReceiveCountContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	dlq, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-max-receive-dlq")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := fmt.Sprintf(`{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:sdk-max-receive-dlq","maxReceiveCount":"1"}`)
+	source, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-max-receive-source"), Attributes: map[string]string{"RedrivePolicy": policy, "VisibilityTimeout": "0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: source.QueueUrl, MessageBody: aws.String("poison")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: source.QueueUrl, VisibilityTimeout: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: source.QueueUrl, VisibilityTimeout: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: dlq.QueueUrl})
+	if err != nil || len(first.Messages) != 1 || len(second.Messages) != 0 || len(moved.Messages) != 1 || aws.ToString(moved.Messages[0].MessageId) != aws.ToString(sent.MessageId) {
+		t.Fatalf("first=%#v second=%#v moved=%#v sent=%#v error=%v", first, second, moved, sent, err)
+	}
+}
+
 func TestAWSSDKSQSSetFifoAttributeValidationContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

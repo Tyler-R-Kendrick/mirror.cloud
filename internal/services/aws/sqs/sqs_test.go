@@ -3011,6 +3011,74 @@ func TestFIFODedupDLQLongPoll(t *testing.T) {
 	}
 }
 
+func TestDeadLetterQueueMaxReceiveCountCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "max-receive-dlq"})
+	call("CreateQueue", map[string]any{"QueueName": "max-receive-source", "Attributes": map[string]any{
+		"RedrivePolicy":     `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:max-receive-dlq","maxReceiveCount":"1"}`,
+		"VisibilityTimeout": "0",
+	}})
+	sent := call("SendMessage", map[string]any{"QueueName": "max-receive-source", "MessageBody": "poison"})
+	first := call("ReceiveMessage", map[string]any{"QueueName": "max-receive-source", "VisibilityTimeout": 0})
+	second := call("ReceiveMessage", map[string]any{"QueueName": "max-receive-source", "VisibilityTimeout": 0})
+	dlq := call("ReceiveMessage", map[string]any{"QueueName": "max-receive-dlq"})
+	firstMessages, _ := first.Output["Messages"].([]any)
+	secondMessages, _ := second.Output["Messages"].([]any)
+	dlqMessages, _ := dlq.Output["Messages"].([]any)
+	if len(firstMessages) != 1 || len(secondMessages) != 0 || len(dlqMessages) != 1 {
+		t.Fatalf("receive counts first=%#v second=%#v dlq=%#v", first.Output, second.Output, dlq.Output)
+	}
+	if asMap(dlqMessages[0])["MessageId"] != sent.Output["MessageId"] || asMap(dlqMessages[0])["Body"] != "poison" {
+		t.Fatalf("dead letter message %#v sent %#v", dlqMessages[0], sent.Output)
+	}
+	golden.AssertJSON(t, map[string]any{"first": first.Output, "second": second.Output, "dlq": dlq.Output})
+}
+
+func FuzzDeadLetterQueueMaxReceiveCount(f *testing.F) {
+	f.Add(uint8(1))
+	f.Add(uint8(2))
+	f.Add(uint8(5))
+	f.Fuzz(func(t *testing.T, raw uint8) {
+		maxReceiveCount := int(raw%5) + 1
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-dlq"}}); err != nil {
+			t.Fatal(err)
+		}
+		policy := fmt.Sprintf(`{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:fuzz-dlq","maxReceiveCount":"%d"}`, maxReceiveCount)
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-source", "Attributes": map[string]any{"RedrivePolicy": policy, "VisibilityTimeout": "0"}}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-source", "MessageBody": "poison"}}); err != nil {
+			t.Fatal(err)
+		}
+		for range maxReceiveCount + 1 {
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "fuzz-source", "VisibilityTimeout": 0}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "fuzz-dlq"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages, _ := response.Output["Messages"].([]any)
+		if len(messages) != 1 || asMap(messages[0])["Body"] != "poison" {
+			t.Fatalf("dead-letter response %#v", response.Output)
+		}
+	})
+}
+
 func FuzzListQueuesPagination(f *testing.F) {
 	f.Add([]byte{0, 1, 2, 3}, uint8(2))
 	f.Add([]byte("queues"), uint8(10))

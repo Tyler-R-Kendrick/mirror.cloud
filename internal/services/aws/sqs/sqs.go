@@ -765,7 +765,9 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 				wanted[name] = true
 			}
 			for _, m := range msgs {
-				p.afterReceive(ctx, req, name, m, vis)
+				if p.afterReceive(ctx, req, name, m, vis) {
+					continue
+				}
 				attributes := map[string]any{}
 				if wanted["All"] || wanted["ApproximateReceiveCount"] {
 					attributes["ApproximateReceiveCount"] = fmt.Sprintf("%v", m["receiveCount"])
@@ -914,7 +916,7 @@ func messageExpired(attrs, message map[string]any, now int64) bool {
 	return retention > 0 && asFloat(message["sentAt"])+float64(retention*1000) <= float64(now/1_000_000)
 }
 
-func (p *Pack) afterReceive(ctx context.Context, req *spi.Request, name string, m map[string]any, vis int) {
+func (p *Pack) afterReceive(ctx context.Context, req *spi.Request, name string, m map[string]any, vis int) bool {
 	n := asInt(m["receiveCount"]) + 1
 	m["receiveCount"] = n
 	if n == 1 {
@@ -932,7 +934,7 @@ func (p *Pack) afterReceive(ctx context.Context, req *spi.Request, name string, 
 		}
 		raw, _ := json.Marshal(m)
 		_ = p.col(req, "msgs:"+dlq).Put(ctx, str(m["handle"]), raw)
-		return
+		return true
 	}
 	m["visibleAt"] = p.deps.Clock.Now().Add(time.Duration(vis) * time.Second).UnixNano()
 	if n > 1 {
@@ -948,10 +950,11 @@ func (p *Pack) afterReceive(ctx context.Context, req *spi.Request, name string, 
 			}
 			return tx.Collection("msgs:"+name).Put(newHandle, raw)
 		})
-		return
+		return false
 	}
 	raw, _ := json.Marshal(m)
 	_ = p.col(req, "msgs:"+name).Put(ctx, str(m["handle"]), raw)
+	return false
 }
 
 func (p *Pack) setVis(ctx context.Context, req *spi.Request, name, handle, timeout string) bool {

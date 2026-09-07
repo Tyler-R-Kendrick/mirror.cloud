@@ -110,6 +110,28 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("sources %d %s", status, body)
 		}
 	})
+	t.Run("Given a max receive count When a message is retried Then it moves to the dead-letter queue", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-max-receive-dlq"}`); status != http.StatusOK {
+			t.Fatalf("dlq create %d %s", status, body)
+		}
+		policy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:000000000000:bdd-max-receive-dlq","maxReceiveCount":"1"}`
+		payload, _ := json.Marshal(map[string]any{"QueueName": "bdd-max-receive-source", "Attributes": map[string]string{"RedrivePolicy": policy, "VisibilityTimeout": "0"}})
+		if status, body := call("CreateQueue", string(payload)); status != http.StatusOK {
+			t.Fatalf("source create %d %s", status, body)
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-max-receive-source","MessageBody":"poison"}`); status != http.StatusOK {
+			t.Fatalf("send %d %s", status, body)
+		}
+		if status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-max-receive-source","VisibilityTimeout":0}`); status != http.StatusOK || !bytes.Contains(body, []byte("poison")) {
+			t.Fatalf("first receive %d %s", status, body)
+		}
+		if status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-max-receive-source","VisibilityTimeout":0}`); status != http.StatusOK || bytes.Contains(body, []byte("poison")) {
+			t.Fatalf("source retry %d %s", status, body)
+		}
+		if status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-max-receive-dlq"}`); status != http.StatusOK || !bytes.Contains(body, []byte("poison")) {
+			t.Fatalf("dlq receive %d %s", status, body)
+		}
+	})
 	t.Run("Given queue types When changing FifoQueue Then unsupported mutations are rejected", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-standard-attribute"}`); status != http.StatusOK {
 			t.Fatalf("standard create %d %s", status, body)

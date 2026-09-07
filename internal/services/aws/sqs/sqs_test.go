@@ -3801,6 +3801,41 @@ func TestApproximateMessageStateCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"standardBefore": standardBefore, "standardAfter": standardAfter, "fifoBefore": fifoBefore, "fifoAfter": fifoAfter})
 }
 
+func TestMessageRetentionFIFOAndInflightCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "retention-fifo.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "MessageRetentionPeriod": "2"}})
+	for _, body := range []string{"foobar1", "foobar2"} {
+		call("SendMessage", map[string]any{"QueueName": "retention-fifo.fifo", "MessageBody": body, "MessageGroupId": body})
+	}
+	if err := clk.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	fifoExpired := call("ReceiveMessage", map[string]any{"QueueName": "retention-fifo.fifo"}).Output
+	call("CreateQueue", map[string]any{"QueueName": "retention-inflight", "Attributes": map[string]any{"MessageRetentionPeriod": "2", "VisibilityTimeout": "2"}})
+	call("SendMessage", map[string]any{"QueueName": "retention-inflight", "MessageBody": "foobar1"})
+	call("SendMessage", map[string]any{"QueueName": "retention-inflight", "MessageBody": "foobar2"})
+	received := call("ReceiveMessage", map[string]any{"QueueName": "retention-inflight", "MaxNumberOfMessages": 1}).Output["Messages"].([]any)[0].(map[string]any)
+	if err := clk.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	inflightExpired := call("ReceiveMessage", map[string]any{"QueueName": "retention-inflight"}).Output
+	call("DeleteMessage", map[string]any{"QueueName": "retention-inflight", "ReceiptHandle": received["ReceiptHandle"]})
+	golden.AssertJSON(t, map[string]any{"fifoExpired": fifoExpired, "inflightExpired": inflightExpired})
+}
+
 func TestSSEMutualExclusionCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

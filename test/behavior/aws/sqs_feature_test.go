@@ -1116,6 +1116,22 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("count %d %s", status, body)
 		}
 	})
+	t.Run("Given a FIFO retention period When messages age past it Then expired messages are omitted", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-retention.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true","MessageRetentionPeriod":"1"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		for _, message := range []string{"one", "two"} {
+			payload := `{"QueueUrl":"http://queue/000000000000/bdd-retention.fifo","MessageBody":"` + message + `","MessageGroupId":"` + message + `"}`
+			if status, body := call("SendMessage", payload); status != http.StatusOK {
+				t.Fatalf("send %d %s", status, body)
+			}
+		}
+		time.Sleep(1500 * time.Millisecond)
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-retention.fifo"}`)
+		if status != http.StatusOK || bytes.Contains(body, []byte(`"Messages"`)) {
+			t.Fatalf("expired receive %d %s", status, body)
+		}
+	})
 	t.Run("Given FIFO deduplication is enabled When updating the strategy Then the attribute changes", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-dedup-strategy.fifo","Attributes":{"FifoQueue":"true","SqsManagedSseEnabled":"true","ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

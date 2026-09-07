@@ -17795,6 +17795,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestMessageAttributeDigestCharacterization",
 		},
 		{
+			name: "sqs-accept-invalid-message-attributes",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if fault := validateMessageAttributes(req.Input[\"MessageAttributes\"]); fault != nil {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestMessageAttributeValidationCharacterization",
+		},
+		{
+			name: "sqs-accept-empty-message-attribute",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "if value == \"\" || !validMessageContents(value) {",
+			new:  "if !validMessageContents(value) {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestMessageAttributeValidationCharacterization",
+		},
+		{
 			name: "sqs-batch-accept-too-many-entries",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "case \"SendMessageBatch\":\n\t\tentries, _ := req.Input[\"Entries\"].([]any)\n\t\tif len(entries) == 0 {\n\t\t\treturn nil, &spi.Fault{Code: \"AWS.SimpleQueueService.EmptyBatchRequest\", Message: \"There should be at least one SendMessageBatchRequestEntry in the request.\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tif len(entries) > 10 {",

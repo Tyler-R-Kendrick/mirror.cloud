@@ -77,6 +77,16 @@ func (c *Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseW
 	if out == nil {
 		out = map[string]any{}
 	}
+	if op.Name == "ListDeadLetterSourceQueues" {
+		if urls, ok := out["QueueUrls"]; ok {
+			aliased := make(map[string]any, len(out)+1)
+			for key, value := range out {
+				aliased[key] = value
+			}
+			aliased["queueUrls"] = urls
+			out = aliased
+		}
+	}
 	return json.NewEncoder(w).Encode(out)
 }
 

@@ -17739,6 +17739,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSendMessageBatchPerEntryMaximumSizeCharacterization",
 		},
 		{
+			name: "sqs-batch-delete-retains-messages",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "for _, e := range entries {\n\t\t\tm := asMap(e)\n\t\t\thandle := str(m[\"ReceiptHandle\"])\n\t\t\t_ = p.col(req, \"msgs:\"+name).Delete(ctx, p.resolveHandle(ctx, req, name, handle))",
+			new:  "for _, e := range []any{} {\n\t\t\tm := asMap(e)\n\t\t\thandle := str(m[\"ReceiptHandle\"])\n\t\t\t_ = p.col(req, \"msgs:\"+name).Delete(ctx, p.resolveHandle(ctx, req, name, handle))",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestPublishGetDeleteMessageBatchCharacterization",
+		},
+		{
 			name: "sqs-batch-accept-too-many-entries",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "case \"SendMessageBatch\":\n\t\tentries, _ := req.Input[\"Entries\"].([]any)\n\t\tif len(entries) == 0 {\n\t\t\treturn nil, &spi.Fault{Code: \"AWS.SimpleQueueService.EmptyBatchRequest\", Message: \"There should be at least one SendMessageBatchRequestEntry in the request.\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tif len(entries) > 10 {",

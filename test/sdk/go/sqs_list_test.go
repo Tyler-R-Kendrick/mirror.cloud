@@ -95,6 +95,50 @@ func TestAWSSDKSQSSendMessageBatchContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSPublishGetDeleteMessageBatchContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-publish-get-delete-batch")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]types.SendMessageBatchRequestEntry, 3)
+	for i := range entries {
+		entries[i] = types.SendMessageBatchRequestEntry{Id: aws.String(fmt.Sprintf("message-%d", i)), MessageBody: aws.String(fmt.Sprintf("body-%d", i))}
+	}
+	sent, err := client.SendMessageBatch(context.Background(), &sqs.SendMessageBatchInput{QueueUrl: created.QueueUrl, Entries: entries})
+	if err != nil || len(sent.Successful) != len(entries) {
+		t.Fatalf("send %#v error %v", sent, err)
+	}
+	received, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, MaxNumberOfMessages: 10})
+	if err != nil || len(received.Messages) != len(entries) {
+		t.Fatalf("receive %#v error %v", received, err)
+	}
+	deleteEntries := make([]types.DeleteMessageBatchRequestEntry, len(received.Messages))
+	for i, message := range received.Messages {
+		deleteEntries[i] = types.DeleteMessageBatchRequestEntry{Id: message.MessageId, ReceiptHandle: message.ReceiptHandle}
+	}
+	deleted, err := client.DeleteMessageBatch(context.Background(), &sqs.DeleteMessageBatchInput{QueueUrl: created.QueueUrl, Entries: deleteEntries})
+	if err != nil || len(deleted.Successful) != len(entries) {
+		t.Fatalf("delete %#v error %v", deleted, err)
+	}
+	remaining, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, MaxNumberOfMessages: 10})
+	if err != nil || len(remaining.Messages) != 0 {
+		t.Fatalf("remaining %#v error %v", remaining, err)
+	}
+}
+
 func TestAWSSDKSQSInvalidBatchEntryIDContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

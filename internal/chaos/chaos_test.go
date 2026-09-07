@@ -920,6 +920,67 @@ func TestConcurrentSQSBatchPerEntrySizeLimitsRemainStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSPublishGetDeleteMessageBatchesRemainConsistent(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	errs := make(chan error, 8)
+	var wg sync.WaitGroup
+	for index := range 8 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			name := fmt.Sprintf("chaos-publish-get-delete-%d", index)
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+				errs <- err
+				return
+			}
+			entries := []any{
+				map[string]any{"Id": "message-0", "MessageBody": "body-0"},
+				map[string]any{"Id": "message-1", "MessageBody": "body-1"},
+				map[string]any{"Id": "message-2", "MessageBody": "body-2"},
+			}
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": name, "Entries": entries}}); err != nil {
+				errs <- err
+				return
+			}
+			received, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MaxNumberOfMessages": 10}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			messages, _ := received.Output["Messages"].([]any)
+			if len(messages) != len(entries) {
+				errs <- fmt.Errorf("received %d messages from %s", len(messages), name)
+				return
+			}
+			deleteEntries := make([]any, len(messages))
+			for i, raw := range messages {
+				message := raw.(map[string]any)
+				deleteEntries[i] = map[string]any{"Id": message["MessageId"], "ReceiptHandle": message["ReceiptHandle"]}
+			}
+			deleted, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessageBatch", Input: map[string]any{"QueueName": name, "Entries": deleteEntries}})
+			if err != nil || len(deleted.Output["Successful"].([]any)) != len(entries) {
+				errs <- fmt.Errorf("deleted batch %#v error %v", deleted, err)
+				return
+			}
+			remaining, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MaxNumberOfMessages": 10}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			if messages, _ := remaining.Output["Messages"].([]any); len(messages) != 0 {
+				errs <- fmt.Errorf("queue %s retained %d messages", name, len(messages))
+			}
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSStandardMessageGroupValidationIsStable(t *testing.T) {
 	p := sqs.New(spitest.Deps(t))
 	ctx := context.Background()

@@ -372,6 +372,34 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("mixed batch bodies %#v", seen)
 		}
 	})
+	t.Run("Given a published batch When receiving and deleting Then the queue is empty", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-publish-get-delete"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("SendMessageBatch", `{"QueueUrl":"http://queue/000000000000/bdd-publish-get-delete","Entries":[{"Id":"1","MessageBody":"body-0"},{"Id":"2","MessageBody":"body-1"},{"Id":"3","MessageBody":"body-2"}]}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"Successful"`)) {
+			t.Fatalf("send %d %s", status, body)
+		}
+		status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-publish-get-delete","MaxNumberOfMessages":10}`)
+		var received map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &received) != nil || len(received["Messages"].([]any)) != 3 {
+			t.Fatalf("receive %d %s", status, body)
+		}
+		deleteEntries := make([]map[string]any, 3)
+		for i, raw := range received["Messages"].([]any) {
+			message := raw.(map[string]any)
+			deleteEntries[i] = map[string]any{"Id": message["MessageId"], "ReceiptHandle": message["ReceiptHandle"]}
+		}
+		payload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-publish-get-delete", "Entries": deleteEntries})
+		status, body = call("DeleteMessageBatch", string(payload))
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"Successful"`)) {
+			t.Fatalf("delete %d %s", status, body)
+		}
+		status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-publish-get-delete","MaxNumberOfMessages":10}`)
+		if status != http.StatusOK || bytes.Contains(body, []byte(`"Messages"`)) {
+			t.Fatalf("remaining %d %s", status, body)
+		}
+	})
 	t.Run("Given an empty message batch When sending Then EmptyBatchRequest is returned", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-empty-batch"}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

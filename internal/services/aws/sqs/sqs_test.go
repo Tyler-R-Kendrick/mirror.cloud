@@ -1596,6 +1596,43 @@ func TestSendBatchReceiveMultipleCharacterization(t *testing.T) {
 	golden.AssertJSON(t, received.Output)
 }
 
+func TestPublishGetDeleteMessageBatchCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "publish-get-delete-batch"})
+	entries := make([]any, 10)
+	for i := range entries {
+		entries[i] = map[string]any{"Id": fmt.Sprintf("message-%d", i), "MessageBody": fmt.Sprintf("messageBody-%d", i)}
+	}
+	sent := call("SendMessageBatch", map[string]any{"QueueName": "publish-get-delete-batch", "Entries": entries})
+	received := call("ReceiveMessage", map[string]any{"QueueName": "publish-get-delete-batch", "MaxNumberOfMessages": 10})
+	messages := received.Output["Messages"].([]any)
+	deleteEntries := make([]any, len(messages))
+	for i, raw := range messages {
+		message := raw.(map[string]any)
+		deleteEntries[i] = map[string]any{"Id": message["MessageId"], "ReceiptHandle": message["ReceiptHandle"]}
+	}
+	deleted := call("DeleteMessageBatch", map[string]any{"QueueName": "publish-get-delete-batch", "Entries": deleteEntries})
+	remaining := call("ReceiveMessage", map[string]any{"QueueName": "publish-get-delete-batch", "MaxNumberOfMessages": 10})
+	if len(sent.Output["Successful"].([]any)) != 10 || len(messages) != 10 || len(deleted.Output["Successful"].([]any)) != 10 {
+		t.Fatalf("batch lifecycle sent=%#v received=%#v deleted=%#v", sent.Output, received.Output, deleted.Output)
+	}
+	remainingCount := 0
+	if raw, ok := remaining.Output["Messages"].([]any); ok {
+		remainingCount = len(raw)
+	}
+	golden.AssertJSON(t, map[string]any{"sent": len(sent.Output["Successful"].([]any)), "received": len(messages), "deleted": len(deleted.Output["Successful"].([]any)), "remaining": remainingCount})
+}
+
 func TestSendMessageBatchEmptyCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -2321,6 +2358,42 @@ func FuzzSendMessageBatchPerEntryMaximumSize(f *testing.F) {
 		}
 		if !oversized && (len(successful) != 2 || len(failed) != 0) {
 			t.Fatalf("valid response %#v", response.Output)
+		}
+	})
+}
+
+func FuzzPublishGetDeleteMessageBatch(f *testing.F) {
+	f.Add(1)
+	f.Add(10)
+	f.Fuzz(func(t *testing.T, count int) {
+		if count < 1 || count > 10 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-publish-get-delete"}}); err != nil {
+			t.Fatal(err)
+		}
+		entries := make([]any, count)
+		for i := range entries {
+			entries[i] = map[string]any{"Id": fmt.Sprintf("message-%d", i), "MessageBody": fmt.Sprintf("body-%d", i)}
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessageBatch", Input: map[string]any{"QueueName": "fuzz-publish-get-delete", "Entries": entries}}); err != nil {
+			t.Fatal(err)
+		}
+		received, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "fuzz-publish-get-delete", "MaxNumberOfMessages": 10}})
+		if err != nil || len(received.Output["Messages"].([]any)) != count {
+			t.Fatalf("receive %#v error %v", received.Output, err)
+		}
+		deleteEntries := make([]any, count)
+		for i, raw := range received.Output["Messages"].([]any) {
+			message := raw.(map[string]any)
+			deleteEntries[i] = map[string]any{"Id": message["MessageId"], "ReceiptHandle": message["ReceiptHandle"]}
+		}
+		deleted, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessageBatch", Input: map[string]any{"QueueName": "fuzz-publish-get-delete", "Entries": deleteEntries}})
+		if err != nil || len(deleted.Output["Successful"].([]any)) != count {
+			t.Fatalf("delete %#v error %v", deleted.Output, err)
 		}
 	})
 }

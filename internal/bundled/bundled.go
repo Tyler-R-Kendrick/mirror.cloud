@@ -26,6 +26,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/generated"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -64,11 +65,38 @@ func ShadowIDs() map[string]string {
 	return out
 }
 
+// servedModel returns the model a bundle is built against: the one the runtime
+// will serve it with.
+//
+// It used to call generated.Model(id) directly, which is the same shape of
+// mistake #296 through #299 were about -- building a service against one
+// description while the edge serves it through another. Here it was not a
+// divergence but a ceiling. Four services are served under an ID the
+// specification does not use, because the SDKs still send the older wire name:
+// CloudWatch signs as `monitoring`, ELBv2 as `elasticloadbalancing`, and the
+// catalog shortened two more. generated.Model has no entry under those names,
+// so those four could never be extracted to bundles at all -- silently, since
+// nothing tries until someone writes the YAML.
+//
+// specboot.Bundle() is the model the edge routes with, mapping included, so
+// reading it here means a bundle is validated against exactly what will serve
+// it. The operations there are the specification's unioned with any the
+// catalog carried, which can only admit bundles that generated.Model would
+// have refused; nothing that loaded before stops loading.
+func servedModel(id string) (*model.Service, error) {
+	if svc := specboot.Bundle().ServiceByID(id); svc != nil {
+		return svc, nil
+	}
+	// A bundle with no service in the booted model has nothing to be served
+	// as. generated.Model gives the better error, naming the missing model.
+	return generated.Model(id)
+}
+
 // shadowOf reports a bundle's shadow reason. Loading is cheap enough to do
 // once per bundle at init, and a bundle that cannot load at all is caught by
 // the factory rather than silently treated as shadowed.
 func shadowOf(id string) (string, error) {
-	svc, err := generated.Model(id)
+	svc, err := servedModel(id)
 	if err != nil {
 		return "", err
 	}
@@ -104,7 +132,7 @@ func New(id string, deps spi.Deps) (spi.BehaviorPack, error) {
 		return proto.WithDeps(deps)
 	}
 
-	svc, err := generated.Model(id)
+	svc, err := servedModel(id)
 	if err != nil {
 		return nil, fmt.Errorf("bundled %s: %w", id, err)
 	}

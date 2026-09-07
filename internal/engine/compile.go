@@ -216,6 +216,29 @@ func runtimeFuncs() []cel.EnvOption {
 				return types.DefaultTypeAdapter.NativeToValue(out)
 			}))),
 
+		// indices answers with 0..n-1 for a list, which is the one thing CEL's
+		// comprehensions cannot give a bundle: `map` binds the element and
+		// never its position.
+		//
+		// AWS batch responses are correlated by position rather than by a
+		// caller-supplied id -- Comprehend's BatchDetectSentiment answers a
+		// ResultList whose rows carry an Index into the TextList that was
+		// sent, and its ErrorList carries the same Index for the rows that
+		// failed. Without this a bundle can answer the right number of rows
+		// and cannot say which input each one is about.
+		//
+		// It takes the list rather than a count so it cannot be asked for a
+		// range larger than something already in memory.
+		cel.Function("indices", cel.Overload("indices_1", []*cel.Type{dyn}, dyn,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				list, _ := fromCEL(v).([]any)
+				out := make([]any, len(list))
+				for i := range list {
+					out[i] = int64(i)
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
+			}))),
+
 		cel.Function("lastSegment", cel.Overload("lastSegment_2", []*cel.Type{str, str}, str,
 			cel.BinaryBinding(func(s, sep ref.Val) ref.Val {
 				parts := strings.Split(fmt.Sprint(s.Value()), fmt.Sprint(sep.Value()))

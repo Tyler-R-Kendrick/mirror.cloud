@@ -1,0 +1,437 @@
+{
+  "schema": "trace/1",
+  "service": "aws.lightsail",
+  "source": "pack:internal/services/aws/lightsail@68978994",
+  "note": "Instances created a list at a time, and the static IP that is the same address every time.",
+  "steps": [
+    {
+      "operation": "GetInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "instances": null
+      }
+    },
+    {
+      "operation": "CreateInstances",
+      "input": {
+        "availabilityZone": "us-east-1a",
+        "blueprintId": "amazon_linux_2023",
+        "bundleId": "nano_3_0",
+        "instanceNames": [
+          "web-1",
+          "web-2"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "operations": [
+          {
+            "operationType": "CreateInstance",
+            "resourceName": "web-1",
+            "status": "Succeeded"
+          },
+          {
+            "operationType": "CreateInstance",
+            "resourceName": "web-2",
+            "status": "Succeeded"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetInstance",
+      "input": {
+        "instanceName": "web-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "instance": {
+          "blueprintId": "amazon_linux_2023",
+          "bundleId": "nano_3_0",
+          "name": "web-1",
+          "state": {
+            "name": "running"
+          }
+        }
+      }
+    },
+    {
+      "operation": "GetInstance",
+      "input": {
+        "instanceName": "web-2"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "instance": {
+          "blueprintId": "amazon_linux_2023",
+          "bundleId": "nano_3_0",
+          "name": "web-2",
+          "state": {
+            "name": "running"
+          }
+        }
+      }
+    },
+    {
+      "operation": "GetInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "instances": [
+          {
+            "blueprintId": "amazon_linux_2023",
+            "bundleId": "nano_3_0",
+            "name": "web-1",
+            "state": {
+              "name": "running"
+            }
+          },
+          {
+            "blueprintId": "amazon_linux_2023",
+            "bundleId": "nano_3_0",
+            "name": "web-2",
+            "state": {
+              "name": "running"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetInstance",
+      "input": {
+        "instanceName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "CreateInstances",
+      "input": {
+        "availabilityZone": "us-east-1b",
+        "blueprintId": "ubuntu_22_04",
+        "bundleId": "micro_3_0",
+        "instanceNames": [
+          "web-1"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "operations": [
+          {
+            "operationType": "CreateInstance",
+            "resourceName": "web-1",
+            "status": "Succeeded"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetInstance",
+      "input": {
+        "instanceName": "web-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "instance": {
+          "blueprintId": "ubuntu_22_04",
+          "bundleId": "micro_3_0",
+          "name": "web-1",
+          "state": {
+            "name": "running"
+          }
+        }
+      }
+    },
+    {
+      "operation": "DeleteInstance",
+      "input": {
+        "instanceName": "web-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "operations": [
+          {
+            "status": "Succeeded"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetInstance",
+      "input": {
+        "instanceName": "web-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "GetInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "instances": [
+          {
+            "blueprintId": "amazon_linux_2023",
+            "bundleId": "nano_3_0",
+            "name": "web-2",
+            "state": {
+              "name": "running"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteInstance",
+      "input": {
+        "instanceName": "web-1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "operations": [
+          {
+            "status": "Succeeded"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "AllocateStaticIp",
+      "input": {
+        "staticIpName": "ip-a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "operations": [
+          {
+            "status": "Succeeded"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetStaticIp",
+      "input": {
+        "staticIpName": "ip-a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "staticIp": {
+          "ipAddress": "192.0.2.10",
+          "isAttached": false,
+          "name": "ip-a"
+        }
+      }
+    },
+    {
+      "operation": "AllocateStaticIp",
+      "input": {
+        "staticIpName": "ip-b"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "operations": [
+          {
+            "status": "Succeeded"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetStaticIp",
+      "input": {
+        "staticIpName": "ip-b"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "staticIp": {
+          "ipAddress": "192.0.2.10",
+          "isAttached": false,
+          "name": "ip-b"
+        }
+      }
+    },
+    {
+      "operation": "GetStaticIp",
+      "input": {
+        "staticIpName": "absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ReleaseStaticIp",
+      "input": {
+        "staticIpName": "ip-a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "operations": [
+          {
+            "status": "Succeeded"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "GetStaticIp",
+      "input": {
+        "staticIpName": "ip-a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "NotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "ReleaseStaticIp",
+      "input": {
+        "staticIpName": "ip-a"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "operations": [
+          {
+            "status": "Succeeded"
+          }
+        ]
+      }
+    }
+  ]
+}

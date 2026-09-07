@@ -1,0 +1,152 @@
+schema: bir/1
+service: aws.comprehend
+
+# Transcribed from the hand-written pack, not established against the real
+# service. There is no model behind any of it: the detect operations answer a
+# fixed result whatever the text says, an endpoint is IN_SERVICE the moment it
+# is created, and a classification job is COMPLETED without reading its input.
+provenance: authored
+
+resources:
+  # An endpoint is addressed by ARN on every operation but create, and the
+  # pack keyed it by the last ARN segment, which is the name it was created
+  # with -- so the two forms resolve the same record.
+  modelendpoint:
+    collection: cpep
+    id:
+      derive: >
+        lastSegment(
+          'EndpointArn' in input ? string(input.EndpointArn) :
+          ('EndpointName' in input ? string(input.EndpointName) : ''), '/')
+    arn: "arn:{partition}:comprehend:{region}:{account}:endpoint/{id}"
+    record:
+      EndpointArn: arn
+      Status: "'IN_SERVICE'"
+      ModelArn: "'ModelArn' in input ? string(input.ModelArn) : ''"
+
+  job:
+    collection: cpjob
+    id:
+      generate: { kind: hex, bytes: 8 }
+      input_members: [JobId]
+    record:
+      JobId: id
+      JobName: "'JobName' in input ? string(input.JobName) : ''"
+      JobStatus: "'COMPLETED'"
+
+errors:
+  NotFound:
+    code: ResourceNotFoundException
+    http: 400
+    fault: client
+
+operations:
+  # The detect operations are constants. They are here rather than absent
+  # because an absent operation is a 501, and a caller wiring up a pipeline
+  # wants a well-shaped answer; what they are not is analysis, which the
+  # quirks say plainly.
+  DetectSentiment:
+    output:
+      Sentiment: "'POSITIVE'"
+      SentimentScore: "{'Positive': 0.9, 'Negative': 0.05, 'Neutral': 0.04, 'Mixed': 0.01}"
+
+  DetectEntities:
+    output:
+      Entities: "[]"
+
+  DetectKeyPhrases:
+    output:
+      KeyPhrases: "[]"
+
+  DetectDominantLanguage:
+    output:
+      Languages: "[{'LanguageCode': 'en', 'Score': 0.99}]"
+
+  # A batch answer is correlated to its request by position, so each row
+  # carries the index of the text it is about.
+  BatchDetectSentiment:
+    output:
+      ResultList: "indices(input.TextList).map(i, {'Index': i, 'Sentiment': 'POSITIVE'})"
+      ErrorList: "[]"
+
+  CreateEndpoint:
+    effects:
+      - put: { resource: modelendpoint }
+    output:
+      EndpointArn: rec.EndpointArn
+
+  DescribeEndpoint:
+    reads:
+      ep: { resource: modelendpoint }
+    require:
+      - { cond: ep_found, error: NotFound }
+    output:
+      EndpointProperties: ep
+
+  ListEndpoints:
+    list: { resource: modelendpoint, member: EndpointPropertiesList, paginate: model }
+
+  DeleteEndpoint:
+    effects:
+      - delete: { resource: modelendpoint, missing: ignore }
+
+  # A create rather than a put: the job id is drawn when the job starts, and
+  # only a create draws one.
+  StartDocumentClassificationJob:
+    effects:
+      - create: { resource: job }
+    output:
+      JobId: rec.JobId
+      JobStatus: rec.JobStatus
+
+  DescribeDocumentClassificationJob:
+    reads:
+      job: { resource: job }
+    require:
+      - { cond: job_found, error: NotFound }
+    output:
+      DocumentClassificationJobProperties: job
+
+  ListDocumentClassificationJobs:
+    list:
+      resource: job
+      member: DocumentClassificationJobPropertiesList
+      paginate: model
+
+quirks:
+  - operation: DetectSentiment
+    note: >
+      Every text is POSITIVE with the same four scores, and DetectEntities and
+      DetectKeyPhrases answer nothing at all. Nothing reads the text: there is
+      no model here and these are constants, so a test that asserts a negative
+      sentiment for negative text passes against the real service and fails
+      against this.
+  - operation: DetectDominantLanguage
+    note: >
+      Every text is English with score 0.99, whatever language it is in.
+  - operation: BatchDetectSentiment
+    note: >
+      Every row is POSITIVE and ErrorList is always empty, so the per-row
+      failure path a caller writes against -- an entry too long, or in an
+      unsupported language -- is never exercised. The indices are real: row i
+      is about TextList[i].
+  - operation: CreateEndpoint
+    note: >
+      An endpoint is IN_SERVICE the instant it is created and its
+      DesiredInferenceUnits are not recorded. The real service moves through
+      CREATING for several minutes and can end in FAILED with a Message, and
+      an endpoint costs money for as long as it is IN_SERVICE. Neither
+      DataAccessRoleArn nor the model the ModelArn names is checked to exist.
+  - operation: DescribeEndpoint
+    note: >
+      EndpointProperties omits CreationTime, LastModifiedTime,
+      CurrentInferenceUnits and DesiredInferenceUnits, which the real service
+      always answers. The pack additionally answered an EndpointName that
+      EndpointProperties does not declare, so no SDK could read it; the bundle
+      drops it and keys the record by that name instead.
+  - operation: StartDocumentClassificationJob
+    note: >
+      A job is COMPLETED before it returns and neither its InputDataConfig nor
+      its OutputDataConfig is read, so nothing is classified and nothing is
+      written to S3. SubmitTime, EndTime and JobArn are absent from the
+      properties the real service always carries.

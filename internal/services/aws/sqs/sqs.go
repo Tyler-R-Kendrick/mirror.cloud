@@ -148,6 +148,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = p.col(req, "queues").Delete(ctx, name)
 		_ = p.col(req, "qattrs").Delete(ctx, name)
 		_ = p.col(req, "qtags").Delete(ctx, name)
+		_ = p.col(req, "qpurge").Delete(ctx, name)
 		for _, collection := range []string{"msgs:" + name, "dedup:" + name} {
 			kvs, _, _ := p.col(req, collection).List(ctx, "", "", 0)
 			for _, kv := range kvs {
@@ -215,6 +216,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "PurgeQueue":
 		name := queueName(req)
+		if previous, ok, _ := p.col(req, "qpurge").Get(ctx, name); ok {
+			purgedAt, _ := strconv.ParseInt(string(previous), 10, 64)
+			if p.deps.Clock.Now().Sub(time.Unix(0, purgedAt)) < time.Minute {
+				return nil, &spi.Fault{Code: "AWS.SimpleQueueService.PurgeQueueInProgress", Message: fmt.Sprintf("Only one PurgeQueue operation on %s is allowed every 60 seconds.", name), HTTPStatus: 403, Fault: "client"}
+			}
+		}
+		_ = p.col(req, "qpurge").Put(ctx, name, []byte(strconv.FormatInt(p.deps.Clock.Now().UnixNano(), 10)))
 		kvs, _, _ := p.col(req, "msgs:"+name).List(ctx, "", "", 0)
 		for _, kv := range kvs {
 			_ = p.col(req, "msgs:"+name).Delete(ctx, kv.Key)

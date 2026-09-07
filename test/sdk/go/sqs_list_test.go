@@ -642,6 +642,33 @@ func TestAWSSDKSQSMessageRetentionContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSSuccessivePurgeContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-purge")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.PurgeQueue(context.Background(), &sqs.PurgeQueueInput{QueueUrl: created.QueueUrl}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.PurgeQueue(context.Background(), &sqs.PurgeQueueInput{QueueUrl: created.QueueUrl})
+	if err == nil || !strings.Contains(err.Error(), "PurgeQueueInProgress") || !strings.Contains(err.Error(), "Only one PurgeQueue operation on sdk-purge is allowed every 60 seconds.") {
+		t.Fatalf("successive purge error %v", err)
+	}
+}
+
 func TestAWSSDKSQSMessageTimestampContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

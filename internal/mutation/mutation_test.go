@@ -17595,6 +17595,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestMessageRetentionCharacterization",
 		},
 		{
+			name: "sqs-allow-successive-purges",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if previous, ok, _ := p.col(req, "qpurge").Get(ctx, name); ok {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestSuccessivePurgeCharacterization",
+		},
+		{
 			name: "sqs-batch-accept-missing-fifo-deduplication-id",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "if _, provided := message[\"MessageDeduplicationId\"]; !provided || str(message[\"MessageDeduplicationId\"]) == \"\" {",

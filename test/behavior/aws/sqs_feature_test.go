@@ -144,6 +144,19 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("retention %d %s", status, body)
 		}
 	})
+	t.Run("Given a recently purged queue When purging again Then purge-in-progress is returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-purge"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("PurgeQueue", `{"QueueUrl":"http://queue/000000000000/bdd-purge"}`); status != http.StatusOK {
+			t.Fatalf("first purge %d %s", status, body)
+		}
+		status, body := call("PurgeQueue", `{"QueueUrl":"http://queue/000000000000/bdd-purge"}`)
+		var response map[string]any
+		if status != http.StatusForbidden || json.Unmarshal(body, &response) != nil || response["__type"] != "AWS.SimpleQueueService.PurgeQueueInProgress" || response["message"] != "Only one PurgeQueue operation on bdd-purge is allowed every 60 seconds." {
+			t.Fatalf("successive purge %d %s", status, body)
+		}
+	})
 	t.Run("Given an oversized receive batch When receiving Then the invalid parameter fault is returned", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-max-messages"}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

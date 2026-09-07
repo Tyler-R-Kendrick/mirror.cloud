@@ -196,6 +196,27 @@ func TestMessageRetentionCharacterization(t *testing.T) {
 	golden.AssertJSON(t, response.Output)
 }
 
+func TestSuccessivePurgeCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "purge"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PurgeQueue", Input: map[string]any{"QueueName": "purge"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PurgeQueue", Input: map[string]any{"QueueName": "purge"}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("purge error %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
+}
+
 func TestReceiveMessageMaxNumberValidation(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -728,6 +749,34 @@ func FuzzMessageRetention(f *testing.F) {
 		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "fuzz-retention", "WaitTimeSeconds": 0}})
 		if err != nil || response.Output["Messages"] != nil {
 			t.Fatalf("retention=%d response %#v error %v", retention, response, err)
+		}
+	})
+}
+
+func FuzzSuccessivePurge(f *testing.F) {
+	f.Add(uint8(0))
+	f.Add(uint8(1))
+	f.Fuzz(func(t *testing.T, raw uint8) {
+		clk := clock.NewControllable()
+		deps := spitest.Deps(t)
+		deps.Clock = clk
+		p := New(deps)
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-purge"}}); err != nil {
+			t.Fatal(err)
+		}
+		for attempt := 0; attempt < 2; attempt++ {
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PurgeQueue", Input: map[string]any{"QueueName": "fuzz-purge"}})
+			if attempt == 0 && err != nil {
+				t.Fatal(err)
+			}
+			if attempt == 1 {
+				fault, ok := err.(*spi.Fault)
+				if !ok || fault.Code != "AWS.SimpleQueueService.PurgeQueueInProgress" {
+					t.Fatalf("raw=%d purge error %#v", raw, err)
+				}
+			}
 		}
 	})
 }

@@ -237,6 +237,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			codec = s.codecs[model.ProtoAWSJSON10]
 		} else {
 			codec = s.codecs[model.ProtoAWSQuery]
+			if strings.Contains(strings.ToLower(r.Header.Get("Accept")), "application/json") {
+				codec = awsquery.NewJSON()
+			}
 		}
 	}
 

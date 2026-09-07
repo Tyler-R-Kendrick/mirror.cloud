@@ -95,4 +95,11 @@ func TestSQSGetQueueAttributesQueryShape(t *testing.T) {
 	if !strings.Contains(body, "<Attributes><Attribute><Name>QueueArn</Name><Value>arn:aws:sqs:us-east-1:000000000000:q</Value></Attribute>") || !strings.Contains(body, "<Attribute><Name>VisibilityTimeout</Name><Value>30</Value></Attribute>") {
 		t.Fatalf("SQS Query attributes %s", body)
 	}
+	w = httptest.NewRecorder()
+	if err := NewJSON().Encode(svc, op, w, &spi.Response{Output: map[string]any{"Attributes": map[string]any{"QueueArn": "arn:aws:sqs:us-east-1:000000000000:q"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Header().Get("Content-Type") != "application/json" || !strings.Contains(w.Body.String(), `"GetQueueAttributesResponse"`) || !strings.Contains(w.Body.String(), `"Name":"QueueArn"`) {
+		t.Fatalf("SQS Query JSON attributes %q %s", w.Header().Get("Content-Type"), w.Body.String())
+	}
 }

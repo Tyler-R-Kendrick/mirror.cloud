@@ -2,6 +2,7 @@
 package awsquery
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,7 +15,10 @@ import (
 )
 
 // Codec implements proto.Codec for awsQuery.
-type Codec struct{}
+type Codec struct{ json bool }
+
+// NewJSON returns the SQS Query endpoint's JSON response variant.
+func NewJSON() Codec { return Codec{json: true} }
 
 func (Codec) Protocol() model.Protocol { return model.ProtoAWSQuery }
 
@@ -54,10 +58,15 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 	return &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}, nil
 }
 
-func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWriter, resp *spi.Response) error {
+func (c Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWriter, resp *spi.Response) error {
 	status := resp.Status
 	if status == 0 {
 		status = 200
+	}
+	if c.json && svc.ID == "aws.sqs" && op.Name == "GetQueueAttributes" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		return json.NewEncoder(w).Encode(map[string]any{"GetQueueAttributesResponse": map[string]any{"GetQueueAttributesResult": map[string]any{"Attributes": sqsAttributes(resp.Output["Attributes"])}}})
 	}
 	w.Header().Set("Content-Type", "text/xml; charset=UTF-8")
 	w.WriteHeader(status)
@@ -79,6 +88,23 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	}
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+func sqsAttributes(value any) []any {
+	attrs, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	keys := make([]string, 0, len(attrs))
+	for key := range attrs {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]any, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, map[string]any{"Name": key, "Value": fmt.Sprint(attrs[key])})
+	}
+	return out
 }
 
 func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.ResponseWriter, f *spi.Fault, requestID string) error {

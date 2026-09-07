@@ -82,6 +82,10 @@ func celFuncs() []cel.EnvOption {
 		// amend one.
 		unaryDyn("toJSON", dyn, str),
 		binaryDyn("lastSegment", str, str, str),
+		// indices answers with 0..n-1 for a list. CEL's `map` binds the
+		// element and never its position, and an AWS batch response is
+		// correlated to its request by position.
+		unaryDyn("indices", dyn, dyn),
 		// CEL comprehensions over a map yield a list, so there is no core way
 		// to build a map minus some keys or to layer two maps. Every provider's
 		// Untag* and every "defaults, then stored, then set" attribute merge

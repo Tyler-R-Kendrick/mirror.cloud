@@ -1,0 +1,393 @@
+{
+  "schema": "trace/1",
+  "service": "aws.comprehend",
+  "source": "pack:internal/services/aws/comprehend@ae1920aa",
+  "note": "The constant detections, the batch numbered by position, and the endpoint addressed by ARN.",
+  "steps": [
+    {
+      "operation": "DetectSentiment",
+      "input": {
+        "LanguageCode": "en",
+        "Text": "this is dreadful"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Sentiment": "POSITIVE",
+        "SentimentScore": {
+          "Mixed": 0.01,
+          "Negative": 0.05,
+          "Neutral": 0.04,
+          "Positive": 0.9
+        }
+      }
+    },
+    {
+      "operation": "DetectEntities",
+      "input": {
+        "LanguageCode": "en",
+        "Text": "Ada Lovelace worked in London"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Entities": []
+      }
+    },
+    {
+      "operation": "DetectKeyPhrases",
+      "input": {
+        "LanguageCode": "en",
+        "Text": "a short document"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "KeyPhrases": []
+      }
+    },
+    {
+      "operation": "DetectDominantLanguage",
+      "input": {
+        "Text": "guten Tag"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "Languages": [
+          {
+            "LanguageCode": "en",
+            "Score": 0.99
+          }
+        ]
+      }
+    },
+    {
+      "operation": "BatchDetectSentiment",
+      "input": {
+        "LanguageCode": "en",
+        "TextList": [
+          "first",
+          "second",
+          "third"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ErrorList": [],
+        "ResultList": [
+          {
+            "Index": 0,
+            "Sentiment": "POSITIVE"
+          },
+          {
+            "Index": 1,
+            "Sentiment": "POSITIVE"
+          },
+          {
+            "Index": 2,
+            "Sentiment": "POSITIVE"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "BatchDetectSentiment",
+      "input": {
+        "LanguageCode": "en",
+        "TextList": []
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "ErrorList": [],
+        "ResultList": null
+      }
+    },
+    {
+      "operation": "ListEndpoints",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EndpointPropertiesList": null
+      }
+    },
+    {
+      "operation": "CreateEndpoint",
+      "input": {
+        "DesiredInferenceUnits": 1,
+        "EndpointName": "classify-ep",
+        "ModelArn": "arn:aws:comprehend:us-east-1:000000000000:document-classifier/c1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EndpointArn": "arn:aws:comprehend:us-east-1:000000000000:endpoint/classify-ep"
+      }
+    },
+    {
+      "operation": "DescribeEndpoint",
+      "input": {
+        "EndpointArn": {
+          "$fromPath": "EndpointArn",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EndpointProperties": {
+          "EndpointArn": "arn:aws:comprehend:us-east-1:000000000000:endpoint/classify-ep",
+          "EndpointName": "classify-ep",
+          "ModelArn": "arn:aws:comprehend:us-east-1:000000000000:document-classifier/c1",
+          "Status": "IN_SERVICE"
+        }
+      },
+      "superseded_members": {
+        "EndpointProperties.EndpointName": "The pack stored an EndpointName on the endpoint record and answered it. EndpointProperties does not declare one -- an endpoint is addressed by ARN and reports its ARN, not the name it was created with -- so it was a member no SDK could read. The bundle keys the record by that name, which is how DescribeEndpoint by ARN and by name still resolve the same record, and answers the declared members only. Every other member of these steps is still compared."
+      }
+    },
+    {
+      "operation": "ListEndpoints",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EndpointPropertiesList": [
+          {
+            "EndpointArn": "arn:aws:comprehend:us-east-1:000000000000:endpoint/classify-ep",
+            "EndpointName": "classify-ep",
+            "ModelArn": "arn:aws:comprehend:us-east-1:000000000000:document-classifier/c1",
+            "Status": "IN_SERVICE"
+          }
+        ]
+      },
+      "superseded_members": {
+        "EndpointPropertiesList[0].EndpointName": "The pack stored an EndpointName on the endpoint record and answered it. EndpointProperties does not declare one -- an endpoint is addressed by ARN and reports its ARN, not the name it was created with -- so it was a member no SDK could read. The bundle keys the record by that name, which is how DescribeEndpoint by ARN and by name still resolve the same record, and answers the declared members only. Every other member of these steps is still compared."
+      }
+    },
+    {
+      "operation": "DescribeEndpoint",
+      "input": {
+        "EndpointArn": "arn:aws:comprehend:us-east-1:000000000000:endpoint/absent"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteEndpoint",
+      "input": {
+        "EndpointArn": {
+          "$fromPath": "EndpointArn",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "DescribeEndpoint",
+      "input": {
+        "EndpointArn": {
+          "$fromPath": "EndpointArn",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    },
+    {
+      "operation": "DeleteEndpoint",
+      "input": {
+        "EndpointArn": {
+          "$fromPath": "EndpointArn",
+          "$fromStep": 7
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      }
+    },
+    {
+      "operation": "ListEndpoints",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "EndpointPropertiesList": null
+      }
+    },
+    {
+      "operation": "StartDocumentClassificationJob",
+      "input": {
+        "DataAccessRoleArn": "arn:aws:iam::000000000000:role/comprehend",
+        "DocumentClassifierArn": "arn:aws:comprehend:us-east-1:000000000000:document-classifier/c1",
+        "InputDataConfig": {
+          "S3Uri": "s3://in/"
+        },
+        "JobName": "nightly",
+        "OutputDataConfig": {
+          "S3Uri": "s3://out/"
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "JobId": "7c589129",
+        "JobStatus": "COMPLETED"
+      }
+    },
+    {
+      "operation": "ListDocumentClassificationJobs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DocumentClassificationJobPropertiesList": [
+          {
+            "JobId": "7c589129",
+            "JobName": "nightly",
+            "JobStatus": "COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeDocumentClassificationJob",
+      "input": {
+        "JobId": {
+          "$fromPath": "JobId",
+          "$fromStep": 15
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "DocumentClassificationJobProperties": {
+          "JobId": "7c589129",
+          "JobName": "nightly",
+          "JobStatus": "COMPLETED"
+        }
+      }
+    },
+    {
+      "operation": "DescribeDocumentClassificationJob",
+      "input": {
+        "JobId": "deadbeefdeadbeef"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "fault": {
+        "code": "ResourceNotFoundException",
+        "http_status": 400,
+        "fault": "client"
+      }
+    }
+  ]
+}

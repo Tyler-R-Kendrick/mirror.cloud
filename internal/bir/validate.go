@@ -67,6 +67,22 @@ func Validate(s *Service, svc *model.Service) error {
 		if res.Collection == "" {
 			problems = append(problems, fmt.Errorf("%s: %s: no collection", s.ServiceID, where))
 		}
+		switch {
+		case reservedVariable(name):
+			problems = append(problems, fmt.Errorf(
+				"%s: %s: %q is a variable the engine declares for every "+
+					"expression (%s), so declaring a resource of that name makes "+
+					"the whole bundle fail to compile with an error that names "+
+					"neither; rename the resource",
+				s.ServiceID, where, name, strings.Join(ReservedVariables, ", ")))
+		case reservedBinding(name) && parentedBy(s, name) != "":
+			problems = append(problems, fmt.Errorf(
+				"%s: %s: %q is one of the engine's own bindings (%s) and %q is "+
+					"scoped under it, so %s.<member> in that resource means the "+
+					"binding and not this record; rename the resource",
+				s.ServiceID, where, name, strings.Join(ReservedBindings, ", "),
+				parentedBy(s, name), name))
+		}
 		if res.Parent != "" {
 			if _, ok := s.Resources[res.Parent]; !ok {
 				problems = append(problems, fmt.Errorf("%s: %s: unknown parent resource %q",
@@ -842,6 +858,54 @@ func asMapAny(v any) map[string]any {
 // use, and saying so at load time is cheaper than debugging a record whose
 // state a service overwrote.
 var ReservedMembers = []string{"__state", "__deadlines"}
+
+// ReservedVariables are declared for every expression in every bundle, so a
+// resource of the same name is not a shadowing risk but an outright build
+// failure: CEL rejects the second declaration and reports "overlapping
+// identifier" against every expression in the service, naming neither the
+// resource nor anything that would have to change.
+//
+// Comprehend has an inference endpoint, and `endpoint` is the obvious name for
+// it, so this is reachable by writing the obvious thing.
+var ReservedVariables = []string{"endpoint", "identity", "input", "now"}
+
+// ReservedBindings are the names the engine binds per operation. A resource
+// may carry one -- CloudTrail's `event` does, and nothing there refers to it
+// from an expression -- but the moment another resource is scoped under it,
+// `event.id` in that resource's collection means the statechart's event and
+// not the record, and the engine has no way to tell the author which was
+// meant.
+var ReservedBindings = []string{
+	"arn", "event", "fx", "hit", "id", "item", "items", "rec",
+}
+
+func reservedVariable(name string) bool {
+	for _, r := range ReservedVariables {
+		if name == r {
+			return true
+		}
+	}
+	return false
+}
+
+func reservedBinding(name string) bool {
+	for _, r := range ReservedBindings {
+		if name == r {
+			return true
+		}
+	}
+	return false
+}
+
+// parentedBy answers with a resource scoped under the named one, if any.
+func parentedBy(s *Service, parent string) string {
+	for _, name := range sortedKeys(s.Resources) {
+		if s.Resources[name].Parent == parent {
+			return name
+		}
+	}
+	return ""
+}
 
 func reservedMember(name string) bool {
 	for _, r := range ReservedMembers {

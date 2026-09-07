@@ -625,4 +625,27 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("metrics %d %s", status, body)
 		}
 	})
+	t.Run("Given a message received twice When visibility expires Then the receipt handle rotates", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-rotate"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-rotate","MessageBody":"message"}`); status != http.StatusOK {
+			t.Fatalf("send %d %s", status, body)
+		}
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-rotate","VisibilityTimeout":0}`)
+		var first map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &first) != nil {
+			t.Fatalf("first receive %d %s", status, body)
+		}
+		status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-rotate","VisibilityTimeout":0}`)
+		var second map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &second) != nil {
+			t.Fatalf("second receive %d %s", status, body)
+		}
+		firstHandle := first["Messages"].([]any)[0].(map[string]any)["ReceiptHandle"]
+		secondHandle := second["Messages"].([]any)[0].(map[string]any)["ReceiptHandle"]
+		if firstHandle == secondHandle {
+			t.Fatalf("receipt handle did not rotate: %v", firstHandle)
+		}
+	})
 }

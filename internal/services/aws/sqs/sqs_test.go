@@ -226,6 +226,36 @@ func TestApproximateMessageStatesCharacterization(t *testing.T) {
 	golden.AssertJSON(t, states)
 }
 
+func TestReceiptHandleRotatesAfterVisibilityTimeout(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "rotate"})
+	call("SendMessage", map[string]any{"QueueName": "rotate", "MessageBody": "message"})
+	first := call("ReceiveMessage", map[string]any{"QueueName": "rotate", "VisibilityTimeout": 1}).Output["Messages"].([]any)[0].(map[string]any)
+	if err := clk.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	second := call("ReceiveMessage", map[string]any{"QueueName": "rotate", "VisibilityTimeout": 0}).Output["Messages"].([]any)[0].(map[string]any)
+	firstHandle, _ := first["ReceiptHandle"].(string)
+	secondHandle, _ := second["ReceiptHandle"].(string)
+	if firstHandle == "" || secondHandle == "" || firstHandle == secondHandle {
+		t.Fatalf("receipt handles did not rotate: %q %q", firstHandle, secondHandle)
+	}
+	golden.AssertJSON(t, map[string]any{"firstHandleLength": len(firstHandle), "secondHandleLength": len(secondHandle), "rotated": firstHandle != secondHandle})
+}
+
 func TestSuccessivePurgeCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
@@ -838,6 +868,44 @@ func FuzzApproximateMessageStates(f *testing.F) {
 		}
 		if attrs["ApproximateNumberOfMessages"] != wantVisible || attrs["ApproximateNumberOfMessagesDelayed"] != wantDelayed {
 			t.Fatalf("delay=%d attributes=%#v", delay, attrs)
+		}
+	})
+}
+
+func FuzzReceiptHandleRotation(f *testing.F) {
+	f.Add(uint8(0))
+	f.Add(uint8(2))
+	f.Fuzz(func(t *testing.T, timeout uint8) {
+		if timeout > 10 {
+			t.Skip()
+		}
+		clk := clock.NewControllable()
+		deps := spitest.Deps(t)
+		deps.Clock = clk
+		p := New(deps)
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-rotate"}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-rotate", "MessageBody": "message"}}); err != nil {
+			t.Fatal(err)
+		}
+		first, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "fuzz-rotate", "VisibilityTimeout": int(timeout)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := clk.Advance(time.Duration(timeout) * time.Second); err != nil {
+			t.Fatal(err)
+		}
+		second, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "fuzz-rotate", "VisibilityTimeout": 0}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		firstHandle := first.Output["Messages"].([]any)[0].(map[string]any)["ReceiptHandle"]
+		secondHandle := second.Output["Messages"].([]any)[0].(map[string]any)["ReceiptHandle"]
+		if firstHandle == secondHandle {
+			t.Fatalf("timeout=%d handle did not rotate", timeout)
 		}
 	})
 }

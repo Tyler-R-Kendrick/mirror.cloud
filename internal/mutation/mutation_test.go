@@ -17611,6 +17611,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestApproximateMessageStatesCharacterization",
 		},
 		{
+			name: "sqs-reuse-receipt-handle-after-receive",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "_ = p.col(req, \"msgs:\"+name).Delete(ctx, rh)\n\tm[\"handle\"] = p.deps.Rand.Hex(64)",
+			new:  "_ = p.col(req, \"msgs:\"+name).Delete(ctx, rh)\n\tm[\"handle\"] = rh",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestReceiptHandleRotatesAfterVisibilityTimeout",
+		},
+		{
 			name: "sqs-batch-accept-missing-fifo-deduplication-id",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "if _, provided := message[\"MessageDeduplicationId\"]; !provided || str(message[\"MessageDeduplicationId\"]) == \"\" {",

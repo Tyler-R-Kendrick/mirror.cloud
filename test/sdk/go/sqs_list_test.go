@@ -708,6 +708,37 @@ func TestAWSSDKSQSApproximateMessageStatesContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSReceiptHandleRotationContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-rotate"), Attributes: map[string]string{"VisibilityTimeout": "0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: created.QueueUrl, MessageBody: aws.String("message")}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl})
+	if err != nil || len(first.Messages) != 1 {
+		t.Fatalf("first receive %#v error %v", first, err)
+	}
+	second, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl})
+	if err != nil || len(second.Messages) != 1 || aws.ToString(first.Messages[0].ReceiptHandle) == aws.ToString(second.Messages[0].ReceiptHandle) {
+		t.Fatalf("receipt handles did not rotate first=%#v second=%#v error=%v", first.Messages, second.Messages, err)
+	}
+}
+
 func TestAWSSDKSQSMessageTimestampContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

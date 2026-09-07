@@ -677,8 +677,10 @@ func (p *Pack) afterReceive(ctx context.Context, req *spi.Request, name string, 
 		return
 	}
 	m["visibleAt"] = p.deps.Clock.Now().Add(time.Duration(vis) * time.Second).UnixNano()
+	_ = p.col(req, "msgs:"+name).Delete(ctx, rh)
+	m["handle"] = p.deps.Rand.Hex(64)
 	raw, _ := json.Marshal(m)
-	_ = p.col(req, "msgs:"+name).Put(ctx, rh, raw)
+	_ = p.col(req, "msgs:"+name).Put(ctx, str(m["handle"]), raw)
 }
 
 func (p *Pack) setVis(ctx context.Context, req *spi.Request, name, handle, timeout string) bool {

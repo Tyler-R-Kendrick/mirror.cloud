@@ -6160,6 +6160,49 @@ func TestConcurrentSQSMessageStateMetricsAreStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSReceiptsRemainValid(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	for index := range 16 {
+		name := fmt.Sprintf("chaos-rotate-%d", index)
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": "message"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for index := range 16 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			name := fmt.Sprintf("chaos-rotate-%d", index)
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "VisibilityTimeout": 0}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			messages, _ := response.Output["Messages"].([]any)
+			handle := ""
+			if len(messages) == 1 {
+				handle, _ = messages[0].(map[string]any)["ReceiptHandle"].(string)
+			}
+			if len(messages) != 1 || len(handle) != 64 {
+				errs <- fmt.Errorf("invalid receipt response %#v", response.Output)
+			}
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSFIFOBatchMissingDeduplicationIsStable(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := sqs.New(deps)

@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 45 / 222 (20.3%) |
-| LocalStack SQS test functions not yet traced | 177 / 222 (79.7%) |
+| LocalStack SQS test functions explicitly traced | 46 / 222 (20.7%) |
+| LocalStack SQS test functions not yet traced | 176 / 222 (79.3%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -640,6 +640,7 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_message_retention` | Messages are removed once `MessageRetentionPeriod` elapses, including queue-visible count cleanup, across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_successive_purge_calls_fail` | A second PurgeQueue within 60 seconds returns `AWS.SimpleQueueService.PurgeQueueInProgress`, HTTP 403, and the exact queue-name message across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_approximate_number_of_messages_delayed` | GetQueueAttributes counts visible, in-flight, and delayed messages separately with the exact ApproximateNumberOfMessages* fields across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_receive_after_visibility_timeout` | A message received again after its visibility timeout gets a new 64-character receipt handle, across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused pending |
 | `test_sqs.py::TestSqsProvider::test_tag_untag_queue` | TagQueue/ListQueueTags preserve tag values, UntagQueue removes selected keys and ignores missing keys, and the final empty response omits `Tags`; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin the wire shape | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_tag_queue_overwrites_existing_tag` | TagQueue overwrites supplied keys while retaining untouched existing tags across atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, chaos/race, and semantic mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_create_queue_with_tags` | CreateQueue persists initial tags for immediate ListQueueTags reads across atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, chaos/race, and semantic mutation coverage | Mapped; focused green |

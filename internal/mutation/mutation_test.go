@@ -17739,6 +17739,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestFIFODeleteAfterVisibilityTimeoutCharacterization",
 		},
 		{
+			name: "sqs-ignore-numeric-visibility-timeout",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if timeout == "" && req.Input["VisibilityTimeout"] != nil {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestFIFODeleteAfterExtendedVisibilityCharacterization",
+		},
+		{
 			name: "sqs-batch-accept-missing-fifo-deduplication-id",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "if _, provided := message[\"MessageDeduplicationId\"]; !provided || str(message[\"MessageDeduplicationId\"]) == \"\" {",

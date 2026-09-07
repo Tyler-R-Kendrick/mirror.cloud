@@ -1193,6 +1193,29 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("expired delete %d %s", status, body)
 		}
 	})
+	t.Run("Given an extended FIFO visibility timeout When the original timeout passes Then deletion still succeeds", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-extended.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true","VisibilityTimeout":"1"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-extended.fifo","MessageBody":"message","MessageGroupId":"group"}`); status != http.StatusOK {
+			t.Fatalf("send %d %s", status, body)
+		}
+		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-extended.fifo"}`)
+		var received map[string]any
+		if status != http.StatusOK || json.Unmarshal(body, &received) != nil {
+			t.Fatalf("receive %d %s", status, body)
+		}
+		handle := received["Messages"].([]any)[0].(map[string]any)["ReceiptHandle"]
+		change, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-extended.fifo", "ReceiptHandle": handle, "VisibilityTimeout": 5})
+		if status, body = call("ChangeMessageVisibility", string(change)); status != http.StatusOK {
+			t.Fatalf("extend %d %s", status, body)
+		}
+		time.Sleep(1500 * time.Millisecond)
+		deletePayload, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-extended.fifo", "ReceiptHandle": handle})
+		if status, body = call("DeleteMessage", string(deletePayload)); status != http.StatusOK {
+			t.Fatalf("delete %d %s", status, body)
+		}
+	})
 	t.Run("Given an emptied FIFO group When sending again Then the group remains usable", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-reuse-group.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

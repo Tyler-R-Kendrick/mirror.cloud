@@ -435,7 +435,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if !validReceiptHandle(handle) {
 				return nil, receiptHandleFault(handle)
 			}
-			if !p.setVis(ctx, req, name, handle, str(req.Input["VisibilityTimeout"])) {
+			timeout := str(req.Input["VisibilityTimeout"])
+			if timeout == "" && req.Input["VisibilityTimeout"] != nil {
+				timeout = strconv.Itoa(asInt(req.Input["VisibilityTimeout"]))
+			}
+			if !p.setVis(ctx, req, name, handle, timeout) {
 				return nil, &spi.Fault{Code: "InvalidParameterValue", Message: fmt.Sprintf("Value %s for parameter ReceiptHandle is invalid. Reason: Message does not exist or is not available for visibility timeout change.", handle), HTTPStatus: 400, Fault: "client"}
 			}
 		} else if entries, ok := req.Input["Entries"].([]any); ok {

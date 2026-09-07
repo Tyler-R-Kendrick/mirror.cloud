@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 61.9% |
-| LocalStack SQS test functions explicitly traced | 133 / 222 (59.9%) |
-| LocalStack SQS test functions not yet traced | 89 / 222 (40.1%) |
+| LocalStack SQS test functions explicitly traced | 135 / 222 (60.8%) |
+| LocalStack SQS test functions not yet traced | 87 / 222 (39.2%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -617,6 +617,8 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_send_delay_and_wait_time` | A delayed message is absent from an immediate receive and is returned by a later explicit long poll after visibility; atomic Verify-style snapshot and raw HTTP BDD coverage pin the interaction | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_approximate_number_of_messages_not_visible` | Standard queues report visible, in-flight, and delayed counts before and after a visibility timeout; atomic Verify-style snapshot, raw HTTP BDD, and in-flight mutation coverage pin the state transitions | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_approximate_number_of_messages_not_visible` | FIFO queues count only received messages as not visible while blocked group successors remain visible, then restore all six after timeout; atomic Verify-style snapshot and FIFO BDD coverage pin group-aware counts | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_delete_after_visibility_timeout` | Standard DeleteMessage remains valid with the original receipt handle after its visibility timeout, removing the message; existing atomic handle characterization and HTTP lifecycle coverage pin the behavior | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_fifo_delete_after_visibility_timeout_extended` | Extending FIFO visibility permits deletion after the original timeout but before the extension expires; atomic Verify-style snapshot, raw HTTP BDD, and existing expiry mutation coverage pin the boundary | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_external_endpoint` | Configured `AdvertiseURL` is used for CreateQueue URLs while the returned URL remains usable for message send/receive; atomic snapshot, raw HTTP BDD, concurrent chaos/race, and advertise-seam mutation coverage pin external endpoint advertisement | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_get_queue_url_contains_localstack_host` | Without an explicit advertise URL, GetQueueUrl retains the default LocalStack host and account/name path; the same atomic endpoint characterization and HTTP lifecycle coverage pin the default | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_list_queues_pagination` | MaxResults returns lexically ordered pages and a base64 last-URL NextToken that resumes strictly after the prior page; all seven requested test forms pin token shape, continuation, final-page omission, and concurrent completeness | Mapped; full race-clean |

@@ -345,6 +345,32 @@ func TestFIFODeleteAfterVisibilityTimeoutCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
+func TestFIFODeleteAfterExtendedVisibilityCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "extended.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": "1"}})
+	call("SendMessage", map[string]any{"QueueName": "extended.fifo", "MessageBody": "message", "MessageGroupId": "group"})
+	received := call("ReceiveMessage", map[string]any{"QueueName": "extended.fifo"}).Output["Messages"].([]any)[0].(map[string]any)
+	call("ChangeMessageVisibility", map[string]any{"QueueName": "extended.fifo", "ReceiptHandle": received["ReceiptHandle"], "VisibilityTimeout": 5})
+	if err := clk.Advance(1500 * time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	call("DeleteMessage", map[string]any{"QueueName": "extended.fifo", "ReceiptHandle": received["ReceiptHandle"]})
+	golden.AssertJSON(t, call("ReceiveMessage", map[string]any{"QueueName": "extended.fifo"}).Output)
+}
+
 func TestFIFOEmptyMessageGroupReuseCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

@@ -1300,6 +1300,23 @@ func FuzzFIFODeduplicationScope(f *testing.F) {
 	})
 }
 
+func FuzzQueueNameValidation(f *testing.F) {
+	for _, seed := range []string{"valid-queue", "valid_queue.fifo", "queue/name", ""} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, name string) {
+		p := New(spitest.Deps(t))
+		input := map[string]any{"QueueName": name}
+		if strings.HasSuffix(name, ".fifo") {
+			input["Attributes"] = map[string]any{"FifoQueue": "true"}
+		}
+		_, err := p.Invoke(context.Background(), &spi.Request{Identity: spi.Identity{Account: "123456789012", Region: "us-east-1"}, Operation: "CreateQueue", Input: input})
+		if validQueueName(name) != (err == nil) {
+			t.Fatalf("queue %q valid=%v error=%v", name, validQueueName(name), err)
+		}
+	})
+}
+
 func FuzzMessageAttributeValidation(f *testing.F) {
 	for _, seed := range []string{"", "aWs.Invalid", "Invalid!attr", "attr.1øßä"} {
 		f.Add(seed)
@@ -2925,6 +2942,7 @@ func TestFIFOQueueNameValidationCharacterization(t *testing.T) {
 		"fifoMissingAttribute":  call(map[string]any{"QueueName": "missing-attribute.fifo"}),
 		"fifoFalseAttribute":    call(map[string]any{"QueueName": "false-attribute.fifo", "Attributes": map[string]any{"FifoQueue": "false"}}),
 		"standardFIFOAttribute": call(map[string]any{"QueueName": "standard-with-fifo", "Attributes": map[string]any{"FifoQueue": "true"}}),
+		"slash":                 call(map[string]any{"QueueName": "queue/name/"}),
 	})
 }
 

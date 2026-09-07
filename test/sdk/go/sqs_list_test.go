@@ -1813,6 +1813,7 @@ func TestAWSSDKSQSFIFOQueueNameValidationContract(t *testing.T) {
 		{name: "sdk-fifo-missing-attribute.fifo", want: "FifoQueue must be specified as true"},
 		{name: "sdk-fifo-false-attribute.fifo", attrs: map[string]string{"FifoQueue": "false"}, want: "FifoQueue must be specified as true"},
 		{name: "sdk-standard-with-fifo", attrs: map[string]string{"FifoQueue": "true"}, want: "Queue name must end in .fifo for FIFO queues"},
+		{name: "sdk-queue-with-slash/name", want: "Queue name must be 1 to 80 characters"},
 	}
 	for _, tc := range cases {
 		_, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String(tc.name), Attributes: tc.attrs})

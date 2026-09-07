@@ -61,6 +61,12 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("empty list %d %s", status, body)
 		}
 	})
+	t.Run("Given a queue name with a slash When creating Then InvalidParameterValue is returned", func(t *testing.T) {
+		status, body := call("CreateQueue", `{"QueueName":"queue/name/"}`)
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte(`"__type":"InvalidParameterValue"`)) {
+			t.Fatalf("invalid queue name %d %s", status, body)
+		}
+	})
 	t.Run("Given a queue When requesting metadata Then only selected attributes are returned", func(t *testing.T) {
 		status, body := call("CreateQueue", `{"QueueName":"bdd-metadata"}`)
 		var created map[string]any

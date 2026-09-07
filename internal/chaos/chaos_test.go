@@ -7125,6 +7125,7 @@ func TestConcurrentSQSFIFOQueueNameValidationIsStable(t *testing.T) {
 		{name: "chaos-missing-attribute.fifo", message: "FifoQueue must be specified as true"},
 		{name: "chaos-false-attribute.fifo", attrs: map[string]any{"FifoQueue": "false"}, message: "FifoQueue must be specified as true"},
 		{name: "chaos-standard-with-fifo", attrs: map[string]any{"FifoQueue": "true"}, message: "Queue name must end in .fifo for FIFO queues"},
+		{name: "chaos-queue-with-slash/name", message: "Queue name must be 1 to 80 characters"},
 	}
 	var wg sync.WaitGroup
 	errs := make(chan error, len(cases)*8)

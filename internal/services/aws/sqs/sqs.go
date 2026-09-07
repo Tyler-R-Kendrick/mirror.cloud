@@ -56,6 +56,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	switch req.Operation {
 	case "CreateQueue":
 		name := str(req.Input["QueueName"])
+		if !validQueueName(name) {
+			return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "Queue name must be 1 to 80 characters of alphanumeric characters, hyphens, underscores, and an optional .fifo suffix.", HTTPStatus: 400, Fault: "client"}
+		}
 		if deleted, ok, _ := p.col(req, "qdeleted").Get(ctx, name); ok {
 			deletedAt, _ := strconv.ParseInt(string(deleted), 10, 64)
 			if p.deps.Clock.Now().Sub(time.Unix(0, deletedAt)) < time.Minute {
@@ -1181,6 +1184,21 @@ func validMessageGroupID(value string) bool {
 	const punctuation = `!"#$%&'()*+,-./:;<=>?@[\\]^_` + "`" + `{|}~`
 	for _, r := range value {
 		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && !strings.ContainsRune(punctuation, r) {
+			return false
+		}
+	}
+	return true
+}
+
+func validQueueName(value string) bool {
+	if strings.HasSuffix(value, ".fifo") {
+		value = strings.TrimSuffix(value, ".fifo")
+	}
+	if value == "" || len(value) > 80 {
+		return false
+	}
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' {
 			return false
 		}
 	}

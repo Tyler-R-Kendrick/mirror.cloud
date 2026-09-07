@@ -338,6 +338,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: output}, nil
 	case "DeleteMessageBatch":
 		entries, _ := req.Input["Entries"].([]any)
+		if len(entries) == 0 {
+			return nil, &spi.Fault{Code: "AWS.SimpleQueueService.EmptyBatchRequest", Message: "There should be at least one DeleteMessageBatchRequestEntry in the request.", HTTPStatus: 400, Fault: "client"}
+		}
 		if len(entries) > 10 {
 			return nil, &spi.Fault{Code: "AWS.SimpleQueueService.TooManyEntriesInBatchRequest", Message: fmt.Sprintf("Maximum number of entries per request are 10. You have sent %d.", len(entries)), HTTPStatus: 400, Fault: "client"}
 		}

@@ -1,0 +1,6 @@
+{
+  "Code": "AWS.SimpleQueueService.EmptyBatchRequest",
+  "Fault": "client",
+  "HTTPStatus": 400,
+  "Message": "There should be at least one DeleteMessageBatchRequestEntry in the request."
+}

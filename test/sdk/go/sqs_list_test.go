@@ -171,6 +171,30 @@ func TestAWSSDKSQSDeleteMessageBatchTooManyEntriesContract(t *testing.T) {
 	}
 }
 
+func TestAWSSDKSQSDeleteMessageBatchEmptyContract(t *testing.T) {
+	cfg := mcfg.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	awsConfig, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("us-east-1"), config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := sqs.NewFromConfig(awsConfig, func(options *sqs.Options) { options.BaseEndpoint = aws.String(server.URL) })
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{QueueName: aws.String("sdk-delete-empty-batch")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.DeleteMessageBatch(context.Background(), &sqs.DeleteMessageBatchInput{QueueUrl: created.QueueUrl, Entries: []types.DeleteMessageBatchRequestEntry{}})
+	if err == nil || !strings.Contains(err.Error(), "EmptyBatchRequest") || !strings.Contains(err.Error(), "There should be at least one DeleteMessageBatchRequestEntry") {
+		t.Fatalf("empty delete batch error %v", err)
+	}
+}
+
 func TestAWSSDKSQSChangeMessageVisibilityBatchTooManyEntriesContract(t *testing.T) {
 	cfg := mcfg.Default()
 	cfg.Services = []string{"aws.sqs"}

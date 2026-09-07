@@ -1490,6 +1490,21 @@ func TestDeleteMessageBatchTooManyEntriesCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
+func TestDeleteMessageBatchEmptyCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "delete-empty-batch"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessageBatch", Input: map[string]any{"QueueName": "delete-empty-batch", "Entries": []any{}}})
+	fault, ok := err.(*spi.Fault)
+	if !ok {
+		t.Fatalf("empty delete batch error %#v", err)
+	}
+	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
+}
+
 func TestSendMessageBatchInvalidContentsPartialFailureCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -2124,6 +2139,28 @@ func FuzzDeleteMessageBatchEntryID(f *testing.F) {
 		fault, ok := err.(*spi.Fault)
 		if !ok || fault.Code != "AWS.SimpleQueueService.InvalidBatchEntryId" {
 			t.Fatalf("invalid id %q error %#v", entryID, err)
+		}
+	})
+}
+
+func FuzzDeleteMessageBatchEmpty(f *testing.F) {
+	f.Add(false)
+	f.Add(true)
+	f.Fuzz(func(t *testing.T, nilEntries bool) {
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-delete-empty-batch"}}); err != nil {
+			t.Fatal(err)
+		}
+		entries := []any{}
+		if nilEntries {
+			entries = nil
+		}
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessageBatch", Input: map[string]any{"QueueName": "fuzz-delete-empty-batch", "Entries": entries}})
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "AWS.SimpleQueueService.EmptyBatchRequest" {
+			t.Fatalf("nil=%v error %#v", nilEntries, err)
 		}
 	})
 }

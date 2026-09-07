@@ -558,6 +558,15 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("invalid delete batch id %d %s", status, body)
 		}
 	})
+	t.Run("Given an empty delete batch When deleting Then the empty batch fault is returned", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-delete-empty-batch"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("DeleteMessageBatch", `{"QueueUrl":"http://queue/000000000000/bdd-delete-empty-batch","Entries":[]}`)
+		if status != http.StatusBadRequest || !bytes.Contains(body, []byte("EmptyBatchRequest")) || !bytes.Contains(body, []byte("There should be at least one DeleteMessageBatchRequestEntry")) {
+			t.Fatalf("empty delete batch %d %s", status, body)
+		}
+	})
 	t.Run("Given more than ten delete batch entries Then the entry-count fault is returned", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-delete-too-many-batch"}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

@@ -38,7 +38,6 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/firehose"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/glue"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iam"
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iot"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kafka"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kinesis"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/kms"

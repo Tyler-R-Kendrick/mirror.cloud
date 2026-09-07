@@ -431,12 +431,14 @@ Wave 1 has surfaced four gaps in the schema. Two of them (C19, C20) are stated a
 
 **C21. Three of the four gaps have more callers than the one that found them, and the count is not reliably measurable.** Reading the packs one at a time is how each gap was found, and it is also the only way to count them: a structural scan cannot separate "iterate a list of entities and write one record each" from "iterate a map of attributes", and a scan for the second shape returns twenty-seven packs of which most are the first. What can be stated is what was confirmed by reading:
 
-| gap | confirmed callers |
-|---|---|
-| filtered delete (C20) | `ssoadmin`, `lakeformation` |
-| N records from one list input | `lightsail`, `emr`, `tagging` |
-| resource-level recompute on `patch` (C19) | six services, all worked around |
-| list index in an expression | `comprehend` |
+| gap | confirmed callers | status |
+|---|---|---|
+| filtered delete (C20) | `ssoadmin`, `lakeformation` | closed — `delete.where` |
+| N records from one list input | `lightsail`, `emr`, `tagging` | closed — `for_each` + per-element `key` |
+| resource-level recompute on `patch` (C19) | six services, all worked around | open — still a discipline |
+| list index in an expression | `comprehend` | closed — `indices(list)` |
+
+Three of the four are closed and the three services that found them are extracted. C19 is still a discipline rather than a rule, and `missing: ignore` (C26) is the nearest thing to a guard it has gained.
 
 Two of those four are hard blocks: a service that needs a filtered delete or an N-record write cannot be extracted at all, and five services are parked on them today. The other two are workarounds — a discipline the schema does not enforce, and an operation left unexpressed — so they cost correctness risk rather than progress.
 
@@ -820,3 +822,21 @@ An exemption that excuses nothing is worse than a missing one. It reads as a doc
 Both now report an exemption that matched nothing, and both have a test for it. The third instance was the ratchet's own guard, which special-cased one metric name so a newly-added metric could start above zero; the next metric would have hit the same wall and needed its own special case. It is driven off the metric list now.
 
 The lesson to carry forward is narrow and checkable: **an exemption mechanism needs three properties, not one.** It must name something that exists, it must say why, and it must be reported when it stops applying. I built the first two twice and the third zero times, and only noticed by reading the diff back with the question "how does this rot?".
+
+**C26. An update wrote the record it could not find, so a batch update over caller-supplied ids conjured one row per id that was not there.** `patch` and `put` both fall through to writing when the store has nothing at the key. That is right for the many operations that mean "update or create" -- Directory Service's `CreateAlias` leaves a record carrying only an id and an alias, transcribed from a pack that did the same -- and wrong for a batch: EMR's `TerminateJobFlows` takes a list of cluster ids and the pack skipped the ones that did not exist, where the obvious bundle stores a cluster with a status and no name that `ListClusters` then answers. A batch cannot check its ids one at a time, so before `missing: ignore` the choice was between not expressing the operation and reintroducing, from the thing replacing the packs, the phantom-record failure this document keeps finding *in* the packs (C25). It is opt-in: eighteen bundles patch without guarding on the record being there, so changing the default would have been a silent behavior change to all of them.
+
+**C27. One hundred and twenty-three operations across ten services have no output shape, so no bundle can ever answer them -- and eighty-seven of those are the whole of the only non-AWS service served.** A bundle's every output member is validated against the generated output shape; an operation whose model carries no output shape cannot be given one, so those operations can only be served by hand-written Go. Counted mechanically against the booted model:
+
+| service | operations with no output shape |
+|---|---|
+| `gcp.storage` | 87 of 87 |
+| `aws.qldb`, `aws.elastictranscoder`, `aws.lookoutmetrics` | all of them (7, 7, 8) |
+| `aws.dynamodb` | 4 of 62 — the Streams data plane |
+| `aws.es` | 4 of 14 — the search data plane |
+| `aws.s3` | 3 of 115 — object lock and `PostObject` |
+| `aws.apigateway`, `aws.appsync`, `aws.timestream` | 1 each — `ExecuteApi`, `GraphQL`, `Query` |
+
+The three all-of-them services are already known: AWS publishes no model for them, which is a permanent exclusion. The single operations are data planes the control-plane specification does not describe, and a pack that answers one is answering something no SDK generated from the specification would send -- so losing them to extraction costs less than it looks.
+
+`gcp.storage` is the finding. Its model has thirty-eight shapes and not one operation bound to any of them, because the Discovery receiver builds each method's name, verb and path and never reads the `request.$ref` and `response.$ref` that sit beside them; `toShape` compounds it by setting each member's shape to the member's *own name* rather than to the type it refers to. So the emulator's only non-AWS provider is structurally unextractable, and nothing said so -- the same shape as the ceiling in `internal/bundled` that #301 removed, one layer further out. It is a receiver defect with a bounded fix, not a limit of the schema.
+

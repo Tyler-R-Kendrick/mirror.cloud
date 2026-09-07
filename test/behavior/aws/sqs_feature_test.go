@@ -403,6 +403,23 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("batch bodies %#v", seen)
 		}
 	})
+	t.Run("Given string and binary message attributes When sending Then their digest and values are retained", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-attribute-digest"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-attribute-digest","MessageBody":"message","MessageAttributes":{"binary":{"DataType":"Binary","BinaryValue":"AAEC"},"string":{"DataType":"String","StringValue":"value"}}}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte("MD5OfMessageAttributes")) {
+			t.Fatalf("send digest %d %s", status, body)
+		}
+		var sent map[string]any
+		if json.Unmarshal(body, &sent) != nil {
+			t.Fatalf("send json %s", body)
+		}
+		status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-attribute-digest","MessageAttributeNames":["All"]}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte("MD5OfMessageAttributes")) || !bytes.Contains(body, []byte("value")) {
+			t.Fatalf("receive digest %d %s", status, body)
+		}
+	})
 	t.Run("Given a batch and a single send When receiving three Then all bodies are present", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-batch-mixed"}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

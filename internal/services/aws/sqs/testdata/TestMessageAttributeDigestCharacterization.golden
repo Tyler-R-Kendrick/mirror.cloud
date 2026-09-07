@@ -1,0 +1,13 @@
+{
+  "attributes": {
+    "binary": {
+      "BinaryValue": "AAEC",
+      "DataType": "Binary"
+    },
+    "string": {
+      "DataType": "String",
+      "StringValue": "value"
+    }
+  },
+  "digest": "de2f3932e5f456023bfa3fd3ff88c9f4"
+}

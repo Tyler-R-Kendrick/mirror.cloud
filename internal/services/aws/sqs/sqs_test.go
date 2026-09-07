@@ -835,6 +835,36 @@ func TestFIFOMessageAttributesCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"first": first, "second": second})
 }
 
+func TestMessageAttributeDigestCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "attribute-digest"}}); err != nil {
+		t.Fatal(err)
+	}
+	attrs := map[string]any{
+		"binary": map[string]any{"DataType": "Binary", "BinaryValue": base64.StdEncoding.EncodeToString([]byte{0, 1, 2})},
+		"string": map[string]any{"DataType": "String", "StringValue": "value"},
+	}
+	sent, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "attribute-digest", "MessageBody": "message", "MessageAttributes": attrs}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, ok := sent.Output["MD5OfMessageAttributes"].(string)
+	if !ok || len(digest) != 32 {
+		t.Fatalf("send digest %#v", sent.Output)
+	}
+	received, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "attribute-digest", "MessageAttributeNames": []any{"All"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := received.Output["Messages"].([]any)[0].(map[string]any)
+	if message["MD5OfMessageAttributes"] != digest || len(asMap(message["MessageAttributes"])) != 2 {
+		t.Fatalf("receive attributes %#v", message)
+	}
+	golden.AssertJSON(t, map[string]any{"digest": digest, "attributes": message["MessageAttributes"]})
+}
+
 func TestMessageAttributeNameFiltersCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -1130,6 +1160,31 @@ func FuzzSetFifoAttributeValidation(f *testing.F) {
 			}
 		} else if err != nil {
 			t.Fatalf("fifo=%v enabled=%v error %v", fifo, enabled, err)
+		}
+	})
+}
+
+func FuzzMessageAttributeDigest(f *testing.F) {
+	f.Add("value")
+	f.Add("")
+	f.Fuzz(func(t *testing.T, value string) {
+		if len(value) > 256 {
+			t.Skip()
+		}
+		p := New(spitest.Deps(t))
+		ctx := context.Background()
+		id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fuzz-attribute-digest"}}); err != nil {
+			t.Fatal(err)
+		}
+		attrs := map[string]any{"kind": map[string]any{"DataType": "String", "StringValue": value}}
+		sent, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fuzz-attribute-digest", "MessageBody": "message", "MessageAttributes": attrs}})
+		if err != nil || str(sent.Output["MD5OfMessageAttributes"]) == "" {
+			t.Fatalf("send %#v error %v", sent.Output, err)
+		}
+		received, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "fuzz-attribute-digest", "MessageAttributeNames": []any{"All"}}})
+		if err != nil || str(received.Output["Messages"].([]any)[0].(map[string]any)["MD5OfMessageAttributes"]) != str(sent.Output["MD5OfMessageAttributes"]) {
+			t.Fatalf("receive %#v error %v", received.Output, err)
 		}
 	})
 }

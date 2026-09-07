@@ -5,9 +5,11 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -460,6 +462,7 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	}
 	sum := md5.Sum([]byte(body))
 	md5hex := hex.EncodeToString(sum[:])
+	md5attrs := md5MessageAttributes(req.Input["MessageAttributes"])
 	attrs := p.queueAttrs(ctx, req, name)
 	maximum := 1 << 20
 	if configured := asInt(attrs["MaximumMessageSize"]); configured > 0 {
@@ -509,7 +512,11 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 			_ = json.Unmarshal(b, &d)
 			until := int64(asFloat(d["until"]))
 			if now.UnixNano() < until {
-				return &spi.Response{Output: map[string]any{"MessageId": d["id"], "MD5OfMessageBody": d["md5"]}}, nil
+				output := map[string]any{"MessageId": d["id"], "MD5OfMessageBody": d["md5"]}
+				if str(d["md5Attrs"]) != "" {
+					output["MD5OfMessageAttributes"] = d["md5Attrs"]
+				}
+				return &spi.Response{Output: output}, nil
 			}
 		}
 	}
@@ -518,7 +525,7 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	seq := p.nextSeq(ctx, req, name)
 	trace := str(asMap(asMap(req.Input["MessageSystemAttributes"])["AWSTraceHeader"])["StringValue"])
 	msg := map[string]any{
-		"id": id, "body": body, "handle": rh, "md5": md5hex,
+		"id": id, "body": body, "handle": rh, "md5": md5hex, "md5Attrs": md5attrs,
 		"group": group, "seq": seq,
 		"visibleAt": now.Add(time.Duration(delay) * time.Second).UnixNano(), "receiveCount": 0, "sentAt": now.UnixMilli(),
 		"attrs": req.Input["MessageAttributes"], "trace": trace,
@@ -526,13 +533,17 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	raw, _ := json.Marshal(msg)
 	_ = p.col(req, "msgs:"+name).Put(ctx, rh, raw)
 	if dedup != "" {
-		db, _ := json.Marshal(map[string]any{"id": id, "md5": md5hex, "until": now.Add(5 * time.Minute).UnixNano()})
+		db, _ := json.Marshal(map[string]any{"id": id, "md5": md5hex, "md5Attrs": md5attrs, "until": now.Add(5 * time.Minute).UnixNano()})
 		_ = p.col(req, "dedup:"+name).Put(ctx, dedup, db)
 	}
 	if p.deps.Bus != nil {
 		_ = p.deps.Bus.Publish(ctx, "sqs", raw)
 	}
-	return &spi.Response{Output: map[string]any{"MessageId": id, "MD5OfMessageBody": md5hex}}, nil
+	output := map[string]any{"MessageId": id, "MD5OfMessageBody": md5hex}
+	if md5attrs != "" {
+		output["MD5OfMessageAttributes"] = md5attrs
+	}
+	return &spi.Response{Output: output}, nil
 }
 
 func validMessageContents(body string) bool {
@@ -558,6 +569,51 @@ func messageSize(body string, attrs any) int {
 		}
 	}
 	return size
+}
+
+func md5MessageAttributes(attrs any) string {
+	values := asMap(attrs)
+	if len(values) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	digest := md5.New()
+	writeField := func(value []byte) {
+		var length [4]byte
+		binary.BigEndian.PutUint32(length[:], uint32(len(value)))
+		_, _ = digest.Write(length[:])
+		_, _ = digest.Write(value)
+	}
+	for _, name := range names {
+		attribute := asMap(values[name])
+		dataType := str(attribute["DataType"])
+		writeField([]byte(name))
+		writeField([]byte(dataType))
+		transport := byte(1)
+		if strings.HasPrefix(dataType, "Binary") {
+			transport = 2
+		}
+		_, _ = digest.Write([]byte{transport})
+		value := str(attribute["StringValue"])
+		if transport == 2 {
+			switch raw := attribute["BinaryValue"].(type) {
+			case []byte:
+				value = string(raw)
+			default:
+				decoded, err := base64.StdEncoding.DecodeString(str(raw))
+				if err == nil {
+					value = string(decoded)
+				}
+			}
+		}
+		writeField([]byte(value))
+	}
+	sum := digest.Sum(nil)
+	return hex.EncodeToString(sum)
 }
 
 func validBatchEntryID(value string) bool {
@@ -635,6 +691,9 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 				}
 				if want := req.Input["MessageAttributeNames"]; want != nil && m["attrs"] != nil {
 					wire["MessageAttributes"] = filterMsgAttrs(m["attrs"], want)
+					if digest := str(m["md5Attrs"]); digest != "" {
+						wire["MD5OfMessageAttributes"] = digest
+					}
 				}
 				out = append(out, wire)
 			}
@@ -784,9 +843,18 @@ func (p *Pack) afterReceive(ctx context.Context, req *spi.Request, name string, 
 	m["visibleAt"] = p.deps.Clock.Now().Add(time.Duration(vis) * time.Second).UnixNano()
 	if n > 1 {
 		newHandle := p.deps.Rand.Hex(64)
-		_ = p.col(req, "rhandles:"+name).Put(ctx, rh, []byte(newHandle))
-		_ = p.col(req, "msgs:"+name).Delete(ctx, rh)
 		m["handle"] = newHandle
+		raw, _ := json.Marshal(m)
+		_ = p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(tx spi.ScopeTx) error {
+			if err := tx.Collection("rhandles:"+name).Put(rh, []byte(newHandle)); err != nil {
+				return err
+			}
+			if err := tx.Collection("msgs:" + name).Delete(rh); err != nil {
+				return err
+			}
+			return tx.Collection("msgs:"+name).Put(newHandle, raw)
+		})
+		return
 	}
 	raw, _ := json.Marshal(m)
 	_ = p.col(req, "msgs:"+name).Put(ctx, str(m["handle"]), raw)

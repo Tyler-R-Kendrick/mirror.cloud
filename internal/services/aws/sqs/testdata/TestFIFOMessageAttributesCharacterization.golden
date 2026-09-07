@@ -9,6 +9,7 @@
         },
         "Body": "message-body-1",
         "MD5OfBody": "19c9e282d65f9733bc6b35d50062c7ee",
+        "MD5OfMessageAttributes": "aa2aa93575d956f452291e8e169c6a6f",
         "MessageAttributes": {
           "kind": {
             "DataType": "String",
@@ -30,6 +31,7 @@
         },
         "Body": "message-body-1",
         "MD5OfBody": "19c9e282d65f9733bc6b35d50062c7ee",
+        "MD5OfMessageAttributes": "aa2aa93575d956f452291e8e169c6a6f",
         "MessageAttributes": {
           "kind": {
             "DataType": "String",

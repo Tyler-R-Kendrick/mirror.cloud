@@ -1096,6 +1096,51 @@ func TestConcurrentSQSSetFifoAttributeValidationIsStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentSQSMessageAttributeDigestsRemainStable(t *testing.T) {
+	p := sqs.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	errs := make(chan error, 16)
+	var wg sync.WaitGroup
+	for index := range 16 {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			name := fmt.Sprintf("chaos-attribute-digest-%d", index)
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+				errs <- err
+				return
+			}
+			attrs := map[string]any{"binary": map[string]any{"DataType": "Binary", "BinaryValue": base64.StdEncoding.EncodeToString([]byte{byte(index), 1, 2})}, "string": map[string]any{"DataType": "String", "StringValue": fmt.Sprintf("value-%d", index)}}
+			response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": "message", "MessageAttributes": attrs}})
+			if err != nil {
+				errs <- err
+				return
+			}
+			digest, _ := response.Output["MD5OfMessageAttributes"].(string)
+			received, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": name, "MessageAttributeNames": []any{"All"}}})
+			var receivedDigest string
+			if err == nil {
+				if messages, ok := received.Output["Messages"].([]any); ok && len(messages) == 1 {
+					receivedDigest, _ = messages[0].(map[string]any)["MD5OfMessageAttributes"].(string)
+				}
+			}
+			if err != nil || receivedDigest != digest {
+				var output map[string]any
+				if received != nil {
+					output = received.Output
+				}
+				errs <- fmt.Errorf("attribute digest queue=%s sent=%s received=%#v error=%v", name, digest, output, err)
+			}
+		}(index)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
 func TestConcurrentSQSStandardMessageGroupValidationIsStable(t *testing.T) {
 	p := sqs.New(spitest.Deps(t))
 	ctx := context.Background()

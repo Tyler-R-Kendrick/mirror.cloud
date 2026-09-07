@@ -17707,6 +17707,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestApproximateMessageStatesCharacterization",
 		},
 		{
+			name: "sqs-count-inflight-as-delayed",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `} else if asInt(message["receiveCount"]) > 0 {`,
+			new:  `} else if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestApproximateMessageStateCharacterization",
+		},
+		{
 			name: "sqs-reuse-receipt-handle-after-receive",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "newHandle := p.deps.Rand.Hex(64)",

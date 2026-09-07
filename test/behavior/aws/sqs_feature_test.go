@@ -1099,6 +1099,23 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("count %d %s", status, body)
 		}
 	})
+	t.Run("Given standard messages When one is in flight Then approximate counts separate visibility states", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-states","Attributes":{"VisibilityTimeout":"5"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		for i := 0; i < 6; i++ {
+			if status, body := call("SendMessage", fmt.Sprintf(`{"QueueUrl":"http://queue/000000000000/bdd-states","MessageBody":"message-%d"}`, i)); status != http.StatusOK {
+				t.Fatalf("send %d %s", status, body)
+			}
+		}
+		if status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-states","MaxNumberOfMessages":1}`); status != http.StatusOK {
+			t.Fatalf("receive %d %s", status, body)
+		}
+		status, body := call("GetQueueAttributes", `{"QueueUrl":"http://queue/000000000000/bdd-states","AttributeNames":["ApproximateNumberOfMessages","ApproximateNumberOfMessagesNotVisible","ApproximateNumberOfMessagesDelayed"]}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"ApproximateNumberOfMessages":"5"`)) || !bytes.Contains(body, []byte(`"ApproximateNumberOfMessagesNotVisible":"1"`)) || !bytes.Contains(body, []byte(`"ApproximateNumberOfMessagesDelayed":"0"`)) {
+			t.Fatalf("count %d %s", status, body)
+		}
+	})
 	t.Run("Given FIFO deduplication is enabled When updating the strategy Then the attribute changes", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-dedup-strategy.fifo","Attributes":{"FifoQueue":"true","SqsManagedSseEnabled":"true","ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

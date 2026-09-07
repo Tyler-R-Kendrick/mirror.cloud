@@ -3677,6 +3677,57 @@ func TestSendDelayAndWaitTimeCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"short": short.Output, "long": long.Output})
 }
 
+func TestApproximateMessageStateCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	attrs := func(name string) map[string]any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": name, "AttributeNames": []any{"ApproximateNumberOfMessages", "ApproximateNumberOfMessagesNotVisible", "ApproximateNumberOfMessagesDelayed"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return asMap(response.Output["Attributes"])
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "states", "Attributes": map[string]any{"VisibilityTimeout": "5"}}}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 6; i++ {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "states", "MessageBody": fmt.Sprintf("message-%d", i)}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "states", "MaxNumberOfMessages": 1}}); err != nil {
+		t.Fatal(err)
+	}
+	standardBefore := attrs("states")
+	if err := clk.Advance(5 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	standardAfter := attrs("states")
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "fifo-states.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": "5"}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range []struct{ body, group string }{{"message-1", "1"}, {"message-2", "1"}, {"message-3", "2"}, {"message-4", "2"}, {"message-5", "3"}, {"message-6", "3"}} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "fifo-states.fifo", "MessageBody": message.body, "MessageGroupId": message.group}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 2 {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "fifo-states.fifo", "MaxNumberOfMessages": 1}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fifoBefore := attrs("fifo-states.fifo")
+	if err := clk.Advance(5 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	fifoAfter := attrs("fifo-states.fifo")
+	golden.AssertJSON(t, map[string]any{"standardBefore": standardBefore, "standardAfter": standardAfter, "fifoBefore": fifoBefore, "fifoAfter": fifoAfter})
+}
+
 func TestSSEMutualExclusionCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

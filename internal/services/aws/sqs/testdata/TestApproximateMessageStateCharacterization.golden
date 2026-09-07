@@ -1,0 +1,22 @@
+{
+  "fifoAfter": {
+    "ApproximateNumberOfMessages": "6",
+    "ApproximateNumberOfMessagesDelayed": "0",
+    "ApproximateNumberOfMessagesNotVisible": "0"
+  },
+  "fifoBefore": {
+    "ApproximateNumberOfMessages": "4",
+    "ApproximateNumberOfMessagesDelayed": "0",
+    "ApproximateNumberOfMessagesNotVisible": "2"
+  },
+  "standardAfter": {
+    "ApproximateNumberOfMessages": "6",
+    "ApproximateNumberOfMessagesDelayed": "0",
+    "ApproximateNumberOfMessagesNotVisible": "0"
+  },
+  "standardBefore": {
+    "ApproximateNumberOfMessages": "5",
+    "ApproximateNumberOfMessagesDelayed": "0",
+    "ApproximateNumberOfMessagesNotVisible": "1"
+  }
+}

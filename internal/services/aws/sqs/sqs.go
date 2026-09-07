@@ -149,7 +149,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = p.col(req, "qattrs").Delete(ctx, name)
 		_ = p.col(req, "qtags").Delete(ctx, name)
 		_ = p.col(req, "qpurge").Delete(ctx, name)
-		for _, collection := range []string{"msgs:" + name, "dedup:" + name} {
+		for _, collection := range []string{"msgs:" + name, "dedup:" + name, "rhandles:" + name} {
 			kvs, _, _ := p.col(req, collection).List(ctx, "", "", 0)
 			for _, kv := range kvs {
 				_ = p.col(req, collection).Delete(ctx, kv.Key)
@@ -166,7 +166,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !validReceiptHandle(handle) {
 			return nil, receiptHandleFault(handle)
 		}
-		_ = p.col(req, "msgs:"+name).Delete(ctx, handle)
+		_ = p.col(req, "msgs:"+name).Delete(ctx, p.resolveHandle(ctx, req, name, handle))
+		_ = p.col(req, "rhandles:"+name).Delete(ctx, handle)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "GetQueueAttributes":
 		name := queueName(req)
@@ -285,7 +286,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if !validBatchEntryID(str(message["Id"])) {
 				return nil, &spi.Fault{Code: "AWS.SimpleQueueService.InvalidBatchEntryId", Message: "A batch entry id can only contain alphanumeric characters, hyphens and underscores. It can be at most 80 letters long.", HTTPStatus: 400, Fault: "client"}
 			}
-			if strings.HasSuffix(name, ".fifo") && str(attrs["ContentBasedDeduplication"]) != "true" {
+			if strings.HasSuffix(name, ".fifo") && str(attrs["ContentBasedDeduplication"]) != "true" && str(message["MessageGroupId"]) != "" {
 				if _, provided := message["MessageDeduplicationId"]; !provided || str(message["MessageDeduplicationId"]) == "" {
 					return nil, &spi.Fault{Code: "InvalidParameterValue", Message: "The queue should either have ContentBasedDeduplication enabled or MessageDeduplicationId provided explicitly", HTTPStatus: 400, Fault: "client"}
 				}
@@ -331,7 +332,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		var ok []any
 		for _, e := range entries {
 			m := asMap(e)
-			_ = p.col(req, "msgs:"+name).Delete(ctx, str(m["ReceiptHandle"]))
+			handle := str(m["ReceiptHandle"])
+			_ = p.col(req, "msgs:"+name).Delete(ctx, p.resolveHandle(ctx, req, name, handle))
+			_ = p.col(req, "rhandles:"+name).Delete(ctx, handle)
 			ok = append(ok, map[string]any{"Id": m["Id"]})
 		}
 		return &spi.Response{Output: map[string]any{"Successful": ok}}, nil
@@ -677,14 +680,19 @@ func (p *Pack) afterReceive(ctx context.Context, req *spi.Request, name string, 
 		return
 	}
 	m["visibleAt"] = p.deps.Clock.Now().Add(time.Duration(vis) * time.Second).UnixNano()
-	_ = p.col(req, "msgs:"+name).Delete(ctx, rh)
-	m["handle"] = p.deps.Rand.Hex(64)
+	if n > 1 {
+		newHandle := p.deps.Rand.Hex(64)
+		_ = p.col(req, "rhandles:"+name).Put(ctx, rh, []byte(newHandle))
+		_ = p.col(req, "msgs:"+name).Delete(ctx, rh)
+		m["handle"] = newHandle
+	}
 	raw, _ := json.Marshal(m)
 	_ = p.col(req, "msgs:"+name).Put(ctx, str(m["handle"]), raw)
 }
 
 func (p *Pack) setVis(ctx context.Context, req *spi.Request, name, handle, timeout string) bool {
-	b, ok, _ := p.col(req, "msgs:"+name).Get(ctx, handle)
+	resolved := p.resolveHandle(ctx, req, name, handle)
+	b, ok, _ := p.col(req, "msgs:"+name).Get(ctx, resolved)
 	if !ok {
 		return false
 	}
@@ -693,8 +701,21 @@ func (p *Pack) setVis(ctx context.Context, req *spi.Request, name, handle, timeo
 	sec := asInt(timeout)
 	m["visibleAt"] = p.deps.Clock.Now().Add(time.Duration(sec) * time.Second).UnixNano()
 	nb, _ := json.Marshal(m)
-	_ = p.col(req, "msgs:"+name).Put(ctx, handle, nb)
+	_ = p.col(req, "msgs:"+name).Put(ctx, resolved, nb)
 	return true
+}
+
+func (p *Pack) resolveHandle(ctx context.Context, req *spi.Request, name, handle string) string {
+	seen := map[string]bool{}
+	for !seen[handle] {
+		seen[handle] = true
+		next, ok, _ := p.col(req, "rhandles:"+name).Get(ctx, handle)
+		if !ok || string(next) == "" {
+			return handle
+		}
+		handle = string(next)
+	}
+	return handle
 }
 
 func validReceiptHandle(handle string) bool {

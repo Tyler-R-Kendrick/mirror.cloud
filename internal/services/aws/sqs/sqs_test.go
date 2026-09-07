@@ -256,6 +256,43 @@ func TestReceiptHandleRotatesAfterVisibilityTimeout(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"firstHandleLength": len(firstHandle), "secondHandleLength": len(secondHandle), "rotated": firstHandle != secondHandle})
 }
 
+func TestPriorReceiptHandleRemainsUsable(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "prior-handle"})
+	call("SendMessage", map[string]any{"QueueName": "prior-handle", "MessageBody": "message"})
+	first := call("ReceiveMessage", map[string]any{"QueueName": "prior-handle", "VisibilityTimeout": 1}).Output["Messages"].([]any)[0].(map[string]any)
+	if err := clk.Advance(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	call("ReceiveMessage", map[string]any{"QueueName": "prior-handle", "VisibilityTimeout": 5})
+	oldHandle := first["ReceiptHandle"].(string)
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ChangeMessageVisibility", Input: map[string]any{"QueueName": "prior-handle", "ReceiptHandle": oldHandle, "VisibilityTimeout": 0}}); err != nil {
+		t.Fatal(err)
+	}
+	third := call("ReceiveMessage", map[string]any{"QueueName": "prior-handle", "VisibilityTimeout": 5}).Output["Messages"].([]any)
+	if len(third) != 1 {
+		t.Fatalf("old receipt handle did not restore visibility: %#v", third)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessage", Input: map[string]any{"QueueName": "prior-handle", "ReceiptHandle": oldHandle}}); err != nil {
+		t.Fatal(err)
+	}
+	left := call("ReceiveMessage", map[string]any{"QueueName": "prior-handle", "VisibilityTimeout": 0}).Output["Messages"]
+	golden.AssertJSON(t, map[string]any{"oldHandleLength": len(oldHandle), "deletedWithOldHandle": left == nil})
+}
+
 func TestSuccessivePurgeCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
@@ -2020,7 +2057,7 @@ func FuzzQueueMetadataAttributeSelection(f *testing.F) {
 				want[name] = true
 			}
 			if name == "All" {
-				want = map[string]bool{"ApproximateNumberOfMessages": true, "QueueArn": true, "CreatedTimestamp": true, "VisibilityTimeout": true}
+				want = map[string]bool{"ApproximateNumberOfMessages": true, "ApproximateNumberOfMessagesDelayed": true, "ApproximateNumberOfMessagesNotVisible": true, "QueueArn": true, "CreatedTimestamp": true, "VisibilityTimeout": true}
 				break
 			}
 		}

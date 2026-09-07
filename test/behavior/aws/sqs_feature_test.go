@@ -647,5 +647,13 @@ func TestSQSQueueListing(t *testing.T) {
 		if firstHandle == secondHandle {
 			t.Fatalf("receipt handle did not rotate: %v", firstHandle)
 		}
+		change, _ := json.Marshal(map[string]any{"QueueUrl": "http://queue/000000000000/bdd-rotate", "ReceiptHandle": firstHandle, "VisibilityTimeout": 0})
+		if status, body = call("ChangeMessageVisibility", string(change)); status != http.StatusOK {
+			t.Fatalf("prior handle change %d %s", status, body)
+		}
+		status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-rotate","VisibilityTimeout":0}`)
+		if status != http.StatusOK || !bytes.Contains(body, []byte(`"Body":"message"`)) {
+			t.Fatalf("prior handle receive %d %s", status, body)
+		}
 	})
 }

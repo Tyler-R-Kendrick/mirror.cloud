@@ -737,6 +737,13 @@ func TestAWSSDKSQSReceiptHandleRotationContract(t *testing.T) {
 	if err != nil || len(second.Messages) != 1 || aws.ToString(first.Messages[0].ReceiptHandle) == aws.ToString(second.Messages[0].ReceiptHandle) {
 		t.Fatalf("receipt handles did not rotate first=%#v second=%#v error=%v", first.Messages, second.Messages, err)
 	}
+	if _, err := client.ChangeMessageVisibility(context.Background(), &sqs.ChangeMessageVisibilityInput{QueueUrl: created.QueueUrl, ReceiptHandle: first.Messages[0].ReceiptHandle, VisibilityTimeout: 0}); err != nil {
+		t.Fatal(err)
+	}
+	third, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl})
+	if err != nil || len(third.Messages) != 1 {
+		t.Fatalf("prior receipt handle was not usable: %#v error %v", third.Messages, err)
+	}
 }
 
 func TestAWSSDKSQSMessageTimestampContract(t *testing.T) {

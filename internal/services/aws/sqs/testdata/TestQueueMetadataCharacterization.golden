@@ -2,6 +2,8 @@
   "all": {
     "Attributes": {
       "ApproximateNumberOfMessages": "0",
+      "ApproximateNumberOfMessagesDelayed": "0",
+      "ApproximateNumberOfMessagesNotVisible": "0",
       "CreatedTimestamp": "1577934245",
       "DelaySeconds": "5",
       "QueueArn": "arn:aws:sqs:us-east-1:123456789012:metadata",

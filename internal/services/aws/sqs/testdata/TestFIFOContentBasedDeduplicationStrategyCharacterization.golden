@@ -2,6 +2,8 @@
   "after": {
     "Attributes": {
       "ApproximateNumberOfMessages": "0",
+      "ApproximateNumberOfMessagesDelayed": "0",
+      "ApproximateNumberOfMessagesNotVisible": "0",
       "ContentBasedDeduplication": "false",
       "CreatedTimestamp": "0",
       "FifoQueue": "true",
@@ -13,6 +15,8 @@
   "before": {
     "Attributes": {
       "ApproximateNumberOfMessages": "0",
+      "ApproximateNumberOfMessagesDelayed": "0",
+      "ApproximateNumberOfMessagesNotVisible": "0",
       "ContentBasedDeduplication": "true",
       "CreatedTimestamp": "0",
       "FifoQueue": "true",

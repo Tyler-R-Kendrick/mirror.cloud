@@ -33,10 +33,34 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 		}
 		return nil, spi.NotImplemented(svc.ID, "unknown", "emulate")
 	}
+	if svc.ID == "aws.sqs" && sqsQueueURLRequest(r) && (action == "CreateQueue" || action == "ListQueues") {
+		return nil, sqsInvalidAction(action)
+	}
 	if op := svc.OperationByName(action); op != nil {
 		return op, nil
 	}
+	if svc.ID == "aws.sqs" {
+		return nil, sqsInvalidAction(action)
+	}
 	return nil, spi.NotImplemented(svc.ID, action, "emulate")
+}
+
+func sqsQueueURLRequest(r *http.Request) bool {
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	return len(parts) >= 2 && len(parts[len(parts)-2]) == 12 && isDigits(parts[len(parts)-2])
+}
+
+func isDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != ""
+}
+
+func sqsInvalidAction(action string) *spi.Fault {
+	return &spi.Fault{Code: "InvalidAction", Message: fmt.Sprintf("The action %s is not valid for this endpoint.", action), HTTPStatus: http.StatusBadRequest, Fault: "client"}
 }
 
 func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) (*spi.Request, error) {

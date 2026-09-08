@@ -96,3 +96,14 @@ func TestDemuxTargetsAndPaths(t *testing.T) {
 		t.Fatalf("unknown target demuxed to %s", service.ID)
 	}
 }
+
+func TestDemuxSQSQueueURLsWithQueryActions(t *testing.T) {
+	server := &Server{bundle: catalog.Bundle()}
+	for _, path := range []string{"/000000000000/q", "/queue/eu-west-1/000000000000/q"} {
+		req := httptest.NewRequest(http.MethodGet, "http://localhost"+path+"?Action=GetQueueAttributes", nil)
+		service := server.demux(req)
+		if service == nil || service.ID != "aws.sqs" {
+			t.Fatalf("demux %s = %#v, want aws.sqs", path, service)
+		}
+	}
+}

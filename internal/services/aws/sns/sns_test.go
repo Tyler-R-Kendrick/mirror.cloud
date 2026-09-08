@@ -714,6 +714,30 @@ func TestSNSPlatformEndpointLifecycleValidation(t *testing.T) {
 	}
 }
 
+func TestSNSPlatformApplicationValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	for name, input := range map[string]map[string]any{
+		"invalid name":       {"Name": "bad.name", "Platform": "GCM"},
+		"invalid platform":   {"Name": "mobile", "Platform": "INVALID"},
+		"missing credential": {"Name": "mobile", "Platform": "GCM", "Attributes": map[string]any{"PlatformPrincipal": "principal"}},
+		"unknown attribute":  {"Name": "mobile", "Platform": "GCM", "Attributes": map[string]any{"Unknown": "value", "PlatformCredential": "secret"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformApplication", Input: input}); err == nil {
+				t.Fatalf("accepted invalid platform application: %#v", input)
+			}
+		})
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformApplication", Input: map[string]any{
+		"Name": "mobile", "Platform": "GCM", "Attributes": map[string]any{"PlatformCredential": "secret"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSNSPublishDisabledPlatformEndpoint(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

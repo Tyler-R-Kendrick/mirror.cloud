@@ -205,8 +205,12 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 	case "CreatePlatformApplication":
 		name := str(req.Input["Name"])
 		plat := str(req.Input["Platform"])
+		attrs := flattenAttrEntries(req.Input, "Attributes")
+		if fault := validatePlatformApplication(name, plat, attrs); fault != nil {
+			return nil, fault
+		}
 		arn := "arn:aws:sns:" + req.Identity.Region + ":" + req.Identity.Account + ":app/" + plat + "/" + name
-		rec := map[string]any{"PlatformApplicationArn": arn, "Name": name, "Platform": plat, "Attributes": req.Input["Attributes"]}
+		rec := map[string]any{"PlatformApplicationArn": arn, "Name": name, "Platform": plat, "Attributes": attrs}
 		b, _ := json.Marshal(rec)
 		_ = col.Put(ctx, arn, b)
 		return &spi.Response{Output: map[string]any{"PlatformApplicationArn": arn}}, nil
@@ -253,6 +257,28 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		_ = json.Unmarshal(b, &rec)
 		return &spi.Response{Output: map[string]any{"Attributes": rec["Attributes"]}}, nil
 	}
+}
+
+func validatePlatformApplication(name, platform string, attrs map[string]any) *spi.Fault {
+	if len(name) < 1 || len(name) > 256 || !validTopicChars(name) {
+		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Name", HTTPStatus: 400, Fault: "client"}
+	}
+	switch platform {
+	case "ADM", "APNS", "APNS_SANDBOX", "BAIDU", "FCM", "GCM", "MPNS", "WNS":
+	default:
+		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Platform", HTTPStatus: 400, Fault: "client"}
+	}
+	if len(attrs) > 0 {
+		if str(attrs["PlatformCredential"]) == "" {
+			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Attributes", HTTPStatus: 400, Fault: "client"}
+		}
+		for key := range attrs {
+			if key != "PlatformPrincipal" && key != "PlatformCredential" {
+				return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Attributes", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+	}
+	return nil
 }
 
 func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Response, error) {

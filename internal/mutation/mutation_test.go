@@ -17808,6 +17808,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPlatformEndpointAttributeValidation",
 		},
 		{
+			name: "sns-accept-invalid-platform-application",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  `if fault := validatePlatformApplication(name, plat, attrs); fault != nil {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPlatformApplicationValidation",
+		},
+		{
 			name: "s3-copy-replace-to-copy",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `if directive != "REPLACE" {`,

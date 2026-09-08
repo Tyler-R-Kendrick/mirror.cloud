@@ -993,6 +993,32 @@ func TestSuccessivePurgeCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
+func TestPurgeClearsFIFODeduplicationCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response.Output
+	}
+	attrs := map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "false"}
+	call("CreateQueue", map[string]any{"QueueName": "purge-dedup.fifo", "Attributes": attrs})
+	input := map[string]any{"QueueName": "purge-dedup.fifo", "MessageBody": "before", "MessageGroupId": "g1", "MessageDeduplicationId": "same"}
+	call("SendMessage", input)
+	call("PurgeQueue", map[string]any{"QueueName": "purge-dedup.fifo"})
+	input["MessageBody"] = "after"
+	call("SendMessage", input)
+	messages := call("ReceiveMessage", map[string]any{"QueueName": "purge-dedup.fifo", "VisibilityTimeout": 0})["Messages"].([]any)
+	if len(messages) != 1 || str(asMap(messages[0])["Body"]) != "after" {
+		t.Fatalf("purge did not clear FIFO deduplication state: %#v", messages)
+	}
+}
+
 func TestReceiveMessageMaxNumberValidation(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

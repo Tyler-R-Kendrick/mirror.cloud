@@ -18179,6 +18179,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestQueueCannotBeRecreatedUntilDeleteWindowExpires",
 		},
 		{
+			name: "sqs-purge-keep-deduplication-state",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `[]string{"msgs:" + name, "dedup:" + name}`,
+			new:  `[]string{"msgs:" + name}`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestPurgeClearsFIFODeduplicationCharacterization",
+		},
+		{
 			name: "sqs-receive-drop-body-digest",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  `"MD5OfBody": m["md5"]`,

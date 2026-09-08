@@ -304,9 +304,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 		}
 		_ = p.col(req, "qpurge").Put(ctx, name, []byte(strconv.FormatInt(p.deps.Clock.Now().UnixNano(), 10)))
-		kvs, _, _ := p.col(req, "msgs:"+name).List(ctx, "", "", 0)
-		for _, kv := range kvs {
-			_ = p.col(req, "msgs:"+name).Delete(ctx, kv.Key)
+		for _, collection := range []string{"msgs:" + name, "dedup:" + name} {
+			kvs, _, _ := p.col(req, collection).List(ctx, "", "", 0)
+			for _, kv := range kvs {
+				_ = p.col(req, collection).Delete(ctx, kv.Key)
+			}
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "TagQueue":

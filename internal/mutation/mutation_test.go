@@ -17502,7 +17502,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-ignore-publish-target-validation",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-			old:  "case \"Publish\":\n\t\tif target := str(req.Input[\"TargetArn\"]); target != \"\" && str(req.Input[\"TopicArn\"]) == \"\" && endpointResourceARN(target) {\n\t\t\tif fault := p.validateEndpointTarget(ctx, req, target); fault != nil {\n\t\t\t\treturn nil, fault\n\t\t\t}\n\t\t\tif fault := validatePublishMessage(req); fault != nil {\n\t\t\t\treturn nil, fault\n\t\t\t}\n\t\t\t_ = p.deps.Bus.Publish(ctx, \"sns:\"+target, []byte(str(req.Input[\"Message\"])))\n\t\t\treturn &spi.Response{Output: map[string]any{\"MessageId\": p.deps.Rand.Hex(16)}}, nil\n\t\t}\n\t\tif fault := p.validatePublishTarget(ctx, req, topicARN(req.Input)); fault != nil {",
+			old:  "case \"Publish\":\n\t\tif target := str(req.Input[\"TargetArn\"]); target != \"\" && str(req.Input[\"TopicArn\"]) == \"\" && endpointResourceARN(target) {\n\t\t\tif fault := p.validateEndpointTarget(ctx, req, target); fault != nil {\n\t\t\t\treturn nil, fault\n\t\t\t}\n\t\t\tif fault := validatePublishMessage(req); fault != nil {\n\t\t\t\treturn nil, fault\n\t\t\t}\n\t\t\tif message, ok := p.platformEndpointMessage(ctx, req, target, str(req.Input[\"Message\"]), str(req.Input[\"MessageStructure\"])); ok {\n\t\t\t\t_ = p.deps.Bus.Publish(ctx, \"sns:\"+target, []byte(message))\n\t\t\t}\n\t\t\treturn &spi.Response{Output: map[string]any{\"MessageId\": p.deps.Rand.Hex(16)}}, nil\n\t\t}\n\t\tif fault := p.validatePublishTarget(ctx, req, topicARN(req.Input)); fault != nil {",
 			new:  "case \"Publish\":\n\t\tif false {",
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestTopicValidationAndPublishTargetCharacterization",
@@ -17802,10 +17802,18 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-drop-platform-endpoint-dispatch",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-			old:  `_ = p.deps.Bus.Publish(ctx, "sns:"+target, []byte(str(req.Input["Message"])))`,
-			new:  `if false { _ = p.deps.Bus.Publish(ctx, "sns:"+target, []byte(str(req.Input["Message"]))) }`,
+			old:  `if message, ok := p.platformEndpointMessage(ctx, req, target, str(req.Input["Message"]), str(req.Input["MessageStructure"])); ok {`,
+			new:  `if false {`,
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSPublishDisabledPlatformEndpoint",
+		},
+		{
+			name: "sns-drop-application-subscription-dispatch",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `if protocol == "application" {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPlatformEndpointSubscriptionDispatch",
 		},
 		{
 			name: "sns-accept-invalid-platform-endpoint-attributes",

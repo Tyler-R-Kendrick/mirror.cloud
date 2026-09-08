@@ -182,7 +182,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if fault := validatePublishMessage(req); fault != nil {
 				return nil, fault
 			}
-			_ = p.deps.Bus.Publish(ctx, "sns:"+target, []byte(str(req.Input["Message"])))
+			if message, ok := p.platformEndpointMessage(ctx, req, target, str(req.Input["Message"]), str(req.Input["MessageStructure"])); ok {
+				_ = p.deps.Bus.Publish(ctx, "sns:"+target, []byte(message))
+			}
 			return &spi.Response{Output: map[string]any{"MessageId": p.deps.Rand.Hex(16)}}, nil
 		}
 		if fault := p.validatePublishTarget(ctx, req, topicARN(req.Input)); fault != nil {
@@ -593,6 +595,12 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 			continue
 		}
 		protocol := str(sub["Protocol"])
+		if protocol == "application" {
+			if message, ok := p.platformEndpointMessage(ctx, req, str(sub["Endpoint"]), body, str(req.Input["MessageStructure"])); ok {
+				_ = p.deps.Bus.Publish(ctx, "sns:"+str(sub["Endpoint"]), []byte(message))
+			}
+			continue
+		}
 		message := structuredMessage(body, str(req.Input["MessageStructure"]), protocol)
 		payload := message
 		if str(sub["RawMessageDelivery"]) != "true" {
@@ -620,6 +628,25 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 		_ = p.col(req, "snsdedup").Put(ctx, arn+"\x1f"+dedupKey, mustJSON(map[string]any{"id": mid, "until": p.deps.Clock.Now().Add(5 * time.Minute).UnixNano()}))
 	}
 	return &spi.Response{Output: map[string]any{"MessageId": mid}}, nil
+}
+
+func (p *Pack) platformEndpointMessage(ctx context.Context, req *spi.Request, endpointARN, body, structure string) (string, bool) {
+	b, found, _ := p.col(req, "platend").Get(ctx, endpointARN)
+	if !found {
+		return "", false
+	}
+	var endpoint map[string]any
+	if json.Unmarshal(b, &endpoint) != nil || strings.EqualFold(str(endpoint["Enabled"]), "false") {
+		return "", false
+	}
+	platform := "application"
+	if app, ok, _ := p.col(req, "platapps").Get(ctx, str(endpoint["PlatformApplicationArn"])); ok {
+		var record map[string]any
+		if json.Unmarshal(app, &record) == nil && str(record["Platform"]) != "" {
+			platform = str(record["Platform"])
+		}
+	}
+	return structuredMessage(body, structure, platform), true
 }
 
 func (p *Pack) validatePublishTarget(ctx context.Context, req *spi.Request, arn string) *spi.Fault {

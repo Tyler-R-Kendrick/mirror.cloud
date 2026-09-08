@@ -785,6 +785,47 @@ func TestSNSPublishDisabledPlatformEndpoint(t *testing.T) {
 	}
 }
 
+func TestSNSPlatformEndpointSubscriptionDispatch(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	app, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformApplication", Input: map[string]any{
+		"Name": "application-dispatch", "Platform": "GCM", "Attributes": map[string]any{"PlatformCredential": "secret"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformEndpoint", Input: map[string]any{
+		"PlatformApplicationArn": app.Output["PlatformApplicationArn"], "Token": "token",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpointARN := str(endpoint.Output["EndpointArn"])
+	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "application-dispatch"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Protocol": "application", "Endpoint": endpointARN,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var delivered string
+	cancel := deps.Bus.Subscribe("sns:"+endpointARN, func(_ context.Context, body []byte) { delivered = string(body) })
+	defer cancel()
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "MessageStructure": "json",
+		"Message": `{"default":"default","GCM":"platform"}`,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if delivered != "platform" {
+		t.Fatalf("platform endpoint message=%q", delivered)
+	}
+}
+
 func TestSNSPlatformEndpointAttributeValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

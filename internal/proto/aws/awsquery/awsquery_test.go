@@ -103,3 +103,15 @@ func TestSQSGetQueueAttributesQueryShape(t *testing.T) {
 		t.Fatalf("SQS Query JSON attributes %q %s", w.Header().Get("Content-Type"), w.Body.String())
 	}
 }
+
+func TestSQSReceiveMessageQueryJSONShape(t *testing.T) {
+	svc := &model.Service{ID: "aws.sqs", Protocol: model.ProtoAWSQuery}
+	op := &model.Operation{Name: "ReceiveMessage"}
+	w := httptest.NewRecorder()
+	if err := NewJSON().Encode(svc, op, w, &spi.Response{Output: map[string]any{"Messages": []any{map[string]any{"Body": `{"foo":"bar"}`}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Header().Get("Content-Type") != "application/json" || !strings.Contains(w.Body.String(), `"ReceiveMessageResponse"`) || !strings.Contains(w.Body.String(), `"Message":{"Body":"{\"foo\":\"bar\"}"}`) {
+		t.Fatalf("SQS Query JSON receive %q %s", w.Header().Get("Content-Type"), w.Body.String())
+	}
+}

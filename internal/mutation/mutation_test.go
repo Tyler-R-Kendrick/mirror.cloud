@@ -18757,6 +18757,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestBootedServerSQSSection48",
 		},
 		{
+			name: "sqs-query-json-receive-uses-message-envelope",
+			file: filepath.Join("internal", "proto", "aws", "awsquery", "awsquery.go"),
+			old:  `if c.json && svc.ID == "aws.sqs" && op.Name == "ReceiveMessage" {`,
+			new:  `if false {`,
+			pkg:  "./internal/proto/aws/awsquery",
+			run:  "TestSQSReceiveMessageQueryJSONShape",
+		},
+		{
 			name: "sqs-query-url-without-action-stays-sqs",
 			file: filepath.Join("internal", "edge", "edge.go"),
 			old:  `if action == "" && r.Method == http.MethodGet && sqsQueuePath(r.URL.Path) {`,

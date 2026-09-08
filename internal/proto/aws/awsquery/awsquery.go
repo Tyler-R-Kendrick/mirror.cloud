@@ -71,6 +71,15 @@ func (c Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWr
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"GetQueueAttributesResponse": map[string]any{"GetQueueAttributesResult": map[string]any{"Attributes": sqsAttributes(resp.Output["Attributes"])}}})
 	}
+	if c.json && svc.ID == "aws.sqs" && op.Name == "ReceiveMessage" {
+		result := map[string]any{}
+		if messages, ok := resp.Output["Messages"].([]any); ok && len(messages) > 0 {
+			result["Message"] = messages[0]
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		return json.NewEncoder(w).Encode(map[string]any{"ReceiveMessageResponse": map[string]any{"ReceiveMessageResult": result}})
+	}
 	w.Header().Set("Content-Type", "text/xml; charset=UTF-8")
 	w.WriteHeader(status)
 	ns := svc.XMLNamespace

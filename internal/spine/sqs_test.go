@@ -362,6 +362,21 @@ func TestBootedServerSQSSection48(t *testing.T) {
 	if !strings.Contains(qrecv, "hello-query-wire") {
 		t.Fatalf("query recv body %s", qrecv)
 	}
+	if code, body, _ := queryCall(url.Values{"Action": {"SendMessage"}, "Version": {"2012-11-05"}, "QueueName": {"queryq"}, "MessageBody": {"json-query-wire"}}); code >= 300 {
+		t.Fatalf("query JSON seed %d %s", code, body)
+	}
+	getReq, _ = http.NewRequest(http.MethodGet, ts.URL+"/000000000000/queryq?Action=ReceiveMessage&VisibilityTimeout=0", nil)
+	getReq.Header.Set("Authorization", auth)
+	getReq.Header.Set("Accept", "application/json")
+	getRes, err = http.DefaultClient.Do(getReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	getBody, _ = io.ReadAll(getRes.Body)
+	getRes.Body.Close()
+	if getRes.StatusCode != http.StatusOK || getRes.Header.Get("Content-Type") != "application/json" || !strings.Contains(string(getBody), `"ReceiveMessageResponse"`) || !strings.Contains(string(getBody), `"Message":{"Body":"`) {
+		t.Fatalf("query JSON receive %d %q %s", getRes.StatusCode, getRes.Header.Get("Content-Type"), getBody)
+	}
 	if code, body, _ := queryCall(url.Values{"Action": {"DeleteMessage"}, "Version": {"2012-11-05"}, "QueueName": {"queryq"}, "ReceiptHandle": {"nope"}}); code != http.StatusBadRequest || !strings.Contains(body, "ReceiptHandleIsInvalid") {
 		t.Fatalf("query delete validation %d %s", code, body)
 	}

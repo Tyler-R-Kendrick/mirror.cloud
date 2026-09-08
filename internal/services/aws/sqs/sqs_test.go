@@ -515,6 +515,35 @@ func TestFIFOMessageGroupVisibilityAfterTerminateCharacterization(t *testing.T) 
 	})
 }
 
+func TestFIFOPartialGroupPriorityCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.Output
+	}
+	call("CreateQueue", map[string]any{"QueueName": "partial-priority.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "VisibilityTimeout": "30"}})
+	call("SendMessage", map[string]any{"QueueName": "partial-priority.fifo", "MessageBody": "g1-m1", "MessageGroupId": "g1"})
+	call("SendMessage", map[string]any{"QueueName": "partial-priority.fifo", "MessageBody": "g1-m2", "MessageGroupId": "g1"})
+	call("SendMessage", map[string]any{"QueueName": "partial-priority.fifo", "MessageBody": "g2-m1", "MessageGroupId": "g2"})
+	first := call("ReceiveMessage", map[string]any{"QueueName": "partial-priority.fifo", "MaxNumberOfMessages": 2})
+	second := call("ReceiveMessage", map[string]any{"QueueName": "partial-priority.fifo", "MaxNumberOfMessages": 1})
+	call("ChangeMessageVisibility", map[string]any{"QueueName": "partial-priority.fifo", "ReceiptHandle": asMap(second["Messages"].([]any)[0])["ReceiptHandle"], "VisibilityTimeout": 0})
+	call("ChangeMessageVisibility", map[string]any{"QueueName": "partial-priority.fifo", "ReceiptHandle": asMap(first["Messages"].([]any)[0])["ReceiptHandle"], "VisibilityTimeout": 0})
+	third := call("ReceiveMessage", map[string]any{"QueueName": "partial-priority.fifo", "MaxNumberOfMessages": 1})
+	if got := str(asMap(third["Messages"].([]any)[0])["Body"]); got != "g2-m1" {
+		t.Fatalf("partial group priority: first=%#v third=%#v", first, third)
+	}
+}
+
 func TestFIFOMessageGroupVisibilityAfterDeleteCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

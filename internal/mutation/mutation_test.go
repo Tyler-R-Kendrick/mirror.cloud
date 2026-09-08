@@ -17616,7 +17616,7 @@ func TestMutantsAreKilled(t *testing.T) {
 			old:  "if partial[order[j]] != partial[order[i]] {\n\t\t\t\t\tif !partial[order[j]] {",
 			new:  "if false {\n\t\t\t\t\tif !partial[order[j]] {",
 			pkg:  "./internal/services/aws/sqs",
-			run:  "TestFIFOMessageGroupVisibilityAfterTerminateCharacterization",
+			run:  "TestFIFOPartialGroupPriorityCharacterization",
 		},
 		{
 			name: "sqs-fifo-allow-per-message-delay",

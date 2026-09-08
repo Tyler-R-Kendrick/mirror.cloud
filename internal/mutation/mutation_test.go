@@ -17912,6 +17912,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPermissionValidation",
 		},
 		{
+			name: "sns-retain-subscription-after-endpoint-delete",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  "if json.Unmarshal(kv.Value, &sub) == nil && str(sub[\"Endpoint\"]) == arn {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPlatformEndpointDeletionCleansSubscriptions",
+		},
+		{
 			name: "sns-accept-invalid-platform-endpoint-attributes",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old:  "func validateEndpointAttributes(attrs map[string]any) *spi.Fault {\n\tfor key, value := range attrs {",

@@ -835,6 +835,44 @@ func TestSNSPlatformEndpointSubscriptionDispatch(t *testing.T) {
 	}
 }
 
+func TestSNSPlatformEndpointDeletionCleansSubscriptions(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	app, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformApplication", Input: map[string]any{
+		"Name": "endpoint-delete", "Platform": "GCM", "Attributes": map[string]any{"PlatformCredential": "secret"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformEndpoint", Input: map[string]any{
+		"PlatformApplicationArn": app.Output["PlatformApplicationArn"], "Token": "token",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "endpoint-delete"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Protocol": "application", "Endpoint": endpoint.Output["EndpointArn"],
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteEndpoint", Input: map[string]any{"EndpointArn": endpoint.Output["EndpointArn"]}}); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListSubscriptionsByTopic", Input: map[string]any{"TopicArn": topic.Output["TopicArn"]}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(asSlice(listed.Output["Subscriptions"])) != 0 {
+		t.Fatalf("endpoint subscription remained: %#v", listed.Output)
+	}
+}
+
 func TestSNSPhoneNumberPublish(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

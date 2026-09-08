@@ -342,7 +342,15 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		_ = col.Put(ctx, arn, b)
 		return &spi.Response{Output: map[string]any{"EndpointArn": arn}}, nil
 	case "DeleteEndpoint":
-		_ = col.Delete(ctx, str(req.Input["EndpointArn"]))
+		arn := str(req.Input["EndpointArn"])
+		_ = col.Delete(ctx, arn)
+		kvs, _, _ := p.col(req, "subs").List(ctx, "", "", 0)
+		for _, kv := range kvs {
+			var sub map[string]any
+			if json.Unmarshal(kv.Value, &sub) == nil && str(sub["Endpoint"]) == arn {
+				_ = p.col(req, "subs").Delete(ctx, kv.Key)
+			}
+		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "SetEndpointAttributes":
 		arn := str(req.Input["EndpointArn"])

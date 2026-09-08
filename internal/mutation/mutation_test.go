@@ -17800,6 +17800,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPublishDisabledPlatformEndpoint",
 		},
 		{
+			name: "sns-accept-invalid-platform-endpoint-attributes",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  `for key, value := range attrs {`,
+			new:  `for key, value := range map[string]any{} {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPlatformEndpointAttributeValidation",
+		},
+		{
 			name: "s3-copy-replace-to-copy",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `if directive != "REPLACE" {`,

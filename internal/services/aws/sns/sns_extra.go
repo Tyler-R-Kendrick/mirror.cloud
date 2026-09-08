@@ -267,6 +267,14 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		if tok == "" {
 			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Token", HTTPStatus: 400, Fault: "client"}
 		}
+		attrs := flattenAttrEntries(req.Input, "Attributes")
+		if fault := validateEndpointAttributes(attrs); fault != nil {
+			return nil, fault
+		}
+		customUserData := req.Input["CustomUserData"]
+		if customUserData == nil {
+			customUserData = attrs["CustomUserData"]
+		}
 		kvs, _, _ := col.List(ctx, "", "", 0)
 		for _, kv := range kvs {
 			var existing map[string]any
@@ -275,7 +283,7 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 			}
 		}
 		arn := app + "/endpoint/" + p.deps.Rand.Hex(8)
-		rec := map[string]any{"EndpointArn": arn, "PlatformApplicationArn": app, "Token": tok, "CustomUserData": req.Input["CustomUserData"], "Enabled": "true"}
+		rec := map[string]any{"EndpointArn": arn, "PlatformApplicationArn": app, "Token": tok, "CustomUserData": customUserData, "Enabled": "true"}
 		b, _ := json.Marshal(rec)
 		_ = col.Put(ctx, arn, b)
 		return &spi.Response{Output: map[string]any{"EndpointArn": arn}}, nil
@@ -291,6 +299,9 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		rec := map[string]any{"EndpointArn": arn}
 		_ = json.Unmarshal(b, &rec)
 		attrs := flattenAttrEntries(req.Input, "Attributes")
+		if fault := validateEndpointAttributes(attrs); fault != nil {
+			return nil, fault
+		}
 		for k, v := range attrs {
 			rec[k] = v
 		}
@@ -320,6 +331,28 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		_ = json.Unmarshal(b, &rec)
 		return &spi.Response{Output: map[string]any{"Attributes": rec}}, nil
 	}
+}
+
+func validateEndpointAttributes(attrs map[string]any) *spi.Fault {
+	for key, value := range attrs {
+		switch key {
+		case "Enabled":
+			if !strings.EqualFold(str(value), "true") && !strings.EqualFold(str(value), "false") {
+				return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Enabled", HTTPStatus: 400, Fault: "client"}
+			}
+		case "Token":
+			if str(value) == "" {
+				return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Token", HTTPStatus: 400, Fault: "client"}
+			}
+		case "CustomUserData":
+			if len(str(value)) > 2048 {
+				return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: CustomUserData", HTTPStatus: 400, Fault: "client"}
+			}
+		default:
+			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: " + key, HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	return nil
 }
 
 func flattenAttrEntries(in map[string]any, prefix string) map[string]any {

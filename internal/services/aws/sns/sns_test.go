@@ -751,6 +751,44 @@ func TestSNSPublishDisabledPlatformEndpoint(t *testing.T) {
 	}
 }
 
+func TestSNSPlatformEndpointAttributeValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	app, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformApplication", Input: map[string]any{
+		"Name": "attribute-validation", "Platform": "GCM", "Attributes": map[string]any{"PlatformCredential": "secret"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appARN := app.Output["PlatformApplicationArn"]
+	for _, attrs := range []map[string]any{
+		{"InvalidKey": "value"},
+		{"Enabled": "maybe"},
+		{"CustomUserData": strings.Repeat("x", 2049)},
+	} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformEndpoint", Input: map[string]any{
+			"PlatformApplicationArn": appARN, "Token": "token-" + str(attrs["Enabled"]), "Attributes": attrs,
+		}}); err == nil {
+			t.Fatalf("accepted invalid endpoint attributes %#v", attrs)
+		}
+	}
+	endpoint, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformEndpoint", Input: map[string]any{
+		"PlatformApplicationArn": appARN, "Token": "valid-token",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, attrs := range []map[string]any{{"InvalidKey": "value"}, {"Enabled": "maybe"}, {"CustomUserData": strings.Repeat("x", 2049)}} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetEndpointAttributes", Input: map[string]any{
+			"EndpointArn": endpoint.Output["EndpointArn"], "Attributes": attrs,
+		}}); err == nil {
+			t.Fatalf("accepted invalid set attributes %#v", attrs)
+		}
+	}
+}
+
 func TestSNSFilterPolicyScopeCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, qp := New(deps), sqs.New(deps)

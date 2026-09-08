@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	neturl "net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -55,6 +56,13 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 }
 
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	if queueScoped(req.Operation) || req.Operation == "GetQueueUrl" {
+		if owner := queueOwner(req); owner != "" && owner != req.Identity.Account {
+			effective := *req
+			effective.Identity.Account = owner
+			req = &effective
+		}
+	}
 	base := advertise(req)
 	if queueScoped(req.Operation) && !p.queueExists(ctx, req, queueName(req)) {
 		return nil, queueMissing(req)
@@ -1362,6 +1370,34 @@ func queueName(req *spi.Request) string {
 		}
 	}
 	return u
+}
+
+func queueOwner(req *spi.Request) string {
+	if owner := str(req.Input["QueueOwnerAWSAccountId"]); owner != "" {
+		return owner
+	}
+	u := str(req.Input["QueueUrl"])
+	if u == "" && req.HTTP != nil && req.HTTP.URL != nil {
+		u = req.HTTP.URL.String()
+	}
+	parsed, err := neturl.Parse(u)
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) < 2 {
+		return ""
+	}
+	owner := parts[len(parts)-2]
+	if len(owner) != 12 {
+		return ""
+	}
+	for _, r := range owner {
+		if r < '0' || r > '9' {
+			return ""
+		}
+	}
+	return owner
 }
 
 func str(v any) string { s, _ := v.(string); return s }

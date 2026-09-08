@@ -1,0 +1,921 @@
+{
+  "schema": "trace/1",
+  "service": "aws.ec2",
+  "source": "internal/services/aws/ec2",
+  "steps": [
+    {
+      "operation": "DescribeVpcs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "vpcSet": null
+      }
+    },
+    {
+      "operation": "CreateVpc",
+      "input": {
+        "CidrBlock": "10.7.0.0/16"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "vpc": {
+          "CidrBlock": "10.7.0.0/16",
+          "State": "available",
+          "VpcId": "vpc-7c589129"
+        }
+      }
+    },
+    {
+      "operation": "CreateVpc",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "vpc": {
+          "CidrBlock": "10.0.0.0/16",
+          "State": "available",
+          "VpcId": "vpc-5f59f223"
+        }
+      }
+    },
+    {
+      "operation": "DescribeVpcs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "vpcSet": [
+          {
+            "CidrBlock": "10.0.0.0/16",
+            "State": "available",
+            "VpcId": "vpc-5f59f223"
+          },
+          {
+            "CidrBlock": "10.7.0.0/16",
+            "State": "available",
+            "VpcId": "vpc-7c589129"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeVpcs",
+      "input": {
+        "VpcId.1": {
+          "$fromPath": "vpc.VpcId",
+          "$fromStep": 1
+        },
+        "VpcIds": [
+          {
+            "$fromPath": "vpc.VpcId",
+            "$fromStep": 1
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "vpcSet": [
+          {
+            "CidrBlock": "10.7.0.0/16",
+            "State": "available",
+            "VpcId": "vpc-7c589129"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeVpcs",
+      "input": {
+        "VpcId.1": "vpc-absent",
+        "VpcIds": [
+          "vpc-absent"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "vpcSet": null
+      }
+    },
+    {
+      "operation": "CreateSubnet",
+      "input": {
+        "CidrBlock": "10.7.1.0/24",
+        "VpcId": {
+          "$fromPath": "vpc.VpcId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "subnet": {
+          "CidrBlock": "10.7.1.0/24",
+          "State": "available",
+          "SubnetId": "subnet-9c8e2cb0",
+          "VpcId": "vpc-7c589129"
+        }
+      }
+    },
+    {
+      "operation": "CreateSubnet",
+      "input": {
+        "VpcId": {
+          "$fromPath": "vpc.VpcId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "subnet": {
+          "CidrBlock": "10.0.1.0/24",
+          "State": "available",
+          "SubnetId": "subnet-33f6fc5d",
+          "VpcId": "vpc-7c589129"
+        }
+      }
+    },
+    {
+      "operation": "DescribeSubnets",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "subnetSet": [
+          {
+            "CidrBlock": "10.0.1.0/24",
+            "State": "available",
+            "SubnetId": "subnet-33f6fc5d",
+            "VpcId": "vpc-7c589129"
+          },
+          {
+            "CidrBlock": "10.7.1.0/24",
+            "State": "available",
+            "SubnetId": "subnet-9c8e2cb0",
+            "VpcId": "vpc-7c589129"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeSubnets",
+      "input": {
+        "SubnetId.1": {
+          "$fromPath": "subnet.SubnetId",
+          "$fromStep": 6
+        },
+        "SubnetIds": [
+          {
+            "$fromPath": "subnet.SubnetId",
+            "$fromStep": 6
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "subnetSet": [
+          {
+            "CidrBlock": "10.7.1.0/24",
+            "State": "available",
+            "SubnetId": "subnet-9c8e2cb0",
+            "VpcId": "vpc-7c589129"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "CreateSecurityGroup",
+      "input": {
+        "Description": "t",
+        "GroupDescription": "t",
+        "GroupName": "web",
+        "VpcId": {
+          "$fromPath": "vpc.VpcId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "groupId": "sg-83d4958a",
+        "securityGroup": {
+          "Description": "t",
+          "GroupId": "sg-83d4958a",
+          "GroupName": "web",
+          "VpcId": "vpc-7c589129"
+        }
+      },
+      "superseded_members": {
+        "securityGroup": "CreateSecurityGroupResult declares GroupId, SecurityGroupArn and Tags. The pack also answered the whole stored group under `securityGroup`, which the result does not declare and no SDK reads; DescribeSecurityGroups is where a group itself is declared."
+      }
+    },
+    {
+      "operation": "CreateSecurityGroup",
+      "input": {
+        "Description": "d",
+        "GroupDescription": "d",
+        "GroupName": "db"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "groupId": "sg-100aa4e6",
+        "securityGroup": {
+          "Description": "d",
+          "GroupId": "sg-100aa4e6",
+          "GroupName": "db",
+          "VpcId": ""
+        }
+      },
+      "superseded_members": {
+        "securityGroup": "CreateSecurityGroupResult declares GroupId, SecurityGroupArn and Tags. The pack also answered the whole stored group under `securityGroup`, which the result does not declare and no SDK reads; DescribeSecurityGroups is where a group itself is declared."
+      }
+    },
+    {
+      "operation": "DescribeSecurityGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "securityGroupInfo": [
+          {
+            "Description": "d",
+            "GroupId": "sg-100aa4e6",
+            "GroupName": "db",
+            "VpcId": ""
+          },
+          {
+            "Description": "t",
+            "GroupId": "sg-83d4958a",
+            "GroupName": "web",
+            "VpcId": "vpc-7c589129"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeSecurityGroups",
+      "input": {
+        "GroupId.1": {
+          "$fromPath": "groupId",
+          "$fromStep": 10
+        },
+        "GroupIds": [
+          {
+            "$fromPath": "groupId",
+            "$fromStep": 10
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "securityGroupInfo": [
+          {
+            "Description": "t",
+            "GroupId": "sg-83d4958a",
+            "GroupName": "web",
+            "VpcId": "vpc-7c589129"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "RunInstances",
+      "input": {
+        "ImageId": "ami-1",
+        "MaxCount": "2",
+        "MinCount": "2",
+        "SubnetId": {
+          "$fromPath": "subnet.SubnetId",
+          "$fromStep": 6
+        },
+        "VpcId": {
+          "$fromPath": "vpc.VpcId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "instancesSet": [
+          {
+            "ImageId": "ami-1",
+            "InstanceId": "i-3ed10eca",
+            "InstanceType": "t3.micro",
+            "State": {
+              "Code": 16,
+              "Name": "running"
+            },
+            "SubnetId": "subnet-9c8e2cb0",
+            "VpcId": "vpc-7c589129"
+          },
+          {
+            "ImageId": "ami-1",
+            "InstanceId": "i-4da7b6a4",
+            "InstanceType": "t3.micro",
+            "State": {
+              "Code": 16,
+              "Name": "running"
+            },
+            "SubnetId": "subnet-9c8e2cb0",
+            "VpcId": "vpc-7c589129"
+          }
+        ],
+        "reservationId": "r-e7175ec1"
+      }
+    },
+    {
+      "operation": "RunInstances",
+      "input": {
+        "ImageId": "ami-2",
+        "MaxCount": "4",
+        "MinCount": "1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "instancesSet": [
+          {
+            "ImageId": "ami-2",
+            "InstanceId": "i-77df676f",
+            "InstanceType": "t3.micro",
+            "State": {
+              "Code": 16,
+              "Name": "running"
+            },
+            "SubnetId": "",
+            "VpcId": ""
+          }
+        ],
+        "reservationId": "r-9045051b"
+      }
+    },
+    {
+      "operation": "RunInstances",
+      "input": {
+        "ImageId": "ami-3",
+        "InstanceType": "m5.large",
+        "MaxCount": "3",
+        "MinCount": "3"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "instancesSet": [
+          {
+            "ImageId": "ami-3",
+            "InstanceId": "i-ac1d53d8",
+            "InstanceType": "m5.large",
+            "State": {
+              "Code": 16,
+              "Name": "running"
+            },
+            "SubnetId": "",
+            "VpcId": ""
+          },
+          {
+            "ImageId": "ami-3",
+            "InstanceId": "i-71a868c4",
+            "InstanceType": "m5.large",
+            "State": {
+              "Code": 16,
+              "Name": "running"
+            },
+            "SubnetId": "",
+            "VpcId": ""
+          },
+          {
+            "ImageId": "ami-3",
+            "InstanceId": "i-34ee9203",
+            "InstanceType": "m5.large",
+            "State": {
+              "Code": 16,
+              "Name": "running"
+            },
+            "SubnetId": "",
+            "VpcId": ""
+          }
+        ],
+        "reservationId": "r-39bb7163"
+      }
+    },
+    {
+      "operation": "DescribeInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "reservationSet": [
+          {
+            "instancesSet": [
+              {
+                "ImageId": "ami-3",
+                "InstanceId": "i-34ee9203",
+                "InstanceType": "m5.large",
+                "State": {
+                  "Code": 16,
+                  "Name": "running"
+                },
+                "SubnetId": "",
+                "VpcId": ""
+              },
+              {
+                "ImageId": "ami-1",
+                "InstanceId": "i-3ed10eca",
+                "InstanceType": "t3.micro",
+                "State": {
+                  "Code": 16,
+                  "Name": "running"
+                },
+                "SubnetId": "subnet-9c8e2cb0",
+                "VpcId": "vpc-7c589129"
+              },
+              {
+                "ImageId": "ami-1",
+                "InstanceId": "i-4da7b6a4",
+                "InstanceType": "t3.micro",
+                "State": {
+                  "Code": 16,
+                  "Name": "running"
+                },
+                "SubnetId": "subnet-9c8e2cb0",
+                "VpcId": "vpc-7c589129"
+              },
+              {
+                "ImageId": "ami-3",
+                "InstanceId": "i-71a868c4",
+                "InstanceType": "m5.large",
+                "State": {
+                  "Code": 16,
+                  "Name": "running"
+                },
+                "SubnetId": "",
+                "VpcId": ""
+              },
+              {
+                "ImageId": "ami-2",
+                "InstanceId": "i-77df676f",
+                "InstanceType": "t3.micro",
+                "State": {
+                  "Code": 16,
+                  "Name": "running"
+                },
+                "SubnetId": "",
+                "VpcId": ""
+              },
+              {
+                "ImageId": "ami-3",
+                "InstanceId": "i-ac1d53d8",
+                "InstanceType": "m5.large",
+                "State": {
+                  "Code": 16,
+                  "Name": "running"
+                },
+                "SubnetId": "",
+                "VpcId": ""
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeInstances",
+      "input": {
+        "InstanceId.1": {
+          "$fromPath": "instancesSet.0.InstanceId",
+          "$fromStep": 14
+        },
+        "InstanceIds": [
+          {
+            "$fromPath": "instancesSet.0.InstanceId",
+            "$fromStep": 14
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "reservationSet": [
+          {
+            "instancesSet": [
+              {
+                "ImageId": "ami-1",
+                "InstanceId": "i-3ed10eca",
+                "InstanceType": "t3.micro",
+                "State": {
+                  "Code": 16,
+                  "Name": "running"
+                },
+                "SubnetId": "subnet-9c8e2cb0",
+                "VpcId": "vpc-7c589129"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "TerminateInstances",
+      "input": {
+        "InstanceId.1": {
+          "$fromPath": "instancesSet.0.InstanceId",
+          "$fromStep": 14
+        },
+        "InstanceIds": [
+          {
+            "$fromPath": "instancesSet.0.InstanceId",
+            "$fromStep": 14
+          }
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "instancesSet": [
+          {
+            "CurrentState": {
+              "Name": "terminated"
+            },
+            "InstanceId": "i-3ed10eca"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DescribeInstances",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "reservationSet": [
+          {
+            "instancesSet": [
+              {
+                "ImageId": "ami-3",
+                "InstanceId": "i-34ee9203",
+                "InstanceType": "m5.large",
+                "State": {
+                  "Code": 16,
+                  "Name": "running"
+                },
+                "SubnetId": "",
+                "VpcId": ""
+              },
+              {
+                "ImageId": "ami-1",
+                "InstanceId": "i-4da7b6a4",
+                "InstanceType": "t3.micro",
+                "State": {
+                  "Code": 16,
+                  "Name": "running"
+                },
+                "SubnetId": "subnet-9c8e2cb0",
+                "VpcId": "vpc-7c589129"
+              },
+              {
+                "ImageId": "ami-3",
+                "InstanceId": "i-71a868c4",
+                "InstanceType": "m5.large",
+                "State": {
+                  "Code": 16,
+                  "Name": "running"
+                },
+                "SubnetId": "",
+                "VpcId": ""
+              },
+              {
+                "ImageId": "ami-2",
+                "InstanceId": "i-77df676f",
+                "InstanceType": "t3.micro",
+                "State": {
+                  "Code": 16,
+                  "Name": "running"
+                },
+                "SubnetId": "",
+                "VpcId": ""
+              },
+              {
+                "ImageId": "ami-3",
+                "InstanceId": "i-ac1d53d8",
+                "InstanceType": "m5.large",
+                "State": {
+                  "Code": 16,
+                  "Name": "running"
+                },
+                "SubnetId": "",
+                "VpcId": ""
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation": "TerminateInstances",
+      "input": {
+        "InstanceId.1": "i-absent",
+        "InstanceIds": [
+          "i-absent"
+        ]
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "instancesSet": [
+          {
+            "CurrentState": {
+              "Name": "terminated"
+            },
+            "InstanceId": "i-absent"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteSecurityGroup",
+      "input": {
+        "GroupId": {
+          "$fromPath": "groupId",
+          "$fromStep": 10
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "return": "true"
+      },
+      "superseded_members": {
+        "Return": "Return is declared Boolean and the pack answered the string \"true\". Both serialize to \u003creturn\u003etrue\u003c/return\u003e, so no client can tell them apart, and the bundle answers the declared type."
+      }
+    },
+    {
+      "operation": "DeleteSecurityGroup",
+      "input": {
+        "GroupName": "db"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "return": "true"
+      },
+      "superseded_members": {
+        "Return": "Return is declared Boolean and the pack answered the string \"true\". Both serialize to \u003creturn\u003etrue\u003c/return\u003e, so no client can tell them apart, and the bundle answers the declared type."
+      }
+    },
+    {
+      "operation": "DescribeSecurityGroups",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "securityGroupInfo": [
+          {
+            "Description": "d",
+            "GroupId": "sg-100aa4e6",
+            "GroupName": "db",
+            "VpcId": ""
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteSubnet",
+      "input": {
+        "SubnetId": {
+          "$fromPath": "subnet.SubnetId",
+          "$fromStep": 6
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "return": "true"
+      },
+      "superseded_members": {
+        "return": "DeleteSubnet and DeleteVpc declare no output at all. The pack answered a `return` member that is on no result shape."
+      }
+    },
+    {
+      "operation": "DescribeSubnets",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "subnetSet": [
+          {
+            "CidrBlock": "10.0.1.0/24",
+            "State": "available",
+            "SubnetId": "subnet-33f6fc5d",
+            "VpcId": "vpc-7c589129"
+          }
+        ]
+      }
+    },
+    {
+      "operation": "DeleteVpc",
+      "input": {
+        "VpcId": {
+          "$fromPath": "vpc.VpcId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "return": "true"
+      },
+      "superseded_members": {
+        "return": "DeleteSubnet and DeleteVpc declare no output at all. The pack answered a `return` member that is on no result shape."
+      }
+    },
+    {
+      "operation": "DeleteVpc",
+      "input": {
+        "VpcId": {
+          "$fromPath": "vpc.VpcId",
+          "$fromStep": 1
+        }
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "return": "true"
+      },
+      "superseded_members": {
+        "return": "DeleteSubnet and DeleteVpc declare no output at all. The pack answered a `return` member that is on no result shape."
+      }
+    },
+    {
+      "operation": "DescribeVpcs",
+      "input": {},
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "vpcSet": [
+          {
+            "CidrBlock": "10.0.0.0/16",
+            "State": "available",
+            "VpcId": "vpc-5f59f223"
+          }
+        ]
+      }
+    }
+  ]
+}

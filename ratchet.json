@@ -1,10 +1,10 @@
 {
-  "packs": 48,
-  "case_labels": 1746,
-  "services_files": 83,
-  "services_loc": 45690,
+  "packs": 47,
+  "case_labels": 1734,
+  "services_files": 82,
+  "services_loc": 45537,
   "fault_sites": 754,
-  "register_sites": 48,
+  "register_sites": 47,
   "pack_dirs": [
     "aws/acm",
     "aws/apigateway",
@@ -16,7 +16,6 @@
     "aws/cloudfront",
     "aws/cognitoidp",
     "aws/dynamodb",
-    "aws/ec2",
     "aws/ecr",
     "aws/ecs",
     "aws/eks",

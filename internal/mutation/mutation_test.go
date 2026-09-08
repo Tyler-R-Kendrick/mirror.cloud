@@ -5703,6 +5703,9 @@ var mutants = []mutant{
 		old: `		if err := ev.writeOne(ctx, path, w, create); err != nil {
 			return err
 		}
+		if rec, ok := ev.binds["rec"].(map[string]any); ok {
+			written = append(written, rec)
+		}
 	}
 	return nil
 }`,
@@ -5712,6 +5715,9 @@ var mutants = []mutant{
 		ev.binds["item"] = list[len(list)-1]
 		if err := ev.writeOne(ctx, path, w, create); err != nil {
 			return err
+		}
+		if rec, ok := ev.binds["rec"].(map[string]any); ok {
+			written = append(written, rec)
 		}
 	}
 	return nil
@@ -5725,20 +5731,14 @@ var mutants = []mutant{
 		// cost of every real assertion beside it.
 		name: "equivalence-superseded-member-exempts-the-step",
 		file: filepath.Join("internal", "equivalence", "equivalence.go"),
-		old: `			for _, d := range u.compare(i, "", want.Output, got.Output) {
-				if _, exempt := step.SupersededMembers[d.Path]; exempt {
+		old: `				if _, exempt := step.SupersededMembers[d.Path]; exempt {
 					used[d.Path] = true
 					continue
-				}
-				diffs = append(diffs, d)
-			}`,
-		new: `			for _, d := range u.compare(i, "", want.Output, got.Output) {
-				if len(step.SupersededMembers) > 0 {
+				}`,
+		new: `				if len(step.SupersededMembers) > 0 {
 					used[d.Path] = true
 					continue
-				}
-				diffs = append(diffs, d)
-			}`,
+				}`,
 		pkg: "./internal/equivalence",
 		run: "TestSupersededMemberExemptsOnlyThatMember",
 	},
@@ -12453,6 +12453,60 @@ var mutants = []mutant{
 		// regenerated. What proves it is the receiver's own ingest test.
 		pkg: "./internal/receiver/aws/smithy",
 		run: "TestIngestRecordsTheSigningName",
+	},
+	{
+		// A batch that answers only its last record is a wrong answer, not an
+		// absent one: RunInstances launches MinCount instances and its response
+		// carries every one of them.
+		name: "engine-for-each-answers-only-the-last-record",
+		file: filepath.Join("internal", "engine", "eval.go"),
+		old:  "\tdefer func() { ev.binds[\"items\"] = written }()",
+		new:  "\tdefer func() { ev.binds[\"items\"] = written[max(len(written)-1, 0):] }()",
+		pkg:  "./internal/engine",
+		run:  "TestForEachAnswersEveryRecordItWrote",
+	},
+	{
+		// Without the prefix every generated id is a bare hex string, which
+		// loads and serves and answers `3ed10eca` where a client expects
+		// `i-3ed10eca`.
+		name: "engine-generate-drops-the-prefix",
+		file: filepath.Join("internal", "engine", "eval.go"),
+		old:  "\t\treturn g.Prefix + ev.e.deps.Rand.Hex(n)",
+		new:  "\t\treturn ev.e.deps.Rand.Hex(n)",
+		pkg:  "./internal/engine",
+		run:  "TestGeneratedIdentityCarriesItsPrefix",
+	},
+	{
+		// A wire name honoured when two members claim it invents a fact the
+		// model does not carry, and does it silently.
+		name: "model-canonical-resolves-an-ambiguous-wire-name",
+		file: filepath.Join("internal", "model", "canonical.go"),
+		old:  "\tif count == 1 {",
+		new:  "\tif count >= 1 {",
+		pkg:  "./internal/model",
+		run:  "TestCanonicalRewritesWireNamesToDeclaredOnes",
+	},
+	{
+		// A map is not a structure, and walking it as one loses the shape of
+		// its values: the members inside each entry stop being renamed, so an
+		// answer that carries records in a map is canonicalized on the outside
+		// and left in wire names within.
+		name: "model-canonical-walks-a-map-as-a-structure",
+		file: filepath.Join("internal", "model", "canonical.go"),
+		old:  "\t\tif known && shape.Kind == KindMap {",
+		new:  "\t\tif false {",
+		pkg:  "./internal/model",
+		run:  "TestCanonicalRewritesWireNamesToDeclaredOnes",
+	},
+	{
+		// Comparing raw member names makes every rename a divergence, which
+		// would put ec2 back to being unextractable.
+		name: "equivalence-compares-raw-member-names",
+		file: filepath.Join("internal", "equivalence", "equivalence.go"),
+		old:  "\tif m, ok := model.Canonical(t.Model, op.Output, out).(map[string]any); ok {",
+		new:  "\tif m, ok := any(out).(map[string]any); ok {",
+		pkg:  "./internal/equivalence",
+		run:  "TestReplayComparesOverDeclaredNames",
 	},
 	{
 		name: "smithy-drop-the-list-element-name",

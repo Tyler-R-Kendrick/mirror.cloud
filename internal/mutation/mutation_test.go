@@ -17856,6 +17856,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPlatformApplicationValidation",
 		},
 		{
+			name: "sns-accept-invalid-platform-application-arn",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  "case \"SetPlatformApplicationAttributes\":\n\t\tarn := str(req.Input[\"PlatformApplicationArn\"])\n\t\tif !validPlatformApplicationARN(arn) {",
+			new:  "case \"SetPlatformApplicationAttributes\":\n\t\tarn := str(req.Input[\"PlatformApplicationArn\"])\n\t\tif false {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPlatformApplicationValidation",
+		},
+		{
 			name: "s3-copy-replace-to-copy",
 			file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
 			old:  `if directive != "REPLACE" {`,

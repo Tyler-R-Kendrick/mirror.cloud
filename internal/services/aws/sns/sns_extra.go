@@ -237,6 +237,9 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "SetPlatformApplicationAttributes":
 		arn := str(req.Input["PlatformApplicationArn"])
+		if !validPlatformApplicationARN(arn) {
+			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: PlatformApplicationArn", HTTPStatus: 400, Fault: "client"}
+		}
 		b, ok, _ := col.Get(ctx, arn)
 		if !ok {
 			return nil, &spi.Fault{Code: "NotFound", Message: "Platform application does not exist", HTTPStatus: 404, Fault: "client"}
@@ -249,6 +252,9 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		return &spi.Response{Output: map[string]any{}}, nil
 	default:
 		arn := str(req.Input["PlatformApplicationArn"])
+		if !validPlatformApplicationARN(arn) {
+			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: PlatformApplicationArn", HTTPStatus: 400, Fault: "client"}
+		}
 		b, ok, _ := col.Get(ctx, arn)
 		if !ok {
 			return nil, &spi.Fault{Code: "NotFound", HTTPStatus: 404, Fault: "client"}
@@ -257,6 +263,15 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		_ = json.Unmarshal(b, &rec)
 		return &spi.Response{Output: map[string]any{"Attributes": rec["Attributes"]}}, nil
 	}
+}
+
+func validPlatformApplicationARN(arn string) bool {
+	parts := strings.Split(arn, ":")
+	if len(parts) != 6 || parts[0] != "arn" || parts[2] != "sns" || parts[3] == "" || parts[4] == "" {
+		return false
+	}
+	resource := strings.Split(parts[5], "/")
+	return len(resource) == 3 && resource[0] == "app" && resource[1] != "" && resource[2] != ""
 }
 
 func validatePlatformApplication(name, platform string, attrs map[string]any) *spi.Fault {

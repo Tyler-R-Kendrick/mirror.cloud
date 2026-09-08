@@ -731,6 +731,15 @@ func TestSNSPlatformApplicationValidation(t *testing.T) {
 			}
 		})
 	}
+	for _, operation := range []string{"GetPlatformApplicationAttributes", "SetPlatformApplicationAttributes"} {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: map[string]any{
+			"PlatformApplicationArn": "invalid-arn", "Attributes": map[string]any{},
+		}})
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "InvalidParameter" {
+			t.Fatalf("malformed application ARN for %s returned %#v", operation, err)
+		}
+	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformApplication", Input: map[string]any{
 		"Name": "mobile", "Platform": "GCM", "Attributes": map[string]any{"PlatformCredential": "secret"},
 	}}); err != nil {

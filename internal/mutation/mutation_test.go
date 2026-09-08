@@ -18628,6 +18628,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSQSEventSourceMappingInvokesAndDeletes",
 		},
 		{
+			name: "lambda-sqs-mapping-ignore-partial-failure",
+			file: filepath.Join("internal", "services", "aws", "lambda", "lambda.go"),
+			old:  `failed[stringValue(message["MessageId"])]`,
+			new:  `failed[stringValue(message["messageId"])]`,
+			pkg:  "./internal/services/aws/lambda",
+			run:  "TestSQSEventSourceMappingPreservesPartialFailures",
+		},
+		{
 			name: "sqs-disable-queue-existence-guard",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  `queueScoped(req.Operation) && !p.queueExists(ctx, req, queueName(req))`,

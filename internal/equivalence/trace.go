@@ -326,12 +326,12 @@ func linkValue(v any, origin map[string][2]any, supplied map[string]bool) any {
 // resolveInputs replaces references with what the candidate answered earlier.
 // A reference that cannot be resolved is left as it is, so the resulting
 // divergence names the step rather than disappearing.
-func resolveInputs(v any, outcomes []Outcome) any {
+func resolveInputs(v any, outcomes []Outcome, at pathMapper) any {
 	switch t := v.(type) {
 	case map[string]any:
 		if step, path, ok := asRef(t); ok {
 			if step >= 0 && step < len(outcomes) {
-				if got, ok := lookupPath(outcomes[step].Output, path); ok {
+				if got, ok := lookupPath(outcomes[step].Output, at(step, path)); ok {
 					return got
 				}
 			}
@@ -339,18 +339,26 @@ func resolveInputs(v any, outcomes []Outcome) any {
 		}
 		out := make(map[string]any, len(t))
 		for k, vv := range t {
-			out[k] = resolveInputs(vv, outcomes)
+			out[k] = resolveInputs(vv, outcomes, at)
 		}
 		return out
 	case []any:
 		out := make([]any, len(t))
 		for i, vv := range t {
-			out[i] = resolveInputs(vv, outcomes)
+			out[i] = resolveInputs(vv, outcomes, at)
 		}
 		return out
 	}
 	return v
 }
+
+// pathMapper rewrites a recorded reference path for the answer it is being
+// looked up in. A recording's paths are the reference handler's; replaying
+// against a candidate that names the same member differently needs them
+// translated, and recording against the handler they came from does not.
+type pathMapper func(step int, path string) string
+
+func samePath(_ int, path string) string { return path }
 
 func asRef(m map[string]any) (step int, path string, ok bool) {
 	if len(m) != 2 {

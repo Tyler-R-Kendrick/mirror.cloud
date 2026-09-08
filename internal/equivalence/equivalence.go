@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -58,6 +59,48 @@ type Outcome struct {
 type Trace struct {
 	Steps    []Step
 	Outcomes []Outcome
+	// Model, when set, is the served model for this service, and outputs are
+	// compared over the member names it declares rather than the names each
+	// side happened to produce.
+	//
+	// A pack and the bundle replacing it can name the same member differently
+	// and still be answering identically: the pack says `vpcSet` because
+	// someone typed the wire name, the bundle says `Vpcs` because that is what
+	// the model calls it, and the codec turns both into the same bytes. Without
+	// the model this gate reads that as a divergence on every renamed member,
+	// which would make ec2Query -- the protocol where the two names differ
+	// most -- impossible to extract without excusing the whole body.
+	Model *model.Service
+}
+
+// canonicalPath rewrites a recorded reference path into the model's names for
+// the operation the reference points at.
+func (t *Trace) canonicalPath(step int, path string) string {
+	if t == nil || t.Model == nil || step < 0 || step >= len(t.Steps) {
+		return path
+	}
+	op := t.Model.OperationByName(t.Steps[step].Operation)
+	if op == nil {
+		return path
+	}
+	return model.CanonicalPath(t.Model, op.Output, path)
+}
+
+// canonical rewrites one outcome into the model's own member names. Both sides
+// go through it, so the comparison stays exactly as strict everywhere the names
+// already agreed.
+func (t *Trace) canonical(operation string, out map[string]any) map[string]any {
+	if t == nil || t.Model == nil {
+		return out
+	}
+	op := t.Model.OperationByName(operation)
+	if op == nil {
+		return out
+	}
+	if m, ok := model.Canonical(t.Model, op.Output, out).(map[string]any); ok {
+		return m
+	}
+	return out
 }
 
 // Record runs steps against a handler and captures the result of each.
@@ -66,7 +109,7 @@ func Record(ctx context.Context, h spi.Handler, steps []Step) (*Trace, error) {
 	for _, s := range steps {
 		// A step may name a value an earlier step produced, which is how a
 		// recording expresses read-after-create for a generated identifier.
-		s.Input, _ = resolveInputs(s.Input, t.Outcomes).(map[string]any)
+		s.Input, _ = resolveInputs(s.Input, t.Outcomes, samePath).(map[string]any)
 		out, err := invoke(ctx, h, s)
 		if err != nil {
 			return nil, err
@@ -113,12 +156,16 @@ func Replay(ctx context.Context, h spi.Handler, t *Trace) ([]Diff, error) {
 	for i, step := range t.Steps {
 		// Inputs that name an earlier answer are resolved against what this
 		// candidate answered, not against what the reference did.
-		step.Input, _ = resolveInputs(step.Input, answered).(map[string]any)
+		step.Input, _ = resolveInputs(step.Input, answered, t.canonicalPath).(map[string]any)
 		got, err := invoke(ctx, h, step)
 		if err != nil {
 			return nil, err
 		}
-		answered = append(answered, got)
+		// The candidate's own answers, in the model's names, so a reference
+		// taken from the reference handler's spelling still finds the member.
+		answered = append(answered, Outcome{
+			Output: t.canonical(step.Operation, got.Output), Fault: got.Fault,
+		})
 		want := t.Outcomes[i]
 
 		switch {
@@ -148,7 +195,9 @@ func Replay(ctx context.Context, h spi.Handler, t *Trace) ([]Diff, error) {
 				continue
 			}
 			used := map[string]bool{}
-			for _, d := range u.compare(i, "", want.Output, got.Output) {
+			for _, d := range u.compare(i, "",
+				t.canonical(step.Operation, want.Output),
+				t.canonical(step.Operation, got.Output)) {
 				if _, exempt := step.SupersededMembers[d.Path]; exempt {
 					used[d.Path] = true
 					continue

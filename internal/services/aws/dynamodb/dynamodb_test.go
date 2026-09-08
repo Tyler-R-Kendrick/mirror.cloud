@@ -80,6 +80,49 @@ func TestTableLifecycleCharacterization(t *testing.T) {
 	})
 }
 
+func TestTableCRUDDescriptionCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response
+	}
+	input := map[string]any{
+		"TableName":             "crud-detail",
+		"KeySchema":             []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}},
+		"AttributeDefinitions":  []any{map[string]any{"AttributeName": "id", "AttributeType": "S"}},
+		"ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 5, "WriteCapacityUnits": 5},
+	}
+	created := asMap(call("CreateTable", input).Output["TableDescription"])
+	described := asMap(call("DescribeTable", map[string]any{"TableName": "crud-detail"}).Output["Table"])
+	deleted := asMap(call("DeleteTable", map[string]any{"TableName": "crud-detail"}).Output["TableDescription"])
+	if created["TableStatus"] != "CREATING" || asInt(asMap(created["ProvisionedThroughput"])["NumberOfDecreasesToday"]) != 0 {
+		t.Fatalf("create description %#v", created)
+	}
+	warm := asMap(described["WarmThroughput"])
+	if described["TableStatus"] != "ACTIVE" || asInt(warm["ReadUnitsPerSecond"]) != 5 || asInt(warm["WriteUnitsPerSecond"]) != 5 || warm["Status"] != "ACTIVE" {
+		t.Fatalf("describe warm throughput %#v", described)
+	}
+	for _, key := range []string{"DeletionProtectionEnabled", "ItemCount", "ProvisionedThroughput", "TableArn", "TableId", "TableName", "TableStatus"} {
+		if _, ok := deleted[key]; !ok {
+			t.Fatalf("delete description missing %s: %#v", key, deleted)
+		}
+	}
+	if deleted["TableStatus"] != "DELETING" || deleted["TableName"] != "crud-detail" {
+		t.Fatalf("delete description %#v", deleted)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"create":   map[string]any{"status": created["TableStatus"], "hasWarmThroughput": created["WarmThroughput"] != nil},
+		"describe": map[string]any{"status": described["TableStatus"], "warm": warm},
+		"delete":   map[string]any{"status": deleted["TableStatus"], "fieldCount": len(deleted)},
+	})
+}
+
 func TestDynamoDBTTLMissingTableFaults(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

@@ -1,0 +1,18 @@
+{
+  "create": {
+    "hasWarmThroughput": false,
+    "status": "CREATING"
+  },
+  "delete": {
+    "fieldCount": 7,
+    "status": "DELETING"
+  },
+  "describe": {
+    "status": "ACTIVE",
+    "warm": {
+      "ReadUnitsPerSecond": 5,
+      "Status": "ACTIVE",
+      "WriteUnitsPerSecond": 5
+    }
+  }
+}

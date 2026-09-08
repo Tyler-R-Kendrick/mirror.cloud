@@ -4,9 +4,9 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 750 of 907 direct upstream test functions are explicitly traced (82.7%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 751 of 907 direct upstream test functions are explicitly traced (82.8%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green across 221 Go packages. The mutation inventory has 2,510 entries. The prior 2,505-entry inventory passed in all four bounded shards (785.888s, 1512.782s, 598.587s, and 1339.222s), and the five newer SNS mutants (platform application validation, direct endpoint dispatch, application-subscription dispatch, phone-number validation, and SMS-subscription dispatch) pass targeted kill checks; a complete four-shard rerun for the new entries remains outstanding. These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green across 221 Go packages. The mutation inventory has 2,511 entries. The prior 2,505-entry inventory passed in all four bounded shards (785.888s, 1512.782s, 598.587s, and 1339.222s), and the six newer SNS mutants (platform application validation, direct endpoint dispatch, application-subscription dispatch, phone-number validation, SMS-subscription dispatch, and opt-in validation) pass targeted kill checks; a complete four-shard rerun for the new entries remains outstanding. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -18,9 +18,9 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SNS operations routed to emulation | 43 / 43 |
 | SNS statement coverage | 91.6% |
 | LocalStack SNS test functions inventoried | 180 |
-| LocalStack SNS test functions explicitly traced | 23 / 180 |
+| LocalStack SNS test functions explicitly traced | 24 / 180 |
 
-The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, subscription-attribute/SMS validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
+The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, subscription-attribute/SMS validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
 
 Initial SNS trace rows:
 
@@ -49,6 +49,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSSMS::test_publish_sms` | `TestSNSPhoneNumberPublish` delivers a valid phone-number publish |
 | `test_sns.py::TestSNSSMS::test_publish_wrong_phone_format` | `TestSNSPhoneNumberPublish` rejects malformed phone numbers |
 | `test_sns.py::TestSNSSMS::test_publish_sms_endpoint` | `TestSNSSMSSubscriptionDelivery` delivers a topic message to an SMS subscription |
+| `test_sns.py::TestSNSSMS::test_opt_in_invalid_number` | `TestSNSOptInPhoneValidation` rejects malformed opt-in numbers |
 
 ## S3 baseline
 
@@ -650,7 +651,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
-The ordinary local gate is green across 221 packages. The prior 2,505-mutant inventory is green in all four bounded shards (exit 0), and the five newer SNS mutants are green in targeted kill checks; the serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
+The ordinary local gate is green across 221 packages. The prior 2,505-mutant inventory is green in all four bounded shards (exit 0), and the six newer SNS mutants are green in targeted kill checks; the serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
 
 | LocalStack test | Mirror evidence | Result |
 |---|---|---|

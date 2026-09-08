@@ -1260,6 +1260,13 @@ func TestRedrivePolicyValidationCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "redrive-valid-dlq"}}); err != nil {
+		t.Fatal(err)
+	}
+	validPolicy := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:redrive-valid-dlq","maxReceiveCount":"42"}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "redrive-valid", "Attributes": map[string]any{"RedrivePolicy": validPolicy}}}); err != nil {
+		t.Fatalf("valid policy rejected: %v", err)
+	}
 	cases := map[string]string{
 		"missingTarget": `{"maxReceiveCount":"42"}`,
 		"missingCount":  `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:dlq"}`,
@@ -2370,6 +2377,9 @@ func TestSendOversizedMessageCharacterization(t *testing.T) {
 	if !ok {
 		t.Fatalf("oversized message fault %#v", err)
 	}
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "oversized", "MessageBody": strings.Repeat("b", (1<<19)+1)}}); err != nil {
+		t.Fatalf("message below default maximum rejected: %v", err)
+	}
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
@@ -2721,6 +2731,12 @@ func TestMessageMoveTaskThrottleAndCancelCharacterization(t *testing.T) {
 		t.Fatal(err)
 	}
 	handle := str(started.Output["TaskHandle"])
+	if err := p.col(&spi.Request{Identity: id}, "qmove").Put(ctx, "cancel-update", []byte(`{"Status":"CANCELLING"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.updateMoveRecord(ctx, &spi.Request{Identity: id}, "cancel-update", map[string]any{"Status": "RUNNING"}); got != "CANCELLED" {
+		t.Fatalf("cancelling move was not preserved: %s", got)
+	}
 	_, duplicateErr := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: map[string]any{"SourceArn": sourceArn, "DestinationArn": destinationArn, "MaxNumberOfMessagesPerSecond": 1}})
 	duplicate, ok := duplicateErr.(*spi.Fault)
 	if !ok || duplicate.Code != "InvalidParameterValue" {
@@ -2784,12 +2800,20 @@ func TestMessageMoveTaskDestinationDeletionCharacterization(t *testing.T) {
 	}
 	sourceArn := queueARN(&spi.Request{Identity: id}, "move-delete-dlq")
 	destinationArn := queueARN(&spi.Request{Identity: id}, "move-delete-destination")
+	missing, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: map[string]any{"SourceArn": sourceArn, "DestinationArn": queueARN(&spi.Request{Identity: id}, "move-delete-missing")}})
+	if missing != nil || err == nil {
+		t.Fatalf("missing destination was accepted: response=%#v error=%v", missing, err)
+	}
 	started, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "StartMessageMoveTask", Input: map[string]any{"SourceArn": sourceArn, "DestinationArn": destinationArn, "MaxNumberOfMessagesPerSecond": 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteQueue", Input: map[string]any{"QueueName": "move-delete-destination"}}); err != nil {
 		t.Fatal(err)
+	}
+	moved, failed := p.moveOne(ctx, &spi.Request{Identity: id}, "move-delete-dlq", "move-delete-destination", spi.KV{Key: "probe", Value: []byte(`{"origin":"move-delete-destination","handle":"probe","visibleAt":0}`)})
+	if moved || !failed {
+		t.Fatalf("move to deleted destination was not rejected: moved=%v failed=%v", moved, failed)
 	}
 	var result map[string]any
 	for i := 0; i < 100; i++ {
@@ -3936,6 +3960,16 @@ func TestSSEAttributesCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "sse-kms-default"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "sse-kms-default", "Attributes": map[string]any{"KmsMasterKeyId": "rotated-key"}}}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "sse-kms-default", "AttributeNames": []any{"SqsManagedSseEnabled"}}})
+	if err != nil || str(response.Output["Attributes"].(map[string]any)["SqsManagedSseEnabled"]) != "false" {
+		t.Fatalf("KMS queue default SSE %#v %v", response, err)
+	}
 	for name, attributes := range map[string]map[string]any{
 		"sse-kms": {"KmsMasterKeyId": "testKeyId", "KmsDataKeyReusePeriodSeconds": "6000", "SqsManagedSseEnabled": "false"},
 		"sse-sqs": {"SqsManagedSseEnabled": "true"},

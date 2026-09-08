@@ -127,6 +127,18 @@ func TestBootedServerSQSSection48(t *testing.T) {
 	if urlOut["QueueUrl"] == nil {
 		t.Fatalf("get url %v", urlOut)
 	}
+	missingNameReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(`{"QueueUrl":"http://queue/000000000000/q"}`))
+	missingNameReq.Header.Set("Content-Type", "application/x-amz-json-1.0")
+	missingNameReq.Header.Set("X-Amz-Target", "AmazonSQS.GetQueueUrl")
+	missingNameReq.Header.Set("Authorization", auth)
+	missingNameRes, err := http.DefaultClient.Do(missingNameReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingNameRes.Body.Close()
+	if missingNameRes.StatusCode < 300 {
+		t.Fatalf("GetQueueUrl accepted QueueUrl without QueueName: %d", missingNameRes.StatusCode)
+	}
 	listed := jsonCall("ListQueues", `{}`)
 	if len(asSlice(listed["QueueUrls"])) == 0 {
 		t.Fatalf("list %v", listed)

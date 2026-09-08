@@ -17789,8 +17789,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sqs-accept-invalid-redrive-policy",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
-			old:  "if json.Unmarshal([]byte(raw), &policy) != nil {",
-			new:  "if false {",
+			old:  "if len(parts) != 6 || parts[0] != \"arn\" || parts[2] != \"sqs\" || parts[3] == \"\" || parts[4] == \"\" || parts[5] == \"\" {",
+			new:  "if len(parts) == 6 || parts[0] != \"arn\" || parts[2] != \"sqs\" || parts[3] == \"\" || parts[4] == \"\" || parts[5] == \"\" {",
 			pkg:  "./internal/services/aws/sqs",
 			run:  "TestRedrivePolicyValidationCharacterization",
 		},
@@ -18397,8 +18397,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sqs-send-wrong-default-message-size",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
-			old:  `maximum := 1 << 20`,
-			new:  `maximum := 1 << 19`,
+			old:  `"MaximumMessageSize":            "1048576",`,
+			new:  `"MaximumMessageSize":            "524288",`,
 			pkg:  "./internal/services/aws/sqs",
 			run:  "TestSendOversizedMessageCharacterization",
 		},
@@ -18719,7 +18719,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sqs-ignore-deleted-move-destination",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
-			old:  `if !p.queueExists(ctx, req, dst) {`,
+			old:  `if !p.queueExists(ctx, req, dest) {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/sqs",
 			run:  "TestMessageMoveTaskDestinationDeletionCharacterization",

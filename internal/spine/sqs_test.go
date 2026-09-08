@@ -251,6 +251,158 @@ func TestBootedServerSQSQueryQueueURLOverride(t *testing.T) {
 	}
 }
 
+func TestBootedServerSQSQuerySendReceiveQueueURLs(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	cfg.Seed = "sqs-query-send-receive"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=00"
+	create := func(name string) string {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(`{"QueueName":"`+name+`"}`))
+		req.Header.Set("Content-Type", "application/x-amz-json-1.0")
+		req.Header.Set("X-Amz-Target", "AmazonSQS.CreateQueue")
+		req.Header.Set("Authorization", auth)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&body); err != nil || res.StatusCode >= 300 {
+			t.Fatalf("create %s: %d %#v %v", name, res.StatusCode, body, err)
+		}
+		parsed, err := url.Parse(str(body["QueueUrl"]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return parsed.Path
+	}
+	query := func(path string, values url.Values) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+path+"?"+values.Encode(), nil)
+		req.Header.Set("Authorization", auth)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(body)
+	}
+	queue1, queue2 := create("query-lifecycle-1"), create("query-lifecycle-2")
+	if code, body := query(queue1, url.Values{"Action": {"SendMessage"}, "MessageBody": {"foobar"}}); code != http.StatusOK {
+		t.Fatalf("query send: %d %s", code, body)
+	}
+	if code, body := query(queue2, url.Values{"Action": {"ReceiveMessage"}}); code != http.StatusOK || !strings.Contains(strings.ReplaceAll(body, " />", "/>"), "<ReceiveMessageResult/>") || strings.Contains(body, "foobar") {
+		t.Fatalf("empty query receive: %d %s", code, body)
+	}
+	if code, body := query(queue1, url.Values{"Action": {"ReceiveMessage"}}); code != http.StatusOK || !strings.Contains(body, "<Body>foobar</Body>") || !strings.Contains(body, "<MD5OfBody>") {
+		t.Fatalf("query receive: %d %s", code, body)
+	}
+}
+
+func TestBootedServerSQSQueryDeletedQueue(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	cfg.Seed = "sqs-query-deleted"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=00"
+	jsonCall := func(op, body string) map[string]any {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-amz-json-1.0")
+		req.Header.Set("X-Amz-Target", "AmazonSQS."+op)
+		req.Header.Set("Authorization", auth)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var out map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&out); err != nil || res.StatusCode >= 300 {
+			t.Fatalf("%s: %d %#v %v", op, res.StatusCode, out, err)
+		}
+		return out
+	}
+	queueURL := str(jsonCall("CreateQueue", `{"QueueName":"query-deleted"}`)["QueueUrl"])
+	jsonCall("DeleteQueue", `{"QueueUrl":"`+queueURL+`"}`)
+	parsed, err := url.Parse(queueURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+parsed.Path+"?Action=GetQueueAttributes&AttributeName.1=QueueArn", nil)
+	req.Header.Set("Authorization", auth)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "<Code>AWS.SimpleQueueService.NonExistentQueue</Code>") || !strings.Contains(string(body), "<Message>The specified queue does not exist for this wsdl version") {
+		t.Fatalf("deleted query queue: %d %s", res.StatusCode, body)
+	}
+}
+
+func TestBootedServerSQSQueryFIFOMissingParameters(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	cfg.Seed = "sqs-query-fifo-validation"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=00"
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(`{"QueueName":"query-validation.fifo","Attributes":{"FifoQueue":"true"}}`))
+	req.Header.Set("Content-Type", "application/x-amz-json-1.0")
+	req.Header.Set("X-Amz-Target", "AmazonSQS.CreateQueue")
+	req.Header.Set("Authorization", auth)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil || res.StatusCode >= 300 {
+		res.Body.Close()
+		t.Fatalf("create fifo: %d %#v %v", res.StatusCode, created, err)
+	}
+	res.Body.Close()
+	parsed, err := url.Parse(str(created["QueueUrl"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := func(values url.Values) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+parsed.Path+"?"+values.Encode(), nil)
+		req.Header.Set("Authorization", auth)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(body)
+	}
+	if code, body := query(url.Values{"Action": {"SendMessage"}, "MessageBody": {"body"}, "MessageGroupId": {"group"}}); code != http.StatusBadRequest || !strings.Contains(body, "<Code>InvalidParameterValue</Code>") {
+		t.Fatalf("missing fifo deduplication id: %d %s", code, body)
+	}
+	if code, body := query(url.Values{"Action": {"SendMessage"}, "MessageBody": {"body"}, "MessageDeduplicationId": {"dedup"}}); code != http.StatusBadRequest || !strings.Contains(body, "<Code>MissingParameter</Code>") {
+		t.Fatalf("missing fifo group id: %d %s", code, body)
+	}
+}
+
 func TestBootedServerSQSSection48(t *testing.T) {
 	t.Setenv("MIRROR_CLOCK", "controllable")
 	cfg := config.Default()

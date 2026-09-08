@@ -17907,6 +17907,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestReceiveMessageSystemAttributeFilteringCharacterization",
 		},
 		{
+			name: "sqs-drop-fair-queue-message-group-id",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if !strings.HasSuffix(name, ".fifo") && str(m["group"]) != "" && (wanted["All"] || wanted["MessageGroupId"]) {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestFairQueueMessageGroupIDCharacterization",
+		},
+		{
 			name: "sqs-drop-fifo-sequence-attribute",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  `if strings.HasSuffix(name, ".fifo") && (wanted["All"] || wanted["SequenceNumber"]) {`,

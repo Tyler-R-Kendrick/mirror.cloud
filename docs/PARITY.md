@@ -4,7 +4,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 727 of 907 direct upstream test functions are explicitly traced (80.2%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 742 of 907 direct upstream test functions are explicitly traced (81.8%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
 The current checkout's ordinary gate is green across 221 Go packages. The mutation inventory has 2,506 entries. The prior 2,505-entry inventory passed in all four bounded shards (785.888s, 1512.782s, 598.587s, and 1339.222s), and the newly added SNS platform-application mutant passes its targeted kill check; a complete four-shard rerun for the new entry remains outstanding. These are local regression signals, not proof against a live AWS oracle.
 
@@ -18,9 +18,29 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SNS operations routed to emulation | 43 / 43 |
 | SNS statement coverage | 91.7% |
 | LocalStack SNS test functions inventoried | 180 |
-| LocalStack SNS test functions explicitly traced | 0 / 180 |
+| LocalStack SNS test functions explicitly traced | 15 / 180 |
 
-The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, subscription-attribute/SMS validation, confirmation/unsubscribe input validation, disabled platform-endpoint publishing, and an AWS SDK publish/list lifecycle contract. It is not an AWS differential proof: the pinned SNS inventory still needs per-test trace rows and a live AWS oracle.
+The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, subscription-attribute/SMS validation, confirmation/unsubscribe input validation, disabled platform-endpoint publishing, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
+
+Initial SNS trace rows:
+
+| LocalStack test | Mirror evidence |
+|---|---|
+| `test_sns.py::TestSNSPlatformApplicationCrud::test_create_platform_application` | `TestSNSControlPlaneOperations` creates and lists a platform application |
+| `test_sns.py::TestSNSPlatformApplicationCrud::test_list_platform_applications` | `TestSNSControlPlaneOperations` verifies the application listing |
+| `test_sns.py::TestSNSPlatformApplicationCrud::test_create_platform_application_invalid_attributes` | `TestSNSPlatformApplicationValidation` rejects missing credentials and unknown keys |
+| `test_sns.py::TestSNSPlatformApplicationCrud::test_create_platform_application_invalid_name` | `TestSNSPlatformApplicationValidation` rejects punctuation in the name |
+| `test_sns.py::TestSNSPlatformApplicationCrud::test_create_platform_application_invalid_platform` | `TestSNSPlatformApplicationValidation` rejects unsupported platforms |
+| `test_sns.py::TestSNSPlatformApplicationCrud::test_get_platform_application_attributes` | `TestSNSControlPlaneOperations` reads stored application attributes |
+| `test_sns.py::TestSNSPlatformApplicationCrud::test_set_platform_application_attributes` | `TestSNSControlPlaneOperations` updates and reads application attributes |
+| `test_sns.py::TestSNSPlatformEndpointCrud::test_create_platform_endpoint` | `TestSNSPlatformEndpointLifecycleValidation` creates an endpoint |
+| `test_sns.py::TestSNSPlatformEndpointCrud::test_create_platform_endpoint_idempotency` | `TestSNSPlatformEndpointLifecycleValidation` verifies repeated-token idempotency |
+| `test_sns.py::TestSNSPlatformEndpointCrud::test_create_platform_endpoint_non_existent_app` | `TestSNSPlatformEndpointLifecycleValidation` rejects a missing application |
+| `test_sns.py::TestSNSPlatformEndpointCrud::test_delete_endpoints_of_deleted_app` | `TestSNSPlatformEndpointLifecycleValidation` verifies endpoint cleanup |
+| `test_sns.py::TestSNSPlatformEndpointCrud::test_set_platform_endpoint_attributes_invalid_attributes` | `TestSNSPlatformEndpointAttributeValidation` rejects unknown, malformed, and oversized attributes |
+| `test_sns.py::TestSNSPlatformEndpointCrud::test_create_platform_endpoint_with_invalid_attributes` | `TestSNSPlatformEndpointAttributeValidation` rejects invalid create attributes |
+| `test_sns.py::TestSNSPlatformEndpoint::test_publish_disabled_endpoint` | `TestSNSPublishDisabledPlatformEndpoint` verifies the `EndpointDisabled` fault |
+| `test_sns.py::TestSNSPlatformEndpoint::test_create_platform_endpoint_custom_data` | `TestSNSPlatformEndpointAttributeValidation` preserves custom endpoint data |
 
 ## S3 baseline
 

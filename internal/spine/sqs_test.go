@@ -127,6 +127,19 @@ func TestBootedServerSQSSection48(t *testing.T) {
 	if urlOut["QueueUrl"] == nil {
 		t.Fatalf("get url %v", urlOut)
 	}
+	for _, action := range []string{"FooBar", "CreateQueue", "ListQueues"} {
+		queryReq, _ := http.NewRequest(http.MethodGet, str(urlOut["QueueUrl"])+"?Action="+action, nil)
+		queryReq.Header.Set("Authorization", auth)
+		queryRes, err := http.DefaultClient.Do(queryReq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		queryBody, _ := io.ReadAll(queryRes.Body)
+		queryRes.Body.Close()
+		if queryRes.StatusCode != http.StatusBadRequest || !strings.Contains(string(queryBody), "<Code>InvalidAction</Code>") || !strings.Contains(string(queryBody), "The action "+action+" is not valid for this endpoint.") {
+			t.Fatalf("query invalid action %s: %d %s", action, queryRes.StatusCode, queryBody)
+		}
+	}
 	missingNameReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(`{"QueueUrl":"http://queue/000000000000/q"}`))
 	missingNameReq.Header.Set("Content-Type", "application/x-amz-json-1.0")
 	missingNameReq.Header.Set("X-Amz-Target", "AmazonSQS.GetQueueUrl")

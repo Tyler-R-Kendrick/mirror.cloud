@@ -4484,6 +4484,32 @@ func TestFIFODeduplicationDeliveryCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"contentCount": len(contentMessages), "deleteCount": 0, "groupCount": len(groupMessages)})
 }
 
+func TestFIFOSingleReceiveOrderingCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response.Output
+	}
+	const queue = "single-receive.fifo"
+	call("CreateQueue", map[string]any{"QueueName": queue, "Attributes": map[string]any{"FifoQueue": "true"}})
+	for index := 0; index < 4; index++ {
+		call("SendMessage", map[string]any{"QueueName": queue, "MessageBody": fmt.Sprintf("message%d", index), "MessageGroupId": "g1", "MessageDeduplicationId": fmt.Sprintf("dedup%d", index)})
+	}
+	bodies := make([]string, 0, 4)
+	for index := 0; index < 4; index++ {
+		message := call("ReceiveMessage", map[string]any{"QueueName": queue})["Messages"].([]any)[0].(map[string]any)
+		bodies = append(bodies, str(message["Body"]))
+		call("DeleteMessage", map[string]any{"QueueName": queue, "ReceiptHandle": message["ReceiptHandle"]})
+	}
+	golden.AssertJSON(t, bodies)
+}
+
 func TestFIFODelayZeroUsesQueueDelayCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)

@@ -602,6 +602,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
+The repository-wide exhaustive gate is not currently verifiable in this environment: the prior run exceeded the 10-minute mutation timeout, and a 30-minute retry exhausted the managed Go cache/filesystem during parallel linking. Focused SQS and mutation results below are independently green.
+
 | LocalStack test | Mirror evidence | Result |
 |---|---|---|
 | `test_sqs.py::TestSqsProvider::test_list_queues` | ListQueues applies QueueNamePrefix and omits QueueUrls when no queue matches; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin both branches | Mapped; full race-clean |

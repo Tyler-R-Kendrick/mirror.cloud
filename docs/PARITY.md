@@ -597,8 +597,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 92.2% |
 | SQS mutation mutants killed | 160 / 160 (100%) |
-| LocalStack SQS test functions explicitly traced | 203 / 208 (97.6%) |
-| LocalStack SQS test functions not yet traced | 5 / 208 (2.4%) |
+| LocalStack SQS test functions explicitly traced | 204 / 208 (98.1%) |
+| LocalStack SQS test functions not yet traced | 4 / 208 (1.9%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
@@ -811,4 +811,4 @@ The repository-wide exhaustive gate is not currently verifiable in this environm
 | `test_sqs.py::TestSqsProvider::test_remove_message_with_old_receipt_handle` | Standard DeleteMessage accepts an older receipt handle after redelivery and removes the message; atomic prior-handle characterization pins the behavior | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_get_list_queues_fails_json_format` | Query ListQueues with JSON negotiation returns the modeled ListQueuesResponse envelope; booted HTTP Section48 coverage pins the supported response shape (the duplicate upstream case is skipped) | Mapped; focused green |
 
-The five remaining source functions are not evidence gaps that can be closed by claiming parity: `test_delete_message_batch_from_lambda`, `test_send_message_with_invalid_fifo_parameters`, and `test_dead_letter_queue_execution_lambda_mapping_preserves_id` are skipped upstream with needs-fixing/TODO markers; `test_deduplication_interval` is an intentionally manual five-minute test; and no Lambda integration harness is present in Mirror. They remain explicitly untraced until an executable AWS-backed or supported equivalent exists.
+The four remaining source functions are not evidence gaps that can be closed by claiming parity: `test_delete_message_batch_from_lambda`, `test_send_message_with_invalid_fifo_parameters`, and `test_dead_letter_queue_execution_lambda_mapping_preserves_id` are skipped upstream with needs-fixing/TODO markers; `test_deduplication_interval` is an intentionally manual five-minute test. They remain explicitly untraced until an executable AWS-backed or supported equivalent exists.

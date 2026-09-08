@@ -455,7 +455,7 @@ func (s *Server) demux(r *http.Request) *model.Service {
 		action = r.Form.Get("Action")
 	}
 	if action != "" {
-		if sqsQueuePath(r.URL.Path) {
+		if sqsQueuePath(r.URL.Path) || sqsQueueDomainHost(host) {
 			return s.bundle.ServiceByID("aws.sqs")
 		}
 		if s.looksLike(r, "s3-control") || s.looksLike(r, "s3control") {
@@ -903,6 +903,10 @@ func sqsQueuePath(path string) bool {
 		}
 	}
 	return true
+}
+
+func sqsQueueDomainHost(host string) bool {
+	return strings.HasPrefix(host, "queue.") || strings.Contains(host, ".queue.")
 }
 
 func (s *Server) looksLike(r *http.Request, prefix string) bool {

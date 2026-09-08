@@ -80,9 +80,6 @@ func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 		if fault := validateSubscriptionAttribute(k, value); fault != nil {
 			return nil, fault
 		}
-		if k == "FilterPolicyScope" && value != "MessageAttributes" && value != "MessageBody" {
-			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: FilterPolicyScope", HTTPStatus: 400, Fault: "client"}
-		}
 		if k == "FilterPolicy" && value != "" {
 			if fault := validateFilterPolicy(value); fault != nil {
 				return nil, fault

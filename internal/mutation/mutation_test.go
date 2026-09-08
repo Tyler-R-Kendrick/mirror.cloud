@@ -17566,14 +17566,6 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSFilterOperators",
 		},
 		{
-			name: "sns-accept-invalid-filter-policy-scope",
-			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
-			old:  `if k == "FilterPolicyScope" && value != "MessageAttributes" && value != "MessageBody" {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/sns",
-			run:  "TestSNSFilterPolicyScopeCharacterization",
-		},
-		{
 			name: "sns-accept-invalid-filter-policy",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old:  "if fault := validateFilterPolicy(value); fault != nil {",

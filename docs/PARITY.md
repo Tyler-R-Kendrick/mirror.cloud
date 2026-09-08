@@ -597,10 +597,10 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 92.1% |
 | SQS mutation mutants killed | 150 / 150 (100%) |
-| LocalStack SQS test functions explicitly traced | 156 / 222 (70.3%) |
-| LocalStack SQS test functions not yet traced | 66 / 222 (29.7%) |
+| LocalStack SQS test functions explicitly traced | 156 / 208 (75.0%) |
+| LocalStack SQS test functions not yet traced | 52 / 208 (25.0%) |
 
-The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
+The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
 | LocalStack test | Mirror evidence | Result |
 |---|---|---|

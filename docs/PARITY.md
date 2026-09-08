@@ -6,7 +6,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 727 of 907 direct upstream test functions are explicitly traced (80.2%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green across 221 Go packages. The current-source mutation inventory has 2,504 entries, and all four bounded shards pass (656.988s, 580.399s, 131.229s, and 669.437s). These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green across 221 Go packages. The current-source mutation inventory has 2,505 entries, and all four bounded shards pass against the current source (785.888s, 1512.782s, 598.587s, and 1339.222s). These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -16,7 +16,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 |---|---:|
 | Requested test forms wired for the audited SNS slice | 7 / 7 (atomic, snapshot, BDD, fuzz, chaos/race, mutation, AWS SDK contract) |
 | SNS operations routed to emulation | 43 / 43 |
-| SNS statement coverage | 91.7% |
+| SNS statement coverage | 91.6% |
 | LocalStack SNS test functions inventoried | 180 |
 | LocalStack SNS test functions explicitly traced | 0 / 180 |
 
@@ -622,7 +622,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
-The ordinary local gate is green (2,705 tests across 221 packages). The current 2,504-mutant inventory is green in four bounded shards using a writable `/tmp` Go cache (exit 0; the three existing environment-conditional cases remain skipped). This is still a local verifier, not live AWS differential evidence.
+The ordinary local gate is green (2,705 tests across 221 packages). The current 2,505-mutant inventory is green in all four bounded shards (exit 0); the serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
 
 | LocalStack test | Mirror evidence | Result |
 |---|---|---|

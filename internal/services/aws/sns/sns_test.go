@@ -826,6 +826,28 @@ func TestSNSPlatformEndpointSubscriptionDispatch(t *testing.T) {
 	}
 }
 
+func TestSNSPhoneNumberPublish(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	phone := "+15555550101"
+	delivered := ""
+	cancel := deps.Bus.Subscribe("sns:sms:"+phone, func(_ context.Context, body []byte) { delivered = string(body) })
+	defer cancel()
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+		"PhoneNumber": phone, "Message": "sms message",
+	}})
+	if err != nil || str(response.Output["MessageId"]) == "" || delivered != "sms message" {
+		t.Fatalf("sms publish response=%#v err=%v delivered=%q", response, err, delivered)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+		"PhoneNumber": "not-a-phone", "Message": "sms message",
+	}}); err == nil {
+		t.Fatal("invalid phone publish succeeded")
+	}
+}
+
 func TestSNSPlatformEndpointAttributeValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

@@ -175,6 +175,16 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = p.col(req, "topics").Put(ctx, name, nb)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "Publish":
+		if phone := str(req.Input["PhoneNumber"]); phone != "" && str(req.Input["TopicArn"]) == "" && str(req.Input["TargetArn"]) == "" {
+			if !validSMSNumber(phone) {
+				return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: PhoneNumber", HTTPStatus: 400, Fault: "client"}
+			}
+			if fault := validatePublishMessage(req); fault != nil {
+				return nil, fault
+			}
+			_ = p.deps.Bus.Publish(ctx, "sns:sms:"+phone, []byte(str(req.Input["Message"])))
+			return &spi.Response{Output: map[string]any{"MessageId": p.deps.Rand.Hex(16)}}, nil
+		}
 		if target := str(req.Input["TargetArn"]); target != "" && str(req.Input["TopicArn"]) == "" && endpointResourceARN(target) {
 			if fault := p.validateEndpointTarget(ctx, req, target); fault != nil {
 				return nil, fault

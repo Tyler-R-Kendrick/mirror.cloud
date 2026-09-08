@@ -169,6 +169,22 @@ func TestSendReceiveCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"sent": sent.Output, "received": received.Output})
 }
 
+func TestQueueNameAsURLCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	ctx := context.Background()
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "name-url"}}); err != nil {
+		t.Fatal(err)
+	}
+	sent, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueUrl": "name-url", "MessageBody": "Using name instead of URL"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if str(sent.Output["MD5OfMessageBody"]) != "86a83f96652a1bfad3891e7d523750cb" {
+		t.Fatalf("send %#v", sent.Output)
+	}
+}
+
 func TestEmptyMessageCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

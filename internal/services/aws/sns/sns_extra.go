@@ -36,6 +36,18 @@ func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Resp
 		}
 		accts := stringList(req.Input, "AWSAccountIds", "AWSAccountId")
 		acts := stringList(req.Input, "ActionNames", "ActionName")
+		for _, statement := range stmts {
+			if str(asMap(statement)["Sid"]) == label {
+				return nil, &spi.Fault{Code: "InvalidParameter", Message: "A policy statement with this label already exists", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+		for _, action := range acts {
+			switch str(action) {
+			case "Publish", "Subscribe", "Receive", "SendMessage", "GetTopicAttributes", "SetTopicAttributes", "DeleteTopic", "ListSubscriptionsByTopic", "AddPermission", "RemovePermission", "GetDataProtectionPolicy", "PutDataProtectionPolicy", "TagResource", "UntagResource":
+			default:
+				return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid action", HTTPStatus: 400, Fault: "client"}
+			}
+		}
 		stmts = append(stmts, map[string]any{"Sid": label, "Effect": "Allow", "Principal": map[string]any{"AWS": accts}, "Action": acts, "Resource": arn})
 		pol["Statement"] = stmts
 		raw, _ := json.Marshal(pol)

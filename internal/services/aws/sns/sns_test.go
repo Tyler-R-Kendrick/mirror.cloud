@@ -952,6 +952,29 @@ func TestSNSTopicFIFOAttributeIsImmutable(t *testing.T) {
 	}
 }
 
+func TestSNSPermissionValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "permission-validation"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := map[string]any{"TopicArn": created.Output["TopicArn"], "Label": "duplicate", "AWSAccountId": []any{"1"}, "ActionName": []any{"Publish"}}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "AddPermission", Input: input}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "AddPermission", Input: input}); err == nil {
+		t.Fatal("accepted duplicate permission label")
+	}
+	input["Label"] = "invalid-action"
+	input["ActionName"] = []any{"InvalidAction"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "AddPermission", Input: input}); err == nil {
+		t.Fatal("accepted invalid permission action")
+	}
+}
+
 func TestSNSSMSAttributeValidationAndSelection(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

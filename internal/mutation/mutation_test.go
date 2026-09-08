@@ -17896,6 +17896,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSTopicFIFOAttributeIsImmutable",
 		},
 		{
+			name: "sns-accept-duplicate-permission-label",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  "if str(asMap(statement)[\"Sid\"]) == label {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPermissionValidation",
+		},
+		{
+			name: "sns-accept-invalid-permission-action",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  "for _, action := range acts {\n\t\t\tswitch str(action) {",
+			new:  "for _, action := range []any{} {\n\t\t\tswitch str(action) {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPermissionValidation",
+		},
+		{
 			name: "sns-accept-invalid-platform-endpoint-attributes",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old:  "func validateEndpointAttributes(attrs map[string]any) *spi.Fault {\n\tfor key, value := range attrs {",

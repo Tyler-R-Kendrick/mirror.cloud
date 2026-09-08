@@ -186,6 +186,19 @@ func TestBootedServerSQSSection48(t *testing.T) {
 	if len(asSlice(listed["QueueUrls"])) == 0 {
 		t.Fatalf("list %v", listed)
 	}
+	queryListReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/?Action=ListQueues&Version=2012-11-05", nil)
+	queryListReq.Header.Set("Authorization", auth)
+	queryListReq.Header.Set("Accept", "application/json")
+	queryListRes, err := http.DefaultClient.Do(queryListReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queryListBody, _ := io.ReadAll(queryListRes.Body)
+	queryListRes.Body.Close()
+	var queryList map[string]any
+	if json.Unmarshal(queryListBody, &queryList) != nil || queryListRes.StatusCode != http.StatusOK || queryList["ListQueuesResponse"] == nil {
+		t.Fatalf("query JSON list %d %s", queryListRes.StatusCode, queryListBody)
+	}
 	jsonCall("SetQueueAttributes", `{"QueueName":"q","Attributes":{"DelaySeconds":"0"}}`)
 	attrs := jsonCall("GetQueueAttributes", `{"QueueName":"q","AttributeNames":["DelaySeconds","VisibilityTimeout"]}`)
 	if asM(attrs["Attributes"])["DelaySeconds"] == nil && asM(attrs["Attributes"])["VisibilityTimeout"] == nil {

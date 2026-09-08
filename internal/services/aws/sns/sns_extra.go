@@ -80,6 +80,11 @@ func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 		if k == "FilterPolicyScope" && value != "MessageAttributes" && value != "MessageBody" {
 			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: FilterPolicyScope", HTTPStatus: 400, Fault: "client"}
 		}
+		if k == "FilterPolicy" && value != "" {
+			if fault := validateFilterPolicy(value); fault != nil {
+				return nil, fault
+			}
+		}
 		if k == "FilterPolicy" && value == "" {
 			delete(rec, k)
 		} else {
@@ -147,6 +152,14 @@ func (p *Pack) dataProtection(ctx context.Context, req *spi.Request) (*spi.Respo
 		return &spi.Response{Output: map[string]any{"DataProtectionPolicy": ""}}, nil
 	}
 	return &spi.Response{Output: map[string]any{"DataProtectionPolicy": string(b)}}, nil
+}
+
+func validateFilterPolicy(raw string) *spi.Fault {
+	var policy map[string]any
+	if json.Unmarshal([]byte(raw), &policy) != nil || policy == nil {
+		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: FilterPolicy", HTTPStatus: 400, Fault: "client"}
+	}
+	return nil
 }
 
 func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response, error) {

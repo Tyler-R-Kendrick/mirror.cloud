@@ -723,6 +723,9 @@ func TestSNSFilterPolicyScopeCharacterization(t *testing.T) {
 	if _, found := attrs.Output["Attributes"].(map[string]any)["FilterPolicyScope"]; found {
 		t.Fatal("exposed scope without filter policy")
 	}
+	if set("FilterPolicy", "invalid-json") == nil {
+		t.Fatal("accepted invalid filter policy")
+	}
 	if fault := set("FilterPolicy", `{"n":["x"]}`); fault != nil {
 		t.Fatal(fault)
 	}

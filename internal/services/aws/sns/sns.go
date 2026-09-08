@@ -265,8 +265,16 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		sub := str(req.Input["TopicArn"]) + ":" + p.deps.Rand.UUID()
 		attrs := asMap(req.Input["Attributes"])
+		if raw := str(attrs["FilterPolicy"]); raw != "" {
+			if fault := validateFilterPolicy(raw); fault != nil {
+				return nil, fault
+			}
+		}
 		if str(req.Input["FilterPolicy"]) != "" {
 			attrs["FilterPolicy"] = req.Input["FilterPolicy"]
+			if fault := validateFilterPolicy(str(req.Input["FilterPolicy"])); fault != nil {
+				return nil, fault
+			}
 		}
 		if str(req.Input["RawMessageDelivery"]) != "" {
 			attrs["RawMessageDelivery"] = req.Input["RawMessageDelivery"]

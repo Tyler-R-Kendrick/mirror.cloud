@@ -169,6 +169,17 @@ func TestSNSControlPlaneOperations(t *testing.T) {
 	if _, err := call("GetTopicAttributes", map[string]any{"TopicArn": topic + "-missing"}); err == nil {
 		t.Fatal("found missing topic")
 	}
+	for _, arn := range []string{"randomstring", "arn:aws:sns:us-east-1:random", "arn:aws:sns:us-east-1:111111111111:random"} {
+		if _, err := call("Unsubscribe", map[string]any{"SubscriptionArn": arn}); err == nil {
+			t.Fatalf("accepted invalid subscription ARN %q", arn)
+		}
+	}
+	if _, err := call("ConfirmSubscription", map[string]any{"TopicArn": topic, "Token": "random-token"}); err == nil {
+		t.Fatal("accepted unknown confirmation token")
+	}
+	if _, err := call("ConfirmSubscription", map[string]any{"TopicArn": topic + "-missing", "Token": "random-token"}); err == nil {
+		t.Fatal("accepted confirmation for missing topic")
+	}
 
 	if _, err := call("AddPermission", map[string]any{"TopicArn": topic}); err == nil {
 		t.Fatal("added permission without label")

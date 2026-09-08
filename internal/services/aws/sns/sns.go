@@ -348,7 +348,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = p.col(req, "subs").Put(ctx, sub, b)
 		return &spi.Response{Output: map[string]any{"SubscriptionArn": sub}}, nil
 	case "Unsubscribe":
-		_ = p.col(req, "subs").Delete(ctx, str(req.Input["SubscriptionArn"]))
+		arn := str(req.Input["SubscriptionArn"])
+		if !validSubscriptionARN(arn) {
+			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: SubscriptionArn", HTTPStatus: 400, Fault: "client"}
+		}
+		_ = p.col(req, "subs").Delete(ctx, arn)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "ListSubscriptions", "ListSubscriptionsByTopic":
 		want := str(req.Input["TopicArn"])
@@ -373,12 +377,23 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: out}, nil
 	case "ConfirmSubscription":
 		tok := str(req.Input["Token"])
+		if topicArn := str(req.Input["TopicArn"]); topicArn != "" {
+			if _, ok, _ := p.col(req, "topics").Get(ctx, topicName(topicArn)); !ok {
+				return nil, topicNotFoundFault()
+			}
+		}
 		b, ok, _ := p.col(req, "pending").Get(ctx, tok)
 		if !ok {
+			if str(req.Input["TopicArn"]) != "" {
+				return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Token", HTTPStatus: 400, Fault: "client"}
+			}
 			return &spi.Response{Output: map[string]any{"SubscriptionArn": tok}}, nil
 		}
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
+		if topicArn := str(req.Input["TopicArn"]); topicArn != "" && str(rec["TopicArn"]) != topicArn {
+			return nil, topicNotFoundFault()
+		}
 		rec["Confirmed"] = true
 		arn := str(rec["SubscriptionArn"])
 		nb, _ := json.Marshal(rec)
@@ -1073,6 +1088,11 @@ func validSMSNumber(number string) bool {
 		}
 	}
 	return true
+}
+
+func validSubscriptionARN(arn string) bool {
+	parts := strings.Split(arn, ":")
+	return len(parts) == 7 && parts[0] == "arn" && parts[2] == "sns" && parts[3] != "" && parts[4] != "" && parts[5] != "" && parts[6] != ""
 }
 
 func validTopicChars(name string) bool {

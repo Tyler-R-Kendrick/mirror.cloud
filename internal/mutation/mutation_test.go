@@ -17728,6 +17728,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSSubscriptionProtocolAndQueueValidation",
 		},
 		{
+			name: "sns-accept-invalid-unsubscribe-arn",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "if !validSubscriptionARN(arn) {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSControlPlaneOperations",
+		},
+		{
+			name: "sns-accept-unknown-confirmation-token",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "if str(req.Input[\"TopicArn\"]) != \"\" {\n\t\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: Token\", HTTPStatus: 400, Fault: \"client\"}",
+			new:  "if false {\n\t\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: Token\", HTTPStatus: 400, Fault: \"client\"}",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSControlPlaneOperations",
+		},
+		{
 			name: "sns-allow-standard-topic-fifo-queue",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `if !strings.HasSuffix(topicName(topicArn), ".fifo") && queueFIFO {`,

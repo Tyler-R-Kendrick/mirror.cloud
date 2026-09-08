@@ -994,7 +994,9 @@ func TestSuccessivePurgeCharacterization(t *testing.T) {
 }
 
 func TestPurgeClearsFIFODeduplicationCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
 	deps := spitest.Deps(t)
+	deps.Clock = clk
 	p := New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
@@ -1016,6 +1018,20 @@ func TestPurgeClearsFIFODeduplicationCharacterization(t *testing.T) {
 	messages := call("ReceiveMessage", map[string]any{"QueueName": "purge-dedup.fifo", "VisibilityTimeout": 0})["Messages"].([]any)
 	if len(messages) != 1 || str(asMap(messages[0])["Body"]) != "after" {
 		t.Fatalf("purge did not clear FIFO deduplication state: %#v", messages)
+	}
+	call("CreateQueue", map[string]any{"QueueName": "purge-all"})
+	call("SendMessage", map[string]any{"QueueName": "purge-all", "MessageBody": "visible"})
+	call("SendMessage", map[string]any{"QueueName": "purge-all", "MessageBody": "delayed", "DelaySeconds": 5})
+	inFlight := call("ReceiveMessage", map[string]any{"QueueName": "purge-all", "VisibilityTimeout": 30})["Messages"].([]any)
+	if len(inFlight) != 1 {
+		t.Fatalf("expected in-flight message before purge: %#v", inFlight)
+	}
+	call("PurgeQueue", map[string]any{"QueueName": "purge-all"})
+	if err := clk.Advance(31 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if got := call("ReceiveMessage", map[string]any{"QueueName": "purge-all", "VisibilityTimeout": 0}); len(got) != 0 {
+		t.Fatalf("purge retained visible, delayed, or in-flight messages: %#v", got)
 	}
 }
 

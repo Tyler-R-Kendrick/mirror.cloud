@@ -622,7 +622,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
-The ordinary local gate is green (2,705 tests across 221 packages). The updated 2,485-mutant gate is also green using a writable `/tmp` Go cache (exit 0; the three existing environment-conditional cases remain skipped). This is still a local verifier, not live AWS differential evidence.
+The ordinary local gate is green (2,705 tests across 221 packages). The current 2,503-mutant inventory is green in four bounded shards using a writable `/tmp` Go cache (exit 0; the three existing environment-conditional cases remain skipped). This is still a local verifier, not live AWS differential evidence.
 
 | LocalStack test | Mirror evidence | Result |
 |---|---|---|

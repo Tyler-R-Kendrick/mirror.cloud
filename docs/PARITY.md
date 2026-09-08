@@ -597,8 +597,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 92.2% |
 | SQS mutation mutants killed | 152 / 152 (100%) |
-| LocalStack SQS test functions explicitly traced | 166 / 208 (79.8%) |
-| LocalStack SQS test functions not yet traced | 42 / 208 (20.2%) |
+| LocalStack SQS test functions explicitly traced | 167 / 208 (80.3%) |
+| LocalStack SQS test functions not yet traced | 41 / 208 (19.7%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
@@ -735,6 +735,7 @@ The repository-wide exhaustive gate is not currently verifiable in this environm
 | `test_sqs.py::TestSqsProvider::test_fifo_queue_send_multiple_messages_multiple_single_receives` | Repeated single-message receives preserve FIFO body, message ID, and deletion order within one group; the atomic golden characterization pins the four-message sequence |
 | `test_sqs.py::TestSqsProvider::test_cross_account_access` | A secondary account can use a primary account's QueueUrl for GetQueueAttributes, SendMessage, ReceiveMessage, DeleteMessage, and PurgeQueue; the atomic cross-account characterization pins the shared URL scope |
 | `test_sqs.py::TestSqsProvider::test_cross_account_get_queue_url` | GetQueueUrl honors QueueOwnerAWSAccountId and returns the primary account's existing URL to a secondary caller; the same characterization pins owner lookup |
+| `test_sqs.py::TestSqsProvider::test_delete_queue_multi_account` | Queue listings remain account-scoped: deleting one account's queue does not remove another account's queue; the atomic isolation characterization pins separate store scopes |
 | `test_sqs.py::TestSqsProvider::test_fifo_receive_message_with_zero_visibility_timeout` | Zero visibility releases FIFO groups immediately while preserving per-group order and prioritizing untouched groups on the next receive; atomic characterization and mutation coverage pin the wire behavior | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_message_group_visibility_after_change_message_visibility` | Changing one FIFO message's visibility releases that message without exposing its hidden successor and lets another group deliver first; atomic characterization and controllable-clock coverage pin the boundary | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_group_visibility_extends_with_change_message_visibility` | Extending one message's visibility blocks that message and its successors while earlier messages in the group remain receivable; controllable-clock characterization covers all three positions | Mapped; focused green |

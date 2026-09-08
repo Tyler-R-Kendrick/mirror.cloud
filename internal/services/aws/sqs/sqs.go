@@ -29,8 +29,10 @@ func init() {
 
 // Pack implements SQS.
 type Pack struct {
-	deps   spi.Deps
-	moveMu sync.Mutex
+	deps    spi.Deps
+	moveMu  sync.Mutex
+	waitMu  sync.Mutex
+	waiters map[string][]chan struct{}
 }
 
 // New constructs the pack.
@@ -618,6 +620,7 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 	}
 	raw, _ := json.Marshal(msg)
 	_ = p.col(req, "msgs:"+name).Put(ctx, rh, raw)
+	p.wakeReceivers(req, name)
 	if dedup != "" {
 		db, _ := json.Marshal(map[string]any{"id": id, "md5": md5hex, "md5Attrs": md5attrs, "md5System": md5system, "seq": seq, "until": now.Add(5 * time.Minute).UnixNano()})
 		_ = p.col(req, "dedup:"+name).Put(ctx, dedupKey, db)
@@ -636,6 +639,40 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 		output["MD5OfMessageSystemAttributes"] = md5system
 	}
 	return &spi.Response{Output: output}, nil
+}
+
+func (p *Pack) receiverWaiter(req *spi.Request, name string) (<-chan struct{}, func()) {
+	key := req.Identity.Account + "\x00" + req.Identity.Region + "\x00" + name
+	ch := make(chan struct{}, 1)
+	p.waitMu.Lock()
+	if p.waiters == nil {
+		p.waiters = map[string][]chan struct{}{}
+	}
+	p.waiters[key] = append(p.waiters[key], ch)
+	p.waitMu.Unlock()
+	return ch, func() {
+		p.waitMu.Lock()
+		defer p.waitMu.Unlock()
+		waiters := p.waiters[key]
+		for i, waiter := range waiters {
+			if waiter == ch {
+				p.waiters[key] = append(waiters[:i], waiters[i+1:]...)
+				break
+			}
+		}
+	}
+}
+
+func (p *Pack) wakeReceivers(req *spi.Request, name string) {
+	key := req.Identity.Account + "\x00" + req.Identity.Region + "\x00" + name
+	p.waitMu.Lock()
+	defer p.waitMu.Unlock()
+	for _, waiter := range p.waiters[key] {
+		select {
+		case waiter <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func validMessageContents(body string) bool {
@@ -838,6 +875,12 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 		vis = asInt(v)
 	}
 	deadline := p.deps.Clock.Now().Add(wait)
+	var wake <-chan struct{}
+	var stopWaiting func()
+	if wait > 0 {
+		wake, stopWaiting = p.receiverWaiter(req, name)
+		defer stopWaiting()
+	}
 	for {
 		now := p.deps.Clock.Now()
 		out := make([]any, 0, max)
@@ -898,6 +941,8 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 		}
 		select {
 		case <-p.deps.Clock.After(d):
+		case <-wake:
+			continue
 		case <-ctx.Done():
 			return &spi.Response{Output: map[string]any{}}, nil
 		}

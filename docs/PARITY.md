@@ -596,8 +596,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 91.3% |
-| LocalStack SQS test functions explicitly traced | 144 / 222 (64.9%) |
-| LocalStack SQS test functions not yet traced | 78 / 222 (35.1%) |
+| LocalStack SQS test functions explicitly traced | 145 / 222 (65.3%) |
+| LocalStack SQS test functions not yet traced | 77 / 222 (34.7%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -628,6 +628,7 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_external_hostname_via_host_header` | CreateQueue advertises the request Host while queue identity remains account-and-name based; atomic Verify-style snapshot pins the returned host-specific URL | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_external_host_via_header_complete_message_lifecycle` | Send and Receive accept the advertised host and loopback host variants for the same queue path; atomic Verify-style snapshot pins the complete lifecycle | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_marker_serialization_json_protocol` | SQS Query ReceiveMessage with Accept=application/json preserves a JSON body containing quotes, carriage returns, and entity text; codec and booted HTTP characterization plus a serialization mutant pin the response envelope | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_fifo_message_group_visibility` | A FIFO long poll wakes when a message arrives, while the shared per-group receive path prevents an immediate successor from bypassing the in-flight message; atomic characterization and raw HTTP wake coverage pin the handoff | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_external_endpoint` | Configured `AdvertiseURL` is used for CreateQueue URLs while the returned URL remains usable for message send/receive; atomic snapshot, raw HTTP BDD, concurrent chaos/race, and advertise-seam mutation coverage pin external endpoint advertisement | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_get_queue_url_contains_localstack_host` | Without an explicit advertise URL, GetQueueUrl retains the default LocalStack host and account/name path; the same atomic endpoint characterization and HTTP lifecycle coverage pin the default | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_list_queues_pagination` | MaxResults returns lexically ordered pages and a base64 last-URL NextToken that resumes strictly after the prior page; all seven requested test forms pin token shape, continuation, final-page omission, and concurrent completeness | Mapped; full race-clean |

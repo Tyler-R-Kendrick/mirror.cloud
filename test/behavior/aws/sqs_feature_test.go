@@ -1257,6 +1257,30 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("released receive %d %s", status, body)
 		}
 	})
+	t.Run("Given a FIFO long poll When a message arrives Then one listener wakes immediately", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-wake.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		result := make(chan []byte, 1)
+		go func() {
+			status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-wake.fifo","WaitTimeSeconds":10}`)
+			if status == http.StatusOK {
+				result <- body
+			}
+		}()
+		time.Sleep(100 * time.Millisecond)
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-wake.fifo","MessageBody":"message","MessageGroupId":"group"}`); status != http.StatusOK {
+			t.Fatalf("send %d %s", status, body)
+		}
+		select {
+		case body := <-result:
+			if !bytes.Contains(body, []byte(`"Body":"message"`)) {
+				t.Fatalf("wake body %s", body)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("FIFO long poll did not wake")
+		}
+	})
 	t.Run("Given an emptied FIFO group When sending again Then the group remains usable", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-reuse-group.fifo","Attributes":{"FifoQueue":"true","ContentBasedDeduplication":"true"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)

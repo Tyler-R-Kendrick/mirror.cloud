@@ -18333,8 +18333,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sqs-message-write-global-queue",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
-			old:  "raw, _ := json.Marshal(msg)\n\t_ = p.col(req, \"msgs:\"+name).Put(ctx, rh, raw)\n\tif dedup != \"\" {",
-			new:  "raw, _ := json.Marshal(msg)\n\t_ = p.col(req, \"msgs\").Put(ctx, rh, raw)\n\tif dedup != \"\" {",
+			old:  `_ = p.col(req, "msgs:"+name).Put(ctx, rh, raw)`,
+			new:  `_ = p.col(req, "msgs").Put(ctx, rh, raw)`,
 			pkg:  "./internal/services/aws/sqs",
 			run:  "TestMessagesRemainQueueScopedCharacterization",
 		},
@@ -18763,6 +18763,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  `if false {`,
 			pkg:  "./internal/proto/aws/awsquery",
 			run:  "TestSQSReceiveMessageQueryJSONShape",
+		},
+		{
+			name: "sqs-long-poll-ignores-send-wake",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "case <-wake:\n\t\t\tcontinue",
+			new:  "case <-make(chan struct{}):\n\t\t\tcontinue",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestReceiveMessageWakesOnSendCharacterization",
 		},
 		{
 			name: "sqs-query-url-without-action-stays-sqs",

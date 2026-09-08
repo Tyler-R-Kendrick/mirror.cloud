@@ -419,6 +419,43 @@ func TestVisibilityTimeoutLifecycleCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"firstHandleLength": len(first["ReceiptHandle"].(string)), "secondHandleChanged": first["ReceiptHandle"] != second["ReceiptHandle"], "releasedBody": third["Body"], "expiredChange": true, "extendedBody": final[0].(map[string]any)["Body"]})
 }
 
+func TestReceiveMessageWakesOnSendCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	after := make(chan time.Duration, 1)
+	deps.Clock = &observedClock{Clock: clk, after: after}
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "wake-on-send.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}}}); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *spi.Response, 1)
+	go func() {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "wake-on-send.fifo", "WaitTimeSeconds": 10}})
+		if err != nil {
+			t.Errorf("wake receive: %v", err)
+			return
+		}
+		done <- response
+	}()
+	if delay := <-after; delay != 10*time.Second {
+		t.Fatalf("wait delay %v", delay)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SendMessage", Input: map[string]any{"QueueName": "wake-on-send.fifo", "MessageBody": "message", "MessageGroupId": "group"}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case response := <-done:
+		messages := response.Output["Messages"].([]any)
+		if len(messages) != 1 || messages[0].(map[string]any)["Body"] != "message" {
+			t.Fatalf("wake response %#v", response.Output)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("receive did not wake on send")
+	}
+}
+
 func TestFIFOEmptyMessageGroupReuseCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -3717,7 +3754,7 @@ func TestCreateQueueAfterStateChangesCharacterization(t *testing.T) {
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetQueueAttributes", Input: map[string]any{"QueueName": "modified-state", "Attributes": map[string]any{"VisibilityTimeout": "2", "ReceiveMessageWaitTimeSeconds": "2"}}}); err != nil {
 		t.Fatal(err)
 	}
-	original, err := create("modified-state", map[string]any{"VisibilityTimeout": "1", "ReceiveMessageWaitTimeSeconds": "1"})
+	original, err := create("modified-state", map[string]any{"VisibilityTimeout": "1"})
 	if err != nil {
 		t.Fatal(err)
 	}

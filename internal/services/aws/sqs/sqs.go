@@ -920,6 +920,14 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 				if wanted["All"] || wanted["ApproximateFirstReceiveTimestamp"] {
 					attributes["ApproximateFirstReceiveTimestamp"] = strconv.FormatInt(int64(asFloat(m["firstReceiveAt"])), 10)
 				}
+				if wanted["All"] || wanted["SenderId"] {
+					attributes["SenderId"] = req.Identity.Account
+				}
+				if strings.HasSuffix(name, ".fifo") && (wanted["All"] || wanted["SequenceNumber"]) {
+					if sequence := asInt(m["seq"]); sequence > 0 {
+						attributes["SequenceNumber"] = strconv.Itoa(sequence)
+					}
+				}
 				if (wanted["All"] || wanted["AWSTraceHeader"]) && str(m["trace"]) != "" {
 					attributes["AWSTraceHeader"] = m["trace"]
 				}

@@ -18187,6 +18187,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestPurgeClearsFIFODeduplicationCharacterization",
 		},
 		{
+			name: "sqs-queue-url-ignore-owner-account",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if owner := queueOwner(req); owner != "" && owner != req.Identity.Account {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestCrossAccountQueueURLCharacterization",
+		},
+		{
 			name: "sqs-receive-drop-body-digest",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  `"MD5OfBody": m["md5"]`,

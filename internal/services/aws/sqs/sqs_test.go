@@ -4510,6 +4510,35 @@ func TestFIFOSingleReceiveOrderingCharacterization(t *testing.T) {
 	golden.AssertJSON(t, bodies)
 }
 
+func TestCrossAccountQueueURLCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	primary := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	secondary := spi.Identity{Account: "222222222222", Region: "us-east-1"}
+	invoke := func(id spi.Identity, operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response.Output
+	}
+	name := "cross-account"
+	created := invoke(primary, "CreateQueue", map[string]any{"QueueName": name})
+	queueURL := str(created["QueueUrl"])
+	lookup := invoke(secondary, "GetQueueUrl", map[string]any{"QueueName": name, "QueueOwnerAWSAccountId": primary.Account})
+	if str(lookup["QueueUrl"]) != queueURL {
+		t.Fatalf("cross-account GetQueueUrl %#v want %q", lookup, queueURL)
+	}
+	invoke(secondary, "SendMessage", map[string]any{"QueueUrl": queueURL, "MessageBody": "cross-account"})
+	received := invoke(secondary, "ReceiveMessage", map[string]any{"QueueUrl": queueURL, "VisibilityTimeout": 30})["Messages"].([]any)
+	if len(received) != 1 || str(asMap(received[0])["Body"]) != "cross-account" {
+		t.Fatalf("cross-account ReceiveMessage %#v", received)
+	}
+	invoke(secondary, "DeleteMessage", map[string]any{"QueueUrl": queueURL, "ReceiptHandle": asMap(received[0])["ReceiptHandle"]})
+	invoke(secondary, "PurgeQueue", map[string]any{"QueueUrl": queueURL})
+}
+
 func TestFIFODelayZeroUsesQueueDelayCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)

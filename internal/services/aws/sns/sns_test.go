@@ -900,6 +900,36 @@ func TestSNSOptInPhoneValidation(t *testing.T) {
 	}
 }
 
+func TestSNSSMSAttributeValidationAndSelection(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	for _, attrs := range []map[string]any{
+		{"InvalidAttribute": "invalid"},
+		{"DefaultSenderID": strings.Repeat("x", 12)},
+		{"DefaultSenderID": "123456789"},
+		{"DefaultSMSType": "invalid"},
+	} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetSMSAttributes", Input: map[string]any{"Attributes": attrs}}); err == nil {
+			t.Fatalf("accepted invalid SMS attributes %#v", attrs)
+		}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetSMSAttributes", Input: map[string]any{"Attributes": map[string]any{
+		"DeliveryStatusSuccessSamplingRate": "100", "DefaultSenderID": "Mirror", "DefaultSMSType": "Promotional",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetSMSAttributes", Input: map[string]any{"Attributes": []any{"DefaultSenderID", "DefaultSMSType"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attrs := asMap(response.Output["Attributes"])
+	if len(attrs) != 2 || attrs["DefaultSenderID"] != "Mirror" || attrs["DefaultSMSType"] != "Promotional" {
+		t.Fatalf("filtered SMS attributes %#v", attrs)
+	}
+}
+
 func TestSNSPlatformEndpointAttributeValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

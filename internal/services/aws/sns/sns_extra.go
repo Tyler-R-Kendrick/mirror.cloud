@@ -3,6 +3,7 @@ package sns
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -441,6 +442,11 @@ func flattenAttrEntries(in map[string]any, prefix string) map[string]any {
 func (p *Pack) smsAttrs(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	if req.Operation == "SetSMSAttributes" {
 		attrs := flattenAttrEntries(req.Input, "Attributes")
+		for key, value := range attrs {
+			if fault := validateSMSAttribute(key, str(value)); fault != nil {
+				return nil, fault
+			}
+		}
 		b, _ := json.Marshal(attrs)
 		_ = p.col(req, "smsattrs").Put(ctx, "default", b)
 		return &spi.Response{Output: map[string]any{}}, nil
@@ -450,7 +456,51 @@ func (p *Pack) smsAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 	if ok {
 		_ = json.Unmarshal(b, &attrs)
 	}
+	requested := stringList(req.Input, "attributes", "Attributes")
+	if len(requested) > 0 {
+		filtered := map[string]any{}
+		for _, key := range requested {
+			name := str(key)
+			if value, found := attrs[name]; found {
+				filtered[name] = value
+			}
+		}
+		attrs = filtered
+	}
 	return &spi.Response{Output: map[string]any{"Attributes": attrs}}, nil
+}
+
+func validateSMSAttribute(name, value string) *spi.Fault {
+	switch name {
+	case "DeliveryStatusSuccessSamplingRate":
+		rate, err := strconv.Atoi(value)
+		if err != nil || rate < 0 || rate > 100 {
+			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: DeliveryStatusSuccessSamplingRate", HTTPStatus: 400, Fault: "client"}
+		}
+	case "DefaultSenderID":
+		if len(value) > 11 || value == "" {
+			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: DefaultSenderID", HTTPStatus: 400, Fault: "client"}
+		}
+		letter := false
+		for _, r := range value {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				letter = true
+			}
+			if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != ' ' {
+				return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: DefaultSenderID", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+		if !letter {
+			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: DefaultSenderID", HTTPStatus: 400, Fault: "client"}
+		}
+	case "DefaultSMSType":
+		if value != "Promotional" && value != "Transactional" {
+			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: DefaultSMSType", HTTPStatus: 400, Fault: "client"}
+		}
+	default:
+		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: " + name, HTTPStatus: 400, Fault: "client"}
+	}
+	return nil
 }
 
 func (p *Pack) smsOpt(ctx context.Context, req *spi.Request) (*spi.Response, error) {

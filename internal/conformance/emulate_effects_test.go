@@ -287,6 +287,13 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 					}
 					input["Attributes"] = map[string]any{"PlatformCredential": "credential"}
 				}
+				if op == "SetSMSAttributes" {
+					input = map[string]any{}
+					for key, value := range fatSNS {
+						input[key] = value
+					}
+					input["Attributes"] = map[string]any{"DefaultSenderID": "Mirror"}
+				}
 				inv(snsP, op, input)
 			}
 		}

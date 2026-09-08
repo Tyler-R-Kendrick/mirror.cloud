@@ -194,6 +194,16 @@ func TestBootedServerSQSPathEndpointStrategy(t *testing.T) {
 	if got := str(body["QueueUrl"]); got != "http://localhost.localstack.cloud:4566/queue/eu-north-1/000000000000/path-q" {
 		t.Fatalf("path strategy URL %q", got)
 	}
+	get, _ := http.NewRequest(http.MethodGet, ts.URL+"/queue/eu-north-1/000000000000/path-q", nil)
+	getRes, err := http.DefaultClient.Do(get)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer getRes.Body.Close()
+	getBody, _ := io.ReadAll(getRes.Body)
+	if getRes.StatusCode != http.StatusNotFound || !strings.Contains(string(getBody), "UnknownOperationException") {
+		t.Fatalf("path no-action request: %d %s", getRes.StatusCode, getBody)
+	}
 }
 
 func TestBootedServerSQSQueryQueueURLOverride(t *testing.T) {

@@ -6,7 +6,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 755 of 907 direct upstream test functions are explicitly traced (83.2%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green across 221 Go packages. The mutation inventory has 2,516 entries. The prior 2,505-entry inventory passed in all four bounded shards (785.888s, 1512.782s, 598.587s, and 1339.222s), and the eleven newer SNS mutants (platform application validation, direct endpoint dispatch, application-subscription dispatch, phone-number validation, SMS-subscription dispatch, opt-in validation, application-ARN validation, SMS-attribute validation, SMS-attribute filtering, invalid sandbox-phone validation, and missing sandbox-phone verification) pass targeted kill checks; a complete four-shard rerun for the new entries remains outstanding. These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green across 221 Go packages. The mutation inventory has 2,517 entries. The prior 2,505-entry inventory passed in all four bounded shards (785.888s, 1512.782s, 598.587s, and 1339.222s), and the twelve newer SNS mutants (platform application validation, direct endpoint dispatch, application-subscription dispatch, phone-number validation, SMS-subscription dispatch, opt-in validation, application-ARN validation, SMS-attribute validation, SMS-attribute filtering, invalid sandbox-phone validation, missing sandbox-phone verification, and invalid opt-out-check validation) pass targeted kill checks; a complete four-shard rerun for the new entries remains outstanding. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -655,7 +655,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
-The ordinary local gate is green across 221 packages. The prior 2,505-mutant inventory is green in all four bounded shards (exit 0), and the eleven newer SNS mutants are green in targeted kill checks; the serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
+The ordinary local gate is green across 221 packages. The prior 2,505-mutant inventory is green in all four bounded shards (exit 0), and the twelve newer SNS mutants are green in targeted kill checks; the serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
 
 | LocalStack test | Mirror evidence | Result |
 |---|---|---|

@@ -17888,6 +17888,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSTagValidation",
 		},
 		{
+			name: "sns-mutate-fifo-topic-attribute",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "if attributeName == \"FifoTopic\" {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSTopicFIFOAttributeIsImmutable",
+		},
+		{
 			name: "sns-accept-invalid-platform-endpoint-attributes",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old:  "func validateEndpointAttributes(attrs map[string]any) *spi.Fault {\n\tfor key, value := range attrs {",

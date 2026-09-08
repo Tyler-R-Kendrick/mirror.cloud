@@ -165,6 +165,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			attrs = map[string]any{}
 		}
 		attributeName := str(req.Input["AttributeName"])
+		if attributeName == "FifoTopic" {
+			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Cannot modify FifoTopic after creation", HTTPStatus: 400, Fault: "client"}
+		}
 		if attributeName == "DeliveryPolicy" && str(req.Input["AttributeValue"]) == "" {
 			delete(attrs, attributeName)
 		} else {

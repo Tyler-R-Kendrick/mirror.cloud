@@ -934,6 +934,24 @@ func TestSNSTagValidation(t *testing.T) {
 	}
 }
 
+func TestSNSTopicFIFOAttributeIsImmutable(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{
+		"Name": "standard-fifo-attribute", "Attributes": map[string]any{"FifoTopic": "false"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetTopicAttributes", Input: map[string]any{
+		"TopicArn": created.Output["TopicArn"], "AttributeName": "FifoTopic", "AttributeValue": "false",
+	}}); err == nil {
+		t.Fatal("modified FifoTopic after creation")
+	}
+}
+
 func TestSNSSMSAttributeValidationAndSelection(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

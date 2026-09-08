@@ -5105,6 +5105,38 @@ func TestDeadLetterQueueMaxReceiveCountCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"first": first.Output, "second": second.Output, "dlq": dlq.Output})
 }
 
+func TestDeadLetterQueuePreservesAttributesCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "attrs-dlq"})
+	call("CreateQueue", map[string]any{"QueueName": "attrs-source", "Attributes": map[string]any{
+		"RedrivePolicy": `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:attrs-dlq","maxReceiveCount":"1"}`, "VisibilityTimeout": "0",
+	}})
+	attrs := map[string]any{"MyAttribute": map[string]any{"StringValue": "foobar", "DataType": "String"}}
+	system := map[string]any{"AWSTraceHeader": map[string]any{"StringValue": "Root=1-test", "DataType": "String"}}
+	call("SendMessage", map[string]any{"QueueName": "attrs-source", "MessageBody": "message", "MessageAttributes": attrs, "MessageSystemAttributes": system})
+	call("ReceiveMessage", map[string]any{"QueueName": "attrs-source", "VisibilityTimeout": 0})
+	call("ReceiveMessage", map[string]any{"QueueName": "attrs-source", "VisibilityTimeout": 0})
+	response := call("ReceiveMessage", map[string]any{"QueueName": "attrs-dlq", "AttributeNames": []any{"AWSTraceHeader"}, "MessageAttributeNames": []any{"All"}})
+	messages := asAnySlice(response.Output["Messages"])
+	if len(messages) != 1 {
+		t.Fatalf("dlq messages %#v", response.Output)
+	}
+	message := asMap(messages[0])
+	if !reflect.DeepEqual(message["MessageAttributes"], attrs) || str(asMap(message["Attributes"])["AWSTraceHeader"]) != "Root=1-test" {
+		t.Fatalf("dlq attributes %#v", message)
+	}
+}
+
 func FuzzDeadLetterQueueMaxReceiveCount(f *testing.F) {
 	f.Add(uint8(1))
 	f.Add(uint8(2))

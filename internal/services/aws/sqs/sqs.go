@@ -1087,6 +1087,8 @@ func (p *Pack) afterReceive(ctx context.Context, req *spi.Request, name string, 
 	max, dlq := redrive(attrs)
 	if max > 0 && n > max && dlq != "" && dlq != name {
 		_ = p.col(req, "msgs:"+name).Delete(ctx, rh)
+		m["receiveCount"] = 0
+		m["firstReceiveAt"] = int64(0)
 		m["visibleAt"] = p.deps.Clock.Now().UnixNano()
 		m["handle"] = p.deps.Rand.Hex(64)
 		if str(m["origin"]) == "" {

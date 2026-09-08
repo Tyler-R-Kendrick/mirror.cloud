@@ -1101,6 +1101,52 @@ func TestPurgeClearsFIFODeduplicationCharacterization(t *testing.T) {
 	}
 }
 
+func TestFIFODeduplicationIntervalCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "dedup-interval.fifo", "Attributes": map[string]any{"FifoQueue": "true", "VisibilityTimeout": "30"}})
+	first := call("SendMessage", map[string]any{"QueueName": "dedup-interval.fifo", "MessageBody": "first", "MessageGroupId": "group", "MessageDeduplicationId": "dedup"})
+	if err := clk.Advance(3 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	within := call("SendMessage", map[string]any{"QueueName": "dedup-interval.fifo", "MessageBody": "duplicate", "MessageGroupId": "group", "MessageDeduplicationId": "dedup"})
+	if within.Output["MessageId"] != first.Output["MessageId"] {
+		t.Fatalf("deduplication window accepted duplicate: first=%#v within=%#v", first.Output, within.Output)
+	}
+	message := asAnySlice(call("ReceiveMessage", map[string]any{"QueueName": "dedup-interval.fifo"}).Output["Messages"])[0].(map[string]any)
+	call("DeleteMessage", map[string]any{"QueueName": "dedup-interval.fifo", "ReceiptHandle": message["ReceiptHandle"]})
+	if got := call("ReceiveMessage", map[string]any{"QueueName": "dedup-interval.fifo", "VisibilityTimeout": 0}).Output["Messages"]; got != nil {
+		t.Fatalf("duplicate became visible inside interval: %#v", got)
+	}
+
+	second := call("SendMessage", map[string]any{"QueueName": "dedup-interval.fifo", "MessageBody": "second", "MessageGroupId": "group", "MessageDeduplicationId": "dedup-2"})
+	if err := clk.Advance(5*time.Minute + time.Second); err != nil {
+		t.Fatal(err)
+	}
+	after := call("SendMessage", map[string]any{"QueueName": "dedup-interval.fifo", "MessageBody": "after", "MessageGroupId": "group", "MessageDeduplicationId": "dedup-2"})
+	if after.Output["MessageId"] == second.Output["MessageId"] {
+		t.Fatalf("deduplication window did not expire: second=%#v after=%#v", second.Output, after.Output)
+	}
+	messages := asAnySlice(call("ReceiveMessage", map[string]any{"QueueName": "dedup-interval.fifo", "MaxNumberOfMessages": 10, "VisibilityTimeout": 0}).Output["Messages"])
+	bodies := make([]string, 0, len(messages))
+	for _, raw := range messages {
+		bodies = append(bodies, str(asMap(raw)["Body"]))
+	}
+	golden.AssertJSON(t, map[string]any{"withinWindowSameId": true, "afterWindowNewId": true, "bodies": bodies})
+}
+
 func TestDeadLetterChainResetsReceiveCountCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)

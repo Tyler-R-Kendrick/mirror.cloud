@@ -596,9 +596,9 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 92.2% |
-| SQS mutation mutants killed | 156 / 156 (100%) |
-| LocalStack SQS test functions explicitly traced | 178 / 208 (85.6%) |
-| LocalStack SQS test functions not yet traced | 30 / 208 (14.4%) |
+| SQS mutation mutants killed | 158 / 158 (100%) |
+| LocalStack SQS test functions explicitly traced | 184 / 208 (88.5%) |
+| LocalStack SQS test functions not yet traced | 24 / 208 (11.5%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
@@ -607,6 +607,12 @@ The repository-wide exhaustive gate is not currently verifiable in this environm
 | LocalStack test | Mirror evidence | Result |
 |---|---|---|
 | `test_sqs.py::TestSqsProvider::test_list_queues` | ListQueues applies QueueNamePrefix and omits QueueUrls when no queue matches; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin both branches | Mapped; full race-clean |
+| `test_sqs.py::TestSqsQueryApi::test_endpoint_strategy_with_multi_region` | SQS endpoint strategies keep same-named queues region-isolated: sends through one regional URL are invisible in another region and return through the originating region; atomic regional isolation and booted endpoint tests pin the behavior | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_list_queues_multi_region_without_endpoint_strategy` | The `off` strategy keeps URLs host/path-compatible while ListQueues remains account-and-region scoped; atomic regional isolation and URL characterization pin the behavior | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_list_queues_multi_region_with_endpoint_strategy_standard` | The `standard` strategy includes `sqs.<region>` in queue URLs and keeps regional listings isolated; atomic URL and regional isolation characterization pin both seams | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_list_queues_multi_region_with_endpoint_strategy_domain` | The `domain` strategy uses `queue` or `<region>.queue` hosts while preserving regional listings; atomic URL and regional isolation characterization pin both default and non-default regions | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_get_queue_url_multi_region` | GetQueueUrl returns each region's stored strategy-specific URL for the same queue name; atomic URL and regional isolation characterization pin lookup identity | Mapped; focused green |
+| `test_sqs.py::TestSqsQueryApi::test_queue_url_format_path_strategy` | The `path` strategy emits `/queue/<region>/<account>/<name>` URLs and the booted edge accepts the configured path shape; atomic and booted HTTP characterization pin generation and routing | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_receive_message_wait_time_seconds_and_max_number_of_messages_does_not_block` | ReceiveMessage returns all currently available messages immediately even when MaxNumberOfMessages exceeds the queue depth and WaitTimeSeconds is five; atomic Verify-style characterization, raw HTTP BDD, and semantic mutation coverage pin the no-wait branch | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_wait_time_seconds_waits_correctly` | An explicit ReceiveMessage long poll returns a message sent after polling begins; atomic Verify-style characterization, raw HTTP BDD, and explicit-wait mutation coverage pin the delayed-message branch | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_create_queue_with_default_attributes_is_idempotent` | Recreating a queue without attributes returns the original URL after custom visibility and receive-wait values were set; atomic Verify-style characterization, SDK contract, and BDD coverage pin omitted-default idempotency | Mapped; focused green |

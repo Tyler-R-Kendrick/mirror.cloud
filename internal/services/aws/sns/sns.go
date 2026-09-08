@@ -611,6 +611,10 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 			}
 			continue
 		}
+		if protocol == "sms" {
+			_ = p.deps.Bus.Publish(ctx, "sns:sms:"+str(sub["Endpoint"]), []byte(structuredMessage(body, str(req.Input["MessageStructure"]), protocol)))
+			continue
+		}
 		message := structuredMessage(body, str(req.Input["MessageStructure"]), protocol)
 		payload := message
 		if str(sub["RawMessageDelivery"]) != "true" {

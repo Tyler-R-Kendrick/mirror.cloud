@@ -848,6 +848,34 @@ func TestSNSPhoneNumberPublish(t *testing.T) {
 	}
 }
 
+func TestSNSSMSSubscriptionDelivery(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	phone := "+15555550102"
+	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "sms-subscription"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Protocol": "sms", "Endpoint": phone,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	delivered := ""
+	cancel := deps.Bus.Subscribe("sns:sms:"+phone, func(_ context.Context, body []byte) { delivered = string(body) })
+	defer cancel()
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Message": "topic sms",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if delivered != "topic sms" {
+		t.Fatalf("sms subscription delivery=%q", delivered)
+	}
+}
+
 func TestSNSPlatformEndpointAttributeValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

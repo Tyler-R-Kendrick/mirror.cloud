@@ -17824,6 +17824,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPhoneNumberPublish",
 		},
 		{
+			name: "sns-drop-sms-subscription-dispatch",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `if protocol == "sms" {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSSMSSubscriptionDelivery",
+		},
+		{
 			name: "sns-accept-invalid-platform-endpoint-attributes",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old:  `for key, value := range attrs {`,

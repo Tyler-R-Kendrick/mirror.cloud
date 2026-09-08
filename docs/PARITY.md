@@ -14,13 +14,13 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 
 | Measure | Current evidence |
 |---|---:|
-| Requested test forms wired for the audited SNS slice | 6 / 7 (atomic, snapshot, BDD, fuzz, chaos/race, mutation) |
+| Requested test forms wired for the audited SNS slice | 7 / 7 (atomic, snapshot, BDD, fuzz, chaos/race, mutation, AWS SDK contract) |
 | SNS operations routed to emulation | 43 / 43 |
 | SNS statement coverage | 91.9% |
 | LocalStack SNS test functions inventoried | 180 |
 | LocalStack SNS test functions explicitly traced | 0 / 180 |
 
-The SNS slice is locally characterized and mutation-checked for topic creation, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, subscription-attribute/SMS validation, and confirmation/unsubscribe input validation. It is not an AWS differential proof: the pinned SNS inventory still needs per-test trace rows and SDK contract coverage.
+The SNS slice is locally characterized and mutation-checked for topic creation, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, subscription-attribute/SMS validation, confirmation/unsubscribe input validation, and an AWS SDK publish/list lifecycle contract. It is not an AWS differential proof: the pinned SNS inventory still needs per-test trace rows and a live AWS oracle.
 
 ## S3 baseline
 

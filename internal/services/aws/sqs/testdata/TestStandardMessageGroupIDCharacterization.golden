@@ -1,4 +1,9 @@
 {
+  "control": {
+    "Code": "InvalidParameterValue",
+    "HTTPStatus": 400,
+    "Message": "Value Invalid-\b for parameter MessageGroupId is invalid. Reason: MessageGroupId can only include alphanumeric and punctuation characters. 1 to 128 in length."
+  },
   "empty": {
     "Code": "InvalidParameterValue",
     "HTTPStatus": 400,

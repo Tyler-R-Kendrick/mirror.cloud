@@ -2991,6 +2991,33 @@ func TestPublishGetDeleteMessageBatchCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"sent": len(sent.Output["Successful"].([]any)), "received": len(messages), "deleted": len(deleted.Output["Successful"].([]any)), "remaining": remainingCount})
 }
 
+func TestDeleteMessageBatchBareReceiptHandlesCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "bare-receipt-batch"})
+	call("SendMessage", map[string]any{"QueueName": "bare-receipt-batch", "MessageBody": "one"})
+	call("SendMessage", map[string]any{"QueueName": "bare-receipt-batch", "MessageBody": "two"})
+	received := call("ReceiveMessage", map[string]any{"QueueName": "bare-receipt-batch", "MaxNumberOfMessages": 10})
+	messages := received.Output["Messages"].([]any)
+	entries := make([]any, len(messages))
+	for i, raw := range messages {
+		entries[i] = raw.(map[string]any)["ReceiptHandle"]
+	}
+	deleted := call("DeleteMessageBatch", map[string]any{"QueueName": "bare-receipt-batch", "Entries": entries})
+	if len(deleted.Output["Successful"].([]any)) != 2 {
+		t.Fatalf("bare receipt deletion %#v", deleted.Output)
+	}
+}
+
 func TestSendMessageBatchEmptyCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()
@@ -3836,7 +3863,7 @@ func TestStandardMessageGroupIDCharacterization(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden.AssertJSON(t, map[string]any{
-		"empty": call(""), "tooLong": call(strings.Repeat("a", 129)), "spaces": call("group 123"),
+		"empty": call(""), "tooLong": call(strings.Repeat("a", 129)), "spaces": call("group 123"), "control": call("Invalid-\b"),
 	})
 }
 
@@ -4780,7 +4807,7 @@ func TestFIFODeduplicationIDCharacterization(t *testing.T) {
 		t.Fatal("valid deduplication id", err)
 	}
 	golden.AssertJSON(t, map[string]any{
-		"valid": valid.Output, "empty": call(""), "tooLong": call(strings.Repeat("a", 129)), "spaces": call("group 123"),
+		"valid": valid.Output, "empty": call(""), "tooLong": call(strings.Repeat("a", 129)), "spaces": call("group 123"), "control": call("Invalid-\b"),
 	})
 }
 

@@ -1,4 +1,10 @@
 {
+  "control": {
+    "Code": "InvalidParameterValue",
+    "Fault": "client",
+    "HTTPStatus": 400,
+    "Message": "Value Invalid-\b for parameter MessageDeduplicationId is invalid. Reason: MessageDeduplicationId can only include alphanumeric and punctuation characters. 1 to 128 in length."
+  },
   "empty": {
     "Code": "InvalidParameterValue",
     "Fault": "client",

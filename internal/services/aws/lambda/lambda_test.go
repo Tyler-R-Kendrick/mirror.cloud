@@ -14,6 +14,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -90,6 +91,92 @@ func TestInvokeReceivesFunctionEnvironment(t *testing.T) {
 	if !strings.Contains(payload, `"name": "s3-reader"`) || !strings.Contains(payload, `"bucket": "objects"`) {
 		t.Fatalf("payload %s", payload)
 	}
+}
+
+func TestSQSEventSourceMappingInvokesAndDeletes(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	deps := spitest.Deps(t)
+	identity := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	queue := sqs.New(deps)
+	function := New(deps)
+	ctx := context.Background()
+	if _, err := queue.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateQueue", Input: map[string]any{"QueueName": "source"}}); err != nil {
+		t.Fatal(err)
+	}
+	sourceARN := "arn:aws:sqs:us-east-1:123456789012:source"
+	code := "def lambda_handler(event, context):\n    record = event['Records'][0]\n    if record['eventSource'] != 'aws:sqs' or record['eventSourceARN'] != 'arn:aws:sqs:us-east-1:123456789012:source':\n        raise RuntimeError('bad source event')\n    return {'count': len(event['Records'])}\n"
+	if _, err := function.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateFunction", Input: map[string]any{
+		"FunctionName": "consumer", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
+		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(code))},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := function.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateEventSourceMapping", Input: map[string]any{
+		"FunctionName": "consumer", "EventSourceArn": sourceARN,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queue.Invoke(ctx, &spi.Request{Identity: identity, Operation: "SendMessage", Input: map[string]any{"QueueName": "source", "MessageBody": "one"}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := queue.Invoke(ctx, &spi.Request{Identity: identity, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "source", "VisibilityTimeout": 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(anySlice(got.Output["Messages"])) != 0 {
+		t.Fatalf("event source mapping left messages: %#v", got.Output)
+	}
+	_ = function.Close()
+}
+
+func TestSQSEventSourceMappingRedrivesFailedMessage(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	deps := spitest.Deps(t)
+	identity := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	queue := sqs.New(deps)
+	function := New(deps)
+	ctx := context.Background()
+	create := func(name string, attrs map[string]any) {
+		t.Helper()
+		if _, err := queue.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateQueue", Input: map[string]any{"QueueName": name, "Attributes": attrs}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	create("dead", nil)
+	create("source", map[string]any{"RedrivePolicy": `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:dead","maxReceiveCount":"1"}`})
+	code := "def lambda_handler(event, context):\n    raise RuntimeError('failed')\n"
+	if _, err := function.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateFunction", Input: map[string]any{
+		"FunctionName": "failing", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
+		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(code))},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := function.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateEventSourceMapping", Input: map[string]any{
+		"FunctionName": "failing", "EventSourceArn": "arn:aws:sqs:us-east-1:123456789012:source",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	sent, err := queue.Invoke(ctx, &spi.Request{Identity: identity, Operation: "SendMessage", Input: map[string]any{"QueueName": "source", "MessageBody": "preserve-id"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := queue.Invoke(ctx, &spi.Request{Identity: identity, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "dead", "VisibilityTimeout": 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := anySlice(got.Output["Messages"])
+	if len(messages) != 1 {
+		t.Fatalf("dead-letter message %#v sent=%#v", got.Output, sent.Output)
+	}
+	message, _ := messages[0].(map[string]any)
+	if stringValue(message["MessageId"]) != stringValue(sent.Output["MessageId"]) {
+		t.Fatalf("dead-letter id %#v sent=%#v", message, sent.Output)
+	}
+	_ = function.Close()
 }
 
 func TestBootedServerLambdaPythonInvoke(t *testing.T) {

@@ -895,6 +895,9 @@ func TestSNSOptInPhoneValidation(t *testing.T) {
 			t.Fatalf("accepted invalid phone key %s", key)
 		}
 	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CheckIfPhoneNumberIsOptedOut", Input: map[string]any{"PhoneNumber": "invalid"}}); err == nil {
+		t.Fatal("checked invalid opt-out phone")
+	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "OptInPhoneNumber", Input: map[string]any{"PhoneNumber": "+15555550103"}}); err != nil {
 		t.Fatal(err)
 	}

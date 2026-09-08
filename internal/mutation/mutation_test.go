@@ -17872,6 +17872,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSSandboxPhoneValidation",
 		},
 		{
+			name: "sns-accept-invalid-opt-out-check-phone",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  "case \"CheckIfPhoneNumberIsOptedOut\":\n\t\tif !validSMSNumber(phone) {",
+			new:  "case \"CheckIfPhoneNumberIsOptedOut\":\n\t\tif false {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSOptInPhoneValidation",
+		},
+		{
 			name: "sns-accept-invalid-platform-endpoint-attributes",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old:  "func validateEndpointAttributes(attrs map[string]any) *spi.Fault {\n\tfor key, value := range attrs {",

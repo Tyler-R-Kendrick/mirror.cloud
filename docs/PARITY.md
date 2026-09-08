@@ -597,8 +597,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 92.2% |
 | SQS mutation mutants killed | 159 / 159 (100%) |
-| LocalStack SQS test functions explicitly traced | 192 / 208 (92.3%) |
-| LocalStack SQS test functions not yet traced | 16 / 208 (7.7%) |
+| LocalStack SQS test functions explicitly traced | 203 / 208 (97.6%) |
+| LocalStack SQS test functions not yet traced | 5 / 208 (2.4%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
@@ -798,3 +798,17 @@ The repository-wide exhaustive gate is not currently verifiable in this environm
 | `test_sqs_move_task.py::test_cancel_with_invalid_source_arn_in_task_handle` | CancelMessageMoveTask returns the exact 404 SourceArn resource fault for a well-formed handle naming a missing queue; atomic characterization and AWS SDK contract cover the boundary | Mapped; focused green |
 | `test_sqs_move_task.py::test_cancel_with_invalid_task_id_in_task_handle` | CancelMessageMoveTask returns the exact 404 Task does not exist fault for a valid source ARN with an unknown task ID; atomic characterization and AWS SDK contract cover the boundary | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_sqs_permission_lifecycle` | AddPermission and RemovePermission preserve AWS's 2008-10-17 default policy, IAM root principals, scalar action shape, duplicate-label fault, and last-statement removal across atomic snapshot, AWS SDK, raw HTTP BDD, and semantic mutation coverage | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_message_with_attributes_should_be_enqueued` | Number-typed message attributes survive SendMessage/ReceiveMessage with the same message ID and value; atomic Verify-style snapshot and attribute digest coverage pin the issue-3737 path | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_message_with_carriage_return` | Carriage-return/newline message bodies round-trip byte-for-byte with matching MD5OfBody; atomic Verify-style snapshot pins the wire content | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_fair_queue_with_message_group_id` | Standard queues retain MessageGroupId and return it as a requested system attribute; atomic Verify-style snapshot and focused receive coverage pin fair-queue metadata | Mapped; focused green |
+| `test_sqs.py::TestSqsQueryApi::test_get_send_and_receive_messages` | Query requests addressed by QueueUrl send and receive only the target queue's message and render an empty queue as a self-closing ReceiveMessageResult; booted HTTP coverage pins the lifecycle | Mapped; focused green |
+| `test_sqs.py::TestSqsQueryApi::test_get_on_deleted_queue_fails` | Query GetQueueAttributes on a deleted queue returns HTTP 400 with the WSDL-specific NonExistentQueue code and message; booted HTTP characterization pins the fault | Mapped; focused green |
+| `test_sqs.py::TestSqsQueryApi::test_posting_to_fifo_requires_deduplicationid_group_id` | Query SendMessage on a FIFO queue rejects missing deduplication or group identifiers with the protocol-specific InvalidParameterValue/MissingParameter faults; booted HTTP characterization pins both | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_change_message_visibility_on_deleted_message` | ChangeMessageVisibility rejects a deleted message with InvalidParameterValue and the AWS availability message; atomic characterization pins the terminal-handle fault | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_delete_message_with_illegal_receipt_handle` | DeleteMessage rejects malformed receipt handles with ReceiptHandleIsInvalid; atomic characterization pins the trust-boundary fault | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_delete_message_with_deleted_receipt_handle` | Repeated DeleteMessage calls with a previously deleted receipt remain successful; atomic characterization pins idempotent deletion | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_fifo_delete_message_with_expired_receipt_handle` | FIFO DeleteMessage rejects an expired receipt handle with the exact InvalidParameterValue expiry fault; atomic controllable-clock characterization pins the boundary | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_remove_message_with_old_receipt_handle` | Standard DeleteMessage accepts an older receipt handle after redelivery and removes the message; atomic prior-handle characterization pins the behavior | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_get_list_queues_fails_json_format` | Query ListQueues with JSON negotiation returns the modeled ListQueuesResponse envelope; booted HTTP Section48 coverage pins the supported response shape (the duplicate upstream case is skipped) | Mapped; focused green |
+
+The five remaining source functions are not evidence gaps that can be closed by claiming parity: `test_delete_message_batch_from_lambda`, `test_send_message_with_invalid_fifo_parameters`, and `test_dead_letter_queue_execution_lambda_mapping_preserves_id` are skipped upstream with needs-fixing/TODO markers; `test_deduplication_interval` is an intentionally manual five-minute test; and no Lambda integration harness is present in Mirror. They remain explicitly untraced until an executable AWS-backed or supported equivalent exists.

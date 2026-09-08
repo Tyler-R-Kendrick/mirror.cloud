@@ -196,6 +196,51 @@ func TestBootedServerSQSPathEndpointStrategy(t *testing.T) {
 	}
 }
 
+func TestBootedServerSQSQueryQueueURLOverride(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	cfg.Seed = "sqs-query-url-override"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=00"
+	create := func(name string) string {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(`{"QueueName":"`+name+`"}`))
+		req.Header.Set("Content-Type", "application/x-amz-json-1.0")
+		req.Header.Set("X-Amz-Target", "AmazonSQS.CreateQueue")
+		req.Header.Set("Authorization", auth)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&body); err != nil || res.StatusCode >= 300 {
+			t.Fatalf("create %s: %d %#v %v", name, res.StatusCode, body, err)
+		}
+		return str(body["QueueUrl"])
+	}
+	first, second := create("query-first"), create("query-second")
+	parsed, err := url.Parse(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+parsed.Path+"?Action=GetQueueAttributes&QueueUrl="+url.QueryEscape(second)+"&AttributeName.1=QueueArn", nil)
+	req.Header.Set("Authorization", auth)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(body), "query-second") || strings.Contains(string(body), "query-first") {
+		t.Fatalf("queue URL override: %d %s", res.StatusCode, body)
+	}
+}
+
 func TestBootedServerSQSSection48(t *testing.T) {
 	t.Setenv("MIRROR_CLOCK", "controllable")
 	cfg := config.Default()

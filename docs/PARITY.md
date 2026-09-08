@@ -597,8 +597,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 92.2% |
 | SQS mutation mutants killed | 152 / 152 (100%) |
-| LocalStack SQS test functions explicitly traced | 172 / 208 (82.7%) |
-| LocalStack SQS test functions not yet traced | 36 / 208 (17.3%) |
+| LocalStack SQS test functions explicitly traced | 173 / 208 (83.2%) |
+| LocalStack SQS test functions not yet traced | 35 / 208 (16.8%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
@@ -678,6 +678,7 @@ The repository-wide exhaustive gate is not currently verifiable in this environm
 | `test_sqs.py::TestSqsProvider::test_invalid_dead_letter_arn_rejected_before_lookup` | A syntactically invalid dead-letter ARN is rejected at CreateQueue before queue lookup or persistence; the same atomic, SDK, BDD, fuzz, chaos, and mutation validation stack pins the early fault | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_dead_letter_queue_with_fifo_and_content_based_deduplication` | FIFO content-based deduplication and dead-letter redrive preserve group operation after a poison message moves; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and redrive mutants pin recovery | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_dead_letter_queue_max_receive_count` | A message exceeding max receive count leaves the source receive response and arrives once in the dead-letter queue; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and threshold mutants pin the boundary | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_dead_letter_queue_chain` | Chained redrive policies deliver a poison message once through q1→q2→q3, resetting the per-queue receive count at each hop; atomic characterization and native state coverage pin the chain transition | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_non_existent_queue` | Deleted queues return the standard AWS non-existent-queue fault for JSON/SDK calls and the Query protocol's WSDL-specific message; atomic characterization, AWS SDK contract, raw HTTP BDD, and semantic mutation coverage pin protocol-specific errors | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_get_queue_attributes_all` | Query requests sent to a queue URL path return all queue attributes as repeated `Attribute` name/value members with partition-aware QueueArn and VisibilityTimeout; atomic codec characterization, raw HTTP contract, and semantic mutation coverage pin the wire shape | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_get_queue_attributes_works_without_authparams` | Queue-URL Query GetQueueAttributes succeeds without an Authorization header and preserves the default attribute envelope; booted HTTP and queue-path demux characterization pin the LocalStack-only access path | Mapped; focused green |

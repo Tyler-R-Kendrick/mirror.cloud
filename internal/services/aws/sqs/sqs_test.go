@@ -3712,6 +3712,23 @@ func TestCreateQueueTagsCharacterization(t *testing.T) {
 	golden.AssertJSON(t, response.Output)
 }
 
+func TestQueryTagFieldsCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response.Output
+	}
+	call("CreateQueue", map[string]any{"QueueName": "query-tags", "Tag.1.Key": "first", "Tag.1.Value": "one", "Tag.2.Key": "second", "Tag.2.Value": "two"})
+	call("TagQueue", map[string]any{"QueueName": "query-tags", "Tags.member.1.Key": "second", "Tags.member.1.Value": "updated", "Tags.member.2.Key": "third", "Tags.member.2.Value": "three"})
+	call("UntagQueue", map[string]any{"QueueName": "query-tags", "TagKey.1": "first"})
+	golden.AssertJSON(t, call("ListQueueTags", map[string]any{"QueueName": "query-tags"}))
+}
+
 func FuzzCreateQueueTags(f *testing.F) {
 	f.Add("tag", "value")
 	f.Add("", "")

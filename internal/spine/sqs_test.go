@@ -90,6 +90,40 @@ func TestBootedServerSQSJSONAndQuery(t *testing.T) {
 	}
 }
 
+func TestBootedServerSQSQueryTags(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	cfg.Seed = "sqs-query-tags"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	call := func(form url.Values) []byte {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=00")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, _ := io.ReadAll(res.Body)
+		if res.StatusCode >= 300 {
+			t.Fatalf("query %v: %d %s", form.Get("Action"), res.StatusCode, body)
+		}
+		return body
+	}
+	call(url.Values{"Action": {"CreateQueue"}, "Version": {"2012-11-05"}, "QueueName": {"query-tags"}, "Tag.1.Key": {"first"}, "Tag.1.Value": {"one"}})
+	call(url.Values{"Action": {"TagQueue"}, "Version": {"2012-11-05"}, "QueueName": {"query-tags"}, "Tags.member.1.Key": {"second"}, "Tags.member.1.Value": {"two"}})
+	body := call(url.Values{"Action": {"ListQueueTags"}, "Version": {"2012-11-05"}, "QueueName": {"query-tags"}})
+	if !strings.Contains(string(body), "<first>one</first>") || !strings.Contains(string(body), "<second>two</second>") {
+		t.Fatalf("query tags response %s", body)
+	}
+}
+
 func TestBootedServerSQSSection48(t *testing.T) {
 	t.Setenv("MIRROR_CLOCK", "controllable")
 	cfg := config.Default()

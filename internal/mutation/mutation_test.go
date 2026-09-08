@@ -9019,6 +9019,23 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestDynamoDBTableMetadataCharacterization",
 		},
 		{
+			name: "dynamodb-table-crud-drop-default-warm-throughput",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
+			old:  `if status == "ACTIVE" && len(warm) == 0 {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestTableCRUDDescriptionCharacterization",
+		},
+		{
+			name: "dynamodb-table-crud-drop-delete-table-id",
+			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
+			old:  `"TableId":                   existing["TableId"],
+`,
+			new:  "",
+			pkg:  "./internal/services/aws/dynamodb",
+			run:  "TestTableCRUDDescriptionCharacterization",
+		},
+		{
 			name: "dynamodb-table-metadata-force-active-index",
 			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
 			old:  `asMap(raw)["IndexStatus"] = status`,

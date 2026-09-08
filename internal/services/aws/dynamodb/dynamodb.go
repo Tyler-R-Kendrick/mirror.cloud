@@ -117,19 +117,30 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		description := tableDescription(rec, "CREATING")
 		return &spi.Response{Output: map[string]any{"TableDescription": description}}, nil
 	case "DeleteTable":
+		var existing map[string]any
 		if err := p.col(req, "tables").Txn(ctx, func(tx spi.Tx) error {
-			if _, ok, err := tx.Get(table); err != nil {
+			b, ok, err := tx.Get(table)
+			if err != nil {
 				return err
 			} else if !ok {
 				return &spi.Fault{Code: "ResourceNotFoundException", Message: "Requested resource not found: Table: " + table + " not found", HTTPStatus: 400, Fault: "client"}
 			}
+			_ = json.Unmarshal(b, &existing)
 			return tx.Delete(table)
 		}); err != nil {
 			return nil, err
 		}
 		_ = p.col(req, "ttl").Delete(ctx, table)
 		_ = p.col(req, "tags").Delete(ctx, "arn:aws:dynamodb:"+req.Identity.Region+":"+req.Identity.Account+":table/"+table)
-		return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{"TableName": table, "TableStatus": "DELETING"}}}, nil
+		return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{
+			"DeletionProtectionEnabled": existing["DeletionProtectionEnabled"],
+			"ItemCount":                 existing["ItemCount"],
+			"ProvisionedThroughput":     existing["ProvisionedThroughput"],
+			"TableArn":                  existing["TableArn"],
+			"TableId":                   existing["TableId"],
+			"TableName":                 table,
+			"TableStatus":               "DELETING",
+		}}}, nil
 	case "DescribeTable":
 		b, ok, _ := p.col(req, "tables").Get(ctx, table)
 		if !ok {
@@ -879,7 +890,14 @@ func (p *Pack) defaultDynamoDBKey(ctx context.Context, req *spi.Request) (string
 func tableDescription(table map[string]any, status string) map[string]any {
 	description := cloneMap(table)
 	description["TableStatus"] = status
-	if warm := asMap(description["WarmThroughput"]); len(warm) > 0 {
+	warm := asMap(description["WarmThroughput"])
+	if status == "ACTIVE" && len(warm) == 0 {
+		if throughput := asMap(description["ProvisionedThroughput"]); asInt(throughput["ReadCapacityUnits"]) > 0 || asInt(throughput["WriteCapacityUnits"]) > 0 {
+			warm = map[string]any{"ReadUnitsPerSecond": throughput["ReadCapacityUnits"], "WriteUnitsPerSecond": throughput["WriteCapacityUnits"]}
+			description["WarmThroughput"] = warm
+		}
+	}
+	if len(warm) > 0 {
 		warm["Status"] = "ACTIVE"
 		if status != "ACTIVE" {
 			warm["Status"] = "UPDATING"

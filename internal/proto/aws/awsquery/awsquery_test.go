@@ -84,6 +84,36 @@ func TestAWSQueryFaultsAndUnknownActions(t *testing.T) {
 	}
 }
 
+func TestSQSQueryInvalidActions(t *testing.T) {
+	svc := &model.Service{ID: "aws.sqs", Operations: []model.Operation{{Name: "CreateQueue"}, {Name: "ListQueues"}, {Name: "SendMessage"}}}
+	codec := Codec{}
+	for _, tc := range []struct {
+		path, action string
+	}{
+		{"/000000000000/q", "FooBar"},
+		{"/000000000000/q", "CreateQueue"},
+		{"/queue/us-east-1/000000000000/q", "ListQueues"},
+	} {
+		r := httptest.NewRequest(http.MethodGet, tc.path+"?Action="+tc.action, nil)
+		_, err := codec.Route(svc, r)
+		fault, ok := err.(*spi.Fault)
+		if !ok || fault.Code != "InvalidAction" || fault.HTTPStatus != http.StatusBadRequest || fault.Message != "The action "+tc.action+" is not valid for this endpoint." {
+			t.Fatalf("%s %s: %#v", tc.path, tc.action, err)
+		}
+		w := httptest.NewRecorder()
+		if err := codec.EncodeFault(svc, nil, w, fault, "request"); err != nil || w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "<Code>InvalidAction</Code>") || !strings.Contains(w.Body.String(), "The action "+tc.action+" is not valid for this endpoint.") {
+			t.Fatalf("wire %s %s: %d %v %s", tc.path, tc.action, w.Code, err, w.Body.String())
+		}
+	}
+	for _, action := range []string{"CreateQueue", "ListQueues"} {
+		r := httptest.NewRequest(http.MethodGet, "/?Action="+action, nil)
+		op, err := codec.Route(svc, r)
+		if err != nil || op == nil || op.Name != action {
+			t.Fatalf("root %s: %#v %v", action, op, err)
+		}
+	}
+}
+
 func TestSQSGetQueueAttributesQueryShape(t *testing.T) {
 	svc := &model.Service{ID: "aws.sqs", Protocol: model.ProtoAWSQuery}
 	op := &model.Operation{Name: "GetQueueAttributes"}

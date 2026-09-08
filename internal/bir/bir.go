@@ -145,6 +145,12 @@ type Generate struct {
 	// Kind is "hex", "uuid" or "int".
 	Kind  string `yaml:"kind"`
 	Bytes int    `yaml:"bytes,omitempty"`
+	// Prefix is written ahead of the drawn value. Almost every AWS identifier
+	// carries one -- `vpc-`, `i-`, `sg-` -- and without it a bundle has to draw
+	// the value as a separate effect and build the key by hand, which works for
+	// one record and not for a batch: a `generate` effect draws once, so every
+	// element of a for_each would be keyed the same.
+	Prefix string `yaml:"prefix,omitempty"`
 }
 
 // Statechart is an SCXML-class lifecycle. Timers compile to stored deadlines

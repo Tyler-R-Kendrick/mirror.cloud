@@ -523,6 +523,13 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 			delete(ev.binds, "item")
 		}
 	}()
+	// A for_each write answers with what it wrote. `rec` holds one record and
+	// after a batch that is whichever element happened to be last, which is a
+	// silently wrong answer rather than an absent one -- RunInstances launches
+	// MinCount instances and its response carries every one of them. A list
+	// binds `items` for the same reason; this binds it for the same name.
+	written := make([]any, 0, len(list))
+	defer func() { ev.binds["items"] = written }()
 	for _, e := range list {
 		ev.binds["item"] = e
 		// The guard runs per element, because a batch's elements are not all
@@ -542,6 +549,9 @@ func (ev *eval) write(ctx context.Context, path string, w bir.WriteEffect, creat
 		}
 		if err := ev.writeOne(ctx, path, w, create); err != nil {
 			return err
+		}
+		if rec, ok := ev.binds["rec"].(map[string]any); ok {
+			written = append(written, rec)
 		}
 	}
 	return nil
@@ -965,15 +975,15 @@ func (ev *eval) removeWhere(ctx context.Context, path string, col spi.Collection
 func (ev *eval) generate(g bir.Generate) string {
 	switch g.Kind {
 	case "uuid":
-		return ev.e.deps.Rand.UUID()
+		return g.Prefix + ev.e.deps.Rand.UUID()
 	case "int":
-		return fmt.Sprint(ev.e.deps.Rand.Intn(1 << 30))
+		return g.Prefix + fmt.Sprint(ev.e.deps.Rand.Intn(1<<30))
 	default:
 		n := g.Bytes
 		if n <= 0 {
 			n = 8
 		}
-		return ev.e.deps.Rand.Hex(n)
+		return g.Prefix + ev.e.deps.Rand.Hex(n)
 	}
 }
 

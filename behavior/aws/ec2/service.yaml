@@ -1,0 +1,187 @@
+schema: bir/1
+service: aws.ec2
+
+# Transcribed from the hand-written pack, not established against the real
+# service. There is no hypervisor and no network: a VPC is a record, a subnet
+# is a record that names one, a security group holds no rules, and an instance
+# is running the moment it is created and reachable from nowhere.
+provenance: authored
+
+resources:
+  vpc:
+    collection: vpc
+    id:
+      generate: { kind: hex, bytes: 8, prefix: "vpc-" }
+      input_members: [VpcId]
+    record:
+      VpcId: id
+
+  subnet:
+    collection: subnet
+    id:
+      generate: { kind: hex, bytes: 8, prefix: "subnet-" }
+      input_members: [SubnetId]
+    record:
+      SubnetId: id
+
+  # A security group is addressed by GroupId, and by GroupName when no id is
+  # given -- which is the pack's fallback in DeleteSecurityGroup, and is a
+  # fiction: the store is keyed by the generated id, so deleting by name
+  # deletes nothing. The quirk records it; the order is what reproduces it.
+  securitygroup:
+    collection: sg
+    id:
+      generate: { kind: hex, bytes: 8, prefix: "sg-" }
+      input_members: [GroupId, GroupName]
+    record:
+      GroupId: id
+
+  instance:
+    collection: inst
+    id:
+      generate: { kind: hex, bytes: 8, prefix: "i-" }
+      # An instance is named by a list, and only its first element is ever
+      # honoured -- which is the pack's behavior, not the service's.
+      derive: >
+        'InstanceIds' in input && size(input.InstanceIds) > 0
+          ? string(input.InstanceIds[0])
+          : ('InstanceId' in input ? string(input.InstanceId) : '')
+    record:
+      InstanceId: id
+
+operations:
+  CreateVpc:
+    effects:
+      - create:
+          resource: vpc
+          record:
+            CidrBlock: >
+              'CidrBlock' in input && string(input.CidrBlock) != ''
+                ? string(input.CidrBlock) : '10.0.0.0/16'
+            State: "'available'"
+    output:
+      Vpc: rec
+
+  DescribeVpcs:
+    list:
+      resource: vpc
+      member: Vpcs
+      key: >
+        'VpcIds' in input && size(input.VpcIds) > 0 ? string(input.VpcIds[0]) : ''
+
+  DeleteVpc:
+    effects:
+      - delete: { resource: vpc, missing: ignore }
+
+  CreateSubnet:
+    effects:
+      - create:
+          resource: subnet
+          record:
+            VpcId: "'VpcId' in input ? string(input.VpcId) : ''"
+            CidrBlock: >
+              'CidrBlock' in input && string(input.CidrBlock) != ''
+                ? string(input.CidrBlock) : '10.0.1.0/24'
+            State: "'available'"
+    output:
+      Subnet: rec
+
+  DescribeSubnets:
+    list:
+      resource: subnet
+      member: Subnets
+      key: >
+        'SubnetIds' in input && size(input.SubnetIds) > 0
+          ? string(input.SubnetIds[0]) : ''
+
+  DeleteSubnet:
+    effects:
+      - delete: { resource: subnet, missing: ignore }
+
+  # The member is Description and the wire calls it GroupDescription, which is
+  # the pack's first choice and the only one a client can send. The pack also
+  # read a raw `Description` form key, which no SDK produces.
+  CreateSecurityGroup:
+    effects:
+      - create:
+          resource: securitygroup
+          record:
+            GroupName: "'GroupName' in input ? string(input.GroupName) : ''"
+            VpcId: "'VpcId' in input ? string(input.VpcId) : ''"
+            Description: "'Description' in input ? string(input.Description) : ''"
+    output:
+      GroupId: id
+
+  DescribeSecurityGroups:
+    list:
+      resource: securitygroup
+      member: SecurityGroups
+      key: >
+        'GroupIds' in input && size(input.GroupIds) > 0
+          ? string(input.GroupIds[0]) : ''
+
+  DeleteSecurityGroup:
+    effects:
+      - delete: { resource: securitygroup, missing: ignore }
+    output:
+      Return: "true"  # declared Boolean; the pack answered the string
+
+
+  # The count is the request's, so the range is bounded by the engine rather
+  # than by the caller: see the quirk.
+  RunInstances:
+    let:
+      count: >
+        int('MinCount' in input && string(input.MinCount) != '' ? input.MinCount
+          : ('MaxCount' in input && string(input.MaxCount) != '' ? input.MaxCount : 1))
+    effects:
+      - create:
+          resource: instance
+          for_each: "series(count > 0 ? count : 1)"
+          record:
+            ImageId: "'ImageId' in input ? string(input.ImageId) : ''"
+            InstanceType: >
+              'InstanceType' in input && string(input.InstanceType) != ''
+                ? string(input.InstanceType) : 't3.micro'
+            SubnetId: "'SubnetId' in input ? string(input.SubnetId) : ''"
+            VpcId: "'VpcId' in input ? string(input.VpcId) : ''"
+            State:
+              Name: "'running'"
+              Code: "16"
+      # Drawn after the instances, which is the order the pack drew in. The
+      # comparison unifies identifiers rather than matching them literally, but
+      # it cannot unify two streams that issue the same value for different
+      # things, and a reservation drawn first shifts every instance id by one.
+      - generate: { bind: rid, kind: hex, bytes: 8 }
+    output:
+      Instances: items
+      ReservationId: "'r-' + fx.rid"
+
+  DescribeInstances:
+    list:
+      resource: instance
+      member: Reservations
+      key: >
+        'InstanceIds' in input && size(input.InstanceIds) > 0
+          ? string(input.InstanceIds[0]) : ''
+    output:
+      Reservations: "[{'Instances': items}]"
+
+  TerminateInstances:
+    effects:
+      - delete: { resource: instance, missing: ignore }
+    output:
+      TerminatingInstances: >
+        [{
+          'InstanceId': 'InstanceIds' in input && size(input.InstanceIds) > 0
+            ? string(input.InstanceIds[0]) : '',
+          'CurrentState': {'Name': 'terminated'}
+        }]
+
+quirks:
+  - operation: RunInstances
+    note: >
+      The pack looped MinCount times with no bound, so one request naming a
+      million instances built a million records in the store. The engine refuses
+      a range above 1024 instead. Neither matches the real service, which
+      rejects a count above its own account limit with a modeled error.

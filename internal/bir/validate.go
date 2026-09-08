@@ -209,7 +209,7 @@ func Validate(s *Service, svc *model.Service) error {
 		// A list binds its records as `items`, so an operation can project them
 		// into something other than the records themselves -- ListQueues
 		// answers with URLs.
-		if op.List != nil {
+		if op.List != nil || opWritesEach(op) {
 			scope = append(scope, "items")
 		}
 		compile := compilerFor(scope...)
@@ -701,7 +701,13 @@ func validateEffect(s *Service, where string, eff Effect, compile, perItem func(
 		if e.ForEach != "" {
 			body = perItem
 			compile(where+"."+kind+".for_each", e.ForEach)
-			if e.Key == "" {
+			// A generated identity is a fresh draw per element, so a create
+			// on such a resource is the one for_each that needs no key --
+			// RunInstances launches N instances and each one gets its own id.
+			// Every other for_each resolves one key from the element, and
+			// without it the last write would win.
+			generated := kind == "create" && s.Resources[e.Resource].ID.Generate != nil
+			if e.Key == "" && !generated {
 				*problems = append(*problems, fmt.Errorf(
 					"%s: %s.%s: for_each without a key; every element would "+
 						"resolve the same key and the last write would win",
@@ -909,6 +915,20 @@ func opWrites(op Operation) bool {
 	for _, e := range op.Effects {
 		if e.Create != nil || e.Put != nil || e.Patch != nil {
 			return true
+		}
+	}
+	return false
+}
+
+// opWritesEach reports whether any effect writes once per element, which is
+// what binds `items` outside a list: a batch answers with everything it wrote,
+// and `rec` is only whichever element happened to be last.
+func opWritesEach(op Operation) bool {
+	for _, e := range op.Effects {
+		for _, w := range []*WriteEffect{e.Create, e.Put, e.Patch} {
+			if w != nil && w.ForEach != "" {
+				return true
+			}
 		}
 	}
 	return false

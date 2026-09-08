@@ -8,6 +8,8 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/equivalence"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -43,7 +45,16 @@ func TestBundlesMatchRecordedPacks(t *testing.T) {
 			if err != nil {
 				t.Fatalf("build the bundled service: %v", err)
 			}
-			diffs, err := equivalence.Replay(context.Background(), pack, f.Trace())
+			trace := f.Trace()
+			// Compare over the model's own member names. A pack and the bundle
+			// replacing it can name the same member differently -- `vpcSet`
+			// versus `Vpcs` -- and serialize to identical bytes; without the
+			// model that reads as a divergence on every renamed member.
+			trace.Model = specboot.Bundle().ServiceByID(f.Service)
+			if trace.Model == nil {
+				t.Fatalf("%s has a recording but is not in the served model", f.Service)
+			}
+			diffs, err := equivalence.Replay(context.Background(), pack, trace)
 			if err != nil {
 				t.Fatalf("replay: %v", err)
 			}
@@ -238,4 +249,68 @@ func sortedIdx(m map[int]string) []int {
 	}
 	sort.Ints(out)
 	return out
+}
+
+// TestReplayComparesOverDeclaredNames pairs with the rename in the codec: two
+// producers naming the same member differently answer identically on the wire,
+// and the gate must see that -- without going blind to a real difference in the
+// same member.
+func TestReplayComparesOverDeclaredNames(t *testing.T) {
+	svc := &model.Service{
+		ID:         "aws.shaped",
+		Operations: []model.Operation{{Name: "DescribeVpcs", Output: "Result"}},
+		Shapes: map[string]model.Shape{
+			"String": {Kind: model.KindString},
+			"Result": {Kind: model.KindStructure, Members: map[string]model.Member{
+				"Vpcs": {Shape: "VpcList", Binding: model.MemberBinding{Name: "vpcSet"}},
+			}},
+			"VpcList": {Kind: model.KindList, Member: "Vpc"},
+			"Vpc": {Kind: model.KindStructure, Members: map[string]model.Member{
+				"VpcId": {Shape: "String", Binding: model.MemberBinding{Name: "vpcId"}},
+			}},
+		},
+	}
+	// The pack answered in wire names, as ec2's does.
+	trace := &equivalence.Trace{
+		Model: svc,
+		Steps: []equivalence.Step{{Operation: "DescribeVpcs", Input: map[string]any{}}},
+		Outcomes: []equivalence.Outcome{{Output: map[string]any{
+			"vpcSet": []any{map[string]any{"vpcId": "vpc-1"}},
+		}}},
+	}
+	// The bundle answers in declared names, which is all a bundle can do.
+	diffs, err := equivalence.Replay(context.Background(), &fixedOutput{out: map[string]any{
+		"Vpcs": []any{map[string]any{"VpcId": "vpc-1"}},
+	}}, trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diffs) != 0 {
+		t.Errorf("the same answer under two names diverged: %v", diffs)
+	}
+
+	// Same names, different answer. Canonicalizing must not have cost the gate
+	// anything: this is the assertion that would still be made without it.
+	diffs, err = equivalence.Replay(context.Background(), &fixedOutput{out: map[string]any{
+		"Vpcs": []any{map[string]any{"VpcId": "vpc-2"}},
+	}}, trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diffs) == 0 {
+		t.Error("a changed value under canonical names was not reported")
+	}
+}
+
+// fixedOutput answers the same body to anything, which is enough to compare
+// two spellings of one answer.
+type fixedOutput struct{ out map[string]any }
+
+func (fixedOutput) ServiceID() string { return "aws.shaped" }
+func (fixedOutput) Tier() model.Tier  { return model.TierEmulate }
+func (fixedOutput) Operations() []string {
+	return []string{"DescribeVpcs"}
+}
+func (f *fixedOutput) Invoke(context.Context, *spi.Request) (*spi.Response, error) {
+	return &spi.Response{Output: f.out}, nil
 }

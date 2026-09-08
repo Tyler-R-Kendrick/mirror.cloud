@@ -13,7 +13,8 @@ import (
 	mcfg "github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
 
-	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/ec2"
+	// aws.ec2 is a bundle; the engine registers it from internal/bundled.
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 )
 
 // TestAWSSDKRoundTripEC2 is the ec2Query protocol's first real client. Every

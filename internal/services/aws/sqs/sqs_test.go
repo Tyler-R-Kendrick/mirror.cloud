@@ -1074,6 +1074,35 @@ func TestDeadLetterChainResetsReceiveCountCharacterization(t *testing.T) {
 	}
 }
 
+func TestReceiveMessageSystemAttributeFilteringCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response.Output
+	}
+	call("CreateQueue", map[string]any{"QueueName": "attrs-standard", "Attributes": map[string]any{"VisibilityTimeout": "0"}})
+	call("SendMessage", map[string]any{"QueueName": "attrs-standard", "MessageBody": "standard"})
+	standard := call("ReceiveMessage", map[string]any{"QueueName": "attrs-standard", "AttributeNames": []any{"SenderId", "SequenceNumber"}})["Messages"].([]any)[0].(map[string]any)
+	standardAttrs := asMap(standard["Attributes"])
+	if standardAttrs["SenderId"] != id.Account || standardAttrs["SequenceNumber"] != nil {
+		t.Fatalf("standard system attributes %#v", standardAttrs)
+	}
+	call("CreateQueue", map[string]any{"QueueName": "attrs.fifo", "Attributes": map[string]any{"FifoQueue": "true", "VisibilityTimeout": "0"}})
+	call("SendMessage", map[string]any{"QueueName": "attrs.fifo", "MessageBody": "fifo", "MessageGroupId": "g", "MessageDeduplicationId": "d"})
+	fifo := call("ReceiveMessage", map[string]any{"QueueName": "attrs.fifo", "MessageSystemAttributeNames": []any{"SenderId", "SequenceNumber"}, "AttributeNames": []any{"SenderId"}})["Messages"].([]any)[0].(map[string]any)
+	fifoAttrs := asMap(fifo["Attributes"])
+	if fifoAttrs["SenderId"] != id.Account || fifoAttrs["SequenceNumber"] != "1" {
+		t.Fatalf("FIFO system attributes %#v", fifoAttrs)
+	}
+}
+
 func TestReceiveMessageMaxNumberValidation(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

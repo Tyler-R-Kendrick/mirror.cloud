@@ -916,6 +916,24 @@ func TestSNSSandboxPhoneValidation(t *testing.T) {
 	}
 }
 
+func TestSNSTagValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "duplicate-tag"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "TagResource", Input: map[string]any{
+		"ResourceArn": created.Output["TopicArn"],
+		"Tags":        []any{map[string]any{"Key": "duplicate", "Value": "one"}, map[string]any{"Key": "duplicate", "Value": "two"}},
+	}})
+	if err == nil {
+		t.Fatal("accepted duplicate tag keys")
+	}
+}
+
 func TestSNSSMSAttributeValidationAndSelection(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

@@ -17880,6 +17880,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSOptInPhoneValidation",
 		},
 		{
+			name: "sns-accept-duplicate-tag-key",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "seen := map[string]bool{}\n\t\tfor _, tag := range asSlice(tags) {",
+			new:  "seen := map[string]bool{}\n\t\tfor _, tag := range []any{} {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSTagValidation",
+		},
+		{
 			name: "sns-accept-invalid-platform-endpoint-attributes",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old:  "func validateEndpointAttributes(attrs map[string]any) *spi.Fault {\n\tfor key, value := range attrs {",

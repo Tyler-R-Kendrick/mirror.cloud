@@ -432,6 +432,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if tags == nil {
 			tags = flattenMembers(req.Input, "Tags")
 		}
+		seen := map[string]bool{}
+		for _, tag := range asSlice(tags) {
+			key := str(asMap(tag)["Key"])
+			if key != "" && seen[key] {
+				return nil, &spi.Fault{Code: "InvalidParameter", Message: "Duplicate tag key", HTTPStatus: 400, Fault: "client"}
+			}
+			seen[key] = true
+		}
 		current := []any{}
 		if b, found, _ := p.col(req, "tags").Get(ctx, arn); found {
 			_ = json.Unmarshal(b, &current)

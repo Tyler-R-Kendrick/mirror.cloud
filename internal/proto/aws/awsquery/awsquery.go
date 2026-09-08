@@ -119,6 +119,14 @@ func (c Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWr
 		writeXML(&b, resp.Output)
 		fmt.Fprintf(&b, `<requestId>mirror</requestId></%sResponse>`, op.Name)
 	} else {
+		if svc.ID == "aws.sqs" && op.Name == "ReceiveMessage" {
+			messages, _ := resp.Output["Messages"].([]any)
+			if len(messages) == 0 {
+				fmt.Fprintf(&b, `<ReceiveMessageResult/><ResponseMetadata><RequestId>mirror</RequestId></ResponseMetadata></%sResponse>`, op.Name)
+				_, err := io.WriteString(w, b.String())
+				return err
+			}
+		}
 		fmt.Fprintf(&b, `<%sResult>`, op.Name)
 		if svc.ID == "aws.sqs" && op.Name == "GetQueueAttributes" {
 			writeSQSAttributes(&b, resp.Output["Attributes"])

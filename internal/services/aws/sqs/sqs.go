@@ -135,10 +135,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			ab, _ := json.Marshal(attrs)
 			_ = p.col(req, "qattrs").Put(ctx, name, ab)
 		}
-		tags := asMap(req.Input["Tags"])
-		if len(tags) == 0 {
-			tags = asMap(req.Input["tags"])
-		}
+		tags := sqsTags(req.Input)
 		if len(tags) > 0 {
 			tb, _ := json.Marshal(tags)
 			_ = p.col(req, "qtags").Put(ctx, name, tb)
@@ -321,7 +318,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "TagQueue":
 		name := queueName(req)
-		tags := asMap(req.Input["Tags"])
+		tags := sqsTags(req.Input)
 		current := map[string]any{}
 		if b, ok, _ := p.col(req, "qtags").Get(ctx, name); ok {
 			_ = json.Unmarshal(b, &current)
@@ -339,10 +336,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if ok {
 			_ = json.Unmarshal(b, &cur)
 		}
-		if keys, ok := req.Input["TagKeys"].([]any); ok {
-			for _, k := range keys {
-				delete(cur, str(k))
-			}
+		for _, key := range sqsTagKeys(req.Input) {
+			delete(cur, key)
 		}
 		nb, _ := json.Marshal(cur)
 		_ = p.col(req, "qtags").Put(ctx, name, nb)
@@ -1352,6 +1347,49 @@ func asMap(v any) map[string]any {
 		return out
 	}
 	return map[string]any{}
+}
+
+func sqsTags(input map[string]any) map[string]any {
+	for _, key := range []string{"Tags", "tags"} {
+		if tags := asMap(input[key]); len(tags) > 0 {
+			return tags
+		}
+	}
+	keys, values := map[string]string{}, map[string]string{}
+	for key, value := range input {
+		if strings.HasPrefix(key, "Tag.") || strings.HasPrefix(key, "Tags.member.") {
+			base := strings.TrimSuffix(strings.TrimSuffix(key, ".Key"), ".Value")
+			switch {
+			case strings.HasSuffix(key, ".Key"):
+				keys[base] = str(value)
+			case strings.HasSuffix(key, ".Value"):
+				values[base] = str(value)
+			}
+		}
+	}
+	out := make(map[string]any, len(keys))
+	for base, key := range keys {
+		out[key] = values[base]
+	}
+	return out
+}
+
+func sqsTagKeys(input map[string]any) []string {
+	if keys, ok := input["TagKeys"].([]any); ok {
+		out := make([]string, 0, len(keys))
+		for _, key := range keys {
+			out = append(out, str(key))
+		}
+		return out
+	}
+	var out []string
+	for key, value := range input {
+		if strings.HasPrefix(key, "TagKey.") || strings.HasPrefix(key, "TagKeys.member.") {
+			out = append(out, str(value))
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func advertise(req *spi.Request) string {

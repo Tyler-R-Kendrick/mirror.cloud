@@ -595,7 +595,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 |---|---:|
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
-| SQS statement coverage | 92.1% |
+| SQS statement coverage | 92.2% |
 | SQS mutation mutants killed | 150 / 150 (100%) |
 | LocalStack SQS test functions explicitly traced | 160 / 208 (76.9%) |
 | LocalStack SQS test functions not yet traced | 48 / 208 (23.1%) |

@@ -597,8 +597,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 92.1% |
 | SQS mutation mutants killed | 150 / 150 (100%) |
-| LocalStack SQS test functions explicitly traced | 152 / 222 (68.5%) |
-| LocalStack SQS test functions not yet traced | 70 / 222 (31.5%) |
+| LocalStack SQS test functions explicitly traced | 156 / 222 (70.3%) |
+| LocalStack SQS test functions not yet traced | 66 / 222 (29.7%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -727,6 +727,10 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_fifo_message_group_visibility_after_change_message_visibility` | Changing one FIFO message's visibility releases that message without exposing its hidden successor and lets another group deliver first; atomic characterization and controllable-clock coverage pin the boundary | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_group_visibility_extends_with_change_message_visibility` | Extending one message's visibility blocks that message and its successors while earlier messages in the group remain receivable; controllable-clock characterization covers all three positions | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_queue_send_message_with_delay_on_queue_works` | Queue-level delay applies to every FIFO message while preserving group order after release; controllable-clock characterization pins delayed visibility and ordering | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_publish_get_delete_message` | SendMessage returns the identifier received by ReceiveMessage and DeleteMessage removes the message from subsequent reads; atomic lifecycle characterization pins the standard queue path | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_delete_message_deletes_with_change_visibility_timeout` | Changing a received message's visibility to zero permits one immediate re-read, after which deletion removes it; the shared lifecycle characterization pins this sequence | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_change_message_visibility_not_permanent` | A visibility release affects only the next receive and does not make the message permanently visible; the shared lifecycle characterization pins the boundary | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_inflight_message_requeue` | An in-flight message whose timeout expires is requeued ahead of a later send; controllable-clock characterization pins sequence ordering | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_queue_send_message_with_delay_seconds_fails` | SendMessage rejects non-zero per-message `DelaySeconds` on FIFO queues with `InvalidParameterValue` and the AWS queue-type reason, while queue-level delay and explicit zero remain supported; atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage pin the distinction | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_tag_untag_queue` | TagQueue/ListQueueTags preserve tag values, UntagQueue removes selected keys and ignores missing keys, and the final empty response omits `Tags`; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin the wire shape | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_untag_queue_ignores_non_existing_tag` | UntagQueue remains successful when a requested key is absent; the queue-tag characterization, SDK, BDD, fuzz, concurrent chaos, and tag mutation stack pin the no-op behavior | Mapped; focused green |

@@ -597,8 +597,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 92.2% |
 | SQS mutation mutants killed | 160 / 160 (100%) |
-| LocalStack SQS test functions explicitly traced | 205 / 208 (98.6%) |
-| LocalStack SQS test functions not yet traced | 3 / 208 (1.4%) |
+| LocalStack SQS test functions explicitly traced | 208 / 208 (100%) |
+| LocalStack SQS test functions not yet traced | 0 / 208 (0%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
@@ -811,5 +811,8 @@ The repository-wide exhaustive gate is not currently verifiable in this environm
 | `test_sqs.py::TestSqsProvider::test_remove_message_with_old_receipt_handle` | Standard DeleteMessage accepts an older receipt handle after redelivery and removes the message; atomic prior-handle characterization pins the behavior | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_get_list_queues_fails_json_format` | Query ListQueues with JSON negotiation returns the modeled ListQueuesResponse envelope; booted HTTP Section48 coverage pins the supported response shape (the duplicate upstream case is skipped) | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_deduplication_interval` | FIFO deduplication suppresses a duplicate within five minutes and accepts the same ID after the interval; controllable-clock characterization replaces the upstream six-minute manual wait | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_delete_message_batch_from_lambda` | Mirror's executable Lambda/SQS event-source mapping and bare-receipt batch-delete characterizations cover delivery, handler invocation, and deletion; the upstream case is skipped as not recreatable | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_send_message_with_invalid_fifo_parameters` | FIFO deduplication and standard-queue group-ID characterizations reject control characters with the AWS InvalidParameterValue shape; the upstream case is skipped with a protocol-parsing TODO | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_dead_letter_queue_execution_lambda_mapping_preserves_id` | Mirror's failed Lambda event-source mapping retries through SQS redrive and preserves the original MessageId in the DLQ; the upstream case is skipped because its fixture is broken | Mapped; focused green |
 
-The three remaining source functions are not evidence gaps that can be closed by claiming parity: `test_delete_message_batch_from_lambda`, `test_send_message_with_invalid_fifo_parameters`, and `test_dead_letter_queue_execution_lambda_mapping_preserves_id` are skipped upstream with needs-fixing/TODO markers. They remain explicitly untraced until an executable AWS-backed or supported Lambda equivalent exists.
+The three upstream-skipped source functions now have executable Mirror equivalents. Their upstream fixtures remain skipped with needs-fixing/TODO markers, so these rows establish supported local behavior rather than live AWS differential proof.

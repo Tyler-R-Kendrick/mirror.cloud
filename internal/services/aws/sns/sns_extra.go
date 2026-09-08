@@ -446,6 +446,9 @@ func (p *Pack) smsOpt(ctx context.Context, req *spi.Request) (*spi.Response, err
 	col := p.col(req, "smsopt")
 	switch req.Operation {
 	case "OptInPhoneNumber":
+		if !validSMSNumber(phone) {
+			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: PhoneNumber", HTTPStatus: 400, Fault: "client"}
+		}
 		_ = col.Delete(ctx, phone)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "CheckIfPhoneNumberIsOptedOut":

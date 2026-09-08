@@ -17832,6 +17832,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSSMSSubscriptionDelivery",
 		},
 		{
+			name: "sns-accept-invalid-opt-in-phone",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  `if !validSMSNumber(phone) {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSOptInPhoneValidation",
+		},
+		{
 			name: "sns-accept-invalid-platform-endpoint-attributes",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old:  `for key, value := range attrs {`,

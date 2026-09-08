@@ -876,6 +876,21 @@ func TestSNSSMSSubscriptionDelivery(t *testing.T) {
 	}
 }
 
+func TestSNSOptInPhoneValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	for _, key := range []string{"PhoneNumber", "phoneNumber"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "OptInPhoneNumber", Input: map[string]any{key: "invalid"}}); err == nil {
+			t.Fatalf("accepted invalid phone key %s", key)
+		}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "OptInPhoneNumber", Input: map[string]any{"PhoneNumber": "+15555550103"}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSNSPlatformEndpointAttributeValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

@@ -5,7 +5,9 @@
         "Attributes": {
           "ApproximateFirstReceiveTimestamp": "0",
           "ApproximateReceiveCount": "1",
-          "SentTimestamp": "0"
+          "SenderId": "123456789012",
+          "SentTimestamp": "0",
+          "SequenceNumber": "1"
         },
         "Body": "message-body-1",
         "MD5OfBody": "19c9e282d65f9733bc6b35d50062c7ee",
@@ -27,7 +29,9 @@
         "Attributes": {
           "ApproximateFirstReceiveTimestamp": "0",
           "ApproximateReceiveCount": "2",
-          "SentTimestamp": "0"
+          "SenderId": "123456789012",
+          "SentTimestamp": "0",
+          "SequenceNumber": "1"
         },
         "Body": "message-body-1",
         "MD5OfBody": "19c9e282d65f9733bc6b35d50062c7ee",

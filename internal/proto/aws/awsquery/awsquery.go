@@ -104,6 +104,11 @@ func (c Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWr
 		w.WriteHeader(status)
 		return json.NewEncoder(w).Encode(map[string]any{"ReceiveMessageResponse": map[string]any{"ReceiveMessageResult": result}})
 	}
+	if c.json && svc.ID == "aws.sqs" && op.Name == "ListQueues" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		return json.NewEncoder(w).Encode(map[string]any{"ListQueuesResponse": map[string]any{"ListQueuesResult": resp.Output}})
+	}
 	w.Header().Set("Content-Type", "text/xml; charset=UTF-8")
 	w.WriteHeader(status)
 	ns := svc.XMLNamespace

@@ -4539,6 +4539,26 @@ func TestCrossAccountQueueURLCharacterization(t *testing.T) {
 	invoke(secondary, "PurgeQueue", map[string]any{"QueueUrl": queueURL})
 }
 
+func TestQueueOwnerParsingCharacterization(t *testing.T) {
+	tests := []struct {
+		name, owner string
+		req         *spi.Request
+	}{
+		{name: "owner parameter", owner: "111111111111", req: &spi.Request{Input: map[string]any{"QueueOwnerAWSAccountId": "111111111111"}}},
+		{name: "queue URL", owner: "222222222222", req: &spi.Request{Input: map[string]any{"QueueUrl": "http://localhost:4566/222222222222/queue"}}},
+		{name: "HTTP path", owner: "333333333333", req: &spi.Request{HTTP: httptest.NewRequest(http.MethodGet, "http://localhost:4566/333333333333/queue", nil), Input: map[string]any{}}},
+		{name: "missing", req: &spi.Request{Input: map[string]any{}}},
+		{name: "invalid", req: &spi.Request{Input: map[string]any{"QueueUrl": "://bad"}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := queueOwner(test.req); got != test.owner {
+				t.Fatalf("queueOwner=%q want %q", got, test.owner)
+			}
+		})
+	}
+}
+
 func TestFIFODelayZeroUsesQueueDelayCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)

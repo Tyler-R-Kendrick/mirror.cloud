@@ -18643,6 +18643,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestQueryTagFieldsCharacterization",
 		},
 		{
+			name: "sqs-path-url-drop-region",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `parsed.Path = "/queue/" + req.Identity.Region`,
+			new:  `parsed.Path = "/queue/"`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestQueueURLStrategiesCharacterization|TestBootedServerSQSPathEndpointStrategy",
+		},
+		{
+			name: "sqs-standard-url-drop-service-prefix",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `host = "sqs." + req.Identity.Region + "." + host`,
+			new:  `host = req.Identity.Region + "." + host`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestQueueURLStrategiesCharacterization",
+		},
+		{
 			name: "sqs-create-queue-skips-existing-check",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  `if existing, ok, _ := p.col(req, "queues").Get(ctx, name); ok {`,

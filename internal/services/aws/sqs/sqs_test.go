@@ -845,6 +845,60 @@ func TestFIFOGroupVisibilityExtensionCharacterization(t *testing.T) {
 	}
 }
 
+func TestMessageLifecycleAfterVisibilityCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	invoke := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	invoke("CreateQueue", map[string]any{"QueueName": "lifecycle"})
+	sent := invoke("SendMessage", map[string]any{"QueueName": "lifecycle", "MessageBody": "delete-me"})
+	first := invoke("ReceiveMessage", map[string]any{"QueueName": "lifecycle"}).Output["Messages"].([]any)[0].(map[string]any)
+	if str(first["MessageId"]) != str(sent.Output["MessageId"]) {
+		t.Fatalf("received message id %#v want %#v", first, sent.Output["MessageId"])
+	}
+	invoke("DeleteMessage", map[string]any{"QueueName": "lifecycle", "ReceiptHandle": first["ReceiptHandle"]})
+	if got := invoke("ReceiveMessage", map[string]any{"QueueName": "lifecycle"}).Output["Messages"]; got != nil {
+		t.Fatalf("deleted message remained: %#v", got)
+	}
+
+	invoke("CreateQueue", map[string]any{"QueueName": "lifecycle-requeue"})
+	invoke("SendMessage", map[string]any{"QueueName": "lifecycle-requeue", "MessageBody": "requeue-1"})
+	received := invoke("ReceiveMessage", map[string]any{"QueueName": "lifecycle-requeue", "VisibilityTimeout": 3}).Output["Messages"].([]any)[0].(map[string]any)
+	if err := clk.Advance(1500 * time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	invoke("SendMessage", map[string]any{"QueueName": "lifecycle-requeue", "MessageBody": "requeue-2"})
+	if err := clk.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	requeued := invoke("ReceiveMessage", map[string]any{"QueueName": "lifecycle-requeue", "VisibilityTimeout": 3}).Output["Messages"].([]any)
+	if len(requeued) != 1 || str(asMap(requeued[0])["MessageId"]) != str(received["MessageId"]) {
+		t.Fatalf("in-flight message was not requeued first: %#v", requeued)
+	}
+
+	invoke("CreateQueue", map[string]any{"QueueName": "lifecycle-release"})
+	invoke("SendMessage", map[string]any{"QueueName": "lifecycle-release", "MessageBody": "release"})
+	released := invoke("ReceiveMessage", map[string]any{"QueueName": "lifecycle-release"}).Output["Messages"].([]any)[0].(map[string]any)
+	invoke("ChangeMessageVisibility", map[string]any{"QueueName": "lifecycle-release", "ReceiptHandle": released["ReceiptHandle"], "VisibilityTimeout": 0})
+	again := invoke("ReceiveMessage", map[string]any{"QueueName": "lifecycle-release"}).Output["Messages"].([]any)
+	if len(again) != 1 || str(asMap(again[0])["MessageId"]) != str(released["MessageId"]) {
+		t.Fatalf("visibility release did not requeue message: %#v", again)
+	}
+	if got := invoke("ReceiveMessage", map[string]any{"QueueName": "lifecycle-release"}).Output["Messages"]; got != nil {
+		t.Fatalf("message became permanently visible after release: %#v", got)
+	}
+}
+
 func FuzzFIFOMessageGroupDeleteVisibility(f *testing.F) {
 	f.Add(false)
 	f.Add(true)

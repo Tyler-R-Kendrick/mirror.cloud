@@ -16,7 +16,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 |---|---:|
 | Requested test forms wired for the audited SNS slice | 6 / 7 (atomic, snapshot, BDD, fuzz, chaos/race, mutation) |
 | SNS operations routed to emulation | 43 / 43 |
-| SNS statement coverage | 92.0% |
+| SNS statement coverage | 91.9% |
 | LocalStack SNS test functions inventoried | 180 |
 | LocalStack SNS test functions explicitly traced | 0 / 180 |
 

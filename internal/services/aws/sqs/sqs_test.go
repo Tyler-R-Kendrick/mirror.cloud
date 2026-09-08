@@ -3755,6 +3755,57 @@ func TestQueueURLStrategiesCharacterization(t *testing.T) {
 	}
 }
 
+func TestQueueURLStrategyRegionIsolationCharacterization(t *testing.T) {
+	for _, strategy := range []string{"off", "standard", "domain", "path"} {
+		deps := spitest.Deps(t)
+		deps.SQSEndpointStrategy = strategy
+		p := New(deps)
+		create := func(region string) string {
+			response, err := p.Invoke(context.Background(), &spi.Request{
+				Identity: spi.Identity{Account: "123456789012", Region: region}, AdvertiseURL: "http://localhost:4566",
+				Operation: "CreateQueue", Input: map[string]any{"QueueName": "same-name"},
+			})
+			if err != nil {
+				t.Fatal(strategy, region, err)
+			}
+			return str(response.Output["QueueUrl"])
+		}
+		first, second := create("us-east-1"), create("eu-central-1")
+		if strategy != "off" && first == second {
+			t.Fatalf("%s reused URL across regions: %q", strategy, first)
+		}
+		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: spi.Identity{Account: "123456789012", Region: "us-east-1"}, Operation: "SendMessage", Input: map[string]any{"QueueUrl": first, "MessageBody": "region-one"}}); err != nil {
+			t.Fatal(strategy, "send", err)
+		}
+		other, err := p.Invoke(context.Background(), &spi.Request{Identity: spi.Identity{Account: "123456789012", Region: "eu-central-1"}, Operation: "ReceiveMessage", Input: map[string]any{"QueueUrl": second, "VisibilityTimeout": 0}})
+		if err != nil {
+			t.Fatal(strategy, "other-region", err)
+		}
+		if len(asAnySlice(other.Output["Messages"])) != 0 {
+			t.Fatalf("%s leaked message across regions: %#v", strategy, other.Output)
+		}
+		own, err := p.Invoke(context.Background(), &spi.Request{Identity: spi.Identity{Account: "123456789012", Region: "us-east-1"}, Operation: "ReceiveMessage", Input: map[string]any{"QueueUrl": first, "VisibilityTimeout": 0}})
+		if err != nil || len(asAnySlice(own.Output["Messages"])) != 1 {
+			t.Fatalf("%s own-region receive %#v %v", strategy, own.Output, err)
+		}
+		for _, tc := range []struct {
+			region, url string
+		}{{"us-east-1", first}, {"eu-central-1", second}} {
+			response, err := p.Invoke(context.Background(), &spi.Request{
+				Identity: spi.Identity{Account: "123456789012", Region: tc.region}, Operation: "ListQueues",
+				Input: map[string]any{},
+			})
+			if err != nil {
+				t.Fatal(strategy, tc.region, err)
+			}
+			urls, _ := response.Output["QueueUrls"].([]any)
+			if len(urls) != 1 || str(urls[0]) != tc.url {
+				t.Fatalf("%s %s list %#v", strategy, tc.region, response.Output)
+			}
+		}
+	}
+}
+
 func FuzzCreateQueueTags(f *testing.F) {
 	f.Add("tag", "value")
 	f.Add("", "")

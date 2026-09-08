@@ -420,12 +420,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if len(entries) > 10 {
 			return nil, &spi.Fault{Code: "AWS.SimpleQueueService.TooManyEntriesInBatchRequest", Message: fmt.Sprintf("Maximum number of entries per request are 10. You have sent %d.", len(entries)), HTTPStatus: 400, Fault: "client"}
 		}
-		for _, entry := range entries {
-			m := asMap(entry)
-			if str(m["Id"]) == "" && str(entry) != "" {
-				continue
+		for i, entry := range entries {
+			if handle := str(entry); handle != "" {
+				entries[i] = map[string]any{"Id": strconv.Itoa(i), "ReceiptHandle": handle}
 			}
-			if !validBatchEntryID(str(m["Id"])) {
+		}
+		for _, entry := range entries {
+			if !validBatchEntryID(str(asMap(entry)["Id"])) {
 				return nil, &spi.Fault{Code: "AWS.SimpleQueueService.InvalidBatchEntryId", Message: "A batch entry id can only contain alphanumeric characters, hyphens and underscores. It can be at most 80 letters long.", HTTPStatus: 400, Fault: "client"}
 			}
 		}
@@ -434,17 +435,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		for _, e := range entries {
 			m := asMap(e)
 			handle := str(m["ReceiptHandle"])
-			// Older SDKs accepted a bare receipt-handle list for this operation.
-			if handle == "" {
-				handle = str(e)
-			}
 			_ = p.col(req, "msgs:"+name).Delete(ctx, p.resolveHandle(ctx, req, name, handle))
 			_ = p.col(req, "rhandles:"+name).Delete(ctx, handle)
-			id := m["Id"]
-			if id == nil {
-				id = handle
-			}
-			ok = append(ok, map[string]any{"Id": id})
+			ok = append(ok, map[string]any{"Id": m["Id"]})
 		}
 		return &spi.Response{Output: map[string]any{"Successful": ok}}, nil
 	case "ChangeMessageVisibility", "ChangeMessageVisibilityBatch":

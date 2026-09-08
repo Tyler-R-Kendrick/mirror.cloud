@@ -9029,11 +9029,11 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "dynamodb-table-crud-drop-delete-table-id",
 			file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
-			old:  `"TableId":                   existing["TableId"],
+			old: `"TableId":                   existing["TableId"],
 `,
-			new:  "",
-			pkg:  "./internal/services/aws/dynamodb",
-			run:  "TestTableCRUDDescriptionCharacterization",
+			new: "",
+			pkg: "./internal/services/aws/dynamodb",
+			run: "TestTableCRUDDescriptionCharacterization",
 		},
 		{
 			name: "dynamodb-table-metadata-force-active-index",
@@ -18610,6 +18610,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  `invocationType == "RequestResponse"`,
 			pkg:  "./internal/services/aws/lambda",
 			run:  "TestInvokeEventAndDryRunStatus",
+		},
+		{
+			name: "lambda-sqs-mapping-drop-source-event",
+			file: filepath.Join("internal", "services", "aws", "lambda", "lambda.go"),
+			old:  `"eventSource": "aws:sqs", "eventSourceARN": sourceARN, "awsRegion": identity.Region,`,
+			new:  `"eventSourceARN": sourceARN, "awsRegion": identity.Region,`,
+			pkg:  "./internal/services/aws/lambda",
+			run:  "TestSQSEventSourceMappingInvokesAndDeletes",
+		},
+		{
+			name: "lambda-sqs-mapping-skip-delete",
+			file: filepath.Join("internal", "services", "aws", "lambda", "lambda.go"),
+			old:  `Operation: "DeleteMessage"`,
+			new:  `Operation: "ReceiveMessage"`,
+			pkg:  "./internal/services/aws/lambda",
+			run:  "TestSQSEventSourceMappingInvokesAndDeletes",
 		},
 		{
 			name: "sqs-disable-queue-existence-guard",

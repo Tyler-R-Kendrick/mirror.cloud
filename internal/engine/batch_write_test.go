@@ -244,3 +244,62 @@ operations:
 		t.Fatalf("the complaint does not say what is wrong: %v", err)
 	}
 }
+
+// TestForEachAnswersEveryRecordItWrote pairs with the test above: a batch that
+// stores N records has to answer with all N.
+//
+// `rec` binds one record, and after a batch that is whichever element happened
+// to be last -- a wrong answer rather than a missing one. RunInstances is the
+// case: the caller sends MinCount and the response carries every instance
+// launched, so a bundle needs the same `items` a list binds.
+func TestForEachAnswersEveryRecordItWrote(t *testing.T) {
+	p := served(t, "aws.ec2")
+	out := invoke(t, p, "RunInstances", map[string]any{
+		"ImageId": "ami-1", "MinCount": "3", "MaxCount": "3",
+	})
+	launched, _ := out["Instances"].([]any)
+	if len(launched) != 3 {
+		t.Fatalf("RunInstances answered %d instances, want 3: %#v", len(launched), out["Instances"])
+	}
+	seen := map[string]bool{}
+	for _, v := range launched {
+		rec, ok := v.(map[string]any)
+		if !ok {
+			t.Fatalf("instance %#v is not a record", v)
+		}
+		seen[fmt.Sprint(rec["InstanceId"])] = true
+	}
+	if len(seen) != 3 {
+		t.Errorf("three instances carry %d distinct ids: %v", len(seen), seen)
+	}
+	// And each one is really in the store, not just in the answer.
+	described, _ := invoke(t, p, "DescribeInstances", map[string]any{})["Reservations"].([]any)
+	if len(described) != 1 {
+		t.Fatalf("DescribeInstances answered %d reservations, want 1", len(described))
+	}
+	stored, _ := described[0].(map[string]any)["Instances"].([]any)
+	if len(stored) != 3 {
+		t.Errorf("%d instances stored, want 3", len(stored))
+	}
+}
+
+// TestGeneratedIdentityCarriesItsPrefix holds the other half of the same
+// launch: every AWS identifier is prefixed, and a bundle cannot build the
+// prefix itself when the identity is drawn per element -- a `generate` effect
+// draws once, so all N records would be keyed the same.
+func TestGeneratedIdentityCarriesItsPrefix(t *testing.T) {
+	p := served(t, "aws.ec2")
+	vpc, _ := invoke(t, p, "CreateVpc", map[string]any{"CidrBlock": "10.7.0.0/16"})["Vpc"].(map[string]any)
+	if id := fmt.Sprint(vpc["VpcId"]); !strings.HasPrefix(id, "vpc-") {
+		t.Errorf("VpcId is %q, want a vpc- prefix", id)
+	}
+	launched, _ := invoke(t, p, "RunInstances", map[string]any{
+		"ImageId": "ami-1", "MinCount": "2", "MaxCount": "2",
+	})["Instances"].([]any)
+	for _, v := range launched {
+		rec, _ := v.(map[string]any)
+		if id := fmt.Sprint(rec["InstanceId"]); !strings.HasPrefix(id, "i-") {
+			t.Errorf("InstanceId is %q, want an i- prefix", id)
+		}
+	}
+}

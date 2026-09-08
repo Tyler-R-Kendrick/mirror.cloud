@@ -86,6 +86,13 @@ func celFuncs() []cel.EnvOption {
 		// element and never its position, and an AWS batch response is
 		// correlated to its request by position.
 		unaryDyn("indices", dyn, dyn),
+		// series answers with 0..n-1 for a count, which indices deliberately
+		// will not do: it takes a list so a bundle cannot ask for a range
+		// larger than something already in memory. RunInstances is the case
+		// that needs the other direction -- the caller sends MinCount and the
+		// service creates that many records -- so the bound moves into the
+		// function instead of coming from a list.
+		unaryDyn("series", dyn, dyn),
 		// CEL comprehensions over a map yield a list, so there is no core way
 		// to build a map minus some keys or to layer two maps. Every provider's
 		// Untag* and every "defaults, then stored, then set" attribute merge

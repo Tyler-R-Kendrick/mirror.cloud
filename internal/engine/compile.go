@@ -239,6 +239,34 @@ func runtimeFuncs() []cel.EnvOption {
 				return types.DefaultTypeAdapter.NativeToValue(out)
 			}))),
 
+		// series answers 0..n-1 for a count, where indices takes a list.
+		//
+		// RunInstances is why: the caller sends MinCount and the service
+		// creates that many instances, so the count is the request's to choose
+		// and there is no list to take it from. That is exactly the reason
+		// indices refuses a count, so the bound it got from the list is
+		// replaced by an explicit one -- seriesMax, far above any real launch.
+		//
+		// Above the bound this refuses rather than truncating. The hand-written
+		// pack looped MinCount times with no bound at all, so one request
+		// naming a million instances built a million records; answering a
+		// truncated list instead would be a wrong answer where an error is an
+		// honest one. A count that is absent, unparseable or below one answers
+		// an empty range, and the bundle decides what that means.
+		cel.Function("series", cel.Overload("series_1", []*cel.Type{dyn}, dyn,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				n := asInt(v)
+				if n > seriesMax {
+					return types.NewErr(
+						"engine: series(%d) exceeds the %d the engine will build in one call", n, seriesMax)
+				}
+				out := make([]any, 0, max(n, 0))
+				for i := int64(0); i < n; i++ {
+					out = append(out, i)
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
+			}))),
+
 		cel.Function("lastSegment", cel.Overload("lastSegment_2", []*cel.Type{str, str}, str,
 			cel.BinaryBinding(func(s, sep ref.Val) ref.Val {
 				parts := strings.Split(fmt.Sprint(s.Value()), fmt.Sprint(sep.Value()))
@@ -298,6 +326,11 @@ func runtimeFuncs() []cel.EnvOption {
 			}))),
 	}
 }
+
+// seriesMax bounds what one call may build. It is generous next to any real
+// launch -- EC2's own RunInstances rejects counts far below it -- and finite,
+// which is the property that matters: the count comes from the request.
+const seriesMax = 1024
 
 func blank(v ref.Val) bool {
 	if v == nil || v == types.NullValue {

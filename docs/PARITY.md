@@ -597,8 +597,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 92.2% |
 | SQS mutation mutants killed | 159 / 159 (100%) |
-| LocalStack SQS test functions explicitly traced | 185 / 208 (88.9%) |
-| LocalStack SQS test functions not yet traced | 23 / 208 (11.1%) |
+| LocalStack SQS test functions explicitly traced | 186 / 208 (89.4%) |
+| LocalStack SQS test functions not yet traced | 22 / 208 (10.6%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
@@ -614,6 +614,7 @@ The repository-wide exhaustive gate is not currently verifiable in this environm
 | `test_sqs.py::TestSqsProvider::test_get_queue_url_multi_region` | GetQueueUrl returns each region's stored strategy-specific URL for the same queue name; atomic URL and regional isolation characterization pin lookup identity | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_queue_url_format_path_strategy` | The `path` strategy emits `/queue/<region>/<account>/<name>` URLs and the booted edge accepts the configured path shape; atomic and booted HTTP characterization pin generation and routing | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_overwrite_queue_url_in_params` | A Query request sent to one queue URL but carrying another QueueUrl parameter resolves attributes from the parameter queue; booted HTTP characterization pins request-target precedence | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_posting_to_queue_via_queue_name` | SendMessage accepts a queue name in QueueUrl position and returns the AWS MD5 body digest; atomic characterization pins the compatibility fallback | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_receive_message_wait_time_seconds_and_max_number_of_messages_does_not_block` | ReceiveMessage returns all currently available messages immediately even when MaxNumberOfMessages exceeds the queue depth and WaitTimeSeconds is five; atomic Verify-style characterization, raw HTTP BDD, and semantic mutation coverage pin the no-wait branch | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_wait_time_seconds_waits_correctly` | An explicit ReceiveMessage long poll returns a message sent after polling begins; atomic Verify-style characterization, raw HTTP BDD, and explicit-wait mutation coverage pin the delayed-message branch | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_create_queue_with_default_attributes_is_idempotent` | Recreating a queue without attributes returns the original URL after custom visibility and receive-wait values were set; atomic Verify-style characterization, SDK contract, and BDD coverage pin omitted-default idempotency | Mapped; focused green |

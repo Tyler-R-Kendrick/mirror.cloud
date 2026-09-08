@@ -918,6 +918,9 @@ func (p *Pack) receive(ctx context.Context, req *spi.Request) (*spi.Response, er
 				if wanted["All"] || wanted["SenderId"] {
 					attributes["SenderId"] = req.Identity.Account
 				}
+				if !strings.HasSuffix(name, ".fifo") && str(m["group"]) != "" && (wanted["All"] || wanted["MessageGroupId"]) {
+					attributes["MessageGroupId"] = str(m["group"])
+				}
 				if strings.HasSuffix(name, ".fifo") && (wanted["All"] || wanted["SequenceNumber"]) {
 					if sequence := asInt(m["seq"]); sequence > 0 {
 						attributes["SequenceNumber"] = strconv.Itoa(sequence)

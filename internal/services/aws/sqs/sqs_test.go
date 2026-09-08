@@ -1598,6 +1598,75 @@ func TestMessageAttributeDigestCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"digest": digest, "attributes": message["MessageAttributes"]})
 }
 
+func TestMessageWithNumberAttributeCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "number-attribute"})
+	attrs := map[string]any{"timestamp": map[string]any{"DataType": "Number", "StringValue": "1614717034367"}}
+	sent := call("SendMessage", map[string]any{"QueueName": "number-attribute", "MessageBody": "test", "MessageAttributes": attrs})
+	received := call("ReceiveMessage", map[string]any{"QueueName": "number-attribute", "MessageAttributeNames": []any{"All"}})
+	message := asAnySlice(received.Output["Messages"])[0].(map[string]any)
+	if message["MessageId"] != sent.Output["MessageId"] || !reflect.DeepEqual(message["MessageAttributes"], attrs) {
+		t.Fatalf("number attribute round trip: sent=%#v received=%#v", sent.Output, message)
+	}
+	golden.AssertJSON(t, map[string]any{"sent": sent.Output, "attributes": message["MessageAttributes"]})
+}
+
+func TestCarriageReturnMessageCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "carriage-return"})
+	body := "{\r\n\"machineID\" : \"d357006e-ff47-439e-1ef8-948225d4307\"}"
+	sent := call("SendMessage", map[string]any{"QueueName": "carriage-return", "MessageBody": body})
+	received := call("ReceiveMessage", map[string]any{"QueueName": "carriage-return"})
+	message := asAnySlice(received.Output["Messages"])[0].(map[string]any)
+	if message["Body"] != body || message["MD5OfBody"] != sent.Output["MD5OfMessageBody"] {
+		t.Fatalf("carriage-return round trip: sent=%#v received=%#v", sent.Output, message)
+	}
+	golden.AssertJSON(t, map[string]any{"body": message["Body"], "md5": message["MD5OfBody"]})
+}
+
+func TestFairQueueMessageGroupIDCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response
+	}
+	call("CreateQueue", map[string]any{"QueueName": "fair-queue"})
+	sent := call("SendMessage", map[string]any{"QueueName": "fair-queue", "MessageBody": "message", "MessageGroupId": "test"})
+	received := call("ReceiveMessage", map[string]any{"QueueName": "fair-queue", "WaitTimeSeconds": 0, "AttributeNames": []any{"All"}})
+	message := asAnySlice(received.Output["Messages"])[0].(map[string]any)
+	attributes := asMap(message["Attributes"])
+	if message["MessageId"] != sent.Output["MessageId"] || attributes["MessageGroupId"] != "test" {
+		t.Fatalf("fair queue group id: sent=%#v received=%#v", sent.Output, message)
+	}
+	golden.AssertJSON(t, map[string]any{"messageGroupId": attributes["MessageGroupId"], "body": message["Body"]})
+}
+
 func TestMessageAttributeValidationCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

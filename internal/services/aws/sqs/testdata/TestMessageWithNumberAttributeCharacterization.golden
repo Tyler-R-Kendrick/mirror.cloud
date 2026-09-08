@@ -1,0 +1,13 @@
+{
+  "attributes": {
+    "timestamp": {
+      "DataType": "Number",
+      "StringValue": "1614717034367"
+    }
+  },
+  "sent": {
+    "MD5OfMessageAttributes": "50be1de5c4f766b34a16cd684ac704bd",
+    "MD5OfMessageBody": "098f6bcd4621d373cade4e832627b4f6",
+    "MessageId": "7c5891299f6489f8"
+  }
+}

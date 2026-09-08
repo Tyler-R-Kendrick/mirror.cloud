@@ -66,12 +66,13 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
 	fmt.Fprintf(&b, `<%sResponse xmlns="%s">`, op.Name, ns)
+	e := enc{svc: svc}
 	if svc.Protocol == model.ProtoEC2Query {
-		writeXML(&b, resp.Output)
+		e.value(&b, op.Output, resp.Output)
 		fmt.Fprintf(&b, `<requestId>mirror</requestId></%sResponse>`, op.Name)
 	} else {
 		fmt.Fprintf(&b, `<%sResult>`, op.Name)
-		writeXML(&b, resp.Output)
+		e.value(&b, op.Output, resp.Output)
 		fmt.Fprintf(&b, `</%sResult><ResponseMetadata><RequestId>mirror</RequestId></ResponseMetadata></%sResponse>`, op.Name, op.Name)
 	}
 	_, err := io.WriteString(w, b.String())
@@ -100,29 +101,173 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 	return err
 }
 
-func writeXML(b *strings.Builder, v any) {
+// enc serializes a response by walking the declared output shape alongside the
+// value the pack or the engine produced.
+//
+// Without the shape a response carries whatever map keys it was handed, which
+// is only correct when the producer knew the wire names itself. The hand-written
+// ec2 pack knew some of them -- it answers `vpcSet` because someone typed
+// `vpcSet` -- and no bundle generated from the model can: the model calls that
+// member `Vpcs`. Renaming here is what lets a bundle answer in declared names
+// and still reach a real client.
+//
+// A producer that already answers in wire names must not be renamed twice, so a
+// key that is not a declared member but *is* some member's wire name passes
+// through unchanged, carrying that member's shape onward. Both kinds of producer
+// therefore serialize identically, which is what the extraction equivalence gate
+// compares.
+//
+// XML attributes are not honoured here. No awsQuery or ec2Query response shape
+// in the served models declares one, and a member written as an element where an
+// attribute was declared would be a silent wrong answer rather than an obvious
+// one, so this records the gap rather than guessing at it.
+type enc struct{ svc *model.Service }
+
+// value writes the contents of one element: the members of a structure, the
+// entries of a map, or the text of a scalar.
+func (e enc) value(b *strings.Builder, shapeID string, v any) {
+	shape, known := e.svc.Shapes[shapeID]
 	switch t := v.(type) {
 	case map[string]any:
-		keys := make([]string, 0, len(t))
-		for k := range t {
-			keys = append(keys, k)
+		if known && shape.Kind == model.KindMap {
+			e.entries(b, shape, t)
+			return
 		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			fmt.Fprintf(b, "<%s>", k)
-			writeXML(b, t[k])
-			fmt.Fprintf(b, "</%s>", k)
+		for _, k := range sortedKeys(t) {
+			wire, child, flat := e.resolve(shape, known, k)
+			e.member(b, wire, child, flat, t[k])
 		}
 	case []any:
+		// A list the shape did not describe -- an undeclared member, or a
+		// producer answering something the model does not carry. The wrapper
+		// the codec has always written is kept so nothing that worked before
+		// this change stops working.
 		for _, item := range t {
 			b.WriteString("<member>")
-			writeXML(b, item)
+			e.value(b, "", item)
 			b.WriteString("</member>")
 		}
 	case nil:
 	default:
 		b.WriteString(xmlEscape(fmt.Sprint(t)))
 	}
+}
+
+// member writes one named member, wrapper included -- except for a flattened
+// list or map, which has no wrapper: each element carries the member's own name.
+func (e enc) member(b *strings.Builder, wire, shapeID string, flat bool, v any) {
+	shape, known := e.svc.Shapes[shapeID]
+	if known {
+		switch shape.Kind {
+		case model.KindList:
+			if items, ok := v.([]any); ok {
+				e.list(b, wire, shape, flat, items)
+				return
+			}
+		case model.KindMap:
+			if entries, ok := v.(map[string]any); ok {
+				if flat {
+					for _, k := range sortedKeys(entries) {
+						open(b, wire)
+						e.entry(b, shape, k, entries[k])
+						closeTag(b, wire)
+					}
+					return
+				}
+			}
+		}
+	}
+	open(b, wire)
+	e.value(b, shapeID, v)
+	closeTag(b, wire)
+}
+
+// list writes an indexed list. The element name comes from the list shape's own
+// member -- `item` in ec2, `member` where the specification says nothing.
+func (e enc) list(b *strings.Builder, wire string, shape model.Shape, flat bool, items []any) {
+	if flat {
+		for _, item := range items {
+			e.member(b, wire, shape.Member, false, item)
+		}
+		return
+	}
+	elem := shape.MemberBinding.Name
+	if elem == "" {
+		elem = "member"
+	}
+	open(b, wire)
+	for _, item := range items {
+		e.member(b, elem, shape.Member, false, item)
+	}
+	closeTag(b, wire)
+}
+
+// entries writes a map's entries, each carrying its key and value explicitly.
+func (e enc) entries(b *strings.Builder, shape model.Shape, m map[string]any) {
+	for _, k := range sortedKeys(m) {
+		b.WriteString("<entry>")
+		e.entry(b, shape, k, m[k])
+		b.WriteString("</entry>")
+	}
+}
+
+func (e enc) entry(b *strings.Builder, shape model.Shape, k string, v any) {
+	kn, vn := shape.KeyBinding.Name, shape.MemberBinding.Name
+	if kn == "" {
+		kn = "key"
+	}
+	if vn == "" {
+		vn = "value"
+	}
+	open(b, kn)
+	b.WriteString(xmlEscape(k))
+	closeTag(b, kn)
+	e.member(b, vn, shape.Member, false, v)
+}
+
+// resolve maps one key of a produced record onto the member it stands for,
+// answering the element name to write, the shape to write it with, and whether
+// the member is flattened.
+func (e enc) resolve(shape model.Shape, known bool, key string) (wire, child string, flat bool) {
+	if !known || (shape.Kind != model.KindStructure && shape.Kind != model.KindUnion) {
+		return key, "", false
+	}
+	if m, ok := shape.Members[key]; ok {
+		if m.Binding.Name != "" {
+			return m.Binding.Name, m.Shape, m.Binding.XMLFlattened
+		}
+		return key, m.Shape, m.Binding.XMLFlattened
+	}
+	// Already a wire name. Sorted so two members sharing one wire name -- which
+	// no served model has, but which a vendor could introduce -- resolve the
+	// same way on every run rather than by map order.
+	for _, n := range sortedMembers(shape) {
+		if m := shape.Members[n]; m.Binding.Name == key {
+			return key, m.Shape, m.Binding.XMLFlattened
+		}
+	}
+	return key, "", false
+}
+
+func open(b *strings.Builder, name string)     { b.WriteString("<" + name + ">") }
+func closeTag(b *strings.Builder, name string) { b.WriteString("</" + name + ">") }
+
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sortedMembers(shape model.Shape) []string {
+	names := make([]string, 0, len(shape.Members))
+	for n := range shape.Members {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func xmlEscape(s string) string {
@@ -155,14 +300,42 @@ func unflatten(svc *model.Service, shapeID string, form url.Values, in map[strin
 		return
 	}
 	for name, member := range shape.Members {
-		wire := name
-		if member.Binding.Name != "" {
-			wire = member.Binding.Name
-		}
-		if v, found := valueAt(svc, member, wire, form, 0); found {
+		if v, found := valueAt(svc, member, requestName(svc, name, member.Binding), form, 0); found {
 			in[name] = v
 		}
 	}
+}
+
+// requestName is the form field one member arrives under.
+//
+// awsQuery asks for a member by its xmlName, and by its member name where the
+// specification gives no xmlName. ec2Query names its request fields separately
+// from its response elements: explicitly with ec2QueryName, and otherwise by
+// capitalizing the xmlName -- `dryRun` on the way out is `DryRun` on the way in.
+// Reading ec2 requests by the response name means never finding a structured
+// member at all, which is why ec2's own pack reads the flat keys by hand.
+func requestName(svc *model.Service, name string, b model.MemberBinding) string {
+	if svc.Protocol == model.ProtoEC2Query {
+		switch {
+		case b.QueryName != "":
+			return b.QueryName
+		case b.Name != "":
+			return strings.ToUpper(b.Name[:1]) + b.Name[1:]
+		}
+		return name
+	}
+	if b.Name != "" {
+		return b.Name
+	}
+	return name
+}
+
+// flattened reports whether a list or map arrives without its member/entry
+// segment. awsQuery flattens only where the specification says so; ec2Query
+// flattens every list in a request, which no trait records because the protocol
+// itself decides it.
+func flattened(svc *model.Service, b model.MemberBinding) bool {
+	return b.XMLFlattened || svc.Protocol == model.ProtoEC2Query
 }
 
 // maxDepth bounds the shape-graph descent. valueAt walks the model, not the
@@ -190,17 +363,14 @@ func valueAt(svc *model.Service, member model.Member, prefix string, form url.Va
 	}
 	switch shape.Kind {
 	case model.KindList:
-		return listAt(svc, shape, prefix, member.Binding.XMLFlattened, form, depth)
+		return listAt(svc, shape, prefix, flattened(svc, member.Binding), form, depth)
 	case model.KindMap:
-		return mapAt(svc, shape, prefix, member.Binding.XMLFlattened, form, depth)
+		return mapAt(svc, shape, prefix, flattened(svc, member.Binding), form, depth)
 	case model.KindStructure, model.KindUnion:
 		out := map[string]any{}
 		for name, field := range shape.Members {
-			wire := name
-			if field.Binding.Name != "" {
-				wire = field.Binding.Name
-			}
-			if v, found := valueAt(svc, field, prefix+"."+wire, form, depth+1); found {
+			at := prefix + "." + requestName(svc, name, field.Binding)
+			if v, found := valueAt(svc, field, at, form, depth+1); found {
 				out[name] = v
 			}
 		}

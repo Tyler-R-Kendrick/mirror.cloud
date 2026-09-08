@@ -138,7 +138,9 @@ type Shape struct {
 	Kind          ShapeKind
 	Members       map[string]Member // structure/union
 	Member        string            // list/map value shape ID
+	MemberBinding MemberBinding     // list element / map value serialization
 	Key           string            // map key shape ID
+	KeyBinding    MemberBinding     // map key serialization
 	EnumValues    []string
 	Constraints   Constraints
 	Streaming     bool // blob streaming payload
@@ -161,6 +163,7 @@ type Member struct {
 type MemberBinding struct {
 	Location        string // "" | "label" | "query" | "header" | "prefixHeaders" | "payload" | "statusCode" | "queryParams"
 	Name            string // wire name (header name, query param, XML/JSON field)
+	QueryName       string // ec2Query request name, which differs from Name
 	TimestampFormat string // "" | "date-time" | "http-date" | "epoch-seconds"
 	XMLAttribute    bool
 	XMLFlattened    bool

@@ -78,7 +78,14 @@ func TestBootedServerEC2ControlPlane(t *testing.T) {
 		t.Fatalf("describe sg missing %s", gid)
 	}
 	run := call(url.Values{"Action": {"RunInstances"}, "Version": {"2016-11-15"}, "ImageId": {"ami-1"}, "MinCount": {"1"}, "MaxCount": {"1"}, "SubnetId": {sid}})
-	iid := xmlTag(run, "InstanceId")
+	// The codec serializes through the shape now, so this pack's `InstanceId`
+	// leaves as `instanceId`, which is the name a real client reads. The two
+	// lookups above already allowed for the wire name; this one had not needed
+	// to, because nothing renamed it.
+	iid := xmlTag(run, "instanceId")
+	if iid == "" {
+		iid = xmlTag(run, "InstanceId")
+	}
 	if iid == "" {
 		t.Fatalf("run %s", run)
 	}

@@ -106,4 +106,11 @@ func TestDemuxSQSQueueURLsWithQueryActions(t *testing.T) {
 			t.Fatalf("demux %s = %#v, want aws.sqs", path, service)
 		}
 	}
+	for _, host := range []string{"queue.localhost.localstack.cloud", "eu-west-1.queue.localhost.localstack.cloud"} {
+		req := httptest.NewRequest(http.MethodGet, "http://"+host+"/?Action=GetQueueAttributes", nil)
+		service := server.demux(req)
+		if service == nil || service.ID != "aws.sqs" {
+			t.Fatalf("demux %s = %#v, want aws.sqs", host, service)
+		}
+	}
 }

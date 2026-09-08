@@ -18853,6 +18853,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestBootedServerSQSSection48",
 		},
 		{
+			name: "sqs-domain-url-demux-stays-sqs",
+			file: filepath.Join("internal", "edge", "edge.go"),
+			old:  `if sqsQueuePath(r.URL.Path) || sqsQueueDomainHost(host) {`,
+			new:  `if sqsQueuePath(r.URL.Path) {`,
+			pkg:  "./internal/edge",
+			run:  "TestDemuxSQSQueueURLsWithQueryActions",
+		},
+		{
 			name: "sqs-query-missing-action-keeps-unknown-operation",
 			file: filepath.Join("internal", "proto", "aws", "awsquery", "awsquery.go"),
 			old:  `return nil, &spi.Fault{Code: "UnknownOperationException", Message: "The action or operation requested is not valid.", HTTPStatus: http.StatusNotFound, Fault: "client"}`,

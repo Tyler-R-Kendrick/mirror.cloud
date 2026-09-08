@@ -4559,6 +4559,38 @@ func TestQueueOwnerParsingCharacterization(t *testing.T) {
 	}
 }
 
+func TestCrossAccountQueueIsolationCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	primary := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	secondary := spi.Identity{Account: "222222222222", Region: "us-east-1"}
+	invoke := func(id spi.Identity, operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response.Output
+	}
+	primaryURL := str(invoke(primary, "CreateQueue", map[string]any{"QueueName": "account-one"})["QueueUrl"])
+	secondaryURL := str(invoke(secondary, "CreateQueue", map[string]any{"QueueName": "account-two"})["QueueUrl"])
+	contains := func(output map[string]any, want string) bool {
+		for _, raw := range output["QueueUrls"].([]any) {
+			if str(raw) == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !contains(invoke(primary, "ListQueues", nil), primaryURL) || contains(invoke(primary, "ListQueues", nil), secondaryURL) {
+		t.Fatalf("primary account queue listing leaked: %#v", invoke(primary, "ListQueues", nil))
+	}
+	invoke(primary, "DeleteQueue", map[string]any{"QueueUrl": primaryURL})
+	if !contains(invoke(secondary, "ListQueues", nil), secondaryURL) {
+		t.Fatalf("secondary queue disappeared after primary delete: %#v", invoke(secondary, "ListQueues", nil))
+	}
+}
+
 func TestFIFODelayZeroUsesQueueDelayCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)

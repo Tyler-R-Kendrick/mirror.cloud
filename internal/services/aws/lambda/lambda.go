@@ -473,7 +473,7 @@ func (p *Pack) processSQSMapping(ctx context.Context, identity spi.Identity, que
 		failed := failedSQSRecords(response)
 		for _, raw := range messages {
 			message, ok := raw.(map[string]any)
-			if !ok || failed[stringValue(message["messageId"])] {
+			if !ok || failed[stringValue(message["MessageId"])] {
 				continue
 			}
 			_, _ = queuePack.Invoke(ctx, &spi.Request{Identity: identity, Operation: "DeleteMessage", Input: map[string]any{

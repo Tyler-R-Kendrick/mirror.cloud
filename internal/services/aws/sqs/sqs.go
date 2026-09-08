@@ -955,6 +955,7 @@ func (p *Pack) visible(ctx context.Context, req *spi.Request, name string, now t
 	if strings.HasSuffix(name, ".fifo") {
 		groups := map[string][]map[string]any{}
 		firstSeq := map[string]int{}
+		received := map[string]bool{}
 		order := []string{}
 		for _, kv := range kvs {
 			var m map[string]any
@@ -973,6 +974,9 @@ func (p *Pack) visible(ctx context.Context, req *spi.Request, name string, now t
 			}
 			if seq := asInt(m["seq"]); seq < firstSeq[group] {
 				firstSeq[group] = seq
+			}
+			if asInt(m["receiveCount"]) > 0 {
+				received[group] = true
 			}
 			groups[group] = append(groups[group], m)
 		}
@@ -996,6 +1000,10 @@ func (p *Pack) visible(ctx context.Context, req *spi.Request, name string, now t
 			for j := i + 1; j < len(order); j++ {
 				if partial[order[j]] != partial[order[i]] {
 					if !partial[order[j]] {
+						order[i], order[j] = order[j], order[i]
+					}
+				} else if received[order[j]] != received[order[i]] {
+					if !received[order[j]] {
 						order[i], order[j] = order[j], order[i]
 					}
 				} else if firstSeq[order[j]] < firstSeq[order[i]] {

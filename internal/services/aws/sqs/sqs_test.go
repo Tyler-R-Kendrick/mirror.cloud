@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -577,6 +578,186 @@ func TestFIFOMessageGroupVisibilityAfterDeleteCharacterization(t *testing.T) {
 	delete(partial, partialFirst[:1])
 	partialRemaining := bodies(receive(partial, 10))
 	golden.AssertJSON(t, map[string]any{"fullDelete": fullRemaining, "partialDelete": partialRemaining})
+}
+
+func TestFIFOOrderingAfterVisibilityExpiryCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	invoke := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	invoke("CreateQueue", map[string]any{"QueueName": "fifo-expiry.fifo", "Attributes": map[string]any{"FifoQueue": "true", "VisibilityTimeout": "1"}})
+	for i := 0; i < 3; i++ {
+		invoke("SendMessage", map[string]any{"QueueName": "fifo-expiry.fifo", "MessageBody": fmt.Sprintf("message-%d", i), "MessageGroupId": "1", "MessageDeduplicationId": fmt.Sprintf("%d", i)})
+	}
+	first := invoke("ReceiveMessage", map[string]any{"QueueName": "fifo-expiry.fifo", "MaxNumberOfMessages": 10})
+	if err := clk.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	second := invoke("ReceiveMessage", map[string]any{"QueueName": "fifo-expiry.fifo", "MaxNumberOfMessages": 10})
+	bodies := func(response *spi.Response) []string {
+		messages := response.Output["Messages"].([]any)
+		out := make([]string, 0, len(messages))
+		for _, raw := range messages {
+			out = append(out, str(asMap(raw)["Body"]))
+		}
+		return out
+	}
+	want := []string{"message-0", "message-1", "message-2"}
+	if got := bodies(first); !reflect.DeepEqual(got, want) {
+		t.Fatalf("initial FIFO order %#v", got)
+	}
+	if got := bodies(second); !reflect.DeepEqual(got, want) {
+		t.Fatalf("expired FIFO order %#v", got)
+	}
+}
+
+func TestFIFOInterleavedGroupOrderingCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	invoke := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	invoke("CreateQueue", map[string]any{"QueueName": "fifo-interleaved.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}})
+	for _, message := range []struct{ body, group string }{{"g1-m1", "group-1"}, {"g2-m1", "group-2"}, {"g1-m2", "group-1"}, {"g1-m3", "group-1"}} {
+		invoke("SendMessage", map[string]any{"QueueName": "fifo-interleaved.fifo", "MessageBody": message.body, "MessageGroupId": message.group})
+	}
+	response := invoke("ReceiveMessage", map[string]any{"QueueName": "fifo-interleaved.fifo", "MaxNumberOfMessages": 10})
+	messages := response.Output["Messages"].([]any)
+	got := make([]string, 0, len(messages))
+	for _, raw := range messages {
+		got = append(got, str(asMap(raw)["Body"]))
+	}
+	want := []string{"g1-m1", "g1-m2", "g1-m3", "g2-m1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("interleaved FIFO order %#v", got)
+	}
+}
+
+func TestFIFOSharedGroupVisibilityCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	invoke := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	invoke("CreateQueue", map[string]any{"QueueName": "fifo-shared.fifo", "Attributes": map[string]any{"FifoQueue": "true", "VisibilityTimeout": "1", "ContentBasedDeduplication": "true"}})
+	for _, message := range []struct{ body, group string }{{"g1-m1", "group-1"}, {"g1-m2", "group-1"}, {"g1-m3", "group-1"}, {"g1-m4", "group-1"}, {"g2-m1", "group-2"}, {"g3-m1", "group-3"}} {
+		invoke("SendMessage", map[string]any{"QueueName": "fifo-shared.fifo", "MessageBody": message.body, "MessageGroupId": message.group})
+	}
+	first := invoke("ReceiveMessage", map[string]any{"QueueName": "fifo-shared.fifo", "MaxNumberOfMessages": 2})
+	if got := first.Output["Messages"].([]any); len(got) != 2 || str(asMap(got[0])["Body"]) != "g1-m1" || str(asMap(got[1])["Body"]) != "g1-m2" {
+		t.Fatalf("first shared-group receive %#v", first.Output)
+	}
+	second := invoke("ReceiveMessage", map[string]any{"QueueName": "fifo-shared.fifo", "MaxNumberOfMessages": 1})
+	if got := second.Output["Messages"].([]any); len(got) != 1 || str(asMap(got[0])["Body"]) != "g2-m1" {
+		t.Fatalf("other group was not available %#v", second.Output)
+	}
+	if err := clk.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	third := invoke("ReceiveMessage", map[string]any{"QueueName": "fifo-shared.fifo", "MaxNumberOfMessages": 10, "VisibilityTimeout": 0})
+	messages := third.Output["Messages"].([]any)
+	if len(messages) != 6 {
+		t.Fatalf("expired shared-group receive %#v", third.Output)
+	}
+	seen := make([]string, 0, len(messages))
+	for _, raw := range messages {
+		seen = append(seen, str(asMap(raw)["Body"]))
+	}
+	valid := [][]string{{"g3-m1", "g1-m1", "g1-m2", "g1-m3", "g1-m4", "g2-m1"}, {"g3-m1", "g2-m1", "g1-m1", "g1-m2", "g1-m3", "g1-m4"}}
+	if !reflect.DeepEqual(seen, valid[0]) && !reflect.DeepEqual(seen, valid[1]) {
+		t.Fatalf("invalid shared-group ordering %#v", seen)
+	}
+}
+
+func TestFIFOZeroVisibilityOrderingCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	invoke := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	invoke("CreateQueue", map[string]any{"QueueName": "fifo-zero.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}})
+	for _, message := range []struct{ body, group string }{{"g1-m1", "group-1"}, {"g2-m1", "group-2"}, {"g2-m2", "group-2"}, {"g3-m1", "group-3"}, {"g1-m2", "group-1"}} {
+		invoke("SendMessage", map[string]any{"QueueName": "fifo-zero.fifo", "MessageBody": message.body, "MessageGroupId": message.group})
+	}
+	bodies := func(response *spi.Response) []string {
+		messages := response.Output["Messages"].([]any)
+		out := make([]string, 0, len(messages))
+		for _, raw := range messages {
+			out = append(out, str(asMap(raw)["Body"]))
+		}
+		return out
+	}
+	first := invoke("ReceiveMessage", map[string]any{"QueueName": "fifo-zero.fifo", "MaxNumberOfMessages": 3, "VisibilityTimeout": 0})
+	if got := bodies(first); !reflect.DeepEqual(got, []string{"g1-m1", "g1-m2", "g2-m1"}) {
+		t.Fatalf("zero-visibility first receive %#v", got)
+	}
+	second := invoke("ReceiveMessage", map[string]any{"QueueName": "fifo-zero.fifo", "MaxNumberOfMessages": 10, "VisibilityTimeout": 0})
+	if got := bodies(second); !reflect.DeepEqual(got, []string{"g3-m1", "g1-m1", "g1-m2", "g2-m1", "g2-m2"}) {
+		t.Fatalf("zero-visibility second receive %#v", got)
+	}
+}
+
+func TestFIFOGroupVisibilityAfterChangeCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	invoke := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	invoke("CreateQueue", map[string]any{"QueueName": "fifo-change.fifo", "Attributes": map[string]any{"FifoQueue": "true", "VisibilityTimeout": "30", "ContentBasedDeduplication": "true"}})
+	for _, message := range []struct{ body, group string }{{"g1-m1", "group-1"}, {"g1-m2", "group-1"}, {"g2-m1", "group-2"}} {
+		invoke("SendMessage", map[string]any{"QueueName": "fifo-change.fifo", "MessageBody": message.body, "MessageGroupId": message.group})
+	}
+	first := invoke("ReceiveMessage", map[string]any{"QueueName": "fifo-change.fifo", "MaxNumberOfMessages": 2})
+	message := first.Output["Messages"].([]any)[0].(map[string]any)
+	invoke("ChangeMessageVisibility", map[string]any{"QueueName": "fifo-change.fifo", "ReceiptHandle": message["ReceiptHandle"], "VisibilityTimeout": 1})
+	if err := clk.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	second := invoke("ReceiveMessage", map[string]any{"QueueName": "fifo-change.fifo", "MaxNumberOfMessages": 3})
+	messages := second.Output["Messages"].([]any)
+	if len(messages) != 2 || str(asMap(messages[0])["Body"]) != "g2-m1" || str(asMap(messages[1])["Body"]) != "g1-m1" {
+		t.Fatalf("changed FIFO visibility %#v", second.Output)
+	}
 }
 
 func FuzzFIFOMessageGroupDeleteVisibility(f *testing.F) {

@@ -18773,6 +18773,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestReceiveMessageWakesOnSendCharacterization",
 		},
 		{
+			name: "sqs-fifo-prioritizes-unreceived-groups",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  "} else if received[order[j]] != received[order[i]] {",
+			new:  "} else if false {",
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestFIFOSharedGroupVisibilityCharacterization|TestFIFOZeroVisibilityOrderingCharacterization",
+		},
+		{
 			name: "sqs-query-url-without-action-stays-sqs",
 			file: filepath.Join("internal", "edge", "edge.go"),
 			old:  `if action == "" && r.Method == http.MethodGet && sqsQueuePath(r.URL.Path) {`,

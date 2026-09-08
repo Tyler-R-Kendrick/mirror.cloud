@@ -124,6 +124,48 @@ func TestBootedServerSQSQueryTags(t *testing.T) {
 	}
 }
 
+func TestBootedServerSQSJSONOnQueueURL(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	cfg.Seed = "sqs-json-queue-url"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	auth := "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=00"
+	request := func(target, endpoint, body string) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-amz-json-1.0")
+		req.Header.Set("X-Amz-Target", "AmazonSQS."+target)
+		req.Header.Set("Authorization", auth)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	create := request("CreateQueue", ts.URL+"/", `{"QueueName":"json-url"}`)
+	defer create.Body.Close()
+	var created map[string]any
+	if err := json.NewDecoder(create.Body).Decode(&created); err != nil || create.StatusCode >= 300 {
+		t.Fatalf("create queue: %d %#v %v", create.StatusCode, created, err)
+	}
+	queueURL := str(created["QueueUrl"])
+	parsed, err := url.Parse(queueURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receive := request("ReceiveMessage", ts.URL+parsed.Path, `{"QueueUrl":"`+queueURL+`","WaitTimeSeconds":1}`)
+	defer receive.Body.Close()
+	if receive.StatusCode != http.StatusOK || receive.Header.Get("Content-Type") != "application/x-amz-json-1.0" {
+		raw, _ := io.ReadAll(receive.Body)
+		t.Fatalf("receive on queue URL: %d %s %q", receive.StatusCode, raw, receive.Header.Get("Content-Type"))
+	}
+}
+
 func TestBootedServerSQSSection48(t *testing.T) {
 	t.Setenv("MIRROR_CLOCK", "controllable")
 	cfg := config.Default()

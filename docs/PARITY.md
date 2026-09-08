@@ -597,8 +597,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 92.2% |
 | SQS mutation mutants killed | 152 / 152 (100%) |
-| LocalStack SQS test functions explicitly traced | 170 / 208 (81.7%) |
-| LocalStack SQS test functions not yet traced | 38 / 208 (18.3%) |
+| LocalStack SQS test functions explicitly traced | 172 / 208 (82.7%) |
+| LocalStack SQS test functions not yet traced | 36 / 208 (17.3%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
@@ -680,12 +680,14 @@ The repository-wide exhaustive gate is not currently verifiable in this environm
 | `test_sqs.py::TestSqsProvider::test_dead_letter_queue_max_receive_count` | A message exceeding max receive count leaves the source receive response and arrives once in the dead-letter queue; atomic characterization snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and threshold mutants pin the boundary | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_non_existent_queue` | Deleted queues return the standard AWS non-existent-queue fault for JSON/SDK calls and the Query protocol's WSDL-specific message; atomic characterization, AWS SDK contract, raw HTTP BDD, and semantic mutation coverage pin protocol-specific errors | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_get_queue_attributes_all` | Query requests sent to a queue URL path return all queue attributes as repeated `Attribute` name/value members with partition-aware QueueArn and VisibilityTimeout; atomic codec characterization, raw HTTP contract, and semantic mutation coverage pin the wire shape | Mapped; focused green |
+| `test_sqs.py::TestSqsQueryApi::test_get_queue_attributes_works_without_authparams` | Queue-URL Query GetQueueAttributes succeeds without an Authorization header and preserves the default attribute envelope; booted HTTP and queue-path demux characterization pin the LocalStack-only access path | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_get_queue_attributes_with_query_args` | Query queue-URL requests honor a selected AttributeName and omit unrequested fields; raw HTTP contract and the shared attribute filtering characterization pin selection semantics | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_get_queue_attributes_json_format` | An `Accept: application/json` Query request returns the SQS JSON envelope with repeated Name/Value attributes; codec characterization, raw HTTP contract, and semantic mutation coverage pin content negotiation | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_get_without_query_json_format_returns_returns_xml` | A queue-URL GET without an Action remains on SQS and returns a 404 `UnknownOperationException` XML response even when JSON is requested; raw HTTP contract and edge/codec mutation coverage pin demux behavior | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_get_queue_url_works_for_same_queue` | Query GetQueueUrl returns the queue URL requested by name when called through a queue URL endpoint, including the owner account parameter; raw HTTP contract pins the endpoint path behavior | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_get_queue_url_work_for_different_queue` | Query GetQueueUrl resolves a different queue by QueueName rather than echoing the endpoint path; raw HTTP contract pins name-based lookup | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_get_queue_attributes_with_invalid_arg_returns_error` | Query GetQueueAttributes rejects an unknown AttributeName with `InvalidAttributeName` and the exact `Unknown Attribute Foobar.` message while allowing known-but-absent optional fields; atomic characterization, raw HTTP contract, and semantic mutation coverage pin validation | Mapped; focused green |
+| `test_sqs.py::TestSqsQueryApi::test_valid_action_with_missing_parameter_raises_exception` | Queue-URL Query SendMessage without MessageBody returns HTTP 400 `MissingParameter` with the exact AWS message; booted HTTP characterization pins validation after endpoint demux | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_get_queue_attributes_of_fifo_queue` | Query GetQueueAttributes on a FIFO queue returns `FifoQueue=true` and the `.fifo` queue identity through the queue-URL path; raw HTTP contract pins FIFO metadata | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_get_delete_queue` | Query DeleteQueue succeeds when addressed through the queue URL path and returns the modeled response envelope; raw HTTP contract pins queue-URL deletion | Mapped; focused green |
 | `test_sqs.py::TestSqsQueryApi::test_invalid_action_raises_exception` | SQS Query rejects unknown actions with HTTP 400 `InvalidAction` and the exact endpoint-scoped message, including queue-URL requests; codec wire characterization pins the fault shape | Mapped; focused green |

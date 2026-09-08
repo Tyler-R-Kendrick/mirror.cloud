@@ -2,6 +2,26 @@
 
 This ledger separates operation routing, line coverage, test forms, and behavioral parity. None is a substitute for another.
 
+## Aggregate audited scope
+
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 727 of 907 direct upstream test functions are explicitly traced (80.2%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+
+The current checkout's ordinary gate is green across 221 Go packages. The current-source mutation inventory has 2,497 entries, and all four bounded shards pass (412s, 743s, 621s, and 527s). These are local regression signals, not proof against a live AWS oracle.
+
+## SNS baseline
+
+Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited on 2026-09-08.
+
+| Measure | Current evidence |
+|---|---:|
+| Requested test forms wired for the audited SNS slice | 6 / 7 (atomic, snapshot, BDD, fuzz, chaos/race, mutation) |
+| SNS operations routed to emulation | 43 / 43 |
+| SNS statement coverage | 92.0% |
+| LocalStack SNS test functions inventoried | 180 |
+| LocalStack SNS test functions explicitly traced | 0 / 180 |
+
+The SNS slice is locally characterized and mutation-checked for topic creation, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, and 100-item list pagination. It is not an AWS differential proof: the pinned SNS inventory still needs per-test trace rows and SDK contract coverage.
+
 ## S3 baseline
 
 Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited on 2026-09-02.
@@ -602,7 +622,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
-The repository-wide exhaustive gate is not currently verifiable in this environment: the prior run exceeded the 10-minute mutation timeout, and a 30-minute retry exhausted the managed Go cache/filesystem during parallel linking. Focused SQS and mutation results below are independently green.
+The ordinary local gate is green (2,705 tests across 221 packages). The updated 2,485-mutant gate is also green using a writable `/tmp` Go cache (exit 0; the three existing environment-conditional cases remain skipped). This is still a local verifier, not live AWS differential evidence.
 
 | LocalStack test | Mirror evidence | Result |
 |---|---|---|

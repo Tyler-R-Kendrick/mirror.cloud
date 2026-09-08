@@ -250,12 +250,18 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 		inv(snsP, "SetTopicAttributes", map[string]any{"TopicArn": arn, "AttributeName": "DisplayName", "AttributeValue": "n"})
 		inv(snsP, "Publish", map[string]any{"TopicArn": arn, "Message": "hi"})
 		inv(snsP, "PublishBatch", map[string]any{"TopicArn": arn, "Message": "hi"})
-		sub := inv(snsP, "Subscribe", map[string]any{"TopicArn": arn, "Protocol": "sqs", "Endpoint": "q"})
+		sub := inv(snsP, "Subscribe", map[string]any{"TopicArn": arn, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:000000000000:q"})
 		inv(snsP, "ConfirmSubscription", map[string]any{"Token": "tok"})
 		inv(snsP, "TagResource", map[string]any{"ResourceArn": arn, "Tags": []any{}})
 		inv(snsP, "UntagResource", map[string]any{"ResourceArn": arn})
 		inv(snsP, "Unsubscribe", map[string]any{"SubscriptionArn": str(sub.Output["SubscriptionArn"])})
 		inv(snsP, "DeleteTopic", map[string]any{"TopicArn": arn})
+		// Recreate the resources used by the remaining write-operation sweep. The
+		// sweep is intended to verify successful state changes, while real SNS
+		// operations correctly reject deleted topics and subscriptions.
+		created = inv(snsP, "CreateTopic", map[string]any{"Name": "t"})
+		arn = str(created.Output["TopicArn"])
+		sub = inv(snsP, "Subscribe", map[string]any{"TopicArn": arn, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:000000000000:q"})
 		fatSNS := map[string]any{
 			"Name": "t", "TopicArn": arn, "PhoneNumber": "+15555550100", "EndpointArn": "arn:e",
 			"Label": "allow", "AWSAccountIds": []any{"111111111111"}, "ActionName": []any{"Publish"},
@@ -265,6 +271,13 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 			"Attributes": map[string]any{"Enabled": "true"}, "DataProtectionPolicy": `{"Name":"p"}`,
 		}
 		for _, op := range snsP.Operations() {
+			// DeletePlatformApplication precedes endpoint creation in the operation
+			// inventory; recreate the fixture app before the endpoint sweep reaches it.
+			if op == "CreatePlatformEndpoint" {
+				inv(snsP, "CreatePlatformApplication", map[string]any{"Name": "t", "Platform": "GCM"})
+				endpoint := inv(snsP, "CreatePlatformEndpoint", map[string]any{"PlatformApplicationArn": fatSNS["PlatformApplicationArn"], "Token": "tok"})
+				fatSNS["EndpointArn"] = str(endpoint.Output["EndpointArn"])
+			}
 			if isWriteOp(op) && !seen[op] {
 				inv(snsP, op, fatSNS)
 			}

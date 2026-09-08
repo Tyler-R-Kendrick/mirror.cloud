@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/golden"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
@@ -31,7 +34,7 @@ func TestTopicSubscribePublish(t *testing.T) {
 	got := [][]byte{}
 	cancel := deps.Bus.Subscribe("sns:"+arn, func(_ context.Context, b []byte) { got = append(got, append([]byte(nil), b...)) })
 	defer cancel()
-	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{"TopicArn": arn, "Protocol": "sqs", "Endpoint": "q"}})
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{"TopicArn": arn, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:q"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,5 +310,544 @@ func TestSNSControlPlaneOperations(t *testing.T) {
 	must("DeleteTopic", map[string]any{"TopicArn": topic})
 	if topics := must("ListTopics", nil).Output["Topics"].([]any); len(topics) != 0 {
 		t.Fatalf("deleted topics %#v", topics)
+	}
+}
+
+func TestTopicValidationAndPublishTargetCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, *spi.Fault) {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err == nil {
+			return response, nil
+		}
+		fault, _ := err.(*spi.Fault)
+		return nil, fault
+	}
+	_, invalidName := call("CreateTopic", map[string]any{"Name": "bad.topic"})
+	_, invalidFIFO := call("CreateTopic", map[string]any{"Name": "fifo-topic", "Attributes": map[string]any{"FifoTopic": "true"}})
+	created, createFault := call("CreateTopic", map[string]any{
+		"Name":       "characterized-topic",
+		"Attributes": map[string]any{"DisplayName": "before"},
+		"Tags":       []any{map[string]any{"Key": "env", "Value": "test"}},
+	})
+	if createFault != nil {
+		t.Fatal(createFault)
+	}
+	arn := str(created.Output["TopicArn"])
+	duplicate, duplicateFault := call("CreateTopic", map[string]any{
+		"Name": "characterized-topic", "Attributes": map[string]any{"DisplayName": "before"},
+	})
+	_, differentFault := call("CreateTopic", map[string]any{
+		"Name": "characterized-topic", "Attributes": map[string]any{"DisplayName": "after"},
+	})
+	_, targetFault := call("Publish", map[string]any{"TargetArn": arn, "Message": "target"})
+	_, malformedFault := call("Publish", map[string]any{"TopicArn": "randomstring", "Message": "bad"})
+	_, missingFault := call("Publish", map[string]any{"TopicArn": arn + "-missing", "Message": "bad"})
+	_, missingPermissionFault := call("AddPermission", map[string]any{"TopicArn": arn + "-missing", "Label": "missing"})
+	_, missingAttributeFault := call("SetTopicAttributes", map[string]any{"TopicArn": arn + "-missing", "AttributeName": "DisplayName", "AttributeValue": "bad"})
+	_, missingSubscriptionFault := call("Subscribe", map[string]any{"TopicArn": arn + "-missing", "Protocol": "sqs", "Endpoint": "q"})
+	_, missingTagFault := call("TagResource", map[string]any{"ResourceArn": arn + "-missing", "Tags": []any{map[string]any{"Key": "a", "Value": "b"}}})
+	_, _ = call("CreateTopic", map[string]any{"Name": "untagged-topic"})
+	_, moreTagsFault := call("CreateTopic", map[string]any{
+		"Name": "untagged-topic", "Tags": []any{map[string]any{"Key": "new", "Value": "tag"}},
+	})
+	if duplicateFault != nil || str(duplicate.Output["TopicArn"]) != arn || differentFault == nil || targetFault != nil || malformedFault == nil || missingFault == nil || missingPermissionFault == nil || missingAttributeFault == nil || missingSubscriptionFault == nil || missingTagFault == nil || moreTagsFault == nil {
+		t.Fatalf("duplicate=%#v/%v different=%#v target=%#v malformed=%#v missing=%#v missingPermission=%#v missingAttribute=%#v missingSubscription=%#v missingTag=%#v moreTags=%#v", duplicate, duplicateFault, differentFault, targetFault, malformedFault, missingFault, missingPermissionFault, missingAttributeFault, missingSubscriptionFault, missingTagFault, moreTagsFault)
+	}
+	if _, fault := call("DeleteTopic", map[string]any{"TopicArn": arn}); fault != nil {
+		t.Fatal(fault)
+	}
+	recreated, fault := call("CreateTopic", map[string]any{"Name": "characterized-topic"})
+	if fault != nil {
+		t.Fatal(fault)
+	}
+	listed, fault := call("ListTagsForResource", map[string]any{"ResourceArn": str(recreated.Output["TopicArn"])})
+	if fault != nil {
+		t.Fatal(fault)
+	}
+	_, fault = call("TagResource", map[string]any{"ResourceArn": str(recreated.Output["TopicArn"]), "Tags": []any{
+		map[string]any{"Key": "a", "Value": "1"}, map[string]any{"Key": "b", "Value": "2"},
+	}})
+	if fault != nil {
+		t.Fatal(fault)
+	}
+	_, fault = call("TagResource", map[string]any{"ResourceArn": str(recreated.Output["TopicArn"]), "Tags": []any{map[string]any{"Key": "c", "Value": "3"}}})
+	if fault != nil {
+		t.Fatal(fault)
+	}
+	_, fault = call("UntagResource", map[string]any{"ResourceArn": str(recreated.Output["TopicArn"]), "TagKeys": []any{"a"}})
+	if fault != nil {
+		t.Fatal(fault)
+	}
+	selective, fault := call("ListTagsForResource", map[string]any{"ResourceArn": str(recreated.Output["TopicArn"])})
+	if fault != nil {
+		t.Fatal(fault)
+	}
+	golden.AssertJSON(t, map[string]any{
+		"invalidName":             map[string]any{"Code": invalidName.Code, "Message": invalidName.Message},
+		"invalidFIFO":             map[string]any{"Code": invalidFIFO.Code, "Message": invalidFIFO.Message},
+		"different":               map[string]any{"Code": differentFault.Code, "Message": differentFault.Message},
+		"malformed":               map[string]any{"Code": malformedFault.Code, "Message": malformedFault.Message},
+		"missing":                 map[string]any{"Code": missingFault.Code, "Message": missingFault.Message},
+		"missingPermission":       map[string]any{"Code": missingPermissionFault.Code, "Message": missingPermissionFault.Message},
+		"missingAttribute":        map[string]any{"Code": missingAttributeFault.Code, "Message": missingAttributeFault.Message},
+		"missingSubscription":     map[string]any{"Code": missingSubscriptionFault.Code, "Message": missingSubscriptionFault.Message},
+		"missingTag":              map[string]any{"Code": missingTagFault.Code, "Message": missingTagFault.Message},
+		"moreTags":                map[string]any{"Code": moreTagsFault.Code, "Message": moreTagsFault.Message},
+		"tagsAfterDelete":         listed.Output,
+		"tagsAfterSelectiveUntag": selective.Output,
+	})
+}
+
+func FuzzTopicNameValidation(f *testing.F) {
+	for _, seed := range []string{"topic", "topic_name-1", "topic.fifo", "bad.topic", ""} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, name string) {
+		valid := validTopicName(name)
+		if valid && strings.HasSuffix(name, ".fifo") {
+			if !validTopicChars(strings.TrimSuffix(name, ".fifo")) {
+				t.Fatalf("accepted invalid FIFO topic %q", name)
+			}
+		}
+	})
+}
+
+func TestSNSListPagination(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	for i := 0; i < 101; i++ {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": fmt.Sprintf("paging-%03d", i)}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListTopics", Input: map[string]any{}})
+	if err != nil || len(asSlice(first.Output["Topics"])) != 100 || str(first.Output["NextToken"]) == "" {
+		t.Fatalf("first topic page=%#v err=%v", first, err)
+	}
+	second, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListTopics", Input: map[string]any{"NextToken": first.Output["NextToken"]}})
+	if err != nil || len(asSlice(second.Output["Topics"])) != 1 || second.Output["NextToken"] != nil {
+		t.Fatalf("second topic page=%#v err=%v", second, err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListTopics", Input: map[string]any{"NextToken": "bad"}}); err == nil {
+		t.Fatal("invalid topic token succeeded")
+	}
+
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "subscription-page"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic := str(created.Output["TopicArn"])
+	for i := 0; i < 101; i++ {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{"TopicArn": topic, "Protocol": "email", "Endpoint": fmt.Sprintf("user-%03d@example.com", i)}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListSubscriptionsByTopic", Input: map[string]any{"TopicArn": topic}})
+	if err != nil || len(asSlice(first.Output["Subscriptions"])) != 100 || str(first.Output["NextToken"]) == "" {
+		t.Fatalf("first subscription page=%#v err=%v", first, err)
+	}
+	second, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListSubscriptionsByTopic", Input: map[string]any{"TopicArn": topic, "NextToken": first.Output["NextToken"]}})
+	if err != nil || len(asSlice(second.Output["Subscriptions"])) != 1 || second.Output["NextToken"] != nil {
+		t.Fatalf("second subscription page=%#v err=%v", second, err)
+	}
+}
+
+func TestSNSFilterOperators(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy any
+		attrs  map[string]any
+		want   bool
+	}{
+		{"numeric-range", map[string]any{"n": []any{map[string]any{"numeric": []any{">", 1, "<=", 3}}}}, map[string]any{"n": map[string]any{"Value": "4"}}, false},
+		{"numeric-range-valid", map[string]any{"n": []any{map[string]any{"numeric": []any{">", 1, "<=", 3}}}}, map[string]any{"n": map[string]any{"Value": "2"}}, true},
+		{"exists-present", map[string]any{"n": []any{map[string]any{"exists": true}}}, map[string]any{"n": "2"}, true},
+		{"exists-missing", map[string]any{"n": []any{map[string]any{"exists": false}}}, map[string]any{}, true},
+		{"anything-but-list", map[string]any{"n": []any{map[string]any{"anything-but": []any{"1", "2"}}}}, map[string]any{"n": "3"}, true},
+		{"suffix", map[string]any{"n": []any{map[string]any{"suffix": "-prod"}}}, map[string]any{"n": "api-prod"}, true},
+		{"equals-ignore-case", map[string]any{"n": []any{map[string]any{"equals-ignore-case": "PROD"}}}, map[string]any{"n": "prod"}, true},
+		{"nested-body", map[string]any{"detail": map[string]any{"type": []any{"order"}}}, map[string]any{"detail": map[string]any{"type": "order"}}, true},
+		{"nested-body-or", map[string]any{"$or": []any{map[string]any{"type": []any{"order"}}, map[string]any{"type": []any{"refund"}}}}, map[string]any{"type": "refund"}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := matchFilter(tc.policy, tc.attrs); got != tc.want {
+				t.Fatalf("matchFilter(%#v, %#v) = %v, want %v", tc.policy, tc.attrs, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSNSFIFOPublishValidationAndTopicDeduplication(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	create := func(name string, attrs map[string]any) string {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": name, "Attributes": attrs}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return str(response.Output["TopicArn"])
+	}
+	fifo := create("events.fifo", map[string]any{"FifoTopic": "true", "ContentBasedDeduplication": "true"})
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"TopicArn": fifo, "Message": "missing-group"}}); err == nil {
+		t.Fatal("FIFO publish without MessageGroupId succeeded")
+	}
+	seen := 0
+	cancel := deps.Bus.Subscribe("sns:"+fifo, func(context.Context, []byte) { seen++ })
+	defer cancel()
+	publish := func(input map[string]any) string {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return str(response.Output["MessageId"])
+	}
+	first := publish(map[string]any{"TopicArn": fifo, "Message": "same", "MessageGroupId": "g"})
+	second := publish(map[string]any{"TopicArn": fifo, "Message": "same", "MessageGroupId": "other"})
+	if first == "" || first != second || seen != 1 {
+		t.Fatalf("topic deduplication first=%q second=%q deliveries=%d", first, second, seen)
+	}
+	noCBD := create("without-cbd.fifo", map[string]any{"FifoTopic": "true"})
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"TopicArn": noCBD, "Message": "missing-dedup", "MessageGroupId": "g"}}); err == nil {
+		t.Fatal("FIFO publish without deduplication ID succeeded")
+	}
+	batch, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PublishBatch", Input: map[string]any{
+		"TopicArn": noCBD,
+		"Entries": []any{
+			map[string]any{"Id": "one", "Message": "one", "MessageGroupId": "g", "MessageDeduplicationId": "d1"},
+			map[string]any{"Id": "two", "Message": "two", "MessageGroupId": "g", "MessageDeduplicationId": "d2"},
+		},
+	}})
+	if err != nil || len(batch.Output["Successful"].([]any)) != 2 {
+		t.Fatalf("FIFO batch response=%#v err=%v", batch, err)
+	}
+}
+
+func TestSNSMessageStructureAndSizeValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	qp := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "structured"}}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "structured-topic"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic := str(created.Output["TopicArn"])
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:structured"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+		"TopicArn": topic, "MessageStructure": "json", "Message": `{"default":"default field","sqs":"sqs field"}`,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kvs, _, _ := deps.Store.Scope("1", "us-east-1").Collection("msgs:structured").List(ctx, "", "", 0)
+	if len(kvs) != 1 {
+		t.Fatalf("structured delivery count %d", len(kvs))
+	}
+	var message map[string]any
+	_ = json.Unmarshal(kvs[0].Value, &message)
+	var envelope map[string]any
+	_ = json.Unmarshal([]byte(str(message["body"])), &envelope)
+	if envelope["Message"] != "sqs field" {
+		t.Fatalf("structured payload %#v", envelope)
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+		"TopicArn": topic, "MessageStructure": "json", "Message": `{"default":"fallback","sqs":{"ignored":"object"}}`,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kvs, _, _ = deps.Store.Scope("1", "us-east-1").Collection("msgs:structured").List(ctx, "", "", 0)
+	if len(kvs) != 2 {
+		t.Fatalf("structured fallback delivery count %d", len(kvs))
+	}
+	_ = json.Unmarshal(kvs[1].Value, &message)
+	_ = json.Unmarshal([]byte(str(message["body"])), &envelope)
+	if envelope["Message"] != "fallback" {
+		t.Fatalf("structured fallback payload %#v", envelope)
+	}
+	for _, input := range []map[string]any{
+		{"TopicArn": topic, "Message": ""},
+		{"TopicArn": topic, "MessageStructure": "json", "Message": `{"sqs":"missing default"}`},
+		{"TopicArn": topic, "MessageStructure": "json", "Message": `{"default": {}}`},
+	} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: input}); err == nil {
+			t.Fatalf("invalid publish succeeded: %#v", input)
+		}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"TopicArn": topic, "Message": strings.Repeat("x", 262145)}}); err == nil {
+		t.Fatal("oversized publish succeeded")
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PublishBatch", Input: map[string]any{"TopicArn": topic}}); err == nil {
+		t.Fatal("empty publish batch succeeded")
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PublishBatch", Input: map[string]any{
+		"TopicArn": topic,
+		"Entries":  []any{map[string]any{"Id": "bad.id", "Message": "x"}},
+	}}); err == nil {
+		t.Fatal("invalid batch entry ID succeeded")
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PublishBatch", Input: map[string]any{
+		"TopicArn": topic,
+		"Entries": []any{
+			map[string]any{"Id": "one", "Message": strings.Repeat("x", 131073)},
+			map[string]any{"Id": "two", "Message": strings.Repeat("y", 131072)},
+		},
+	}}); err == nil {
+		t.Fatal("oversized publish batch succeeded")
+	}
+}
+
+func TestSNSSubscriptionProtocolAndQueueValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	qp := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	create := func(operation string, input map[string]any) {
+		t.Helper()
+		if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	create("CreateQueue", map[string]any{"QueueName": "regular"})
+	create("CreateQueue", map[string]any{"QueueName": "fifo.fifo", "Attributes": map[string]any{"FifoQueue": "true"}})
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "topic"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic := str(created.Output["TopicArn"])
+	for _, input := range []map[string]any{
+		{"TopicArn": topic, "Protocol": "invalid", "Endpoint": "endpoint"},
+		{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "unknown"},
+		{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:fifo.fifo"},
+	} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: input}); err == nil {
+			t.Fatalf("invalid subscription succeeded: %#v", input)
+		}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:regular"}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSNSPlatformEndpointLifecycleValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) (*spi.Response, error) {
+		t.Helper()
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+	}
+	if _, err := call("CreatePlatformEndpoint", map[string]any{"PlatformApplicationArn": "arn:aws:sns:us-east-1:1:app/GCM/missing", "Token": "token"}); err == nil {
+		t.Fatal("created endpoint for missing application")
+	}
+	app, err := call("CreatePlatformApplication", map[string]any{"Name": "mobile", "Platform": "GCM", "Attributes": map[string]any{"PlatformCredential": "secret"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appARN := str(app.Output["PlatformApplicationArn"])
+	first, err := call("CreatePlatformEndpoint", map[string]any{"PlatformApplicationArn": appARN, "Token": "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := call("CreatePlatformEndpoint", map[string]any{"PlatformApplicationArn": appARN, "Token": "token"})
+	if err != nil || str(first.Output["EndpointArn"]) != str(second.Output["EndpointArn"]) {
+		t.Fatalf("endpoint idempotency first=%#v second=%#v err=%v", first, second, err)
+	}
+	if _, err := call("SetEndpointAttributes", map[string]any{"EndpointArn": appARN + "/endpoint/missing"}); err == nil {
+		t.Fatal("set attributes for missing endpoint")
+	}
+	if _, err := call("SetPlatformApplicationAttributes", map[string]any{"PlatformApplicationArn": appARN + "/missing"}); err == nil {
+		t.Fatal("set attributes for missing application")
+	}
+	if _, err := call("DeletePlatformApplication", map[string]any{"PlatformApplicationArn": appARN}); err != nil {
+		t.Fatal(err)
+	}
+	if endpoints, err := call("ListEndpointsByPlatformApplication", map[string]any{"PlatformApplicationArn": appARN}); err != nil || len(asSlice(endpoints.Output["Endpoints"])) != 0 {
+		t.Fatalf("deleted application endpoints=%#v err=%v", endpoints, err)
+	}
+}
+
+func TestSNSFilterPolicyScopeCharacterization(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "q"}}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "scope"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arn := str(created.Output["TopicArn"])
+	sub, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{"TopicArn": arn, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:q"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subARN := str(sub.Output["SubscriptionArn"])
+	set := func(name, value string) *spi.Fault {
+		_, callErr := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetSubscriptionAttributes", Input: map[string]any{"SubscriptionArn": subARN, "AttributeName": name, "AttributeValue": value}})
+		fault, _ := callErr.(*spi.Fault)
+		return fault
+	}
+	if set("FilterPolicyScope", "invalid") == nil {
+		t.Fatal("accepted invalid filter policy scope")
+	}
+	if fault := set("FilterPolicyScope", "MessageBody"); fault != nil {
+		t.Fatal(fault)
+	}
+	attrs, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetSubscriptionAttributes", Input: map[string]any{"SubscriptionArn": subARN}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := attrs.Output["Attributes"].(map[string]any)["FilterPolicyScope"]; found {
+		t.Fatal("exposed scope without filter policy")
+	}
+	if fault := set("FilterPolicy", `{"n":["x"]}`); fault != nil {
+		t.Fatal(fault)
+	}
+	attrs, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetSubscriptionAttributes", Input: map[string]any{"SubscriptionArn": subARN}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := attrs.Output["Attributes"].(map[string]any)["FilterPolicyScope"]; got != "MessageBody" {
+		t.Fatalf("scope %#v", got)
+	}
+	if fault := set("FilterPolicy", ""); fault != nil {
+		t.Fatal(fault)
+	}
+	attrs, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetSubscriptionAttributes", Input: map[string]any{"SubscriptionArn": subARN}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := attrs.Output["Attributes"].(map[string]any)["FilterPolicy"]; found {
+		t.Fatal("retained cleared filter policy")
+	}
+}
+
+func TestSNSMessageBodyFilterDelivery(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "body-filter"}}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "body-filter"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arn := str(created.Output["TopicArn"])
+	sub, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{"TopicArn": arn, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:body-filter"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subARN := str(sub.Output["SubscriptionArn"])
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetSubscriptionAttributes", Input: map[string]any{"SubscriptionArn": subARN, "AttributeName": "FilterPolicyScope", "AttributeValue": "MessageBody"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetSubscriptionAttributes", Input: map[string]any{"SubscriptionArn": subARN, "AttributeName": "FilterPolicy", "AttributeValue": `{"detail":{"type":["order"]}}`}}); err != nil {
+		t.Fatal(err)
+	}
+	publish := func(body string) {
+		t.Helper()
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"TopicArn": arn, "Message": body}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	publish(`{"detail":{"type":"refund"}}`)
+	publish(`{"detail":{"type":"order"}}`)
+	msgs, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "body-filter", "VisibilityTimeout": 0, "MaxNumberOfMessages": 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(asSlice(msgs.Output["Messages"])); got != 1 {
+		t.Fatalf("body filter delivered %d messages, want 1", got)
+	}
+}
+
+func TestSNSSubscribeIdempotency(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "q"}}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "idempotent"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arn := str(created.Output["TopicArn"])
+	subscribe := func(attrs map[string]any) (*spi.Response, error) {
+		return p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{"TopicArn": arn, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:q", "Attributes": attrs}})
+	}
+	first, err := subscribe(map[string]any{"RawMessageDelivery": "True"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, attrs := range []map[string]any{{"RawMessageDelivery": "true", "FilterPolicyScope": "MessageAttributes"}, nil, {}} {
+		got, callErr := subscribe(attrs)
+		if callErr != nil || str(got.Output["SubscriptionArn"]) != str(first.Output["SubscriptionArn"]) {
+			t.Fatalf("idempotent subscribe attrs=%#v got=%#v err=%v", attrs, got, callErr)
+		}
+	}
+	if _, err := subscribe(map[string]any{"RawMessageDelivery": "false", "FilterPolicyScope": "MessageBody"}); err == nil {
+		t.Fatal("accepted subscription with differing attributes")
+	}
+}
+
+func TestSNSConcurrentPublishChaos(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "chaos"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arn := str(created.Output["TopicArn"])
+	received := make(chan []byte, 32)
+	cancel := deps.Bus.Subscribe("sns:"+arn, func(_ context.Context, body []byte) { received <- append([]byte(nil), body...) })
+	defer cancel()
+	var wg sync.WaitGroup
+	errCh := make(chan error, 32)
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, callErr := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"TopicArn": arn, "Message": fmt.Sprintf("body-%d", i)}})
+			if callErr != nil {
+				errCh <- callErr
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for callErr := range errCh {
+		t.Fatal(callErr)
+	}
+	if len(received) != 32 {
+		t.Fatalf("received %d messages, want 32", len(received))
 	}
 }

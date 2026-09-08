@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
@@ -127,6 +128,16 @@ func TestSQSEventSourceMappingInvokesAndDeletes(t *testing.T) {
 	}
 	if len(anySlice(got.Output["Messages"])) != 0 {
 		t.Fatalf("event source mapping left messages: %#v", got.Output)
+	}
+	if err := deps.Clock.Advance(31 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	got, err = queue.Invoke(ctx, &spi.Request{Identity: identity, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "source", "VisibilityTimeout": 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(anySlice(got.Output["Messages"])) != 0 {
+		t.Fatalf("event source mapping did not delete message: %#v", got.Output)
 	}
 	_ = function.Close()
 }

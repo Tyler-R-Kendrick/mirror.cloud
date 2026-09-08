@@ -11,6 +11,9 @@ import (
 func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	arn := str(req.Input["TopicArn"])
 	name := topicName(arn)
+	if _, ok, _ := p.col(req, "topics").Get(ctx, name); !ok {
+		return nil, topicNotFoundFault()
+	}
 	b, ok, _ := p.col(req, "topics").Get(ctx, name)
 	m := map[string]any{"arn": arn, "name": name}
 	if ok {
@@ -66,20 +69,31 @@ func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Resp
 func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	arn := str(req.Input["SubscriptionArn"])
 	b, ok, _ := p.col(req, "subs").Get(ctx, arn)
-	var rec map[string]any
-	if ok {
-		_ = json.Unmarshal(b, &rec)
-	} else {
-		rec = map[string]any{"SubscriptionArn": arn}
+	if !ok {
+		return nil, &spi.Fault{Code: "NotFound", Message: "Subscription does not exist", HTTPStatus: 404, Fault: "client"}
 	}
+	var rec map[string]any
+	_ = json.Unmarshal(b, &rec)
 	if req.Operation == "SetSubscriptionAttributes" {
 		k := str(req.Input["AttributeName"])
-		rec[k] = req.Input["AttributeValue"]
+		value := str(req.Input["AttributeValue"])
+		if k == "FilterPolicyScope" && value != "MessageAttributes" && value != "MessageBody" {
+			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: FilterPolicyScope", HTTPStatus: 400, Fault: "client"}
+		}
+		if k == "FilterPolicy" && value == "" {
+			delete(rec, k)
+		} else {
+			rec[k] = req.Input["AttributeValue"]
+		}
 		if rec["attrs"] == nil {
 			rec["attrs"] = map[string]any{}
 		}
 		if attrs, ok := rec["attrs"].(map[string]any); ok {
-			attrs[k] = req.Input["AttributeValue"]
+			if k == "FilterPolicy" && value == "" {
+				delete(attrs, k)
+			} else {
+				attrs[k] = req.Input["AttributeValue"]
+			}
 			rec["attrs"] = attrs
 		}
 		nb, _ := json.Marshal(rec)
@@ -91,12 +105,18 @@ func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 		"TopicArn":                     rec["TopicArn"],
 		"Protocol":                     rec["Protocol"],
 		"Endpoint":                     rec["Endpoint"],
-		"FilterPolicy":                 rec["FilterPolicy"],
-		"RawMessageDelivery":           rec["RawMessageDelivery"],
 		"ConfirmationWasAuthenticated": "true",
+	}
+	for _, key := range []string{"FilterPolicy", "RawMessageDelivery"} {
+		if value := rec[key]; value != nil && str(value) != "" {
+			attrs[key] = value
+		}
 	}
 	if extra, ok := rec["attrs"].(map[string]any); ok {
 		for k, v := range extra {
+			if k == "FilterPolicyScope" && rec["FilterPolicy"] == nil {
+				continue
+			}
 			attrs[k] = v
 		}
 	}
@@ -150,15 +170,25 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		}
 		return &spi.Response{Output: map[string]any{"PlatformApplications": out}}, nil
 	case "DeletePlatformApplication":
-		_ = col.Delete(ctx, str(req.Input["PlatformApplicationArn"]))
+		app := str(req.Input["PlatformApplicationArn"])
+		_ = col.Delete(ctx, app)
+		endpoints := p.col(req, "platend")
+		kvs, _, _ := endpoints.List(ctx, "", "", 0)
+		for _, kv := range kvs {
+			var endpoint map[string]any
+			if json.Unmarshal(kv.Value, &endpoint) == nil && str(endpoint["PlatformApplicationArn"]) == app {
+				_ = endpoints.Delete(ctx, kv.Key)
+			}
+		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "SetPlatformApplicationAttributes":
 		arn := str(req.Input["PlatformApplicationArn"])
 		b, ok, _ := col.Get(ctx, arn)
-		rec := map[string]any{"PlatformApplicationArn": arn}
-		if ok {
-			_ = json.Unmarshal(b, &rec)
+		if !ok {
+			return nil, &spi.Fault{Code: "NotFound", Message: "Platform application does not exist", HTTPStatus: 404, Fault: "client"}
 		}
+		rec := map[string]any{"PlatformApplicationArn": arn}
+		_ = json.Unmarshal(b, &rec)
 		rec["Attributes"] = flattenAttrEntries(req.Input, "Attributes")
 		nb, _ := json.Marshal(rec)
 		_ = col.Put(ctx, arn, nb)
@@ -181,6 +211,19 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 	case "CreatePlatformEndpoint":
 		app := str(req.Input["PlatformApplicationArn"])
 		tok := str(req.Input["Token"])
+		if _, ok, _ := p.col(req, "platapps").Get(ctx, app); !ok {
+			return nil, &spi.Fault{Code: "NotFound", Message: "Platform application does not exist", HTTPStatus: 404, Fault: "client"}
+		}
+		if tok == "" {
+			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Token", HTTPStatus: 400, Fault: "client"}
+		}
+		kvs, _, _ := col.List(ctx, "", "", 0)
+		for _, kv := range kvs {
+			var existing map[string]any
+			if json.Unmarshal(kv.Value, &existing) == nil && str(existing["PlatformApplicationArn"]) == app && str(existing["Token"]) == tok {
+				return &spi.Response{Output: map[string]any{"EndpointArn": existing["EndpointArn"]}}, nil
+			}
+		}
 		arn := app + "/endpoint/" + p.deps.Rand.Hex(8)
 		rec := map[string]any{"EndpointArn": arn, "PlatformApplicationArn": app, "Token": tok, "CustomUserData": req.Input["CustomUserData"], "Enabled": "true"}
 		b, _ := json.Marshal(rec)
@@ -192,10 +235,11 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 	case "SetEndpointAttributes":
 		arn := str(req.Input["EndpointArn"])
 		b, ok, _ := col.Get(ctx, arn)
-		rec := map[string]any{"EndpointArn": arn}
-		if ok {
-			_ = json.Unmarshal(b, &rec)
+		if !ok {
+			return nil, &spi.Fault{Code: "NotFound", Message: "Endpoint does not exist", HTTPStatus: 404, Fault: "client"}
 		}
+		rec := map[string]any{"EndpointArn": arn}
+		_ = json.Unmarshal(b, &rec)
 		attrs := flattenAttrEntries(req.Input, "Attributes")
 		for k, v := range attrs {
 			rec[k] = v

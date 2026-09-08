@@ -597,8 +597,8 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 92.2% |
 | SQS mutation mutants killed | 151 / 151 (100%) |
-| LocalStack SQS test functions explicitly traced | 160 / 208 (76.9%) |
-| LocalStack SQS test functions not yet traced | 48 / 208 (23.1%) |
+| LocalStack SQS test functions explicitly traced | 163 / 208 (78.4%) |
+| LocalStack SQS test functions not yet traced | 45 / 208 (21.6%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
@@ -729,6 +729,9 @@ The repository-wide exhaustive gate is not currently verifiable in this environm
 | `test_sqs.py::TestSqsProvider::test_fifo_messages_in_order_after_timeout` | FIFO messages in one group retain sequence order after their shared visibility timeout expires; atomic characterization and controllable-clock coverage pin the retry order | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_receive_message_group_id_ordering` | Interleaved FIFO sends are delivered group-contiguously while preserving per-group sequence order; atomic characterization coverage pins the ordering rule | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_receive_message_visibility_timeout_shared_in_group` | Receiving part of a FIFO group hides its remaining messages while other groups remain available, then prioritizes groups not previously received after expiry; atomic characterization, race coverage, and semantic mutation coverage pin shared visibility | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_fifo_content_based_message_deduplication_arrives_once` | Content-based FIFO deduplication suppresses a repeated body within the five-minute window; the atomic delivery characterization pins one visible message |
+| `test_sqs.py::TestSqsProvider::test_fifo_deduplication_arrives_once_after_delete` | Deleting a FIFO message does not clear its deduplication record, so republishing the same ID remains suppressed; atomic characterization pins this persistence |
+| `test_sqs.py::TestSqsProvider::test_fifo_deduplication_not_on_message_group_id` | Queue-scoped FIFO deduplication suppresses the same ID across distinct message groups; atomic characterization pins the scope |
 | `test_sqs.py::TestSqsProvider::test_fifo_receive_message_with_zero_visibility_timeout` | Zero visibility releases FIFO groups immediately while preserving per-group order and prioritizing untouched groups on the next receive; atomic characterization and mutation coverage pin the wire behavior | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_message_group_visibility_after_change_message_visibility` | Changing one FIFO message's visibility releases that message without exposing its hidden successor and lets another group deliver first; atomic characterization and controllable-clock coverage pin the boundary | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_group_visibility_extends_with_change_message_visibility` | Extending one message's visibility blocks that message and its successors while earlier messages in the group remain receivable; controllable-clock characterization covers all three positions | Mapped; focused green |

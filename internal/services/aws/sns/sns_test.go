@@ -714,6 +714,43 @@ func TestSNSPlatformEndpointLifecycleValidation(t *testing.T) {
 	}
 }
 
+func TestSNSPublishDisabledPlatformEndpoint(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	app, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformApplication", Input: map[string]any{
+		"Name": "publish-endpoint", "Platform": "GCM", "Attributes": map[string]any{"PlatformCredential": "secret"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformEndpoint", Input: map[string]any{
+		"PlatformApplicationArn": app.Output["PlatformApplicationArn"], "Token": "token",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpointARN := str(endpoint.Output["EndpointArn"])
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+		"TargetArn": endpointARN, "Message": "message",
+	}}); err != nil {
+		t.Fatalf("enabled endpoint publish: %v", err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetEndpointAttributes", Input: map[string]any{
+		"EndpointArn": endpointARN, "Attributes": map[string]any{"Enabled": "false"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+		"TargetArn": endpointARN, "Message": "message",
+	}})
+	fault, ok := err.(*spi.Fault)
+	if !ok || fault.Code != "EndpointDisabled" || fault.Message != "Endpoint is disabled" {
+		t.Fatalf("disabled endpoint publish fault=%#v err=%v", fault, err)
+	}
+}
+
 func TestSNSFilterPolicyScopeCharacterization(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, qp := New(deps), sqs.New(deps)

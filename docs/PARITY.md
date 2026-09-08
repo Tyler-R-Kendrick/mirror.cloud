@@ -6,7 +6,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 727 of 907 direct upstream test functions are explicitly traced (80.2%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green across 221 Go packages. The current-source mutation inventory has 2,503 entries, and all four bounded shards pass (643s, 662s, 595s, and 651s). These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green across 221 Go packages. The current-source mutation inventory has 2,504 entries, and all four bounded shards pass (656.988s, 580.399s, 131.229s, and 669.437s). These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -16,11 +16,11 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 |---|---:|
 | Requested test forms wired for the audited SNS slice | 7 / 7 (atomic, snapshot, BDD, fuzz, chaos/race, mutation, AWS SDK contract) |
 | SNS operations routed to emulation | 43 / 43 |
-| SNS statement coverage | 91.9% |
+| SNS statement coverage | 91.7% |
 | LocalStack SNS test functions inventoried | 180 |
 | LocalStack SNS test functions explicitly traced | 0 / 180 |
 
-The SNS slice is locally characterized and mutation-checked for topic creation, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, subscription-attribute/SMS validation, confirmation/unsubscribe input validation, and an AWS SDK publish/list lifecycle contract. It is not an AWS differential proof: the pinned SNS inventory still needs per-test trace rows and a live AWS oracle.
+The SNS slice is locally characterized and mutation-checked for topic creation, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, subscription-attribute/SMS validation, confirmation/unsubscribe input validation, disabled platform-endpoint publishing, and an AWS SDK publish/list lifecycle contract. It is not an AWS differential proof: the pinned SNS inventory still needs per-test trace rows and a live AWS oracle.
 
 ## S3 baseline
 
@@ -622,7 +622,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
-The ordinary local gate is green (2,705 tests across 221 packages). The current 2,503-mutant inventory is green in four bounded shards using a writable `/tmp` Go cache (exit 0; the three existing environment-conditional cases remain skipped). This is still a local verifier, not live AWS differential evidence.
+The ordinary local gate is green (2,705 tests across 221 packages). The current 2,504-mutant inventory is green in four bounded shards using a writable `/tmp` Go cache (exit 0; the three existing environment-conditional cases remain skipped). This is still a local verifier, not live AWS differential evidence.
 
 | LocalStack test | Mirror evidence | Result |
 |---|---|---|

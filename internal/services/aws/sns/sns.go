@@ -175,6 +175,15 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = p.col(req, "topics").Put(ctx, name, nb)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "Publish":
+		if target := str(req.Input["TargetArn"]); target != "" && str(req.Input["TopicArn"]) == "" && endpointResourceARN(target) {
+			if fault := p.validateEndpointTarget(ctx, req, target); fault != nil {
+				return nil, fault
+			}
+			if fault := validatePublishMessage(req); fault != nil {
+				return nil, fault
+			}
+			return &spi.Response{Output: map[string]any{"MessageId": p.deps.Rand.Hex(16)}}, nil
+		}
 		if fault := p.validatePublishTarget(ctx, req, topicARN(req.Input)); fault != nil {
 			return nil, fault
 		}
@@ -648,6 +657,30 @@ func (p *Pack) validatePublishTarget(ctx context.Context, req *spi.Request, arn 
 		}
 	} else if dedupProvided {
 		return &spi.Fault{Code: "InvalidParameter", Message: "MessageDeduplicationId is only supported for FIFO topics.", HTTPStatus: 400, Fault: "client"}
+	}
+	return nil
+}
+
+func endpointResourceARN(arn string) bool {
+	parts := strings.Split(arn, ":")
+	return len(parts) == 6 && parts[0] == "arn" && parts[2] == "sns" && strings.Contains(parts[5], "/endpoint/")
+}
+
+func (p *Pack) validateEndpointTarget(ctx context.Context, req *spi.Request, arn string) *spi.Fault {
+	parts := strings.Split(arn, ":")
+	if len(parts) != 6 || parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {
+		return &spi.Fault{Code: "NotFound", Message: "Endpoint does not exist", HTTPStatus: 404, Fault: "client"}
+	}
+	b, ok, _ := p.col(req, "platend").Get(ctx, arn)
+	if !ok {
+		return &spi.Fault{Code: "NotFound", Message: "Endpoint does not exist", HTTPStatus: 404, Fault: "client"}
+	}
+	var endpoint map[string]any
+	if json.Unmarshal(b, &endpoint) != nil {
+		return &spi.Fault{Code: "NotFound", Message: "Endpoint does not exist", HTTPStatus: 404, Fault: "client"}
+	}
+	if strings.EqualFold(str(endpoint["Enabled"]), "false") {
+		return &spi.Fault{Code: "EndpointDisabled", Message: "Endpoint is disabled", HTTPStatus: 400, Fault: "client"}
 	}
 	return nil
 }

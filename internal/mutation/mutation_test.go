@@ -17502,7 +17502,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-ignore-publish-target-validation",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-			old:  "case \"Publish\":\n\t\tif fault := p.validatePublishTarget(ctx, req, topicARN(req.Input)); fault != nil {",
+			old:  "case \"Publish\":\n\t\tif target := str(req.Input[\"TargetArn\"]); target != \"\" && str(req.Input[\"TopicArn\"]) == \"\" && endpointResourceARN(target) {\n\t\t\tif fault := p.validateEndpointTarget(ctx, req, target); fault != nil {\n\t\t\t\treturn nil, fault\n\t\t\t}\n\t\t\tif fault := validatePublishMessage(req); fault != nil {\n\t\t\t\treturn nil, fault\n\t\t\t}\n\t\t\treturn &spi.Response{Output: map[string]any{\"MessageId\": p.deps.Rand.Hex(16)}}, nil\n\t\t}\n\t\tif fault := p.validatePublishTarget(ctx, req, topicARN(req.Input)); fault != nil {",
 			new:  "case \"Publish\":\n\t\tif false {",
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestTopicValidationAndPublishTargetCharacterization",
@@ -17790,6 +17790,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSPlatformEndpointLifecycleValidation",
+		},
+		{
+			name: "sns-publish-disabled-platform-endpoint",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `if strings.EqualFold(str(endpoint["Enabled"]), "false") {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPublishDisabledPlatformEndpoint",
 		},
 		{
 			name: "s3-copy-replace-to-copy",

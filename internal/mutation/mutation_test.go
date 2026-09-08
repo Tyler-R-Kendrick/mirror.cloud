@@ -18627,6 +18627,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestCreateQueueTagsCharacterization",
 		},
 		{
+			name: "sqs-query-tags-ignore-flat-fields",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if strings.HasPrefix(key, "Tag.") || strings.HasPrefix(key, "Tags.member.") {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestQueryTagFieldsCharacterization",
+		},
+		{
+			name: "sqs-query-untag-ignore-flat-fields",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if strings.HasPrefix(key, "TagKey.") || strings.HasPrefix(key, "TagKeys.member.") {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestQueryTagFieldsCharacterization",
+		},
+		{
 			name: "sqs-create-queue-skips-existing-check",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  `if existing, ok, _ := p.col(req, "queues").Get(ctx, name); ok {`,

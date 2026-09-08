@@ -760,6 +760,91 @@ func TestFIFOGroupVisibilityAfterChangeCharacterization(t *testing.T) {
 	}
 }
 
+func TestFIFOQueueDelayCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	invoke := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	invoke("CreateQueue", map[string]any{"QueueName": "fifo-delay.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true", "DelaySeconds": "2"}})
+	for i := 1; i <= 3; i++ {
+		invoke("SendMessage", map[string]any{"QueueName": "fifo-delay.fifo", "MessageBody": fmt.Sprintf("message-%d", i), "MessageGroupId": "1", "MessageDeduplicationId": fmt.Sprintf("%d", i)})
+	}
+	if response := invoke("ReceiveMessage", map[string]any{"QueueName": "fifo-delay.fifo", "WaitTimeSeconds": 0}); response.Output["Messages"] != nil {
+		t.Fatalf("delayed FIFO messages were visible early: %#v", response.Output)
+	}
+	if err := clk.Advance(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	response := invoke("ReceiveMessage", map[string]any{"QueueName": "fifo-delay.fifo", "MaxNumberOfMessages": 3, "VisibilityTimeout": 0})
+	messages := response.Output["Messages"].([]any)
+	if len(messages) != 3 {
+		t.Fatalf("delayed FIFO count %#v", response.Output)
+	}
+	for i, raw := range messages {
+		if got := str(asMap(raw)["Body"]); got != fmt.Sprintf("message-%d", i+1) {
+			t.Fatalf("delayed FIFO order %#v", response.Output)
+		}
+	}
+}
+
+func TestFIFOGroupVisibilityExtensionCharacterization(t *testing.T) {
+	for _, tc := range []struct {
+		position int
+		visible  int
+	}{{0, 0}, {1, 1}, {2, 2}} {
+		t.Run(fmt.Sprintf("position-%d", tc.position), func(t *testing.T) {
+			clk := clock.NewControllable()
+			deps := spitest.Deps(t)
+			deps.Clock = clk
+			p := New(deps)
+			ctx := context.Background()
+			id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+			invoke := func(operation string, input map[string]any) *spi.Response {
+				t.Helper()
+				response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return response
+			}
+			invoke("CreateQueue", map[string]any{"QueueName": "fifo-extend.fifo", "Attributes": map[string]any{"FifoQueue": "true", "VisibilityTimeout": "1"}})
+			for i, body := range []string{"foo", "bar", "baz"} {
+				invoke("SendMessage", map[string]any{"QueueName": "fifo-extend.fifo", "MessageBody": body, "MessageGroupId": "1", "MessageDeduplicationId": fmt.Sprintf("%d", i)})
+			}
+			received := invoke("ReceiveMessage", map[string]any{"QueueName": "fifo-extend.fifo", "MaxNumberOfMessages": 5}).Output["Messages"].([]any)
+			if len(received) != 3 {
+				t.Fatalf("initial FIFO receive %#v", received)
+			}
+			invoke("ChangeMessageVisibility", map[string]any{"QueueName": "fifo-extend.fifo", "ReceiptHandle": asMap(received[tc.position])["ReceiptHandle"], "VisibilityTimeout": 4})
+			if err := clk.Advance(2500 * time.Millisecond); err != nil {
+				t.Fatal(err)
+			}
+			response := invoke("ReceiveMessage", map[string]any{"QueueName": "fifo-extend.fifo", "MaxNumberOfMessages": 5, "VisibilityTimeout": 0})
+			messages := response.Output["Messages"]
+			if tc.visible == 0 {
+				if messages != nil {
+					t.Fatalf("extended first message did not block group: %#v", response.Output)
+				}
+				return
+			}
+			got := messages.([]any)
+			if len(got) != tc.visible {
+				t.Fatalf("extended position %d returned %#v", tc.position, response.Output)
+			}
+		})
+	}
+}
+
 func FuzzFIFOMessageGroupDeleteVisibility(f *testing.F) {
 	f.Add(false)
 	f.Add(true)

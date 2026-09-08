@@ -1035,6 +1035,45 @@ func TestPurgeClearsFIFODeduplicationCharacterization(t *testing.T) {
 	}
 }
 
+func TestDeadLetterChainResetsReceiveCountCharacterization(t *testing.T) {
+	clk := clock.NewControllable()
+	deps := spitest.Deps(t)
+	deps.Clock = clk
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response.Output
+	}
+	for _, name := range []string{"chain-q1", "chain-q2", "chain-q3"} {
+		call("CreateQueue", map[string]any{"QueueName": name, "Attributes": map[string]any{"VisibilityTimeout": "0"}})
+	}
+	for i, target := range []string{"chain-q2", "chain-q3"} {
+		call("SetQueueAttributes", map[string]any{"QueueName": fmt.Sprintf("chain-q%d", i+1), "Attributes": map[string]any{
+			"RedrivePolicy": fmt.Sprintf(`{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:123456789012:%s","maxReceiveCount":"1"}`, target),
+		}})
+	}
+	call("SendMessage", map[string]any{"QueueName": "chain-q1", "MessageBody": "chain"})
+	call("ReceiveMessage", map[string]any{"QueueName": "chain-q1", "AttributeNames": []any{"All"}})
+	if got := call("ReceiveMessage", map[string]any{"QueueName": "chain-q1"})["Messages"]; got != nil {
+		t.Fatalf("q1 retained message: %#v", got)
+	}
+	if got := call("ReceiveMessage", map[string]any{"QueueName": "chain-q2", "AttributeNames": []any{"All"}})["Messages"].([]any); len(got) != 1 || str(asMap(got[0])["Body"]) != "chain" || str(asMap(asMap(got[0])["Attributes"])["ApproximateReceiveCount"]) != "1" {
+		t.Fatalf("q2 first delivery %#v", got)
+	}
+	if got := call("ReceiveMessage", map[string]any{"QueueName": "chain-q2"})["Messages"]; got != nil {
+		t.Fatalf("q2 retained message after second receive: %#v", got)
+	}
+	if got := call("ReceiveMessage", map[string]any{"QueueName": "chain-q3"})["Messages"].([]any); len(got) != 1 || str(asMap(got[0])["Body"]) != "chain" {
+		t.Fatalf("q3 delivery %#v", got)
+	}
+}
+
 func TestReceiveMessageMaxNumberValidation(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

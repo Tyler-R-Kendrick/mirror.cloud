@@ -534,16 +534,20 @@ func (p *Pack) smsSandbox(ctx context.Context, req *spi.Request) (*spi.Response,
 	col := p.col(req, "smssandbox")
 	switch req.Operation {
 	case "CreateSMSSandboxPhoneNumber":
+		if !validSMSNumber(phone) {
+			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: PhoneNumber", HTTPStatus: 400, Fault: "client"}
+		}
 		rec := map[string]any{"PhoneNumber": phone, "Status": "Pending"}
 		b, _ := json.Marshal(rec)
 		_ = col.Put(ctx, phone, b)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "VerifySMSSandboxPhoneNumber":
 		b, ok, _ := col.Get(ctx, phone)
-		rec := map[string]any{"PhoneNumber": phone}
-		if ok {
-			_ = json.Unmarshal(b, &rec)
+		if !ok {
+			return nil, &spi.Fault{Code: "NotFound", Message: "Phone number is not registered", HTTPStatus: 404, Fault: "client"}
 		}
+		rec := map[string]any{"PhoneNumber": phone}
+		_ = json.Unmarshal(b, &rec)
 		rec["Status"] = "Verified"
 		nb, _ := json.Marshal(rec)
 		_ = col.Put(ctx, phone, nb)

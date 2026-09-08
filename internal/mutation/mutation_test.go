@@ -17834,8 +17834,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-accept-invalid-opt-in-phone",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
-			old:  `if !validSMSNumber(phone) {`,
-			new:  `if false {`,
+			old:  "func (p *Pack) smsOpt(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tphone := str(req.Input[\"phoneNumber\"])\n\tif phone == \"\" {\n\t\tphone = str(req.Input[\"PhoneNumber\"])\n\t}\n\tcol := p.col(req, \"smsopt\")\n\tswitch req.Operation {\n\tcase \"OptInPhoneNumber\":\n\t\tif !validSMSNumber(phone) {",
+			new:  "func (p *Pack) smsOpt(ctx context.Context, req *spi.Request) (*spi.Response, error) {\n\tphone := str(req.Input[\"phoneNumber\"])\n\tif phone == \"\" {\n\t\tphone = str(req.Input[\"PhoneNumber\"])\n\t}\n\tcol := p.col(req, \"smsopt\")\n\tswitch req.Operation {\n\tcase \"OptInPhoneNumber\":\n\t\tif false {",
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSOptInPhoneValidation",
 		},
@@ -17854,6 +17854,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSSMSAttributeValidationAndSelection",
+		},
+		{
+			name: "sns-accept-invalid-sandbox-phone",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  "case \"CreateSMSSandboxPhoneNumber\":\n\t\tif !validSMSNumber(phone) {",
+			new:  "case \"CreateSMSSandboxPhoneNumber\":\n\t\tif false {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSSandboxPhoneValidation",
+		},
+		{
+			name: "sns-verify-missing-sandbox-phone",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  "if !ok {\n\t\t\treturn nil, &spi.Fault{Code: \"NotFound\", Message: \"Phone number is not registered\"",
+			new:  "if false {\n\t\t\treturn nil, &spi.Fault{Code: \"NotFound\", Message: \"Phone number is not registered\"",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSSandboxPhoneValidation",
 		},
 		{
 			name: "sns-accept-invalid-platform-endpoint-attributes",

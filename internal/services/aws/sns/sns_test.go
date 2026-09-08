@@ -900,6 +900,19 @@ func TestSNSOptInPhoneValidation(t *testing.T) {
 	}
 }
 
+func TestSNSSandboxPhoneValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateSMSSandboxPhoneNumber", Input: map[string]any{"PhoneNumber": "invalid"}}); err == nil {
+		t.Fatal("accepted invalid sandbox phone")
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "VerifySMSSandboxPhoneNumber", Input: map[string]any{"PhoneNumber": "+15555550999"}}); err == nil {
+		t.Fatal("verified an unregistered sandbox phone")
+	}
+}
+
 func TestSNSSMSAttributeValidationAndSelection(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

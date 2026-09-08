@@ -279,7 +279,15 @@ func TestListedWriteOpsAreNotEmptySuccess(t *testing.T) {
 				fatSNS["EndpointArn"] = str(endpoint.Output["EndpointArn"])
 			}
 			if isWriteOp(op) && !seen[op] {
-				inv(snsP, op, fatSNS)
+				input := fatSNS
+				if op == "CreatePlatformApplication" {
+					input = map[string]any{}
+					for key, value := range fatSNS {
+						input[key] = value
+					}
+					input["Attributes"] = map[string]any{"PlatformCredential": "credential"}
+				}
+				inv(snsP, op, input)
 			}
 		}
 		assertWritesCovered(t, snsP.Operations(), seen)

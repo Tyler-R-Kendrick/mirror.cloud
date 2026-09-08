@@ -596,9 +596,9 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | Requested test forms wired | 7 / 7 (100%) |
 | SQS operations routed to emulation | 23 / 23 (100%) |
 | SQS statement coverage | 92.0% |
-| SQS mutation mutants killed | 149 / 149 (100%) |
-| LocalStack SQS test functions explicitly traced | 145 / 222 (65.3%) |
-| LocalStack SQS test functions not yet traced | 77 / 222 (34.7%) |
+| SQS mutation mutants killed | 150 / 150 (100%) |
+| LocalStack SQS test functions explicitly traced | 150 / 222 (67.6%) |
+| LocalStack SQS test functions not yet traced | 72 / 222 (32.4%) |
 
 The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_developer_api.py`, and 12 in `test_sqs_move_task.py`; parametrized cases are not expanded.
 
@@ -720,6 +720,11 @@ The pinned inventory is 196 direct functions in `test_sqs.py`, 14 in `test_sqs_d
 | `test_sqs.py::TestSqsProvider::test_fifo_delete_after_visibility_timeout` | FIFO DeleteMessage rejects an expired receipt handle with `InvalidParameterValue` and the exact AWS expiry message while standard queues retain their delete behavior, across atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_empty_message_groups_added_back_to_queue` | After deleting the only message in a FIFO group, the group can receive a later message again; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, and concurrent chaos/race coverage pin group reuse | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_message_group_visibility_after_terminate_visibility_timeout` | Terminating the first message's visibility in a partially hidden FIFO group lets another fully visible group deliver first, then returns the released message without exposing the still-hidden successor; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and mutation coverage pin ordering | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_fifo_messages_in_order_after_timeout` | FIFO messages in one group retain sequence order after their shared visibility timeout expires; atomic characterization and controllable-clock coverage pin the retry order | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_fifo_receive_message_group_id_ordering` | Interleaved FIFO sends are delivered group-contiguously while preserving per-group sequence order; atomic characterization coverage pins the ordering rule | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_fifo_receive_message_visibility_timeout_shared_in_group` | Receiving part of a FIFO group hides its remaining messages while other groups remain available, then prioritizes groups not previously received after expiry; atomic characterization, race coverage, and semantic mutation coverage pin shared visibility | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_fifo_receive_message_with_zero_visibility_timeout` | Zero visibility releases FIFO groups immediately while preserving per-group order and prioritizing untouched groups on the next receive; atomic characterization and mutation coverage pin the wire behavior | Mapped; focused green |
+| `test_sqs.py::TestSqsProvider::test_fifo_message_group_visibility_after_change_message_visibility` | Changing one FIFO message's visibility releases that message without exposing its hidden successor and lets another group deliver first; atomic characterization and controllable-clock coverage pin the boundary | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_fifo_queue_send_message_with_delay_seconds_fails` | SendMessage rejects non-zero per-message `DelaySeconds` on FIFO queues with `InvalidParameterValue` and the AWS queue-type reason, while queue-level delay and explicit zero remain supported; atomic, Verify-style snapshot, SDK, raw HTTP BDD, fuzz, chaos/race, and mutation coverage pin the distinction | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_tag_untag_queue` | TagQueue/ListQueueTags preserve tag values, UntagQueue removes selected keys and ignores missing keys, and the final empty response omits `Tags`; atomic, Verify-style snapshot, AWS SDK contract, raw HTTP BDD, native fuzz, concurrent chaos/race, and semantic mutation coverage pin the wire shape | Mapped; focused green |
 | `test_sqs.py::TestSqsProvider::test_untag_queue_ignores_non_existing_tag` | UntagQueue remains successful when a requested key is absent; the queue-tag characterization, SDK, BDD, fuzz, concurrent chaos, and tag mutation stack pin the no-op behavior | Mapped; focused green |

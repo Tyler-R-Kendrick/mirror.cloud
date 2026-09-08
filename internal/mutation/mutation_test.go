@@ -17899,6 +17899,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestMessageSystemAttributeDigestCharacterization",
 		},
 		{
+			name: "sqs-drop-sender-id-attribute",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if wanted["All"] || wanted["SenderId"] {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestReceiveMessageSystemAttributeFilteringCharacterization",
+		},
+		{
+			name: "sqs-drop-fifo-sequence-attribute",
+			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
+			old:  `if strings.HasSuffix(name, ".fifo") && (wanted["All"] || wanted["SequenceNumber"]) {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sqs",
+			run:  "TestReceiveMessageSystemAttributeFilteringCharacterization",
+		},
+		{
 			name: "sqs-drop-message-system-digest-response",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
 			old:  "if md5system != \"\" {\n\t\toutput[\"MD5OfMessageSystemAttributes\"] = md5system\n\t}",
@@ -18693,8 +18709,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sqs-reset-move-receive-count",
 			file: filepath.Join("internal", "services", "aws", "sqs", "sqs.go"),
-			old:  `m["receiveCount"] = 0`,
-			new:  `m["receiveCount"] = 1`,
+			old:  "_ = p.col(req, \"msgs:\"+src).Delete(ctx, kv.Key)\n\tm[\"handle\"] = p.deps.Rand.Hex(64)\n\tm[\"receiveCount\"] = 0",
+			new:  "_ = p.col(req, \"msgs:\"+src).Delete(ctx, kv.Key)\n\tm[\"handle\"] = p.deps.Rand.Hex(64)\n\tm[\"receiveCount\"] = 1",
 			pkg:  "./internal/services/aws/sqs",
 			run:  "TestMessageMoveTaskDefaultDestinationCharacterization",
 		},

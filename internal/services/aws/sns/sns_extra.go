@@ -77,6 +77,9 @@ func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 	if req.Operation == "SetSubscriptionAttributes" {
 		k := str(req.Input["AttributeName"])
 		value := str(req.Input["AttributeValue"])
+		if fault := validateSubscriptionAttribute(k, value); fault != nil {
+			return nil, fault
+		}
 		if k == "FilterPolicyScope" && value != "MessageAttributes" && value != "MessageBody" {
 			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: FilterPolicyScope", HTTPStatus: 400, Fault: "client"}
 		}
@@ -87,6 +90,8 @@ func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 		}
 		if k == "FilterPolicy" && value == "" {
 			delete(rec, k)
+		} else if k == "RawMessageDelivery" {
+			rec[k] = strings.ToLower(value)
 		} else {
 			rec[k] = req.Input["AttributeValue"]
 		}
@@ -96,6 +101,8 @@ func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 		if attrs, ok := rec["attrs"].(map[string]any); ok {
 			if k == "FilterPolicy" && value == "" {
 				delete(attrs, k)
+			} else if k == "RawMessageDelivery" {
+				attrs[k] = strings.ToLower(value)
 			} else {
 				attrs[k] = req.Input["AttributeValue"]
 			}
@@ -160,6 +167,39 @@ func validateFilterPolicy(raw string) *spi.Fault {
 		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: FilterPolicy", HTTPStatus: 400, Fault: "client"}
 	}
 	return nil
+}
+
+func validateSubscriptionAttribute(name, value string) *spi.Fault {
+	switch name {
+	case "FilterPolicy":
+		if value != "" {
+			return validateFilterPolicy(value)
+		}
+	case "FilterPolicyScope":
+		if value != "MessageAttributes" && value != "MessageBody" {
+			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: FilterPolicyScope", HTTPStatus: 400, Fault: "client"}
+		}
+	case "RawMessageDelivery":
+		if !strings.EqualFold(value, "true") && !strings.EqualFold(value, "false") {
+			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: RawMessageDelivery", HTTPStatus: 400, Fault: "client"}
+		}
+	case "RedrivePolicy":
+		if value != "" {
+			var policy map[string]any
+			if json.Unmarshal([]byte(value), &policy) != nil || !validSQSARN(str(policy["deadLetterTargetArn"])) {
+				return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: RedrivePolicy", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+	case "DeliveryPolicy", "SubscriptionRoleArn":
+	default:
+		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: " + name, HTTPStatus: 400, Fault: "client"}
+	}
+	return nil
+}
+
+func validSQSARN(arn string) bool {
+	parts := strings.Split(arn, ":")
+	return len(parts) == 6 && parts[0] == "arn" && parts[2] == "sqs" && parts[3] != "" && parts[4] != "" && parts[5] != ""
 }
 
 func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response, error) {

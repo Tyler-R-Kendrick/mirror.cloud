@@ -164,7 +164,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if attrs == nil {
 			attrs = map[string]any{}
 		}
-		attrs[str(req.Input["AttributeName"])] = req.Input["AttributeValue"]
+		attributeName := str(req.Input["AttributeName"])
+		if attributeName == "DeliveryPolicy" && str(req.Input["AttributeValue"]) == "" {
+			delete(attrs, attributeName)
+		} else {
+			attrs[attributeName] = req.Input["AttributeValue"]
+		}
 		m["attrs"] = attrs
 		nb, _ := json.Marshal(m)
 		_ = p.col(req, "topics").Put(ctx, name, nb)
@@ -258,6 +263,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		default:
 			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Protocol", HTTPStatus: 400, Fault: "client"}
 		}
+		if protocol == "sms" && !validSMSNumber(str(req.Input["Endpoint"])) {
+			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Endpoint", HTTPStatus: 400, Fault: "client"}
+		}
 		if protocol == "sqs" {
 			if fault := p.validateSQSSubscription(ctx, req, topicArn, str(req.Input["Endpoint"])); fault != nil {
 				return nil, fault
@@ -277,7 +285,15 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 		}
 		if str(req.Input["RawMessageDelivery"]) != "" {
-			attrs["RawMessageDelivery"] = req.Input["RawMessageDelivery"]
+			attrs["RawMessageDelivery"] = strings.ToLower(str(req.Input["RawMessageDelivery"]))
+		}
+		for name, value := range attrs {
+			if fault := validateSubscriptionAttribute(name, str(value)); fault != nil {
+				return nil, fault
+			}
+		}
+		if raw, ok := attrs["RawMessageDelivery"]; ok {
+			attrs["RawMessageDelivery"] = strings.ToLower(str(raw))
 		}
 		requestedFilter := str(attrs["FilterPolicy"])
 		requestedRaw := strings.ToLower(str(attrs["RawMessageDelivery"]))
@@ -1045,6 +1061,18 @@ func validTopicName(name string) bool {
 		return len(name) >= 5 && len(name) <= 256 && strings.HasSuffix(name, ".fifo") && validTopicChars(strings.TrimSuffix(name, ".fifo"))
 	}
 	return validTopicChars(name)
+}
+
+func validSMSNumber(number string) bool {
+	if len(number) < 3 || len(number) > 16 || number[0] != '+' || number[1] < '1' || number[1] > '9' {
+		return false
+	}
+	for _, r := range number[2:] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func validTopicChars(name string) bool {

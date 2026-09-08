@@ -158,6 +158,14 @@ func TestSNSControlPlaneOperations(t *testing.T) {
 	if attributes["DisplayName"] != "Events" || attributes["TopicArn"] != topic {
 		t.Fatalf("topic attributes %#v", attributes)
 	}
+	must("SetTopicAttributes", map[string]any{"TopicArn": topic, "AttributeName": "DeliveryPolicy", "AttributeValue": `{"http":{"defaultHealthyRetryPolicy":{"numRetries":1}}}`})
+	if got := must("GetTopicAttributes", map[string]any{"TopicArn": topic}).Output["Attributes"].(map[string]any)["DeliveryPolicy"]; got == nil {
+		t.Fatal("delivery policy was not stored")
+	}
+	must("SetTopicAttributes", map[string]any{"TopicArn": topic, "AttributeName": "DeliveryPolicy", "AttributeValue": ""})
+	if _, found := must("GetTopicAttributes", map[string]any{"TopicArn": topic}).Output["Attributes"].(map[string]any)["DeliveryPolicy"]; found {
+		t.Fatal("empty delivery policy was retained")
+	}
 	if _, err := call("GetTopicAttributes", map[string]any{"TopicArn": topic + "-missing"}); err == nil {
 		t.Fatal("found missing topic")
 	}
@@ -643,6 +651,14 @@ func TestSNSSubscriptionProtocolAndQueueValidation(t *testing.T) {
 			t.Fatalf("invalid subscription succeeded: %#v", input)
 		}
 	}
+	for _, endpoint := range []string{"+15--551234567", "NAA+15551234567", "+15551234567.", "/+15551234567"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{"TopicArn": topic, "Protocol": "sms", "Endpoint": endpoint}}); err == nil {
+			t.Fatalf("invalid SMS endpoint accepted: %s", endpoint)
+		}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{"TopicArn": topic, "Protocol": "sms", "Endpoint": "+1234567890"}}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:regular"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -726,6 +742,15 @@ func TestSNSFilterPolicyScopeCharacterization(t *testing.T) {
 	if set("FilterPolicy", "invalid-json") == nil {
 		t.Fatal("accepted invalid filter policy")
 	}
+	for _, tc := range []struct{ name, value string }{
+		{"FakeAttribute", "test-value"},
+		{"RawMessageDelivery", "test-value"},
+		{"RedrivePolicy", `{"deadLetterTargetArn":"fake-arn"}`},
+	} {
+		if set(tc.name, tc.value) == nil {
+			t.Fatalf("accepted invalid subscription attribute %s", tc.name)
+		}
+	}
 	if fault := set("FilterPolicy", `{"n":["x"]}`); fault != nil {
 		t.Fatal(fault)
 	}
@@ -808,6 +833,10 @@ func TestSNSSubscribeIdempotency(t *testing.T) {
 	first, err := subscribe(map[string]any{"RawMessageDelivery": "True"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	gotAttrs, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetSubscriptionAttributes", Input: map[string]any{"SubscriptionArn": first.Output["SubscriptionArn"]}})
+	if err != nil || gotAttrs.Output["Attributes"].(map[string]any)["RawMessageDelivery"] != "true" {
+		t.Fatalf("raw delivery normalization attrs=%#v err=%v", gotAttrs, err)
 	}
 	for _, attrs := range []map[string]any{{"RawMessageDelivery": "true", "FilterPolicyScope": "MessageAttributes"}, nil, {}} {
 		got, callErr := subscribe(attrs)

@@ -17582,6 +17582,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSFilterPolicyScopeCharacterization",
 		},
 		{
+			name: "sns-accept-invalid-subscription-attribute",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  "if fault := validateSubscriptionAttribute(k, value); fault != nil {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSFilterPolicyScopeCharacterization",
+		},
+		{
+			name: "sns-retain-raw-delivery-case",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "attrs[\"RawMessageDelivery\"] = strings.ToLower(str(raw))",
+			new:  "attrs[\"RawMessageDelivery\"] = raw",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSSubscribeIdempotency",
+		},
+		{
 			name: "sns-retain-cleared-filter-policy",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old: `if k == "FilterPolicy" && value == "" {
@@ -17656,6 +17672,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSMessageStructureAndSizeValidation",
 		},
 		{
+			name: "sns-retain-empty-delivery-policy",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "if attributeName == \"DeliveryPolicy\" && str(req.Input[\"AttributeValue\"]) == \"\" {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSControlPlaneOperations",
+		},
+		{
 			name: "sns-ignore-structured-protocol-message",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `if value, ok := values[protocol].(string); ok && value != "" {`,
@@ -17692,6 +17716,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `if protocol == "sqs" {`,
 			new:  `if false {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSSubscriptionProtocolAndQueueValidation",
+		},
+		{
+			name: "sns-accept-invalid-sms-endpoint",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "if protocol == \"sms\" && !validSMSNumber(str(req.Input[\"Endpoint\"])) {",
+			new:  "if false {",
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSSubscriptionProtocolAndQueueValidation",
 		},

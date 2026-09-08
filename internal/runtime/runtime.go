@@ -459,6 +459,7 @@ func Boot(cfg config.Config) (*Runtime, error) {
 		Journal:                   journal.New(),
 		Model:                     &bundle,
 		S3AllowNonstandardRegions: cfg.S3AllowNonstandardRegions,
+		SQSEndpointStrategy:       cfg.SQSEndpointStrategy,
 	}
 	deps.Authorizer = iam.NewAuthorizer(deps.Store)
 	if cfg.PersistDir != "" {

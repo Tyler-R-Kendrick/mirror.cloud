@@ -111,6 +111,7 @@ type Deps struct {
 	Authorizer                Authorizer
 	Compute                   ComputeProvider
 	S3AllowNonstandardRegions bool
+	SQSEndpointStrategy       string
 }
 
 // Store is account+region namespaced structured state.

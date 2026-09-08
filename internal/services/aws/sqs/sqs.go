@@ -63,7 +63,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			req = &effective
 		}
 	}
-	base := advertise(req)
+	base := p.sqsAdvertise(req)
 	if queueScoped(req.Operation) && !p.queueExists(ctx, req, queueName(req)) {
 		return nil, queueMissing(req)
 	}
@@ -1401,6 +1401,41 @@ func advertise(req *spi.Request) string {
 		return scheme + "://" + req.HTTP.Host
 	}
 	return "http://127.0.0.1:4566"
+}
+
+func (p *Pack) sqsAdvertise(req *spi.Request) string {
+	base := advertise(req)
+	strategy := strings.ToLower(p.deps.SQSEndpointStrategy)
+	if strategy == "" || strategy == "off" {
+		return base
+	}
+	parsed, err := neturl.Parse(base)
+	if err != nil || parsed.Host == "" {
+		return base
+	}
+	host := parsed.Hostname()
+	if host == "localhost" {
+		host = "localhost.localstack.cloud"
+	}
+	port := parsed.Port()
+	if strategy == "standard" {
+		host = "sqs." + req.Identity.Region + "." + host
+	} else if strategy == "domain" {
+		if req.Identity.Region == "us-east-1" {
+			host = "queue." + host
+		} else {
+			host = req.Identity.Region + ".queue." + host
+		}
+	} else if strategy == "path" {
+		parsed.Path = "/queue/" + req.Identity.Region
+	} else {
+		return base
+	}
+	parsed.Host = host
+	if port != "" {
+		parsed.Host += ":" + port
+	}
+	return parsed.String()
 }
 
 func queueName(req *spi.Request) string {

@@ -6,7 +6,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 747 of 907 direct upstream test functions are explicitly traced (82.4%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green across 221 Go packages. The mutation inventory has 2,507 entries. The prior 2,505-entry inventory passed in all four bounded shards (785.888s, 1512.782s, 598.587s, and 1339.222s), and the two newer SNS mutants (platform application validation and endpoint dispatch) pass targeted kill checks; a complete four-shard rerun for the new entries remains outstanding. These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green across 221 Go packages. The mutation inventory has 2,508 entries. The prior 2,505-entry inventory passed in all four bounded shards (785.888s, 1512.782s, 598.587s, and 1339.222s), and the three newer SNS mutants (platform application validation, direct endpoint dispatch, and application-subscription dispatch) pass targeted kill checks; a complete four-shard rerun for the new entries remains outstanding. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -44,7 +44,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_set_platform_endpoint_attributes_invalid_attributes` | `TestSNSPlatformEndpointAttributeValidation` rejects unknown, malformed, and oversized attributes |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_create_platform_endpoint_with_invalid_attributes` | `TestSNSPlatformEndpointAttributeValidation` rejects invalid create attributes |
 | `test_sns.py::TestSNSPlatformEndpoint::test_publish_disabled_endpoint` | `TestSNSPublishDisabledPlatformEndpoint` verifies the `EndpointDisabled` fault |
-| `test_sns.py::TestSNSPlatformEndpoint::test_publish_to_platform_endpoint_is_dispatched` | `TestSNSPublishDisabledPlatformEndpoint` verifies enabled endpoint delivery on the bus |
+| `test_sns.py::TestSNSPlatformEndpoint::test_publish_to_platform_endpoint_is_dispatched` | `TestSNSPlatformEndpointSubscriptionDispatch` verifies platform-specific delivery on the bus |
 | `test_sns.py::TestSNSPlatformEndpoint::test_create_platform_endpoint_custom_data` | `TestSNSPlatformEndpointAttributeValidation` preserves custom endpoint data |
 
 ## S3 baseline
@@ -647,7 +647,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
-The ordinary local gate is green across 221 packages. The prior 2,505-mutant inventory is green in all four bounded shards (exit 0), and the two newer SNS mutants are green in targeted kill checks; the serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
+The ordinary local gate is green across 221 packages. The prior 2,505-mutant inventory is green in all four bounded shards (exit 0), and the three newer SNS mutants are green in targeted kill checks; the serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
 
 | LocalStack test | Mirror evidence | Result |
 |---|---|---|

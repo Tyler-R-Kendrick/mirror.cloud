@@ -121,14 +121,19 @@ func TestBootedServerSQSSection48(t *testing.T) {
 		}
 		return out
 	}
-	jsonCall("CreateQueue", `{"QueueName":"dlq"}`)
+	dlqOut := jsonCall("CreateQueue", `{"QueueName":"dlq"}`)
 	jsonCall("CreateQueue", `{"QueueName":"q","Attributes":{"VisibilityTimeout":"0","RedrivePolicy":"{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:000000000000:dlq\",\"maxReceiveCount\":\"1\"}"}}`)
 	urlOut := jsonCall("GetQueueUrl", `{"QueueName":"q"}`)
 	if urlOut["QueueUrl"] == nil {
 		t.Fatalf("get url %v", urlOut)
 	}
+	queueURL, err := url.Parse(str(urlOut["QueueUrl"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	queueEndpoint := ts.URL + queueURL.Path
 	for _, action := range []string{"FooBar", "CreateQueue", "ListQueues"} {
-		queryReq, _ := http.NewRequest(http.MethodGet, str(urlOut["QueueUrl"])+"?Action="+action, nil)
+		queryReq, _ := http.NewRequest(http.MethodGet, queueEndpoint+"?Action="+action, nil)
 		queryReq.Header.Set("Authorization", auth)
 		queryRes, err := http.DefaultClient.Do(queryReq)
 		if err != nil {
@@ -139,6 +144,31 @@ func TestBootedServerSQSSection48(t *testing.T) {
 		if queryRes.StatusCode != http.StatusBadRequest || !strings.Contains(string(queryBody), "<Code>InvalidAction</Code>") || !strings.Contains(string(queryBody), "The action "+action+" is not valid for this endpoint.") {
 			t.Fatalf("query invalid action %s: %d %s", action, queryRes.StatusCode, queryBody)
 		}
+	}
+	missingParamReq, _ := http.NewRequest(http.MethodGet, queueEndpoint+"?Action=SendMessage", nil)
+	missingParamReq.Header.Set("Authorization", auth)
+	missingParamRes, err := http.DefaultClient.Do(missingParamReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingParamBody, _ := io.ReadAll(missingParamRes.Body)
+	missingParamRes.Body.Close()
+	if missingParamRes.StatusCode != http.StatusBadRequest || !strings.Contains(string(missingParamBody), "<Code>MissingParameter</Code>") || !strings.Contains(string(missingParamBody), "The request must contain the parameter MessageBody.") {
+		t.Fatalf("query missing parameter: %d %s", missingParamRes.StatusCode, missingParamBody)
+	}
+	dlqURL, err := url.Parse(str(dlqOut["QueueUrl"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unauthReq, _ := http.NewRequest(http.MethodGet, ts.URL+dlqURL.Path+"?Action=GetQueueAttributes&AttributeName.1=All", nil)
+	unauthRes, err := http.DefaultClient.Do(unauthReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unauthBody, _ := io.ReadAll(unauthRes.Body)
+	unauthRes.Body.Close()
+	if unauthRes.StatusCode != http.StatusOK || !strings.Contains(string(unauthBody), "<GetQueueAttributesResponse") || !strings.Contains(string(unauthBody), "<Name>VisibilityTimeout</Name><Value>30") {
+		t.Fatalf("query without auth params: %d %s", unauthRes.StatusCode, unauthBody)
 	}
 	missingNameReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(`{"QueueUrl":"http://queue/000000000000/q"}`))
 	missingNameReq.Header.Set("Content-Type", "application/x-amz-json-1.0")

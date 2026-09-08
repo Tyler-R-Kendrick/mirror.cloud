@@ -421,7 +421,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, &spi.Fault{Code: "AWS.SimpleQueueService.TooManyEntriesInBatchRequest", Message: fmt.Sprintf("Maximum number of entries per request are 10. You have sent %d.", len(entries)), HTTPStatus: 400, Fault: "client"}
 		}
 		for _, entry := range entries {
-			if !validBatchEntryID(str(asMap(entry)["Id"])) {
+			m := asMap(entry)
+			if str(m["Id"]) == "" && str(entry) != "" {
+				continue
+			}
+			if !validBatchEntryID(str(m["Id"])) {
 				return nil, &spi.Fault{Code: "AWS.SimpleQueueService.InvalidBatchEntryId", Message: "A batch entry id can only contain alphanumeric characters, hyphens and underscores. It can be at most 80 letters long.", HTTPStatus: 400, Fault: "client"}
 			}
 		}
@@ -430,9 +434,17 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		for _, e := range entries {
 			m := asMap(e)
 			handle := str(m["ReceiptHandle"])
+			// Older SDKs accepted a bare receipt-handle list for this operation.
+			if handle == "" {
+				handle = str(e)
+			}
 			_ = p.col(req, "msgs:"+name).Delete(ctx, p.resolveHandle(ctx, req, name, handle))
 			_ = p.col(req, "rhandles:"+name).Delete(ctx, handle)
-			ok = append(ok, map[string]any{"Id": m["Id"]})
+			id := m["Id"]
+			if id == nil {
+				id = handle
+			}
+			ok = append(ok, map[string]any{"Id": id})
 		}
 		return &spi.Response{Output: map[string]any{"Successful": ok}}, nil
 	case "ChangeMessageVisibility", "ChangeMessageVisibilityBatch":
@@ -622,6 +634,7 @@ func (p *Pack) send(ctx context.Context, req *spi.Request) (*spi.Response, error
 		"group": group, "seq": seq,
 		"visibleAt": now.Add(time.Duration(delay) * time.Second).UnixNano(), "receiveCount": 0, "sentAt": now.UnixMilli(),
 		"attrs": req.Input["MessageAttributes"], "trace": trace,
+		"queue": name, "queueArn": queueARN(req, name), "account": req.Identity.Account, "region": req.Identity.Region,
 	}
 	raw, _ := json.Marshal(msg)
 	_ = p.col(req, "msgs:"+name).Put(ctx, rh, raw)

@@ -14,9 +14,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -27,10 +29,30 @@ func init() {
 }
 
 // Pack implements Lambda-lite.
-type Pack struct{ deps spi.Deps }
+type Pack struct {
+	deps      spi.Deps
+	cancelSQS func()
+	closeOnce sync.Once
+}
 
 // New constructs the pack.
-func New(d spi.Deps) *Pack { return &Pack{deps: d} }
+func New(d spi.Deps) *Pack {
+	p := &Pack{deps: d}
+	if d.Bus != nil {
+		p.cancelSQS = d.Bus.Subscribe("sqs", p.consumeSQS)
+	}
+	return p
+}
+
+// Close stops the SQS event-source consumer.
+func (p *Pack) Close() error {
+	p.closeOnce.Do(func() {
+		if p.cancelSQS != nil {
+			p.cancelSQS()
+		}
+	})
+	return nil
+}
 
 func (p *Pack) ServiceID() string { return "aws.lambda" }
 func (p *Pack) Tier() model.Tier  { return model.TierEmulate }
@@ -365,6 +387,137 @@ func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return nil, err
 	}
 	return &spi.Response{Output: map[string]any{"StatusCode": 200, "Payload": json.RawMessage(out)}}, nil
+}
+
+// consumeSQS delivers messages for mappings created through the Lambda API.
+// The SQS bus event is only a wake-up; ReceiveMessage remains the source of
+// truth so visibility, retry, and redrive semantics stay in the SQS pack.
+func (p *Pack) consumeSQS(ctx context.Context, payload []byte) {
+	var event map[string]any
+	if json.Unmarshal(payload, &event) != nil {
+		return
+	}
+	queue := stringValue(event["queue"])
+	if queue == "" {
+		return
+	}
+	identity := spi.Identity{Account: stringValue(event["account"]), Region: stringValue(event["region"])}
+	if identity.Account == "" || identity.Region == "" {
+		return
+	}
+	sourceARN := stringValue(event["queueArn"])
+	if sourceARN == "" {
+		sourceARN = "arn:aws:sqs:" + identity.Region + ":" + identity.Account + ":" + queue
+	}
+	req := &spi.Request{Identity: identity}
+	kvs, _, _ := p.col(req).List(ctx, "esm:", "", 0)
+	for _, kv := range kvs {
+		var mapping map[string]any
+		if json.Unmarshal(kv.Value, &mapping) != nil || stringValue(mapping["EventSourceArn"]) != sourceARN {
+			continue
+		}
+		if enabled, ok := mapping["Enabled"].(bool); ok && !enabled {
+			continue
+		}
+		if stringValue(mapping["State"]) == "Disabled" {
+			continue
+		}
+		p.processSQSMapping(ctx, identity, queue, sourceARN, stringValue(mapping["FunctionName"]))
+	}
+}
+
+func (p *Pack) processSQSMapping(ctx context.Context, identity spi.Identity, queue, sourceARN, function string) {
+	if function == "" {
+		return
+	}
+	if i := strings.Index(function, ":function:"); i >= 0 {
+		function = function[i+len(":function:"):]
+		if i := strings.IndexByte(function, ':'); i >= 0 {
+			function = function[:i]
+		}
+	}
+	queuePack := sqs.New(p.deps)
+	// A failed invocation is retried immediately with zero visibility. This
+	// keeps local event delivery deterministic and lets SQS redrive after the
+	// configured receive count without a second scheduler.
+	for attempt := 0; attempt < 10; attempt++ {
+		received, err := queuePack.Invoke(ctx, &spi.Request{Identity: identity, Operation: "ReceiveMessage", Input: map[string]any{
+			"QueueName": queue, "MaxNumberOfMessages": 10, "VisibilityTimeout": 0,
+			"AttributeNames": []any{"All"}, "MessageAttributeNames": []any{"All"},
+		}})
+		if err != nil {
+			return
+		}
+		messages := anySlice(received.Output["Messages"])
+		if len(messages) == 0 {
+			return
+		}
+		records := make([]any, 0, len(messages))
+		for _, raw := range messages {
+			message, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			records = append(records, map[string]any{
+				"messageId": message["MessageId"], "receiptHandle": message["ReceiptHandle"],
+				"body": message["Body"], "attributes": message["Attributes"],
+				"messageAttributes": message["MessageAttributes"], "md5OfBody": message["MD5OfBody"],
+				"eventSource": "aws:sqs", "eventSourceARN": sourceARN, "awsRegion": identity.Region,
+			})
+		}
+		body, _ := json.Marshal(map[string]any{"Records": records})
+		response, invokeErr := p.Invoke(ctx, &spi.Request{Identity: identity, Operation: "Invoke", Input: map[string]any{"FunctionName": function}, Body: io.NopCloser(bytes.NewReader(body))})
+		if invokeErr != nil {
+			continue
+		}
+		failed := failedSQSRecords(response)
+		for _, raw := range messages {
+			message, ok := raw.(map[string]any)
+			if !ok || failed[stringValue(message["messageId"])] {
+				continue
+			}
+			_, _ = queuePack.Invoke(ctx, &spi.Request{Identity: identity, Operation: "DeleteMessage", Input: map[string]any{
+				"QueueName": queue, "ReceiptHandle": message["ReceiptHandle"],
+			}})
+		}
+		if len(failed) == 0 {
+			return
+		}
+	}
+}
+
+func failedSQSRecords(response *spi.Response) map[string]bool {
+	failed := map[string]bool{}
+	if response == nil {
+		return failed
+	}
+	payload, ok := response.Output["Payload"].(json.RawMessage)
+	if !ok {
+		return failed
+	}
+	var output map[string]any
+	if json.Unmarshal(payload, &output) != nil {
+		return failed
+	}
+	items, _ := output["batchItemFailures"].([]any)
+	for _, item := range items {
+		if entry, ok := item.(map[string]any); ok {
+			if id := stringValue(entry["itemIdentifier"]); id != "" {
+				failed[id] = true
+			}
+		}
+	}
+	return failed
+}
+
+func anySlice(value any) []any {
+	values, _ := value.([]any)
+	return values
+}
+
+func stringValue(value any) string {
+	s, _ := value.(string)
+	return s
 }
 
 func runHandler(name, runtime, handler string, code, environment any, payload []byte) ([]byte, error) {

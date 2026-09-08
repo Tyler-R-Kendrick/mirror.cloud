@@ -756,10 +756,20 @@ func TestSNSPublishDisabledPlatformEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	endpointARN := str(endpoint.Output["EndpointArn"])
+	delivered := 0
+	cancel := deps.Bus.Subscribe("sns:"+endpointARN, func(_ context.Context, body []byte) {
+		if string(body) == "message" {
+			delivered++
+		}
+	})
+	defer cancel()
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
 		"TargetArn": endpointARN, "Message": "message",
 	}}); err != nil {
 		t.Fatalf("enabled endpoint publish: %v", err)
+	}
+	if delivered != 1 {
+		t.Fatalf("enabled endpoint deliveries=%d", delivered)
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetEndpointAttributes", Input: map[string]any{
 		"EndpointArn": endpointARN, "Attributes": map[string]any{"Enabled": "false"},

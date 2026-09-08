@@ -182,6 +182,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if fault := validatePublishMessage(req); fault != nil {
 				return nil, fault
 			}
+			_ = p.deps.Bus.Publish(ctx, "sns:"+target, []byte(str(req.Input["Message"])))
 			return &spi.Response{Output: map[string]any{"MessageId": p.deps.Rand.Hex(16)}}, nil
 		}
 		if fault := p.validatePublishTarget(ctx, req, topicARN(req.Input)); fault != nil {

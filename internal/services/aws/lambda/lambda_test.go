@@ -131,6 +131,45 @@ func TestSQSEventSourceMappingInvokesAndDeletes(t *testing.T) {
 	_ = function.Close()
 }
 
+func TestSQSEventSourceMappingPreservesPartialFailures(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	deps := spitest.Deps(t)
+	identity := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	queue := sqs.New(deps)
+	function := New(deps)
+	ctx := context.Background()
+	if _, err := queue.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateQueue", Input: map[string]any{"QueueName": "partial"}}); err != nil {
+		t.Fatal(err)
+	}
+	code := "def lambda_handler(event, context):\n    return {'batchItemFailures': [{'itemIdentifier': event['Records'][0]['messageId']}] }\n"
+	if _, err := function.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateFunction", Input: map[string]any{
+		"FunctionName": "partial", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
+		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(code))},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := function.Invoke(ctx, &spi.Request{Identity: identity, Operation: "CreateEventSourceMapping", Input: map[string]any{
+		"FunctionName": "partial", "EventSourceArn": "arn:aws:sqs:us-east-1:123456789012:partial",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{"one", "two"} {
+		if _, err := queue.Invoke(ctx, &spi.Request{Identity: identity, Operation: "SendMessage", Input: map[string]any{"QueueName": "partial", "MessageBody": body}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := queue.Invoke(ctx, &spi.Request{Identity: identity, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "partial", "VisibilityTimeout": 0, "MaxNumberOfMessages": 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(anySlice(got.Output["Messages"])) != 1 {
+		t.Fatalf("partial failure deletion %#v", got.Output)
+	}
+	_ = function.Close()
+}
+
 func TestSQSEventSourceMappingRedrivesFailedMessage(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 not installed")

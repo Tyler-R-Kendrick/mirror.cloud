@@ -3729,6 +3729,32 @@ func TestQueryTagFieldsCharacterization(t *testing.T) {
 	golden.AssertJSON(t, call("ListQueueTags", map[string]any{"QueueName": "query-tags"}))
 }
 
+func TestQueueURLStrategiesCharacterization(t *testing.T) {
+	for _, tc := range []struct {
+		strategy, region, name, want string
+	}{
+		{"off", "eu-north-1", "off", "http://localhost:4566/123456789012/off"},
+		{"standard", "eu-north-1", "standard", "http://sqs.eu-north-1.localhost.localstack.cloud:4566/123456789012/standard"},
+		{"domain", "eu-north-1", "domain", "http://eu-north-1.queue.localhost.localstack.cloud:4566/123456789012/domain"},
+		{"domain", "us-east-1", "domain-east", "http://queue.localhost.localstack.cloud:4566/123456789012/domain-east"},
+		{"path", "eu-north-1", "path", "http://localhost.localstack.cloud:4566/queue/eu-north-1/123456789012/path"},
+	} {
+		deps := spitest.Deps(t)
+		deps.SQSEndpointStrategy = tc.strategy
+		p := New(deps)
+		response, err := p.Invoke(context.Background(), &spi.Request{
+			Identity: spi.Identity{Account: "123456789012", Region: tc.region}, AdvertiseURL: "http://localhost:4566",
+			Operation: "CreateQueue", Input: map[string]any{"QueueName": tc.name},
+		})
+		if err != nil {
+			t.Fatal(tc.strategy, err)
+		}
+		if got := str(response.Output["QueueUrl"]); got != tc.want {
+			t.Fatalf("%s URL %q", tc.strategy, got)
+		}
+	}
+}
+
 func FuzzCreateQueueTags(f *testing.F) {
 	f.Add("tag", "value")
 	f.Add("", "")

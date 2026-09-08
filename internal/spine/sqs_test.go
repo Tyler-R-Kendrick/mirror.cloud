@@ -166,6 +166,36 @@ func TestBootedServerSQSJSONOnQueueURL(t *testing.T) {
 	}
 }
 
+func TestBootedServerSQSPathEndpointStrategy(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	cfg.Seed = "sqs-path-strategy"
+	cfg.AdvertiseURL = "http://localhost:4566"
+	cfg.SQSEndpointStrategy = "path"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(`{"QueueName":"path-q"}`))
+	req.Header.Set("Content-Type", "application/x-amz-json-1.0")
+	req.Header.Set("X-Amz-Target", "AmazonSQS.CreateQueue")
+	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/eu-north-1/sqs/aws4_request, SignedHeaders=host, Signature=00")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var body map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil || res.StatusCode >= 300 {
+		t.Fatalf("create: %d %#v %v", res.StatusCode, body, err)
+	}
+	if got := str(body["QueueUrl"]); got != "http://localhost.localstack.cloud:4566/queue/eu-north-1/000000000000/path-q" {
+		t.Fatalf("path strategy URL %q", got)
+	}
+}
+
 func TestBootedServerSQSSection48(t *testing.T) {
 	t.Setenv("MIRROR_CLOCK", "controllable")
 	cfg := config.Default()

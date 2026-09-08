@@ -455,6 +455,9 @@ func (s *Server) demux(r *http.Request) *model.Service {
 		action = r.Form.Get("Action")
 	}
 	if action != "" {
+		if sqsQueuePath(r.URL.Path) {
+			return s.bundle.ServiceByID("aws.sqs")
+		}
 		if s.looksLike(r, "s3-control") || s.looksLike(r, "s3control") {
 			return s.bundle.ServiceByID("aws.s3control")
 		}
@@ -881,15 +884,25 @@ func (s *Server) demux(r *http.Request) *model.Service {
 
 func sqsQueuePath(path string) bool {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 2 || len(parts[0]) != 12 {
+	account := ""
+	name := ""
+	switch {
+	case len(parts) == 2:
+		account, name = parts[0], parts[1]
+	case len(parts) == 4 && parts[0] == "queue":
+		account, name = parts[2], parts[3]
+	default:
 		return false
 	}
-	for _, r := range parts[0] {
+	if len(account) != 12 || name == "" {
+		return false
+	}
+	for _, r := range account {
 		if r < '0' || r > '9' {
 			return false
 		}
 	}
-	return parts[1] != ""
+	return true
 }
 
 func (s *Server) looksLike(r *http.Request, prefix string) bool {

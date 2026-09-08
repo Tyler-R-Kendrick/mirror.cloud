@@ -151,6 +151,56 @@ func TestInvalidReceiptHandleCharacterization(t *testing.T) {
 	golden.AssertJSON(t, map[string]any{"Code": fault.Code, "Message": fault.Message, "HTTPStatus": fault.HTTPStatus, "Fault": fault.Fault})
 }
 
+func TestChangeVisibilityOnDeletedMessageCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	invoke := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response
+	}
+	invoke("CreateQueue", map[string]any{"QueueName": "deleted-visibility"})
+	invoke("SendMessage", map[string]any{"QueueName": "deleted-visibility", "MessageBody": "foo"})
+	message := asAnySlice(invoke("ReceiveMessage", map[string]any{"QueueName": "deleted-visibility"}).Output["Messages"])[0]
+	handle := asMap(message)["ReceiptHandle"]
+	invoke("DeleteMessage", map[string]any{"QueueName": "deleted-visibility", "ReceiptHandle": handle})
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ChangeMessageVisibility", Input: map[string]any{"QueueName": "deleted-visibility", "ReceiptHandle": handle, "VisibilityTimeout": 42}})
+	fault, ok := err.(*spi.Fault)
+	if !ok || fault.Code != "InvalidParameterValue" || !strings.Contains(fault.Message, "Message does not exist") {
+		t.Fatalf("deleted visibility error %#v", err)
+	}
+}
+
+func TestDeleteReceiptHandleCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	invoke := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response
+	}
+	invoke("CreateQueue", map[string]any{"QueueName": "delete-handles"})
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessage", Input: map[string]any{"QueueName": "delete-handles", "ReceiptHandle": "garbage"}})
+	fault, ok := err.(*spi.Fault)
+	if !ok || fault.Code != "ReceiptHandleIsInvalid" {
+		t.Fatalf("illegal handle error %#v", err)
+	}
+	invoke("SendMessage", map[string]any{"QueueName": "delete-handles", "MessageBody": "foo"})
+	message := asAnySlice(invoke("ReceiveMessage", map[string]any{"QueueName": "delete-handles", "VisibilityTimeout": 0}).Output["Messages"])[0]
+	input := map[string]any{"QueueName": "delete-handles", "ReceiptHandle": asMap(message)["ReceiptHandle"]}
+	for range 3 {
+		invoke("DeleteMessage", input)
+	}
+}
+
 func TestSendReceiveCharacterization(t *testing.T) {
 	p := New(spitest.Deps(t))
 	ctx := context.Background()

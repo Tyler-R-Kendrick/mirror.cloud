@@ -4441,6 +4441,49 @@ func TestFIFODeduplicationIDCharacterization(t *testing.T) {
 	})
 }
 
+func TestFIFODeduplicationDeliveryCharacterization(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	call := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatal(operation, err)
+		}
+		return response.Output
+	}
+	call("CreateQueue", map[string]any{"QueueName": "dedup-content.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"}})
+	for i := 0; i < 2; i++ {
+		call("SendMessage", map[string]any{"QueueName": "dedup-content.fifo", "MessageBody": "same", "MessageGroupId": "g1"})
+	}
+	contentMessages := call("ReceiveMessage", map[string]any{"QueueName": "dedup-content.fifo", "VisibilityTimeout": 0})["Messages"].([]any)
+	if len(contentMessages) != 1 {
+		t.Fatalf("content-based duplicate delivered: %#v", contentMessages)
+	}
+
+	call("CreateQueue", map[string]any{"QueueName": "dedup-delete.fifo", "Attributes": map[string]any{"FifoQueue": "true"}})
+	input := map[string]any{"QueueName": "dedup-delete.fifo", "MessageBody": "before", "MessageGroupId": "g1", "MessageDeduplicationId": "same"}
+	call("SendMessage", input)
+	received := call("ReceiveMessage", map[string]any{"QueueName": "dedup-delete.fifo", "VisibilityTimeout": 30})["Messages"].([]any)[0].(map[string]any)
+	call("DeleteMessage", map[string]any{"QueueName": "dedup-delete.fifo", "ReceiptHandle": received["ReceiptHandle"]})
+	input["MessageBody"] = "after"
+	call("SendMessage", input)
+	if got := call("ReceiveMessage", map[string]any{"QueueName": "dedup-delete.fifo", "VisibilityTimeout": 0}); len(got) != 0 {
+		t.Fatalf("duplicate delivered after delete: %#v", got)
+	}
+
+	call("CreateQueue", map[string]any{"QueueName": "dedup-groups.fifo", "Attributes": map[string]any{"FifoQueue": "true"}})
+	for _, group := range []string{"g1", "g2"} {
+		call("SendMessage", map[string]any{"QueueName": "dedup-groups.fifo", "MessageBody": "same", "MessageGroupId": group, "MessageDeduplicationId": "same"})
+	}
+	groupMessages := call("ReceiveMessage", map[string]any{"QueueName": "dedup-groups.fifo", "VisibilityTimeout": 0})["Messages"].([]any)
+	if len(groupMessages) != 1 {
+		t.Fatalf("queue-scoped duplicate delivered across groups: %#v", groupMessages)
+	}
+	golden.AssertJSON(t, map[string]any{"contentCount": len(contentMessages), "deleteCount": 0, "groupCount": len(groupMessages)})
+}
+
 func TestFIFODelayZeroUsesQueueDelayCharacterization(t *testing.T) {
 	clk := clock.NewControllable()
 	deps := spitest.Deps(t)

@@ -109,8 +109,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-lambda-envelope-key-casing",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-			old:  `"SignatureVersion": "1", "SigningCertURL": snsCertificateURL(req),`,
-			new:  `"SignatureVersion": "1", "SigningCertUrl": snsCertificateURL(req),`,
+			old:  `"SignatureVersion": "1", "SigningCertUrl": snsCertificateURL(req),`,
+			new:  `"SignatureVersion": "1", "SigningCertURL": snsCertificateURL(req),`,
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestLambdaSubscriptionDelivery",
 		},

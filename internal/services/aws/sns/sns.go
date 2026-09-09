@@ -1010,7 +1010,7 @@ func (p *Pack) lambdaNotification(req *spi.Request, sub map[string]any, body, me
 	sns := map[string]any{
 		"Type": "Notification", "MessageId": messageID, "TopicArn": sub["TopicArn"], "Subject": req.Input["Subject"],
 		"Message": body, "Timestamp": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano),
-		"SignatureVersion": "1", "SigningCertURL": snsCertificateURL(req),
+		"SignatureVersion": "1", "SigningCertUrl": snsCertificateURL(req),
 		"UnsubscribeURL":    "http://127.0.0.1:4566/?Action=Unsubscribe&SubscriptionArn=" + str(sub["SubscriptionArn"]),
 		"MessageAttributes": attrs,
 	}

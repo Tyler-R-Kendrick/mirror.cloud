@@ -1197,6 +1197,22 @@ func TestSNSPendingEmailSubscription(t *testing.T) {
 	if err != nil || !validSubscriptionARN(str(withARN.Output["SubscriptionArn"])) {
 		t.Fatalf("email subscription with ARN=%#v err=%v", withARN, err)
 	}
+	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer httpServer.Close()
+	httpSub, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic, "Protocol": "http", "Endpoint": httpServer.URL, "ReturnSubscriptionArn": true,
+	}})
+	if err != nil || !validSubscriptionARN(str(httpSub.Output["SubscriptionArn"])) {
+		t.Fatalf("HTTP subscription with ARN=%#v err=%v", httpSub, err)
+	}
+	httpAgain, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic, "Protocol": "http", "Endpoint": httpServer.URL,
+	}})
+	if err != nil || str(httpAgain.Output["SubscriptionArn"]) != "pending confirmation" {
+		t.Fatalf("HTTP idempotent pending subscription=%#v err=%v", httpAgain, err)
+	}
 }
 
 func TestSNSCreateTopicIdempotencyPreservesAttributes(t *testing.T) {

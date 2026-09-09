@@ -6,7 +6,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 766 of 907 direct upstream test functions are explicitly traced (84.5%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green: 2,735 tests across 221 Go packages. The 2,535-entry mutation inventory now includes targeted kill checks for permission ARN shape and scope; a complete four-shard rerun for these newest entries remains outstanding. These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green: 2,735 tests across 221 Go packages. The 2,535-entry mutation inventory passed in all four CI-equivalent shards (549.653s, 530.875s, 579.121s, and 556.303s). These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -666,7 +666,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
-The ordinary local gate is green across 221 packages. The 2,535-entry inventory has targeted green kill checks for the newest SNS behavior; the prior 2,533-entry inventory is green in all four bounded shards (exit 0). Serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
+The ordinary local gate is green across 221 packages. The current 2,535-entry inventory is green in all four bounded shards (exit 0); serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
 
 | LocalStack test | Mirror evidence | Result |
 |---|---|---|

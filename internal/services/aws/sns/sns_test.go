@@ -135,6 +135,41 @@ func TestSNSSQSRawDeliveryPreservesMessageAttributes(t *testing.T) {
 	}
 }
 
+func TestSNSSQSNotificationPreservesMessageAttributes(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "envelope-attrs"}}); err != nil {
+		t.Fatal(err)
+	}
+	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "envelope-attrs"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	topicARN := str(topic.Output["TopicArn"])
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topicARN, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:envelope-attrs",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	attrs := map[string]any{"kind": map[string]any{"DataType": "String", "StringValue": "event"}}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+		"TopicArn": topicARN, "Message": "envelope", "Subject": "subject", "MessageAttributes": attrs,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "envelope-attrs"}})
+	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+		t.Fatalf("envelope delivery=%#v err=%v", received, err)
+	}
+	message := asMap(asSlice(received.Output["Messages"])[0])
+	var envelope map[string]any
+	if json.Unmarshal([]byte(str(message["Body"])), &envelope) != nil || envelope["Subject"] != "subject" || str(asMap(envelope["MessageAttributes"])["kind"].(map[string]any)["StringValue"]) != "event" {
+		t.Fatalf("notification envelope=%#v", envelope)
+	}
+}
+
 func TestSNSSQSDeliveryPropagatesTraceHeader(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, qp := New(deps), sqs.New(deps)

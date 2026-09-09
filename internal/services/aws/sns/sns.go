@@ -698,13 +698,16 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 			continue
 		}
 		message := structuredMessage(body, str(req.Input["MessageStructure"]), protocol)
+		notification := map[string]any{"Type": "Notification", "Message": message, "TopicArn": arn, "MessageId": mid}
+		if subject := str(req.Input["Subject"]); subject != "" {
+			notification["Subject"] = subject
+		}
+		if len(msgAttrs) > 0 {
+			notification["MessageAttributes"] = msgAttrs
+		}
 		payload := message
 		sqsAttrs := map[string]any(nil)
 		if str(sub["RawMessageDelivery"]) != "true" {
-			notification := map[string]any{"Type": "Notification", "Message": message, "TopicArn": arn, "MessageId": mid}
-			if subject := str(req.Input["Subject"]); subject != "" {
-				notification["Subject"] = subject
-			}
 			env, _ := json.Marshal(notification)
 			payload = string(env)
 		} else {
@@ -724,10 +727,6 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 				}
 			}
 		case "http", "https":
-			notification := map[string]any{"Type": "Notification", "Message": message, "TopicArn": arn, "MessageId": mid}
-			if subject := str(req.Input["Subject"]); subject != "" {
-				notification["Subject"] = subject
-			}
 			contentType := "application/json"
 			if policy := str(asMap(sub["attrs"])["DeliveryPolicy"]); policy != "" {
 				if value, ok := deliveryContentType(policy, "requestPolicy"); ok {

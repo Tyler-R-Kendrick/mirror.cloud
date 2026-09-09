@@ -4785,10 +4785,10 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-drop-sqs-subject",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-			old:  "if subject := str(req.Input[\"Subject\"]); subject != \"\" {\n\t\t\t\tnotification[\"Subject\"] = subject\n\t\t\t}\n\t\t\tenv, _ := json.Marshal(notification)",
-			new:  "env, _ := json.Marshal(notification)",
-			pkg:  "./internal/services/aws/s3",
-			run:  "TestBucketNotificationTopicDelivery",
+			old:  "if subject := str(req.Input[\"Subject\"]); subject != \"\" {\n\t\t\tnotification[\"Subject\"] = subject\n\t\t}",
+			new:  "if false {\n\t\t}",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSSQSNotificationPreservesMessageAttributes",
 		},
 		{
 			name: "s3-notifications-skip-validation",
@@ -17984,6 +17984,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSPendingEmailSubscription",
+		},
+		{
+			name: "sns-drop-notification-message-attributes",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `notification["MessageAttributes"] = msgAttrs`,
+			new:  `notification["MessageAttributes"] = nil`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSSQSNotificationPreservesMessageAttributes",
 		},
 		{
 			name: "sns-allow-standard-topic-fifo-queue",

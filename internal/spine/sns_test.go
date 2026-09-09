@@ -157,8 +157,8 @@ func TestBootedServerSNSSection48(t *testing.T) {
 
 	sqsJSON("CreateQueue", `{"QueueName":"filt"}`)
 	formCall(url.Values{"Action": {"Subscribe"}, "TopicArn": {arn}, "Protocol": {"sqs"}, "Endpoint": {"arn:aws:sqs:us-east-1:000000000000:filt"}, "FilterPolicy": {`{"event":["order"]}`}, "RawMessageDelivery": {"true"}})
-	formCall(url.Values{"Action": {"Publish"}, "TopicArn": {arn}, "Message": {"skip-other"}, "MessageAttributes.entry.1.Name": {"event"}, "MessageAttributes.entry.1.Value.StringValue": {"other"}})
-	formCall(url.Values{"Action": {"Publish"}, "TopicArn": {arn}, "Message": {"hit-exact"}, "MessageAttributes.entry.1.Name": {"event"}, "MessageAttributes.entry.1.Value.StringValue": {"order"}})
+	formCall(url.Values{"Action": {"Publish"}, "TopicArn": {arn}, "Message": {"skip-other"}, "MessageAttributes.entry.1.Name": {"event"}, "MessageAttributes.entry.1.Value.DataType": {"String"}, "MessageAttributes.entry.1.Value.StringValue": {"other"}})
+	formCall(url.Values{"Action": {"Publish"}, "TopicArn": {arn}, "Message": {"hit-exact"}, "MessageAttributes.entry.1.Name": {"event"}, "MessageAttributes.entry.1.Value.DataType": {"String"}, "MessageAttributes.entry.1.Value.StringValue": {"order"}})
 	filt := sqsJSON("ReceiveMessage", `{"QueueName":"filt","MaxNumberOfMessages":10,"WaitTimeSeconds":0,"VisibilityTimeout":0}`)
 	if !recvHas(filt, "hit-exact") || recvHas(filt, "skip-other") {
 		t.Fatalf("exact filter %v", filt)
@@ -166,8 +166,8 @@ func TestBootedServerSNSSection48(t *testing.T) {
 
 	sqsJSON("CreateQueue", `{"QueueName":"pref"}`)
 	formCall(url.Values{"Action": {"Subscribe"}, "TopicArn": {arn}, "Protocol": {"sqs"}, "Endpoint": {"arn:aws:sqs:us-east-1:000000000000:pref"}, "FilterPolicy": {`{"event":[{"prefix":"ord"}]}`}, "RawMessageDelivery": {"true"}})
-	formCall(url.Values{"Action": {"Publish"}, "TopicArn": {arn}, "Message": {"hit-prefix"}, "MessageAttributes.entry.1.Name": {"event"}, "MessageAttributes.entry.1.Value.StringValue": {"order"}})
-	formCall(url.Values{"Action": {"Publish"}, "TopicArn": {arn}, "Message": {"skip-prefix"}, "MessageAttributes.entry.1.Name": {"event"}, "MessageAttributes.entry.1.Value.StringValue": {"nope"}})
+	formCall(url.Values{"Action": {"Publish"}, "TopicArn": {arn}, "Message": {"hit-prefix"}, "MessageAttributes.entry.1.Name": {"event"}, "MessageAttributes.entry.1.Value.DataType": {"String"}, "MessageAttributes.entry.1.Value.StringValue": {"order"}})
+	formCall(url.Values{"Action": {"Publish"}, "TopicArn": {arn}, "Message": {"skip-prefix"}, "MessageAttributes.entry.1.Name": {"event"}, "MessageAttributes.entry.1.Value.DataType": {"String"}, "MessageAttributes.entry.1.Value.StringValue": {"nope"}})
 	pref := sqsJSON("ReceiveMessage", `{"QueueName":"pref","MaxNumberOfMessages":10,"WaitTimeSeconds":0,"VisibilityTimeout":0}`)
 	if !recvHas(pref, "hit-prefix") || recvHas(pref, "skip-prefix") {
 		t.Fatalf("prefix filter %v", pref)
@@ -175,8 +175,8 @@ func TestBootedServerSNSSection48(t *testing.T) {
 
 	sqsJSON("CreateQueue", `{"QueueName":"numq"}`)
 	formCall(url.Values{"Action": {"Subscribe"}, "TopicArn": {arn}, "Protocol": {"sqs"}, "Endpoint": {"arn:aws:sqs:us-east-1:000000000000:numq"}, "FilterPolicy": {`{"n":[{"numeric":[">",5]}]}`}, "RawMessageDelivery": {"true"}})
-	formCall(url.Values{"Action": {"Publish"}, "TopicArn": {arn}, "Message": {"hit-num"}, "MessageAttributes.entry.1.Name": {"n"}, "MessageAttributes.entry.1.Value.StringValue": {"9"}})
-	formCall(url.Values{"Action": {"Publish"}, "TopicArn": {arn}, "Message": {"skip-num"}, "MessageAttributes.entry.1.Name": {"n"}, "MessageAttributes.entry.1.Value.StringValue": {"1"}})
+	formCall(url.Values{"Action": {"Publish"}, "TopicArn": {arn}, "Message": {"hit-num"}, "MessageAttributes.entry.1.Name": {"n"}, "MessageAttributes.entry.1.Value.DataType": {"String"}, "MessageAttributes.entry.1.Value.StringValue": {"9"}})
+	formCall(url.Values{"Action": {"Publish"}, "TopicArn": {arn}, "Message": {"skip-num"}, "MessageAttributes.entry.1.Name": {"n"}, "MessageAttributes.entry.1.Value.DataType": {"String"}, "MessageAttributes.entry.1.Value.StringValue": {"1"}})
 	numq := sqsJSON("ReceiveMessage", `{"QueueName":"numq","MaxNumberOfMessages":10,"WaitTimeSeconds":0,"VisibilityTimeout":0}`)
 	if !recvHas(numq, "hit-num") || recvHas(numq, "skip-num") {
 		t.Fatalf("numeric filter %v", numq)
@@ -184,8 +184,8 @@ func TestBootedServerSNSSection48(t *testing.T) {
 
 	sqsJSON("CreateQueue", `{"QueueName":"abq"}`)
 	formCall(url.Values{"Action": {"Subscribe"}, "TopicArn": {arn}, "Protocol": {"sqs"}, "Endpoint": {"arn:aws:sqs:us-east-1:000000000000:abq"}, "FilterPolicy": {`{"event":[{"anything-but":"skip"}]}`}, "RawMessageDelivery": {"true"}})
-	formCall(url.Values{"Action": {"Publish"}, "TopicArn": {arn}, "Message": {"hit-ab"}, "MessageAttributes.entry.1.Name": {"event"}, "MessageAttributes.entry.1.Value.StringValue": {"keep"}})
-	formCall(url.Values{"Action": {"Publish"}, "TopicArn": {arn}, "Message": {"skip-ab"}, "MessageAttributes.entry.1.Name": {"event"}, "MessageAttributes.entry.1.Value.StringValue": {"skip"}})
+	formCall(url.Values{"Action": {"Publish"}, "TopicArn": {arn}, "Message": {"hit-ab"}, "MessageAttributes.entry.1.Name": {"event"}, "MessageAttributes.entry.1.Value.DataType": {"String"}, "MessageAttributes.entry.1.Value.StringValue": {"keep"}})
+	formCall(url.Values{"Action": {"Publish"}, "TopicArn": {arn}, "Message": {"skip-ab"}, "MessageAttributes.entry.1.Name": {"event"}, "MessageAttributes.entry.1.Value.DataType": {"String"}, "MessageAttributes.entry.1.Value.StringValue": {"skip"}})
 	abq := sqsJSON("ReceiveMessage", `{"QueueName":"abq","MaxNumberOfMessages":10,"WaitTimeSeconds":0,"VisibilityTimeout":0}`)
 	if !recvHas(abq, "hit-ab") || recvHas(abq, "skip-ab") {
 		t.Fatalf("anything-but filter %v", abq)

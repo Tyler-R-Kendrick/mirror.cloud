@@ -83,6 +83,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSSQSNotificationPreservesMessageAttributes",
 		},
 		{
+			name: "sns-lambda-envelope-key-casing",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `"SignatureVersion": "1", "Signature": "", "SigningCertURL":`,
+			new:  `"SignatureVersion": "1", "Signature": "", "SigningCertUrl":`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestLambdaSubscriptionDelivery",
+		},
+		{
 			name: "restxml-canonicalize-etag-header",
 			file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
 			old:  `if strings.EqualFold(k, "ETag") {`,

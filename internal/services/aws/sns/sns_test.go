@@ -271,7 +271,7 @@ func TestLambdaSubscriptionDelivery(t *testing.T) {
 	req := &spi.Request{Identity: id, Input: map[string]any{"Subject": "warning"}}
 	event := p.lambdaNotification(req, sub, "hello", "message-1", map[string]any{"severity": "high"})
 	got := event["Records"].([]any)[0].(map[string]any)["Sns"].(map[string]any)
-	if got["Message"] != "hello" || got["TopicArn"] != topic || got["Subject"] != "warning" {
+	if got["Message"] != "hello" || got["TopicArn"] != topic || got["Subject"] != "warning" || !strings.Contains(str(got["SigningCertURL"]), "SimpleNotificationService.pem") || !strings.Contains(str(got["UnsubscribeURL"]), "Action=Unsubscribe") {
 		t.Fatalf("lambda SNS event %#v", got)
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"TopicArn": topic, "Message": "hello", "Subject": "warning"}}); err != nil {

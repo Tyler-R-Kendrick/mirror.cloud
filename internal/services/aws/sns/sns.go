@@ -1000,8 +1000,8 @@ func (p *Pack) lambdaNotification(req *spi.Request, sub map[string]any, body, me
 			"Sns": map[string]any{
 				"Type": "Notification", "MessageId": messageID, "TopicArn": sub["TopicArn"], "Subject": req.Input["Subject"],
 				"Message": body, "Timestamp": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), "MessageAttributes": attrs,
-				"SignatureVersion": "1", "Signature": "", "SigningCertUrl": "https://sns." + req.Identity.Region + ".amazonaws.com/SimpleNotificationService.pem",
-				"UnsubscribeUrl": "http://127.0.0.1:4566/?Action=Unsubscribe&SubscriptionArn=" + str(sub["SubscriptionArn"]),
+				"SignatureVersion": "1", "Signature": "", "SigningCertURL": "https://sns." + req.Identity.Region + ".amazonaws.com/SimpleNotificationService.pem",
+				"UnsubscribeURL": "http://127.0.0.1:4566/?Action=Unsubscribe&SubscriptionArn=" + str(sub["SubscriptionArn"]),
 			},
 		}},
 	}

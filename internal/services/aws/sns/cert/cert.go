@@ -24,8 +24,9 @@ var signing struct {
 
 func initSigning() {
 	signing.key, _ = rsa.GenerateKey(rand.Reader, 2048)
-	now := time.Now().UTC()
-	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Mirror SNS"}, NotBefore: now.Add(-time.Minute), NotAfter: now.AddDate(10, 0, 0), KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, IsCA: true}
+	notBefore := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	notAfter := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Mirror SNS"}, NotBefore: notBefore, NotAfter: notAfter, KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, IsCA: true}
 	der, _ := x509.CreateCertificate(rand.Reader, template, template, &signing.key.PublicKey, signing.key)
 	signing.cert = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }

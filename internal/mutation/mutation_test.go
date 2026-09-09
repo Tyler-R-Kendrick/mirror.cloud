@@ -17898,8 +17898,14 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-create-endpoint-for-missing-app",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
-			old:  `if _, ok, _ := p.col(req, "platapps").Get(ctx, app); !ok {`,
-			new:  `if false {`,
+			old:  `case "CreatePlatformEndpoint":
+		app := str(req.Input["PlatformApplicationArn"])
+		tok := str(req.Input["Token"])
+		if _, ok, _ := p.col(req, "platapps").Get(ctx, app); !ok {`,
+			new:  `case "CreatePlatformEndpoint":
+		app := str(req.Input["PlatformApplicationArn"])
+		tok := str(req.Input["Token"])
+		if false {`,
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSPlatformEndpointLifecycleValidation",
 		},
@@ -17950,6 +17956,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			return nil, &spi.Fault{Code: "NotFound", Message: "Platform application does not exist", HTTPStatus: 404, Fault: "client"}
 		}`,
 			new: `if false {
+			return nil, &spi.Fault{Code: "NotFound", Message: "Platform application does not exist", HTTPStatus: 404, Fault: "client"}
+		}`,
+			pkg: "./internal/services/aws/sns",
+			run: "TestSNSPlatformEndpointLifecycleValidation",
+		},
+		{
+			name: "sns-list-endpoints-on-missing-app",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old: `case "ListEndpointsByPlatformApplication":
+		app := str(req.Input["PlatformApplicationArn"])
+		if _, ok, _ := p.col(req, "platapps").Get(ctx, app); !ok {
+			return nil, &spi.Fault{Code: "NotFound", Message: "Platform application does not exist", HTTPStatus: 404, Fault: "client"}
+		}`,
+			new: `case "ListEndpointsByPlatformApplication":
+		app := str(req.Input["PlatformApplicationArn"])
+		if false {
 			return nil, &spi.Fault{Code: "NotFound", Message: "Platform application does not exist", HTTPStatus: 404, Fault: "client"}
 		}`,
 			pkg: "./internal/services/aws/sns",

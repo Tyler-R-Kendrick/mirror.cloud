@@ -426,6 +426,9 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "ListEndpointsByPlatformApplication":
 		app := str(req.Input["PlatformApplicationArn"])
+		if _, ok, _ := p.col(req, "platapps").Get(ctx, app); !ok {
+			return nil, &spi.Fault{Code: "NotFound", Message: "Platform application does not exist", HTTPStatus: 404, Fault: "client"}
+		}
 		kvs, _, _ := col.List(ctx, "", "", 0)
 		var out []any
 		for _, kv := range kvs {

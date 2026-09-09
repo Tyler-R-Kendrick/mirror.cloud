@@ -4,7 +4,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 778 of 907 direct upstream test functions are explicitly traced (85.8%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 779 of 907 direct upstream test functions are explicitly traced (85.9%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
 The current checkout's ordinary gate is green: 2,745 tests across 221 Go packages. The 2,567-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the twenty-seven new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
 
@@ -18,7 +18,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SNS operations routed to emulation | 43 / 43 |
 | SNS statement coverage | 92.0% |
 | LocalStack SNS test functions inventoried | 180 |
-| LocalStack SNS test functions explicitly traced | 42 / 180 |
+| LocalStack SNS test functions explicitly traced | 43 / 180 |
 
 The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
 
@@ -51,6 +51,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSTopicCrud::test_tags` | `TestSNSTagValidation` rejects duplicate tag keys |
 | `test_sns.py::TestSNSTopicCrud::test_topic_get_attributes_with_fifo_false` | `TestSNSTopicFIFOAttributeIsImmutable` rejects changing `FifoTopic` after creation |
 | `test_sns.py::TestSNSTopicCrud::test_add_permission_errors` | `TestSNSPermissionValidation` rejects duplicate labels and invalid actions |
+| `test_sns.py::TestSNSTopicCrud::test_create_topic_with_attributes` | `TestSNSTopicAttributesIncludeDefaultPolicy` returns AWS's default topic policy with the topic ARN and owner condition |
 | `test_sns.py::TestSNSPlatformEndpoint::test_delete_platform_endpoint_with_subscription` | `TestSNSPlatformEndpointDeletionCleansSubscriptions` removes subscriptions when their endpoint is deleted |
 | `test_sns.py::TestSNSSMS::test_get_sms_attributes_from_unmodified_region` | `TestSNSDefaultSMSAttributes` returns the default monthly spend limit |
 | `test_sns.py::TestSNSTopicCrudV2::test_create_topic_different_attrs` | `TestSNSStandardTopicFalseFIFOIsIdempotent` treats explicit standard-topic `FifoTopic=false` as idempotent |

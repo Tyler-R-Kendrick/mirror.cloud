@@ -17978,6 +17978,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSSQSDeliveryPropagatesTraceHeader",
 		},
 		{
+			name: "sns-hide-pending-subscription-state",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  `if confirmed, ok := rec["Confirmed"].(bool); ok && !confirmed {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPendingEmailSubscription",
+		},
+		{
 			name: "sns-allow-standard-topic-fifo-queue",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `if !strings.HasSuffix(topicName(topicArn), ".fifo") && queueFIFO {`,

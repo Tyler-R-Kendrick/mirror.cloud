@@ -1314,6 +1314,10 @@ func TestSNSPendingEmailSubscription(t *testing.T) {
 	if err != nil || !validSubscriptionARN(str(withARN.Output["SubscriptionArn"])) {
 		t.Fatalf("email subscription with ARN=%#v err=%v", withARN, err)
 	}
+	attrs, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetSubscriptionAttributes", Input: map[string]any{"SubscriptionArn": withARN.Output["SubscriptionArn"]}})
+	if err != nil || attrs.Output["Attributes"].(map[string]any)["PendingConfirmation"] != "true" || attrs.Output["Attributes"].(map[string]any)["ConfirmationWasAuthenticated"] != "false" {
+		t.Fatalf("pending subscription attributes=%#v err=%v", attrs, err)
+	}
 	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.WriteHeader(http.StatusNoContent)
 	}))

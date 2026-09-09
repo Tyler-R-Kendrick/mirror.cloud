@@ -699,6 +699,7 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 		}
 		message := structuredMessage(body, str(req.Input["MessageStructure"]), protocol)
 		payload := message
+		sqsAttrs := map[string]any(nil)
 		if str(sub["RawMessageDelivery"]) != "true" {
 			notification := map[string]any{"Type": "Notification", "Message": message, "TopicArn": arn, "MessageId": mid}
 			if subject := str(req.Input["Subject"]); subject != "" {
@@ -706,18 +707,20 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 			}
 			env, _ := json.Marshal(notification)
 			payload = string(env)
+		} else {
+			sqsAttrs = sqsMessageAttributes(msgAttrs)
 		}
 		switch str(sub["Protocol"]) {
 		case "sqs":
-			if !p.deliverSQS(ctx, req, str(sub["Endpoint"]), payload) {
+			if !p.deliverSQS(ctx, req, str(sub["Endpoint"]), payload, sqsAttrs) {
 				if dlq := subscriptionDLQ(sub); dlq != "" {
-					p.deliverSQS(ctx, req, dlq, payload)
+					p.deliverSQS(ctx, req, dlq, payload, sqsAttrs)
 				}
 			}
 		case "lambda":
 			if !p.deliverLambda(ctx, req, sub, message, mid, msgAttrs) {
 				if dlq := subscriptionDLQ(sub); dlq != "" {
-					p.deliverSQS(ctx, req, dlq, payload)
+					p.deliverSQS(ctx, req, dlq, payload, nil)
 				}
 			}
 		case "http", "https":
@@ -743,7 +746,7 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 			}
 			if !p.httpPost(str(sub["Endpoint"]), body, "Notification", contentType) {
 				if dlq := subscriptionDLQ(sub); dlq != "" {
-					p.deliverSQS(ctx, req, dlq, payload)
+					p.deliverSQS(ctx, req, dlq, payload, nil)
 				}
 			}
 		}
@@ -991,12 +994,15 @@ func (p *Pack) lambdaNotification(req *spi.Request, sub map[string]any, body, me
 	}
 }
 
-func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body string) bool {
+func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body string, attrs map[string]any) bool {
 	name := endpoint
 	if i := strings.LastIndexAny(endpoint, "/:"); i >= 0 {
 		name = endpoint[i+1:]
 	}
 	in := map[string]any{"QueueName": name, "MessageBody": body}
+	if len(attrs) > 0 {
+		in["MessageAttributes"] = attrs
+	}
 	for _, key := range []string{"MessageGroupId", "MessageDeduplicationId"} {
 		if value := str(req.Input[key]); value != "" {
 			in[key] = value
@@ -1004,6 +1010,30 @@ func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body 
 	}
 	_, err := sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "SendMessage", Input: in})
 	return err == nil
+}
+
+func sqsMessageAttributes(attrs map[string]any) map[string]any {
+	if len(attrs) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(attrs))
+	for name, raw := range attrs {
+		value := asMap(raw)
+		dataType := str(value["DataType"])
+		if dataType == "" {
+			dataType = str(value["Type"])
+		}
+		attribute := map[string]any{"DataType": dataType}
+		if binary := value["BinaryValue"]; binary != nil {
+			attribute["BinaryValue"] = binary
+		} else if stringValue := value["StringValue"]; stringValue != nil {
+			attribute["StringValue"] = stringValue
+		} else if rawValue := value["Value"]; rawValue != nil {
+			attribute["StringValue"] = rawValue
+		}
+		out[name] = attribute
+	}
+	return out
 }
 
 func (p *Pack) httpPost(endpoint string, payload any, messageType, contentType string) bool {

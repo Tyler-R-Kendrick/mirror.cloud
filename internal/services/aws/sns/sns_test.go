@@ -92,6 +92,46 @@ func TestPublishFilterAndSQSDelivery(t *testing.T) {
 	}
 }
 
+func TestSNSSQSRawDeliveryPreservesMessageAttributes(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	snsCall := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response
+	}
+	sqsCall := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response
+	}
+	sqsCall("CreateQueue", map[string]any{"QueueName": "raw-attrs"})
+	topic := str(snsCall("CreateTopic", map[string]any{"Name": "raw-attrs"}).Output["TopicArn"])
+	snsCall("Subscribe", map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:raw-attrs", "RawMessageDelivery": "true"})
+	attrs := map[string]any{
+		"text":   map[string]any{"DataType": "String", "StringValue": "value"},
+		"binary": map[string]any{"DataType": "Binary", "BinaryValue": base64.StdEncoding.EncodeToString([]byte{2, 3, 4})},
+	}
+	snsCall("Publish", map[string]any{"TopicArn": topic, "Message": "raw", "MessageAttributes": attrs})
+	received := sqsCall("ReceiveMessage", map[string]any{"QueueName": "raw-attrs", "MessageAttributeNames": []any{"All"}})
+	messages := asSlice(received.Output["Messages"])
+	if len(messages) != 1 {
+		t.Fatalf("messages %#v", received.Output)
+	}
+	message := asMap(messages[0])
+	if message["Body"] != "raw" || len(asMap(message["MessageAttributes"])) != 2 {
+		t.Fatalf("raw delivery %#v", message)
+	}
+}
+
 func TestLambdaSubscriptionDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, lp := New(deps), lambda.New(deps)

@@ -17906,7 +17906,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-drop-sqs-subscription-redrive",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-			old:  `if !p.deliverSQS(ctx, req, str(sub["Endpoint"]), payload) {`,
+			old:  `if !p.deliverSQS(ctx, req, str(sub["Endpoint"]), payload, sqsAttrs) {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSSQSSubscriptionRedrive",
@@ -17926,6 +17926,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  `body = notification`,
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSHTTPDeliveryPolicy",
+		},
+		{
+			name: "sns-drop-raw-sqs-message-attributes",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `sqsAttrs = sqsMessageAttributes(msgAttrs)`,
+			new:  `sqsAttrs = nil`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSSQSRawDeliveryPreservesMessageAttributes",
+		},
+		{
+			name: "sns-drop-sqs-string-attribute-value",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `attribute["StringValue"] = rawValue`,
+			new:  `attribute["StringValue"] = nil`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSSQSRawDeliveryPreservesMessageAttributes",
 		},
 		{
 			name: "sns-allow-standard-topic-fifo-queue",

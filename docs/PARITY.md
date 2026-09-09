@@ -4,9 +4,9 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 771 of 907 direct upstream test functions are explicitly traced (85.0%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 772 of 907 direct upstream test functions are explicitly traced (85.1%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green: 2,739 tests across 221 Go packages. The 2,551-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the eleven new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green: 2,739 tests across 221 Go packages. The 2,552-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the twelve new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -60,6 +60,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSPublishCrud::test_publish_no_confirm_subscription` | `TestSNSPendingEmailSubscription` keeps email subscriptions pending until confirmation and verifies `ReturnSubscriptionArn` |
 | `test_sns.py::TestSNSSubscriptionHttp::test_http_subscription_response` | `TestSNSPendingEmailSubscription` verifies pending versus returned subscription ARN semantics for HTTP subscriptions |
 | `test_sns.py::TestSNSSubscriptionHttp::test_redrive_policy_http_subscription` | `TestSNSHTTPSubscriptionRedrive` sends failed HTTP notifications to the configured SQS DLQ |
+| `test_sns.py::TestSNSSubscriptionCrud::test_redrive_policy_sqs_queue_subscription` | `TestSNSSQSSubscriptionRedrive` sends failed SQS subscription notifications to the configured DLQ |
 | `test_sns.py::TestSNSTopicCrudV2::test_create_topic_should_be_idempotent` | `TestSNSCreateTopicIdempotencyPreservesAttributes` preserves topic attributes on repeated creation |
 | `test_sns.py::TestSNSTopicCrudV2::test_data_protection_policy_crud` | `TestSNSControlPlaneOperations` projects a stored data-protection policy into topic attributes |
 | `test_sns.py::TestSNSSMS::test_publish_sms_endpoint` | `TestSNSSMSSubscriptionDelivery` delivers a topic message to an SMS subscription |

@@ -464,6 +464,9 @@ func (s *Server) demux(r *http.Request) *model.Service {
 		if sqsQueuePath(r.URL.Path) || sqsQueueDomainHost(host) {
 			return s.bundle.ServiceByID("aws.sqs")
 		}
+		if action == "ConfirmSubscription" && strings.HasPrefix(r.URL.Query().Get("TopicArn"), "arn:aws:sns:") {
+			return s.bundle.ServiceByID("aws.sns")
+		}
 		if s.looksLike(r, "s3-control") || s.looksLike(r, "s3control") {
 			return s.bundle.ServiceByID("aws.s3control")
 		}

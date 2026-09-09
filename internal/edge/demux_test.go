@@ -114,3 +114,11 @@ func TestDemuxSQSQueueURLsWithQueryActions(t *testing.T) {
 		}
 	}
 }
+
+func TestDemuxSNSConfirmationURL(t *testing.T) {
+	server := &Server{bundle: catalog.Bundle()}
+	req := httptest.NewRequest(http.MethodGet, "http://localhost/?Action=ConfirmSubscription&TopicArn=arn:aws:sns:us-east-1:123456789012:topic&Token=token", nil)
+	if service := server.demux(req); service == nil || service.ID != "aws.sns" {
+		t.Fatalf("SNS confirmation URL demux = %#v", service)
+	}
+}

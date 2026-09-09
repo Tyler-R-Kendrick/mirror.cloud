@@ -709,7 +709,11 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 		}
 		switch str(sub["Protocol"]) {
 		case "sqs":
-			p.deliverSQS(ctx, req, str(sub["Endpoint"]), payload)
+			if !p.deliverSQS(ctx, req, str(sub["Endpoint"]), payload) {
+				if dlq := subscriptionDLQ(sub); dlq != "" {
+					p.deliverSQS(ctx, req, dlq, payload)
+				}
+			}
 		case "lambda":
 			_, _ = p.deliverLambda(ctx, req, sub, message, mid, msgAttrs)
 		case "http", "https":
@@ -966,7 +970,7 @@ func (p *Pack) lambdaNotification(req *spi.Request, sub map[string]any, body, me
 	}
 }
 
-func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body string) {
+func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body string) bool {
 	name := endpoint
 	if i := strings.LastIndexAny(endpoint, "/:"); i >= 0 {
 		name = endpoint[i+1:]
@@ -977,7 +981,8 @@ func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body 
 			in[key] = value
 		}
 	}
-	_, _ = sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "SendMessage", Input: in})
+	_, err := sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "SendMessage", Input: in})
+	return err == nil
 }
 
 func (p *Pack) httpPost(endpoint string, payload map[string]any) bool {

@@ -1273,6 +1273,48 @@ func TestSNSHTTPSubscriptionRedrive(t *testing.T) {
 	}
 }
 
+func TestSNSSQSSubscriptionRedrive(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	qp := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	for _, name := range []string{"sns-sqs-source", "sns-sqs-dlq"} {
+		if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": name}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "sns-sqs-redrive"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceARN := "arn:aws:sqs:us-east-1:1:sns-sqs-source"
+	sub, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Protocol": "sqs", "Endpoint": sourceARN,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetSubscriptionAttributes", Input: map[string]any{
+		"SubscriptionArn": sub.Output["SubscriptionArn"], "AttributeName": "RedrivePolicy",
+		"AttributeValue": `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:1:sns-sqs-dlq"}`,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteQueue", Input: map[string]any{"QueueUrl": "http://localhost:4566/1/sns-sqs-source"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Message": "redrive-sqs",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueUrl": "http://localhost:4566/1/sns-sqs-dlq"}})
+	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+		t.Fatalf("SQS DLQ messages=%#v err=%v", received, err)
+	}
+}
+
 func TestSNSCreateTopicIdempotencyPreservesAttributes(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

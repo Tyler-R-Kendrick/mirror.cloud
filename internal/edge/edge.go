@@ -464,9 +464,13 @@ func (s *Server) demux(r *http.Request) *model.Service {
 		if sqsQueuePath(r.URL.Path) || sqsQueueDomainHost(host) {
 			return s.bundle.ServiceByID("aws.sqs")
 		}
-		if action == "ConfirmSubscription" {
-			parts := strings.Split(r.URL.Query().Get("TopicArn"), ":")
-			if len(parts) == 6 && parts[0] == "arn" && parts[2] == "sns" {
+		if action == "ConfirmSubscription" || action == "Unsubscribe" {
+			arn := r.URL.Query().Get("TopicArn")
+			if action == "Unsubscribe" {
+				arn = r.URL.Query().Get("SubscriptionArn")
+			}
+			parts := strings.Split(arn, ":")
+			if len(parts) >= 6 && parts[0] == "arn" && parts[2] == "sns" {
 				return s.bundle.ServiceByID("aws.sns")
 			}
 		}

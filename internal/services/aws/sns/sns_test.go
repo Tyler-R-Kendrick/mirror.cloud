@@ -308,6 +308,9 @@ func TestSNSHTTPSubscriptionConfirmationSignature(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := <-received
+	if got := payload["Type"]; got != "SubscriptionConfirmation" {
+		t.Fatalf("confirmation type %v", got)
+	}
 	if str(payload["Type"]) != "SubscriptionConfirmation" || str(payload["SigningCertURL"]) == "" || str(payload["Signature"]) == "" || !validTestSNSNotificationSignature(payload) {
 		t.Fatalf("unsigned confirmation %#v", payload)
 	}
@@ -315,6 +318,59 @@ func TestSNSHTTPSubscriptionConfirmationSignature(t *testing.T) {
 	wantURL := "http://127.0.0.1:4566/?Action=ConfirmSubscription&TopicArn=" + topicARN + "&Token=" + str(payload["Token"])
 	if str(payload["SubscribeURL"]) != wantURL {
 		t.Fatalf("confirmation URL %q", payload["SubscribeURL"])
+	}
+}
+
+func TestSNSHTTPUnsubscribeConfirmation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "unsubscribe-confirmation"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	received := make(chan map[string]any, 2)
+	headers := make(chan http.Header, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		defer request.Body.Close()
+		var payload map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Errorf("SNS confirmation payload: %v", err)
+			return
+		}
+		if got := request.Header.Get("Content-Type"); got != "text/plain; charset=UTF-8" {
+			t.Errorf("content type %q", got)
+		}
+		headers <- request.Header.Clone()
+		received <- payload
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	sub, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Protocol": "http", "Endpoint": server.URL, "ReturnSubscriptionArn": true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmation := <-received
+	<-headers
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ConfirmSubscription", Input: map[string]any{"Token": confirmation["Token"]}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Unsubscribe", Input: map[string]any{"SubscriptionArn": sub.Output["SubscriptionArn"]}}); err != nil {
+		t.Fatal(err)
+	}
+	unsubscribed := <-received
+	unsubscribeHeaders := <-headers
+	if str(unsubscribed["Type"]) != "UnsubscribeConfirmation" || str(unsubscribed["Signature"]) == "" || !validTestSNSNotificationSignature(unsubscribed) {
+		t.Fatalf("unsigned unsubscribe confirmation %#v", unsubscribed)
+	}
+	if got := str(unsubscribed["Message"]); !strings.Contains(got, str(sub.Output["SubscriptionArn"])) {
+		t.Fatalf("unsubscribe message %q", got)
+	}
+	if got := unsubscribeHeaders.Get("x-amz-sns-subscription-arn"); got != str(sub.Output["SubscriptionArn"]) {
+		t.Fatalf("unsubscribe subscription header %q", got)
 	}
 }
 

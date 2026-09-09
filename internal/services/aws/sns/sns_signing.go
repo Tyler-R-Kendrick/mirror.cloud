@@ -17,9 +17,17 @@ func signNotification(values map[string]any, version string) string {
 }
 
 func snsCertificateURL(req *spi.Request) string {
+	return snsServiceURL(req) + "/_aws/sns/SimpleNotificationService.pem"
+}
+
+func snsServiceURL(req *spi.Request) string {
 	base := strings.TrimRight(req.AdvertiseURL, "/")
 	if base == "" {
 		base = "http://127.0.0.1:4566"
 	}
-	return base + "/_aws/sns/SimpleNotificationService.pem"
+	return base
+}
+
+func snsActionURL(req *spi.Request, action, key, value string) string {
+	return snsServiceURL(req) + "/?Action=" + action + "&" + key + "=" + value
 }

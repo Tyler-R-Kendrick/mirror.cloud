@@ -125,5 +125,10 @@ func TestDemuxSNSConfirmationURL(t *testing.T) {
 		if service := server.demux(req); service == nil || service.ID != "aws.sns" {
 			t.Fatalf("SNS confirmation URL demux %s = %#v", topicARN, service)
 		}
+		subscriptionARN := topicARN + ":subscription"
+		req = httptest.NewRequest(http.MethodGet, "http://localhost/?Action=Unsubscribe&SubscriptionArn="+subscriptionARN, nil)
+		if service := server.demux(req); service == nil || service.ID != "aws.sns" {
+			t.Fatalf("SNS unsubscribe URL demux %s = %#v", subscriptionARN, service)
+		}
 	}
 }

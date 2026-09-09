@@ -406,16 +406,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			rec["Token"] = tok
 			_ = p.col(req, "pending").Put(ctx, tok, mustJSON(rec))
 			if proto == "http" || proto == "https" {
-				base := strings.TrimRight(req.AdvertiseURL, "/")
-				if base == "" {
-					base = "http://127.0.0.1:4566"
-				}
 				topicARN := str(rec["TopicArn"])
 				confirmation := map[string]any{
 					"Type": "SubscriptionConfirmation", "MessageId": p.deps.Rand.Hex(16), "Token": tok,
 					"TopicArn":         topicARN,
 					"Message":          "You have chosen to subscribe to the topic " + topicARN + ".\nTo confirm the subscription, visit the SubscribeURL included in this message.",
-					"SubscribeURL":     base + "/?Action=ConfirmSubscription&TopicArn=" + topicARN + "&Token=" + tok,
+					"SubscribeURL":     snsActionURL(req, "ConfirmSubscription", "TopicArn", topicARN) + "&Token=" + tok,
 					"Timestamp":        p.deps.Clock.Now().UTC().Format(time.RFC3339Nano),
 					"SignatureVersion": "1", "SigningCertURL": snsCertificateURL(req),
 				}
@@ -429,7 +425,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				}
 				confirmation["SignatureVersion"] = signatureVersion
 				confirmation["Signature"] = signNotification(confirmation, signatureVersion)
-				p.httpPost(str(req.Input["Endpoint"]), confirmation, "SubscriptionConfirmation", "application/json")
+				p.httpPost(str(req.Input["Endpoint"]), confirmation, "SubscriptionConfirmation", "text/plain; charset=UTF-8", str(confirmation["MessageId"]), topicARN, "")
 			}
 			b, _ := json.Marshal(rec)
 			_ = p.col(req, "subs").Put(ctx, sub, b)
@@ -450,6 +446,33 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		topicArn := strings.Join(strings.Split(arn, ":")[:6], ":")
 		if _, found, _ := p.col(req, "topics").Get(ctx, topicName(topicArn)); !found {
 			return nil, topicNotFoundFault()
+		}
+		if b, found, _ := p.col(req, "subs").Get(ctx, arn); found {
+			var sub map[string]any
+			if json.Unmarshal(b, &sub) == nil && (str(sub["Protocol"]) == "http" || str(sub["Protocol"]) == "https") {
+				token := p.deps.Rand.Hex(16)
+				topic := str(sub["TopicArn"])
+				confirmation := map[string]any{
+					"Type": "UnsubscribeConfirmation", "MessageId": p.deps.Rand.Hex(16), "Token": token,
+					"TopicArn":         topic,
+					"Message":          "You have chosen to deactivate subscription " + arn + ".\nTo cancel this operation and restore the subscription, visit the SubscribeURL included in this message.",
+					"SubscribeURL":     snsActionURL(req, "ConfirmSubscription", "TopicArn", topic) + "&Token=" + token,
+					"Timestamp":        p.deps.Clock.Now().UTC().Format(time.RFC3339Nano),
+					"SignatureVersion": "1", "SigningCertURL": snsCertificateURL(req),
+				}
+				signatureVersion := "1"
+				if topicBytes, topicFound, _ := p.col(req, "topics").Get(ctx, topicName(topic)); topicFound {
+					var topicRecord map[string]any
+					_ = json.Unmarshal(topicBytes, &topicRecord)
+					if str(asMap(topicRecord["attrs"])["SignatureVersion"]) == "2" {
+						signatureVersion = "2"
+					}
+				}
+				confirmation["SignatureVersion"] = signatureVersion
+				unsubscribeSignature := signNotification(confirmation, signatureVersion)
+				confirmation["Signature"] = unsubscribeSignature
+				p.httpPost(str(sub["Endpoint"]), confirmation, "UnsubscribeConfirmation", "text/plain; charset=UTF-8", str(confirmation["MessageId"]), topic, arn)
+			}
 		}
 		_ = p.col(req, "subs").Delete(ctx, arn)
 		return &spi.Response{Output: map[string]any{}}, nil
@@ -729,7 +752,7 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 			"Type": "Notification", "Message": message, "TopicArn": arn, "MessageId": mid,
 			"Timestamp":      p.deps.Clock.Now().UTC().Format(time.RFC3339Nano),
 			"SigningCertURL": snsCertificateURL(req),
-			"UnsubscribeURL": "http://127.0.0.1:4566/?Action=Unsubscribe&SubscriptionArn=" + str(sub["SubscriptionArn"]),
+			"UnsubscribeURL": snsActionURL(req, "Unsubscribe", "SubscriptionArn", str(sub["SubscriptionArn"])),
 		}
 		signatureVersion := "1"
 		if b, found, _ := p.col(req, "topics").Get(ctx, topicName(arn)); found {
@@ -785,7 +808,7 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 			if str(sub["RawMessageDelivery"]) == "true" {
 				body = payload
 			}
-			if !p.httpPost(str(sub["Endpoint"]), body, "Notification", contentType) {
+			if !p.httpPost(str(sub["Endpoint"]), body, "Notification", contentType, mid, arn, str(sub["SubscriptionArn"])) {
 				if dlq := subscriptionDLQ(sub); dlq != "" {
 					p.deliverSQS(ctx, req, dlq, payload, nil, dedupKey)
 				}
@@ -1031,7 +1054,7 @@ func (p *Pack) lambdaNotification(req *spi.Request, sub map[string]any, body, me
 		"Type": "Notification", "MessageId": messageID, "TopicArn": sub["TopicArn"], "Subject": req.Input["Subject"],
 		"Message": body, "Timestamp": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano),
 		"SignatureVersion": "1", "SigningCertUrl": snsCertificateURL(req),
-		"UnsubscribeURL":    "http://127.0.0.1:4566/?Action=Unsubscribe&SubscriptionArn=" + str(sub["SubscriptionArn"]),
+		"UnsubscribeURL":    snsActionURL(req, "Unsubscribe", "SubscriptionArn", str(sub["SubscriptionArn"])),
 		"MessageAttributes": attrs,
 	}
 	signatureVersion := "1"
@@ -1098,7 +1121,7 @@ func sqsMessageAttributes(attrs map[string]any) map[string]any {
 	return out
 }
 
-func (p *Pack) httpPost(endpoint string, payload any, messageType, contentType string) bool {
+func (p *Pack) httpPost(endpoint string, payload any, messageType, contentType, messageID, topicARN, subscriptionARN string) bool {
 	if endpoint == "" {
 		return false
 	}
@@ -1113,6 +1136,17 @@ func (p *Pack) httpPost(endpoint string, payload any, messageType, contentType s
 		return false
 	}
 	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("User-Agent", "Amazon Simple Notification Service Agent")
+	req.Header.Set("Accept-Encoding", "gzip,deflate")
+	if messageID != "" {
+		req.Header.Set("x-amz-sns-message-id", messageID)
+	}
+	if topicARN != "" {
+		req.Header.Set("x-amz-sns-topic-arn", topicARN)
+	}
+	if subscriptionARN != "" {
+		req.Header.Set("x-amz-sns-subscription-arn", subscriptionARN)
+	}
 	if messageType != "" {
 		req.Header.Set("x-amz-sns-message-type", messageType)
 	}

@@ -412,6 +412,9 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		rec := map[string]any{"EndpointArn": arn}
 		_ = json.Unmarshal(b, &rec)
 		attrs := flattenAttrEntries(req.Input, "Attributes")
+		if len(attrs) == 0 {
+			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Attributes", HTTPStatus: 400, Fault: "client"}
+		}
 		if fault := validateEndpointAttributes(attrs); fault != nil {
 			return nil, fault
 		}

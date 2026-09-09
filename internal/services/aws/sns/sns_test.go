@@ -724,6 +724,10 @@ func TestSNSPlatformEndpointLifecycleValidation(t *testing.T) {
 	if _, err := call("SetEndpointAttributes", map[string]any{"EndpointArn": appARN + "/endpoint/missing"}); err == nil {
 		t.Fatal("set attributes for missing endpoint")
 	}
+	endpointARN := str(first.Output["EndpointArn"])
+	if _, err := call("SetEndpointAttributes", map[string]any{"EndpointArn": endpointARN, "Attributes": map[string]any{}}); err == nil {
+		t.Fatal("accepted empty endpoint attributes")
+	}
 	if _, err := call("SetPlatformApplicationAttributes", map[string]any{"PlatformApplicationArn": appARN + "/missing"}); err == nil {
 		t.Fatal("set attributes for missing application")
 	}

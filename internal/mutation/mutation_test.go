@@ -17932,6 +17932,18 @@ func TestMutantsAreKilled(t *testing.T) {
 			run: "TestSNSPlatformEndpointLifecycleValidation",
 		},
 		{
+			name: "sns-accept-empty-endpoint-attributes",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old: `if len(attrs) == 0 {
+			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Attributes", HTTPStatus: 400, Fault: "client"}
+		}`,
+			new: `if false {
+			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Attributes", HTTPStatus: 400, Fault: "client"}
+		}`,
+			pkg: "./internal/services/aws/sns",
+			run: "TestSNSPlatformEndpointLifecycleValidation",
+		},
+		{
 			name: "sns-set-attributes-on-missing-app",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old: `if !ok {

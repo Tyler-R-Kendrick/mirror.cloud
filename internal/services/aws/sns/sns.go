@@ -209,7 +209,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if fault := validatePublishMessage(req); fault != nil {
 				return nil, fault
 			}
-			_ = p.deps.Bus.Publish(ctx, "sns:sms:"+phone, []byte(str(req.Input["Message"])))
+			if !p.smsOptedOut(ctx, req, phone) {
+				_ = p.deps.Bus.Publish(ctx, "sns:sms:"+phone, []byte(str(req.Input["Message"])))
+			}
 			return &spi.Response{Output: map[string]any{"MessageId": p.deps.Rand.Hex(16)}}, nil
 		}
 		if target := str(req.Input["TargetArn"]); target != "" && str(req.Input["TopicArn"]) == "" && endpointResourceARN(target) {
@@ -694,7 +696,9 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 			continue
 		}
 		if protocol == "sms" {
-			_ = p.deps.Bus.Publish(ctx, "sns:sms:"+str(sub["Endpoint"]), []byte(structuredMessage(body, str(req.Input["MessageStructure"]), protocol)))
+			if !p.smsOptedOut(ctx, req, str(sub["Endpoint"])) {
+				_ = p.deps.Bus.Publish(ctx, "sns:sms:"+str(sub["Endpoint"]), []byte(structuredMessage(body, str(req.Input["MessageStructure"]), protocol)))
+			}
 			continue
 		}
 		message := structuredMessage(body, str(req.Input["MessageStructure"]), protocol)
@@ -754,6 +758,11 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 		_ = p.col(req, "snsdedup").Put(ctx, arn+"\x1f"+dedupKey, mustJSON(map[string]any{"id": mid, "until": p.deps.Clock.Now().Add(5 * time.Minute).UnixNano()}))
 	}
 	return &spi.Response{Output: map[string]any{"MessageId": mid}}, nil
+}
+
+func (p *Pack) smsOptedOut(ctx context.Context, req *spi.Request, phone string) bool {
+	_, optedOut, _ := p.col(req, "smsopt").Get(ctx, phone)
+	return optedOut
 }
 
 func (p *Pack) platformEndpointMessage(ctx context.Context, req *spi.Request, endpointARN, body, structure string) (string, bool) {

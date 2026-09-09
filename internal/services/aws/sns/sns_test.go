@@ -1117,6 +1117,30 @@ func TestSNSPhoneNumberPublish(t *testing.T) {
 	}
 }
 
+func TestSNSSMSOptOutSuppressesDelivery(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	phone := "+15555550123"
+	received := make(chan []byte, 1)
+	cancel := deps.Bus.Subscribe("sns:sms:"+phone, func(_ context.Context, body []byte) { received <- body })
+	defer cancel()
+	if err := p.col(&spi.Request{Identity: id}, "smsopt").Put(ctx, phone, []byte("true")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+		"PhoneNumber": phone, "Message": "blocked",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case body := <-received:
+		t.Fatalf("opted-out SMS was delivered: %q", body)
+	default:
+	}
+}
+
 func TestSNSSMSSubscriptionDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

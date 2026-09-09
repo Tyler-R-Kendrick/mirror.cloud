@@ -67,6 +67,14 @@ func TestMutantsAreKilled(t *testing.T) {
 	}
 	mutants := []mutant{
 		{
+			name: "sns-ignore-sms-opt-out",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `if !p.smsOptedOut(ctx, req, phone) {`,
+			new:  `if true {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSSMSOptOutSuppressesDelivery",
+		},
+		{
 			name: "restxml-canonicalize-etag-header",
 			file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
 			old:  `if strings.EqualFold(k, "ETag") {`,

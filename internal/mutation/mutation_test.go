@@ -17648,6 +17648,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestTopicValidationAndPublishTargetCharacterization",
 		},
 		{
+			name: "sns-drop-data-protection-topic-attribute",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  "attrs[\"DataProtectionPolicy\"] = policy\n\t\tm[\"attrs\"] = attrs",
+			new:  "m[\"attrs\"] = attrs",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSControlPlaneOperations",
+		},
+		{
 			name: "sns-ignore-verified-sandbox-phone",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old:  `if str(rec["Status"]) == "Verified" {`,

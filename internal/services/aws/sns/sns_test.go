@@ -211,6 +211,9 @@ func TestSNSControlPlaneOperations(t *testing.T) {
 	if got := must("GetDataProtectionPolicy", map[string]any{"ResourceArn": topic}).Output["DataProtectionPolicy"]; got != `{"Name":"policy"}` {
 		t.Fatalf("data protection policy %q", got)
 	}
+	if got := must("GetTopicAttributes", map[string]any{"TopicArn": topic}).Output["Attributes"].(map[string]any)["DataProtectionPolicy"]; got != `{"Name":"policy"}` {
+		t.Fatalf("topic data protection attribute %q", got)
+	}
 	if got := must("GetDataProtectionPolicy", map[string]any{"ResourceArn": topic + ":missing"}).Output["DataProtectionPolicy"]; got != "" {
 		t.Fatalf("missing data protection policy %q", got)
 	}

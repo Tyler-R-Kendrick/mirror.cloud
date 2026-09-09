@@ -168,7 +168,30 @@ func (p *Pack) dataProtection(ctx context.Context, req *spi.Request) (*spi.Respo
 		arn = str(req.Input["TopicArn"])
 	}
 	if req.Operation == "PutDataProtectionPolicy" {
-		_ = p.col(req, "dpp").Put(ctx, arn, []byte(str(req.Input["DataProtectionPolicy"])))
+		if !validTopicARN(arn) {
+			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: ResourceArn", HTTPStatus: 400, Fault: "client"}
+		}
+		parts := strings.Split(arn, ":")
+		if parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {
+			return nil, topicNotFoundFault()
+		}
+		name := topicName(arn)
+		if _, found, _ := p.col(req, "topics").Get(ctx, name); !found {
+			return nil, topicNotFoundFault()
+		}
+		policy := str(req.Input["DataProtectionPolicy"])
+		_ = p.col(req, "dpp").Put(ctx, arn, []byte(policy))
+		b, _, _ := p.col(req, "topics").Get(ctx, name)
+		m := map[string]any{"arn": arn, "name": name}
+		_ = json.Unmarshal(b, &m)
+		attrs := asMap(m["attrs"])
+		if attrs == nil {
+			attrs = map[string]any{}
+		}
+		attrs["DataProtectionPolicy"] = policy
+		m["attrs"] = attrs
+		nb, _ := json.Marshal(m)
+		_ = p.col(req, "topics").Put(ctx, name, nb)
 		return &spi.Response{Output: map[string]any{}}, nil
 	}
 	b, ok, _ := p.col(req, "dpp").Get(ctx, arn)

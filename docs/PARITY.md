@@ -6,7 +6,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 765 of 907 direct upstream test functions are explicitly traced (84.3%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green: 2,733 tests across 221 Go packages. The mutation inventory now has 2,528 entries; the prior 2,527-entry inventory passed in all four CI-equivalent shards (1908.579s, 1936.820s, 1921.702s, and 1937.136s), and the new topic-ARN scope mutant passes its targeted kill check. A complete four-shard rerun for the new entry remains outstanding. These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green: 2,734 tests across 221 Go packages. The 2,528-entry mutation inventory passed in all four CI-equivalent shards (466.019s, 484.993s, 455.802s, and 544.844s). These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -665,7 +665,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
-The ordinary local gate is green across 221 packages. The prior 2,505-mutant inventory is green in all four bounded shards (exit 0), and the twenty newer SNS mutants are green in targeted kill checks; the serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
+The ordinary local gate is green across 221 packages. The current 2,528-mutant inventory is green in all four bounded shards (exit 0); the serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
 
 | LocalStack test | Mirror evidence | Result |
 |---|---|---|

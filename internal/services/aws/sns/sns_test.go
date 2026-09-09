@@ -135,6 +135,41 @@ func TestSNSSQSRawDeliveryPreservesMessageAttributes(t *testing.T) {
 	}
 }
 
+func TestSNSFlattenedBinaryMessageAttributeDelivery(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "flattened-binary"}}); err != nil {
+		t.Fatal(err)
+	}
+	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "flattened-binary"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	topicARN := str(topic.Output["TopicArn"])
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topicARN, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:flattened-binary", "RawMessageDelivery": "true",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	binaryValue := base64.StdEncoding.EncodeToString([]byte{7, 8, 9})
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+		"TopicArn": topicARN, "Message": "flattened", "MessageAttributes.entry.1.Name": "binary",
+		"MessageAttributes.entry.1.Value.DataType": "Binary", "MessageAttributes.entry.1.Value.BinaryValue": binaryValue,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "flattened-binary", "MessageAttributeNames": []any{"All"}}})
+	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+		t.Fatalf("flattened binary delivery=%#v err=%v", received, err)
+	}
+	message := asMap(asSlice(received.Output["Messages"])[0])
+	if str(asMap(asMap(message["MessageAttributes"])["binary"])["BinaryValue"]) != binaryValue {
+		t.Fatalf("flattened binary attributes=%#v", message)
+	}
+}
+
 func TestSNSSQSNotificationPreservesMessageAttributes(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, qp := New(deps), sqs.New(deps)

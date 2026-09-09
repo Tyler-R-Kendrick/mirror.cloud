@@ -17994,6 +17994,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSSQSNotificationPreservesMessageAttributes",
 		},
 		{
+			name: "sns-drop-flattened-binary-message-attribute",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `slot["BinaryValue"] = v`,
+			new:  `slot["BinaryValue"] = nil`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSFlattenedBinaryMessageAttributeDelivery",
+		},
+		{
 			name: "sns-allow-standard-topic-fifo-queue",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `if !strings.HasSuffix(topicName(topicArn), ".fifo") && queueFIFO {`,

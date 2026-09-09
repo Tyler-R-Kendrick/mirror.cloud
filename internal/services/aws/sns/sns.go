@@ -1275,6 +1275,8 @@ func messageAttrs(in map[string]any) map[string]any {
 		case "Value.StringValue", "Value":
 			slot["StringValue"] = str(v)
 			slot["Value"] = str(v)
+		case "Value.BinaryValue":
+			slot["BinaryValue"] = v
 		}
 	}
 	out := map[string]any{}

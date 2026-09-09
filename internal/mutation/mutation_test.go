@@ -17936,6 +17936,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSStandardTopicFalseFIFOIsIdempotent",
 		},
 		{
+			name: "sns-accept-invalid-message-attributes",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "if fault := validateMessageAttributes(messageAttrs(req.Input)); fault != nil {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSMessageAttributeValidation",
+		},
+		{
 			name: "sns-accept-invalid-platform-endpoint-attributes",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old:  "func validateEndpointAttributes(attrs map[string]any) *spi.Fault {\n\tfor key, value := range attrs {",

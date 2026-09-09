@@ -779,6 +779,9 @@ func validatePublishMessage(req *spi.Request) *spi.Fault {
 	if body == "" {
 		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Message", HTTPStatus: 400, Fault: "client"}
 	}
+	if fault := validateMessageAttributes(messageAttrs(req.Input)); fault != nil {
+		return fault
+	}
 	if publishMessageSize(body, messageAttrs(req.Input)) > 262144 {
 		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Message too long", HTTPStatus: 400, Fault: "client"}
 	}
@@ -799,6 +802,45 @@ func validatePublishMessage(req *spi.Request) *spi.Fault {
 		}
 		if _, ok := values["default"].(string); !ok {
 			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: MessageStructure values must be strings", HTTPStatus: 400, Fault: "client"}
+		}
+	}
+	return nil
+}
+
+func validateMessageAttributes(attrs map[string]any) *spi.Fault {
+	for name, raw := range attrs {
+		if len(name) == 0 || len(name) > 256 || name[0] == '.' || name[len(name)-1] == '.' || strings.Contains(name, "..") {
+			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: MessageAttributes", HTTPStatus: 400, Fault: "client"}
+		}
+		for _, r := range name {
+			if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' && r != '-' && r != '.' {
+				return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: MessageAttributes", HTTPStatus: 400, Fault: "client"}
+			}
+		}
+		attribute := asMap(raw)
+		dataType := str(attribute["DataType"])
+		if dataType == "" {
+			dataType = str(attribute["Type"])
+		}
+		parts := strings.SplitN(dataType, ".", 2)
+		if dataType == "" || (parts[0] != "String" && parts[0] != "Number" && parts[0] != "Binary") || (len(parts) == 2 && parts[1] == "") {
+			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: MessageAttributes", HTTPStatus: 400, Fault: "client"}
+		}
+		stringValue := str(attribute["StringValue"])
+		if stringValue == "" {
+			stringValue = str(attribute["Value"])
+		}
+		binaryValue := attribute["BinaryValue"]
+		hasBinary := binaryValue != nil && str(binaryValue) != ""
+		switch parts[0] {
+		case "String", "Number":
+			if stringValue == "" || hasBinary {
+				return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: MessageAttributes", HTTPStatus: 400, Fault: "client"}
+			}
+		case "Binary":
+			if !hasBinary || stringValue != "" {
+				return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: MessageAttributes", HTTPStatus: 400, Fault: "client"}
+			}
 		}
 	}
 	return nil

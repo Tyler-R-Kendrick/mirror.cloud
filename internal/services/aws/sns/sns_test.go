@@ -1073,6 +1073,40 @@ func TestSNSStandardTopicFalseFIFOIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestSNSMessageAttributeValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "message-attributes"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalid := []map[string]any{
+		{"missing": map[string]any{"DataType": "String", "StringValue": ""}},
+		{"missing-type": map[string]any{"StringValue": "value"}},
+		{"binary-as-string": map[string]any{"DataType": "String", "BinaryValue": "123"}},
+		{"string-as-binary": map[string]any{"DataType": "Binary", "StringValue": "123"}},
+		{"invalid-type": map[string]any{"DataType": "InvalidType", "StringValue": "123"}},
+		{strings.Repeat("a", 257): map[string]any{"DataType": "String", "StringValue": "123"}},
+		{"a^*?": map[string]any{"DataType": "String", "StringValue": "123"}},
+		{".abc": map[string]any{"DataType": "String", "StringValue": "123"}},
+		{"abc.": map[string]any{"DataType": "String", "StringValue": "123"}},
+		{"a..bc": map[string]any{"DataType": "String", "StringValue": "123"}},
+		{"attr": map[string]any{"DataType": "String.", "StringValue": "123"}},
+	}
+	for _, attrs := range invalid {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"TopicArn": created.Output["TopicArn"], "Message": "message", "MessageAttributes": attrs}}); err == nil {
+			t.Fatalf("accepted invalid message attributes %#v", attrs)
+		}
+	}
+	for _, dataType := range []string{"String.prefixed", "String.  prefixed.", "Number"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"TopicArn": created.Output["TopicArn"], "Message": "message", "MessageAttributes": map[string]any{"attr": map[string]any{"DataType": dataType, "StringValue": "123"}}}}); err != nil {
+			t.Fatalf("rejected valid message attribute type %q: %v", dataType, err)
+		}
+	}
+}
+
 func TestSNSPlatformEndpointAttributeValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

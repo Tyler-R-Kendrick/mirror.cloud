@@ -1113,6 +1113,34 @@ func TestSNSPendingEmailSubscription(t *testing.T) {
 	}
 }
 
+func TestSNSCreateTopicIdempotencyPreservesAttributes(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{
+		"Name": "idempotent-attributes",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic := str(created.Output["TopicArn"])
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetTopicAttributes", Input: map[string]any{
+		"TopicArn": topic, "AttributeName": "DisplayName", "AttributeValue": "AlreadySet",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{
+		"Name": "idempotent-attributes",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	attrs, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetTopicAttributes", Input: map[string]any{"TopicArn": topic}})
+	if err != nil || str(asMap(attrs.Output["Attributes"])["DisplayName"]) != "AlreadySet" {
+		t.Fatalf("idempotent attributes=%#v err=%v", attrs, err)
+	}
+}
+
 func TestSNSTopicAttributeARNValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

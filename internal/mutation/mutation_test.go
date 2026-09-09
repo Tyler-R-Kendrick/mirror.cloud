@@ -131,6 +131,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSCertificateEndpoint",
 		},
 		{
+			name: "edge-demux-sns-confirmation-url",
+			file: filepath.Join("internal", "edge", "edge.go"),
+			old:  `if action == "ConfirmSubscription" && strings.HasPrefix(r.URL.Query().Get("TopicArn"), "arn:aws:sns:") {`,
+			new:  `if false {`,
+			pkg:  "./internal/edge",
+			run:  "TestDemuxSNSConfirmationURL",
+		},
+		{
 			name: "restxml-canonicalize-etag-header",
 			file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
 			old:  `if strings.EqualFold(k, "ETag") {`,

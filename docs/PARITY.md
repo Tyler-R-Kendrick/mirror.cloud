@@ -4,9 +4,9 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 776 of 907 direct upstream test functions are explicitly traced (85.5%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 777 of 907 direct upstream test functions are explicitly traced (85.7%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green: 2,740 tests across 221 Go packages. The 2,558-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the eighteen new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green: 2,741 tests across 221 Go packages. The 2,559-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the nineteen new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -65,6 +65,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSSubscriptionHttp::test_subscribe_external_http_endpoint_content_type` | `TestSNSHTTPDeliveryPolicy` verifies raw HTTP bodies, policy-selected content type, and SNS message-type headers |
 | `test_sns.py::TestSNSSubscriptionSQS::test_attribute_raw_subscribe` | `TestSNSSQSRawDeliveryPreservesMessageAttributes` verifies raw SQS delivery carries string and binary message attributes |
 | `test_sns.py::TestSNSSubscriptionSQS::test_message_attributes_not_missing` | `TestSNSSQSRawDeliveryPreservesMessageAttributes` verifies raw SQS delivery does not drop message attributes |
+| `test_sns.py::TestSNSSubscriptionSQSFifo::test_publish_to_fifo_topic_to_sqs_queue_no_content_dedup` | `TestSNSFIFOTopicToSQSWithoutQueueDeduplication` supplies SNS-generated deduplication IDs to FIFO queues without content-based deduplication |
 | `test_sns.py::TestSNSTopicCrudV2::test_create_topic_should_be_idempotent` | `TestSNSCreateTopicIdempotencyPreservesAttributes` preserves topic attributes on repeated creation |
 | `test_sns.py::TestSNSTopicCrudV2::test_data_protection_policy_crud` | `TestSNSControlPlaneOperations` projects a stored data-protection policy into topic attributes |
 | `test_sns.py::TestSNSSMS::test_publish_sms_endpoint` | `TestSNSSMSSubscriptionDelivery` delivers a topic message to an SMS subscription |

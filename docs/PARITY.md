@@ -4,9 +4,9 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 765 of 907 direct upstream test functions are explicitly traced (84.3%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 766 of 907 direct upstream test functions are explicitly traced (84.5%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green: 2,734 tests across 221 Go packages. The 2,530-entry mutation inventory passed in all four CI-equivalent shards (521.971s, 529.264s, 521.999s, and 548.935s). These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green: 2,735 tests across 221 Go packages. The 2,531-entry mutation inventory now includes a targeted kill check for pending email subscriptions; a complete four-shard rerun for this newest entry remains outstanding. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -18,7 +18,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SNS operations routed to emulation | 43 / 43 |
 | SNS statement coverage | 92.0% |
 | LocalStack SNS test functions inventoried | 180 |
-| LocalStack SNS test functions explicitly traced | 38 / 180 |
+| LocalStack SNS test functions explicitly traced | 39 / 180 |
 
 The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
 
@@ -57,6 +57,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSPublishCrud::test_empty_or_wrong_message_attributes` | `TestSNSMessageAttributeValidation` rejects malformed names, types, and value combinations |
 | `test_sns.py::TestSNSSMS::test_publish_sms` | `TestSNSPhoneNumberPublish` delivers a valid phone-number publish |
 | `test_sns.py::TestSNSSMS::test_publish_wrong_phone_format` | `TestSNSPhoneNumberPublish` rejects malformed phone numbers |
+| `test_sns.py::TestSNSPublishCrud::test_publish_no_confirm_subscription` | `TestSNSPendingEmailSubscription` keeps email subscriptions pending until confirmation |
 | `test_sns.py::TestSNSSMS::test_publish_sms_endpoint` | `TestSNSSMSSubscriptionDelivery` delivers a topic message to an SMS subscription |
 | `test_sns.py::TestSNSSMS::test_opt_in_invalid_number` | `TestSNSOptInPhoneValidation` rejects malformed opt-in numbers |
 | `test_sns.py::TestSNSSMS::test_set_invalid_sms_attributes` | `TestSNSSMSAttributeValidationAndSelection` rejects unknown and malformed SMS attributes |
@@ -665,7 +666,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
-The ordinary local gate is green across 221 packages. The current 2,530-mutant inventory is green in all four bounded shards (exit 0); the serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
+The ordinary local gate is green across 221 packages. The 2,531-entry inventory has a targeted green kill check for the newest SNS behavior; the prior 2,530-entry inventory is green in all four bounded shards (exit 0). Serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
 
 | LocalStack test | Mirror evidence | Result |
 |---|---|---|

@@ -1043,6 +1043,19 @@ func TestSNSSMSAttributeValidationAndSelection(t *testing.T) {
 	}
 }
 
+func TestSNSDefaultSMSAttributes(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	response, err := p.Invoke(context.Background(), &spi.Request{Identity: spi.Identity{Account: "1", Region: "us-west-2"}, Operation: "GetSMSAttributes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attrs := asMap(response.Output["Attributes"])
+	if attrs["MonthlySpendLimit"] != "1" {
+		t.Fatalf("default SMS attributes %#v", attrs)
+	}
+}
+
 func TestSNSPlatformEndpointAttributeValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

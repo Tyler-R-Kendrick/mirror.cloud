@@ -17920,6 +17920,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPlatformEndpointDeletionCleansSubscriptions",
 		},
 		{
+			name: "sns-drop-default-sms-spend-limit",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  "attrs := map[string]any{\"MonthlySpendLimit\": \"1\"}",
+			new:  "attrs := map[string]any{}",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSDefaultSMSAttributes",
+		},
+		{
 			name: "sns-accept-invalid-platform-endpoint-attributes",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old:  "func validateEndpointAttributes(attrs map[string]any) *spi.Fault {\n\tfor key, value := range attrs {",

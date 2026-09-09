@@ -472,7 +472,7 @@ func (p *Pack) smsAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 		return &spi.Response{Output: map[string]any{}}, nil
 	}
 	b, ok, _ := p.col(req, "smsattrs").Get(ctx, "default")
-	attrs := map[string]any{}
+	attrs := map[string]any{"MonthlySpendLimit": "1"}
 	if ok {
 		_ = json.Unmarshal(b, &attrs)
 	}

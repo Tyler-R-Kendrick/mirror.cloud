@@ -27,7 +27,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/aws/restxml"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/gcp/gcprest"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns/cert"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -80,7 +80,7 @@ func New(cfg config.Config, deps spi.Deps, reg registry.Registry, version string
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(r.URL.Path, "/_aws/sns/SimpleNotificationService.pem") {
 		w.Header().Set("Content-Type", "application/x-pem-file")
-		_, _ = w.Write(sns.SigningCertificate())
+		_, _ = w.Write(cert.Certificate())
 		return
 	}
 	var awsChunks [][]byte

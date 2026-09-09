@@ -303,6 +303,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"Successful": ok}}, nil
 	case "Subscribe":
 		topicArn := str(req.Input["TopicArn"])
+		if !validTopicARN(topicArn) {
+			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: TopicArn", HTTPStatus: 400, Fault: "client"}
+		}
+		parts := strings.Split(topicArn, ":")
+		if parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {
+			return nil, topicNotFoundFault()
+		}
 		if _, ok, _ := p.col(req, "topics").Get(ctx, topicName(topicArn)); !ok {
 			return nil, topicNotFoundFault()
 		}

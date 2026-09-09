@@ -4,9 +4,9 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 779 of 907 direct upstream test functions are explicitly traced (85.9%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 780 of 907 direct upstream test functions are explicitly traced (86.0%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green: 2,745 tests across 221 Go packages. The 2,568-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the twenty-eight new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green: 2,747 tests across 221 Go packages. The 2,571-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the thirty-one new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -18,7 +18,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SNS operations routed to emulation | 43 / 43 |
 | SNS statement coverage | 92.0% |
 | LocalStack SNS test functions inventoried | 180 |
-| LocalStack SNS test functions explicitly traced | 43 / 180 |
+| LocalStack SNS test functions explicitly traced | 44 / 180 |
 
 The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
 
@@ -68,6 +68,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSSubscriptionSQS::test_message_attributes_not_missing` | `TestSNSSQSRawDeliveryPreservesMessageAttributes` verifies raw SQS delivery does not drop message attributes |
 | `test_sns.py::TestSNSSubscriptionSQSFifo::test_publish_to_fifo_topic_to_sqs_queue_no_content_dedup` | `TestSNSFIFOTopicToSQSWithoutQueueDeduplication` supplies SNS-generated deduplication IDs to FIFO queues without content-based deduplication |
 | `test_sns.py::TestSNSSubscriptionSQS::test_publish_sqs_from_sns_with_xray_propagation` | `TestSNSSQSDeliveryPropagatesTraceHeader` carries `X-Amzn-Trace-Id` into the SQS `AWSTraceHeader` message attribute |
+| `test_sns.py::TestSNSSubscriptionSQS::test_publish_sqs_verify_signature` | `TestSNSSQSNotificationPreservesMessageAttributes` and `TestSNSSQSNotificationSignatureVersionTwo` verify canonical RSA SNS signatures for SHA-1 and SHA-256 envelopes, including the served certificate |
 | `test_sns.py::TestSNSTopicCrudV2::test_create_topic_should_be_idempotent` | `TestSNSCreateTopicIdempotencyPreservesAttributes` preserves topic attributes on repeated creation |
 | `test_sns.py::TestSNSTopicCrudV2::test_data_protection_policy_crud` | `TestSNSControlPlaneOperations` projects a stored data-protection policy into topic attributes |
 | `test_sns.py::TestSNSSMS::test_publish_sms_endpoint` | `TestSNSSMSSubscriptionDelivery` delivers a topic message to an SMS subscription |
@@ -679,7 +680,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 
 The pinned inventory is 196 direct functions in `test_sqs.py` and 12 in `test_sqs_move_task.py`; `test_sqs_developer_api.py` is absent at the pinned commit and is excluded. Parametrized cases are not expanded.
 
-The ordinary local gate is green across 221 packages. The current 2,568-entry inventory has focused green shards for newly added mutants; a full four-shard rerun remains pending because the prior four-way harness exceeded its 35-minute bound. Serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
+The ordinary local gate is green across 221 packages. The current 2,571-entry inventory has focused green shards for newly added mutants; a full four-shard rerun remains pending because the prior four-way harness exceeded its 35-minute bound. Serial reruns use bounded parallelism to avoid exhausting the dedicated Go cache. This is still a local verifier, not live AWS differential evidence.
 
 | LocalStack test | Mirror evidence | Result |
 |---|---|---|

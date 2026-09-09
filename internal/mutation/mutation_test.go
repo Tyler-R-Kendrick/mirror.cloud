@@ -17776,6 +17776,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSControlPlaneOperations",
 		},
 		{
+			name: "sns-confirm-email-subscription",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "if proto == \"http\" || proto == \"https\" || proto == \"email\" || proto == \"email-json\" {",
+			new:  "if proto == \"http\" || proto == \"https\" {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPendingEmailSubscription",
+		},
+		{
 			name: "sns-allow-standard-topic-fifo-queue",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `if !strings.HasSuffix(topicName(topicArn), ".fifo") && queueFIFO {`,

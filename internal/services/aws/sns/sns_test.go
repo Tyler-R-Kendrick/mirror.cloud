@@ -1087,6 +1087,28 @@ func TestSNSUnsubscribeDeletedTopic(t *testing.T) {
 	}
 }
 
+func TestSNSPendingEmailSubscription(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "pending-email"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic := str(created.Output["TopicArn"])
+	sub, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic, "Protocol": "email", "Endpoint": "user@example.com",
+	}})
+	if err != nil || str(sub.Output["SubscriptionArn"]) != "pending confirmation" {
+		t.Fatalf("email subscription=%#v err=%v", sub, err)
+	}
+	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListSubscriptions", Input: map[string]any{}})
+	if err != nil || len(asSlice(listed.Output["Subscriptions"])) != 1 || str(asMap(asSlice(listed.Output["Subscriptions"])[0])["SubscriptionArn"]) != "PendingConfirmation" {
+		t.Fatalf("pending email listing=%#v err=%v", listed, err)
+	}
+}
+
 func TestSNSTopicAttributeARNValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

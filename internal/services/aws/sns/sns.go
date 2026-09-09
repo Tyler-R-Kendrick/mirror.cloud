@@ -373,15 +373,17 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			"Confirmed":          true,
 		}
 		proto := str(req.Input["Protocol"])
-		if proto == "http" || proto == "https" {
+		if proto == "http" || proto == "https" || proto == "email" || proto == "email-json" {
 			tok := p.deps.Rand.Hex(16)
 			rec["Confirmed"] = false
 			rec["Token"] = tok
 			_ = p.col(req, "pending").Put(ctx, tok, mustJSON(rec))
-			p.httpPost(str(req.Input["Endpoint"]), map[string]any{
-				"Type": "SubscriptionConfirmation", "Token": tok, "TopicArn": rec["TopicArn"],
-				"SubscribeURL": "http://127.0.0.1/confirm?Token=" + tok,
-			})
+			if proto == "http" || proto == "https" {
+				p.httpPost(str(req.Input["Endpoint"]), map[string]any{
+					"Type": "SubscriptionConfirmation", "Token": tok, "TopicArn": rec["TopicArn"],
+					"SubscribeURL": "http://127.0.0.1/confirm?Token=" + tok,
+				})
+			}
 			b, _ := json.Marshal(rec)
 			_ = p.col(req, "subs").Put(ctx, sub, b)
 			return &spi.Response{Output: map[string]any{"SubscriptionArn": "pending confirmation"}}, nil
@@ -409,6 +411,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			_ = json.Unmarshal(kv.Value, &m)
 			if want != "" && str(m["TopicArn"]) != want {
 				continue
+			}
+			if confirmed, ok := m["Confirmed"].(bool); ok && !confirmed {
+				m["SubscriptionArn"] = "PendingConfirmation"
 			}
 			subs = append(subs, m)
 		}

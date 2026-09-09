@@ -138,6 +138,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "GetTopicAttributes":
 		arn := str(req.Input["TopicArn"])
+		if !validTopicARN(arn) {
+			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: TopicArn", HTTPStatus: 400, Fault: "client"}
+		}
 		b, ok, _ := p.col(req, "topics").Get(ctx, topicName(arn))
 		if !ok {
 			return nil, &spi.Fault{Code: "NotFound", HTTPStatus: 404, Fault: "client"}
@@ -1231,6 +1234,11 @@ func validSMSNumber(number string) bool {
 func validSubscriptionARN(arn string) bool {
 	parts := strings.Split(arn, ":")
 	return len(parts) == 7 && parts[0] == "arn" && parts[2] == "sns" && parts[3] != "" && parts[4] != "" && parts[5] != "" && parts[6] != ""
+}
+
+func validTopicARN(arn string) bool {
+	parts := strings.Split(arn, ":")
+	return len(parts) == 6 && parts[0] == "arn" && parts[2] == "sns" && parts[3] != "" && parts[4] != "" && parts[5] != ""
 }
 
 func validTopicChars(name string) bool {

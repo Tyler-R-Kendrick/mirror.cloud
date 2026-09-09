@@ -1081,6 +1081,20 @@ func TestSNSUnsubscribeDeletedTopic(t *testing.T) {
 	}
 }
 
+func TestSNSTopicAttributeARNValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "attrs-arn"}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "GetTopicAttributes", Input: map[string]any{"TopicArn": "attrs-arn"}})
+	fault, _ := err.(*spi.Fault)
+	if fault == nil || fault.Code != "InvalidParameter" {
+		t.Fatalf("malformed TopicArn fault=%v", err)
+	}
+}
+
 func TestSNSStandardTopicFalseFIFOIsIdempotent(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

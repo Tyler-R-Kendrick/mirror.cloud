@@ -17736,6 +17736,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSUnsubscribeDeletedTopic",
 		},
 		{
+			name: "sns-accept-malformed-topic-attributes-arn",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "if !validTopicARN(arn) {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSTopicAttributeARNValidation",
+		},
+		{
 			name: "sns-accept-unknown-confirmation-token",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  "if str(req.Input[\"TopicArn\"]) != \"\" {\n\t\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: Token\", HTTPStatus: 400, Fault: \"client\"}",

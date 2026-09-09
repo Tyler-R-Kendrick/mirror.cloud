@@ -406,10 +406,30 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			rec["Token"] = tok
 			_ = p.col(req, "pending").Put(ctx, tok, mustJSON(rec))
 			if proto == "http" || proto == "https" {
-				p.httpPost(str(req.Input["Endpoint"]), map[string]any{
-					"Type": "SubscriptionConfirmation", "Token": tok, "TopicArn": rec["TopicArn"],
-					"SubscribeURL": "http://127.0.0.1/confirm?Token=" + tok,
-				}, "SubscriptionConfirmation", "application/json")
+				base := strings.TrimRight(req.AdvertiseURL, "/")
+				if base == "" {
+					base = "http://127.0.0.1:4566"
+				}
+				topicARN := str(rec["TopicArn"])
+				confirmation := map[string]any{
+					"Type": "SubscriptionConfirmation", "MessageId": p.deps.Rand.Hex(16), "Token": tok,
+					"TopicArn":         topicARN,
+					"Message":          "You have chosen to subscribe to the topic " + topicARN + ".\nTo confirm the subscription, visit the SubscribeURL included in this message.",
+					"SubscribeURL":     base + "/?Action=ConfirmSubscription&TopicArn=" + topicARN + "&Token=" + tok,
+					"Timestamp":        p.deps.Clock.Now().UTC().Format(time.RFC3339Nano),
+					"SignatureVersion": "1", "SigningCertURL": snsCertificateURL(req),
+				}
+				signatureVersion := "1"
+				if b, found, _ := p.col(req, "topics").Get(ctx, topicName(topicARN)); found {
+					var topic map[string]any
+					_ = json.Unmarshal(b, &topic)
+					if str(asMap(topic["attrs"])["SignatureVersion"]) == "2" {
+						signatureVersion = "2"
+					}
+				}
+				confirmation["SignatureVersion"] = signatureVersion
+				confirmation["Signature"] = signNotification(confirmation, signatureVersion)
+				p.httpPost(str(req.Input["Endpoint"]), confirmation, "SubscriptionConfirmation", "application/json")
 			}
 			b, _ := json.Marshal(rec)
 			_ = p.col(req, "subs").Put(ctx, sub, b)

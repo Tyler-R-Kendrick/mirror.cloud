@@ -251,7 +251,13 @@ func validTestSNSNotificationSignature(values map[string]any) bool {
 		return false
 	}
 	var canonical strings.Builder
-	for _, field := range []string{"Message", "MessageId", "Subject", "Timestamp", "TopicArn", "Type"} {
+	fields := []string{"Message", "MessageId"}
+	if typ := str(values["Type"]); typ == "SubscriptionConfirmation" || typ == "UnsubscribeConfirmation" {
+		fields = append(fields, "SubscribeURL", "Subject", "Timestamp", "Token", "TopicArn", "Type")
+	} else {
+		fields = append(fields, "Subject", "Timestamp", "TopicArn", "Type")
+	}
+	for _, field := range fields {
 		if value, ok := values[field]; ok {
 			canonical.WriteString(field + "\n" + str(value) + "\n")
 		}
@@ -273,6 +279,43 @@ func validTestSNSNotificationSignature(values map[string]any) bool {
 	}
 	public, ok := cert.PublicKey.(*rsa.PublicKey)
 	return ok && rsa.VerifyPKCS1v15(public, hash, digest, signature) == nil
+}
+
+func TestSNSHTTPSubscriptionConfirmationSignature(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "confirmation-signature"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	received := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		defer request.Body.Close()
+		var payload map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Errorf("confirmation payload: %v", err)
+			return
+		}
+		received <- payload
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Protocol": "http", "Endpoint": server.URL,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	payload := <-received
+	if str(payload["Type"]) != "SubscriptionConfirmation" || str(payload["SigningCertURL"]) == "" || str(payload["Signature"]) == "" || !validTestSNSNotificationSignature(payload) {
+		t.Fatalf("unsigned confirmation %#v", payload)
+	}
+	topicARN := str(topic.Output["TopicArn"])
+	wantURL := "http://127.0.0.1:4566/?Action=ConfirmSubscription&TopicArn=" + topicARN + "&Token=" + str(payload["Token"])
+	if str(payload["SubscribeURL"]) != wantURL {
+		t.Fatalf("confirmation URL %q", payload["SubscribeURL"])
+	}
 }
 
 func TestSNSSQSDeliveryPropagatesTraceHeader(t *testing.T) {

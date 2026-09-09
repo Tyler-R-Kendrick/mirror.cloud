@@ -60,7 +60,12 @@ func Certificate() []byte {
 
 func Sign(values map[string]any, version string, stringify func(any) string) string {
 	signing.once.Do(initSigning)
-	fields := []string{"Message", "MessageId", "Subject", "Timestamp", "TopicArn", "Type"}
+	fields := []string{"Message", "MessageId"}
+	if typ := stringify(values["Type"]); typ == "SubscriptionConfirmation" || typ == "UnsubscribeConfirmation" {
+		fields = append(fields, "SubscribeURL", "Subject", "Timestamp", "Token", "TopicArn", "Type")
+	} else {
+		fields = append(fields, "Subject", "Timestamp", "TopicArn", "Type")
+	}
 	var b strings.Builder
 	for _, field := range fields {
 		if value, ok := values[field]; ok {

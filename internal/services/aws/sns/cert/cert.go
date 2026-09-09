@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/pem"
 	"math/big"
 	"strings"
@@ -22,12 +23,33 @@ var signing struct {
 	cert []byte
 }
 
+type deterministicReader struct {
+	seed []byte
+	n    uint64
+	buf  []byte
+}
+
+func (r *deterministicReader) Read(p []byte) (int, error) {
+	for len(r.buf) < len(p) {
+		var counter [8]byte
+		binary.BigEndian.PutUint64(counter[:], r.n)
+		sum := sha256.Sum256(append(append([]byte{}, r.seed...), counter[:]...))
+		r.buf = append(r.buf, sum[:]...)
+		r.n++
+	}
+	copy(p, r.buf[:len(p)])
+	r.buf = r.buf[len(p):]
+	return len(p), nil
+}
+
 func initSigning() {
-	signing.key, _ = rsa.GenerateKey(rand.Reader, 2048)
+	// ponytail: deterministic local key keeps characterization snapshots stable; rotate only for external trust.
+	reader := &deterministicReader{seed: []byte("mirror.cloud SNS signing key")}
+	signing.key, _ = rsa.GenerateKey(reader, 2048)
 	notBefore := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	notAfter := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
 	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Mirror SNS"}, NotBefore: notBefore, NotAfter: notAfter, KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, IsCA: true}
-	der, _ := x509.CreateCertificate(rand.Reader, template, template, &signing.key.PublicKey, signing.key)
+	der, _ := x509.CreateCertificate(reader, template, template, &signing.key.PublicKey, signing.key)
 	signing.cert = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
 

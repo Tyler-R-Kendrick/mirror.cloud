@@ -1215,6 +1215,64 @@ func TestSNSPendingEmailSubscription(t *testing.T) {
 	}
 }
 
+func TestSNSHTTPSubscriptionRedrive(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	qp := sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	queue, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "sns-http-dlq"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "sns-http-redrive"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := make(chan string, 1)
+	messageType := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var payload map[string]any
+		_ = json.NewDecoder(request.Body).Decode(&payload)
+		if str(payload["Type"]) == "SubscriptionConfirmation" {
+			token <- str(payload["Token"])
+			messageType <- request.Header.Get("x-amz-sns-message-type")
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	sub, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Protocol": "http", "Endpoint": server.URL, "ReturnSubscriptionArn": true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := <-messageType; got != "SubscriptionConfirmation" {
+		t.Fatalf("confirmation message type header=%q", got)
+	}
+	confirmationToken := <-token
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ConfirmSubscription", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Token": confirmationToken,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	server.Close()
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetSubscriptionAttributes", Input: map[string]any{
+		"SubscriptionArn": sub.Output["SubscriptionArn"], "AttributeName": "RedrivePolicy",
+		"AttributeValue": `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:1:sns-http-dlq"}`,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Message": "redrive",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueUrl": queue.Output["QueueUrl"]}})
+	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+		t.Fatalf("DLQ messages=%#v err=%v", received, err)
+	}
+}
+
 func TestSNSCreateTopicIdempotencyPreservesAttributes(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

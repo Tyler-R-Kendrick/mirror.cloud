@@ -717,7 +717,11 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 			if subject := str(req.Input["Subject"]); subject != "" {
 				notification["Subject"] = subject
 			}
-			p.httpPost(str(sub["Endpoint"]), notification)
+			if !p.httpPost(str(sub["Endpoint"]), notification) {
+				if dlq := subscriptionDLQ(sub); dlq != "" {
+					p.deliverSQS(ctx, req, dlq, payload)
+				}
+			}
 		}
 	}
 	if dedupKey != "" {
@@ -976,22 +980,38 @@ func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body 
 	_, _ = sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "SendMessage", Input: in})
 }
 
-func (p *Pack) httpPost(endpoint string, payload map[string]any) {
+func (p *Pack) httpPost(endpoint string, payload map[string]any) bool {
 	if endpoint == "" {
-		return
+		return false
 	}
 	b, _ := json.Marshal(payload)
 	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(b))
 	if err != nil {
-		return
+		return false
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if messageType := str(payload["Type"]); messageType != "" {
+		req.Header.Set("x-amz-sns-message-type", messageType)
+	}
 	cli := &http.Client{Timeout: 2 * time.Second}
 	res, err := cli.Do(req)
 	if err != nil {
-		return
+		return false
 	}
 	ioDiscard(res)
+	return res.StatusCode >= http.StatusOK && res.StatusCode < http.StatusMultipleChoices
+}
+
+func subscriptionDLQ(sub map[string]any) string {
+	raw := str(asMap(sub["attrs"])["RedrivePolicy"])
+	if raw == "" {
+		raw = str(sub["RedrivePolicy"])
+	}
+	var policy map[string]any
+	if json.Unmarshal([]byte(raw), &policy) != nil {
+		return ""
+	}
+	return str(policy["deadLetterTargetArn"])
 }
 
 func ioDiscard(res *http.Response) {

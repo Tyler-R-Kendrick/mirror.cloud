@@ -17896,6 +17896,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPendingEmailSubscription",
 		},
 		{
+			name: "sns-drop-http-subscription-redrive",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `if !p.httpPost(str(sub["Endpoint"]), notification) {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSHTTPSubscriptionRedrive",
+		},
+		{
 			name: "sns-allow-standard-topic-fifo-queue",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `if !strings.HasSuffix(topicName(topicArn), ".fifo") && queueFIFO {`,

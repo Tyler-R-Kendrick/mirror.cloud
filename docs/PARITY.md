@@ -57,7 +57,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSPublishCrud::test_empty_or_wrong_message_attributes` | `TestSNSMessageAttributeValidation` rejects malformed names, types, and value combinations |
 | `test_sns.py::TestSNSSMS::test_publish_sms` | `TestSNSPhoneNumberPublish` delivers a valid phone-number publish |
 | `test_sns.py::TestSNSSMS::test_publish_wrong_phone_format` | `TestSNSPhoneNumberPublish` rejects malformed phone numbers |
-| `test_sns.py::TestSNSPublishCrud::test_publish_no_confirm_subscription` | `TestSNSPendingEmailSubscription` keeps email subscriptions pending until confirmation |
+| `test_sns.py::TestSNSPublishCrud::test_publish_no_confirm_subscription` | `TestSNSPendingEmailSubscription` keeps email subscriptions pending until confirmation and verifies `ReturnSubscriptionArn` |
 | `test_sns.py::TestSNSTopicCrudV2::test_create_topic_should_be_idempotent` | `TestSNSCreateTopicIdempotencyPreservesAttributes` preserves topic attributes on repeated creation |
 | `test_sns.py::TestSNSTopicCrudV2::test_data_protection_policy_crud` | `TestSNSControlPlaneOperations` projects a stored data-protection policy into topic attributes |
 | `test_sns.py::TestSNSSMS::test_publish_sms_endpoint` | `TestSNSSMSSubscriptionDelivery` delivers a topic message to an SMS subscription |

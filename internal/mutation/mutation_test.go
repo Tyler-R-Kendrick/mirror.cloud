@@ -17816,6 +17816,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSControlPlaneOperations",
 		},
 		{
+			name: "sns-accept-malformed-confirm-topic-arn",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "if topicArn := str(req.Input[\"TopicArn\"]); topicArn != \"\" {\n\t\t\tif !validTopicARN(topicArn) {\n\t\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t\t\t}\n\t\t\tparts := strings.Split(topicArn, \":\")",
+			new:  "if topicArn := str(req.Input[\"TopicArn\"]); topicArn != \"\" {\n\t\t\tif false {\n\t\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t\t\t}\n\t\t\tparts := strings.Split(topicArn, \":\")",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestTopicValidationAndPublishTargetCharacterization",
+		},
+		{
+			name: "sns-accept-cross-scope-confirm-topic-arn",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "if topicArn := str(req.Input[\"TopicArn\"]); topicArn != \"\" {\n\t\t\tif !validTopicARN(topicArn) {\n\t\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t\t\t}\n\t\t\tparts := strings.Split(topicArn, \":\")\n\t\t\tif parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {",
+			new:  "if topicArn := str(req.Input[\"TopicArn\"]); topicArn != \"\" {\n\t\t\tif !validTopicARN(topicArn) {\n\t\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t\t\t}\n\t\t\tparts := strings.Split(topicArn, \":\")\n\t\t\tif false {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestTopicValidationAndPublishTargetCharacterization",
+		},
+		{
 			name: "sns-accept-malformed-delete-topic-arn",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  "case \"DeleteTopic\":\n\t\tarn := str(req.Input[\"TopicArn\"])\n\t\tif !validTopicARN(arn) {\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tparts := strings.Split(arn, \":\")",

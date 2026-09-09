@@ -180,7 +180,6 @@ func TestSNSControlPlaneOperations(t *testing.T) {
 	if _, err := call("ConfirmSubscription", map[string]any{"TopicArn": topic + "-missing", "Token": "random-token"}); err == nil {
 		t.Fatal("accepted confirmation for missing topic")
 	}
-
 	if _, err := call("AddPermission", map[string]any{"TopicArn": topic}); err == nil {
 		t.Fatal("added permission without label")
 	}
@@ -380,13 +379,15 @@ func TestTopicValidationAndPublishTargetCharacterization(t *testing.T) {
 	_, missingSubscriptionFault := call("Subscribe", map[string]any{"TopicArn": arn + "-missing", "Protocol": "sqs", "Endpoint": "q"})
 	_, malformedSubscriptionARNFault := call("Subscribe", map[string]any{"TopicArn": "characterized-topic", "Protocol": "sqs", "Endpoint": "q"})
 	_, crossScopeSubscriptionARNFault := call("Subscribe", map[string]any{"TopicArn": "arn:aws:sns:us-west-2:123456789012:characterized-topic", "Protocol": "sqs", "Endpoint": "q"})
+	_, malformedConfirmTopicARNFault := call("ConfirmSubscription", map[string]any{"TopicArn": "characterized-topic", "Token": "random-token"})
+	_, crossScopeConfirmTopicARNFault := call("ConfirmSubscription", map[string]any{"TopicArn": "arn:aws:sns:us-west-2:123456789012:characterized-topic", "Token": "random-token"})
 	_, missingTagFault := call("TagResource", map[string]any{"ResourceArn": arn + "-missing", "Tags": []any{map[string]any{"Key": "a", "Value": "b"}}})
 	_, _ = call("CreateTopic", map[string]any{"Name": "untagged-topic"})
 	_, moreTagsFault := call("CreateTopic", map[string]any{
 		"Name": "untagged-topic", "Tags": []any{map[string]any{"Key": "new", "Value": "tag"}},
 	})
-	if duplicateFault != nil || str(duplicate.Output["TopicArn"]) != arn || differentFault == nil || targetFault != nil || malformedFault == nil || missingFault == nil || missingPermissionFault == nil || malformedPermissionARNFault == nil || crossScopePermissionARNFault == nil || missingAttributeFault == nil || malformedAttributeARNFault == nil || crossScopeAttributeARNFault == nil || malformedDeleteARNFault == nil || crossScopeDeleteARNFault == nil || missingSubscriptionFault == nil || malformedSubscriptionARNFault == nil || crossScopeSubscriptionARNFault == nil || missingTagFault == nil || moreTagsFault == nil {
-		t.Fatalf("duplicate=%#v/%v different=%#v target=%#v malformed=%#v missing=%#v missingPermission=%#v malformedPermissionARN=%#v crossScopePermissionARN=%#v missingAttribute=%#v malformedAttributeARN=%#v crossScopeAttributeARN=%#v malformedDeleteARN=%#v crossScopeDeleteARN=%#v missingSubscription=%#v malformedSubscriptionARN=%#v crossScopeSubscriptionARN=%#v missingTag=%#v moreTags=%#v", duplicate, duplicateFault, differentFault, targetFault, malformedFault, missingFault, missingPermissionFault, malformedPermissionARNFault, crossScopePermissionARNFault, missingAttributeFault, malformedAttributeARNFault, crossScopeAttributeARNFault, malformedDeleteARNFault, crossScopeDeleteARNFault, missingSubscriptionFault, malformedSubscriptionARNFault, crossScopeSubscriptionARNFault, missingTagFault, moreTagsFault)
+	if duplicateFault != nil || str(duplicate.Output["TopicArn"]) != arn || differentFault == nil || targetFault != nil || malformedFault == nil || missingFault == nil || missingPermissionFault == nil || malformedPermissionARNFault == nil || crossScopePermissionARNFault == nil || missingAttributeFault == nil || malformedAttributeARNFault == nil || crossScopeAttributeARNFault == nil || malformedDeleteARNFault == nil || crossScopeDeleteARNFault == nil || missingSubscriptionFault == nil || malformedSubscriptionARNFault == nil || crossScopeSubscriptionARNFault == nil || malformedConfirmTopicARNFault == nil || crossScopeConfirmTopicARNFault == nil || missingTagFault == nil || moreTagsFault == nil {
+		t.Fatalf("duplicate=%#v/%v different=%#v target=%#v malformed=%#v missing=%#v missingPermission=%#v malformedPermissionARN=%#v crossScopePermissionARN=%#v missingAttribute=%#v malformedAttributeARN=%#v crossScopeAttributeARN=%#v malformedDeleteARN=%#v crossScopeDeleteARN=%#v missingSubscription=%#v malformedSubscriptionARN=%#v crossScopeSubscriptionARN=%#v malformedConfirmTopicARN=%#v crossScopeConfirmTopicARN=%#v missingTag=%#v moreTags=%#v", duplicate, duplicateFault, differentFault, targetFault, malformedFault, missingFault, missingPermissionFault, malformedPermissionARNFault, crossScopePermissionARNFault, missingAttributeFault, malformedAttributeARNFault, crossScopeAttributeARNFault, malformedDeleteARNFault, crossScopeDeleteARNFault, missingSubscriptionFault, malformedSubscriptionARNFault, crossScopeSubscriptionARNFault, malformedConfirmTopicARNFault, crossScopeConfirmTopicARNFault, missingTagFault, moreTagsFault)
 	}
 	attrs, fault := call("GetTopicAttributes", map[string]any{"TopicArn": arn})
 	if fault != nil || str(asMap(attrs.Output["Attributes"])["DisplayName"]) != "before" {

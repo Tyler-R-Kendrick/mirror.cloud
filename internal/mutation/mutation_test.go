@@ -17510,8 +17510,8 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-retain-topic-tags-after-delete",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-			old:  "case \"DeleteTopic\":\n\t\tarn := str(req.Input[\"TopicArn\"])\n\t\tname := topicName(arn)\n\t\t_ = p.col(req, \"topics\").Delete(ctx, name)\n\t\t_ = p.col(req, \"tags\").Delete(ctx, arn)",
-			new:  "case \"DeleteTopic\":\n\t\tarn := str(req.Input[\"TopicArn\"])\n\t\tname := topicName(arn)\n\t\t_ = p.col(req, \"topics\").Delete(ctx, name)\n\t\tif false { _ = p.col(req, \"tags\").Delete(ctx, arn) }",
+			old:  "case \"DeleteTopic\":\n\t\tarn := str(req.Input[\"TopicArn\"])\n\t\tif !validTopicARN(arn) {\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tparts := strings.Split(arn, \":\")\n\t\tif parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {\n\t\t\treturn nil, topicNotFoundFault()\n\t\t}\n\t\tname := topicName(arn)\n\t\t_ = p.col(req, \"topics\").Delete(ctx, name)\n\t\t_ = p.col(req, \"tags\").Delete(ctx, arn)",
+			new:  "case \"DeleteTopic\":\n\t\tarn := str(req.Input[\"TopicArn\"])\n\t\tif !validTopicARN(arn) {\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tparts := strings.Split(arn, \":\")\n\t\tif parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {\n\t\t\treturn nil, topicNotFoundFault()\n\t\t}\n\t\tname := topicName(arn)\n\t\t_ = p.col(req, \"topics\").Delete(ctx, name)\n\t\tif false { _ = p.col(req, \"tags\").Delete(ctx, arn) }",
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestTopicValidationAndPublishTargetCharacterization",
 		},
@@ -17774,6 +17774,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  "if false {\n\t\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: Token\", HTTPStatus: 400, Fault: \"client\"}",
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSControlPlaneOperations",
+		},
+		{
+			name: "sns-accept-malformed-delete-topic-arn",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "case \"DeleteTopic\":\n\t\tarn := str(req.Input[\"TopicArn\"])\n\t\tif !validTopicARN(arn) {\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tparts := strings.Split(arn, \":\")",
+			new:  "case \"DeleteTopic\":\n\t\tarn := str(req.Input[\"TopicArn\"])\n\t\tif false {\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tparts := strings.Split(arn, \":\")",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestTopicValidationAndPublishTargetCharacterization",
+		},
+		{
+			name: "sns-accept-cross-scope-delete-topic-arn",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "case \"DeleteTopic\":\n\t\tarn := str(req.Input[\"TopicArn\"])\n\t\tif !validTopicARN(arn) {\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tparts := strings.Split(arn, \":\")\n\t\tif parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {",
+			new:  "case \"DeleteTopic\":\n\t\tarn := str(req.Input[\"TopicArn\"])\n\t\tif !validTopicARN(arn) {\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tparts := strings.Split(arn, \":\")\n\t\tif false {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestTopicValidationAndPublishTargetCharacterization",
 		},
 		{
 			name: "sns-confirm-email-subscription",

@@ -124,6 +124,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: out}, nil
 	case "DeleteTopic":
 		arn := str(req.Input["TopicArn"])
+		if !validTopicARN(arn) {
+			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: TopicArn", HTTPStatus: 400, Fault: "client"}
+		}
+		parts := strings.Split(arn, ":")
+		if parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {
+			return nil, topicNotFoundFault()
+		}
 		name := topicName(arn)
 		_ = p.col(req, "topics").Delete(ctx, name)
 		_ = p.col(req, "tags").Delete(ctx, arn)

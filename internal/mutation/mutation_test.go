@@ -123,6 +123,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSHTTPSubscriptionConfirmationSignature",
 		},
 		{
+			name: "sns-drop-unsubscribe-confirmation-signature",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `confirmation["Signature"] = unsubscribeSignature`,
+			new:  `confirmation["Signature"] = ""`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSHTTPUnsubscribeConfirmation",
+		},
+		{
 			name: "sns-drop-signing-certificate-endpoint",
 			file: filepath.Join("internal", "edge", "edge.go"),
 			old:  `if strings.HasSuffix(r.URL.Path, "/_aws/sns/SimpleNotificationService.pem") {`,
@@ -133,7 +141,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "edge-demux-sns-confirmation-url",
 			file: filepath.Join("internal", "edge", "edge.go"),
-			old:  `if action == "ConfirmSubscription" {`,
+			old:  `if action == "ConfirmSubscription" || action == "Unsubscribe" {`,
 			new:  `if false {`,
 			pkg:  "./internal/edge",
 			run:  "TestDemuxSNSConfirmationURL",
@@ -17970,7 +17978,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-drop-http-subscription-redrive",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-			old:  `if !p.httpPost(str(sub["Endpoint"]), body, "Notification", contentType) {`,
+			old:  `if !p.httpPost(str(sub["Endpoint"]), body, "Notification", contentType, mid, arn, str(sub["SubscriptionArn"])) {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSHTTPSubscriptionRedrive",

@@ -17898,16 +17898,16 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-create-endpoint-for-missing-app",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
-			old:  `case "CreatePlatformEndpoint":
+			old: `case "CreatePlatformEndpoint":
 		app := str(req.Input["PlatformApplicationArn"])
 		tok := str(req.Input["Token"])
 		if _, ok, _ := p.col(req, "platapps").Get(ctx, app); !ok {`,
-			new:  `case "CreatePlatformEndpoint":
+			new: `case "CreatePlatformEndpoint":
 		app := str(req.Input["PlatformApplicationArn"])
 		tok := str(req.Input["Token"])
 		if false {`,
-			pkg:  "./internal/services/aws/sns",
-			run:  "TestSNSPlatformEndpointLifecycleValidation",
+			pkg: "./internal/services/aws/sns",
+			run: "TestSNSPlatformEndpointLifecycleValidation",
 		},
 		{
 			name: "sns-duplicate-platform-endpoint-token",
@@ -18149,6 +18149,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			name: "sns-accept-invalid-platform-application",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old:  `if fault := validatePlatformApplication(name, plat, attrs); fault != nil {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPlatformApplicationValidation",
+		},
+		{
+			name: "sns-accept-empty-platform-application-attributes",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  `if len(attrs) == 0 || str(attrs["PlatformCredential"]) == "" || (platform == "ADM" && str(attrs["PlatformPrincipal"]) == "") {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSPlatformApplicationValidation",

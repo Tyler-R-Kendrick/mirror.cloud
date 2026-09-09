@@ -747,7 +747,9 @@ func TestSNSPlatformApplicationValidation(t *testing.T) {
 	for name, input := range map[string]map[string]any{
 		"invalid name":       {"Name": "bad.name", "Platform": "GCM"},
 		"invalid platform":   {"Name": "mobile", "Platform": "INVALID"},
+		"missing attributes": {"Name": "mobile", "Platform": "ADM", "Attributes": map[string]any{}},
 		"missing credential": {"Name": "mobile", "Platform": "GCM", "Attributes": map[string]any{"PlatformPrincipal": "principal"}},
+		"missing principal":  {"Name": "mobile", "Platform": "ADM", "Attributes": map[string]any{"PlatformCredential": "secret"}},
 		"unknown attribute":  {"Name": "mobile", "Platform": "GCM", "Attributes": map[string]any{"Unknown": "value", "PlatformCredential": "secret"}},
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -329,14 +329,12 @@ func validatePlatformApplication(name, platform string, attrs map[string]any) *s
 	default:
 		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Platform", HTTPStatus: 400, Fault: "client"}
 	}
-	if len(attrs) > 0 {
-		if str(attrs["PlatformCredential"]) == "" {
+	if len(attrs) == 0 || str(attrs["PlatformCredential"]) == "" || (platform == "ADM" && str(attrs["PlatformPrincipal"]) == "") {
+		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Attributes", HTTPStatus: 400, Fault: "client"}
+	}
+	for key := range attrs {
+		if key != "PlatformPrincipal" && key != "PlatformCredential" {
 			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Attributes", HTTPStatus: 400, Fault: "client"}
-		}
-		for key := range attrs {
-			if key != "PlatformPrincipal" && key != "PlatformCredential" {
-				return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Attributes", HTTPStatus: 400, Fault: "client"}
-			}
 		}
 	}
 	return nil

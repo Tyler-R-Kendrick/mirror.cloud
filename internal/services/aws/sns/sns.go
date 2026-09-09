@@ -418,6 +418,18 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "ListSubscriptions", "ListSubscriptionsByTopic":
 		want := str(req.Input["TopicArn"])
+		if req.Operation == "ListSubscriptionsByTopic" {
+			if !validTopicARN(want) {
+				return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: TopicArn", HTTPStatus: 400, Fault: "client"}
+			}
+			parts := strings.Split(want, ":")
+			if parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {
+				return nil, topicNotFoundFault()
+			}
+			if _, ok, _ := p.col(req, "topics").Get(ctx, topicName(want)); !ok {
+				return nil, topicNotFoundFault()
+			}
+		}
 		kvs, _, _ := p.col(req, "subs").List(ctx, "", "", 0)
 		var subs []any
 		for _, kv := range kvs {

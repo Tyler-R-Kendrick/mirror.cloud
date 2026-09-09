@@ -1097,6 +1097,31 @@ func TestSNSUnsubscribeDeletedTopic(t *testing.T) {
 	}
 }
 
+func TestSNSListSubscriptionsByTopicARNValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "list-subs-validation"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arn := str(created.Output["TopicArn"])
+	for _, topicARN := range []string{
+		"list-subs-validation",
+		strings.Replace(arn, ":us-east-1:", ":us-west-2:", 1),
+		arn + "-missing",
+	} {
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListSubscriptionsByTopic", Input: map[string]any{"TopicArn": topicARN}})
+		if err == nil {
+			t.Fatalf("accepted invalid or missing TopicArn %q", topicARN)
+		}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListSubscriptionsByTopic", Input: map[string]any{"TopicArn": arn}}); err != nil {
+		t.Fatalf("valid TopicArn rejected: %v", err)
+	}
+}
+
 func TestSNSPendingEmailSubscription(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

@@ -4,9 +4,9 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 768 of 907 direct upstream test functions are explicitly traced (84.7%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 769 of 907 direct upstream test functions are explicitly traced (84.8%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green: 2,736 tests across 221 Go packages. The 2,540-entry mutation inventory passed in all four CI-equivalent shards (1110.866s, 1278.263s, 1248.509s, and 1233.725s). These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green: 2,736 tests across 221 Go packages. The 2,543-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -18,7 +18,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SNS operations routed to emulation | 43 / 43 |
 | SNS statement coverage | 92.0% |
 | LocalStack SNS test functions inventoried | 180 |
-| LocalStack SNS test functions explicitly traced | 41 / 180 |
+| LocalStack SNS test functions explicitly traced | 42 / 180 |
 
 The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
 
@@ -65,6 +65,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSSMS::test_set_invalid_sms_attributes` | `TestSNSSMSAttributeValidationAndSelection` rejects unknown and malformed SMS attributes |
 | `test_sns.py::TestSNSSMS::test_set_get_sms_attributes` | `TestSNSSMSAttributeValidationAndSelection` persists SMS attributes and applies the requested-attribute filter |
 | `test_sns.py::TestSNSSubscriptionCrudV2::test_unsubscribe_from_deleted_topic` | `TestSNSUnsubscribeDeletedTopic` rejects unsubscribe after topic deletion |
+| `test_sns.py::TestSNSSubscriptionCrudV2::test_getting_subscriptions_by_topic` | `TestSNSListSubscriptionsByTopicARNValidation` rejects malformed, cross-scope, and missing topic ARNs while accepting a valid topic |
 | `test_sns.py::TestSNSTopicCrud::test_create_topic_with_attributes` | `TestSNSTopicAttributeARNValidation` rejects malformed `GetTopicAttributes` ARNs |
 | `test_sns.py::TestSNSTopicCrud::test_create_topic_with_attributes` | `TestSNSTopicAttributeARNScope` rejects cross-region `GetTopicAttributes` ARNs |
 

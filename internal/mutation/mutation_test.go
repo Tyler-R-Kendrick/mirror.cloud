@@ -17944,6 +17944,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSSQSRawDeliveryPreservesMessageAttributes",
 		},
 		{
+			name: "sns-drop-sqs-binary-attribute-value",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `attribute["BinaryValue"] = binary`,
+			new:  `attribute["BinaryValue"] = nil`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSSQSRawDeliveryPreservesMessageAttributes",
+		},
+		{
 			name: "sns-ignore-topic-http-content-type-policy",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old: `if value, ok := deliveryContentType(str(asMap(topic["attrs"])["DeliveryPolicy"]), "http", "defaultRequestPolicy"); ok {

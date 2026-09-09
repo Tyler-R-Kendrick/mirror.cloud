@@ -127,7 +127,10 @@ func TestSNSSQSRawDeliveryPreservesMessageAttributes(t *testing.T) {
 		t.Fatalf("messages %#v", received.Output)
 	}
 	message := asMap(messages[0])
-	if message["Body"] != "raw" || len(asMap(message["MessageAttributes"])) != 2 {
+	messageAttrs := asMap(message["MessageAttributes"])
+	if message["Body"] != "raw" || len(messageAttrs) != 2 ||
+		str(asMap(messageAttrs["text"])["StringValue"]) != "value" ||
+		str(asMap(messageAttrs["binary"])["BinaryValue"]) != base64.StdEncoding.EncodeToString([]byte{2, 3, 4}) {
 		t.Fatalf("raw delivery %#v", message)
 	}
 }

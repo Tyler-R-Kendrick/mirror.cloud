@@ -17738,7 +17738,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-accept-malformed-topic-attributes-arn",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-			old:  "if !validTopicARN(arn) {",
+			old:  "case \"GetTopicAttributes\":\n\t\tarn := str(req.Input[\"TopicArn\"])\n\t\tif !validTopicARN(arn) {",
 			new:  "if false {",
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSTopicAttributeARNValidation",
@@ -17746,10 +17746,26 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-accept-cross-scope-topic-attributes-arn",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-			old:  "parts := strings.Split(arn, \":\")\n\t\tif parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {",
+			old:  "case \"GetTopicAttributes\":\n\t\tarn := str(req.Input[\"TopicArn\"])\n\t\tif !validTopicARN(arn) {\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tparts := strings.Split(arn, \":\")\n\t\tif parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {",
 			new:  "parts := strings.Split(arn, \":\")\n\t\tif false {",
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSTopicAttributeARNScope",
+		},
+		{
+			name: "sns-accept-malformed-set-topic-attributes-arn",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "case \"SetTopicAttributes\":\n\t\tarn := str(req.Input[\"TopicArn\"])\n\t\tif !validTopicARN(arn) {\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tparts := strings.Split(arn, \":\")",
+			new:  "case \"SetTopicAttributes\":\n\t\tarn := str(req.Input[\"TopicArn\"])\n\t\tif false {\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tparts := strings.Split(arn, \":\")",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestTopicValidationAndPublishTargetCharacterization",
+		},
+		{
+			name: "sns-accept-cross-scope-set-topic-attributes-arn",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "case \"SetTopicAttributes\":\n\t\tarn := str(req.Input[\"TopicArn\"])\n\t\tif !validTopicARN(arn) {\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tparts := strings.Split(arn, \":\")\n\t\tif parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {\n\t\t\treturn nil, topicNotFoundFault()\n\t\t}\n\t\tname := topicName(arn)",
+			new:  "case \"SetTopicAttributes\":\n\t\tarn := str(req.Input[\"TopicArn\"])\n\t\tif !validTopicARN(arn) {\n\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t\t}\n\t\tparts := strings.Split(arn, \":\")\n\t\tif false {\n\t\t\treturn nil, topicNotFoundFault()\n\t\t}\n\t\tname := topicName(arn)",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestTopicValidationAndPublishTargetCharacterization",
 		},
 		{
 			name: "sns-accept-unknown-confirmation-token",

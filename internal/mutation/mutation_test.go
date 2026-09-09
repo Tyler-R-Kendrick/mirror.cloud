@@ -83,6 +83,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSSQSNotificationPreservesMessageAttributes",
 		},
 		{
+			name: "sns-drop-default-topic-policy",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  "return fmt.Sprintf(`{\"Version\":\"2008-10-17\",\"Id\":\"__default_policy_ID\",\"Statement\":[{\"Sid\":\"__default_statement_ID\",\"Effect\":\"Allow\",\"Principal\":{\"AWS\":\"*\"},\"Action\":[\"SNS:Subscribe\",\"SNS:ListSubscriptionsByTopic\",\"SNS:DeleteTopic\",\"SNS:GetTopicAttributes\",\"SNS:Publish\",\"SNS:RemovePermission\",\"SNS:AddPermission\",\"SNS:SetTopicAttributes\"],\"Resource\":\"%s\",\"Condition\":{\"StringEquals\":{\"AWS:SourceOwner\":\"%s\"}}}]}`, arn, account)",
+			new:  "return \"\"",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSTopicAttributesIncludeDefaultPolicy",
+		},
+		{
 			name: "sns-lambda-envelope-key-casing",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `"SignatureVersion": "1", "Signature": "", "SigningCertURL":`,

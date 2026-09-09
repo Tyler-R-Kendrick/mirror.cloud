@@ -1095,6 +1095,26 @@ func TestSNSPlatformEndpointDeletionCleansSubscriptions(t *testing.T) {
 	}
 }
 
+func TestSNSTopicAttributesIncludeDefaultPolicy(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "default-policy"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attrs, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetTopicAttributes", Input: map[string]any{"TopicArn": created.Output["TopicArn"]}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := str(asMap(attrs.Output["Attributes"])["Policy"])
+	var decoded map[string]any
+	if json.Unmarshal([]byte(policy), &decoded) != nil || decoded["Version"] != "2008-10-17" || decoded["Id"] != "__default_policy_ID" || !strings.Contains(policy, "__default_statement_ID") || !strings.Contains(policy, created.Output["TopicArn"].(string)) {
+		t.Fatalf("default topic policy=%q", policy)
+	}
+}
+
 func TestSNSPhoneNumberPublish(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

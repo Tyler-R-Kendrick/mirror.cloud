@@ -164,6 +164,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				attrs[k] = v
 			}
 		}
+		if _, ok := attrs["Policy"]; !ok {
+			attrs["Policy"] = defaultTopicPolicy(arn, req.Identity.Account)
+		}
 		return &spi.Response{Output: map[string]any{"Attributes": attrs}}, nil
 	case "SetTopicAttributes":
 		arn := str(req.Input["TopicArn"])

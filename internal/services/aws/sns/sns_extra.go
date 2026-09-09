@@ -3,6 +3,7 @@ package sns
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -31,9 +32,11 @@ func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Resp
 	if attrs == nil {
 		attrs = map[string]any{}
 	}
-	pol := map[string]any{"Version": "2012-10-17", "Statement": []any{}}
+	pol := map[string]any{}
 	if raw := str(attrs["Policy"]); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &pol)
+	} else {
+		_ = json.Unmarshal([]byte(defaultTopicPolicy(arn, req.Identity.Account)), &pol)
 	}
 	stmts, _ := pol["Statement"].([]any)
 	if req.Operation == "AddPermission" {
@@ -84,6 +87,10 @@ func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Resp
 	nb, _ := json.Marshal(m)
 	_ = p.col(req, "topics").Put(ctx, name, nb)
 	return &spi.Response{Output: map[string]any{}}, nil
+}
+
+func defaultTopicPolicy(arn, account string) string {
+	return fmt.Sprintf(`{"Version":"2008-10-17","Id":"__default_policy_ID","Statement":[{"Sid":"__default_statement_ID","Effect":"Allow","Principal":{"AWS":"*"},"Action":["SNS:Subscribe","SNS:ListSubscriptionsByTopic","SNS:DeleteTopic","SNS:GetTopicAttributes","SNS:Publish","SNS:RemovePermission","SNS:AddPermission","SNS:SetTopicAttributes"],"Resource":"%s","Condition":{"StringEquals":{"AWS:SourceOwner":"%s"}}}]}`, arn, account)
 }
 
 func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, error) {

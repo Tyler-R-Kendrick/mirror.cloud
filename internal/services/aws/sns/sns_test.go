@@ -200,7 +200,7 @@ func TestSNSSQSNotificationPreservesMessageAttributes(t *testing.T) {
 	}
 	message := asMap(asSlice(received.Output["Messages"])[0])
 	var envelope map[string]any
-	if json.Unmarshal([]byte(str(message["Body"])), &envelope) != nil || envelope["Subject"] != "subject" || str(asMap(envelope["MessageAttributes"])["kind"].(map[string]any)["StringValue"]) != "event" {
+	if json.Unmarshal([]byte(str(message["Body"])), &envelope) != nil || envelope["Subject"] != "subject" || envelope["SignatureVersion"] != "1" || envelope["Signature"] != "" || !strings.Contains(str(envelope["SigningCertURL"]), "SimpleNotificationService.pem") || !strings.Contains(str(envelope["UnsubscribeURL"]), "Action=Unsubscribe") || str(asMap(envelope["MessageAttributes"])["kind"].(map[string]any)["StringValue"]) != "event" {
 		t.Fatalf("notification envelope=%#v", envelope)
 	}
 }

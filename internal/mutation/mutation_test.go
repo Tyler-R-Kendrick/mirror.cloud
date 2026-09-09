@@ -75,6 +75,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSSMSOptOutSuppressesDelivery",
 		},
 		{
+			name: "sns-drop-notification-envelope-metadata",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `"Timestamp": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), "SignatureVersion": "1", "Signature": "",`,
+			new:  `"Timestamp": "", "SignatureVersion": "", "Signature": "",`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSSQSNotificationPreservesMessageAttributes",
+		},
+		{
 			name: "restxml-canonicalize-etag-header",
 			file: filepath.Join("internal", "proto", "aws", "restxml", "restxml.go"),
 			old:  `if strings.EqualFold(k, "ETag") {`,

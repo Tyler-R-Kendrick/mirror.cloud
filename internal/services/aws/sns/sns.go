@@ -702,7 +702,12 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 			continue
 		}
 		message := structuredMessage(body, str(req.Input["MessageStructure"]), protocol)
-		notification := map[string]any{"Type": "Notification", "Message": message, "TopicArn": arn, "MessageId": mid}
+		notification := map[string]any{
+			"Type": "Notification", "Message": message, "TopicArn": arn, "MessageId": mid,
+			"Timestamp": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), "SignatureVersion": "1", "Signature": "",
+			"SigningCertURL": "https://sns." + req.Identity.Region + ".amazonaws.com/SimpleNotificationService.pem",
+			"UnsubscribeURL": "http://127.0.0.1:4566/?Action=Unsubscribe&SubscriptionArn=" + str(sub["SubscriptionArn"]),
+		}
 		if subject := str(req.Input["Subject"]); subject != "" {
 			notification["Subject"] = subject
 		}

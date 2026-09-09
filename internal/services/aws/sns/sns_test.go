@@ -716,6 +716,11 @@ func TestSNSPlatformEndpointLifecycleValidation(t *testing.T) {
 	if err != nil || str(first.Output["EndpointArn"]) != str(second.Output["EndpointArn"]) {
 		t.Fatalf("endpoint idempotency first=%#v second=%#v err=%v", first, second, err)
 	}
+	if _, err := call("CreatePlatformEndpoint", map[string]any{
+		"PlatformApplicationArn": appARN, "Token": "token", "Attributes": map[string]any{"Enabled": "false"},
+	}); err == nil {
+		t.Fatal("accepted endpoint idempotency request with different attributes")
+	}
 	if _, err := call("SetEndpointAttributes", map[string]any{"EndpointArn": appARN + "/endpoint/missing"}); err == nil {
 		t.Fatal("set attributes for missing endpoint")
 	}

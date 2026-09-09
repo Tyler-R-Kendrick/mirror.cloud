@@ -17912,6 +17912,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPlatformEndpointLifecycleValidation",
 		},
 		{
+			name: "sns-accept-platform-endpoint-different-attributes",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  "for key, value := range requestedAttrs {\n\t\t\t\t\tif key == \"Enabled\" && strings.EqualFold(str(existing[key]), str(value)) {",
+			new:  "for key, value := range map[string]any{} {\n\t\t\t\t\tif key == \"Enabled\" && strings.EqualFold(str(existing[key]), str(value)) {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPlatformEndpointLifecycleValidation",
+		},
+		{
 			name: "sns-set-attributes-on-missing-endpoint",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old: `if !ok {

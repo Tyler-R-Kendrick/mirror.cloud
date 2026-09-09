@@ -362,15 +362,33 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		if customUserData == nil {
 			customUserData = attrs["CustomUserData"]
 		}
+		requestedAttrs := map[string]any{}
+		for key, value := range attrs {
+			requestedAttrs[key] = value
+		}
+		if customUserData != nil {
+			requestedAttrs["CustomUserData"] = customUserData
+		}
 		kvs, _, _ := col.List(ctx, "", "", 0)
 		for _, kv := range kvs {
 			var existing map[string]any
 			if json.Unmarshal(kv.Value, &existing) == nil && str(existing["PlatformApplicationArn"]) == app && str(existing["Token"]) == tok {
+				for key, value := range requestedAttrs {
+					if key == "Enabled" && strings.EqualFold(str(existing[key]), str(value)) {
+						continue
+					}
+					if str(existing[key]) != str(value) {
+						return nil, &spi.Fault{Code: "InvalidParameter", Message: "Endpoint already exists with a different attribute value.", HTTPStatus: 400, Fault: "client"}
+					}
+				}
 				return &spi.Response{Output: map[string]any{"EndpointArn": existing["EndpointArn"]}}, nil
 			}
 		}
 		arn := app + "/endpoint/" + p.deps.Rand.Hex(8)
 		rec := map[string]any{"EndpointArn": arn, "PlatformApplicationArn": app, "Token": tok, "CustomUserData": customUserData, "Enabled": "true"}
+		for key, value := range requestedAttrs {
+			rec[key] = value
+		}
 		b, _ := json.Marshal(rec)
 		_ = col.Put(ctx, arn, b)
 		return &spi.Response{Output: map[string]any{"EndpointArn": arn}}, nil

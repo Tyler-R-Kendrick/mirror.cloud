@@ -2,8 +2,14 @@ package sns
 
 import (
 	"context"
+	"crypto"
+	"crypto/rsa"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -200,9 +206,73 @@ func TestSNSSQSNotificationPreservesMessageAttributes(t *testing.T) {
 	}
 	message := asMap(asSlice(received.Output["Messages"])[0])
 	var envelope map[string]any
-	if json.Unmarshal([]byte(str(message["Body"])), &envelope) != nil || envelope["Subject"] != "subject" || envelope["SignatureVersion"] != "1" || envelope["Signature"] != "" || !strings.Contains(str(envelope["SigningCertURL"]), "SimpleNotificationService.pem") || !strings.Contains(str(envelope["UnsubscribeURL"]), "Action=Unsubscribe") || str(asMap(envelope["MessageAttributes"])["kind"].(map[string]any)["StringValue"]) != "event" {
+	if json.Unmarshal([]byte(str(message["Body"])), &envelope) != nil || envelope["Subject"] != "subject" || str(envelope["Timestamp"]) == "" || !validTestSNSNotificationSignature(envelope) || !strings.Contains(str(envelope["SigningCertURL"]), "SimpleNotificationService.pem") || !strings.Contains(str(envelope["UnsubscribeURL"]), "Action=Unsubscribe") || str(asMap(envelope["MessageAttributes"])["kind"].(map[string]any)["StringValue"]) != "event" {
 		t.Fatalf("notification envelope=%#v", envelope)
 	}
+}
+
+func TestSNSSQSNotificationSignatureVersionTwo(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "signature-v2"}}); err != nil {
+		t.Fatal(err)
+	}
+	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{
+		"Name": "signature-v2", "Attributes": map[string]any{"SignatureVersion": "2"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arn := str(topic.Output["TopicArn"])
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": arn, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:signature-v2",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"TopicArn": arn, "Message": "signed-v2"}}); err != nil {
+		t.Fatal(err)
+	}
+	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "signature-v2"}})
+	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+		t.Fatalf("signature v2 delivery=%#v err=%v", received, err)
+	}
+	var envelope map[string]any
+	if json.Unmarshal([]byte(str(asMap(asSlice(received.Output["Messages"])[0])["Body"])), &envelope) != nil || str(envelope["SignatureVersion"]) != "2" || !validTestSNSNotificationSignature(envelope) {
+		t.Fatalf("signature v2 envelope=%#v", envelope)
+	}
+}
+
+func validTestSNSNotificationSignature(values map[string]any) bool {
+	block, _ := pem.Decode(signingCertificate())
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return false
+	}
+	var canonical strings.Builder
+	for _, field := range []string{"Message", "MessageId", "Subject", "Timestamp", "TopicArn", "Type"} {
+		if value, ok := values[field]; ok {
+			canonical.WriteString(field + "\n" + str(value) + "\n")
+		}
+	}
+	signature, err := base64.StdEncoding.DecodeString(str(values["Signature"]))
+	if err != nil {
+		return false
+	}
+	var hash crypto.Hash
+	var digest []byte
+	if str(values["SignatureVersion"]) == "2" {
+		hash = crypto.SHA256
+		sum := sha256.Sum256([]byte(canonical.String()))
+		digest = sum[:]
+	} else {
+		hash = crypto.SHA1
+		sum := sha1.Sum([]byte(canonical.String()))
+		digest = sum[:]
+	}
+	public, ok := cert.PublicKey.(*rsa.PublicKey)
+	return ok && rsa.VerifyPKCS1v15(public, hash, digest, signature) == nil
 }
 
 func TestSNSSQSDeliveryPropagatesTraceHeader(t *testing.T) {

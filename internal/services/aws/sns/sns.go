@@ -707,16 +707,26 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 		message := structuredMessage(body, str(req.Input["MessageStructure"]), protocol)
 		notification := map[string]any{
 			"Type": "Notification", "Message": message, "TopicArn": arn, "MessageId": mid,
-			"Timestamp": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), "SignatureVersion": "1", "Signature": "",
-			"SigningCertURL": "https://sns." + req.Identity.Region + ".amazonaws.com/SimpleNotificationService.pem",
+			"Timestamp":      p.deps.Clock.Now().UTC().Format(time.RFC3339Nano),
+			"SigningCertURL": snsCertificateURL(req),
 			"UnsubscribeURL": "http://127.0.0.1:4566/?Action=Unsubscribe&SubscriptionArn=" + str(sub["SubscriptionArn"]),
 		}
+		signatureVersion := "1"
+		if b, found, _ := p.col(req, "topics").Get(ctx, topicName(arn)); found {
+			var topic map[string]any
+			_ = json.Unmarshal(b, &topic)
+			if str(asMap(topic["attrs"])["SignatureVersion"]) == "2" {
+				signatureVersion = "2"
+			}
+		}
+		notification["SignatureVersion"] = signatureVersion
 		if subject := str(req.Input["Subject"]); subject != "" {
 			notification["Subject"] = subject
 		}
 		if len(msgAttrs) > 0 {
 			notification["MessageAttributes"] = msgAttrs
 		}
+		notification["Signature"] = signNotification(notification, signatureVersion)
 		payload := message
 		sqsAttrs := map[string]any(nil)
 		if str(sub["RawMessageDelivery"]) != "true" {
@@ -997,15 +1007,28 @@ func (p *Pack) deliverLambda(ctx context.Context, req *spi.Request, sub map[stri
 }
 
 func (p *Pack) lambdaNotification(req *spi.Request, sub map[string]any, body, messageID string, attrs map[string]any) map[string]any {
+	sns := map[string]any{
+		"Type": "Notification", "MessageId": messageID, "TopicArn": sub["TopicArn"], "Subject": req.Input["Subject"],
+		"Message": body, "Timestamp": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano),
+		"SignatureVersion": "1", "SigningCertURL": snsCertificateURL(req),
+		"UnsubscribeURL":    "http://127.0.0.1:4566/?Action=Unsubscribe&SubscriptionArn=" + str(sub["SubscriptionArn"]),
+		"MessageAttributes": attrs,
+	}
+	signatureVersion := "1"
+	if arn := str(sub["TopicArn"]); arn != "" {
+		if b, found, _ := p.col(req, "topics").Get(context.Background(), topicName(arn)); found {
+			var topic map[string]any
+			_ = json.Unmarshal(b, &topic)
+			if str(asMap(topic["attrs"])["SignatureVersion"]) == "2" {
+				signatureVersion = "2"
+			}
+		}
+	}
+	sns["Signature"] = signNotification(sns, signatureVersion)
 	return map[string]any{
 		"Records": []any{map[string]any{
 			"EventSource": "aws:sns", "EventVersion": "1.0", "EventSubscriptionArn": sub["SubscriptionArn"],
-			"Sns": map[string]any{
-				"Type": "Notification", "MessageId": messageID, "TopicArn": sub["TopicArn"], "Subject": req.Input["Subject"],
-				"Message": body, "Timestamp": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), "MessageAttributes": attrs,
-				"SignatureVersion": "1", "Signature": "", "SigningCertURL": "https://sns." + req.Identity.Region + ".amazonaws.com/SimpleNotificationService.pem",
-				"UnsubscribeURL": "http://127.0.0.1:4566/?Action=Unsubscribe&SubscriptionArn=" + str(sub["SubscriptionArn"]),
-			},
+			"Sns": sns,
 		}},
 	}
 }

@@ -23,10 +23,32 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sts"
 )
 
 type recordingAuthorizer struct{ checks []string }
+
+func TestSNSCertificateEndpoint(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sns"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
+	defer ts.Close()
+	response, err := http.Get(ts.URL + "/_aws/sns/SimpleNotificationService.pem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("BEGIN CERTIFICATE")) {
+		t.Fatalf("certificate response status=%d err=%v body=%q", response.StatusCode, err, body)
+	}
+}
 
 func s3Envelope(t testing.TB, response *http.Response) map[string]any {
 	t.Helper()

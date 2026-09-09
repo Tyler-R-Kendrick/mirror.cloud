@@ -117,7 +117,7 @@ func TestSNSSQSRawDeliveryPreservesMessageAttributes(t *testing.T) {
 	topic := str(snsCall("CreateTopic", map[string]any{"Name": "raw-attrs"}).Output["TopicArn"])
 	snsCall("Subscribe", map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:raw-attrs", "RawMessageDelivery": "true"})
 	attrs := map[string]any{
-		"text":   map[string]any{"DataType": "String", "StringValue": "value"},
+		"text":   map[string]any{"Type": "String", "Value": "value"},
 		"binary": map[string]any{"DataType": "Binary", "BinaryValue": base64.StdEncoding.EncodeToString([]byte{2, 3, 4})},
 	}
 	snsCall("Publish", map[string]any{"TopicArn": topic, "Message": "raw", "MessageAttributes": attrs})

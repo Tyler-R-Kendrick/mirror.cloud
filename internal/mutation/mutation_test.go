@@ -133,7 +133,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "edge-demux-sns-confirmation-url",
 			file: filepath.Join("internal", "edge", "edge.go"),
-			old:  `if action == "ConfirmSubscription" && strings.HasPrefix(r.URL.Query().Get("TopicArn"), "arn:aws:sns:") {`,
+			old:  `if action == "ConfirmSubscription" {`,
 			new:  `if false {`,
 			pkg:  "./internal/edge",
 			run:  "TestDemuxSNSConfirmationURL",

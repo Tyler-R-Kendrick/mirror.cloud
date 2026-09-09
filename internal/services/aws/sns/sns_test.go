@@ -405,6 +405,14 @@ func TestSNSControlPlaneOperations(t *testing.T) {
 	if subAttributes["RawMessageDelivery"] != "true" || subAttributes["ConfirmationWasAuthenticated"] != "true" {
 		t.Fatalf("subscription attributes %#v", subAttributes)
 	}
+	must("SetSubscriptionAttributes", map[string]any{"SubscriptionArn": httpSub, "AttributeName": "DeliveryPolicy", "AttributeValue": `{"requestPolicy":{"headerContentType":"text/plain"}}`})
+	if got := must("GetSubscriptionAttributes", map[string]any{"SubscriptionArn": httpSub}).Output["Attributes"].(map[string]any)["DeliveryPolicy"]; got == nil {
+		t.Fatal("subscription delivery policy was not stored")
+	}
+	must("SetSubscriptionAttributes", map[string]any{"SubscriptionArn": httpSub, "AttributeName": "DeliveryPolicy", "AttributeValue": ""})
+	if _, found := must("GetSubscriptionAttributes", map[string]any{"SubscriptionArn": httpSub}).Output["Attributes"].(map[string]any)["DeliveryPolicy"]; found {
+		t.Fatal("empty subscription delivery policy was retained")
+	}
 	must("Unsubscribe", map[string]any{"SubscriptionArn": httpSub})
 
 	batch := must("PublishBatch", map[string]any{"TopicArn": topic, "Entries": []any{

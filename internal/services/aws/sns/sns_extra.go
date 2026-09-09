@@ -108,7 +108,7 @@ func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 				return nil, fault
 			}
 		}
-		if k == "FilterPolicy" && value == "" {
+		if (k == "FilterPolicy" || k == "DeliveryPolicy") && value == "" {
 			delete(rec, k)
 		} else if k == "RawMessageDelivery" {
 			rec[k] = strings.ToLower(value)
@@ -119,7 +119,7 @@ func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 			rec["attrs"] = map[string]any{}
 		}
 		if attrs, ok := rec["attrs"].(map[string]any); ok {
-			if k == "FilterPolicy" && value == "" {
+			if (k == "FilterPolicy" || k == "DeliveryPolicy") && value == "" {
 				delete(attrs, k)
 			} else if k == "RawMessageDelivery" {
 				attrs[k] = strings.ToLower(value)

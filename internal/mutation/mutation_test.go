@@ -17592,9 +17592,9 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-retain-cleared-filter-policy",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
-			old: `if k == "FilterPolicy" && value == "" {
+			old: `if (k == "FilterPolicy" || k == "DeliveryPolicy") && value == "" {
 				delete(attrs, k)`,
-			new: `if false {
+			new: `if k == "FilterPolicy" && value == "" {
 				delete(attrs, k)`,
 			pkg: "./internal/services/aws/sns",
 			run: "TestSNSFilterPolicyScopeCharacterization",
@@ -18000,6 +18000,16 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  `slot["BinaryValue"] = nil`,
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSFlattenedBinaryMessageAttributeDelivery",
+		},
+		{
+			name: "sns-retain-empty-subscription-delivery-policy",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old: `if (k == "FilterPolicy" || k == "DeliveryPolicy") && value == "" {
+			delete(rec, k)`,
+			new: `if k == "FilterPolicy" && value == "" {
+			delete(rec, k)`,
+			pkg: "./internal/services/aws/sns",
+			run: "TestSNSControlPlaneOperations",
 		},
 		{
 			name: "sns-allow-standard-topic-fifo-queue",

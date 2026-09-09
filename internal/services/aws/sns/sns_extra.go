@@ -11,6 +11,13 @@ import (
 
 func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	arn := str(req.Input["TopicArn"])
+	if !validTopicARN(arn) {
+		return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: TopicArn", HTTPStatus: 400, Fault: "client"}
+	}
+	parts := strings.Split(arn, ":")
+	if parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {
+		return nil, topicNotFoundFault()
+	}
 	name := topicName(arn)
 	if _, ok, _ := p.col(req, "topics").Get(ctx, name); !ok {
 		return nil, topicNotFoundFault()

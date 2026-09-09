@@ -17632,6 +17632,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSControlPlaneOperations",
 		},
 		{
+			name: "sns-accept-malformed-permission-topic-arn",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  "if !validTopicARN(arn) {\n\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t}\n\tparts := strings.Split(arn, \":\")",
+			new:  "if false {\n\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: TopicArn\", HTTPStatus: 400, Fault: \"client\"}\n\t}\n\tparts := strings.Split(arn, \":\")",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestTopicValidationAndPublishTargetCharacterization",
+		},
+		{
+			name: "sns-accept-cross-scope-permission-topic-arn",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  "parts := strings.Split(arn, \":\")\n\tif parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {\n\t\treturn nil, topicNotFoundFault()\n\t}\n\tname := topicName(arn)",
+			new:  "parts := strings.Split(arn, \":\")\n\tif false {\n\t\treturn nil, topicNotFoundFault()\n\t}\n\tname := topicName(arn)",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestTopicValidationAndPublishTargetCharacterization",
+		},
+		{
 			name: "sns-ignore-verified-sandbox-phone",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old:  `if str(rec["Status"]) == "Verified" {`,

@@ -4,9 +4,9 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 763 of 907 direct upstream test functions are explicitly traced (84.1%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 764 of 907 direct upstream test functions are explicitly traced (84.2%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green: 2,732 tests across 221 Go packages. The 2,526-entry mutation inventory passed in all four CI-equivalent shards (2070.248s, 2054.528s, 2065.491s, and 2075.426s); this includes the twenty-one newer SNS mutants (platform application validation, direct endpoint dispatch, application-subscription dispatch, phone-number validation, SMS-subscription dispatch, opt-in validation, application-ARN validation, SMS-attribute validation, SMS-attribute filtering, invalid sandbox-phone validation, missing sandbox-phone verification, invalid opt-out-check validation, duplicate tag-key validation, FIFO-topic immutability, duplicate permission-label validation, invalid permission-action validation, endpoint-subscription cleanup, default SMS spend-limit exposure, standard-topic false-FIFO idempotency, message-attribute validation, and deleted-topic unsubscribe rejection). These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green: 2,732 tests across 221 Go packages. The mutation inventory now has 2,527 entries; the prior 2,526-entry inventory passed in all four CI-equivalent shards (2070.248s, 2054.528s, 2065.491s, and 2075.426s), and the new malformed-topic-ARN mutant passes its targeted kill check. A complete four-shard rerun for the new entry remains outstanding. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -18,7 +18,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SNS operations routed to emulation | 43 / 43 |
 | SNS statement coverage | 92.0% |
 | LocalStack SNS test functions inventoried | 180 |
-| LocalStack SNS test functions explicitly traced | 36 / 180 |
+| LocalStack SNS test functions explicitly traced | 37 / 180 |
 
 The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
 
@@ -62,6 +62,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSSMS::test_set_invalid_sms_attributes` | `TestSNSSMSAttributeValidationAndSelection` rejects unknown and malformed SMS attributes |
 | `test_sns.py::TestSNSSMS::test_set_get_sms_attributes` | `TestSNSSMSAttributeValidationAndSelection` persists SMS attributes and applies the requested-attribute filter |
 | `test_sns.py::TestSNSSubscriptionCrudV2::test_unsubscribe_from_deleted_topic` | `TestSNSUnsubscribeDeletedTopic` rejects unsubscribe after topic deletion |
+| `test_sns.py::TestSNSTopicCrud::test_create_topic_with_attributes` | `TestSNSTopicAttributeARNValidation` rejects malformed `GetTopicAttributes` ARNs |
 
 ## S3 baseline
 

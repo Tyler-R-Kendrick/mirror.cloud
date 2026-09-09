@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1356,6 +1357,62 @@ func TestSNSLambdaSubscriptionRedrive(t *testing.T) {
 	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueUrl": "http://localhost:4566/1/sns-lambda-dlq"}})
 	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
 		t.Fatalf("Lambda DLQ messages=%#v err=%v", received, err)
+	}
+}
+
+func TestSNSHTTPDeliveryPolicy(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "sns-http-policy"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := make(chan string, 1)
+	bodyCh := make(chan string, 1)
+	contentTypeCh := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, incoming *http.Request) {
+		if incoming.Header.Get("x-amz-sns-message-type") == "SubscriptionConfirmation" {
+			var payload map[string]any
+			_ = json.NewDecoder(incoming.Body).Decode(&payload)
+			token <- str(payload["Token"])
+		} else {
+			body, _ := io.ReadAll(incoming.Body)
+			bodyCh <- string(body)
+			contentTypeCh <- incoming.Header.Get("Content-Type")
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	sub, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Protocol": "http", "Endpoint": server.URL, "ReturnSubscriptionArn": true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ConfirmSubscription", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Token": <-token,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]string{"DeliveryPolicy": `{"requestPolicy":{"headerContentType":"text/csv"}}`, "RawMessageDelivery": "true"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetSubscriptionAttributes", Input: map[string]any{
+			"SubscriptionArn": sub.Output["SubscriptionArn"], "AttributeName": name, "AttributeValue": value,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Message": "raw-http-message",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if body := <-bodyCh; body != "raw-http-message" {
+		t.Fatalf("raw HTTP body=%q", body)
+	}
+	if got := <-contentTypeCh; got != "text/csv" {
+		t.Fatalf("HTTP content type=%q", got)
 	}
 }
 

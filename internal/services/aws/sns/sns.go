@@ -404,7 +404,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				p.httpPost(str(req.Input["Endpoint"]), map[string]any{
 					"Type": "SubscriptionConfirmation", "Token": tok, "TopicArn": rec["TopicArn"],
 					"SubscribeURL": "http://127.0.0.1/confirm?Token=" + tok,
-				})
+				}, "SubscriptionConfirmation", "application/json")
 			}
 			b, _ := json.Marshal(rec)
 			_ = p.col(req, "subs").Put(ctx, sub, b)
@@ -725,7 +725,23 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 			if subject := str(req.Input["Subject"]); subject != "" {
 				notification["Subject"] = subject
 			}
-			if !p.httpPost(str(sub["Endpoint"]), notification) {
+			contentType := "application/json"
+			if policy := str(asMap(sub["attrs"])["DeliveryPolicy"]); policy != "" {
+				if value, ok := deliveryContentType(policy, "requestPolicy"); ok {
+					contentType = value
+				}
+			} else if b, found, _ := p.col(req, "topics").Get(ctx, topicName(arn)); found {
+				var topic map[string]any
+				_ = json.Unmarshal(b, &topic)
+				if value, ok := deliveryContentType(str(asMap(topic["attrs"])["DeliveryPolicy"]), "http", "defaultRequestPolicy"); ok {
+					contentType = value
+				}
+			}
+			body := any(notification)
+			if str(sub["RawMessageDelivery"]) == "true" {
+				body = payload
+			}
+			if !p.httpPost(str(sub["Endpoint"]), body, "Notification", contentType) {
 				if dlq := subscriptionDLQ(sub); dlq != "" {
 					p.deliverSQS(ctx, req, dlq, payload)
 				}
@@ -990,17 +1006,22 @@ func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body 
 	return err == nil
 }
 
-func (p *Pack) httpPost(endpoint string, payload map[string]any) bool {
+func (p *Pack) httpPost(endpoint string, payload any, messageType, contentType string) bool {
 	if endpoint == "" {
 		return false
 	}
-	b, _ := json.Marshal(payload)
+	var b []byte
+	if raw, ok := payload.(string); ok {
+		b = []byte(raw)
+	} else {
+		b, _ = json.Marshal(payload)
+	}
 	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(b))
 	if err != nil {
 		return false
 	}
-	req.Header.Set("Content-Type", "application/json")
-	if messageType := str(payload["Type"]); messageType != "" {
+	req.Header.Set("Content-Type", contentType)
+	if messageType != "" {
 		req.Header.Set("x-amz-sns-message-type", messageType)
 	}
 	cli := &http.Client{Timeout: 2 * time.Second}
@@ -1010,6 +1031,22 @@ func (p *Pack) httpPost(endpoint string, payload map[string]any) bool {
 	}
 	ioDiscard(res)
 	return res.StatusCode >= http.StatusOK && res.StatusCode < http.StatusMultipleChoices
+}
+
+func deliveryContentType(raw string, path ...string) (string, bool) {
+	var value map[string]any
+	if json.Unmarshal([]byte(raw), &value) != nil {
+		return "", false
+	}
+	for _, key := range path {
+		var ok bool
+		value, ok = value[key].(map[string]any)
+		if !ok {
+			return "", false
+		}
+	}
+	contentType := str(value["headerContentType"])
+	return contentType, contentType != ""
 }
 
 func subscriptionDLQ(sub map[string]any) string {

@@ -17898,7 +17898,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-drop-http-subscription-redrive",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-			old:  `if !p.httpPost(str(sub["Endpoint"]), notification) {`,
+			old:  `if !p.httpPost(str(sub["Endpoint"]), body, "Notification", contentType) {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSHTTPSubscriptionRedrive",
@@ -17918,6 +17918,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSLambdaSubscriptionRedrive",
+		},
+		{
+			name: "sns-wrap-raw-http-subscription-body",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `body = payload`,
+			new:  `body = notification`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSHTTPDeliveryPolicy",
 		},
 		{
 			name: "sns-allow-standard-topic-fifo-queue",

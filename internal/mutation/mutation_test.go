@@ -17728,6 +17728,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSControlPlaneOperations",
 		},
 		{
+			name: "sns-unsubscribe-deleted-topic",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "if _, found, _ := p.col(req, \"topics\").Get(ctx, topicName(topicArn)); !found {",
+			new:  "if false {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSUnsubscribeDeletedTopic",
+		},
+		{
 			name: "sns-accept-unknown-confirmation-token",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  "if str(req.Input[\"TopicArn\"]) != \"\" {\n\t\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: Token\", HTTPStatus: 400, Fault: \"client\"}",

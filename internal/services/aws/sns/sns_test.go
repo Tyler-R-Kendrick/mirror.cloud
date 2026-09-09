@@ -1056,6 +1056,31 @@ func TestSNSDefaultSMSAttributes(t *testing.T) {
 	}
 }
 
+func TestSNSUnsubscribeDeletedTopic(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "deleted-sub"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic := str(created.Output["TopicArn"])
+	sub, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic, "Protocol": "email", "Endpoint": "user@example.com",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subARN := str(sub.Output["SubscriptionArn"])
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteTopic", Input: map[string]any{"TopicArn": topic}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Unsubscribe", Input: map[string]any{"SubscriptionArn": subARN}}); err == nil {
+		t.Fatal("unsubscribed from a deleted topic")
+	}
+}
+
 func TestSNSStandardTopicFalseFIFOIsIdempotent(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

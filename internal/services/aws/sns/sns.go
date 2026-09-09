@@ -380,6 +380,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !validSubscriptionARN(arn) {
 			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: SubscriptionArn", HTTPStatus: 400, Fault: "client"}
 		}
+		topicArn := strings.Join(strings.Split(arn, ":")[:6], ":")
+		if _, found, _ := p.col(req, "topics").Get(ctx, topicName(topicArn)); !found {
+			return nil, topicNotFoundFault()
+		}
 		_ = p.col(req, "subs").Delete(ctx, arn)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "ListSubscriptions", "ListSubscriptionsByTopic":

@@ -252,6 +252,9 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		name := str(req.Input["Name"])
 		plat := str(req.Input["Platform"])
 		attrs := flattenAttrEntries(req.Input, "Attributes")
+		if len(attrs) == 0 && req.Input["Attributes"] != nil {
+			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Attributes", HTTPStatus: 400, Fault: "client"}
+		}
 		if fault := validatePlatformApplication(name, plat, attrs); fault != nil {
 			return nil, fault
 		}
@@ -329,7 +332,7 @@ func validatePlatformApplication(name, platform string, attrs map[string]any) *s
 	default:
 		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Platform", HTTPStatus: 400, Fault: "client"}
 	}
-	if len(attrs) == 0 || str(attrs["PlatformCredential"]) == "" || (platform == "ADM" && str(attrs["PlatformPrincipal"]) == "") {
+	if len(attrs) > 0 && (str(attrs["PlatformCredential"]) == "" || (platform == "ADM" && str(attrs["PlatformPrincipal"]) == "")) {
 		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Attributes", HTTPStatus: 400, Fault: "client"}
 	}
 	for key := range attrs {

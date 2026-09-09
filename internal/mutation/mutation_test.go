@@ -18156,7 +18156,15 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-accept-empty-platform-application-attributes",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
-			old:  `if len(attrs) == 0 || str(attrs["PlatformCredential"]) == "" || (platform == "ADM" && str(attrs["PlatformPrincipal"]) == "") {`,
+			old:  `if len(attrs) > 0 && (str(attrs["PlatformCredential"]) == "" || (platform == "ADM" && str(attrs["PlatformPrincipal"]) == "")) {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPlatformApplicationValidation",
+		},
+		{
+			name: "sns-accept-explicit-empty-platform-application-attributes",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  `if len(attrs) == 0 && req.Input["Attributes"] != nil {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSPlatformApplicationValidation",

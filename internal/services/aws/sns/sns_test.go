@@ -1405,6 +1405,14 @@ func TestSNSHTTPDeliveryPolicy(t *testing.T) {
 	p := New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	snsCall := func(operation string, input map[string]any) *spi.Response {
+		t.Helper()
+		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response
+	}
 	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "sns-http-policy"}})
 	if err != nil {
 		t.Fatal(err)
@@ -1412,6 +1420,7 @@ func TestSNSHTTPDeliveryPolicy(t *testing.T) {
 	token := make(chan string, 1)
 	bodyCh := make(chan string, 1)
 	contentTypeCh := make(chan string, 1)
+	messageTypeCh := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, incoming *http.Request) {
 		if incoming.Header.Get("x-amz-sns-message-type") == "SubscriptionConfirmation" {
 			var payload map[string]any
@@ -1421,6 +1430,7 @@ func TestSNSHTTPDeliveryPolicy(t *testing.T) {
 			body, _ := io.ReadAll(incoming.Body)
 			bodyCh <- string(body)
 			contentTypeCh <- incoming.Header.Get("Content-Type")
+			messageTypeCh <- incoming.Header.Get("x-amz-sns-message-type")
 		}
 		writer.WriteHeader(http.StatusNoContent)
 	}))
@@ -1453,6 +1463,16 @@ func TestSNSHTTPDeliveryPolicy(t *testing.T) {
 	}
 	if got := <-contentTypeCh; got != "text/csv" {
 		t.Fatalf("HTTP content type=%q", got)
+	}
+	if got := <-messageTypeCh; got != "Notification" {
+		t.Fatalf("SNS message type=%q", got)
+	}
+	snsCall("SetSubscriptionAttributes", map[string]any{"SubscriptionArn": sub.Output["SubscriptionArn"], "AttributeName": "DeliveryPolicy", "AttributeValue": ""})
+	snsCall("SetSubscriptionAttributes", map[string]any{"SubscriptionArn": sub.Output["SubscriptionArn"], "AttributeName": "RawMessageDelivery", "AttributeValue": "false"})
+	snsCall("SetTopicAttributes", map[string]any{"TopicArn": topic.Output["TopicArn"], "AttributeName": "DeliveryPolicy", "AttributeValue": `{"http":{"defaultRequestPolicy":{"headerContentType":"text/plain"}}}`})
+	snsCall("Publish", map[string]any{"TopicArn": topic.Output["TopicArn"], "Message": "topic-policy-message"})
+	if got := <-contentTypeCh; got != "text/plain" {
+		t.Fatalf("topic HTTP content type=%q", got)
 	}
 }
 

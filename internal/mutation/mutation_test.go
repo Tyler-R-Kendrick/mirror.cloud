@@ -17944,6 +17944,16 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSSQSRawDeliveryPreservesMessageAttributes",
 		},
 		{
+			name: "sns-ignore-topic-http-content-type-policy",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old: `if value, ok := deliveryContentType(str(asMap(topic["attrs"])["DeliveryPolicy"]), "http", "defaultRequestPolicy"); ok {
+					contentType = value
+				}`,
+			new: `if false {`,
+			pkg: "./internal/services/aws/sns",
+			run: "TestSNSHTTPDeliveryPolicy",
+		},
+		{
 			name: "sns-allow-standard-topic-fifo-queue",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `if !strings.HasSuffix(topicName(topicArn), ".fifo") && queueFIFO {`,

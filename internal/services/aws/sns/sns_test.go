@@ -613,6 +613,43 @@ func TestSNSFIFOPublishValidationAndTopicDeduplication(t *testing.T) {
 	}
 }
 
+func TestSNSFIFOTopicToSQSWithoutQueueDeduplication(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
+		"QueueName": "sns-fifo-no-dedup.fifo", "Attributes": map[string]any{"FifoQueue": "true"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{
+		"Name": "sns-fifo-no-dedup.fifo", "Attributes": map[string]any{"FifoTopic": "true", "ContentBasedDeduplication": "true"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	topicARN := str(topic.Output["TopicArn"])
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topicARN, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:sns-fifo-no-dedup.fifo", "RawMessageDelivery": "true",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+			"TopicArn": topicARN, "Message": "deduplicated", "MessageGroupId": "group-1",
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{
+		"QueueName": "sns-fifo-no-dedup.fifo", "AttributeNames": []any{"All"},
+	}})
+	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+		t.Fatalf("FIFO SNS delivery=%#v err=%v", received, err)
+	}
+}
+
 func TestSNSMessageStructureAndSizeValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

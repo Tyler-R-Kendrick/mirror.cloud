@@ -17906,7 +17906,7 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-drop-sqs-subscription-redrive",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-			old:  `if !p.deliverSQS(ctx, req, str(sub["Endpoint"]), payload, sqsAttrs) {`,
+			old:  `if !p.deliverSQS(ctx, req, str(sub["Endpoint"]), payload, sqsAttrs, dedupKey) {`,
 			new:  `if false {`,
 			pkg:  "./internal/services/aws/sns",
 			run:  "TestSNSSQSSubscriptionRedrive",
@@ -17960,6 +17960,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			new: `if false {`,
 			pkg: "./internal/services/aws/sns",
 			run: "TestSNSHTTPDeliveryPolicy",
+		},
+		{
+			name: "sns-drop-fifo-sqs-deduplication-override",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `in["MessageDeduplicationId"] = dedupOverride`,
+			new:  `in["MessageDeduplicationId"] = ""`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSFIFOTopicToSQSWithoutQueueDeduplication",
 		},
 		{
 			name: "sns-allow-standard-topic-fifo-queue",

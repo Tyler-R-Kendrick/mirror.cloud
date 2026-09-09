@@ -712,15 +712,15 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 		}
 		switch str(sub["Protocol"]) {
 		case "sqs":
-			if !p.deliverSQS(ctx, req, str(sub["Endpoint"]), payload, sqsAttrs) {
+			if !p.deliverSQS(ctx, req, str(sub["Endpoint"]), payload, sqsAttrs, dedupKey) {
 				if dlq := subscriptionDLQ(sub); dlq != "" {
-					p.deliverSQS(ctx, req, dlq, payload, sqsAttrs)
+					p.deliverSQS(ctx, req, dlq, payload, sqsAttrs, dedupKey)
 				}
 			}
 		case "lambda":
 			if !p.deliverLambda(ctx, req, sub, message, mid, msgAttrs) {
 				if dlq := subscriptionDLQ(sub); dlq != "" {
-					p.deliverSQS(ctx, req, dlq, payload, nil)
+					p.deliverSQS(ctx, req, dlq, payload, nil, dedupKey)
 				}
 			}
 		case "http", "https":
@@ -746,7 +746,7 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 			}
 			if !p.httpPost(str(sub["Endpoint"]), body, "Notification", contentType) {
 				if dlq := subscriptionDLQ(sub); dlq != "" {
-					p.deliverSQS(ctx, req, dlq, payload, nil)
+					p.deliverSQS(ctx, req, dlq, payload, nil, dedupKey)
 				}
 			}
 		}
@@ -994,7 +994,7 @@ func (p *Pack) lambdaNotification(req *spi.Request, sub map[string]any, body, me
 	}
 }
 
-func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body string, attrs map[string]any) bool {
+func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body string, attrs map[string]any, dedupOverride string) bool {
 	name := endpoint
 	if i := strings.LastIndexAny(endpoint, "/:"); i >= 0 {
 		name = endpoint[i+1:]
@@ -1007,6 +1007,9 @@ func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body 
 		if value := str(req.Input[key]); value != "" {
 			in[key] = value
 		}
+	}
+	if _, present := in["MessageDeduplicationId"]; !present && dedupOverride != "" && strings.HasSuffix(name, ".fifo") {
+		in["MessageDeduplicationId"] = dedupOverride
 	}
 	_, err := sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "SendMessage", Input: in})
 	return err == nil

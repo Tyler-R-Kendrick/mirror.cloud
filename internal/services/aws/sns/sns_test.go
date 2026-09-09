@@ -1056,6 +1056,23 @@ func TestSNSDefaultSMSAttributes(t *testing.T) {
 	}
 }
 
+func TestSNSStandardTopicFalseFIFOIsIdempotent(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "standard-idempotent"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{
+		"Name": "standard-idempotent", "Attributes": map[string]any{"FifoTopic": "false"},
+	}})
+	if err != nil || duplicate.Output["TopicArn"] != created.Output["TopicArn"] {
+		t.Fatalf("explicit false was not idempotent: %#v %v", duplicate, err)
+	}
+}
+
 func TestSNSPlatformEndpointAttributeValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

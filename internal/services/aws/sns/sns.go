@@ -81,6 +81,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			var current map[string]any
 			_ = json.Unmarshal(existing, &current)
 			for key, value := range attrs {
+				if key == "FifoTopic" && strings.EqualFold(str(value), "false") && asMap(current["attrs"])[key] == nil {
+					continue
+				}
 				if str(asMap(current["attrs"])[key]) != str(value) {
 					return nil, &spi.Fault{Code: "TopicAlreadyExists", Message: "Topic already exists with a different attribute value.", HTTPStatus: 400, Fault: "client"}
 				}

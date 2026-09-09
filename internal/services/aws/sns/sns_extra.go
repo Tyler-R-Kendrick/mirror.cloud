@@ -88,6 +88,9 @@ func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Resp
 
 func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	arn := str(req.Input["SubscriptionArn"])
+	if !validSubscriptionARN(arn) {
+		return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: SubscriptionArn", HTTPStatus: 400, Fault: "client"}
+	}
 	b, ok, _ := p.col(req, "subs").Get(ctx, arn)
 	if !ok {
 		return nil, &spi.Fault{Code: "NotFound", Message: "Subscription does not exist", HTTPStatus: 404, Fault: "client"}

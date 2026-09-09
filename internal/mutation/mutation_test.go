@@ -17768,6 +17768,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSControlPlaneOperations",
 		},
 		{
+			name: "sns-accept-malformed-subscription-attributes-arn",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  "if !validSubscriptionARN(arn) {\n\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: SubscriptionArn\", HTTPStatus: 400, Fault: \"client\"}\n\t}\n\tb, ok, _ := p.col(req, \"subs\").Get(ctx, arn)",
+			new:  "if false {\n\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: SubscriptionArn\", HTTPStatus: 400, Fault: \"client\"}\n\t}\n\tb, ok, _ := p.col(req, \"subs\").Get(ctx, arn)",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSSubscriptionAttributesARNValidation",
+		},
+		{
 			name: "sns-unsubscribe-deleted-topic",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  "if _, found, _ := p.col(req, \"topics\").Get(ctx, topicName(topicArn)); !found {",

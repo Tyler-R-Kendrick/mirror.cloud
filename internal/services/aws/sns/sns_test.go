@@ -1122,6 +1122,44 @@ func TestSNSListSubscriptionsByTopicARNValidation(t *testing.T) {
 	}
 }
 
+func TestSNSSubscriptionAttributesARNValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "sub-attrs-validation"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": created.Output["TopicArn"], "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:q",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arn := str(sub.Output["SubscriptionArn"])
+	for _, operation := range []string{"GetSubscriptionAttributes", "SetSubscriptionAttributes"} {
+		for _, tc := range []struct {
+			subscriptionARN string
+			code            string
+		}{
+			{"malformed-subscription", "InvalidParameter"},
+			{strings.Replace(arn, ":us-east-1:", ":us-west-2:", 1), "NotFound"},
+		} {
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: map[string]any{
+				"SubscriptionArn": tc.subscriptionARN, "AttributeName": "RawMessageDelivery", "AttributeValue": "true",
+			}})
+			fault, _ := err.(*spi.Fault)
+			if fault == nil || fault.Code != tc.code {
+				t.Fatalf("%s SubscriptionArn %q fault=%v", operation, tc.subscriptionARN, err)
+			}
+		}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetSubscriptionAttributes", Input: map[string]any{"SubscriptionArn": arn}}); err != nil {
+		t.Fatalf("valid SubscriptionArn rejected: %v", err)
+	}
+}
+
 func TestSNSPendingEmailSubscription(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

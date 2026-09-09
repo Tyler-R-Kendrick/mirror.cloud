@@ -115,6 +115,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestLambdaSubscriptionDelivery",
 		},
 		{
+			name: "sns-drop-subscription-confirmation-signature",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `confirmation["Signature"] = signNotification(confirmation, signatureVersion)`,
+			new:  `confirmation["Signature"] = ""`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSHTTPSubscriptionConfirmationSignature",
+		},
+		{
 			name: "sns-drop-signing-certificate-endpoint",
 			file: filepath.Join("internal", "edge", "edge.go"),
 			old:  `if strings.HasSuffix(r.URL.Path, "/_aws/sns/SimpleNotificationService.pem") {`,

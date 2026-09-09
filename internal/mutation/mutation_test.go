@@ -17888,6 +17888,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPendingEmailSubscription",
 		},
 		{
+			name: "sns-hide-return-subscription-arn",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `returnSubscriptionArn := strings.EqualFold(str(req.Input["ReturnSubscriptionArn"]), "true")`,
+			new:  `returnSubscriptionArn := false`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPendingEmailSubscription",
+		},
+		{
 			name: "sns-allow-standard-topic-fifo-queue",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `if !strings.HasSuffix(topicName(topicArn), ".fifo") && queueFIFO {`,

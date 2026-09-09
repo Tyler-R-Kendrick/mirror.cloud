@@ -356,6 +356,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		rawProvided := attrs["RawMessageDelivery"] != nil
 		requestedScope := str(attrs["FilterPolicyScope"])
 		scopeProvided := attrs["FilterPolicyScope"] != nil
+		returnSubscriptionArn := strings.EqualFold(str(req.Input["ReturnSubscriptionArn"]), "true")
+		if value, ok := req.Input["ReturnSubscriptionArn"].(bool); ok {
+			returnSubscriptionArn = value
+		}
 		if requestedScope == "" {
 			requestedScope = "MessageAttributes"
 		}
@@ -372,7 +376,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				existingScope = "MessageAttributes"
 			}
 			if (attrs["FilterPolicy"] == nil || existingFilter == requestedFilter) && (!rawProvided || existingRaw == requestedRaw) && (!scopeProvided || existingScope == requestedScope) {
-				return &spi.Response{Output: map[string]any{"SubscriptionArn": existing["SubscriptionArn"]}}, nil
+				responseArn := str(existing["SubscriptionArn"])
+				if confirmed, ok := existing["Confirmed"].(bool); ok && !confirmed && !returnSubscriptionArn {
+					responseArn = "pending confirmation"
+				}
+				return &spi.Response{Output: map[string]any{"SubscriptionArn": responseArn}}, nil
 			}
 			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Subscription already exists with different attributes.", HTTPStatus: 400, Fault: "client"}
 		}
@@ -400,7 +408,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			b, _ := json.Marshal(rec)
 			_ = p.col(req, "subs").Put(ctx, sub, b)
-			return &spi.Response{Output: map[string]any{"SubscriptionArn": "pending confirmation"}}, nil
+			responseArn := "pending confirmation"
+			if returnSubscriptionArn {
+				responseArn = sub
+			}
+			return &spi.Response{Output: map[string]any{"SubscriptionArn": responseArn}}, nil
 		}
 		b, _ := json.Marshal(rec)
 		_ = p.col(req, "subs").Put(ctx, sub, b)

@@ -1191,6 +1191,12 @@ func TestSNSPendingEmailSubscription(t *testing.T) {
 	if err != nil || len(asSlice(listed.Output["Subscriptions"])) != 1 || str(asMap(asSlice(listed.Output["Subscriptions"])[0])["SubscriptionArn"]) != "PendingConfirmation" {
 		t.Fatalf("pending email listing=%#v err=%v", listed, err)
 	}
+	withARN, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic, "Protocol": "email", "Endpoint": "other@example.com", "ReturnSubscriptionArn": true,
+	}})
+	if err != nil || !validSubscriptionARN(str(withARN.Output["SubscriptionArn"])) {
+		t.Fatalf("email subscription with ARN=%#v err=%v", withARN, err)
+	}
 }
 
 func TestSNSCreateTopicIdempotencyPreservesAttributes(t *testing.T) {

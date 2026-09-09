@@ -17744,6 +17744,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSTopicAttributeARNValidation",
 		},
 		{
+			name: "sns-accept-cross-scope-topic-attributes-arn",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "parts := strings.Split(arn, \":\")\n\t\tif parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {",
+			new:  "parts := strings.Split(arn, \":\")\n\t\tif false {",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSTopicAttributeARNScope",
+		},
+		{
 			name: "sns-accept-unknown-confirmation-token",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  "if str(req.Input[\"TopicArn\"]) != \"\" {\n\t\t\t\treturn nil, &spi.Fault{Code: \"InvalidParameter\", Message: \"Invalid parameter: Token\", HTTPStatus: 400, Fault: \"client\"}",

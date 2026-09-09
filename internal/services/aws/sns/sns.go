@@ -141,6 +141,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !validTopicARN(arn) {
 			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: TopicArn", HTTPStatus: 400, Fault: "client"}
 		}
+		parts := strings.Split(arn, ":")
+		if parts[3] != req.Identity.Region || parts[4] != req.Identity.Account {
+			return nil, topicNotFoundFault()
+		}
 		b, ok, _ := p.col(req, "topics").Get(ctx, topicName(arn))
 		if !ok {
 			return nil, &spi.Fault{Code: "NotFound", HTTPStatus: 404, Fault: "client"}

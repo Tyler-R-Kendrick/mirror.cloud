@@ -1095,6 +1095,22 @@ func TestSNSTopicAttributeARNValidation(t *testing.T) {
 	}
 }
 
+func TestSNSTopicAttributeARNScope(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	created, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "scope-arn"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	arn := strings.Replace(str(created.Output["TopicArn"]), ":us-east-1:", ":us-west-2:", 1)
+	_, err = p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "GetTopicAttributes", Input: map[string]any{"TopicArn": arn}})
+	fault, _ := err.(*spi.Fault)
+	if fault == nil || fault.Code != "NotFound" {
+		t.Fatalf("cross-region TopicArn fault=%v", err)
+	}
+}
+
 func TestSNSStandardTopicFalseFIFOIsIdempotent(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

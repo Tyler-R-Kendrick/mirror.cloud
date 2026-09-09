@@ -715,7 +715,11 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 				}
 			}
 		case "lambda":
-			_, _ = p.deliverLambda(ctx, req, sub, message, mid, msgAttrs)
+			if !p.deliverLambda(ctx, req, sub, message, mid, msgAttrs) {
+				if dlq := subscriptionDLQ(sub); dlq != "" {
+					p.deliverSQS(ctx, req, dlq, payload)
+				}
+			}
 		case "http", "https":
 			notification := map[string]any{"Type": "Notification", "Message": message, "TopicArn": arn, "MessageId": mid}
 			if subject := str(req.Input["Subject"]); subject != "" {
@@ -941,7 +945,7 @@ func topicNotFoundFault() *spi.Fault {
 	return &spi.Fault{Code: "NotFound", Message: "Topic does not exist", HTTPStatus: 404, Fault: "client"}
 }
 
-func (p *Pack) deliverLambda(ctx context.Context, req *spi.Request, sub map[string]any, body, messageID string, attrs map[string]any) (*spi.Response, error) {
+func (p *Pack) deliverLambda(ctx context.Context, req *spi.Request, sub map[string]any, body, messageID string, attrs map[string]any) bool {
 	endpoint := str(sub["Endpoint"])
 	name := endpoint
 	if _, rest, ok := strings.Cut(endpoint, ":function:"); ok {
@@ -953,7 +957,8 @@ func (p *Pack) deliverLambda(ctx context.Context, req *spi.Request, sub map[stri
 	in := p.lambdaNotification(req, sub, body, messageID, attrs)
 	in["FunctionName"] = name
 	in["InvocationType"] = "Event"
-	return lambda.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: in})
+	_, err := lambda.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: in})
+	return err == nil
 }
 
 func (p *Pack) lambdaNotification(req *spi.Request, sub map[string]any, body, messageID string, attrs map[string]any) map[string]any {

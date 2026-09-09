@@ -135,6 +135,42 @@ func TestSNSSQSRawDeliveryPreservesMessageAttributes(t *testing.T) {
 	}
 }
 
+func TestSNSSQSDeliveryPropagatesTraceHeader(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "trace-queue"}}); err != nil {
+		t.Fatal(err)
+	}
+	topic, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{"Name": "trace-topic"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:trace-queue",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	trace := "Root=1-3152b799-8954dae64eda91bc9a23a7e8;Parent=7fa8c0f79203be72;Sampled=1"
+	if _, err := p.Invoke(ctx, &spi.Request{
+		Identity: id, Operation: "Publish", HTTP: &http.Request{Header: http.Header{"X-Amzn-Trace-Id": []string{trace}}},
+		Input: map[string]any{"TopicArn": topic.Output["TopicArn"], "Message": "trace"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{
+		"QueueName": "trace-queue", "AttributeNames": []any{"AWSTraceHeader"},
+	}})
+	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+		t.Fatalf("trace delivery=%#v err=%v", received, err)
+	}
+	attrs := asMap(asMap(asSlice(received.Output["Messages"])[0])["Attributes"])
+	if attrs["AWSTraceHeader"] != trace {
+		t.Fatalf("trace attributes=%#v", attrs)
+	}
+}
+
 func TestLambdaSubscriptionDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, lp := New(deps), lambda.New(deps)

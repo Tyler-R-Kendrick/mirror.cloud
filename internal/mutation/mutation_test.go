@@ -17970,6 +17970,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSFIFOTopicToSQSWithoutQueueDeduplication",
 		},
 		{
+			name: "sns-drop-sqs-trace-header-propagation",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `HTTP: req.HTTP`,
+			new:  `HTTP: nil`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSSQSDeliveryPropagatesTraceHeader",
+		},
+		{
 			name: "sns-allow-standard-topic-fifo-queue",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `if !strings.HasSuffix(topicName(topicArn), ".fifo") && queueFIFO {`,

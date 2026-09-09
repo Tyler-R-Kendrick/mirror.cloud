@@ -1011,7 +1011,7 @@ func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body 
 	if _, present := in["MessageDeduplicationId"]; !present && dedupOverride != "" && strings.HasSuffix(name, ".fifo") {
 		in["MessageDeduplicationId"] = dedupOverride
 	}
-	_, err := sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "SendMessage", Input: in})
+	_, err := sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "SendMessage", Input: in, HTTP: req.HTTP})
 	return err == nil
 }
 

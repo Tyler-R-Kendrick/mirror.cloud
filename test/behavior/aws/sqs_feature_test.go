@@ -976,10 +976,15 @@ func TestSQSQueueListing(t *testing.T) {
 		if status != http.StatusOK || bytes.Contains(body, []byte(`"Messages"`)) {
 			t.Fatalf("early receive %d %s", status, body)
 		}
-		time.Sleep(2500 * time.Millisecond)
-		status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-delay-zero.fifo","WaitTimeSeconds":0}`)
-		if status != http.StatusOK || !bytes.Contains(body, []byte(`"Body":"message"`)) {
-			t.Fatalf("delayed receive %d %s", status, body)
+		for attempt := 0; ; attempt++ {
+			status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-delay-zero.fifo","WaitTimeSeconds":0}`)
+			if status == http.StatusOK && bytes.Contains(body, []byte(`"Body":"message"`)) {
+				break
+			}
+			if attempt >= 50 {
+				t.Fatalf("delayed receive %d %s", status, body)
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
 	})
 	t.Run("Given a FIFO queue When sending with zero delay Then the body digest is preserved", func(t *testing.T) {

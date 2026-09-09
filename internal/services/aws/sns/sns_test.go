@@ -256,8 +256,8 @@ func TestSNSControlPlaneOperations(t *testing.T) {
 	must("Unsubscribe", map[string]any{"SubscriptionArn": httpSub})
 
 	batch := must("PublishBatch", map[string]any{"TopicArn": topic, "Entries": []any{
-		map[string]any{"Id": "one", "Message": "first", "MessageAttributes": map[string]any{"kind": map[string]any{"Value": "a"}}},
-		map[string]any{"Id": "two", "Message": "second", "MessageAttributes.entry.1.Name": "kind", "MessageAttributes.entry.1.Value.StringValue": "b"},
+		map[string]any{"Id": "one", "Message": "first", "MessageAttributes": map[string]any{"kind": map[string]any{"Type": "String", "Value": "a"}}},
+		map[string]any{"Id": "two", "Message": "second", "MessageAttributes.entry.1.Name": "kind", "MessageAttributes.entry.1.Value.DataType": "String", "MessageAttributes.entry.1.Value.StringValue": "b"},
 	}})
 	if successful := batch.Output["Successful"].([]any); len(successful) != 2 {
 		t.Fatalf("batch %#v", successful)

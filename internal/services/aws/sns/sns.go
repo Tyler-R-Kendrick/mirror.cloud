@@ -1102,6 +1102,9 @@ func messageAttrs(in map[string]any) map[string]any {
 		switch parts[1] {
 		case "Name":
 			slot["Name"] = str(v)
+		case "Value.DataType":
+			slot["DataType"] = str(v)
+			slot["Type"] = str(v)
 		case "Value.StringValue", "Value":
 			slot["StringValue"] = str(v)
 			slot["Value"] = str(v)

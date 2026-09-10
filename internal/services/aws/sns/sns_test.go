@@ -154,6 +154,15 @@ func TestSNSCrossRegionTopicAccessRejected(t *testing.T) {
 	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: caller, Operation: "GetTopicAttributes", Input: map[string]any{"TopicArn": arn}}); err == nil {
 		t.Fatal("cross-region topic access unexpectedly succeeded")
 	}
+	for _, operation := range []string{"Publish", "PublishBatch"} {
+		input := map[string]any{"TopicArn": arn, "Message": "cross-region"}
+		if operation == "PublishBatch" {
+			input = map[string]any{"TopicArn": arn, "Entries": []any{map[string]any{"Id": "one", "Message": "cross-region"}}}
+		}
+		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: caller, Operation: operation, Input: input}); err == nil {
+			t.Fatalf("cross-region %s unexpectedly succeeded", operation)
+		}
+	}
 }
 
 func TestSNSCrossAccountAndRegionSQSDelivery(t *testing.T) {

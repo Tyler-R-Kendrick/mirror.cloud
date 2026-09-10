@@ -18195,6 +18195,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPlatformEndpointLifecycleValidation",
 		},
 		{
+			name: "sns-drop-firehose-subscription-delivery",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `_ = p.deps.Bus.Publish(ctx, "firehose", mustJSON(map[string]any{`,
+			new:  `_ = p.deps.Bus.Publish(ctx, "sns", mustJSON(map[string]any{`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSFirehoseSubscriptionPublishesNotification",
+		},
+		{
 			name: "sns-accept-platform-endpoint-different-attributes",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old:  "for key, value := range requestedAttrs {\n\t\t\t\t\tif key == \"Enabled\" && strings.EqualFold(str(existing[key]), str(value)) {",

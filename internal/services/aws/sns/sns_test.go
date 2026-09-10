@@ -1204,6 +1204,35 @@ func TestSNSFIFOTopicToSQSWithoutQueueDeduplication(t *testing.T) {
 	}
 }
 
+func TestSNSPublishBatchToFIFOSQS(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{
+		"QueueName": "sns-batch.fifo", "Attributes": map[string]any{"FifoQueue": "true", "ContentBasedDeduplication": "true"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{
+		"Name": "sns-batch.fifo", "Attributes": map[string]any{"FifoTopic": "true", "ContentBasedDeduplication": "true"},
+	}).Output["TopicArn"])
+	invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:sns-batch.fifo", "RawMessageDelivery": "true"})
+	entries := []any{
+		map[string]any{"Id": "one", "Message": "one", "MessageGroupId": "g"},
+		map[string]any{"Id": "two", "Message": "two", "MessageGroupId": "g"},
+		map[string]any{"Id": "three", "Message": "three", "MessageGroupId": "g"},
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PublishBatch", Input: map[string]any{"TopicArn": topic, "Entries": entries}})
+	if err != nil || len(asSlice(response.Output["Successful"])) != len(entries) {
+		t.Fatalf("FIFO batch response=%#v err=%v", response, err)
+	}
+	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "sns-batch.fifo", "MaxNumberOfMessages": 10}})
+	if err != nil || len(asSlice(received.Output["Messages"])) != len(entries) {
+		t.Fatalf("FIFO batch delivery=%#v err=%v", received, err)
+	}
+}
+
 func TestSNSMessageStructureAndSizeValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

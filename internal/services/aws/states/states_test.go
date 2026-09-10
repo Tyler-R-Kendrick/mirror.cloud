@@ -1558,7 +1558,7 @@ func TestStatesRetryScheduling(t *testing.T) {
 	select {
 	case early := <-result:
 		t.Fatalf("Express Retry completed early %#v", early)
-	case <-time.After(10 * time.Millisecond):
+	case <-time.After(100 * time.Millisecond):
 	}
 	if err := deps.Clock.Advance(2 * time.Second); err != nil {
 		t.Fatal(err)

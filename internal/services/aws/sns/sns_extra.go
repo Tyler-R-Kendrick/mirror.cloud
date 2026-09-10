@@ -585,7 +585,14 @@ func (p *Pack) smsAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 				return nil, fault
 			}
 		}
-		b, _ := json.Marshal(attrs)
+		current := map[string]any{}
+		if b, ok, _ := p.col(req, "smsattrs").Get(ctx, "default"); ok {
+			_ = json.Unmarshal(b, &current)
+		}
+		for key, value := range attrs {
+			current[key] = value
+		}
+		b, _ := json.Marshal(current)
 		_ = p.col(req, "smsattrs").Put(ctx, "default", b)
 		return &spi.Response{Output: map[string]any{}}, nil
 	}

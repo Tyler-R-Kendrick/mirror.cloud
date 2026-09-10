@@ -2017,6 +2017,31 @@ func TestSNSSMSAttributeValidationAndSelection(t *testing.T) {
 	}
 }
 
+func TestSNSSMSAttributesMerge(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetSMSAttributes", Input: map[string]any{"Attributes": map[string]any{
+		"DefaultSenderID": "Mirror", "DefaultSMSType": "Promotional",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetSMSAttributes", Input: map[string]any{"Attributes": map[string]any{
+		"DefaultSenderID": "Alerts",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetSMSAttributes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attrs := asMap(response.Output["Attributes"])
+	if attrs["DefaultSenderID"] != "Alerts" || attrs["DefaultSMSType"] != "Promotional" {
+		t.Fatalf("SMS attributes did not merge: %#v", attrs)
+	}
+}
+
 func TestSNSDefaultSMSAttributes(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

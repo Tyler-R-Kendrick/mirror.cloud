@@ -8,6 +8,28 @@ Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, 
 
 The current checkout's ordinary gate is green: 2,798 tests across 221 Go packages. The post-fix 2,602-entry mutation inventory is green in four parallel shards (all four completed successfully; 2,684.9–2,816.7s per shard); two equivalent SNS mutants remain excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
+## Azure Blob baseline
+
+Authority: official Azure Blob REST (`{account}.blob.core.windows.net`, `restype=container`, `comp=list`, `x-ms-blob-type: BlockBlob`). There is no LocalStack Azure inventory; rows are operation → Mirror evidence, not a live `*.blob.core.windows.net` differential. Queue/Table/File, page/append blobs, leases, snapshots, copy, and SAS are not in this denominator.
+
+| Measure | Current evidence |
+|---|---:|
+| Requested test forms wired for the emulated Azure Blob slice | 7 / 7 (atomic, snapshot/`internal/golden`, restXml contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
+| Core Azure Blob REST operations routed to emulation | 8 / 8 |
+| Live Azure probe | none (not required) |
+
+| Azure Blob operation | Mirror evidence |
+|---|---|
+| `PUT /{container}?restype=container` (`CreateContainer`) | Booted create is HTTP 201; atomic empty 400 `InvalidResourceName` and duplicate 409 `ContainerAlreadyExists`; BDD create; chaos `TestAzureConcurrentDuplicateContainers`; mutants `azure-accept-empty-container` and `azure-accept-duplicate-container` |
+| `GET /{container}?restype=container` (`GetContainer`) | Booted get after create; characterization `get`; missing container HTTP 404 `ContainerNotFound` with `x-ms-error-code` and no `x-amzn-errortype` |
+| `GET /?comp=list` (`ListContainers`) | Booted list XML `EnumerationResults`/`<Name>ctr</Name>`; characterization `list`; BDD lists after create |
+| `DELETE /{container}?restype=container` (`DeleteContainer`) | Atomic delete then missing get is 404 |
+| `PUT /{container}/{blob}` (`PutBlob`) | Booted Put Blob then Get Blob round-trips bytes; characterization `put`; fuzz `FuzzBlobBytes`; chaos concurrent put/get |
+| `GET /{container}/{blob}` (`GetBlob`) | Booted GET returns stored bytes; missing blob HTTP 404 `BlobNotFound`; mutant `azure-get-missing-blob-as-empty` |
+| `GET /{container}?restype=container&comp=list` (`ListBlobs`) | Characterization `blobs`; atomic list after put |
+| `DELETE /{container}/{blob}` (`DeleteBlob`) | Booted delete then GET is 404; characterization `delete`; BDD delete |
+| Azure faults vs AWS faults | restXml `EncodeFault` uses `<Error><Code/><Message/>` plus `x-ms-error-code` and omits `x-amzn-errortype`; mutant `azure-encode-aws-fault` |
+
 ## GCS baseline
 
 Authority: official GCS JSON API v1 (`storage.googleapis.com` `/storage/v1/...` and `/upload/storage/v1/...`). There is no LocalStack GCS inventory; rows are operation → Mirror evidence, not a live `storage.googleapis.com` differential. Leftover Discovery extraOps remain named control-plane records and are not in this denominator.

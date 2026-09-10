@@ -395,6 +395,8 @@ var Aliases = map[string]string{
 	"cloudflare.kv":               "cloudflare.kv",
 	"hostinger":                   "hostinger.dns",
 	"hostinger.dns":               "hostinger.dns",
+	"azure":                       "azure.blobs",
+	"azure.blobs":                 "azure.blobs",
 }
 
 // Profiles are named service sets.
@@ -404,6 +406,7 @@ var Profiles = map[string][]string{
 	"vercel-core":     {"vercel.api"},
 	"cloudflare-core": {"cloudflare.kv"},
 	"hostinger-core":  {"hostinger.dns"},
+	"azure-core":      {"azure.blobs"},
 }
 
 // CanonicalServiceID maps a CLI token to a service ID.

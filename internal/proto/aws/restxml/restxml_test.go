@@ -819,6 +819,38 @@ func TestRESTXMLEncodeAndFaultContracts(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "<Message>The XML you provided was not well-formed or did not validate against our published schema</Message>") {
 		t.Fatalf("malformed XML fault %s", w.Body.String())
 	}
+
+	az := &model.Service{ID: "azure.blobs"}
+	for _, test := range []struct{ method, path, want string }{
+		{http.MethodPut, "/c?restype=container", "CreateContainer"},
+		{http.MethodGet, "/?comp=list", "ListContainers"},
+		{http.MethodGet, "/c?restype=container", "GetContainer"},
+		{http.MethodDelete, "/c?restype=container", "DeleteContainer"},
+		{http.MethodPut, "/c/o", "PutBlob"},
+		{http.MethodGet, "/c/o", "GetBlob"},
+		{http.MethodGet, "/c?restype=container&comp=list", "ListBlobs"},
+		{http.MethodDelete, "/c/o", "DeleteBlob"},
+		{http.MethodGet, "/unknown", "Unknown"},
+	} {
+		op, err := codec.Route(az, httptest.NewRequest(test.method, test.path, nil))
+		if err != nil || op.Name != test.want {
+			t.Errorf("azure %s %s: %#v %v, want %s", test.method, test.path, op, err, test.want)
+		}
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(az, &model.Operation{Name: "ListContainers"}, w, &spi.Response{Output: map[string]any{"_list": []any{map[string]any{"name": "c"}}, "_kind": "containers"}}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "<Name>c</Name>") || !strings.Contains(w.Body.String(), "EnumerationResults") {
+		t.Fatalf("azure list %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.EncodeFault(az, &model.Operation{Name: "GetBlob"}, w, &spi.Fault{Code: "BlobNotFound", Message: "The specified blob does not exist.", HTTPStatus: 404, Fault: "client"}, "id"); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || w.Header().Get("x-ms-error-code") != "BlobNotFound" || !strings.Contains(w.Body.String(), "<Code>BlobNotFound</Code>") {
+		t.Fatalf("azure fault %d %#v %s", w.Code, w.Header(), w.Body.String())
+	}
 }
 
 func str(v any) string {

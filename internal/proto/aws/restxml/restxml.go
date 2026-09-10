@@ -26,6 +26,9 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 		}
 		return &model.Operation{Name: a, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}, nil
 	}
+	if svc.ID == "azure.blobs" {
+		return azureOp(svc, r), nil
+	}
 	if svc.ID == "aws.route53" {
 		return route53Op(svc, r), nil
 	}
@@ -344,7 +347,69 @@ func cloudfrontOp(svc *model.Service, r *http.Request) *model.Operation {
 	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: m, Code: 200}}
 }
 
+func azureOp(svc *model.Service, r *http.Request) *model.Operation {
+	name := azureRoute(r)
+	if op := svc.OperationByName(name); op != nil {
+		return op
+	}
+	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
+}
+
+func azureRoute(r *http.Request) string {
+	q := r.URL.Query()
+	path := strings.Trim(r.URL.Path, "/")
+	container, blob, _ := strings.Cut(path, "/")
+	if path == "" {
+		container, blob = "", ""
+	}
+	_ = container
+	m := r.Method
+	if q.Get("restype") == "container" && blob == "" {
+		if q.Get("comp") == "list" {
+			return "ListBlobs"
+		}
+		switch m {
+		case http.MethodPut:
+			return "CreateContainer"
+		case http.MethodGet, http.MethodHead:
+			return "GetContainer"
+		case http.MethodDelete:
+			return "DeleteContainer"
+		}
+	}
+	if path == "" && q.Get("comp") == "list" {
+		return "ListContainers"
+	}
+	if blob != "" {
+		switch m {
+		case http.MethodPut:
+			return "PutBlob"
+		case http.MethodGet, http.MethodHead:
+			return "GetBlob"
+		case http.MethodDelete:
+			return "DeleteBlob"
+		}
+	}
+	return "Unknown"
+}
+
 func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) (*spi.Request, error) {
+	if svc.ID == "azure.blobs" {
+		in := map[string]any{}
+		path := strings.Trim(r.URL.Path, "/")
+		container, blob, _ := strings.Cut(path, "/")
+		if path != "" {
+			in["container"] = container
+			if blob != "" {
+				in["blob"] = blob
+			}
+		}
+		req := &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}
+		if op.Name == "PutBlob" && r.Body != nil {
+			req.Body = r.Body
+		}
+		return req, nil
+	}
 	if svc.ID == "aws.route53" {
 		in := map[string]any{}
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
@@ -1273,6 +1338,9 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	if status == 0 {
 		status = 200
 	}
+	if svc.ID == "azure.blobs" {
+		return encodeAzure(w, status, resp)
+	}
 	for k, vs := range resp.Headers {
 		if strings.EqualFold(k, "ETag") {
 			w.Header()["ETag"] = append(w.Header()["ETag"], vs...)
@@ -1856,6 +1924,63 @@ func writeLifecycle(v any, b *strings.Builder) {
 	}
 }
 
+func encodeAzure(w http.ResponseWriter, status int, resp *spi.Response) error {
+	for k, vs := range resp.Headers {
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+	if resp.Stream != nil {
+		w.WriteHeader(status)
+		_, err := io.Copy(w, resp.Stream)
+		_ = resp.Stream.Close()
+		return err
+	}
+	if resp.Output != nil {
+		if lst, ok := resp.Output["_list"]; ok {
+			w.Header().Set("Content-Type", "application/xml")
+			w.WriteHeader(status)
+			kind, _ := resp.Output["_kind"].(string)
+			var b strings.Builder
+			b.WriteString(`<?xml version="1.0" encoding="utf-8"?><EnumerationResults>`)
+			if kind == "blobs" {
+				b.WriteString("<Blobs>")
+				for _, item := range asAny(lst) {
+					m, _ := item.(map[string]any)
+					b.WriteString("<Blob><Name>")
+					b.WriteString(xmlEscape(strAny(m["name"])))
+					b.WriteString("</Name></Blob>")
+				}
+				b.WriteString("</Blobs>")
+			} else {
+				b.WriteString("<Containers>")
+				for _, item := range asAny(lst) {
+					m, _ := item.(map[string]any)
+					b.WriteString("<Container><Name>")
+					b.WriteString(xmlEscape(strAny(m["name"])))
+					b.WriteString("</Name></Container>")
+				}
+				b.WriteString("</Containers>")
+			}
+			b.WriteString("</EnumerationResults>")
+			_, err := io.WriteString(w, b.String())
+			return err
+		}
+	}
+	w.WriteHeader(status)
+	return nil
+}
+
+func asAny(v any) []any {
+	s, _ := v.([]any)
+	return s
+}
+
+func strAny(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
 func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.ResponseWriter, f *spi.Fault, requestID string) error {
 	status := f.HTTPStatus
 	if status == 0 {
@@ -1864,6 +1989,13 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 	if f.Code == "MirrorNotImplemented" {
 		w.Header().Set("x-mirror-not-implemented", svc.ID+"."+op.Name)
 		status = 501
+	}
+	if svc.ID == "azure.blobs" {
+		w.Header().Set("Content-Type", "application/xml")
+		w.Header().Set("x-ms-error-code", f.Code)
+		w.WriteHeader(status)
+		_, err := io.WriteString(w, `<Error><Code>`+xmlEscape(f.Code)+`</Code><Message>`+xmlEscape(f.Message)+`</Message></Error>`)
+		return err
 	}
 	if region := xmlString(f.Fields["Region"]); region != "" {
 		w.Header().Set("x-amz-bucket-region", region)

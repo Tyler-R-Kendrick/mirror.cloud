@@ -451,6 +451,9 @@ func (s *Server) demux(r *http.Request) *model.Service {
 			}
 		}
 	}
+	if azureRequest(r) {
+		return s.bundle.ServiceByID("azure.blobs")
+	}
 	if cloudflareRequest(r) {
 		return s.bundle.ServiceByID("cloudflare.kv")
 	}
@@ -493,6 +496,18 @@ func (s *Server) demux(r *http.Request) *model.Service {
 		return s.bundle.ServiceByID("aws.s3")
 	}
 	return nil
+}
+
+func azureRequest(r *http.Request) bool {
+	host := strings.ToLower(r.Host)
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	if strings.Contains(host, "blob.core.windows.net") || strings.Contains(host, "azure") {
+		return true
+	}
+	q := r.URL.Query()
+	return q.Get("restype") == "container" || q.Get("comp") == "list" || r.Header.Get("x-ms-blob-type") != ""
 }
 
 func hostingerRequest(r *http.Request) bool {

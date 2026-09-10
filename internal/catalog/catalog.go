@@ -236,6 +236,7 @@ func Bundle() *model.Bundle {
 	}
 	cloudflare := []string{"CreateNamespace", "ListNamespaces", "GetNamespace", "PutValue", "GetValue", "DeleteValue"}
 	hostinger := []string{"CreateDomain", "ListDomains", "GetDomain", "GetDNSRecords", "UpdateDNSRecords", "DeleteDNSRecords"}
+	azure := []string{"CreateContainer", "GetContainer", "ListContainers", "DeleteContainer", "PutBlob", "GetBlob", "ListBlobs", "DeleteBlob"}
 	gcs := []string{"storage.buckets.insert", "storage.buckets.get", "storage.buckets.list",
 		"storage.buckets.delete", "storage.buckets.patch",
 		"storage.objects.insert", "storage.objects.get", "storage.objects.list",
@@ -1295,6 +1296,7 @@ func Bundle() *model.Bundle {
 			svc("vercel.api", "vercel", model.ProtoRESTJSON1, "", "", "", mk(vercel)),
 			svc("cloudflare.kv", "cloudflare", model.ProtoRESTJSON1, "", "", "", mk(cloudflare)),
 			svc("hostinger.dns", "hostinger", model.ProtoRESTJSON1, "", "", "", mk(hostinger)),
+			svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", mk(azure)),
 			svc("aws.kms", "kms", model.ProtoAWSJSON11, "TrentService", "", "", mk(kms)),
 			svc("aws.logs", "logs", model.ProtoAWSJSON11, "Logs_20140328", "", "", mk(cwlogs)),
 			svc("aws.events", "events", model.ProtoAWSJSON11, "AWSEvents", "", "", mk(ev)),

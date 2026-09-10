@@ -81,6 +81,8 @@ func TestDemuxTargetsAndPaths(t *testing.T) {
 		{http.MethodGet, "", "api.cloudflare.com", "/client/v4/accounts/a/storage/kv/namespaces", "cloudflare.kv"},
 		{http.MethodGet, "", "localhost", "/api/dns/v1/zones/ex.test", "hostinger.dns"},
 		{http.MethodGet, "", "api.hostinger.com", "/api/domains/v1/portfolio", "hostinger.dns"},
+		{http.MethodPut, "", "acct.blob.core.windows.net", "/ctr?restype=container", "azure.blobs"},
+		{http.MethodGet, "", "localhost", "/ctr?restype=container", "azure.blobs"},
 		{http.MethodPost, "", "localhost", "/2015-03-31/functions", "aws.lambda"},
 		{http.MethodGet, "", "localhost", "/restapis", "aws.apigateway"},
 		{http.MethodGet, "", "localhost", "/2013-04-01/hostedzone", "aws.route53"},

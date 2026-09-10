@@ -18000,6 +18000,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSLambdaSubscriptionRedrive",
 		},
 		{
+			name: "sns-leak-platform-endpoint-internal-fields",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old:  `attrs := map[string]any{"Enabled": str(rec["Enabled"]), "Token": str(rec["Token"])}`,
+			new:  `attrs := rec`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPlatformEndpointAttributesProjection",
+		},
+		{
 			name: "sns-wrap-raw-http-subscription-body",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  `body = payload`,

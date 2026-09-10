@@ -171,6 +171,7 @@ func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 	attrs := map[string]any{
 		"SubscriptionArn":              rec["SubscriptionArn"],
 		"TopicArn":                     rec["TopicArn"],
+		"Owner":                        req.Identity.Account,
 		"Protocol":                     rec["Protocol"],
 		"Endpoint":                     rec["Endpoint"],
 		"ConfirmationWasAuthenticated": "true",

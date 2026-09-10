@@ -2625,6 +2625,48 @@ func TestSNSPendingEmailSubscription(t *testing.T) {
 	}
 }
 
+func TestSNSSubscriptionIdempotency(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "sns-idempotent"}}); err != nil {
+		t.Fatal(err)
+	}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "sns-idempotent"}).Output["TopicArn"])
+	endpoint := "arn:aws:sqs:us-east-1:1:sns-idempotent"
+	subscribe := func(attrs map[string]any) string {
+		t.Helper()
+		input := map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": endpoint, "ReturnSubscriptionArn": true}
+		if attrs != nil {
+			input["Attributes"] = attrs
+		}
+		return str(invokeSNS(t, p, id, "Subscribe", input).Output["SubscriptionArn"])
+	}
+	arn := subscribe(map[string]any{"RawMessageDelivery": "True"})
+	if !validSubscriptionARN(arn) {
+		t.Fatalf("subscription ARN=%q", arn)
+	}
+	for _, attrs := range []map[string]any{
+		{"RawMessageDelivery": "true"},
+		{"RawMessageDelivery": "true", "FilterPolicyScope": "MessageAttributes"},
+		nil,
+		{},
+		{"FilterPolicyScope": "MessageAttributes"},
+	} {
+		if got := subscribe(attrs); got != arn {
+			t.Fatalf("idempotent attrs=%#v ARN=%q want %q", attrs, got, arn)
+		}
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic, "Protocol": "sqs", "Endpoint": endpoint,
+		"Attributes": map[string]any{"RawMessageDelivery": "false", "FilterPolicyScope": "MessageBody"},
+		"ReturnSubscriptionArn": true,
+	}}); err == nil {
+		t.Fatal("accepted subscription with different attributes")
+	}
+}
+
 func TestSNSHTTPSubscriptionRedrive(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

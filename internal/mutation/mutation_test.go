@@ -18415,6 +18415,17 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSSMSAttributeValidationAndSelection",
 		},
 		{
+			name: "sns-overwrite-sms-attributes",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
+			old: `for key, value := range attrs {
+			current[key] = value
+		}
+		b, _ := json.Marshal(current)`,
+			new: `b, _ := json.Marshal(attrs)`,
+			pkg: "./internal/services/aws/sns",
+			run: "TestSNSSMSAttributesMerge",
+		},
+		{
 			name: "sns-accept-invalid-sandbox-phone",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old:  "case \"CreateSMSSandboxPhoneNumber\":\n\t\tif !validSMSNumber(phone) {",

@@ -22,6 +22,7 @@ Emulate op counts are `len(pack.Operations())`. Remaining ingested operations ar
 | `digitalocean.v2` | `restJson1` | 8 | 0 |
 | `hetzner.v1` | `restJson1` | 8 | 0 |
 | `railway.graphql` | `restJson1` | 6 | 0 |
+| `fly.machines` | `restJson1` | 8 | 0 |
 | `aws.kms` | `awsJson1_1` | 54 | 0 |
 | `aws.logs` | `awsJson1_1` | 118 | 0 |
 | `aws.events` | `awsJson1_1` | 57 | 0 |

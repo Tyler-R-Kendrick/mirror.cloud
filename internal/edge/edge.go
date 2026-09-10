@@ -451,6 +451,9 @@ func (s *Server) demux(r *http.Request) *model.Service {
 			}
 		}
 	}
+	if flyRequest(r) {
+		return s.bundle.ServiceByID("fly.machines")
+	}
 	if railwayRequest(r) {
 		return s.bundle.ServiceByID("railway.graphql")
 	}
@@ -505,6 +508,17 @@ func (s *Server) demux(r *http.Request) *model.Service {
 		return s.bundle.ServiceByID("aws.s3")
 	}
 	return nil
+}
+
+func flyRequest(r *http.Request) bool {
+	host := strings.ToLower(r.Host)
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	if strings.Contains(host, "machines.dev") {
+		return true
+	}
+	return strings.Contains(r.URL.Path, "/v1/apps")
 }
 
 func railwayRequest(r *http.Request) bool {

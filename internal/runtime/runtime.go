@@ -403,6 +403,8 @@ var Aliases = map[string]string{
 	"hetzner.v1":                  "hetzner.v1",
 	"railway":                     "railway.graphql",
 	"railway.graphql":             "railway.graphql",
+	"fly":                         "fly.machines",
+	"fly.machines":                "fly.machines",
 }
 
 // Profiles are named service sets.
@@ -416,6 +418,7 @@ var Profiles = map[string][]string{
 	"digitalocean-core": {"digitalocean.v2"},
 	"hetzner-core":      {"hetzner.v1"},
 	"railway-core":      {"railway.graphql"},
+	"fly-core":          {"fly.machines"},
 }
 
 // CanonicalServiceID maps a CLI token to a service ID.

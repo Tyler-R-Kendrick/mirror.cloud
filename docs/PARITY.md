@@ -8,6 +8,28 @@ Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, 
 
 The current checkout's ordinary gate is green: 2,798 tests across 221 Go packages. The post-fix 2,602-entry mutation inventory is green in four parallel shards (all four completed successfully; 2,684.9–2,816.7s per shard); two equivalent SNS mutants remain excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
+## Fly Machines baseline
+
+Authority: official Fly Machines API v1 (`api.machines.dev` `/v1/apps` and `/v1/apps/{app_name}/machines`). There is no LocalStack Fly inventory; rows are operation → Mirror evidence, not a live `api.machines.dev` differential. Volumes, certificates, tokens, secrets, and GraphQL `api.fly.io` are not in this denominator.
+
+| Measure | Current evidence |
+|---|---:|
+| Requested test forms wired for the emulated Fly slice | 7 / 7 (atomic, snapshot/`internal/golden`, restJson1 contract, BDD HTTP, fuzz, chaos/race, overlay mutation) |
+| Core Fly Machines operations routed to emulation | 8 / 8 |
+| Live Fly probe | none (not required) |
+
+| Fly operation | Mirror evidence |
+|---|---|
+| `POST /v1/apps` (`CreateApp`) | Booted create returns `{id, created_at}` HTTP 201; atomic empty 400 and duplicate 422; BDD create; chaos `TestFlyConcurrentDuplicateApps`; mutants `fly-accept-empty-app-name` and `fly-accept-duplicate-app` |
+| `GET /v1/apps` (`ListApps`) | Booted list wraps `{apps, total_apps}`; characterization `list`; BDD lists after create |
+| `GET /v1/apps/{app_name}` (`GetApp`) | Booted get-after-set; missing app HTTP 404 `{error}` without `x-amzn-errortype`; mutant `fly-get-missing-app-as-empty` |
+| `DELETE /v1/apps/{app_name}` (`DeleteApp`) | Atomic delete then get is 404; `TestDeleteMissingAppAndMachine` and booted DELETE of missing app are HTTP 404 `{error}`; characterization `delete`/`del_miss_a`; mutant `fly-delete-missing-app-as-success` |
+| `POST /v1/apps/{app_name}/machines` (`CreateMachine`) | Booted create then GET round-trips; characterization `machine` |
+| `GET /v1/apps/{app_name}/machines` (`ListMachines`) | Characterization `machines` (JSON array) |
+| `GET /v1/apps/{app_name}/machines/{id}` (`GetMachine`) | Booted get-after-set; missing machine 404 |
+| `DELETE /v1/apps/{app_name}/machines/{id}` (`DeleteMachine`) | Atomic delete then get is 404; booted DELETE of missing machine is HTTP 404 `{error}`; characterization `del_mach`/`del_miss_m`; mutant `fly-delete-missing-machine-as-success` |
+| Fly faults vs AWS faults | restJson1 `Encode` writes create `{id,created_at}`, list `{apps,total_apps}` or a machines array, and GET as the resource object; `EncodeFault` uses `{error: message}` and omits `x-amzn-errortype`; mutant `fly-encode-aws-fault` |
+
 ## Railway baseline
 
 Authority: official Railway GraphQL v2 (`backboard.railway.com` `POST /graphql/v2`). There is no LocalStack Railway inventory; rows are operation → Mirror evidence, not a live `backboard.railway.com` differential. Deployments, variables, volumes, and custom domains are not in this denominator.

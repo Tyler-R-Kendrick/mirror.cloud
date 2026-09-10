@@ -66,6 +66,7 @@ import (
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/azure/blobs"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/cloudflare/api"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/digitalocean/v2"
+	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/fly/machines"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/gcp/gcs"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/hetzner/v1"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/hostinger/api"

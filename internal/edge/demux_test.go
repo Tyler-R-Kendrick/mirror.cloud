@@ -89,6 +89,8 @@ func TestDemuxTargetsAndPaths(t *testing.T) {
 		{http.MethodGet, "", "api.hetzner.cloud", "/v1/ssh_keys", "hetzner.v1"},
 		{http.MethodPost, "", "localhost", "/graphql/v2", "railway.graphql"},
 		{http.MethodPost, "", "backboard.railway.com", "/graphql/v2", "railway.graphql"},
+		{http.MethodGet, "", "localhost", "/v1/apps", "fly.machines"},
+		{http.MethodGet, "", "api.machines.dev", "/v1/apps/web", "fly.machines"},
 		{http.MethodPost, "", "localhost", "/2015-03-31/functions", "aws.lambda"},
 		{http.MethodGet, "", "localhost", "/restapis", "aws.apigateway"},
 		{http.MethodGet, "", "localhost", "/2013-04-01/hostedzone", "aws.route53"},

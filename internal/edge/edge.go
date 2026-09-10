@@ -461,6 +461,9 @@ func (s *Server) demux(r *http.Request) *model.Service {
 	if strings.Contains(path, "/storage/v1") || strings.Contains(path, "/upload/storage") {
 		return s.bundle.ServiceByID("gcp.storage")
 	}
+	if vercelRequest(r) {
+		return s.bundle.ServiceByID("vercel.api")
+	}
 	if strings.Contains(path, "/2015-03-31/") {
 		return s.bundle.ServiceByID("aws.lambda")
 	}
@@ -484,6 +487,21 @@ func (s *Server) demux(r *http.Request) *model.Service {
 		return s.bundle.ServiceByID("aws.s3")
 	}
 	return nil
+}
+
+func vercelRequest(r *http.Request) bool {
+	host := strings.ToLower(r.Host)
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	if strings.Contains(host, "vercel") {
+		return true
+	}
+	path := r.URL.Path
+	if len(path) < 4 || path[0] != '/' || path[1] != 'v' || path[2] < '1' || path[2] > '9' {
+		return false
+	}
+	return strings.Contains(path, "/projects") || strings.Contains(path, "/deployments") || strings.Contains(path, "/user") || strings.Contains(path, "/teams")
 }
 
 func sqsQueuePath(path string) bool {

@@ -75,6 +75,8 @@ func TestDemuxTargetsAndPaths(t *testing.T) {
 		{http.MethodPost, "DynamoDB_20120810.ListTables", "localhost", "/", "aws.dynamodb"},
 		{http.MethodGet, "", "bucket.s3.us-east-1.amazonaws.com", "/key", "aws.s3"},
 		{http.MethodGet, "", "localhost", "/storage/v1/b", "gcp.storage"},
+		{http.MethodGet, "", "localhost", "/v9/projects", "vercel.api"},
+		{http.MethodGet, "", "api.vercel.com", "/v13/deployments", "vercel.api"},
 		{http.MethodPost, "", "localhost", "/2015-03-31/functions", "aws.lambda"},
 		{http.MethodGet, "", "localhost", "/restapis", "aws.apigateway"},
 		{http.MethodGet, "", "localhost", "/2013-04-01/hostedzone", "aws.route53"},

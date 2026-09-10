@@ -227,6 +227,13 @@ func Bundle() *model.Bundle {
 		"BatchGetSecretValue", "CancelRotateSecret", "DeleteResourcePolicy", "GetResourcePolicy",
 		"PutResourcePolicy", "RemoveRegionsFromReplication", "ReplicateSecretToRegions", "RotateSecret",
 		"StopReplicationToReplica", "UpdateSecretVersionStage", "ValidateResourcePolicy"}
+	vercel := []string{
+		"GetUser", "CreateProject", "ListProjects", "GetProject", "DeleteProject",
+		"ListProjectEnv", "CreateProjectEnv", "DeleteProjectEnv",
+		"ListProjectDomains", "AddProjectDomain",
+		"CreateDeployment", "ListDeployments", "GetDeployment", "DeleteDeployment",
+		"KvCommand",
+	}
 	gcs := []string{"storage.buckets.insert", "storage.buckets.get", "storage.buckets.list",
 		"storage.buckets.delete", "storage.buckets.patch",
 		"storage.objects.insert", "storage.objects.get", "storage.objects.list",
@@ -1283,6 +1290,7 @@ func Bundle() *model.Bundle {
 			svc("aws.ssm", "ssm", model.ProtoAWSJSON11, "AmazonSSM", "", "", mk(ssm)),
 			svc("aws.secretsmanager", "secretsmanager", model.ProtoAWSJSON11, "secretsmanager", "", "", mk(sm)),
 			svc("gcp.storage", "storage", model.ProtoGCPRESTSON, "", "", "", mk(gcs)),
+			svc("vercel.api", "vercel", model.ProtoRESTJSON1, "", "", "", mk(vercel)),
 			svc("aws.kms", "kms", model.ProtoAWSJSON11, "TrentService", "", "", mk(kms)),
 			svc("aws.logs", "logs", model.ProtoAWSJSON11, "Logs_20140328", "", "", mk(cwlogs)),
 			svc("aws.events", "events", model.ProtoAWSJSON11, "AWSEvents", "", "", mk(ev)),

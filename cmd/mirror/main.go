@@ -191,6 +191,8 @@ func cmdEnv(args []string) error {
 	fmt.Printf("export AWS_DEFAULT_REGION=%s\n", cfg.DefaultRegion)
 	fmt.Printf("export AWS_EC2_METADATA_DISABLED=true\n")
 	fmt.Printf("export STORAGE_EMULATOR_HOST=%s\n", host)
+	fmt.Printf("export VERCEL_API_URL=%s\n", url)
+	fmt.Printf("export VERCEL_TOKEN=test\n")
 	fmt.Printf("export AWS_S3_FORCE_PATH_STYLE=true\n")
 	return nil
 }

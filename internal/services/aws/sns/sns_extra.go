@@ -181,7 +181,10 @@ func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 		attrs["ConfirmationWasAuthenticated"] = "false"
 		attrs["PendingConfirmation"] = "true"
 	}
-	for _, key := range []string{"FilterPolicy", "RawMessageDelivery"} {
+	for _, key := range []string{"FilterPolicy", "RawMessageDelivery", "FilterPolicyScope"} {
+		if key == "FilterPolicyScope" && rec["FilterPolicy"] == nil {
+			continue
+		}
 		if value := rec[key]; value != nil && str(value) != "" {
 			attrs[key] = value
 		}

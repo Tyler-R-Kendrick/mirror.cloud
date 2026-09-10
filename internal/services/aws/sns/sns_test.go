@@ -346,6 +346,17 @@ func TestSNSMissingPlatformApplicationAttributes(t *testing.T) {
 	}
 }
 
+func TestSNSSetMissingPlatformEndpointAttributes(t *testing.T) {
+	p := New(spitest.Deps(t))
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "SetEndpointAttributes", Input: map[string]any{
+		"EndpointArn": "arn:aws:sns:us-east-1:1:endpoint/ADM/missing/endpoint", "Attributes": map[string]any{"Enabled": "false"},
+	}})
+	if err == nil {
+		t.Fatal("updated missing platform endpoint")
+	}
+}
+
 func TestSNSStandardMessageGroupIDDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, qp := New(deps), sqs.New(deps)

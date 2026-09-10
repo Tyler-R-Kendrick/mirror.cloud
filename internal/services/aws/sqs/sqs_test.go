@@ -5456,10 +5456,13 @@ func FuzzQueueMetadataAttributeSelection(f *testing.F) {
 		choices := []string{"QueueArn", "CreatedTimestamp", "VisibilityTimeout", "missing", "All"}
 		names := make([]any, 0, len(raw))
 		want := map[string]bool{}
+		unknown := false
 		for _, value := range raw {
 			name := choices[int(value)%len(choices)]
 			names = append(names, name)
-			if name != "missing" && name != "All" {
+			if name == "missing" {
+				unknown = true
+			} else if name != "All" {
 				want[name] = true
 			}
 			if name == "All" {
@@ -5468,6 +5471,13 @@ func FuzzQueueMetadataAttributeSelection(f *testing.F) {
 			}
 		}
 		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetQueueAttributes", Input: map[string]any{"QueueName": "metadata", "AttributeNames": names}})
+		if unknown {
+			fault, ok := err.(*spi.Fault)
+			if !ok || fault.Code != "InvalidAttributeName" {
+				t.Fatalf("unknown attribute error %#v", err)
+			}
+			return
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -5545,6 +5555,13 @@ func FuzzSendReceiveMessageDigest(f *testing.F) {
 			fault, _ := err.(*spi.Fault)
 			if fault == nil || fault.Code != "MissingParameter" {
 				t.Fatalf("empty body fault %#v", err)
+			}
+			return
+		}
+		if !validMessageContents(string(body)) {
+			fault, _ := err.(*spi.Fault)
+			if fault == nil || fault.Code != "InvalidMessageContents" {
+				t.Fatalf("invalid body fault %#v", err)
 			}
 			return
 		}
@@ -5710,7 +5727,7 @@ func FuzzMessagesRemainQueueScoped(f *testing.F) {
 	f.Add(false, []byte("message"))
 	f.Add(true, []byte("other"))
 	f.Fuzz(func(t *testing.T, second bool, body []byte) {
-		if len(body) == 0 || len(body) > 1024 || !utf8.Valid(body) {
+		if len(body) == 0 || len(body) > 1024 || !utf8.Valid(body) || !validMessageContents(string(body)) {
 			t.Skip()
 		}
 		p := New(spitest.Deps(t))

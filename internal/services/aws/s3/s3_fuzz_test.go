@@ -2960,7 +2960,7 @@ func FuzzGetObjectResponseOverrides(f *testing.F) {
 		f.Add(uint8(index), value, index%2 == 0)
 	}
 	f.Fuzz(func(t *testing.T, fieldIndex uint8, value string, queryName bool) {
-		if value == "" || len(value) > 256 || !utf8.ValidString(value) || strings.ContainsAny(value, "\r\n") {
+		if value == "" || len(value) > 256 || !utf8.ValidString(value) || strings.ContainsAny(value, "\r\n") || strings.IndexFunc(value, func(r rune) bool { return r > 0xff }) >= 0 {
 			t.Skip()
 		}
 		fields := []struct{ input, query, header string }{

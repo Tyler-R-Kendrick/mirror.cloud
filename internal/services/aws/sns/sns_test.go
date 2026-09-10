@@ -1705,6 +1705,10 @@ func TestSNSSubscriptionListProjection(t *testing.T) {
 	if _, leaked := entry["Confirmed"]; leaked {
 		t.Fatalf("subscription leaked internal fields %#v", entry)
 	}
+	allListed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListSubscriptions"})
+	if err != nil || len(asSlice(allListed.Output["Subscriptions"])) != 1 || !reflect.DeepEqual(asSlice(allListed.Output["Subscriptions"])[0], entry) {
+		t.Fatalf("all subscription summaries %#v err=%v", allListed, err)
+	}
 }
 
 func TestSNSSubscriptionAttributesARNValidation(t *testing.T) {

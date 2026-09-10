@@ -132,6 +132,14 @@ func TestRESTJSONServiceRoutes(t *testing.T) {
 		{"cloudflare.kv", http.MethodGet, "/client/v4/accounts/a/storage/kv/namespaces/nid/values/k", "", "GetValue"},
 		{"cloudflare.kv", http.MethodDelete, "/client/v4/accounts/a/storage/kv/namespaces/nid/values/k", "", "DeleteValue"},
 		{"cloudflare.kv", http.MethodGet, "/client/v4/unknown", "", "Unknown"},
+
+		{"hostinger.dns", http.MethodPost, "/api/domains/v1/portfolio", "", "CreateDomain"},
+		{"hostinger.dns", http.MethodGet, "/api/domains/v1/portfolio", "", "ListDomains"},
+		{"hostinger.dns", http.MethodGet, "/api/domains/v1/portfolio/ex.test", "", "GetDomain"},
+		{"hostinger.dns", http.MethodGet, "/api/dns/v1/zones/ex.test", "", "GetDNSRecords"},
+		{"hostinger.dns", http.MethodPut, "/api/dns/v1/zones/ex.test", "", "UpdateDNSRecords"},
+		{"hostinger.dns", http.MethodDelete, "/api/dns/v1/zones/ex.test", "", "DeleteDNSRecords"},
+		{"hostinger.dns", http.MethodGet, "/api/unknown", "", "Unknown"},
 	} {
 		request := httptest.NewRequest(test.method, test.path, nil)
 		if test.target != "" {
@@ -276,5 +284,28 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 	}
 	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"code":10013`) || !strings.Contains(w.Body.String(), `"success":false`) {
 		t.Fatalf("cf fault %d %#v %s", w.Code, w.Header(), w.Body.String())
+	}
+
+	hs := &model.Service{ID: "hostinger.dns"}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(hs, &model.Operation{Name: "ListDomains"}, w, &spi.Response{Output: map[string]any{"_list": []any{map[string]any{"domain": "ex.test"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || strings.Contains(w.Body.String(), `"_list"`) || !strings.Contains(w.Body.String(), `"domain":"ex.test"`) {
+		t.Fatalf("hs list encode %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(hs, &model.Operation{Name: "CreateDomain"}, w, &spi.Response{Output: map[string]any{"domain": "ex.test", "status": "active"}}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"domain":"ex.test"`) {
+		t.Fatalf("hs encode %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.EncodeFault(hs, &model.Operation{Name: "GetDomain"}, w, &spi.Fault{Code: "not_found", Message: "Domain not found", HTTPStatus: 404, Fault: "client"}, "id"); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"correlation_id":"mirror"`) || !strings.Contains(w.Body.String(), `"message":"Domain not found"`) {
+		t.Fatalf("hs fault %d %#v %s", w.Code, w.Header(), w.Body.String())
 	}
 }

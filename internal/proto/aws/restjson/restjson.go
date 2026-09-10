@@ -38,6 +38,9 @@ func (Codec) Route(svc *model.Service, r *http.Request) (*model.Operation, error
 	if svc.ID == "cloudflare.kv" {
 		return cloudflareOp(svc, r), nil
 	}
+	if svc.ID == "hostinger.dns" {
+		return hostingerOp(svc, r), nil
+	}
 	// An X-Amz-Target names an operation outright, and an explicit statement
 	// beats one inferred from a path. No SDK sends it for a restJson1 service,
 	// but this project's own recordings and pack tests do, and some services
@@ -340,6 +343,41 @@ func opensearchOp(svc *model.Service, r *http.Request) *model.Operation {
 	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
 }
 
+func hostingerOp(svc *model.Service, r *http.Request) *model.Operation {
+	name := hostingerRoute(r)
+	if op := svc.OperationByName(name); op != nil {
+		return op
+	}
+	return &model.Operation{Name: name, HTTP: model.HTTPBinding{Method: r.Method, Code: 200}}
+}
+
+func hostingerRoute(r *http.Request) string {
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	m := r.Method
+	if len(parts) >= 4 && parts[0] == "api" && parts[1] == "domains" && parts[2] == "v1" && parts[3] == "portfolio" {
+		if len(parts) == 4 && m == http.MethodPost {
+			return "CreateDomain"
+		}
+		if len(parts) == 4 && m == http.MethodGet {
+			return "ListDomains"
+		}
+		if len(parts) >= 5 && m == http.MethodGet {
+			return "GetDomain"
+		}
+	}
+	if len(parts) >= 5 && parts[0] == "api" && parts[1] == "dns" && parts[2] == "v1" && parts[3] == "zones" {
+		switch m {
+		case http.MethodGet:
+			return "GetDNSRecords"
+		case http.MethodPut:
+			return "UpdateDNSRecords"
+		case http.MethodDelete:
+			return "DeleteDNSRecords"
+		}
+	}
+	return "Unknown"
+}
+
 func cloudflareOp(svc *model.Service, r *http.Request) *model.Operation {
 	name := cloudflareRoute(r)
 	if op := svc.OperationByName(name); op != nil {
@@ -485,6 +523,9 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	if svc.ID == "cloudflare.kv" {
 		return encodeCloudflare(w, status, resp)
 	}
+	if svc.ID == "hostinger.dns" {
+		return encodeHostinger(w, status, resp)
+	}
 	if w.Header().Get("Content-Type") == "" {
 		w.Header().Set("Content-Type", "application/json")
 	}
@@ -527,6 +568,20 @@ func encodeCloudflare(w http.ResponseWriter, status int, resp *spi.Response) err
 	return json.NewEncoder(w).Encode(map[string]any{"success": true, "errors": []any{}, "messages": []any{}, "result": result})
 }
 
+func encodeHostinger(w http.ResponseWriter, status int, resp *spi.Response) error {
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/json")
+	}
+	w.WriteHeader(status)
+	if resp.Output == nil {
+		return nil
+	}
+	if lst, ok := resp.Output["_list"]; ok {
+		return json.NewEncoder(w).Encode(lst)
+	}
+	return json.NewEncoder(w).Encode(resp.Output)
+}
+
 func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.ResponseWriter, f *spi.Fault, requestID string) error {
 	status := f.HTTPStatus
 	if status == 0 {
@@ -553,6 +608,10 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 			"messages": []any{},
 			"result":   nil,
 		})
+	}
+	if svc.ID == "hostinger.dns" {
+		w.WriteHeader(status)
+		return json.NewEncoder(w).Encode(map[string]any{"message": f.Message, "correlation_id": "mirror"})
 	}
 	w.Header().Set("x-amzn-errortype", f.Code)
 	w.WriteHeader(status)

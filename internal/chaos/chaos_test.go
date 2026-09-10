@@ -34,6 +34,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	cfapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/cloudflare/api"
+	hsapi "github.com/tyler-r-kendrick/mirror.cloud/internal/services/hostinger/api"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/vercel/api"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -7650,6 +7651,68 @@ func TestCloudflareConcurrentKVPutGet(t *testing.T) {
 	}
 	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetValue", Input: map[string]any{"account_id": "acct1", "namespace_id": nid, "key": "k"}})
 	if err != nil || got.Output["_raw"] == nil {
+		t.Fatalf("get after concurrent put %#v %v", got, err)
+	}
+}
+
+func TestHostingerConcurrentDuplicateDomains(t *testing.T) {
+	p := hsapi.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	errCh := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range cap(errCh) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateDomain", Input: map[string]any{"domain": "race.test"}})
+			errCh <- err
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	winners := 0
+	for err := range errCh {
+		if err == nil {
+			winners++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.HTTPStatus != 409 || fault.Code != "conflict" {
+			t.Fatalf("concurrent create: %v", err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("successful creates = %d, want 1", winners)
+	}
+}
+
+func TestHostingerConcurrentDNSPutGet(t *testing.T) {
+	p := hsapi.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateDomain", Input: map[string]any{"domain": "race.test"}}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errCh := make(chan error, 32)
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			zone := []any{map[string]any{"name": "@", "type": "A", "ttl": 300, "records": []any{map[string]any{"content": fmt.Sprintf("1.2.3.%d", n)}}}}
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "UpdateDNSRecords", Input: map[string]any{"domain": "race.test", "overwrite": true, "zone": zone}}); err != nil {
+				errCh <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatal(err)
+	}
+	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetDNSRecords", Input: map[string]any{"domain": "race.test"}})
+	if err != nil || got.Output["_list"] == nil {
 		t.Fatalf("get after concurrent put %#v %v", got, err)
 	}
 }

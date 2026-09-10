@@ -1,0 +1,56 @@
+{
+  "after_del": {
+    "_list": []
+  },
+  "create": {
+    "domain": "snap.test",
+    "status": "active"
+  },
+  "delete": {
+    "message": "Request accepted"
+  },
+  "duplicate": {
+    "error": "conflict",
+    "message": "Domain already exists",
+    "status": 409
+  },
+  "empty": {
+    "error": "validation_error",
+    "message": "Domain is required",
+    "status": 422
+  },
+  "get": {
+    "domain": "snap.test",
+    "status": "active"
+  },
+  "list": {
+    "_list": [
+      {
+        "domain": "snap.test",
+        "status": "active"
+      }
+    ]
+  },
+  "missing": {
+    "error": "not_found",
+    "message": "Domain not found",
+    "status": 404
+  },
+  "records": {
+    "_list": [
+      {
+        "name": "@",
+        "records": [
+          {
+            "content": "1.2.3.4"
+          }
+        ],
+        "ttl": 300,
+        "type": "A"
+      }
+    ]
+  },
+  "update": {
+    "message": "Request accepted"
+  }
+}

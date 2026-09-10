@@ -21596,6 +21596,38 @@ var mutants = []mutant{
 		pkg:  "./internal/proto/aws/restjson",
 		run:  "TestRESTJSON",
 	},
+	{
+		name: "hostinger-accept-empty-domain",
+		file: filepath.Join("internal", "services", "hostinger", "api", "api.go"),
+		old:  "if domain == \"\" {\n\t\treturn nil, hsFault(\"validation_error\", \"Domain is required\", 422)",
+		new:  "if false {\n\t\treturn nil, hsFault(\"validation_error\", \"Domain is required\", 422)",
+		pkg:  "./internal/services/hostinger/api",
+		run:  "TestCreateDomainRejectsEmptyAndDuplicate",
+	},
+	{
+		name: "hostinger-accept-duplicate-domain",
+		file: filepath.Join("internal", "services", "hostinger", "api", "api.go"),
+		old:  `if _, exists, _ := p.col(req, "hsdom").Get(ctx, domain); exists {`,
+		new:  `if _, exists, _ := p.col(req, "hsdom").Get(ctx, domain); false {`,
+		pkg:  "./internal/services/hostinger/api",
+		run:  "TestCreateDomainRejectsEmptyAndDuplicate",
+	},
+	{
+		name: "hostinger-get-missing-domain-as-empty",
+		file: filepath.Join("internal", "services", "hostinger", "api", "api.go"),
+		old:  "if !ok {\n\t\treturn nil, hsFault(\"not_found\", \"Domain not found\", 404)\n\t}\n\tvar rec map[string]any",
+		new:  "if false {\n\t\treturn nil, hsFault(\"not_found\", \"Domain not found\", 404)\n\t}\n\tvar rec map[string]any",
+		pkg:  "./internal/services/hostinger/api",
+		run:  "TestDomainAndDNSLifecycle",
+	},
+	{
+		name: "hostinger-encode-aws-fault",
+		file: filepath.Join("internal", "proto", "aws", "restjson", "restjson.go"),
+		old:  "if svc.ID == \"hostinger.dns\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"message\": f.Message, \"correlation_id\": \"mirror\"})",
+		new:  "if false && svc.ID == \"hostinger.dns\" {\n\t\tw.WriteHeader(status)\n\t\treturn json.NewEncoder(w).Encode(map[string]any{\"message\": f.Message, \"correlation_id\": \"mirror\"})",
+		pkg:  "./internal/proto/aws/restjson",
+		run:  "TestRESTJSON",
+	},
 }
 
 // shard reads the slice of the suite this process is responsible for, from

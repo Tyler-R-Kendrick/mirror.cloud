@@ -454,6 +454,9 @@ func (s *Server) demux(r *http.Request) *model.Service {
 	if cloudflareRequest(r) {
 		return s.bundle.ServiceByID("cloudflare.kv")
 	}
+	if hostingerRequest(r) {
+		return s.bundle.ServiceByID("hostinger.dns")
+	}
 	if vercelRequest(r) {
 		return s.bundle.ServiceByID("vercel.api")
 	}
@@ -490,6 +493,18 @@ func (s *Server) demux(r *http.Request) *model.Service {
 		return s.bundle.ServiceByID("aws.s3")
 	}
 	return nil
+}
+
+func hostingerRequest(r *http.Request) bool {
+	host := strings.ToLower(r.Host)
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	if strings.Contains(host, "hostinger") {
+		return true
+	}
+	path := r.URL.Path
+	return strings.HasPrefix(path, "/api/dns/") || strings.HasPrefix(path, "/api/domains/")
 }
 
 func cloudflareRequest(r *http.Request) bool {

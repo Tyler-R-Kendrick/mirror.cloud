@@ -917,7 +917,7 @@ func (p *Pack) validatePublishTarget(ctx context.Context, req *spi.Request, arn 
 
 func endpointResourceARN(arn string) bool {
 	parts := strings.Split(arn, ":")
-	return len(parts) == 6 && parts[0] == "arn" && parts[2] == "sns" && strings.Contains(parts[5], "/endpoint/")
+	return len(parts) == 6 && parts[0] == "arn" && parts[2] == "sns" && strings.HasPrefix(parts[5], "endpoint/")
 }
 
 func (p *Pack) validateEndpointTarget(ctx context.Context, req *spi.Request, arn string) *spi.Fault {

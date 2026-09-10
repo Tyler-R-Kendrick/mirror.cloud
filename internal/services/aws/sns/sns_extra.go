@@ -437,7 +437,7 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 				return &spi.Response{Output: map[string]any{"EndpointArn": existing["EndpointArn"]}}, nil
 			}
 		}
-		arn := app + "/endpoint/" + p.deps.Rand.Hex(8)
+		arn := strings.Replace(app, ":app/", ":endpoint/", 1) + "/" + p.deps.Rand.Hex(8)
 		rec := map[string]any{"EndpointArn": arn, "PlatformApplicationArn": app, "Token": tok, "CustomUserData": customUserData, "Enabled": "true"}
 		for key, value := range requestedAttrs {
 			rec[key] = value

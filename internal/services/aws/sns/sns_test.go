@@ -1191,6 +1191,9 @@ func TestSNSPlatformEndpointListProjection(t *testing.T) {
 		t.Fatalf("endpoints %#v", listed.Output)
 	}
 	entry := asMap(endpoints[0])
+	if got := str(entry["EndpointArn"]); !strings.Contains(got, ":endpoint/GCM/endpoint-list/") {
+		t.Fatalf("endpoint ARN %q", got)
+	}
 	if _, leaked := entry["PlatformApplicationArn"]; leaked {
 		t.Fatalf("endpoint leaked application ARN: %#v", entry)
 	}

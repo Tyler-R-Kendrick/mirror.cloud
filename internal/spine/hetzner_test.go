@@ -75,10 +75,26 @@ func TestBootedServerHetznerAPI(t *testing.T) {
 	if code != 200 || env["ssh_key"].(map[string]any)["name"] != "laptop" {
 		t.Fatalf("get ssh %d %s", code, raw)
 	}
-	code, raw, h := do(http.MethodGet, "/v1/servers/missing", "")
+	code, _, _ = do(http.MethodDelete, "/v1/ssh_keys/"+kid, "")
+	if code != 200 {
+		t.Fatalf("delete ssh %d", code)
+	}
+	code, raw, h := do(http.MethodDelete, "/v1/servers/missing", "")
 	miss := map[string]any{}
 	_ = json.Unmarshal(raw, &miss)
 	errObj, _ := miss["error"].(map[string]any)
+	if code != 404 || errObj["code"] != "not_found" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("delete missing server %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodDelete, "/v1/ssh_keys/missing", "")
+	_ = json.Unmarshal(raw, &miss)
+	errObj, _ = miss["error"].(map[string]any)
+	if code != 404 || errObj["code"] != "not_found" || h.Get("x-amzn-errortype") != "" {
+		t.Fatalf("delete missing ssh %d %#v %s", code, h, raw)
+	}
+	code, raw, h = do(http.MethodGet, "/v1/servers/missing", "")
+	_ = json.Unmarshal(raw, &miss)
+	errObj, _ = miss["error"].(map[string]any)
 	if code != 404 || errObj["code"] != "not_found" || h.Get("x-amzn-errortype") != "" {
 		t.Fatalf("missing server %d %#v %s", code, h, raw)
 	}

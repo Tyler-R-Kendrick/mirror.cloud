@@ -23,11 +23,11 @@ Authority: official Hetzner Cloud API v1 (`api.hetzner.cloud` `/v1/servers` and 
 | `POST /v1/servers` (`CreateServer`) | Booted create returns `{server}`; atomic empty 400 `invalid_input` and duplicate 409 `uniqueness_error`; BDD create; chaos `TestHetznerConcurrentDuplicateServers`; mutants `hetzner-accept-empty-server` and `hetzner-accept-duplicate-server` |
 | `GET /v1/servers` (`ListServers`) | Booted list wraps `{servers, meta.pagination.total_entries}`; characterization `list`; BDD lists after create |
 | `GET /v1/servers/{id}` (`GetServer`) | Booted get-after-set; missing server HTTP 404 `{error.code:not_found}` without `x-amzn-errortype`; mutant `hetzner-get-missing-server-as-empty` |
-| `DELETE /v1/servers/{id}` (`DeleteServer`) | Atomic delete then get is 404; characterization `delete` |
+| `DELETE /v1/servers/{id}` (`DeleteServer`) | Atomic delete then get is 404; `TestDeleteMissingServerAndSSHKey` and booted DELETE of missing id are HTTP 404 `{error.code:not_found}`; characterization `delete`/`del_miss_s`; mutant `hetzner-delete-missing-server-as-success` |
 | `POST /v1/ssh_keys` (`CreateSSHKey`) | Atomic create; duplicate fingerprint 409; BDD create |
 | `GET /v1/ssh_keys` (`ListSSHKeys`) | Characterization `keys` |
 | `GET /v1/ssh_keys/{id}` (`GetSSHKey`) | Booted POST then GET returns the stored key; missing key 404 |
-| `DELETE /v1/ssh_keys/{id}` (`DeleteSSHKey`) | Atomic delete of missing is 404 |
+| `DELETE /v1/ssh_keys/{id}` (`DeleteSSHKey`) | Atomic `DeleteSSHKey` of a created key then GET is 404; booted DELETE of the created key then DELETE of missing `/v1/ssh_keys/{id}` is HTTP 404 `{error.code:not_found}`; characterization `del_ssh`/`del_miss_k`; mutant `hetzner-delete-missing-ssh-key-as-success` |
 | Hetzner faults vs AWS faults | restJson1 `Encode` wraps singular/plural keys plus `meta.pagination.total_entries`; `EncodeFault` uses `{error:{code,message}}` and omits `x-amzn-errortype`; mutant `hetzner-encode-aws-fault` |
 
 ## DigitalOcean baseline

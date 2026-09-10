@@ -12,6 +12,20 @@
     },
     "status": 0
   },
+  "del_miss_k": {
+    "error": "not_found",
+    "message": "SSH key not found",
+    "status": 404
+  },
+  "del_miss_s": {
+    "error": "not_found",
+    "message": "Server not found",
+    "status": 404
+  },
+  "del_ssh": {
+    "output": null,
+    "status": 200
+  },
   "delete": {
     "output": null,
     "status": 200

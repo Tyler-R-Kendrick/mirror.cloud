@@ -51,9 +51,26 @@ func TestServerAndSSHKeyLifecycle(t *testing.T) {
 	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 404 || f.Code != "not_found" {
 		t.Fatalf("missing server %#v", err)
 	}
-	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetSSHKey", Input: map[string]any{"id": "missing"}})
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteSSHKey", Input: map[string]any{"id": kid}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetSSHKey", Input: map[string]any{"id": kid}})
 	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 404 || f.Code != "not_found" {
-		t.Fatalf("missing ssh %#v", err)
+		t.Fatalf("missing ssh after delete %#v", err)
+	}
+}
+
+func TestDeleteMissingServerAndSSHKey(t *testing.T) {
+	p := New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteServer", Input: map[string]any{"id": "missing"}})
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 404 || f.Code != "not_found" {
+		t.Fatalf("delete missing server %#v", err)
+	}
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteSSHKey", Input: map[string]any{"id": "missing"}})
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 404 || f.Code != "not_found" {
+		t.Fatalf("delete missing ssh %#v", err)
 	}
 }
 

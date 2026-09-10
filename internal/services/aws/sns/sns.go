@@ -19,6 +19,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/logs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -1084,7 +1085,54 @@ func (p *Pack) deliverLambda(ctx context.Context, req *spi.Request, sub map[stri
 	in["FunctionName"] = name
 	in["InvocationType"] = "Event"
 	_, err := lambda.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: in})
+	p.recordLambdaDelivery(ctx, req, sub, messageID, err)
 	return err == nil
+}
+
+func (p *Pack) recordLambdaDelivery(ctx context.Context, req *spi.Request, sub map[string]any, messageID string, deliveryErr error) {
+	topicARN := str(req.Input["TopicArn"])
+	b, found, _ := p.col(req, "topics").Get(ctx, topicName(topicARN))
+	if !found {
+		return
+	}
+	var topic map[string]any
+	if json.Unmarshal(b, &topic) != nil {
+		return
+	}
+	attrs := asMap(topic["attrs"])
+	feedback := "LambdaSuccessFeedbackRoleArn"
+	feedbackRate := "LambdaSuccessFeedbackSampleRate"
+	if deliveryErr != nil {
+		feedback = "LambdaFailureFeedbackRoleArn"
+		feedbackRate = "LambdaFailureFeedbackSampleRate"
+	}
+	if str(attrs[feedback]) == "" {
+		return
+	}
+	sample := 100
+	if value, err := strconv.Atoi(str(attrs[feedbackRate])); err == nil {
+		sample = value
+	}
+	if sample <= 0 || (sample < 100 && p.deps.Rand.Intn(100) >= sample) {
+		return
+	}
+	group := fmt.Sprintf("sns/%s/%s/%s", req.Identity.Region, req.Identity.Account, topicName(topicARN))
+	stream := "delivery"
+	logPack := logs.New(p.deps)
+	_, _ = logPack.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "CreateLogGroup", Input: map[string]any{"logGroupName": group}})
+	_, _ = logPack.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "CreateLogStream", Input: map[string]any{"logGroupName": group, "logStreamName": stream}})
+	providerResponse := ""
+	statusCode := 200
+	if deliveryErr != nil {
+		providerResponse = deliveryErr.Error()
+		statusCode = 500
+	}
+	message := map[string]any{
+		"notification": map[string]any{"messageId": messageID, "timestamp": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)},
+		"delivery":     map[string]any{"destination": str(sub["Endpoint"]), "providerResponse": providerResponse, "statusCode": statusCode, "dwellTimeMs": 0},
+	}
+	encoded, _ := json.Marshal(message)
+	_, _ = logPack.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "PutLogEvents", Input: map[string]any{"logGroupName": group, "logStreamName": stream, "logEvents": []any{map[string]any{"timestamp": p.deps.Clock.Now().UnixMilli(), "message": string(encoded)}}}})
 }
 
 func (p *Pack) lambdaNotification(req *spi.Request, sub map[string]any, body, messageID string, attrs map[string]any) map[string]any {

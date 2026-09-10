@@ -18273,6 +18273,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSObscureSMSPhoneSubscription",
 		},
 		{
+			name: "sns-accept-invalid-subject",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `if value == "" || len([]rune(value)) > 100 {`,
+			new:  `if false {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSSubjectValidation",
+		},
+		{
 			name: "sns-ignore-cross-region-sqs-owner",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  "targetReq.Identity.Region = parts[3]",

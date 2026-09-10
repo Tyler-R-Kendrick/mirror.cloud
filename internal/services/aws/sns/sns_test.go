@@ -1213,6 +1213,20 @@ func TestSNSMessageStructureAndSizeValidation(t *testing.T) {
 	}
 }
 
+func TestSNSSubjectValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "subject-validation"}).Output["TopicArn"])
+	for _, subject := range []string{strings.Repeat("x", 101), "line\nbreak", "control\x00"} {
+		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
+			"TopicArn": topic, "Message": "message", "Subject": subject,
+		}}); err == nil {
+			t.Fatalf("accepted invalid subject %q", subject)
+		}
+	}
+}
+
 func TestSNSPublishBatchFIFOValidation(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

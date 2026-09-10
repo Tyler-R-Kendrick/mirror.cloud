@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
@@ -1000,8 +1001,16 @@ func validatePublishMessage(req *spi.Request) *spi.Fault {
 	if publishMessageSize(body, messageAttrs(req.Input)) > 262144 {
 		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Message too long", HTTPStatus: 400, Fault: "client"}
 	}
-	if subject, present := req.Input["Subject"]; present && str(subject) == "" {
-		return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Subject", HTTPStatus: 400, Fault: "client"}
+	if subject, present := req.Input["Subject"]; present {
+		value := str(subject)
+		if value == "" || len([]rune(value)) > 100 {
+			return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Subject", HTTPStatus: 400, Fault: "client"}
+		}
+		for _, r := range value {
+			if unicode.IsControl(r) {
+				return &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Subject", HTTPStatus: 400, Fault: "client"}
+			}
+		}
 	}
 	structure := str(req.Input["MessageStructure"])
 	if structure != "" && structure != "json" {

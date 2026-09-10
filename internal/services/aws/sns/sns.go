@@ -1595,12 +1595,15 @@ func validSMSNumber(number string) bool {
 	if len(number) < 3 || len(number) > 16 || number[0] != '+' || number[1] < '1' || number[1] > '9' {
 		return false
 	}
+	previousSeparator := false
 	for _, r := range number[2:] {
-		if r < '0' || r > '9' {
+		separator := r == '/' || r == '-' || r == '.'
+		if (r < '0' || r > '9') && !separator || separator && previousSeparator {
 			return false
 		}
+		previousSeparator = separator
 	}
-	return true
+	return !previousSeparator
 }
 
 func validSubscriptionARN(arn string) bool {

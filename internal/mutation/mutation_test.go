@@ -18265,6 +18265,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSPublishBatchFIFOValidation",
 		},
 		{
+			name: "sns-reject-sms-separator-validation",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  `if (r < '0' || r > '9') && !separator || separator && previousSeparator {`,
+			new:  `if (r < '0' || r > '9') && !separator {`,
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSObscureSMSPhoneSubscription",
+		},
+		{
 			name: "sns-ignore-cross-region-sqs-owner",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  "targetReq.Identity.Region = parts[3]",

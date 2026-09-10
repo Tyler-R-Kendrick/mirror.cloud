@@ -1683,6 +1683,25 @@ func TestSNSPhoneNumberPublish(t *testing.T) {
 	}
 }
 
+func TestSNSObscureSMSPhoneSubscription(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "obscure-sms"}).Output["TopicArn"])
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic, "Protocol": "sms", "Endpoint": "+12/34-567.890",
+	}}); err != nil {
+		t.Fatalf("accepted AWS-compatible SMS endpoint: %v", err)
+	}
+	for _, endpoint := range []string{"+15--551234567", "+15551234567.", "/+15551234567"} {
+		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+			"TopicArn": topic, "Protocol": "sms", "Endpoint": endpoint,
+		}}); err == nil {
+			t.Fatalf("accepted invalid SMS endpoint %q", endpoint)
+		}
+	}
+}
+
 func TestSNSSMSOptOutSuppressesDelivery(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := New(deps)

@@ -6,7 +6,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 783 of 907 direct upstream test functions are explicitly traced (86.3%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green: 2,747 tests across 221 Go packages. The 2,578-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the thirty-six new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green: 2,747 tests across 221 Go packages. The 2,579-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the thirty-seven new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -27,12 +27,12 @@ Initial SNS trace rows:
 | LocalStack test | Mirror evidence |
 |---|---|
 | `test_sns.py::TestSNSPlatformApplicationCrud::test_create_platform_application` | `TestSNSControlPlaneOperations` creates and lists a platform application |
-| `test_sns.py::TestSNSPlatformApplicationCrud::test_list_platform_applications` | `TestSNSControlPlaneOperations` verifies the application listing |
+| `test_sns.py::TestSNSPlatformApplicationCrud::test_list_platform_applications` | `TestSNSControlPlaneOperations` and `TestSNSPlatformApplicationAttributesProjection` verify the public application listing shape |
 | `test_sns.py::TestSNSPlatformApplicationCrud::test_create_platform_application_invalid_attributes` | `TestSNSPlatformApplicationValidation` rejects missing credentials and unknown keys |
 | `test_sns.py::TestSNSPlatformApplicationCrud::test_create_platform_application_invalid_name` | `TestSNSPlatformApplicationValidation` rejects punctuation in the name |
 | `test_sns.py::TestSNSPlatformApplicationCrud::test_create_platform_application_invalid_platform` | `TestSNSPlatformApplicationValidation` rejects unsupported platforms |
-| `test_sns.py::TestSNSPlatformApplicationCrud::test_get_platform_application_attributes` | `TestSNSControlPlaneOperations` reads stored application attributes |
-| `test_sns.py::TestSNSPlatformApplicationCrud::test_set_platform_application_attributes` | `TestSNSControlPlaneOperations` updates and reads application attributes |
+| `test_sns.py::TestSNSPlatformApplicationCrud::test_get_platform_application_attributes` | `TestSNSControlPlaneOperations` and `TestSNSPlatformApplicationAttributesProjection` read public attributes without credentials |
+| `test_sns.py::TestSNSPlatformApplicationCrud::test_set_platform_application_attributes` | `TestSNSControlPlaneOperations` and `TestSNSPlatformApplicationAttributesProjection` merge updates while retaining `Enabled` |
 | `test_sns.py::TestSNSPlatformApplicationCrud::test_get_platform_application_attributes_invalid_arn` | `TestSNSPlatformApplicationValidation` rejects a malformed get ARN |
 | `test_sns.py::TestSNSPlatformApplicationCrud::test_set_platform_application_attributes_invalid_arn` | `TestSNSPlatformApplicationValidation` rejects a malformed set ARN |
 | `test_sns.py::TestSNSPlatformEndpointCrud::test_create_platform_endpoint` | `TestSNSPlatformEndpointLifecycleValidation` creates an endpoint |

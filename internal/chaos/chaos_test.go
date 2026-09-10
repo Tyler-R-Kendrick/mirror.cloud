@@ -33,6 +33,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sqs"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/vercel/api"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -7527,5 +7528,64 @@ func TestConcurrentSQSMessageMoveTaskStartsAllowOneActiveTask(t *testing.T) {
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CancelMessageMoveTask", Input: map[string]any{"TaskHandle": handle}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestVercelConcurrentDuplicateProjectNames(t *testing.T) {
+	p := api.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	errCh := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range cap(errCh) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateProject", Input: map[string]any{"name": "race"}})
+			errCh <- err
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	winners := 0
+	for err := range errCh {
+		if err == nil {
+			winners++
+			continue
+		}
+		var fault *spi.Fault
+		if !errors.As(err, &fault) || fault.HTTPStatus != 409 {
+			t.Fatalf("concurrent create: %v", err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("successful creates = %d, want 1", winners)
+	}
+}
+
+func TestVercelConcurrentKVSetGet(t *testing.T) {
+	p := api.New(spitest.Deps(t))
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	var wg sync.WaitGroup
+	errCh := make(chan error, 32)
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			key := "k"
+			if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "KvCommand", Input: map[string]any{"_redis": []any{"SET", key, n}}}); err != nil {
+				errCh <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatal(err)
+	}
+	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "KvCommand", Input: map[string]any{"_redis": []any{"GET", "k"}}})
+	if err != nil || got.Output["result"] == nil {
+		t.Fatalf("get after concurrent set %#v %v", got, err)
 	}
 }

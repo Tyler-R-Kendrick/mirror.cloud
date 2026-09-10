@@ -379,7 +379,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 		}
 		sub := str(req.Input["TopicArn"]) + ":" + p.deps.Rand.UUID()
-		attrs := asMap(req.Input["Attributes"])
+		attrs := flattenAttrEntries(req.Input, "Attributes")
 		if str(req.Input["FilterPolicy"]) != "" {
 			attrs["FilterPolicy"] = req.Input["FilterPolicy"]
 		}

@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -1100,6 +1101,33 @@ func TestSNSPlatformEndpointLifecycleValidation(t *testing.T) {
 	}
 	if _, err := call("ListEndpointsByPlatformApplication", map[string]any{"PlatformApplicationArn": appARN}); err == nil {
 		t.Fatal("listed endpoints for deleted application")
+	}
+}
+
+func TestSNSPlatformEndpointAttributesProjection(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	app, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformApplication", Input: map[string]any{
+		"Name": "endpoint-attributes", "Platform": "GCM", "Attributes": map[string]any{"PlatformCredential": "secret"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreatePlatformEndpoint", Input: map[string]any{
+		"PlatformApplicationArn": app.Output["PlatformApplicationArn"], "Token": "token", "CustomUserData": "custom",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	get, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetEndpointAttributes", Input: map[string]any{"EndpointArn": endpoint.Output["EndpointArn"]}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"Enabled": "true", "Token": "token", "CustomUserData": "custom"}
+	if got := asMap(get.Output["Attributes"]); !reflect.DeepEqual(got, want) {
+		t.Fatalf("endpoint attributes %#v, want %#v", got, want)
 	}
 }
 

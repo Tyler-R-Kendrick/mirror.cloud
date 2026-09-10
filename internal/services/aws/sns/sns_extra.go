@@ -461,7 +461,11 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		}
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
-		return &spi.Response{Output: map[string]any{"Attributes": rec}}, nil
+		attrs := map[string]any{"Enabled": str(rec["Enabled"]), "Token": str(rec["Token"])}
+		if customUserData := str(rec["CustomUserData"]); customUserData != "" {
+			attrs["CustomUserData"] = customUserData
+		}
+		return &spi.Response{Output: map[string]any{"Attributes": attrs}}, nil
 	}
 }
 

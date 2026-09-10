@@ -16412,7 +16412,7 @@ var mutants = []mutant{
 	{
 		name: "sns-drop-signing-certificate-endpoint",
 		file: filepath.Join("internal", "edge", "edge.go"),
-		old:  `if strings.HasSuffix(r.URL.Path, "/_aws/sns/SimpleNotificationService.pem") {`,
+		old:  `if strings.Contains(r.URL.Path, "/_aws/sns/SimpleNotificationService") && strings.HasSuffix(r.URL.Path, ".pem") {`,
 		new:  `if false {`,
 		pkg:  "./internal/edge",
 		run:  "TestSNSCertificateEndpoint",

@@ -1,6 +1,7 @@
 package restjson
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -381,4 +382,40 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"code":"not_found"`) || !strings.Contains(w.Body.String(), `"error"`) {
 		t.Fatalf("hz fault %d %#v %s", w.Code, w.Header(), w.Body.String())
 	}
+
+	rw := &model.Service{ID: "railway.graphql"}
+	for _, test := range []struct{ query, want string }{
+		{`mutation { projectCreate(input:{name:"web"}) { id } }`, "projectCreate"},
+		{`{ projects { edges { node { id } } } }`, "projects"},
+		{`{ project(id:"x") { id } }`, "project"},
+		{`mutation { projectDelete(id:"x") }`, "projectDelete"},
+		{`mutation { serviceCreate(input:{name:"api"}) { id } }`, "serviceCreate"},
+		{`{ service(id:"x") { id } }`, "service"},
+		{`{ unknown }`, "Unknown"},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/graphql/v2", strings.NewReader(`{"query":`+jsonQuote(test.query)+`}`))
+		op, err := codec.Route(rw, req)
+		if err != nil || op.Name != test.want {
+			t.Errorf("railway %q: %#v %v, want %s", test.query, op, err, test.want)
+		}
+	}
+	w = httptest.NewRecorder()
+	if err := codec.Encode(rw, &model.Operation{Name: "projects"}, w, &spi.Response{Output: map[string]any{"_list": []any{map[string]any{"id": "1", "name": "web"}}, "_wrap": "projects"}}); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"data"`) || !strings.Contains(w.Body.String(), `"edges"`) || !strings.Contains(w.Body.String(), `"node"`) {
+		t.Fatalf("rw list encode %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if err := codec.EncodeFault(rw, &model.Operation{Name: "project"}, w, &spi.Fault{Code: "NOT_FOUND", Message: "Project not found", HTTPStatus: 200, Fault: "client"}, "id"); err != nil {
+		t.Fatal(err)
+	}
+	if w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"errors"`) || !strings.Contains(w.Body.String(), `"NOT_FOUND"`) {
+		t.Fatalf("rw fault %d %#v %s", w.Code, w.Header(), w.Body.String())
+	}
+}
+
+func jsonQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }

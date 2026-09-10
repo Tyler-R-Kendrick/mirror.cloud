@@ -239,6 +239,7 @@ func Bundle() *model.Bundle {
 	azure := []string{"CreateContainer", "GetContainer", "ListContainers", "DeleteContainer", "PutBlob", "GetBlob", "ListBlobs", "DeleteBlob"}
 	digitalocean := []string{"CreateDroplet", "ListDroplets", "GetDroplet", "DeleteDroplet", "CreateDomain", "ListDomains", "GetDomain", "DeleteDomain"}
 	hetzner := []string{"CreateServer", "ListServers", "GetServer", "DeleteServer", "CreateSSHKey", "ListSSHKeys", "GetSSHKey", "DeleteSSHKey"}
+	railway := []string{"projectCreate", "projects", "project", "projectDelete", "serviceCreate", "service"}
 	gcs := []string{"storage.buckets.insert", "storage.buckets.get", "storage.buckets.list",
 		"storage.buckets.delete", "storage.buckets.patch",
 		"storage.objects.insert", "storage.objects.get", "storage.objects.list",
@@ -1301,6 +1302,7 @@ func Bundle() *model.Bundle {
 			svc("azure.blobs", "azure", model.ProtoRESTXML, "", "", "", mk(azure)),
 			svc("digitalocean.v2", "digitalocean", model.ProtoRESTJSON1, "", "", "", mk(digitalocean)),
 			svc("hetzner.v1", "hetzner", model.ProtoRESTJSON1, "", "", "", mk(hetzner)),
+			svc("railway.graphql", "railway", model.ProtoRESTJSON1, "", "", "", mk(railway)),
 			svc("aws.kms", "kms", model.ProtoAWSJSON11, "TrentService", "", "", mk(kms)),
 			svc("aws.logs", "logs", model.ProtoAWSJSON11, "Logs_20140328", "", "", mk(cwlogs)),
 			svc("aws.events", "events", model.ProtoAWSJSON11, "AWSEvents", "", "", mk(ev)),

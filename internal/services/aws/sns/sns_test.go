@@ -133,12 +133,20 @@ func TestSNSCrossAccountAndRegionSQSDelivery(t *testing.T) {
 	p := New(deps)
 	qp := sqs.New(deps)
 	owner := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	sameRegionQueueOwner := spi.Identity{Account: "222222222222", Region: "us-east-1"}
 	queueOwner := spi.Identity{Account: "222222222222", Region: "us-west-2"}
 	arn := str(invokeSNS(t, p, owner, "CreateTopic", map[string]any{"Name": "remote-queue-topic"}).Output["TopicArn"])
+	sameQueue := str(invokeSNSQueue(t, qp, sameRegionQueueOwner, "CreateQueue", map[string]any{"QueueName": "same-account-queue"}).Output["QueueUrl"])
 	queue := str(invokeSNSQueue(t, qp, queueOwner, "CreateQueue", map[string]any{"QueueName": "remote-queue"}).Output["QueueUrl"])
+	sameQueueARN := "arn:aws:sqs:us-east-1:222222222222:same-account-queue"
 	queueARN := "arn:aws:sqs:us-west-2:222222222222:remote-queue"
+	invokeSNS(t, p, owner, "Subscribe", map[string]any{"TopicArn": arn, "Protocol": "sqs", "Endpoint": sameQueueARN})
 	invokeSNS(t, p, owner, "Subscribe", map[string]any{"TopicArn": arn, "Protocol": "sqs", "Endpoint": queueARN})
 	invokeSNS(t, p, owner, "Publish", map[string]any{"TopicArn": arn, "Message": "remote-delivery"})
+	sameReceived := invokeSNSQueue(t, qp, sameRegionQueueOwner, "ReceiveMessage", map[string]any{"QueueUrl": sameQueue, "WaitTimeSeconds": 1})
+	if len(asSlice(sameReceived.Output["Messages"])) != 1 || !strings.Contains(str(asMap(asSlice(sameReceived.Output["Messages"])[0])["Body"]), "remote-delivery") {
+		t.Fatalf("cross-account delivery: %#v", sameReceived.Output)
+	}
 	received := invokeSNSQueue(t, qp, queueOwner, "ReceiveMessage", map[string]any{"QueueUrl": queue, "WaitTimeSeconds": 1})
 	messages := asSlice(received.Output["Messages"])
 	if len(messages) != 1 || !strings.Contains(str(asMap(messages[0])["Body"]), "remote-delivery") {

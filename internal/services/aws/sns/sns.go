@@ -362,6 +362,16 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if protocol == "sms" && !validSMSNumber(str(req.Input["Endpoint"])) {
 			return nil, &spi.Fault{Code: "InvalidParameter", Message: "Invalid parameter: Endpoint", HTTPStatus: 400, Fault: "client"}
 		}
+		if protocol == "application" {
+			endpoint := str(req.Input["Endpoint"])
+			parts := strings.Split(endpoint, ":")
+			if len(parts) != 6 || parts[0] != "arn" || parts[2] != "sns" || parts[3] != req.Identity.Region || parts[4] != req.Identity.Account || !strings.HasPrefix(parts[5], "endpoint/") {
+				return nil, &spi.Fault{Code: "NotFound", Message: "Endpoint does not exist", HTTPStatus: 404, Fault: "client"}
+			}
+			if _, ok, _ := p.col(req, "platend").Get(ctx, endpoint); !ok {
+				return nil, &spi.Fault{Code: "NotFound", Message: "Endpoint does not exist", HTTPStatus: 404, Fault: "client"}
+			}
+		}
 		if protocol == "sqs" {
 			if fault := p.validateSQSSubscription(ctx, req, topicArn, str(req.Input["Endpoint"])); fault != nil {
 				return nil, fault

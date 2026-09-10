@@ -1660,6 +1660,11 @@ func TestSNSPlatformEndpointSubscriptionDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
+		"TopicArn": topic.Output["TopicArn"], "Protocol": "application", "Endpoint": app.Output["PlatformApplicationArn"],
+	}}); err == nil {
+		t.Fatal("subscribed nonexistent application endpoint")
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
 		"TopicArn": topic.Output["TopicArn"], "Protocol": "application", "Endpoint": endpointARN,
 	}}); err != nil {
 		t.Fatal(err)

@@ -17848,6 +17848,14 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSSubscriptionProtocolAndQueueValidation",
 		},
 		{
+			name: "sns-accept-nonexistent-application-endpoint",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "if protocol == \"application\" {\n\t\t\tendpoint := str(req.Input[\"Endpoint\"])\n\t\t\tparts := strings.Split(endpoint, \":\")",
+			new:  "if false {\n\t\t\tendpoint := str(req.Input[\"Endpoint\"])\n\t\t\tparts := strings.Split(endpoint, \":\")",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSPlatformEndpointSubscriptionDispatch",
+		},
+		{
 			name: "sns-accept-invalid-unsubscribe-arn",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
 			old:  "if !validSubscriptionARN(arn) {",
@@ -18415,10 +18423,12 @@ func TestMutantsAreKilled(t *testing.T) {
 		{
 			name: "sns-drop-application-subscription-dispatch",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-			old:  `if protocol == "application" {`,
-			new:  `if false {`,
-			pkg:  "./internal/services/aws/sns",
-			run:  "TestSNSPlatformEndpointSubscriptionDispatch",
+			old: `if protocol == "application" {
+			if message, ok := p.platformEndpointMessage(ctx, req, str(sub["Endpoint"]), body, str(req.Input["MessageStructure"])); ok {`,
+			new: `if false {
+			if message, ok := p.platformEndpointMessage(ctx, req, str(sub["Endpoint"]), body, str(req.Input["MessageStructure"])); ok {`,
+			pkg: "./internal/services/aws/sns",
+			run: "TestSNSPlatformEndpointSubscriptionDispatch",
 		},
 		{
 			name: "sns-accept-invalid-phone-publish",

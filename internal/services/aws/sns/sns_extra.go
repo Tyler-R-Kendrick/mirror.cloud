@@ -442,7 +442,7 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 						continue
 					}
 					if str(existing[key]) != str(value) {
-						return nil, &spi.Fault{Code: "InvalidParameter", Message: "Endpoint already exists with a different attribute value.", HTTPStatus: 400, Fault: "client"}
+						return nil, &spi.Fault{Code: "InvalidParameter", Message: fmt.Sprintf("Endpoint %s already exists with the same Token, but different attributes.", str(existing["EndpointArn"])), HTTPStatus: 400, Fault: "client"}
 					}
 				}
 				return &spi.Response{Output: map[string]any{"EndpointArn": existing["EndpointArn"]}}, nil

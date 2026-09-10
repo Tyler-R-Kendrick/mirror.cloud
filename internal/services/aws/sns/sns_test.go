@@ -14,6 +14,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -3579,6 +3581,10 @@ func TestSNSFilterPolicyNumericSQSDelivery(t *testing.T) {
 	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
 		t.Fatalf("numeric filter delivery=%#v err=%v", received, err)
 	}
+	body := str(asMap(asSlice(received.Output["Messages"])[0])["Body"])
+	if !strings.Contains(body, "in-range") || strings.Contains(body, "out-of-range") {
+		t.Fatalf("numeric filter body %q", body)
+	}
 }
 
 func TestSNSLambdaSubscribeNotificationEnvelope(t *testing.T) {
@@ -3586,9 +3592,12 @@ func TestSNSLambdaSubscribeNotificationEnvelope(t *testing.T) {
 	p, lp := New(deps), lambda.New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	eventOut := filepath.Join(t.TempDir(), "event.json")
+	code := "import json,os\ndef lambda_handler(event, context):\n open(os.environ['EVENT_OUT'],'w').write(json.dumps(event))\n return event\n"
 	if _, err := lp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
 		"FunctionName": "sns-lambda-envelope", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
-		"Code": map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte("def lambda_handler(event, context):\n return event\n"))},
+		"Code":        map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte(code))},
+		"Environment": map[string]any{"Variables": map[string]any{"EVENT_OUT": eventOut}},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -3601,9 +3610,14 @@ func TestSNSLambdaSubscribeNotificationEnvelope(t *testing.T) {
 		t.Fatalf("lambda subscription pending: %#v", attrs)
 	}
 	invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": topic, "Subject": "[Subject] Test subject", "Message": "Hello world."})
-	envelope := p.lambdaNotification(&spi.Request{Identity: id, Input: map[string]any{"Subject": "[Subject] Test subject", "TopicArn": topic}}, map[string]any{
-		"SubscriptionArn": sub.Output["SubscriptionArn"], "TopicArn": topic,
-	}, "Hello world.", "mid-1", nil)
+	raw, err := os.ReadFile(eventOut)
+	if err != nil {
+		t.Fatalf("lambda did not persist the delivered event: %v", err)
+	}
+	var envelope map[string]any
+	if json.Unmarshal(raw, &envelope) != nil {
+		t.Fatalf("lambda event %s", raw)
+	}
 	records := asSlice(envelope["Records"])
 	if len(records) != 1 || str(asMap(records[0])["EventSource"]) != "aws:sns" {
 		t.Fatalf("lambda records %#v", envelope)

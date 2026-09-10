@@ -593,6 +593,10 @@ func (s *Server) diag(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAWSInternal(w http.ResponseWriter, r *http.Request) bool {
 	path := r.URL.Path
+	if r.Method == http.MethodDelete && r.URL.Path == "/_aws/dynamodb/expired" {
+		s.expireDynamoDBItems(w, r)
+		return true
+	}
 	if strings.Contains(path, "/_aws/sns/SimpleNotificationService") && strings.HasSuffix(path, ".pem") {
 		w.Header().Set("Content-Type", "application/x-pem-file")
 		_, _ = w.Write(cert.Certificate())
@@ -616,6 +620,24 @@ func (s *Server) handleAWSInternal(w http.ResponseWriter, r *http.Request) bool 
 		return true
 	}
 	return false
+}
+
+func (s *Server) expireDynamoDBItems(w http.ResponseWriter, r *http.Request) {
+	const serviceID = "aws.dynamodb"
+	pack, ok := s.reg.Resolve(serviceID)
+	if !ok || pack == nil || !s.serviceEnabled(serviceID) {
+		http.Error(w, "MirrorNotImplemented: aws.dynamodb", http.StatusNotImplemented)
+		return
+	}
+	id := s.internalIdentity(r)
+	response, err := pack.Invoke(r.Context(), &spi.Request{Identity: id, ServiceID: serviceID, Operation: "ExpireItems", HTTP: r})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("x-mirror-fidelity", string(pack.Tier()))
+	_ = json.NewEncoder(w).Encode(response.Output)
 }
 
 func (s *Server) internalIdentity(r *http.Request) spi.Identity {

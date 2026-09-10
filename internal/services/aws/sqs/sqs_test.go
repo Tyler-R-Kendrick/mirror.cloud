@@ -4593,10 +4593,10 @@ func TestSendDelayAndWaitTimeCharacterization(t *testing.T) {
 		}
 		done <- response
 	}()
-	if delay := <-after; delay != 2*time.Second {
-		t.Fatalf("explicit wait delay %v", delay)
+	if delay := <-after; delay != time.Second {
+		t.Fatalf("delayed visibility wait %v", delay)
 	}
-	if err := clk.Advance(2 * time.Second); err != nil {
+	if err := clk.Advance(time.Second); err != nil {
 		t.Fatal(err)
 	}
 	long := <-done

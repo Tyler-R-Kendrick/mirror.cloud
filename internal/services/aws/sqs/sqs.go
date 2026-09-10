@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	neturl "net/url"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -1750,6 +1751,7 @@ func (p *Pack) moveOne(ctx context.Context, req *spi.Request, src, dst string, k
 }
 
 func (p *Pack) runMoveTask(req *spi.Request, handle, src, dst string, maxPerSecond int) {
+	runtime.Gosched()
 	ctx := context.Background()
 	interval := time.Second / time.Duration(maxPerSecond)
 	for {

@@ -2941,3 +2941,31 @@ func TestSNSConcurrentPublishChaos(t *testing.T) {
 		t.Fatalf("received %d messages, want 32", len(received))
 	}
 }
+
+func TestSNSSubscriptionAttributeValidation(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "sub-attribute-validation"}).Output["TopicArn"])
+	subscription := str(invokeSNS(t, p, id, "Subscribe", map[string]any{
+		"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:missing",
+	}).Output["SubscriptionArn"])
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{"FakeAttribute", "test-value"},
+		{"RawMessageDelivery", "test-value"},
+		{"RawMessageDelivery", ""},
+		{"RedrivePolicy", `{"deadLetterTargetArn":"fake-arn"}`},
+		{"RedrivePolicy", "{invalidjson}"},
+		{"FilterPolicy", "{invalidjson}"},
+	} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetSubscriptionAttributes", Input: map[string]any{
+			"SubscriptionArn": subscription, "AttributeName": tc.name, "AttributeValue": tc.value,
+		}}); err == nil {
+			t.Fatalf("accepted invalid subscription attribute %s=%q", tc.name, tc.value)
+		}
+	}
+}

@@ -4,7 +4,7 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 832 of 907 direct upstream test functions are explicitly traced (91.7%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 833 of 907 direct upstream test functions are explicitly traced (91.8%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
 The current checkout's ordinary gate is green: 2,793 tests across 221 Go packages. The 2,602-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the fifty-eight new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. Two equivalent SNS mutants are excluded because their substitutions are unobservable through the region/account-scoped public operations. These are local regression signals, not proof against a live AWS oracle.
 
@@ -18,7 +18,7 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SNS operations routed to emulation | 43 / 43 |
 | SNS statement coverage | 92.0% |
 | LocalStack SNS test functions inventoried | 180 |
-| LocalStack SNS test functions explicitly traced | 96 / 180 |
+| LocalStack SNS test functions explicitly traced | 97 / 180 |
 
 The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, topic name boundaries, topic tag lifecycle, topic permission lifecycle, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, FIFO PublishBatch validation and SQS delivery, topic delivery-policy CRUD and raw-policy projection, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, SMS endpoint punctuation validation, subject validation, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, same-region cross-account topic access, cross-account/cross-region SQS delivery, Lambda delivery feedback logging, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
 
@@ -121,6 +121,7 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSTopicCrudV2::test_create_topic_after_delete_with_new_tags` | `TestSNSTopicTagLifecycle` permits new tags after deletion and recreation |
 | `test_sns.py::TestSNSPublishCrud::test_publish_batch_invalid_entry_id` | `TestSNSMessageStructureAndSizeValidation` rejects malformed and duplicate batch entry IDs |
 | `test_sns.py::TestSNSTopicCrud::test_delete_topic_idempotency` | `TestSNSTopicDeleteIdempotency` allows repeated deletion while keeping the topic absent |
+| `test_sns.py::TestSNSTopicCrudV2::test_delete_non_existent_topic` | `TestSNSTopicDeleteIdempotency` accepts deletion of a well-formed topic ARN that was never created |
 | `test_sns.py::TestSNSSubscriptionSQS::test_publish_batch_exceptions` | `TestSNSPublishBatchFIFOValidation` rejects FIFO batch entries missing group or deduplication IDs |
 | `test_sns.py::TestSNSSubscriptionSQS::test_publish_batch_messages_from_sns_to_sqs` | `TestSNSPublishBatchSQSDelivery` verifies five-entry batch delivery, raw SQS attributes, subject handling, and JSON message selection |
 | `test_sns.py::TestSNSSubscriptionSQS::test_subscribe_to_sqs_with_queue_url` | `TestSNSSubscriptionProtocolAndQueueValidation` rejects queue URLs where an SQS ARN is required |

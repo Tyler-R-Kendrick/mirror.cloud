@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +31,9 @@ func init() {
 	registry.Register(registry.Factory{ServiceID: "aws.sns", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
 		return &Pack{deps: d}, nil
 	}})
+	lambda.PublishSNS = func(ctx context.Context, deps spi.Deps, id spi.Identity, topicARN, message string) {
+		_, _ = New(deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{"TopicArn": topicARN, "Message": message}})
+	}
 }
 
 // Pack implements SNS.
@@ -249,7 +253,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				return nil, fault
 			}
 			if !p.smsOptedOut(ctx, req, phone) {
-				_ = p.deps.Bus.Publish(ctx, "sns:sms:"+phone, []byte(str(req.Input["Message"])))
+				msg := str(req.Input["Message"])
+				_ = p.deps.Bus.Publish(ctx, "sns:sms:"+phone, []byte(msg))
+				p.recordJSONList(ctx, req, "snssms", phone, map[string]any{"Message": msg})
 			}
 			return &spi.Response{Output: map[string]any{"MessageId": p.deps.Rand.Hex(16)}}, nil
 		}
@@ -262,6 +268,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			if message, ok := p.platformEndpointMessage(ctx, req, target, str(req.Input["Message"]), str(req.Input["MessageStructure"])); ok {
 				_ = p.deps.Bus.Publish(ctx, "sns:"+target, []byte(message))
+				p.recordJSONList(ctx, req, "snsplat", target, map[string]any{"Message": message})
 			}
 			return &spi.Response{Output: map[string]any{"MessageId": p.deps.Rand.Hex(16)}}, nil
 		}
@@ -448,6 +455,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			rec["Confirmed"] = false
 			rec["Token"] = tok
 			_ = p.col(req, "pending").Put(ctx, tok, mustJSON(rec))
+			if proto == "email" || proto == "email-json" {
+				p.sendSES(ctx, req, str(req.Input["Endpoint"]), "SNS Subscription Confirmation", "Token="+tok)
+			}
 			if proto == "http" || proto == "https" {
 				topicARN := str(rec["TopicArn"])
 				confirmation := map[string]any{
@@ -789,12 +799,15 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 		if protocol == "application" {
 			if message, ok := p.platformEndpointMessage(ctx, req, str(sub["Endpoint"]), body, str(req.Input["MessageStructure"])); ok {
 				_ = p.deps.Bus.Publish(ctx, "sns:"+str(sub["Endpoint"]), []byte(message))
+				p.recordJSONList(ctx, req, "snsplat", str(sub["Endpoint"]), map[string]any{"Message": message})
 			}
 			continue
 		}
 		if protocol == "sms" {
 			if !p.smsOptedOut(ctx, req, str(sub["Endpoint"])) {
-				_ = p.deps.Bus.Publish(ctx, "sns:sms:"+str(sub["Endpoint"]), []byte(structuredMessage(body, str(req.Input["MessageStructure"]), protocol)))
+				msg := structuredMessage(body, str(req.Input["MessageStructure"]), protocol)
+				_ = p.deps.Bus.Publish(ctx, "sns:sms:"+str(sub["Endpoint"]), []byte(msg))
+				p.recordJSONList(ctx, req, "snssms", str(sub["Endpoint"]), map[string]any{"Message": msg})
 			}
 			continue
 		}
@@ -847,6 +860,8 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 					p.deliverSQS(ctx, req, dlq, payload, nil, dedupKey)
 				}
 			}
+		case "email", "email-json":
+			p.sendSES(ctx, req, str(sub["Endpoint"]), "SNS Notification", payload)
 		case "http", "https":
 			contentType := "application/json"
 			if policy := str(asMap(sub["attrs"])["DeliveryPolicy"]); policy != "" {
@@ -880,6 +895,27 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 func (p *Pack) smsOptedOut(ctx context.Context, req *spi.Request, phone string) bool {
 	_, optedOut, _ := p.col(req, "smsopt").Get(ctx, phone)
 	return optedOut
+}
+
+func (p *Pack) recordJSONList(ctx context.Context, req *spi.Request, col, key string, item any) {
+	b, _, _ := p.col(req, col).Get(ctx, key)
+	var list []any
+	_ = json.Unmarshal(b, &list)
+	list = append(list, item)
+	_ = p.col(req, col).Put(ctx, key, mustJSON(list))
+}
+
+func (p *Pack) sendSES(ctx context.Context, req *spi.Request, to, subject, body string) {
+	source := os.Getenv("MIRROR_SNS_SES_SENDER")
+	if source == "" {
+		source = "admin@localstack.com"
+	}
+	mid := "0000-" + p.deps.Rand.Hex(8)
+	_ = p.col(req, "sesmsg").Put(ctx, mid, mustJSON(map[string]any{
+		"MessageId": mid, "Source": source,
+		"Destination": map[string]any{"ToAddresses": []any{to}},
+		"Subject":     subject, "Body": body,
+	}))
 }
 
 func (p *Pack) platformEndpointMessage(ctx context.Context, req *spi.Request, endpointARN, body, structure string) (string, bool) {

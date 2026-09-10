@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -3791,5 +3792,128 @@ func TestSNSHTTPNotificationSignature(t *testing.T) {
 	notification := <-got
 	if str(notification["Type"]) != "Notification" || str(notification["Message"]) != "hello" || str(notification["Subject"]) != "signed" || !validTestSNSNotificationSignature(notification) {
 		t.Fatalf("http notification %#v", notification)
+	}
+}
+
+func TestSNSEmailDeliveredThroughSES(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "email-ses"}).Output["TopicArn"])
+	sub := invokeSNS(t, p, id, "Subscribe", map[string]any{
+		"TopicArn": topic, "Protocol": "email", "Endpoint": "user@example.com", "ReturnSubscriptionArn": true,
+	})
+	messages := sesMessages(t, deps, id)
+	if len(messages) != 1 || str(messages[0]["Source"]) != "admin@localstack.com" {
+		t.Fatalf("confirmation email %#v", messages)
+	}
+	token := str(asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": sub.Output["SubscriptionArn"]}).Output["Attributes"])["Token"])
+	if token == "" {
+		b, ok, _ := p.col(&spi.Request{Identity: id}, "subs").Get(context.Background(), str(sub.Output["SubscriptionArn"]))
+		var rec map[string]any
+		if !ok || json.Unmarshal(b, &rec) != nil {
+			t.Fatal("missing email token")
+		}
+		token = str(rec["Token"])
+	}
+	invokeSNS(t, p, id, "ConfirmSubscription", map[string]any{"TopicArn": topic, "Token": token})
+	invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": topic, "Message": "hello-email"})
+	messages = sesMessages(t, deps, id)
+	if len(messages) < 2 {
+		t.Fatalf("expected confirmation and notification, got %#v", messages)
+	}
+}
+
+func sesMessages(t *testing.T, deps spi.Deps, id spi.Identity) []map[string]any {
+	t.Helper()
+	kvs, _, err := deps.Store.Scope(id.Account, id.Region).Collection("sesmsg").List(context.Background(), "", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []map[string]any
+	for _, kv := range kvs {
+		var rec map[string]any
+		if json.Unmarshal(kv.Value, &rec) == nil {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+func TestSNSCertURLUsesAdvertiseHost(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "cert-host"}}); err != nil {
+		t.Fatal(err)
+	}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "cert-host"}).Output["TopicArn"])
+	invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:cert-host"})
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, AdvertiseURL: "http://sns.example:4566", Operation: "Publish", Input: map[string]any{"TopicArn": topic, "Message": "cert"}}); err != nil {
+		t.Fatal(err)
+	}
+	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "cert-host"}})
+	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+		t.Fatalf("cert host delivery %#v err=%v", received, err)
+	}
+	var envelope map[string]any
+	if json.Unmarshal([]byte(str(asMap(asSlice(received.Output["Messages"])[0])["Body"])), &envelope) != nil || !strings.Contains(str(envelope["SigningCertURL"]), "http://sns.example:4566/_aws/sns/SimpleNotificationService.pem") {
+		t.Fatalf("signing cert url %#v", envelope)
+	}
+}
+
+func TestSNSLambdaFunctionDLQToTopic(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	deps := spitest.Deps(t)
+	p, lp, qp := New(deps), lambda.New(deps), sqs.New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "lambda-dlq"}}); err != nil {
+		t.Fatal(err)
+	}
+	dlqTopic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "lambda-dlq"}).Output["TopicArn"])
+	invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": dlqTopic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:lambda-dlq"})
+	created, err := lp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateFunction", Input: map[string]any{
+		"FunctionName": "sns-dlq-fn", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler",
+		"Code":             map[string]any{"ZipFile": base64.StdEncoding.EncodeToString([]byte("def lambda_handler(event, context):\n raise Exception('boom')\n"))},
+		"DeadLetterConfig": map[string]any{"TargetArn": dlqTopic},
+	}})
+	if err != nil || created.Output["DeadLetterConfig"] == nil {
+		t.Fatalf("create function %#v err=%v", created, err)
+	}
+	src := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "lambda-src"}).Output["TopicArn"])
+	invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": src, "Protocol": "lambda", "Endpoint": "arn:aws:lambda:us-east-1:1:function:sns-dlq-fn"})
+	invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": src, "Message": `{"fail":true}`})
+	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "lambda-dlq"}})
+	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+		t.Fatalf("lambda dlq %#v err=%v", received, err)
+	}
+	body := str(asMap(asSlice(received.Output["Messages"])[0])["Body"])
+	if !strings.Contains(body, "RetriesExhausted") || !strings.Contains(body, "Unhandled") {
+		t.Fatalf("dlq body %s", body)
+	}
+}
+
+func TestSNSRetrospectSMSAndPlatform(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	invokeSNS(t, p, id, "Publish", map[string]any{"PhoneNumber": "+15555550123", "Message": "sms-direct"})
+	b, ok, _ := p.col(&spi.Request{Identity: id}, "snssms").Get(ctx, "+15555550123")
+	var msgs []any
+	if !ok || json.Unmarshal(b, &msgs) != nil || len(msgs) != 1 {
+		t.Fatalf("sms retrospect %s ok=%v", b, ok)
+	}
+	app := invokeSNS(t, p, id, "CreatePlatformApplication", map[string]any{"Name": "retro", "Platform": "GCM", "Attributes": map[string]any{"PlatformCredential": "secret"}})
+	ep := invokeSNS(t, p, id, "CreatePlatformEndpoint", map[string]any{"PlatformApplicationArn": app.Output["PlatformApplicationArn"], "Token": "tok"})
+	invokeSNS(t, p, id, "Publish", map[string]any{"TargetArn": ep.Output["EndpointArn"], "Message": "push"})
+	pb, ok, _ := p.col(&spi.Request{Identity: id}, "snsplat").Get(ctx, str(ep.Output["EndpointArn"]))
+	var pushes []any
+	if !ok || json.Unmarshal(pb, &pushes) != nil || len(pushes) != 1 {
+		t.Fatalf("platform retrospect %s ok=%v", pb, ok)
 	}
 }

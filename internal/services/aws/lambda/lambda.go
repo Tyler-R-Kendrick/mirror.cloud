@@ -22,6 +22,10 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
+// PublishSNS publishes onto an SNS topic. SNS registers this from init to
+// avoid an import cycle when Event invokes fail into a function DLQ.
+var PublishSNS func(ctx context.Context, deps spi.Deps, id spi.Identity, topicARN, message string)
+
 func init() {
 	registry.Register(registry.Factory{ServiceID: "aws.lambda", Tier: model.TierEmulate, New: func(d spi.Deps) (spi.BehaviorPack, error) {
 		return New(d), nil
@@ -75,6 +79,27 @@ func (p *Pack) col(req *spi.Request) spi.Collection {
 	return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Collection("lambda")
 }
 
+func (p *Pack) emitDLQ(ctx context.Context, req *spi.Request, rec map[string]any, payload []byte, invokeErr error) {
+	target := str(asMap(rec["DeadLetterConfig"])["TargetArn"])
+	if target == "" || PublishSNS == nil || !strings.Contains(target, ":sns:") {
+		return
+	}
+	envelope, _ := json.Marshal(map[string]any{
+		"requestContext":  map[string]any{"condition": "RetriesExhausted", "functionArn": "arn:aws:lambda:" + req.Identity.Region + ":" + req.Identity.Account + ":function:" + str(rec["FunctionName"])},
+		"requestPayload":  json.RawMessage(payload),
+		"responseContext": map[string]any{"functionError": "Unhandled"},
+		"responsePayload": invokeErr.Error(),
+	})
+	PublishSNS(ctx, p.deps, req.Identity, target, string(envelope))
+}
+
+func asMap(v any) map[string]any {
+	if m, ok := v.(map[string]any); ok {
+		return m
+	}
+	return map[string]any{}
+}
+
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	if req.HTTP != nil {
 		req.Operation = route(req)
@@ -107,10 +132,17 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			"Code":         req.Input["Code"],
 			"Environment":  req.Input["Environment"],
 		}
+		if dlc := req.Input["DeadLetterConfig"]; dlc != nil {
+			rec["DeadLetterConfig"] = dlc
+		}
 		b, _ := json.Marshal(rec)
 		_ = p.col(req).Put(ctx, name, b)
 		arn := "arn:aws:lambda:" + req.Identity.Region + ":" + req.Identity.Account + ":function:" + name
-		return &spi.Response{Output: map[string]any{"FunctionName": name, "FunctionArn": arn, "Runtime": rec["Runtime"], "Handler": rec["Handler"]}}, nil
+		out := map[string]any{"FunctionName": name, "FunctionArn": arn, "Runtime": rec["Runtime"], "Handler": rec["Handler"]}
+		if rec["DeadLetterConfig"] != nil {
+			out["DeadLetterConfig"] = rec["DeadLetterConfig"]
+		}
+		return &spi.Response{Output: out}, nil
 	case "GetFunction":
 		name := str(req.Input["FunctionName"])
 		b, ok, _ := p.col(req).Get(ctx, name)
@@ -381,6 +413,9 @@ func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	}
 	out, err := runHandler(name, str(rec["Runtime"]), str(rec["Handler"]), rec["Code"], rec["Environment"], payload)
 	if invocationType == "Event" {
+		if err != nil {
+			p.emitDLQ(ctx, req, rec, payload, err)
+		}
 		return &spi.Response{Status: http.StatusAccepted, Output: map[string]any{"StatusCode": http.StatusAccepted}}, nil
 	}
 	if err != nil {

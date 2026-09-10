@@ -107,6 +107,23 @@ func TestRESTJSONServiceRoutes(t *testing.T) {
 		{"aws.es", http.MethodGet, "/index/_doc/id", "", "GetDocument"},
 		{"aws.es", http.MethodDelete, "/index/_doc/id", "", "DeleteDocument"},
 		{"aws.es", http.MethodPost, "/", "OpenSearch_20210101.Custom", "Custom"},
+
+		{"vercel.api", http.MethodGet, "/v2/user", "", "GetUser"},
+		{"vercel.api", http.MethodPost, "/v11/projects", "", "CreateProject"},
+		{"vercel.api", http.MethodGet, "/v9/projects", "", "ListProjects"},
+		{"vercel.api", http.MethodGet, "/v9/projects/app", "", "GetProject"},
+		{"vercel.api", http.MethodDelete, "/v9/projects/app", "", "DeleteProject"},
+		{"vercel.api", http.MethodGet, "/v9/projects/app/env", "", "ListProjectEnv"},
+		{"vercel.api", http.MethodPost, "/v10/projects/app/env", "", "CreateProjectEnv"},
+		{"vercel.api", http.MethodDelete, "/v9/projects/app/env/env_1", "", "DeleteProjectEnv"},
+		{"vercel.api", http.MethodGet, "/v10/projects/app/domains", "", "ListProjectDomains"},
+		{"vercel.api", http.MethodPost, "/v10/projects/app/domains", "", "AddProjectDomain"},
+		{"vercel.api", http.MethodPost, "/v13/deployments", "", "CreateDeployment"},
+		{"vercel.api", http.MethodGet, "/v6/deployments", "", "ListDeployments"},
+		{"vercel.api", http.MethodGet, "/v13/deployments/dpl_1", "", "GetDeployment"},
+		{"vercel.api", http.MethodDelete, "/v13/deployments/dpl_1", "", "DeleteDeployment"},
+		{"vercel.api", http.MethodPost, "/", "", "KvCommand"},
+		{"vercel.api", http.MethodGet, "/v9/unknown", "", "Unknown"},
 	} {
 		request := httptest.NewRequest(test.method, test.path, nil)
 		if test.target != "" {
@@ -206,5 +223,22 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 	}
 	if w.Code != http.StatusNotImplemented || w.Header().Get("x-amzn-errortype") != "MirrorNotImplemented" || w.Header().Get("x-mirror-not-implemented") != "aws.lambda.Invoke" || !strings.Contains(w.Body.String(), `"__type":"MirrorNotImplemented"`) {
 		t.Fatalf("fault %d %#v %s", w.Code, w.Header(), w.Body.String())
+	}
+
+	vercel := &model.Service{ID: "vercel.api"}
+	decoded, err = codec.Decode(vercel, &model.Operation{Name: "KvCommand"}, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`["GET","k"]`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd, _ := decoded.Input["_redis"].([]any)
+	if len(cmd) != 2 || cmd[0] != "GET" || cmd[1] != "k" {
+		t.Fatalf("redis decode %#v", decoded.Input)
+	}
+	w = httptest.NewRecorder()
+	if err := codec.EncodeFault(vercel, &model.Operation{Name: "GetProject"}, w, &spi.Fault{Code: "not_found", Message: "missing", HTTPStatus: 404, Fault: "client"}, "id"); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 404 || w.Header().Get("x-amzn-errortype") != "" || !strings.Contains(w.Body.String(), `"code":"not_found"`) {
+		t.Fatalf("vercel fault %d %#v %s", w.Code, w.Header(), w.Body.String())
 	}
 }

@@ -8,7 +8,7 @@ The test suite keeps each failure mode independently runnable:
 | Contract | `make test-contract` | Every protocol codec plus real AWS SDK S3, DynamoDB transaction, and SQS round trips |
 | Snapshot / characterization | `make test-snapshot` | Catalog, support matrix, mock determinism, and spec diffs via `internal/golden` |
 | Chaos | `make test-chaos` | Concurrent writes and transaction tokens, account isolation, injected blob failure, clock jumps, and subscriber panics |
-| BDD / functional | `make test-bdd` | Booted HTTP S3/STS behavior and Terraform read paths |
+| BDD / functional | `make test-bdd` | Booted HTTP S3/STS/Vercel behavior and Terraform read paths |
 | Fuzz | `make test-fuzz` | AWS chunk framing, SigV4 identity, REST URI routing, every DynamoDB lifecycle/data/PartiQL/stream/transaction fuzzer, S3 state and checksums, Step Functions JSONPath, and GCS paths |
 | Mutation | `make test-mutation` | selected routing, auth, protocol, state, queue, stream, event, compute, scheduler, pipes, lifecycle, and storage mutants; all must be killed |
 

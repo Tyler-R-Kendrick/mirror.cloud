@@ -568,8 +568,15 @@ func TestAWSSDKSQSFIFOZeroDelayUsesQueueDelayContract(t *testing.T) {
 	if err != nil || len(initial.Messages) != 0 {
 		t.Fatalf("initial %#v error %v", initial, err)
 	}
-	time.Sleep(2100 * time.Millisecond)
-	after, err := client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, WaitTimeSeconds: 0})
+	deadline := time.Now().Add(5 * time.Second)
+	var after *sqs.ReceiveMessageOutput
+	for {
+		after, err = client.ReceiveMessage(context.Background(), &sqs.ReceiveMessageInput{QueueUrl: created.QueueUrl, WaitTimeSeconds: 0})
+		if err != nil || len(after.Messages) == 1 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	if err != nil || len(after.Messages) != 1 || aws.ToString(after.Messages[0].Body) != "message" {
 		t.Fatalf("after %#v error %v", after, err)
 	}

@@ -4,9 +4,9 @@ This ledger separates operation routing, line coverage, test forms, and behavior
 
 ## Aggregate audited scope
 
-Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 787 of 907 direct upstream test functions are explicitly traced (86.8%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
+Across the four services with pinned LocalStack inventories (S3, DynamoDB, SQS, and SNS), 789 of 907 direct upstream test functions are explicitly traced (86.9%). The routed-operation denominator is 243 of 243 for those services; this is not a percentage for all AWS services implemented by Mirror.
 
-The current checkout's ordinary gate is green: 2,751 tests across 221 Go packages. The 2,586-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the forty-three new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
+The current checkout's ordinary gate is green: 2,753 tests across 221 Go packages. The 2,588-entry mutation inventory is pending a full four-shard rerun after the latest SNS validation change; the forty-five new SNS mutants pass in focused mutation coverage, while the full rerun exceeded the 35-minute four-way harness limit. These are local regression signals, not proof against a live AWS oracle.
 
 ## SNS baseline
 
@@ -18,9 +18,9 @@ Authority: LocalStack commit `c2cb02372f48cde90b06f0e6ce809a058251fbd7`, audited
 | SNS operations routed to emulation | 43 / 43 |
 | SNS statement coverage | 92.0% |
 | LocalStack SNS test functions inventoried | 180 |
-| LocalStack SNS test functions explicitly traced | 51 / 180 |
+| LocalStack SNS test functions explicitly traced | 53 / 180 |
 
-The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
+The SNS slice is locally characterized and mutation-checked for topic and platform-application validation, publish-target validation, topic deletion cleanup, missing-topic faults, structured-message fallback, 100-item list pagination, subscription-attribute/SMS validation, SMS attribute validation/filtering/defaults, message-attribute validation, confirmation/unsubscribe input validation, platform-endpoint dispatch and disabled publishing, phone-number publishing, SMS subscription delivery, opt-in validation, same-region cross-account topic access, cross-account/cross-region SQS delivery, Lambda delivery feedback logging, and an AWS SDK publish/list lifecycle contract. These initial trace rows cover only a subset of the pinned inventory; this is not an AWS differential proof and a live AWS oracle is still absent.
 
 Initial SNS trace rows:
 
@@ -80,6 +80,8 @@ Initial SNS trace rows:
 | `test_sns.py::TestSNSSubscriptionCrudV2::test_unsubscribe_from_deleted_topic` | `TestSNSUnsubscribeDeletedTopic` rejects unsubscribe after topic deletion |
 | `test_sns.py::TestSNSSubscriptionFirehose::test_publish_to_firehose_with_s3` | `TestSNSFirehoseSubscriptionPublishesNotification` and `TestSNSFirehoseSubscriptionRetainsRecord` route SNS notification bytes onto a Firehose direct-put stream |
 | `test_sns.py::TestSNSPublishDelivery::test_delivery_lambda` | `TestSNSLambdaSuccessFeedbackDeliveryLog` records Lambda delivery success feedback in the SNS CloudWatch Logs group and stream |
+| `test_sns.py::TestSNSMultiAccounts::test_cross_account_access` | `TestSNSCrossAccountTopicAccess` verifies same-region callers can mutate, inspect, and publish to an owner-scoped topic |
+| `test_sns.py::TestSNSMultiAccounts::test_cross_account_publish_to_sqs` | `TestSNSCrossAccountAndRegionSQSDelivery` delivers an owner topic message to a queue identified by another account and region |
 | `test_sns.py::TestSNSSubscriptionCrudV2::test_getting_subscriptions_by_topic` | `TestSNSListSubscriptionsByTopicARNValidation` rejects malformed, cross-scope, and missing topic ARNs while accepting a valid topic |
 | `test_sns.py::TestSNSSubscriptionCrud::test_list_subscriptions` | `TestSNSSubscriptionListProjection` verifies both list operations expose only AWS's public subscription fields |
 | `test_sns.py::TestSNSSubscriptionCrudV2::test_subscribe_attributes` | `TestSNSControlPlaneOperations` verifies `GetSubscriptionAttributes` exposes the owning account alongside public subscription attributes |

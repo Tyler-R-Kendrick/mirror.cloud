@@ -93,6 +93,57 @@ func TestSNSFirehoseSubscriptionPublishesNotification(t *testing.T) {
 	}
 }
 
+func TestSNSCrossAccountTopicAccess(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	ctx := context.Background()
+	owner := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	caller := spi.Identity{Account: "222222222222", Region: "us-east-1"}
+	arn := str(invokeSNS(t, p, owner, "CreateTopic", map[string]any{"Name": "shared-topic"}).Output["TopicArn"])
+
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: caller, Operation: "SetTopicAttributes", Input: map[string]any{
+		"TopicArn": arn, "AttributeName": "DisplayName", "AttributeValue": "shared",
+	}}); err != nil {
+		t.Fatalf("cross-account set attributes: %v", err)
+	}
+	got := invokeSNS(t, p, caller, "GetTopicAttributes", map[string]any{"TopicArn": arn})
+	if str(asMap(got.Output["Attributes"])["DisplayName"]) != "shared" {
+		t.Fatalf("cross-account attributes: %#v", got.Output)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: caller, Operation: "Publish", Input: map[string]any{
+		"TopicArn": arn, "Message": "cross-account",
+	}}); err != nil {
+		t.Fatalf("cross-account publish: %v", err)
+	}
+}
+
+func TestSNSCrossAccountAndRegionSQSDelivery(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := New(deps)
+	qp := sqs.New(deps)
+	owner := spi.Identity{Account: "111111111111", Region: "us-east-1"}
+	queueOwner := spi.Identity{Account: "222222222222", Region: "us-west-2"}
+	arn := str(invokeSNS(t, p, owner, "CreateTopic", map[string]any{"Name": "remote-queue-topic"}).Output["TopicArn"])
+	queue := str(invokeSNSQueue(t, qp, queueOwner, "CreateQueue", map[string]any{"QueueName": "remote-queue"}).Output["QueueUrl"])
+	queueARN := "arn:aws:sqs:us-west-2:222222222222:remote-queue"
+	invokeSNS(t, p, owner, "Subscribe", map[string]any{"TopicArn": arn, "Protocol": "sqs", "Endpoint": queueARN})
+	invokeSNS(t, p, owner, "Publish", map[string]any{"TopicArn": arn, "Message": "remote-delivery"})
+	received := invokeSNSQueue(t, qp, queueOwner, "ReceiveMessage", map[string]any{"QueueUrl": queue, "WaitTimeSeconds": 1})
+	messages := asSlice(received.Output["Messages"])
+	if len(messages) != 1 || !strings.Contains(str(asMap(messages[0])["Body"]), "remote-delivery") {
+		t.Fatalf("cross-account/region delivery: %#v", received.Output)
+	}
+}
+
+func invokeSNSQueue(t *testing.T, p *sqs.Pack, id spi.Identity, operation string, input map[string]any) *spi.Response {
+	t.Helper()
+	resp, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+	if err != nil {
+		t.Fatalf("%s: %v", operation, err)
+	}
+	return resp
+}
+
 func invokeSNS(t *testing.T, p *Pack, id spi.Identity, operation string, input map[string]any) *spi.Response {
 	t.Helper()
 	resp, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})

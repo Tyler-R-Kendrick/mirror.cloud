@@ -18213,6 +18213,22 @@ func TestMutantsAreKilled(t *testing.T) {
 			run:  "TestSNSLambdaSuccessFeedbackDeliveryLog",
 		},
 		{
+			name: "sns-ignore-cross-account-topic-owner",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "copyReq.Identity.Account = parts[4]",
+			new:  "copyReq.Identity.Account = req.Identity.Account",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSCrossAccountTopicAccess",
+		},
+		{
+			name: "sns-ignore-cross-region-sqs-owner",
+			file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
+			old:  "targetReq.Identity.Region = parts[3]",
+			new:  "targetReq.Identity.Region = req.Identity.Region",
+			pkg:  "./internal/services/aws/sns",
+			run:  "TestSNSCrossAccountAndRegionSQSDelivery",
+		},
+		{
 			name: "sns-accept-platform-endpoint-different-attributes",
 			file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
 			old:  "for key, value := range requestedAttrs {\n\t\t\t\t\tif key == \"Enabled\" && strings.EqualFold(str(existing[key]), str(value)) {",

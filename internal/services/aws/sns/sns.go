@@ -62,6 +62,17 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 }
 
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+	// SNS permits same-region callers from another account to use topic actions
+	// granted by the topic policy. State is owned by the account encoded in the
+	// ARN; keep cross-region access rejected by the operation checks below.
+	if arn := topicARN(req.Input); validTopicARN(arn) {
+		parts := strings.Split(arn, ":")
+		if parts[3] == req.Identity.Region && parts[4] != req.Identity.Account {
+			copyReq := *req
+			copyReq.Identity.Account = parts[4]
+			req = &copyReq
+		}
+	}
 	switch req.Operation {
 	case "CreateTopic":
 		name := str(req.Input["Name"])
@@ -1164,6 +1175,13 @@ func (p *Pack) lambdaNotification(req *spi.Request, sub map[string]any, body, me
 
 func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body string, attrs map[string]any, dedupOverride string) bool {
 	name := endpoint
+	targetReq := *req
+	parts := strings.Split(endpoint, ":")
+	if len(parts) == 6 && parts[0] == "arn" && parts[2] == "sqs" {
+		targetReq.Identity.Region = parts[3]
+		targetReq.Identity.Account = parts[4]
+		name = parts[5]
+	}
 	if i := strings.LastIndexAny(endpoint, "/:"); i >= 0 {
 		name = endpoint[i+1:]
 	}
@@ -1179,7 +1197,7 @@ func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body 
 	if _, present := in["MessageDeduplicationId"]; !present && dedupOverride != "" && strings.HasSuffix(name, ".fifo") {
 		in["MessageDeduplicationId"] = dedupOverride
 	}
-	_, err := sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "SendMessage", Input: in, HTTP: req.HTTP})
+	_, err := sqs.New(p.deps).Invoke(ctx, &spi.Request{Identity: targetReq.Identity, Operation: "SendMessage", Input: in, HTTP: req.HTTP})
 	return err == nil
 }
 
